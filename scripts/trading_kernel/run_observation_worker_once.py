@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one bounded trading-kernel action and print its current result."""
+"""Run one PostgreSQL-selected closed-bar observation worker tick."""
 
 from __future__ import annotations
 
@@ -21,12 +21,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.trading_kernel.application.ports import VenuePort  # noqa: E402
-from src.trading_kernel.application.runtime import RuntimeTickRequest  # noqa: E402
+from src.trading_kernel.application.market_ports import PublicMarketSource  # noqa: E402
 from src.trading_kernel.infrastructure.pg_unit_of_work import (  # noqa: E402
     PostgresKernelUnitOfWork,
 )
-from src.trading_kernel.interfaces.worker import run_worker_once  # noqa: E402
+from src.trading_kernel.interfaces.observation_worker import (  # noqa: E402
+    ObservationWorkerRequest,
+    run_observation_worker_once,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -36,9 +38,8 @@ def _parser() -> argparse.ArgumentParser:
         default=os.getenv("TRADING_KERNEL_DATABASE_URL", ""),
         help="PostgreSQL SQLAlchemy URL; defaults to TRADING_KERNEL_DATABASE_URL",
     )
-    parser.add_argument("--venue-factory", required=True, help="module:callable")
-    parser.add_argument("--monitor-key", required=True)
-    parser.add_argument("--owner-policy-id", required=True)
+    parser.add_argument("--market-source-factory", required=True, help="module:callable")
+    parser.add_argument("--worker-id", required=True)
     parser.add_argument(
         "--runtime-commit",
         default=os.getenv("TRADING_KERNEL_RUNTIME_COMMIT", ""),
@@ -47,21 +48,20 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", ""),
     )
-    parser.add_argument("--ticket-id")
-    parser.add_argument("--worker-id", required=True)
     parser.add_argument("--now-ms", type=int)
     parser.add_argument("--lease-ms", type=int, default=30_000)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
+    parser.add_argument("--retry-interval-ms", type=int, default=30_000)
     return parser
 
 
 def _load_factory(spec: str) -> Callable[[], object]:
     module_name, separator, attribute_name = spec.partition(":")
     if not separator or not module_name.strip() or not attribute_name.strip():
-        raise ValueError("venue factory must use module:callable")
+        raise ValueError("market source factory must use module:callable")
     factory = getattr(importlib.import_module(module_name), attribute_name)
     if not callable(factory):
-        raise TypeError("venue factory target is not callable")
+        raise TypeError("market source factory target is not callable")
     return factory
 
 
@@ -73,34 +73,31 @@ async def _run(args: argparse.Namespace) -> int:
     if args.lease_ms <= 0:
         raise ValueError("lease-ms must be positive")
 
-    venue = _load_factory(args.venue_factory)()
-    if inspect.isawaitable(venue):
-        venue = await venue
-    if not callable(getattr(venue, "execute", None)):
-        raise TypeError("venue factory must return a VenuePort")
-    venue_port = cast(VenuePort, venue)
+    source = _load_factory(args.market_source_factory)()
+    if inspect.isawaitable(source):
+        source = await source
+    if not callable(getattr(source, "fetch_closed_candles", None)):
+        raise TypeError("market source factory must return a PublicMarketSource")
 
     engine = create_async_engine(database_url)
     try:
-        result = await run_worker_once(
+        result = await run_observation_worker_once(
             lambda: PostgresKernelUnitOfWork(engine),
-            venue_port,
-            RuntimeTickRequest(
-                monitor_key=args.monitor_key,
-                owner_policy_id=args.owner_policy_id,
+            cast(PublicMarketSource, source),
+            ObservationWorkerRequest(
+                worker_id=args.worker_id,
                 runtime_commit=args.runtime_commit,
                 schema_revision=args.schema_revision,
-                ticket_id=args.ticket_id,
-                worker_id=args.worker_id,
                 now_ms=now_ms,
                 lease_until_ms=now_ms + args.lease_ms,
                 timeout_seconds=args.timeout_seconds,
+                retry_interval_ms=args.retry_interval_ms,
             ),
         )
         print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
         return 0
     finally:
-        close = getattr(venue, "close", None)
+        close = getattr(source, "close", None)
         if callable(close):
             closed = close()
             if inspect.isawaitable(closed):

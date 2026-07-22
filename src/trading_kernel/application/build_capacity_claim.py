@@ -57,7 +57,10 @@ def build_capacity_claim(
         or now_ms >= action_facts.valid_until_ms
     ):
         return _refused(CapacityClaimStatus.ACTION_FACTS_INVALID_OR_STALE)
-    if position_mode != "independent_sides":
+    if (
+        position_mode != "independent_sides"
+        or action_facts.account_position_mode != "independent_sides"
+    ):
         return _refused(CapacityClaimStatus.ACCOUNT_MODE_INVALID)
     if (
         netting_domain_occupied

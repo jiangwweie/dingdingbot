@@ -55,6 +55,7 @@ from src.trading_kernel.domain.reducer import reduce_event
 
 class DispatchCommandStatus(StrEnum):
     NO_COMMAND = "no_command"
+    SUPERSEDED = "superseded"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     OUTCOME_UNKNOWN = "outcome_unknown"
@@ -65,6 +66,7 @@ class DispatchCommandRequest(BaseModel):
 
     worker_id: str
     ticket_id: str | None = None
+    command_kinds: tuple[ExchangeCommandKind, ...] = ()
     now_ms: int
     lease_until_ms: int
     timeout_seconds: float
@@ -124,6 +126,7 @@ async def dispatch_one_command(
         expired = await uow.exchange_commands.get_one_expired_claim(
             now_ms=request.now_ms,
             ticket_id=request.ticket_id,
+            command_kinds=request.command_kinds,
         )
         if expired is not None:
             result = ExchangeCommandResult(
@@ -159,7 +162,28 @@ async def dispatch_one_command(
             now_ms=request.now_ms,
             lease_until_ms=request.lease_until_ms,
             ticket_id=request.ticket_id,
+            command_kinds=request.command_kinds,
         )
+        if command is not None:
+            aggregate = await uow.aggregates.get(
+                command.ticket_identity.ticket_id
+            )
+            if aggregate is None:
+                raise RuntimeError("claimed command has no Ticket aggregate")
+            if not _command_is_applicable(command, aggregate.status):
+                await uow.exchange_commands.mark_claimed_superseded(
+                    command_id=command.command_id,
+                    worker_id=request.worker_id,
+                    observed_at_ms=request.now_ms,
+                    reason=(
+                        "aggregate_state_moved_on:"
+                        f"{aggregate.status.value}"
+                    ),
+                )
+                return DispatchCommandResult(
+                    status=DispatchCommandStatus.SUPERSEDED,
+                    command_id=command.command_id,
+                )
     if command is None:
         return DispatchCommandResult(status=DispatchCommandStatus.NO_COMMAND)
 
@@ -218,6 +242,30 @@ async def dispatch_one_command(
         status=DispatchCommandStatus(result.status.value),
         command_id=command.command_id,
     )
+
+
+def _command_is_applicable(
+    command: ExchangeCommand,
+    aggregate_status: AggregateStatus,
+) -> bool:
+    applicable_statuses = {
+        ExchangeCommandKind.ENTRY: {AggregateStatus.ENTRY_PENDING},
+        ExchangeCommandKind.INITIAL_STOP: {AggregateStatus.PROTECTION_PENDING},
+        ExchangeCommandKind.TAKE_PROFIT: {AggregateStatus.TP1_PENDING},
+        ExchangeCommandKind.REPLACE_PROTECTION: {
+            AggregateStatus.RUNNER_REPLACEMENT_PENDING
+        },
+        ExchangeCommandKind.EXIT: {AggregateStatus.EXIT_PENDING},
+        ExchangeCommandKind.CONTROLLED_FLATTEN: {
+            AggregateStatus.CONTROLLED_FLATTEN_PENDING
+        },
+        ExchangeCommandKind.CANCEL_ORDER: {
+            AggregateStatus.PARTIAL_FILL_INCIDENT,
+            AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING,
+            AggregateStatus.RECONCILIATION_PENDING,
+        },
+    }
+    return aggregate_status in applicable_statuses[command.kind]
 
 
 def _command_result_event(

@@ -884,7 +884,9 @@ def _runtime_surface(rel_path: str) -> str:
         return "production_systemd"
     if rel_path.startswith("src/trading_kernel/"):
         return "trading_kernel_runtime"
-    if rel_path == "scripts/trading_kernel/run_worker_once.py":
+    if rel_path.startswith("scripts/trading_kernel/run_") and rel_path.endswith(
+        "_worker_once.py"
+    ):
         return "trading_kernel_runtime"
     if rel_path.startswith("scripts/trading_kernel/"):
         return "one_shot_ops"

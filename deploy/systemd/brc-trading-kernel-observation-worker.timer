@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for one due BRC trading kernel observation every two seconds
+
+[Timer]
+OnBootSec=14s
+OnUnitActiveSec=2s
+AccuracySec=100ms
+Persistent=false
+Unit=brc-trading-kernel-observation-worker.service
+
+[Install]
+WantedBy=timers.target

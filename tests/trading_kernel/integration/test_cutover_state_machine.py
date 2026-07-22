@@ -30,17 +30,18 @@ from scripts.trading_kernel.verify_flat_cutover import (
 )
 from src.trading_kernel.infrastructure.pg_models import (
     entry_lane_current,
-    event_specs,
     instrument_rules_current,
-    instruments,
     metadata,
     owner_policy_current,
     runtime_capabilities_current,
     runtime_profiles,
     runtime_scopes_current,
     schema_metadata,
-    strategy_groups,
-    strategy_versions,
+)
+from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.strategy_registry_seed import (
+    seed_strategy_registry,
 )
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
@@ -341,21 +342,63 @@ async def test_disposable_postgres_rehearsal_rebuilds_clean_schema_and_seeds_aut
     }
 
 
-def test_systemd_worker_unit_is_bounded_and_timer_driven() -> None:
-    service = (
-        REPO_ROOT / "deploy/systemd/brc-trading-kernel-worker.service"
-    ).read_text(encoding="utf-8")
-    timer = (
-        REPO_ROOT / "deploy/systemd/brc-trading-kernel-worker.timer"
-    ).read_text(encoding="utf-8")
+def test_systemd_runtime_workers_are_four_explicit_bounded_roles() -> None:
+    systemd_dir = REPO_ROOT / "deploy/systemd"
+    assert not (systemd_dir / "brc-trading-kernel-worker.service").exists()
+    assert not (systemd_dir / "brc-trading-kernel-worker.timer").exists()
 
-    assert "Type=oneshot" in service
-    assert "scripts/trading_kernel/run_worker_once.py" in service
-    assert "--runtime-commit ${TRADING_KERNEL_RUNTIME_COMMIT}" in service
-    assert "--schema-revision ${TRADING_KERNEL_SCHEMA_REVISION}" in service
-    assert "--timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS}" in service
-    assert "OnUnitActiveSec=2s" in timer
-    assert "Persistent=false" in timer
+    for role in ("entry", "lifecycle"):
+        service = (
+            systemd_dir / f"brc-trading-kernel-{role}-worker.service"
+        ).read_text(encoding="utf-8")
+        timer = (
+            systemd_dir / f"brc-trading-kernel-{role}-worker.timer"
+        ).read_text(encoding="utf-8")
+
+        assert "Type=oneshot" in service
+        assert "scripts/trading_kernel/run_command_worker_once.py" in service
+        assert f"--worker-role {role}" in service
+        assert "--timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS}" in service
+        if role == "entry":
+            assert "--runtime-commit ${TRADING_KERNEL_RUNTIME_COMMIT}" in service
+            assert "--schema-revision ${TRADING_KERNEL_SCHEMA_REVISION}" in service
+            assert (
+                "--action-fact-validity-ms "
+                "${TRADING_KERNEL_ACTION_FACT_VALIDITY_MS}"
+            ) in service
+        else:
+            assert (
+                "--idle-poll-interval-ms ${TRADING_KERNEL_IDLE_POLL_INTERVAL_MS}"
+                in service
+            )
+        assert "OnUnitActiveSec=2s" in timer
+        assert "Persistent=false" in timer
+
+    observation_service = (
+        systemd_dir / "brc-trading-kernel-observation-worker.service"
+    ).read_text(encoding="utf-8")
+    observation_timer = (
+        systemd_dir / "brc-trading-kernel-observation-worker.timer"
+    ).read_text(encoding="utf-8")
+    assert "Type=oneshot" in observation_service
+    assert "scripts/trading_kernel/run_observation_worker_once.py" in observation_service
+    assert "--runtime-scope-id" not in observation_service
+    assert "OnUnitActiveSec=2s" in observation_timer
+    assert "Persistent=false" in observation_timer
+
+    reconciliation_service = (
+        systemd_dir / "brc-trading-kernel-reconciliation-worker.service"
+    ).read_text(encoding="utf-8")
+    reconciliation_timer = (
+        systemd_dir / "brc-trading-kernel-reconciliation-worker.timer"
+    ).read_text(encoding="utf-8")
+    assert "Type=oneshot" in reconciliation_service
+    assert (
+        "scripts/trading_kernel/run_reconciliation_worker_once.py"
+        in reconciliation_service
+    )
+    assert "OnUnitActiveSec=2s" in reconciliation_timer
+    assert "Persistent=false" in reconciliation_timer
 
 
 class FakeCutoverAdapter:
@@ -593,48 +636,15 @@ class LocalPostgresCutoverAdapter:
         return False
 
     async def _seed_authority(self, plan: CutoverPlan) -> None:
+        async with PostgresKernelUnitOfWork(self.engine) as uow:
+            await seed_strategy_registry(uow, seeded_at_ms=1_000)
+
+        sor_long = next(
+            contract
+            for contract in registered_strategy_contracts()
+            if contract.event_id == "SOR-LONG"
+        )
         async with self.engine.begin() as connection:
-            await connection.execute(
-                sa.insert(strategy_groups).values(
-                    strategy_group_id="SOR-001",
-                    display_name="Session Opening Range",
-                    active_version_id="SOR-001:v3",
-                    status="active",
-                    updated_at_ms=1_000,
-                )
-            )
-            await connection.execute(
-                sa.insert(strategy_versions).values(
-                    strategy_version_id="SOR-001:v3",
-                    strategy_group_id="SOR-001",
-                    version=3,
-                    semantics={},
-                    status="active",
-                    created_at_ms=1_000,
-                )
-            )
-            await connection.execute(
-                sa.insert(event_specs).values(
-                    event_spec_id="SOR-LONG:v3",
-                    strategy_version_id="SOR-001:v3",
-                    position_side="long",
-                    timeframe="15m",
-                    entry_order_type="market",
-                    execution_semantics={},
-                    status="active",
-                    created_at_ms=1_000,
-                )
-            )
-            await connection.execute(
-                sa.insert(instruments).values(
-                    exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                    venue_id=plan.venue_id,
-                    asset_class="crypto_contract",
-                    venue_symbol="BTCUSDT",
-                    contract_kind="perpetual",
-                    status="active",
-                )
-            )
             await connection.execute(
                 sa.insert(instrument_rules_current).values(
                     exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
@@ -674,9 +684,9 @@ class LocalPostgresCutoverAdapter:
             await connection.execute(
                 sa.insert(runtime_scopes_current).values(
                     runtime_scope_id="scope-sor-btc-long",
-                    strategy_group_id="SOR-001",
-                    strategy_version_id="SOR-001:v3",
-                    event_spec_id="SOR-LONG:v3",
+                    strategy_group_id=sor_long.strategy_group_id,
+                    strategy_version_id=sor_long.strategy_version_id,
+                    event_spec_id=sor_long.event_spec_id,
                     runtime_profile_id=plan.runtime_profile_id,
                     owner_policy_id="policy-main",
                     exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",

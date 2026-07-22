@@ -14,6 +14,7 @@ from src.trading_kernel.application.ports import (
     EventSpecSnapshot,
     InstrumentRulesSnapshot,
     InstrumentSnapshot,
+    ObservationScopeClaim,
     ReadinessSnapshot,
     RuntimeCapabilitySnapshot,
     RuntimeProfileSnapshot,
@@ -236,6 +237,97 @@ class PostgresSignalRepository:
                 )
             )
         return tuple(candidates)
+
+    async def claim_next_observation_scope(
+        self,
+        *,
+        worker_id: str,
+        now_ms: int,
+        lease_until_ms: int,
+    ) -> ObservationScopeClaim | None:
+        normalized_worker_id = worker_id.strip()
+        if not normalized_worker_id:
+            raise ValueError("observation worker identity must be non-blank")
+        if now_ms <= 0 or lease_until_ms <= now_ms:
+            raise ValueError("observation lease must end after its claim time")
+        result = await self._connection.execute(
+            sa.select(
+                runtime_scopes_current.c.runtime_scope_id,
+                event_specs.c.timeframe,
+            )
+            .join(
+                event_specs,
+                event_specs.c.event_spec_id
+                == runtime_scopes_current.c.event_spec_id,
+            )
+            .where(
+                runtime_scopes_current.c.enabled.is_(True),
+                event_specs.c.status == "active",
+                sa.or_(
+                    runtime_scopes_current.c.observation_due_at_ms.is_(None),
+                    runtime_scopes_current.c.observation_due_at_ms <= now_ms,
+                ),
+                sa.or_(
+                    runtime_scopes_current.c.observation_lease_until_ms.is_(None),
+                    runtime_scopes_current.c.observation_lease_until_ms <= now_ms,
+                ),
+            )
+            .order_by(
+                sa.func.coalesce(
+                    runtime_scopes_current.c.observation_due_at_ms,
+                    0,
+                ),
+                runtime_scopes_current.c.runtime_scope_id,
+            )
+            .limit(1)
+            .with_for_update(of=runtime_scopes_current, skip_locked=True)
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        runtime_scope_id = str(row["runtime_scope_id"])
+        timeframe = cast(Literal["15m", "1h"], str(row["timeframe"]))
+        interval_ms = 900_000 if timeframe == "15m" else 3_600_000
+        trigger_candle_close_time_ms = now_ms - (now_ms % interval_ms)
+        await self._connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id == runtime_scope_id
+            )
+            .values(
+                observation_claim_owner=normalized_worker_id,
+                observation_lease_until_ms=lease_until_ms,
+            )
+        )
+        return ObservationScopeClaim(
+            runtime_scope_id=runtime_scope_id,
+            timeframe=timeframe,
+            trigger_candle_close_time_ms=trigger_candle_close_time_ms,
+        )
+
+    async def schedule_observation_scope(
+        self,
+        *,
+        runtime_scope_id: str,
+        worker_id: str,
+        due_at_ms: int,
+    ) -> None:
+        if due_at_ms <= 0:
+            raise ValueError("observation due time must be positive")
+        result = await self._connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id == runtime_scope_id,
+                runtime_scopes_current.c.observation_claim_owner == worker_id,
+            )
+            .values(
+                observation_due_at_ms=due_at_ms,
+                observation_claim_owner=None,
+                observation_lease_until_ms=None,
+            )
+        )
+        if result.rowcount != 1:
+            raise RuntimeError("observation scope lease is not owned by worker")
 
     async def _get_next_candidate_ready(
         self,

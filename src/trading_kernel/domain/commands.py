@@ -29,6 +29,7 @@ class ExchangeCommandKind(StrEnum):
 class ExchangeCommandStatus(StrEnum):
     PREPARED = "prepared"
     CLAIMED = "claimed"
+    SUPERSEDED = "superseded"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     OUTCOME_UNKNOWN = "outcome_unknown"

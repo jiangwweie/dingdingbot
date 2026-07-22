@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping
 from decimal import Decimal
 import inspect
@@ -10,6 +11,15 @@ from typing import Literal, Protocol
 from pydantic import JsonValue
 
 from src.trading_kernel.application.ports import VenueCommandRequest, VenueTruthRequest
+from src.trading_kernel.application.runtime_facts import (
+    ActionTimeFactsRequest,
+    LifecycleFactsRequest,
+    PositionSnapshotRequest,
+)
+from src.trading_kernel.application.maintain_ticket_lifecycle import (
+    TicketLifecycleFacts,
+)
+from src.trading_kernel.domain.capacity import ActionTimeFacts
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandResult,
@@ -21,6 +31,8 @@ from src.trading_kernel.domain.venue_truth import (
     VenueOrderTruth,
     VenueTruthSnapshot,
 )
+from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
 
 
 class _CcxtExchange(Protocol):
@@ -70,6 +82,24 @@ class _CcxtExchange(Protocol):
         params: Mapping[str, object],
     ) -> object: ...
 
+    def fetch_ticker(self, symbol: str) -> object: ...
+
+    def fetch_balance(self, params: Mapping[str, object]) -> object: ...
+
+    def fetch_position_mode(
+        self,
+        symbol: str,
+        params: Mapping[str, object],
+    ) -> object: ...
+
+    def fetch_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str,
+        since: object,
+        limit: int,
+    ) -> object: ...
+
 
 _AUTHORITATIVE_REJECTION_TYPES = {
     "BadRequest",
@@ -86,11 +116,267 @@ class CcxtVenueAdapter:
         *,
         exchanges: Mapping[tuple[str, str], _CcxtExchange],
         venue_symbols: Mapping[tuple[str, str], str],
+        settlement_assets: Mapping[tuple[str, str], str] | None = None,
+        taker_fee_rates: Mapping[tuple[str, str], Decimal] | None = None,
         clock_ms: Callable[[], int],
     ) -> None:
         self._exchanges = dict(exchanges)
         self._venue_symbols = dict(venue_symbols)
+        self._settlement_assets = dict(settlement_assets or {})
+        self._taker_fee_rates = dict(taker_fee_rates or {})
         self._clock_ms = clock_ms
+
+    async def read_action_time_facts(
+        self,
+        request: ActionTimeFactsRequest,
+    ) -> ActionTimeFacts:
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+        )
+        settlement_asset = self._settlement_assets.get(
+            (request.venue_id, request.exchange_instrument_id)
+        )
+        if not settlement_asset:
+            raise RuntimeError("canonical instrument has no settlement asset mapping")
+
+        ticker, balance, mode, positions, regular_orders, conditional_orders = (
+            await asyncio.gather(
+                _call_raw_exchange(exchange.fetch_ticker, symbol),
+                _call_raw_exchange(exchange.fetch_balance, {"type": "future"}),
+                _call_raw_exchange(exchange.fetch_position_mode, symbol, {}),
+                _call_raw_exchange(
+                    exchange.fetch_positions,
+                    [symbol],
+                    {"positionSide": request.position_side.upper()},
+                ),
+                _call_raw_exchange(
+                    exchange.fetch_open_orders,
+                    symbol,
+                    None,
+                    100,
+                    {"conditional": False},
+                ),
+                _call_raw_exchange(
+                    exchange.fetch_open_orders,
+                    symbol,
+                    None,
+                    100,
+                    {"conditional": True},
+                ),
+            )
+        )
+        ticker_mapping = _require_mapping(ticker, name="ticker")
+        balance_mapping = _require_mapping(balance, name="balance")
+        mode_mapping = _require_mapping(mode, name="position mode")
+        position_rows = _require_list(positions, name="positions")
+        regular_rows = _require_list(regular_orders, name="regular open orders")
+        conditional_rows = _require_list(
+            conditional_orders,
+            name="conditional open orders",
+        )
+        return ActionTimeFacts(
+            signal_event_id=request.signal_event_id,
+            runtime_scope_id=request.runtime_scope_id,
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+            position_side=request.position_side,
+            account_position_mode=_account_position_mode(mode_mapping),
+            best_bid_price=_positive_decimal_field(
+                ticker_mapping,
+                "bid",
+                fallback_info_key="bidPrice",
+            ),
+            best_ask_price=_positive_decimal_field(
+                ticker_mapping,
+                "ask",
+                fallback_info_key="askPrice",
+            ),
+            account_equity=_balance_decimal(
+                balance_mapping,
+                bucket="total",
+                asset=settlement_asset,
+                fallback_info_key="totalWalletBalance",
+            ),
+            available_margin=_balance_decimal(
+                balance_mapping,
+                bucket="free",
+                asset=settlement_asset,
+                fallback_info_key="availableBalance",
+            ),
+            netting_domain_position_qty=_position_quantity(
+                position_rows,
+                expected_symbol=symbol,
+                position_side=request.position_side,
+            ),
+            netting_domain_open_order_count=_open_order_count(
+                (*regular_rows, *conditional_rows),
+                expected_symbol=symbol,
+                position_side=request.position_side,
+            ),
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_position_snapshot(
+        self,
+        request: PositionSnapshotRequest,
+    ) -> PositionSnapshot:
+        domain = request.netting_domain
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+        )
+        positions, regular_orders, conditional_orders = await asyncio.gather(
+            _call_raw_exchange(
+                exchange.fetch_positions,
+                [symbol],
+                {"positionSide": domain.position_side.upper()},
+            ),
+            _call_raw_exchange(
+                exchange.fetch_open_orders,
+                symbol,
+                None,
+                100,
+                {"conditional": False},
+            ),
+            _call_raw_exchange(
+                exchange.fetch_open_orders,
+                symbol,
+                None,
+                100,
+                {"conditional": True},
+            ),
+        )
+        position_rows = _require_list(positions, name="positions")
+        quantity, average_entry_price = _position_details(
+            position_rows,
+            expected_symbol=symbol,
+            position_side=domain.position_side,
+        )
+        open_orders = _position_open_orders(
+            (
+                *_require_list(regular_orders, name="regular open orders"),
+                *_require_list(
+                    conditional_orders,
+                    name="conditional open orders",
+                ),
+            ),
+            expected_symbol=symbol,
+            position_side=domain.position_side,
+        )
+        return PositionSnapshot(
+            netting_domain=domain,
+            quantity=quantity,
+            average_entry_price=average_entry_price,
+            open_orders=open_orders,
+            observed_at_ms=request.observed_at_ms,
+        )
+
+    async def read_lifecycle_facts(
+        self,
+        request: LifecycleFactsRequest,
+    ) -> TicketLifecycleFacts:
+        domain = request.netting_domain
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+        )
+        key = (domain.venue_id, domain.exchange_instrument_id)
+        settlement_asset = self._settlement_assets.get(key)
+        taker_fee_rate = self._taker_fee_rates.get(key)
+        if not settlement_asset:
+            raise RuntimeError("canonical instrument has no settlement asset mapping")
+        if taker_fee_rate is None:
+            raise RuntimeError("canonical instrument has no taker fee rate")
+
+        tp1_client_id = request.tp1_venue_client_order_id
+        candle_limit = max(request.atr_period + 1, request.structure_window_bars)
+        positions_call = _call_raw_exchange(
+            exchange.fetch_positions,
+            [symbol],
+            {"positionSide": domain.position_side.upper()},
+        )
+        entry_fills_call = _call_raw_exchange(
+            exchange.fetch_my_trades,
+            symbol,
+            None,
+            100,
+            {"clientOrderId": request.entry_venue_client_order_id},
+        )
+        tp1_fills_call = (
+            _call_raw_exchange(
+                exchange.fetch_my_trades,
+                symbol,
+                None,
+                100,
+                {"clientOrderId": tp1_client_id},
+            )
+            if tp1_client_id is not None
+            else _empty_rows()
+        )
+        candles_call = (
+            _call_raw_exchange(
+                exchange.fetch_ohlcv,
+                symbol,
+                request.timeframe,
+                None,
+                candle_limit,
+            )
+            if request.runner_market_required
+            else _empty_rows()
+        )
+        positions, entry_fills, tp1_fills, candle_rows = await asyncio.gather(
+            positions_call,
+            entry_fills_call,
+            tp1_fills_call,
+            candles_call,
+        )
+        position_quantity, _ = _position_details(
+            _require_list(positions, name="positions"),
+            expected_symbol=symbol,
+            position_side=domain.position_side,
+        )
+        _, _, entry_fee_quote = _fill_metrics(
+            _require_list(entry_fills, name="entry fills"),
+            venue_client_order_id=request.entry_venue_client_order_id,
+            settlement_asset=settlement_asset,
+        )
+        tp1_quantity, tp1_average_price, _ = _fill_metrics(
+            _require_list(tp1_fills, name="TP1 fills"),
+            venue_client_order_id=tp1_client_id,
+            settlement_asset=settlement_asset,
+        )
+        allocated_entry_fee = (
+            entry_fee_quote * position_quantity / request.entry_quantity
+        )
+        market_facts = (
+            _lifecycle_market_facts(
+                _require_list(candle_rows, name="lifecycle candles"),
+                timeframe=request.timeframe,
+                observed_at_ms=request.observed_at_ms,
+                entered_at_ms=request.entered_at_ms,
+                position_side=domain.position_side,
+                structure_window_bars=request.structure_window_bars,
+                atr_period=request.atr_period,
+            )
+            if request.runner_market_required
+            else None
+        )
+        return TicketLifecycleFacts(
+            position_quantity=position_quantity,
+            tp1_filled_quantity=tp1_quantity,
+            tp1_average_fill_price=tp1_average_price,
+            allocated_entry_fee_quote=allocated_entry_fee,
+            exit_taker_fee_rate=taker_fee_rate,
+            price_tick=request.price_tick,
+            market_facts=market_facts,
+            observed_at_ms=request.observed_at_ms,
+        )
 
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
         exchange_key = (request.venue_id, request.account_id)
@@ -250,7 +536,11 @@ class CcxtVenueAdapter:
                 else VenueLookupStatus.VISIBLE
             ),
             order=order,
-            position_quantity=_position_quantity(positions, expected_symbol=symbol),
+            position_quantity=_position_quantity(
+                positions,
+                expected_symbol=symbol,
+                position_side=request.position_side,
+            ),
             matching_fill_quantity=_matching_fill_quantity(
                 fills,
                 venue_client_order_id=request.venue_client_order_id,
@@ -284,7 +574,10 @@ async def _call_exchange(
     clock_ms: Callable[[], int],
 ) -> object | ExchangeCommandResult:
     try:
-        response = operation(*args)
+        if inspect.iscoroutinefunction(operation):
+            response = await operation(*args)
+        else:
+            response = await asyncio.to_thread(operation, *args)
         if inspect.isawaitable(response):
             response = await response
         return response
@@ -303,7 +596,9 @@ async def _call_raw_exchange(
     operation: Callable[..., object],
     *args: object,
 ) -> object:
-    response = operation(*args)
+    if inspect.iscoroutinefunction(operation):
+        return await operation(*args)
+    response = await asyncio.to_thread(operation, *args)
     if inspect.isawaitable(response):
         return await response
     return response
@@ -312,6 +607,12 @@ async def _call_raw_exchange(
 def _require_list(value: object, *, name: str) -> list[object]:
     if not isinstance(value, list):
         raise RuntimeError(f"venue {name} response is not a list")
+    return value
+
+
+def _require_mapping(value: object, *, name: str) -> Mapping[object, object]:
+    if not isinstance(value, Mapping):
+        raise RuntimeError(f"venue {name} response is not a mapping")
     return value
 
 
@@ -351,6 +652,7 @@ def _position_quantity(
     rows: list[object],
     *,
     expected_symbol: str,
+    position_side: Literal["long", "short"],
 ) -> Decimal:
     total = Decimal("0")
     for value in rows:
@@ -358,8 +660,261 @@ def _position_quantity(
             raise RuntimeError("venue position row is not a mapping")
         if str(value.get("symbol") or "") != expected_symbol:
             continue
+        if _row_position_side(value) != position_side:
+            continue
         total += abs(Decimal(str(value.get("contracts") or "0")))
     return total
+
+
+def _position_details(
+    rows: list[object],
+    *,
+    expected_symbol: str,
+    position_side: Literal["long", "short"],
+) -> tuple[Decimal, Decimal | None]:
+    total_quantity = Decimal("0")
+    weighted_entry = Decimal("0")
+    for value in rows:
+        if not isinstance(value, Mapping):
+            raise RuntimeError("venue position row is not a mapping")
+        if str(value.get("symbol") or "") != expected_symbol:
+            continue
+        if _row_position_side(value) != position_side:
+            continue
+        quantity = abs(Decimal(str(value.get("contracts") or "0")))
+        if quantity == 0:
+            continue
+        price = Decimal(
+            str(
+                value.get("entryPrice")
+                or _mapping_value(value.get("info"), "entryPrice")
+                or "0"
+            )
+        )
+        if price <= 0:
+            raise RuntimeError("open venue position lacks entry price")
+        total_quantity += quantity
+        weighted_entry += quantity * price
+    if total_quantity == 0:
+        return Decimal("0"), None
+    return total_quantity, weighted_entry / total_quantity
+
+
+def _position_open_orders(
+    rows: tuple[object, ...],
+    *,
+    expected_symbol: str,
+    position_side: Literal["long", "short"],
+) -> tuple[VenueOrderSnapshot, ...]:
+    orders: list[VenueOrderSnapshot] = []
+    for value in rows:
+        if not isinstance(value, Mapping):
+            raise RuntimeError("venue open-order row is not a mapping")
+        if str(value.get("symbol") or "") != expected_symbol:
+            continue
+        if _row_position_side(value) != position_side:
+            continue
+        orders.append(
+            VenueOrderSnapshot(
+                exchange_order_id=str(value.get("id") or ""),
+                venue_client_order_id=(
+                    str(value.get("clientOrderId"))
+                    if value.get("clientOrderId") is not None
+                    else None
+                ),
+                position_side=position_side,
+                reduce_only=_boolean_field(value, "reduceOnly"),
+            )
+        )
+    return tuple(sorted(orders, key=lambda item: item.exchange_order_id))
+
+
+def _row_position_side(value: Mapping[object, object]) -> Literal["long", "short"]:
+    info = value.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    raw = str(raw_info.get("positionSide") or value.get("side") or "").lower()
+    return _position_side_literal(raw)
+
+
+def _open_order_count(
+    rows: tuple[object, ...],
+    *,
+    expected_symbol: str,
+    position_side: Literal["long", "short"],
+) -> int:
+    count = 0
+    for value in rows:
+        if not isinstance(value, Mapping):
+            raise RuntimeError("venue open-order row is not a mapping")
+        if str(value.get("symbol") or "") != expected_symbol:
+            continue
+        if _row_position_side(value) == position_side:
+            count += 1
+    return count
+
+
+def _positive_decimal_field(
+    value: Mapping[object, object],
+    key: str,
+    *,
+    fallback_info_key: str,
+) -> Decimal:
+    info = value.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    result = Decimal(str(value.get(key) or raw_info.get(fallback_info_key) or "0"))
+    if result <= 0:
+        raise RuntimeError(f"venue {key} is missing or non-positive")
+    return result
+
+
+def _balance_decimal(
+    balance: Mapping[object, object],
+    *,
+    bucket: str,
+    asset: str,
+    fallback_info_key: str,
+) -> Decimal:
+    raw_bucket = balance.get(bucket)
+    bucket_mapping = raw_bucket if isinstance(raw_bucket, Mapping) else {}
+    info = balance.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    result = Decimal(
+        str(bucket_mapping.get(asset) or raw_info.get(fallback_info_key) or "0")
+    )
+    if result < 0 or (bucket == "total" and result <= 0):
+        raise RuntimeError(f"venue account {bucket} is invalid")
+    return result
+
+
+async def _empty_rows() -> list[object]:
+    return []
+
+
+def _fill_metrics(
+    rows: list[object],
+    *,
+    venue_client_order_id: str | None,
+    settlement_asset: str,
+) -> tuple[Decimal, Decimal | None, Decimal]:
+    if venue_client_order_id is None:
+        return Decimal("0"), None, Decimal("0")
+    quantity = Decimal("0")
+    weighted_price = Decimal("0")
+    fee_quote = Decimal("0")
+    for value in rows:
+        if not isinstance(value, Mapping):
+            raise RuntimeError("venue fill row is not a mapping")
+        info = value.get("info")
+        raw_info = info if isinstance(info, Mapping) else {}
+        client_id = str(
+            value.get("clientOrderId")
+            or raw_info.get("clientOrderId")
+            or ""
+        )
+        if client_id != venue_client_order_id:
+            continue
+        fill_quantity = abs(Decimal(str(value.get("amount") or "0")))
+        fill_price = Decimal(str(value.get("price") or "0"))
+        if fill_quantity <= 0 or fill_price <= 0:
+            raise RuntimeError("venue fill quantity and price must be positive")
+        quantity += fill_quantity
+        weighted_price += fill_quantity * fill_price
+        fee = value.get("fee")
+        if isinstance(fee, Mapping) and fee.get("cost") is not None:
+            currency = str(fee.get("currency") or "").upper()
+            if currency != settlement_asset.upper():
+                raise RuntimeError("venue fill fee is not in settlement asset")
+            fee_quote += abs(Decimal(str(fee.get("cost"))))
+    average_price = None if quantity == 0 else weighted_price / quantity
+    return quantity, average_price, fee_quote
+
+
+def _lifecycle_market_facts(
+    rows: list[object],
+    *,
+    timeframe: str,
+    observed_at_ms: int,
+    entered_at_ms: int,
+    position_side: Literal["long", "short"],
+    structure_window_bars: int,
+    atr_period: int,
+) -> LifecycleMarketFacts:
+    duration_ms = {"15m": 900_000, "1h": 3_600_000}[timeframe]
+    candles: list[tuple[int, int, Decimal, Decimal, Decimal]] = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) < 5:
+            raise RuntimeError("venue lifecycle candle row is malformed")
+        open_time_ms = int(row[0])
+        close_time_ms = open_time_ms + duration_ms - 1
+        if close_time_ms > observed_at_ms:
+            continue
+        candles.append(
+            (
+                open_time_ms,
+                close_time_ms,
+                Decimal(str(row[2])),
+                Decimal(str(row[3])),
+                Decimal(str(row[4])),
+            )
+        )
+    candles.sort(key=lambda item: item[0])
+    if len(candles) < atr_period + 1 or len(candles) < structure_window_bars:
+        raise RuntimeError("lifecycle candles are insufficient")
+    true_ranges: list[Decimal] = []
+    for index in range(len(candles) - atr_period, len(candles)):
+        _, _, high, low, _ = candles[index]
+        previous_close = candles[index - 1][4]
+        true_ranges.append(
+            max(
+                high - low,
+                abs(high - previous_close),
+                abs(low - previous_close),
+            )
+        )
+    atr = sum(true_ranges, Decimal("0")) / Decimal(atr_period)
+    structure_rows = candles[-structure_window_bars:]
+    structure_reference = (
+        min(item[3] for item in structure_rows)
+        if position_side == "long"
+        else max(item[2] for item in structure_rows)
+    )
+    return LifecycleMarketFacts(
+        watermark_ms=candles[-1][1],
+        is_final_closed_candle=True,
+        structure_reference=structure_reference,
+        atr=atr,
+        holding_bars=sum(1 for item in candles if item[1] >= entered_at_ms),
+    )
+
+
+def _account_position_mode(
+    value: Mapping[object, object],
+) -> str:
+    hedged = value.get("hedged")
+    if not isinstance(hedged, bool):
+        raise RuntimeError("venue position mode response lacks hedged boolean")
+    return "independent_sides" if hedged else "one_way"
+
+
+def _mapping_value(value: object, key: str) -> object | None:
+    return value.get(key) if isinstance(value, Mapping) else None
+
+
+def _boolean_field(value: Mapping[object, object], key: str) -> bool:
+    raw = value.get(key)
+    if raw is None:
+        raw = _mapping_value(value.get("info"), key)
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"true", "1"}:
+            return True
+        if normalized in {"false", "0", ""}:
+            return False
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    raise RuntimeError(f"venue boolean field {key} is invalid")
 
 
 def _position_side_literal(value: str) -> Literal["long", "short"]:

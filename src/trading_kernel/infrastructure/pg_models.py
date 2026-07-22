@@ -253,6 +253,9 @@ runtime_scopes_current = sa.Table(
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("enabled", sa.Boolean, nullable=False),
     sa.Column("scope_version", sa.Integer, nullable=False),
+    _time("observation_due_at_ms", nullable=True),
+    _time("observation_lease_until_ms", nullable=True),
+    _id("observation_claim_owner", nullable=True),
     _time("updated_at_ms"),
     sa.UniqueConstraint(
         "strategy_group_id",
@@ -261,6 +264,13 @@ runtime_scopes_current = sa.Table(
         "exchange_instrument_id",
         "position_side",
     ),
+)
+
+sa.Index(
+    "ix_brc_runtime_scopes_current_observation_due",
+    runtime_scopes_current.c.enabled,
+    runtime_scopes_current.c.observation_due_at_ms,
+    runtime_scopes_current.c.observation_lease_until_ms,
 )
 
 facts_current = sa.Table(
@@ -501,6 +511,8 @@ trade_aggregates = sa.Table(
     _id("pending_cancel_exchange_order_id", nullable=True),
     _id("exit_exchange_order_id", nullable=True),
     _id("review_id", nullable=True),
+    _time("lifecycle_due_at_ms", nullable=True),
+    _time("reconciliation_due_at_ms", nullable=True),
     _time("updated_at_ms"),
     sa.CheckConstraint("version > 0", name="version_positive"),
     sa.CheckConstraint("last_event_sequence > 0", name="sequence_positive"),
@@ -508,6 +520,16 @@ trade_aggregates = sa.Table(
     sa.CheckConstraint("protected_qty >= 0", name="protection_nonnegative"),
     sa.CheckConstraint("tp1_target_qty >= 0", name="tp1_target_nonnegative"),
     sa.CheckConstraint("tp1_filled_qty >= 0", name="tp1_filled_nonnegative"),
+)
+sa.Index(
+    "ix_brc_trade_aggregates_lifecycle_due",
+    trade_aggregates.c.status,
+    trade_aggregates.c.lifecycle_due_at_ms,
+)
+sa.Index(
+    "ix_brc_trade_aggregates_reconciliation_due",
+    trade_aggregates.c.status,
+    trade_aggregates.c.reconciliation_due_at_ms,
 )
 
 trade_events = sa.Table(

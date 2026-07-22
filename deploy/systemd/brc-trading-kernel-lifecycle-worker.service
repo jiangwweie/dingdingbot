@@ -1,5 +1,5 @@
 [Unit]
-Description=BRC trading kernel bounded worker tick
+Description=BRC trading kernel bounded lifecycle worker tick
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/etc/brc/trading-kernel.env
@@ -11,15 +11,13 @@ Group=brc
 WorkingDirectory=/opt/brc/current
 EnvironmentFile=/etc/brc/trading-kernel.env
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/brc/current/.venv/bin/python scripts/trading_kernel/run_worker_once.py \
+ExecStart=/opt/brc/current/.venv/bin/python scripts/trading_kernel/run_command_worker_once.py \
     --venue-factory ${TRADING_KERNEL_VENUE_FACTORY} \
-    --monitor-key ${TRADING_KERNEL_MONITOR_KEY} \
-    --owner-policy-id ${TRADING_KERNEL_OWNER_POLICY_ID} \
-    --runtime-commit ${TRADING_KERNEL_RUNTIME_COMMIT} \
-    --schema-revision ${TRADING_KERNEL_SCHEMA_REVISION} \
-    --worker-id ${TRADING_KERNEL_WORKER_ID} \
+    --worker-role lifecycle \
+    --worker-id ${TRADING_KERNEL_LIFECYCLE_WORKER_ID} \
     --lease-ms ${TRADING_KERNEL_LEASE_MS} \
-    --timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS}
+    --timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS} \
+    --idle-poll-interval-ms ${TRADING_KERNEL_IDLE_POLL_INTERVAL_MS}
 TimeoutStartSec=30
 NoNewPrivileges=true
 PrivateTmp=true

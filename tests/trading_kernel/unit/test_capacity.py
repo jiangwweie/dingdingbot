@@ -82,6 +82,7 @@ def test_capacity_claim_caps_margin_by_current_account_equity() -> None:
     [
         ("stale_action", CapacityClaimStatus.ACTION_FACTS_INVALID_OR_STALE),
         ("one_way", CapacityClaimStatus.ACCOUNT_MODE_INVALID),
+        ("venue_one_way", CapacityClaimStatus.ACCOUNT_MODE_INVALID),
         ("occupied", CapacityClaimStatus.NETTING_DOMAIN_OCCUPIED),
         ("stop_wrong_side", CapacityClaimStatus.PROTECTION_UNAVAILABLE),
         ("no_margin", CapacityClaimStatus.BUDGET_EXHAUSTED),
@@ -102,6 +103,8 @@ def test_capacity_claim_fails_closed_for_each_action_time_boundary(
         action = action.model_copy(update={"valid_until_ms": 1_010})
     elif case == "one_way":
         position_mode = "one_way"
+    elif case == "venue_one_way":
+        action = action.model_copy(update={"account_position_mode": "one_way"})
     elif case == "occupied":
         occupied = True
     elif case == "stop_wrong_side":
@@ -196,6 +199,7 @@ def _action_facts() -> ActionTimeFacts:
         account_id="experiment-1",
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side="long",
+        account_position_mode="independent_sides",
         best_bid_price=Decimal("99.9"),
         best_ask_price=Decimal("100"),
         account_equity=Decimal("1000"),

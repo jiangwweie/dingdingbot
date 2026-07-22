@@ -28,6 +28,11 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
+from src.trading_kernel.interfaces.observation_worker import (
+    ObservationWorkerRequest,
+    ObservationWorkerStatus,
+    run_observation_worker_once,
+)
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
     SAFE_DATABASE,
@@ -75,6 +80,61 @@ class TimeoutMarketSource:
         request: ClosedCandleRequest,
     ) -> tuple[ClosedCandle, ...]:
         raise TimeoutError(f"timed out: {request.exchange_instrument_id}")
+
+
+@pytest.mark.asyncio
+async def test_observation_worker_claims_one_due_scope_and_waits_for_next_close(
+    observation_engine: AsyncEngine,
+) -> None:
+    await _seed_sor_scope(observation_engine)
+    snapshot = sor_snapshot(side=None)
+    source = FakeMarketSource(
+        {
+            (
+                snapshot.exchange_instrument_id,
+                "15m",
+            ): snapshot.candles_15m
+        }
+    )
+    request = ObservationWorkerRequest(
+        worker_id="observation-worker-1",
+        runtime_commit="kernel-test-head",
+        schema_revision="0001_initial",
+        now_ms=NOW_MS,
+        lease_until_ms=NOW_MS + 30_000,
+        timeout_seconds=1,
+        retry_interval_ms=30_000,
+    )
+
+    first = await run_observation_worker_once(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        source,
+        request,
+    )
+    second = await run_observation_worker_once(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        source,
+        request,
+    )
+
+    assert first.status is ObservationWorkerStatus.OBSERVED
+    assert first.runtime_scope_id == "scope-sor-eth-long"
+    assert first.trigger_candle_close_time_ms == NOW_MS
+    assert first.observation_status is ObservationStatus.NO_SIGNAL
+    assert second.status is ObservationWorkerStatus.NO_WORK
+    assert len(source.calls) == 1
+    async with observation_engine.connect() as connection:
+        scope = (
+            await connection.execute(
+                sa.select(runtime_scopes_current).where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == "scope-sor-eth-long"
+                )
+            )
+        ).mappings().one()
+    assert scope["observation_due_at_ms"] == NOW_MS + 900_000
+    assert scope["observation_claim_owner"] is None
+    assert scope["observation_lease_until_ms"] is None
 
 
 @pytest_asyncio.fixture(name="observation_engine")

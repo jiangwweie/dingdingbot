@@ -273,6 +273,9 @@ def upgrade() -> None:
         sa.Column("position_side", SHORT_TEXT, nullable=False),
         sa.Column("enabled", sa.Boolean, nullable=False),
         sa.Column("scope_version", sa.Integer, nullable=False),
+        _time("observation_due_at_ms", nullable=True),
+        _time("observation_lease_until_ms", nullable=True),
+        _id("observation_claim_owner", nullable=True),
         _time("updated_at_ms"),
         sa.UniqueConstraint(
             "strategy_group_id",
@@ -282,6 +285,11 @@ def upgrade() -> None:
             "position_side",
             name="uq_brc_runtime_scopes_current_identity",
         ),
+    )
+    op.create_index(
+        "ix_brc_runtime_scopes_current_observation_due",
+        "brc_runtime_scopes_current",
+        ["enabled", "observation_due_at_ms", "observation_lease_until_ms"],
     )
     op.create_table(
         "brc_facts_current",
@@ -548,6 +556,8 @@ def upgrade() -> None:
         _id("pending_cancel_exchange_order_id", nullable=True),
         _id("exit_exchange_order_id", nullable=True),
         _id("review_id", nullable=True),
+        _time("lifecycle_due_at_ms", nullable=True),
+        _time("reconciliation_due_at_ms", nullable=True),
         _time("updated_at_ms"),
         sa.CheckConstraint("version > 0", name="ck_brc_trade_aggregates_version_positive"),
         sa.CheckConstraint(
@@ -570,6 +580,16 @@ def upgrade() -> None:
             "tp1_filled_qty >= 0",
             name="ck_brc_trade_aggregates_tp1_filled_nonnegative",
         ),
+    )
+    op.create_index(
+        "ix_brc_trade_aggregates_lifecycle_due",
+        "brc_trade_aggregates",
+        ["status", "lifecycle_due_at_ms"],
+    )
+    op.create_index(
+        "ix_brc_trade_aggregates_reconciliation_due",
+        "brc_trade_aggregates",
+        ["status", "reconciliation_due_at_ms"],
     )
     op.create_table(
         "brc_trade_events",

@@ -39,6 +39,7 @@ class ActionTimeFacts(BaseModel):
     account_id: str
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
+    account_position_mode: str
     best_bid_price: Decimal
     best_ask_price: Decimal
     account_equity: Decimal
@@ -54,6 +55,7 @@ class ActionTimeFacts(BaseModel):
         "venue_id",
         "account_id",
         "exchange_instrument_id",
+        "account_position_mode",
         mode="before",
     )
     @classmethod

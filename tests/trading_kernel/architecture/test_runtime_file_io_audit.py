@@ -21,7 +21,7 @@ def load(path):
 
 def test_file_io_audit_rejects_trading_kernel_runtime_file_write() -> None:
     occurrences = audit.audit_python_file(
-        rel_path="scripts/trading_kernel/run_worker_once.py",
+        rel_path="scripts/trading_kernel/run_command_worker_once.py",
         text='''
 from pathlib import Path
 

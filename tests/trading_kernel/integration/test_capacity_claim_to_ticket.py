@@ -142,6 +142,7 @@ def _action_facts(signal_event_id: str) -> ActionTimeFacts:
         account_id="subaccount-main",
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side="long",
+        account_position_mode="independent_sides",
         best_bid_price=Decimal("9999.9"),
         best_ask_price=Decimal("10000"),
         account_equity=Decimal("1000"),

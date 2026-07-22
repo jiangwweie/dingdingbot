@@ -1,0 +1,29 @@
+[Unit]
+Description=BRC trading kernel bounded closed-bar observation worker tick
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/brc/trading-kernel.env
+
+[Service]
+Type=oneshot
+User=brc
+Group=brc
+WorkingDirectory=/opt/brc/current
+EnvironmentFile=/etc/brc/trading-kernel.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/brc/current/.venv/bin/python scripts/trading_kernel/run_observation_worker_once.py \
+    --market-source-factory ${TRADING_KERNEL_MARKET_SOURCE_FACTORY} \
+    --worker-id ${TRADING_KERNEL_OBSERVATION_WORKER_ID} \
+    --runtime-commit ${TRADING_KERNEL_RUNTIME_COMMIT} \
+    --schema-revision ${TRADING_KERNEL_SCHEMA_REVISION} \
+    --lease-ms ${TRADING_KERNEL_LEASE_MS} \
+    --timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS} \
+    --retry-interval-ms ${TRADING_KERNEL_OBSERVATION_RETRY_INTERVAL_MS}
+TimeoutStartSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

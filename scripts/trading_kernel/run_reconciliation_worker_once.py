@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Run one venue-truth, reconciliation, settlement, or review worker tick."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import importlib
+import inspect
+import json
+import os
+from pathlib import Path
+import sys
+import time
+from typing import Callable, cast
+
+from sqlalchemy.ext.asyncio import create_async_engine
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.trading_kernel.application.ports import VenueTruthPort  # noqa: E402
+from src.trading_kernel.application.runtime_facts import (  # noqa: E402
+    PositionSnapshotSource,
+)
+from src.trading_kernel.infrastructure.pg_unit_of_work import (  # noqa: E402
+    PostgresKernelUnitOfWork,
+)
+from src.trading_kernel.interfaces.reconciliation_worker import (  # noqa: E402
+    ReconciliationWorkerRequest,
+    run_reconciliation_worker_once,
+)
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--database-url",
+        default=os.getenv("TRADING_KERNEL_DATABASE_URL", ""),
+        help="PostgreSQL SQLAlchemy URL; defaults to TRADING_KERNEL_DATABASE_URL",
+    )
+    parser.add_argument("--venue-factory", required=True, help="module:callable")
+    parser.add_argument("--worker-id", required=True)
+    parser.add_argument("--now-ms", type=int)
+    parser.add_argument("--timeout-seconds", type=float, default=10.0)
+    parser.add_argument("--unknown-visibility-grace-ms", type=int, default=30_000)
+    parser.add_argument("--idle-poll-interval-ms", type=int, default=2_000)
+    return parser
+
+
+def _load_factory(spec: str) -> Callable[[], object]:
+    module_name, separator, attribute_name = spec.partition(":")
+    if not separator or not module_name.strip() or not attribute_name.strip():
+        raise ValueError("venue factory must use module:callable")
+    factory = getattr(importlib.import_module(module_name), attribute_name)
+    if not callable(factory):
+        raise TypeError("venue factory target is not callable")
+    return factory
+
+
+async def _run(args: argparse.Namespace) -> int:
+    database_url = str(args.database_url or "").strip()
+    if not database_url.startswith("postgresql+asyncpg://"):
+        raise ValueError("database URL must use postgresql+asyncpg")
+    now_ms = args.now_ms or int(time.time() * 1_000)
+
+    adapter = _load_factory(args.venue_factory)()
+    if inspect.isawaitable(adapter):
+        adapter = await adapter
+    if not callable(getattr(adapter, "lookup_command_truth", None)):
+        raise TypeError("venue factory must provide VenueTruthPort")
+    if not callable(getattr(adapter, "read_position_snapshot", None)):
+        raise TypeError("venue factory must provide PositionSnapshotSource")
+
+    engine = create_async_engine(database_url)
+    try:
+        result = await run_reconciliation_worker_once(
+            lambda: PostgresKernelUnitOfWork(engine),
+            cast(VenueTruthPort, adapter),
+            cast(PositionSnapshotSource, adapter),
+            ReconciliationWorkerRequest(
+                worker_id=args.worker_id,
+                now_ms=now_ms,
+                timeout_seconds=args.timeout_seconds,
+                unknown_visibility_grace_ms=args.unknown_visibility_grace_ms,
+                idle_poll_interval_ms=args.idle_poll_interval_ms,
+            ),
+        )
+        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
+        return 0
+    finally:
+        close = getattr(adapter, "close", None)
+        if callable(close):
+            closed = close()
+            if inspect.isawaitable(closed):
+                await closed
+        await engine.dispose()
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    return asyncio.run(_run(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

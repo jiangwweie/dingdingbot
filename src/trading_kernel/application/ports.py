@@ -9,7 +9,7 @@ from typing import Callable, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
-from src.trading_kernel.domain.aggregate import TradeAggregate
+from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.commands import (
@@ -78,6 +78,8 @@ class TradeReviewRecord(BaseModel):
 
 
 class MonitorOwnerStatus(StrEnum):
+    NOT_ENABLED = "not_enabled"
+    RUNNING = "running"
     WAITING_FOR_OPPORTUNITY = "waiting_for_opportunity"
     PROCESSING = "processing"
     TEMPORARILY_UNAVAILABLE = "temporarily_unavailable"
@@ -179,6 +181,14 @@ class RuntimeScopeSnapshot(BaseModel):
     scope_version: int
 
 
+class ObservationScopeClaim(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime_scope_id: str
+    timeframe: Literal["15m", "1h"]
+    trigger_candle_close_time_ms: int
+
+
 class RuntimeProfileSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -258,6 +268,22 @@ class AggregateRepository(Protocol):
 
     async def get_for_update(self, ticket_id: str) -> TradeAggregate | None: ...
 
+    async def get_next_for_statuses(
+        self,
+        statuses: tuple[AggregateStatus, ...],
+        *,
+        work_kind: Literal["lifecycle", "reconciliation"] | None = None,
+        now_ms: int | None = None,
+    ) -> TradeAggregate | None: ...
+
+    async def schedule_next_check(
+        self,
+        ticket_id: str,
+        *,
+        work_kind: Literal["lifecycle", "reconciliation"],
+        due_at_ms: int,
+    ) -> None: ...
+
     async def save(
         self,
         aggregate: TradeAggregate,
@@ -294,6 +320,7 @@ class ExchangeCommandRepository(Protocol):
         now_ms: int,
         lease_until_ms: int,
         ticket_id: str | None = None,
+        command_kinds: tuple[ExchangeCommandKind, ...] = (),
     ) -> ExchangeCommand | None: ...
 
     async def record_result(
@@ -304,12 +331,24 @@ class ExchangeCommandRepository(Protocol):
         result: ExchangeCommandResult,
     ) -> None: ...
 
+    async def mark_claimed_superseded(
+        self,
+        *,
+        command_id: str,
+        worker_id: str,
+        observed_at_ms: int,
+        reason: str,
+    ) -> None: ...
+
     async def get_one_expired_claim(
         self,
         *,
         now_ms: int,
         ticket_id: str | None = None,
+        command_kinds: tuple[ExchangeCommandKind, ...] = (),
     ) -> ExchangeCommand | None: ...
+
+    async def get_one_unknown(self) -> ExchangeCommand | None: ...
 
     async def record_expired_claim_unknown(
         self,
@@ -496,6 +535,22 @@ class SignalRepository(Protocol):
         now_ms: int,
         limit: int,
     ) -> tuple[EntryCandidate, ...]: ...
+
+    async def claim_next_observation_scope(
+        self,
+        *,
+        worker_id: str,
+        now_ms: int,
+        lease_until_ms: int,
+    ) -> ObservationScopeClaim | None: ...
+
+    async def schedule_observation_scope(
+        self,
+        *,
+        runtime_scope_id: str,
+        worker_id: str,
+        due_at_ms: int,
+    ) -> None: ...
 
     async def get_readiness(
         self,

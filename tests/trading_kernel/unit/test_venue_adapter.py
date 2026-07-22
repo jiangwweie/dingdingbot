@@ -5,6 +5,11 @@ from decimal import Decimal
 import pytest
 
 from src.trading_kernel.application.ports import VenueCommandRequest, VenueTruthRequest
+from src.trading_kernel.application.runtime_facts import (
+    ActionTimeFactsRequest,
+    LifecycleFactsRequest,
+    PositionSnapshotRequest,
+)
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandKind,
@@ -13,6 +18,7 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
 from src.trading_kernel.domain.venue_truth import VenueLookupStatus
+from src.trading_kernel.domain.identities import NettingDomain
 
 
 class FakeAsyncExchange:
@@ -93,7 +99,13 @@ class TruthExchange:
 
     async def fetch_positions(self, symbols, params):
         self.calls.append("positions")
-        return [{"symbol": symbols[0], "contracts": "0"}]
+        return [
+            {
+                "symbol": symbols[0],
+                "contracts": "0",
+                "info": {"positionSide": params["positionSide"]},
+            }
+        ]
 
     async def fetch_my_trades(self, symbol, since, limit, params):
         self.calls.append("fills")
@@ -145,6 +157,116 @@ class CancelTruthExchange(TruthExchange):
             ]
         return []
 
+
+class ActionFactsExchange:
+    async def fetch_ticker(self, symbol):
+        return {"symbol": symbol, "bid": "59999.9", "ask": "60000.1"}
+
+    async def fetch_balance(self, params):
+        assert params == {"type": "future"}
+        return {
+            "total": {"USDT": "1200"},
+            "free": {"USDT": "800"},
+        }
+
+    async def fetch_position_mode(self, symbol, params):
+        assert symbol == "BTC/USDT:USDT"
+        assert params == {}
+        return {"hedged": True}
+
+    async def fetch_positions(self, symbols, params):
+        assert params == {"positionSide": "LONG"}
+        return [
+            {
+                "symbol": symbols[0],
+                "contracts": "0.01",
+                "entryPrice": "59000",
+                "side": "long",
+                "info": {"positionSide": "LONG"},
+            },
+            {
+                "symbol": symbols[0],
+                "contracts": "0.02",
+                "entryPrice": "61000",
+                "side": "short",
+                "info": {"positionSide": "SHORT"},
+            },
+        ]
+
+    async def fetch_open_orders(self, symbol, since, limit, params):
+        assert symbol == "BTC/USDT:USDT"
+        del since, limit
+        return [
+            {
+                "id": f"order-{params['conditional']}-long",
+                "clientOrderId": f"brc-{params['conditional']}-long",
+                "symbol": symbol,
+                "reduceOnly": True,
+                "info": {"positionSide": "LONG"},
+            },
+            {
+                "id": f"order-{params['conditional']}-short",
+                "clientOrderId": f"brc-{params['conditional']}-short",
+                "symbol": symbol,
+                "reduceOnly": True,
+                "info": {"positionSide": "SHORT"},
+            },
+        ]
+
+
+class OneWayActionFactsExchange(ActionFactsExchange):
+    async def fetch_position_mode(self, symbol, params):
+        assert symbol == "BTC/USDT:USDT"
+        assert params == {}
+        return {"hedged": False}
+
+
+class LifecycleFactsExchange:
+    async def fetch_positions(self, symbols, params):
+        return [
+            {
+                "symbol": symbols[0],
+                "contracts": "0.005",
+                "entryPrice": "60000",
+                "info": {"positionSide": params["positionSide"]},
+            }
+        ]
+
+    async def fetch_my_trades(self, symbol, since, limit, params):
+        del symbol, since, limit
+        client_id = params["clientOrderId"]
+        if client_id == "brc-entry-1":
+            return [
+                {
+                    "clientOrderId": client_id,
+                    "amount": "0.01",
+                    "price": "60000",
+                    "fee": {"cost": "0.4", "currency": "USDT"},
+                }
+            ]
+        return [
+            {
+                "clientOrderId": client_id,
+                "amount": "0.005",
+                "price": "61000",
+                "fee": {"cost": "0.15", "currency": "USDT"},
+            }
+        ]
+
+    async def fetch_ohlcv(self, symbol, timeframe, since, limit):
+        del symbol, timeframe, since
+        return [
+            [
+                1_000 + index * 900_000,
+                "60000",
+                str(60010 + index),
+                str(59990 + index),
+                str(60000 + index),
+                "10",
+            ]
+            for index in range(limit)
+        ]
+
 @pytest.mark.asyncio
 async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> None:
     exchange = FakeAsyncExchange()
@@ -174,6 +296,188 @@ async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> N
             "positionSide": "LONG",
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_builds_exact_hedge_side_action_time_facts() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): ActionFactsExchange()
+        },
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        clock_ms=lambda: 2_000,
+    )
+
+    facts = await adapter.read_action_time_facts(
+        ActionTimeFactsRequest(
+            signal_event_id="signal-1",
+            runtime_scope_id="scope-1",
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            position_side="long",
+            observed_at_ms=2_000,
+            valid_for_ms=5_000,
+        )
+    )
+
+    assert facts.account_position_mode == "independent_sides"
+    assert facts.best_bid_price == Decimal("59999.9")
+    assert facts.best_ask_price == Decimal("60000.1")
+    assert facts.account_equity == Decimal("1200")
+    assert facts.available_margin == Decimal("800")
+    assert facts.netting_domain_position_qty == Decimal("0.01")
+    assert facts.netting_domain_open_order_count == 2
+    assert facts.valid_until_ms == 7_000
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_reports_actual_one_way_account_mode() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): OneWayActionFactsExchange()
+        },
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        clock_ms=lambda: 2_000,
+    )
+
+    facts = await adapter.read_action_time_facts(
+        ActionTimeFactsRequest(
+            signal_event_id="signal-1",
+            runtime_scope_id="scope-1",
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            position_side="long",
+            observed_at_ms=2_000,
+            valid_for_ms=5_000,
+        )
+    )
+
+    assert facts.account_position_mode == "one_way"
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_builds_position_snapshot_for_exact_netting_domain() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): ActionFactsExchange()
+        },
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        clock_ms=lambda: 2_000,
+    )
+    domain = NettingDomain(
+        venue_id="binance-usdm",
+        account_id="experiment-1",
+        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+        position_side="long",
+    )
+
+    snapshot = await adapter.read_position_snapshot(
+        PositionSnapshotRequest(
+            ticket_id="ticket-1",
+            netting_domain=domain,
+            observed_at_ms=2_000,
+        )
+    )
+
+    assert snapshot.netting_domain == domain
+    assert snapshot.quantity == Decimal("0.01")
+    assert snapshot.average_entry_price == Decimal("59000")
+    assert {order.exchange_order_id for order in snapshot.open_orders} == {
+        "order-False-long",
+        "order-True-long",
+    }
+    assert all(order.position_side == "long" for order in snapshot.open_orders)
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): LifecycleFactsExchange()
+        },
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        taker_fee_rates={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): Decimal("0.0005")
+        },
+        clock_ms=lambda: 20_000_000,
+    )
+    request = LifecycleFactsRequest(
+        ticket_id="ticket-1",
+        netting_domain=NettingDomain(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            position_side="long",
+        ),
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+        timeframe="15m",
+        entry_quantity=Decimal("0.01"),
+        expected_position_quantity=Decimal("0.005"),
+        entry_venue_client_order_id="brc-entry-1",
+        tp1_venue_client_order_id="brc-tp1-1",
+        entered_at_ms=1_000,
+        price_tick=Decimal("0.1"),
+        structure_window_bars=4,
+        atr_period=14,
+        runner_market_required=True,
+        observed_at_ms=20_000_000,
+    )
+
+    facts = await adapter.read_lifecycle_facts(request)
+
+    assert facts.position_quantity == Decimal("0.005")
+    assert facts.tp1_filled_quantity == Decimal("0.005")
+    assert facts.tp1_average_fill_price == Decimal("61000")
+    assert facts.allocated_entry_fee_quote == Decimal("0.20")
+    assert facts.exit_taker_fee_rate == Decimal("0.0005")
+    assert facts.price_tick == Decimal("0.1")
+    assert facts.market_facts is not None
+    assert facts.market_facts.is_final_closed_candle is True
+    assert facts.market_facts.structure_reference == Decimal("60001")
+    assert facts.market_facts.atr > 0
 
 
 @pytest.mark.asyncio

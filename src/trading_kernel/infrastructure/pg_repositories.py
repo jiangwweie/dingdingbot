@@ -10,6 +10,7 @@ from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.sql.elements import ColumnElement
 
 from src.trading_kernel.application.ports import (
     AggregateVersionConflict,
@@ -222,6 +223,72 @@ class PostgresAggregateRepository:
     async def get_for_update(self, ticket_id: str) -> TradeAggregate | None:
         return await self._get(ticket_id, for_update=True)
 
+    async def get_next_for_statuses(
+        self,
+        statuses: tuple[AggregateStatus, ...],
+        *,
+        work_kind: Literal["lifecycle", "reconciliation"] | None = None,
+        now_ms: int | None = None,
+    ) -> TradeAggregate | None:
+        if not statuses:
+            return None
+        due_column = None
+        if work_kind == "lifecycle":
+            due_column = trade_aggregates.c.lifecycle_due_at_ms
+        elif work_kind == "reconciliation":
+            due_column = trade_aggregates.c.reconciliation_due_at_ms
+        if due_column is not None and (now_ms is None or now_ms <= 0):
+            raise ValueError("scheduled aggregate selection requires positive now_ms")
+        conditions: list[ColumnElement[bool]] = [
+            trade_aggregates.c.status.in_(
+                tuple(status.value for status in statuses)
+            )
+        ]
+        if due_column is not None:
+            conditions.append(
+                sa.func.coalesce(due_column, trade_aggregates.c.updated_at_ms)
+                <= now_ms
+            )
+        order_column = (
+            trade_aggregates.c.updated_at_ms
+            if due_column is None
+            else sa.func.coalesce(due_column, trade_aggregates.c.updated_at_ms)
+        )
+        result = await self._connection.execute(
+            sa.select(trade_aggregates.c.ticket_id)
+            .where(*conditions)
+            .order_by(
+                order_column,
+                trade_aggregates.c.ticket_id,
+            )
+            .with_for_update(skip_locked=True, of=trade_aggregates)
+            .limit(1)
+        )
+        ticket_id = result.scalar_one_or_none()
+        return None if ticket_id is None else await self.get(str(ticket_id))
+
+    async def schedule_next_check(
+        self,
+        ticket_id: str,
+        *,
+        work_kind: Literal["lifecycle", "reconciliation"],
+        due_at_ms: int,
+    ) -> None:
+        if due_at_ms <= 0:
+            raise ValueError("aggregate next-check time must be positive")
+        column = (
+            trade_aggregates.c.lifecycle_due_at_ms
+            if work_kind == "lifecycle"
+            else trade_aggregates.c.reconciliation_due_at_ms
+        )
+        updated = await self._connection.execute(
+            sa.update(trade_aggregates)
+            .where(trade_aggregates.c.ticket_id == ticket_id)
+            .values({column.name: due_at_ms})
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict("aggregate missing during reschedule")
+
     async def _get(
         self,
         ticket_id: str,
@@ -373,6 +440,7 @@ class PostgresExchangeCommandRepository:
         now_ms: int,
         lease_until_ms: int,
         ticket_id: str | None = None,
+        command_kinds: tuple[ExchangeCommandKind, ...] = (),
     ) -> ExchangeCommand | None:
         conditions = [
             exchange_commands.c.status == ExchangeCommandStatus.PREPARED.value,
@@ -380,6 +448,12 @@ class PostgresExchangeCommandRepository:
         ]
         if ticket_id is not None:
             conditions.append(exchange_commands.c.ticket_id == ticket_id)
+        if command_kinds:
+            conditions.append(
+                exchange_commands.c.command_kind.in_(
+                    tuple(kind.value for kind in command_kinds)
+                )
+            )
         result = await self._connection.execute(
             sa.select(exchange_commands.c.command_id)
             .where(*conditions)
@@ -430,11 +504,44 @@ class PostgresExchangeCommandRepository:
         if updated.rowcount != 1:
             raise AggregateVersionConflict("command claim changed before result")
 
+    async def mark_claimed_superseded(
+        self,
+        *,
+        command_id: str,
+        worker_id: str,
+        observed_at_ms: int,
+        reason: str,
+    ) -> None:
+        normalized_reason = str(reason or "").strip()
+        if not normalized_reason:
+            raise ValueError("superseded command requires a reason")
+        updated = await self._connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.command_id == command_id,
+                exchange_commands.c.status == ExchangeCommandStatus.CLAIMED.value,
+                exchange_commands.c.claim_owner == worker_id,
+            )
+            .values(
+                status=ExchangeCommandStatus.SUPERSEDED.value,
+                result_payload={
+                    "status": ExchangeCommandStatus.SUPERSEDED.value,
+                    "reason": normalized_reason,
+                    "observed_at_ms": observed_at_ms,
+                },
+                completed_at_ms=observed_at_ms,
+                lease_until_ms=None,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict("command claim changed before supersession")
+
     async def get_one_expired_claim(
         self,
         *,
         now_ms: int,
         ticket_id: str | None = None,
+        command_kinds: tuple[ExchangeCommandKind, ...] = (),
     ) -> ExchangeCommand | None:
         conditions = [
             exchange_commands.c.status == ExchangeCommandStatus.CLAIMED.value,
@@ -442,10 +549,33 @@ class PostgresExchangeCommandRepository:
         ]
         if ticket_id is not None:
             conditions.append(exchange_commands.c.ticket_id == ticket_id)
+        if command_kinds:
+            conditions.append(
+                exchange_commands.c.command_kind.in_(
+                    tuple(kind.value for kind in command_kinds)
+                )
+            )
         result = await self._connection.execute(
             sa.select(exchange_commands.c.command_id)
             .where(*conditions)
             .order_by(exchange_commands.c.lease_until_ms, exchange_commands.c.command_id)
+            .with_for_update(skip_locked=True, of=exchange_commands)
+            .limit(1)
+        )
+        command_id = result.scalar_one_or_none()
+        return None if command_id is None else await self.get(str(command_id))
+
+    async def get_one_unknown(self) -> ExchangeCommand | None:
+        result = await self._connection.execute(
+            sa.select(exchange_commands.c.command_id)
+            .where(
+                exchange_commands.c.status
+                == ExchangeCommandStatus.OUTCOME_UNKNOWN.value
+            )
+            .order_by(
+                exchange_commands.c.completed_at_ms,
+                exchange_commands.c.command_id,
+            )
             .with_for_update(skip_locked=True, of=exchange_commands)
             .limit(1)
         )

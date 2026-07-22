@@ -144,6 +144,107 @@ class KindAwareAcceptingVenue:
         )
 
 
+class CountingKindAwareAcceptingVenue(KindAwareAcceptingVenue):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
+        self.calls += 1
+        return await super().execute(request)
+
+
+@pytest.mark.asyncio
+async def test_prepared_command_is_superseded_before_venue_write_when_state_moves_on(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    accepting = KindAwareAcceptingVenue()
+    await _dispatch_for_ticket(dispatch_engine, accepting, ticket.identity.ticket_id)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    await _dispatch_for_ticket(dispatch_engine, accepting, ticket.identity.ticket_id)
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert aggregate is not None
+        assert aggregate.status is AggregateStatus.TP1_PENDING
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=Decimal("0"),
+                    average_entry_price=None,
+                    open_orders=(
+                        VenueOrderSnapshot(
+                            exchange_order_id=str(
+                                aggregate.initial_stop_exchange_order_id
+                            ),
+                            venue_client_order_id="brc-initial-stop",
+                            position_side="long",
+                            reduce_only=True,
+                        ),
+                    ),
+                    observed_at_ms=2_300,
+                ),
+            ),
+        )
+
+    venue = CountingKindAwareAcceptingVenue()
+    superseded = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="lifecycle-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=2_400,
+            lease_until_ms=7_400,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert superseded.status is DispatchCommandStatus.SUPERSEDED
+    assert venue.calls == 0
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    tp1 = next(
+        command
+        for command in commands
+        if command.kind is ExchangeCommandKind.TAKE_PROFIT
+    )
+    assert tp1.status is ExchangeCommandStatus.SUPERSEDED
+
+    cleanup = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="lifecycle-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=2_500,
+            lease_until_ms=7_500,
+            timeout_seconds=1,
+        ),
+    )
+    assert cleanup.status is DispatchCommandStatus.ACCEPTED
+    assert venue.calls == 1
+
+
 @pytest.mark.asyncio
 async def test_tp1_and_replacement_commands_reach_protected_runner(
     dispatch_engine: AsyncEngine,
