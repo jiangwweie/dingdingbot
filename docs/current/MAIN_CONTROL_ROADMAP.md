@@ -25,10 +25,12 @@ multi-StrategyGroup typed observation
 | Kernel lifecycle | Implemented under `src/trading_kernel` |
 | Retired production code | Deleted in `d570018a` |
 | Multi-position certification | `104 passed` at commit `5946cbf1` |
+| Typed signal to Ticket | Implemented and committed in `17af6575` |
+| Destructive cutover tooling | Local state machine and disposable-PG rehearsal pass |
 | Database | One `0001_initial`, 29 target tables, downgrade/upgrade certified |
 | Static checks | Ruff pass; production Mypy zero errors |
 | Runtime file authority | Suspicious readers and recurring report writers both zero |
-| Tokyo | Still requires destructive cutover to the new kernel |
+| Tokyo | Paused before deployment pending Owner strategy-refactor review |
 
 ## Critical Path
 
@@ -37,9 +39,10 @@ multi-StrategyGroup typed observation
 | 1 | Current documentation retirement | Only the rebuilt-kernel authority allowlist remains |
 | 2 | Typed signal to frozen Ticket | Production-shaped typed input can persist, queue, serialize, and issue Tickets |
 | 3 | Destructive cutover tooling | Crash-safe and resume-safe rehearsal passes every refusal case |
-| 4 | Tokyo cutover | Exact commit/schema/seed/services verified with retired tables absent |
-| 5 | Controlled real-funds lifecycle | One Ticket reaches terminal review and final flatness |
-| 6 | Completion audit | Every final requirement has direct current evidence |
+| 4 | Strategy refactor decision and implementation | Strategy models and producers match the new kernel without retired semantics |
+| 5 | Tokyo cutover | Exact commit/schema/seed/services verified with retired tables absent |
+| 6 | Controlled real-funds lifecycle | One Ticket reaches terminal review and final flatness |
+| 7 | Completion audit | Every final requirement has direct current evidence |
 
 ## Stop Conditions
 
@@ -51,3 +54,6 @@ code/schema mismatch.
 Missing implementation, documentation debt, or difficult migration work is not
 a reason to narrow the final target. The next action remains the earliest
 unfinished critical-path capability.
+
+Tokyo deployment, server mutation, and real-funds acceptance are currently an
+explicit stop boundary until the Owner strategy-refactor review is complete.

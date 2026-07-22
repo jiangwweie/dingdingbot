@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the BRC trading kernel worker every two seconds
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=2s
+AccuracySec=100ms
+Persistent=false
+Unit=brc-trading-kernel-worker.service
+
+[Install]
+WantedBy=timers.target

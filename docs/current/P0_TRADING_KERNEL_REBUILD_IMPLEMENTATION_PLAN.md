@@ -105,18 +105,28 @@ Tickets progress concurrently through one reducer and durable command model.
 
 **TDD sequence:**
 
-- [ ] RED: exact plan phases and identities.
-- [ ] GREEN: side-effect-free plan mode.
-- [ ] RED: every flatness, order, protection, outcome, writer, and identity
+- [x] RED: exact plan phases and identities.
+- [x] GREEN: side-effect-free plan mode.
+- [x] RED: every flatness, order, protection, outcome, writer, and identity
   precondition independently blocks destruction.
-- [ ] RED: interrupted apply resumes at the first unverified phase.
-- [ ] GREEN: implement explicit phase journal, writer fence, final verification,
+- [x] RED: interrupted apply resumes at the first unverified phase.
+- [x] GREEN: implement explicit phase journal, writer fence, final verification,
   short-lived backup, schema rebuild, seed, deploy, readonly certification, and
   staged capability restore.
-- [ ] Rehearse on disposable PostgreSQL and local service substitutes.
-- [ ] Commit with `ops(kernel): add destructive flat-state cutover`.
+- [x] Rehearse on disposable PostgreSQL and local service substitutes.
+- [x] Commit with `ops(kernel): add destructive flat-state cutover`.
+
+## Owner Gate Before Task 16
+
+The trading main chain and local cutover capability are completed first. Tokyo,
+server mutation, and controlled real-funds acceptance must not begin until the
+Owner and Codex review and decide the separate aggressive StrategyGroup and
+strategy-signal refactor. Existing strategy models and producers are not
+implicitly accepted merely because the trading kernel is ready.
 
 ## Task 16: Tokyo Cutover And Controlled Real-Funds Acceptance
+
+Task 16 is paused behind the Owner strategy-refactor gate above.
 
 - [ ] Read current Tokyo commit, schema, services, DB roles, account mode,
   positions, orders, protection, and unresolved outcomes.

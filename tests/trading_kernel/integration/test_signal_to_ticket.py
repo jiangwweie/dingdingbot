@@ -84,7 +84,7 @@ async def test_typed_signal_persists_readiness_and_issues_one_frozen_ticket(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_001,
             ),
         )
@@ -98,7 +98,7 @@ async def test_typed_signal_persists_readiness_and_issues_one_frozen_ticket(
             IssueReadySignalRequest(
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_002,
             ),
         )
@@ -145,7 +145,7 @@ async def test_signal_from_non_independent_position_mode_is_rejected_before_pers
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_001,
             ),
         )
@@ -169,7 +169,7 @@ async def test_wrong_fact_digest_is_rejected_before_signal_persistence(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_001,
             ),
         )
@@ -193,7 +193,7 @@ async def test_missing_or_stale_required_fact_rejects_signal(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_600,
             ),
         )
@@ -212,7 +212,7 @@ async def test_duplicate_typed_signal_is_idempotently_rejected(
     request = IngestSignalRequest(
         signal=signal,
         runtime_commit="kernel-test-head",
-        schema_revision="0001",
+        schema_revision="0001_initial",
         now_ms=1_001,
     )
 
@@ -276,7 +276,7 @@ async def test_three_ready_signals_issue_serially_into_three_concurrent_domains(
                 IngestSignalRequest(
                     signal=signal,
                     runtime_commit="kernel-test-head",
-                    schema_revision="0001",
+                    schema_revision="0001_initial",
                     now_ms=1_003,
                 ),
             )
@@ -290,7 +290,7 @@ async def test_three_ready_signals_issue_serially_into_three_concurrent_domains(
                 IssueReadySignalRequest(
                     claim_owner=f"signal-worker-{index}",
                     runtime_commit="kernel-test-head",
-                    schema_revision="0001",
+                    schema_revision="0001_initial",
                     now_ms=1_010 + index,
                 ),
             )
@@ -305,7 +305,7 @@ async def test_three_ready_signals_issue_serially_into_three_concurrent_domains(
                         IssueReadySignalRequest(
                             claim_owner="signal-worker-blocked",
                             runtime_commit="kernel-test-head",
-                            schema_revision="0001",
+                            schema_revision="0001_initial",
                             now_ms=1_020,
                         ),
                     )
@@ -343,7 +343,7 @@ async def test_budget_is_revalidated_at_issue_and_persisted_as_first_blocker(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_001,
             ),
         )
@@ -359,7 +359,7 @@ async def test_budget_is_revalidated_at_issue_and_persisted_as_first_blocker(
             IssueReadySignalRequest(
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_002,
             ),
         )
@@ -388,7 +388,7 @@ async def test_policy_disabled_after_ingest_returns_exact_issue_blocker(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_001,
             ),
         )
@@ -407,7 +407,7 @@ async def test_policy_disabled_after_ingest_returns_exact_issue_blocker(
             IssueReadySignalRequest(
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_002,
             ),
         )
@@ -432,7 +432,7 @@ async def test_expired_queued_signal_is_terminally_blocked_not_left_ticket_ready
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_001,
             ),
         )
@@ -444,7 +444,7 @@ async def test_expired_queued_signal_is_terminally_blocked_not_left_ticket_ready
             IssueReadySignalRequest(
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=signal.expires_at_ms,
             ),
         )
@@ -500,7 +500,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit=runtime_commit,
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=now_ms,
             ),
         )
@@ -522,7 +522,7 @@ async def test_no_ready_signal_returns_explicit_idle_result(
             IssueReadySignalRequest(
                 claim_owner="signal-worker-idle",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_001,
             ),
         )
@@ -543,7 +543,7 @@ async def test_two_signal_workers_create_exactly_one_ticket_for_one_ready_signal
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 now_ms=1_001,
             ),
         )
@@ -556,7 +556,7 @@ async def test_two_signal_workers_create_exactly_one_ticket_for_one_ready_signal
                 IssueReadySignalRequest(
                     claim_owner=worker,
                     runtime_commit="kernel-test-head",
-                    schema_revision="0001",
+                    schema_revision="0001_initial",
                     now_ms=1_002,
                 ),
             )
@@ -708,7 +708,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 capability_key="signal_to_ticket",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001",
+                schema_revision="0001_initial",
                 certification={},
                 updated_at_ms=1_000,
             )

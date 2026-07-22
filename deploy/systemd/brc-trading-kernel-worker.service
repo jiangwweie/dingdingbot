@@ -1,0 +1,30 @@
+[Unit]
+Description=BRC trading kernel bounded worker tick
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/brc/trading-kernel.env
+
+[Service]
+Type=oneshot
+User=brc
+Group=brc
+WorkingDirectory=/opt/brc/current
+EnvironmentFile=/etc/brc/trading-kernel.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/brc/current/.venv/bin/python scripts/trading_kernel/run_worker_once.py \
+    --venue-factory ${TRADING_KERNEL_VENUE_FACTORY} \
+    --monitor-key ${TRADING_KERNEL_MONITOR_KEY} \
+    --owner-policy-id ${TRADING_KERNEL_OWNER_POLICY_ID} \
+    --runtime-commit ${TRADING_KERNEL_RUNTIME_COMMIT} \
+    --schema-revision ${TRADING_KERNEL_SCHEMA_REVISION} \
+    --worker-id ${TRADING_KERNEL_WORKER_ID} \
+    --lease-ms ${TRADING_KERNEL_LEASE_MS} \
+    --timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS}
+TimeoutStartSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target
