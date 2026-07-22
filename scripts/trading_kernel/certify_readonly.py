@@ -7,9 +7,18 @@ import argparse
 import asyncio
 import json
 import os
+from pathlib import Path
+import sys
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.trading_kernel.infrastructure.pg_models import metadata  # noqa: E402
 
 
 SCHEMA = "brc.trading_kernel.readonly_certification.v1"
@@ -52,6 +61,62 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
                     )
                 ).scalar_one()
             )
+            runtime_identity = {
+                str(row["metadata_key"]): str(row["metadata_value"])
+                for row in (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT metadata_key, metadata_value
+                              FROM brc_schema_metadata
+                             WHERE metadata_key IN (
+                                'runtime_commit',
+                                'schema_revision',
+                                'seed_identity'
+                             )
+                            """
+                        )
+                    )
+                ).mappings()
+            }
+            actual_tables = {
+                str(name)
+                for name in (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT relname
+                              FROM pg_catalog.pg_class
+                             WHERE relkind IN ('r', 'p')
+                               AND relnamespace = current_schema()::regnamespace
+                               AND relname <> 'alembic_version'
+                            """
+                        )
+                    )
+                ).scalars()
+            }
+            expected_tables = set(metadata.tables)
+            runtime_scope_count = int(
+                (
+                    await connection.execute(
+                        text("SELECT count(*) FROM brc_runtime_scopes_current")
+                    )
+                ).scalar_one()
+            )
+            capabilities = {
+                str(row["capability_key"]): bool(row["enabled"])
+                for row in (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT capability_key, enabled
+                              FROM brc_runtime_capabilities_current
+                             ORDER BY capability_key
+                            """
+                        )
+                    )
+                ).mappings()
+            }
             integrity_orphans = int(
                 (
                     await connection.execute(
@@ -119,7 +184,8 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
                     await connection.execute(
                         text(
                             "SELECT count(*) FROM brc_exchange_commands "
-                            "WHERE status IN ('claimed', 'outcome_unknown')"
+                            "WHERE status IN "
+                            "('prepared', 'claimed', 'outcome_unknown')"
                         )
                     )
                 ).scalar_one()
@@ -134,6 +200,25 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
                     )
                 ).scalar_one()
             )
+            owner_projection_row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT monitor_key,
+                               owner_status,
+                               summary,
+                               intervention,
+                               ticket_id,
+                               incident_id,
+                               updated_at_ms,
+                               projection_version
+                          FROM brc_monitor_current
+                         ORDER BY updated_at_ms DESC, monitor_key
+                         LIMIT 1
+                        """
+                    )
+                )
+            ).mappings().one_or_none()
             await connection.rollback()
     finally:
         await engine.dispose()
@@ -146,10 +231,41 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         "unresolved_commands": unresolved_commands,
         "open_incidents": open_incidents,
     }
+    table_allowlist = {
+        "status": "pass" if actual_tables == expected_tables else "fail",
+        "count": len(actual_tables),
+        "tables": sorted(actual_tables),
+    }
+    active_counts = {
+        "tickets": active_ticket_domains,
+        "commands": unresolved_commands,
+        "positions": non_flat_positions,
+        "incidents": open_incidents,
+    }
+    owner_projection = (
+        None
+        if owner_projection_row is None
+        else {key: owner_projection_row[key] for key in owner_projection_row}
+    )
+    expected_capabilities = {
+        "exchange_commands": False,
+        "strategy_signal_ingest": True,
+    }
     passed = (
         revision == EXPECTED_ALEMBIC_REVISION
+        and runtime_identity.get("schema_revision") == EXPECTED_ALEMBIC_REVISION
+        and set(runtime_identity) == {
+            "runtime_commit",
+            "schema_revision",
+            "seed_identity",
+        }
+        and actual_tables == expected_tables
+        and runtime_scope_count == 22
+        and capabilities == expected_capabilities
         and integrity_orphans == 0
         and legacy_execution_tables == 0
+        and unresolved_commands == 0
+        and open_incidents == 0
         and (
             not require_flat
             or (non_flat_positions == 0 and active_ticket_domains == 0)
@@ -159,6 +275,12 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         "schema": SCHEMA,
         "status": "pass" if passed else "fail",
         "alembic_revision": revision,
+        "runtime_identity": runtime_identity,
+        "table_allowlist": table_allowlist,
+        "runtime_scope_count": runtime_scope_count,
+        "capabilities": capabilities,
+        "active_counts": active_counts,
+        "owner_projection": owner_projection,
         "require_flat": require_flat,
         "checks": checks,
     }

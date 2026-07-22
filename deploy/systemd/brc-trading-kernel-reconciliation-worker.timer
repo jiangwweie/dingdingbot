@@ -1,9 +1,9 @@
 [Unit]
-Description=Run the BRC trading kernel reconciliation worker every two seconds
+Description=Run the BRC trading kernel reconciliation worker every five seconds
 
 [Timer]
 OnBootSec=17s
-OnUnitActiveSec=2s
+OnUnitActiveSec=5s
 AccuracySec=100ms
 Persistent=false
 Unit=brc-trading-kernel-reconciliation-worker.service

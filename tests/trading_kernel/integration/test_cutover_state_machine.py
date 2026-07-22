@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+import subprocess
+import sys
 from uuid import uuid4
 
 import asyncpg
@@ -21,6 +23,7 @@ from scripts.trading_kernel.cutover_tokyo import (
     plan_cutover,
     run_cutover,
 )
+from scripts.trading_kernel.certify_readonly import _certify
 from scripts.trading_kernel.verify_flat_cutover import (
     CutoverBlocker,
     CutoverFacts,
@@ -353,6 +356,10 @@ def test_systemd_runtime_workers_are_four_explicit_bounded_roles() -> None:
         assert f"--worker-role {role}" in service
         assert "--timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS}" in service
         if role == "entry":
+            assert (
+                "ConditionPathExists=!/etc/brc/trading-kernel.write-fenced"
+                in service
+            )
             assert "--runtime-commit ${TRADING_KERNEL_RUNTIME_COMMIT}" in service
             assert "--schema-revision ${TRADING_KERNEL_SCHEMA_REVISION}" in service
             assert (
@@ -376,7 +383,7 @@ def test_systemd_runtime_workers_are_four_explicit_bounded_roles() -> None:
     assert "Type=oneshot" in observation_service
     assert "scripts/trading_kernel/run_observation_worker_once.py" in observation_service
     assert "--runtime-scope-id" not in observation_service
-    assert "OnUnitActiveSec=2s" in observation_timer
+    assert "OnUnitActiveSec=5s" in observation_timer
     assert "Persistent=false" in observation_timer
 
     reconciliation_service = (
@@ -390,8 +397,73 @@ def test_systemd_runtime_workers_are_four_explicit_bounded_roles() -> None:
         "scripts/trading_kernel/run_reconciliation_worker_once.py"
         in reconciliation_service
     )
-    assert "OnUnitActiveSec=2s" in reconciliation_timer
+    assert "OnUnitActiveSec=5s" in reconciliation_timer
     assert "Persistent=false" in reconciliation_timer
+
+
+@pytest.mark.asyncio
+async def test_readonly_certification_reports_exact_runtime_authority(
+    journal_database_url: str,
+) -> None:
+    await asyncio.to_thread(_run_alembic, journal_database_url, "upgrade", "head")
+    engine = create_async_engine(journal_database_url)
+    plan = _plan()
+    try:
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id=plan.account_id,
+                    runtime_commit=plan.target_commit,
+                    schema_revision=plan.target_schema_revision,
+                    seeded_at_ms=1_000,
+                ),
+            )
+        payload = await _certify(journal_database_url, require_flat=True)
+    finally:
+        await engine.dispose()
+
+    assert payload["status"] == "pass"
+    assert payload["runtime_identity"] == {
+        "runtime_commit": plan.target_commit,
+        "schema_revision": plan.target_schema_revision,
+        "seed_identity": plan.target_seed_identity,
+    }
+    assert payload["table_allowlist"] == {
+        "status": "pass",
+        "count": 33,
+        "tables": sorted(metadata.tables),
+    }
+    assert payload["runtime_scope_count"] == 22
+    assert payload["capabilities"] == {
+        "exchange_commands": False,
+        "strategy_signal_ingest": True,
+    }
+    assert payload["active_counts"] == {
+        "tickets": 0,
+        "commands": 0,
+        "positions": 0,
+        "incidents": 0,
+    }
+    assert payload["owner_projection"] is None
+
+
+def test_readonly_certification_cli_loads_outside_repository(
+    tmp_path: Path,
+) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/trading_kernel/certify_readonly.py"),
+            "--help",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 class FakeCutoverAdapter:

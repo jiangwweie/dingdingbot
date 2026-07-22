@@ -3,6 +3,7 @@ Description=BRC trading kernel bounded ENTRY worker tick
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/etc/brc/trading-kernel.env
+ConditionPathExists=!/etc/brc/trading-kernel.write-fenced
 
 [Service]
 Type=oneshot
