@@ -111,6 +111,23 @@ async def test_ssh_system_phase_inspection_returns_typed_state() -> None:
     assert state.exchange_commands_enabled is False
 
 
+@pytest.mark.asyncio
+async def test_static_inactive_service_counts_as_stopped_and_disabled() -> None:
+    module = _production_adapter_module()
+    system = module.SshTokyoSystem(StaticInactiveUnitRunner(module))
+
+    stopped = await system._units_stopped_and_disabled(
+        frozenset(
+            {
+                "brc-runtime-monitor.service",
+                "brc-runtime-monitor.timer",
+            }
+        )
+    )
+
+    assert stopped is True
+
+
 class AlwaysMissingRunner:
     def __init__(self, module: ModuleType) -> None:
         self.module = module
@@ -123,6 +140,38 @@ class AlwaysMissingRunner:
     ) -> object:
         del argv, check
         return self.module._RemoteResult(returncode=1, stdout="", stderr="")
+
+
+class StaticInactiveUnitRunner:
+    def __init__(self, module: ModuleType) -> None:
+        self.module = module
+
+    async def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        check: bool = True,
+    ) -> object:
+        del check
+        if "is-active" in argv:
+            return self.module._RemoteResult(
+                returncode=1,
+                stdout="inactive",
+                stderr="",
+            )
+        if "is-enabled" in argv and argv[-1].endswith(".service"):
+            return self.module._RemoteResult(
+                returncode=0,
+                stdout="static",
+                stderr="",
+            )
+        if "is-enabled" in argv:
+            return self.module._RemoteResult(
+                returncode=1,
+                stdout="disabled",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv!r}")
 
 
 class FakeTokyoSystem:

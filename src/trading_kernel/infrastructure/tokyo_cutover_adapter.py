@@ -810,10 +810,10 @@ class SshTokyoSystem:
 
     async def _unit_enabled(self, unit: str) -> bool:
         result = await self._runner.run(
-            ("sudo", "systemctl", "is-enabled", "--quiet", unit),
+            ("sudo", "systemctl", "is-enabled", unit),
             check=False,
         )
-        return result.returncode == 0
+        return result.stdout in {"enabled", "enabled-runtime"}
 
     async def _unit_active(self, unit: str) -> bool:
         result = await self._runner.run(
