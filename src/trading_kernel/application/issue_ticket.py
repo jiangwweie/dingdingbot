@@ -12,7 +12,7 @@ from src.trading_kernel.application.ports import (
 )
 from src.trading_kernel.domain.events import TicketIssued
 from src.trading_kernel.domain.reducer import reduce_event
-from src.trading_kernel.domain.ticket import TradeTicket
+from src.trading_kernel.domain.capacity import CapacityClaim
 
 
 class IssueTicketStatus(StrEnum):
@@ -30,13 +30,14 @@ class IssueTicketStatus(StrEnum):
     POLICY_MISSING_OR_STALE = "policy_missing_or_stale"
     POLICY_DISABLED = "policy_disabled"
     BUDGET_EXHAUSTED = "budget_exhausted"
+    PROTECTION_UNAVAILABLE = "protection_unavailable"
     CAPACITY_CLAIM_MISSING = "capacity_claim_missing"
 
 
 class IssueTicketRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    ticket: TradeTicket
+    capacity_claim: CapacityClaim
     now_ms: int
     claim_owner: str
 
@@ -67,7 +68,8 @@ async def issue_ticket(
     uow: KernelUnitOfWork,
     request: IssueTicketRequest,
 ) -> IssueTicketResult:
-    ticket = request.ticket
+    claim = request.capacity_claim
+    ticket = claim.to_ticket()
     lane = await uow.entry_admission.lock_global_lane()
     if lane.status != "idle":
         return IssueTicketResult(
@@ -75,7 +77,7 @@ async def issue_ticket(
             ticket_id=None,
         )
 
-    if request.now_ms >= ticket.expires_at_ms:
+    if request.now_ms >= claim.expires_at_ms:
         return IssueTicketResult(
             status=IssueTicketStatus.FACTS_EXPIRED,
             ticket_id=None,
@@ -113,16 +115,21 @@ async def issue_ticket(
         for_update=True,
     )
     current_notional = exposure.gross_notional if exposure is not None else 0
+    current_risk = exposure.gross_risk_at_stop if exposure is not None else 0
     current_tickets = exposure.active_ticket_count if exposure is not None else 0
     if (
         current_tickets >= policy.max_concurrent_tickets
         or current_notional + ticket.notional > policy.max_gross_notional
+        or current_risk + ticket.risk_at_stop > policy.max_gross_risk_at_stop
+        or ticket.risk_at_stop > policy.max_ticket_risk_at_stop
+        or ticket.leverage != policy.target_leverage
     ):
         return IssueTicketResult(
             status=IssueTicketStatus.BUDGET_EXHAUSTED,
             ticket_id=None,
         )
 
+    await uow.capacity_claims.add(claim)
     await uow.budgets.add(
         BudgetReservationRecord(
             budget_reservation_id=f"budget:{ticket.identity.ticket_id}",

@@ -19,6 +19,7 @@ from src.trading_kernel.application.issue_ticket import (
     IssueTicketStatus,
     issue_ticket,
 )
+from src.trading_kernel.domain.capacity import freeze_capacity_claim
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
@@ -69,7 +70,7 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         result = await issue_ticket(
             uow,
-            IssueTicketRequest(
+            _issue_request(
                 ticket=ticket,
                 now_ms=1_001,
                 claim_owner="worker-1",
@@ -109,12 +110,12 @@ async def test_occupied_global_lane_serializes_two_different_tickets(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         issued = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=first, now_ms=1_001, claim_owner="worker-1"),
+            _issue_request(ticket=first, now_ms=1_001, claim_owner="worker-1"),
         )
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         blocked = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=second, now_ms=1_002, claim_owner="worker-2"),
+            _issue_request(ticket=second, now_ms=1_002, claim_owner="worker-2"),
         )
 
     assert issued.status is IssueTicketStatus.ISSUED
@@ -131,7 +132,7 @@ async def test_expired_action_time_facts_cannot_issue_ticket(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         result = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=ticket, now_ms=2_000, claim_owner="worker-1"),
+            _issue_request(ticket=ticket, now_ms=2_000, claim_owner="worker-1"),
         )
 
     assert result.status is IssueTicketStatus.FACTS_EXPIRED
@@ -149,14 +150,14 @@ async def test_missing_or_stale_owner_policy_blocks_ticket(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         missing = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
+            _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
         )
 
     await _seed_policy(issue_engine, policy_version=8)
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         stale = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=ticket, now_ms=1_002, claim_owner="worker-1"),
+            _issue_request(ticket=ticket, now_ms=1_002, claim_owner="worker-1"),
         )
 
     assert missing.status is IssueTicketStatus.POLICY_MISSING_OR_STALE
@@ -173,7 +174,7 @@ async def test_policy_and_budget_limits_fail_closed(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         disabled = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
+            _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
         )
     assert disabled.status is IssueTicketStatus.POLICY_DISABLED
 
@@ -183,7 +184,7 @@ async def test_policy_and_budget_limits_fail_closed(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         exhausted = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=ticket, now_ms=1_002, claim_owner="worker-1"),
+            _issue_request(ticket=ticket, now_ms=1_002, claim_owner="worker-1"),
         )
     assert exhausted.status is IssueTicketStatus.BUDGET_EXHAUSTED
 
@@ -200,7 +201,7 @@ async def test_active_netting_domain_blocks_a_new_exposure_episode(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         result = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=second, now_ms=1_010, claim_owner="worker-2"),
+            _issue_request(ticket=second, now_ms=1_010, claim_owner="worker-2"),
         )
 
     assert result.status is IssueTicketStatus.ACTIVE_NETTING_DOMAIN
@@ -222,7 +223,7 @@ async def test_long_and_short_are_independent_default_netting_domains(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         result = await issue_ticket(
             uow,
-            IssueTicketRequest(
+            _issue_request(
                 ticket=short_ticket,
                 now_ms=1_010,
                 claim_owner="worker-short",
@@ -250,7 +251,7 @@ async def test_one_signal_cannot_create_a_second_ticket_identity(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         result = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=second, now_ms=1_010, claim_owner="worker-2"),
+            _issue_request(ticket=second, now_ms=1_010, claim_owner="worker-2"),
         )
 
     assert result.status is IssueTicketStatus.DUPLICATE_SIGNAL
@@ -272,7 +273,7 @@ async def test_two_worker_race_has_exactly_one_global_entry_winner(
         async with PostgresKernelUnitOfWork(issue_engine) as uow:
             return await issue_ticket(
                 uow,
-                IssueTicketRequest(ticket=ticket, now_ms=1_001, claim_owner=worker),
+                _issue_request(ticket=ticket, now_ms=1_001, claim_owner=worker),
             )
 
     results = await asyncio.gather(
@@ -309,6 +310,7 @@ async def _seed_policy(
                 real_submit_enabled=real_submit_enabled,
                 max_concurrent_tickets=2,
                 max_gross_notional=max_gross_notional,
+                target_leverage="5",
                 scope={},
                 updated_at_ms=1_000,
             )
@@ -319,7 +321,7 @@ async def _issue_and_release_lane(engine: AsyncEngine, ticket) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         result = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
+            _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
         )
     assert result.status is IssueTicketStatus.ISSUED
     async with engine.begin() as connection:
@@ -361,6 +363,34 @@ def _ticket_for_signal(
         netting_domain=domain,
     )
     return _ticket(identity=identity, runtime_scope_id=f"scope-{position_side}")
+
+
+def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketRequest:
+    return IssueTicketRequest(
+        capacity_claim=freeze_capacity_claim(
+            ticket_identity=ticket.identity,
+            owner_policy_id=ticket.owner_policy_id,
+            owner_policy_version=ticket.owner_policy_version,
+            runtime_scope_id=ticket.runtime_scope_id,
+            runtime_scope_version=ticket.runtime_scope_version,
+            fact_digest=ticket.fact_digest,
+            action_facts_digest="sha256:" + "2" * 64,
+            instrument_rules_projection_version=1,
+            created_at_ms=ticket.created_at_ms,
+            expires_at_ms=ticket.expires_at_ms,
+            entry_reference_price=ticket.entry_reference_price,
+            quantity=ticket.quantity,
+            notional=ticket.notional,
+            leverage=ticket.leverage,
+            risk_at_stop=ticket.risk_at_stop,
+            entry_order_type=ticket.entry_order_type,
+            entry_limit_price=ticket.entry_limit_price,
+            initial_stop_price=ticket.initial_stop_price,
+            take_profit_prices=ticket.take_profit_prices,
+        ),
+        now_ms=now_ms,
+        claim_owner=claim_owner,
+    )
 
 
 def _database_url(database_name: str) -> str:

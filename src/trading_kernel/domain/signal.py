@@ -74,6 +74,7 @@ class StrategySignal(BaseModel):
     position_side: Literal["long", "short"]
     fact_digest: str
     occurred_at_ms: int
+    observed_at_ms: int
     expires_at_ms: int
     facts: tuple[SignalFactSnapshot, ...]
 
@@ -134,8 +135,14 @@ class StrategySignal(BaseModel):
 
     @model_validator(mode="after")
     def _validate_time_and_facts(self) -> "StrategySignal":
-        if self.occurred_at_ms <= 0 or self.expires_at_ms <= self.occurred_at_ms:
-            raise ValueError("signal expiry must follow a positive occurrence time")
+        if (
+            self.occurred_at_ms <= 0
+            or self.observed_at_ms < self.occurred_at_ms
+            or self.expires_at_ms <= self.observed_at_ms
+        ):
+            raise ValueError(
+                "signal observation must follow occurrence and precede expiry"
+            )
         if any(
             fact.observed_at_ms > self.occurred_at_ms
             or fact.valid_until_ms < self.expires_at_ms

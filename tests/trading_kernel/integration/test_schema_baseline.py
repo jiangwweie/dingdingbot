@@ -8,6 +8,7 @@ from src.trading_kernel.infrastructure.pg_models import metadata
 EXPECTED_TABLES = {
     "brc_account_exposure_current",
     "brc_budget_reservations",
+    "brc_capacity_claims",
     "brc_entry_lane_current",
     "brc_event_required_facts",
     "brc_event_specs",
@@ -46,15 +47,20 @@ def test_kernel_metadata_has_exact_clean_table_allowlist() -> None:
 
 def test_kernel_schema_has_core_uniqueness_constraints() -> None:
     tickets = metadata.tables["brc_trade_tickets"]
+    claims = metadata.tables["brc_capacity_claims"]
     commands = metadata.tables["brc_exchange_commands"]
     events = metadata.tables["brc_trade_events"]
 
     ticket_uniques = _unique_column_sets(tickets)
+    claim_uniques = _unique_column_sets(claims)
     command_uniques = _unique_column_sets(commands)
     event_uniques = _unique_column_sets(events)
 
     assert ("signal_event_id",) in ticket_uniques
     assert ("active_netting_domain_key",) in ticket_uniques
+    assert ("signal_event_id",) in claim_uniques
+    assert ("ticket_id",) in claim_uniques
+    assert ("decision_digest",) in claim_uniques
     assert ("idempotency_key",) in command_uniques
     assert ("venue_client_order_id",) in command_uniques
     assert ("ticket_id", "command_kind", "generation") in command_uniques
@@ -64,6 +70,9 @@ def test_kernel_schema_has_core_uniqueness_constraints() -> None:
 def test_financial_columns_use_fixed_precision_numeric() -> None:
     required = {
         ("brc_trade_tickets", "quantity"),
+        ("brc_trade_tickets", "entry_reference_price"),
+        ("brc_capacity_claims", "quantity"),
+        ("brc_capacity_claims", "notional"),
         ("brc_trade_tickets", "notional"),
         ("brc_trade_aggregates", "position_qty"),
         ("brc_exchange_commands", "quantity"),
@@ -100,8 +109,42 @@ def test_signal_schema_contains_observation_identity_without_capital_or_order_te
 
     assert "position_side IN ('long', 'short')" in check_sql
     assert "expires_at_ms > occurred_at_ms" in check_sql
+    assert (
+        "observed_at_ms >= occurred_at_ms AND expires_at_ms > observed_at_ms"
+        in check_sql
+    )
     assert "fact_digest ~ '^sha256:[0-9a-f]{64}$'" in check_sql
     assert forbidden_columns.isdisjoint(signals.c.keys())
+
+
+def test_candidate_selector_has_bounded_ordering_indexes() -> None:
+    readiness = metadata.tables["brc_readiness_current"]
+    signals = metadata.tables["brc_signal_events"]
+
+    assert ("readiness_state", "signal_event_id") in _index_column_sets(readiness)
+    assert (
+        "expires_at_ms",
+        "occurred_at_ms",
+        "observed_at_ms",
+        "signal_event_id",
+    ) in _index_column_sets(signals)
+
+
+def test_owner_capacity_policy_has_positive_database_constraints() -> None:
+    policies = metadata.tables["brc_owner_policy_current"]
+    check_sql = {
+        str(constraint.sqltext)
+        for constraint in policies.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+
+    assert "priority_rank > 0" in check_sql
+    assert "max_concurrent_tickets > 0" in check_sql
+    assert "max_gross_notional > 0" in check_sql
+    assert "max_gross_risk_at_stop > 0" in check_sql
+    assert "max_ticket_risk_at_stop > 0" in check_sql
+    assert "max_ticket_risk_at_stop <= max_gross_risk_at_stop" in check_sql
+    assert "target_leverage > 0" in check_sql
 
 
 def test_signal_fact_snapshots_are_append_only_per_signal_and_definition() -> None:
@@ -151,4 +194,11 @@ def _unique_column_sets(table: sa.Table) -> set[tuple[str, ...]]:
         tuple(column.name for column in constraint.columns)
         for constraint in table.constraints
         if isinstance(constraint, sa.UniqueConstraint)
+    }
+
+
+def _index_column_sets(table: sa.Table) -> set[tuple[str, ...]]:
+    return {
+        tuple(column.name for column in index.columns)
+        for index in table.indexes
     }

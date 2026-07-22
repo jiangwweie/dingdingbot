@@ -41,6 +41,7 @@ class TradeTicket(BaseModel):
     fact_digest: str
     created_at_ms: int
     expires_at_ms: int
+    entry_reference_price: Decimal
     quantity: Decimal
     notional: Decimal
     leverage: Decimal
@@ -74,6 +75,7 @@ class TradeTicket(BaseModel):
         "quantity",
         "notional",
         "leverage",
+        "entry_reference_price",
         "initial_stop_price",
     )
     @classmethod

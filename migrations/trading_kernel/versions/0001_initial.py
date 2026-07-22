@@ -171,10 +171,62 @@ def upgrade() -> None:
         sa.Column("policy_version", sa.Integer, nullable=False),
         sa.Column("enabled", sa.Boolean, nullable=False),
         sa.Column("real_submit_enabled", sa.Boolean, nullable=False),
+        sa.Column(
+            "priority_rank",
+            sa.Integer,
+            nullable=False,
+            server_default=sa.text("100"),
+        ),
         sa.Column("max_concurrent_tickets", sa.Integer, nullable=False),
         sa.Column("max_gross_notional", MONEY, nullable=False),
+        sa.Column(
+            "max_gross_risk_at_stop",
+            MONEY,
+            nullable=False,
+            server_default=sa.text("1000000000"),
+        ),
+        sa.Column(
+            "max_ticket_risk_at_stop",
+            MONEY,
+            nullable=False,
+            server_default=sa.text("1000000000"),
+        ),
+        sa.Column(
+            "target_leverage",
+            MONEY,
+            nullable=False,
+            server_default=sa.text("1"),
+        ),
         _json("scope"),
         _time("updated_at_ms"),
+        sa.CheckConstraint(
+            "priority_rank > 0",
+            name="ck_brc_owner_policy_current_priority_positive",
+        ),
+        sa.CheckConstraint(
+            "max_concurrent_tickets > 0",
+            name="ck_brc_owner_policy_current_max_concurrent_tickets_positive",
+        ),
+        sa.CheckConstraint(
+            "max_gross_notional > 0",
+            name="ck_brc_owner_policy_current_max_gross_notional_positive",
+        ),
+        sa.CheckConstraint(
+            "max_gross_risk_at_stop > 0",
+            name="ck_brc_owner_policy_current_max_gross_risk_positive",
+        ),
+        sa.CheckConstraint(
+            "max_ticket_risk_at_stop > 0",
+            name="ck_brc_owner_policy_current_max_ticket_risk_positive",
+        ),
+        sa.CheckConstraint(
+            "max_ticket_risk_at_stop <= max_gross_risk_at_stop",
+            name="ck_brc_owner_policy_current_ticket_risk_within_gross_risk",
+        ),
+        sa.CheckConstraint(
+            "target_leverage > 0",
+            name="ck_brc_owner_policy_current_target_leverage_positive",
+        ),
     )
     op.create_table(
         "brc_runtime_profiles",
@@ -236,6 +288,7 @@ def upgrade() -> None:
         sa.Column("position_side", SHORT_TEXT, nullable=False),
         sa.Column("fact_digest", LONG_TEXT, nullable=False),
         _time("occurred_at_ms"),
+        _time("observed_at_ms"),
         _time("expires_at_ms"),
         sa.CheckConstraint(
             "position_side IN ('long', 'short')",
@@ -244,6 +297,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "expires_at_ms > occurred_at_ms",
             name="ck_brc_signal_events_time_window_valid",
+        ),
+        sa.CheckConstraint(
+            "observed_at_ms >= occurred_at_ms AND expires_at_ms > observed_at_ms",
+            name="ck_brc_signal_events_observation_window_valid",
         ),
         sa.CheckConstraint(
             "fact_digest ~ '^sha256:[0-9a-f]{64}$'",
@@ -288,6 +345,21 @@ def upgrade() -> None:
         _time("updated_at_ms"),
         sa.Column("projection_version", sa.BigInteger, nullable=False),
     )
+    op.create_index(
+        "ix_brc_readiness_current_readiness_state_signal_event_id",
+        "brc_readiness_current",
+        ["readiness_state", "signal_event_id"],
+    )
+    op.create_index(
+        "ix_brc_signal_events_candidate_order",
+        "brc_signal_events",
+        [
+            "expires_at_ms",
+            "occurred_at_ms",
+            "observed_at_ms",
+            "signal_event_id",
+        ],
+    )
     op.create_table(
         "brc_entry_lane_current",
         sa.Column("lane_id", SHORT_TEXT, primary_key=True),
@@ -309,6 +381,77 @@ def upgrade() -> None:
         _time("updated_at_ms"),
     )
     op.create_table(
+        "brc_capacity_claims",
+        _id("capacity_claim_id", primary_key=True),
+        _id("ticket_id"),
+        _id("signal_event_id"),
+        _id("exposure_episode_id"),
+        _id("strategy_group_id"),
+        _id("strategy_version_id"),
+        _id("event_spec_id"),
+        _id("runtime_profile_id"),
+        _id("owner_policy_id"),
+        sa.Column("owner_policy_version", sa.Integer, nullable=False),
+        _id("runtime_scope_id"),
+        sa.Column("runtime_scope_version", sa.Integer, nullable=False),
+        _id("account_id"),
+        sa.Column("venue_id", SHORT_TEXT, nullable=False),
+        _id("exchange_instrument_id"),
+        sa.Column("position_side", SHORT_TEXT, nullable=False),
+        sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
+        sa.Column("fact_digest", LONG_TEXT, nullable=False),
+        sa.Column("action_facts_digest", LONG_TEXT, nullable=False),
+        sa.Column(
+            "instrument_rules_projection_version",
+            sa.BigInteger,
+            nullable=False,
+        ),
+        sa.Column("entry_reference_price", MONEY, nullable=False),
+        sa.Column("quantity", MONEY, nullable=False),
+        sa.Column("notional", MONEY, nullable=False),
+        sa.Column("leverage", MONEY, nullable=False),
+        sa.Column("risk_at_stop", MONEY, nullable=False),
+        sa.Column("entry_order_type", SHORT_TEXT, nullable=False),
+        sa.Column("entry_limit_price", MONEY, nullable=True),
+        sa.Column("initial_stop_price", MONEY, nullable=False),
+        _json("take_profit_prices"),
+        sa.Column("decision_digest", LONG_TEXT, nullable=False),
+        _time("created_at_ms"),
+        _time("expires_at_ms"),
+        sa.UniqueConstraint(
+            "ticket_id",
+            name="uq_brc_capacity_claims_ticket_id",
+        ),
+        sa.UniqueConstraint(
+            "signal_event_id",
+            name="uq_brc_capacity_claims_signal_event_id",
+        ),
+        sa.UniqueConstraint(
+            "decision_digest",
+            name="uq_brc_capacity_claims_decision_digest",
+        ),
+        sa.CheckConstraint(
+            "quantity > 0",
+            name="ck_brc_capacity_claims_quantity_positive",
+        ),
+        sa.CheckConstraint(
+            "notional > 0",
+            name="ck_brc_capacity_claims_notional_positive",
+        ),
+        sa.CheckConstraint(
+            "leverage > 0",
+            name="ck_brc_capacity_claims_leverage_positive",
+        ),
+        sa.CheckConstraint(
+            "risk_at_stop >= 0",
+            name="ck_brc_capacity_claims_risk_nonnegative",
+        ),
+        sa.CheckConstraint(
+            "expires_at_ms > created_at_ms",
+            name="ck_brc_capacity_claims_time_window_valid",
+        ),
+    )
+    op.create_table(
         "brc_trade_tickets",
         _id("ticket_id", primary_key=True),
         _id("exposure_episode_id"),
@@ -327,6 +470,7 @@ def upgrade() -> None:
         sa.Column("position_side", SHORT_TEXT, nullable=False),
         sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
         sa.Column("active_netting_domain_key", LONG_TEXT, nullable=True),
+        sa.Column("entry_reference_price", MONEY, nullable=False),
         sa.Column("quantity", MONEY, nullable=False),
         sa.Column("notional", MONEY, nullable=False),
         sa.Column("leverage", MONEY, nullable=False),
@@ -571,6 +715,7 @@ def downgrade() -> None:
         "brc_trade_events",
         "brc_trade_aggregates",
         "brc_trade_tickets",
+        "brc_capacity_claims",
         "brc_runtime_capabilities_current",
         "brc_entry_lane_current",
         "brc_readiness_current",

@@ -21,6 +21,7 @@ from src.trading_kernel.application.ports import (
     RuntimeIncidentRecord,
     TradeReviewRecord,
 )
+from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     CommandPayload,
@@ -74,6 +75,7 @@ from src.trading_kernel.domain.ticket import EntryOrderType, TicketStatus, Trade
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     budget_reservations,
+    capacity_claims,
     entry_lane_current,
     exchange_commands,
     monitor_current,
@@ -521,6 +523,39 @@ class PostgresBudgetRepository:
             raise AggregateVersionConflict("active budget reservation is missing")
 
 
+class PostgresCapacityClaimRepository:
+    def __init__(self, connection: AsyncConnection) -> None:
+        self._connection = connection
+
+    async def add(self, claim: CapacityClaim) -> None:
+        await self._connection.execute(
+            sa.insert(capacity_claims).values(_capacity_claim_values(claim))
+        )
+
+    async def get(self, capacity_claim_id: str) -> CapacityClaim | None:
+        return await self._get(
+            capacity_claims.c.capacity_claim_id == capacity_claim_id
+        )
+
+    async def get_for_signal(self, signal_event_id: str) -> CapacityClaim | None:
+        return await self._get(
+            capacity_claims.c.signal_event_id == signal_event_id
+        )
+
+    async def get_for_ticket(self, ticket_id: str) -> CapacityClaim | None:
+        return await self._get(capacity_claims.c.ticket_id == ticket_id)
+
+    async def _get(
+        self,
+        predicate: sa.ColumnElement[bool],
+    ) -> CapacityClaim | None:
+        result = await self._connection.execute(
+            sa.select(capacity_claims).where(predicate)
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else _capacity_claim_from_row(row)
+
+
 class PostgresIncidentRepository:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
@@ -756,8 +791,12 @@ class PostgresEntryAdmissionRepository:
             policy_version=int(row["policy_version"]),
             enabled=bool(row["enabled"]),
             real_submit_enabled=bool(row["real_submit_enabled"]),
+            priority_rank=int(row["priority_rank"]),
             max_concurrent_tickets=int(row["max_concurrent_tickets"]),
             max_gross_notional=Decimal(row["max_gross_notional"]),
+            max_gross_risk_at_stop=Decimal(row["max_gross_risk_at_stop"]),
+            max_ticket_risk_at_stop=Decimal(row["max_ticket_risk_at_stop"]),
+            target_leverage=Decimal(row["target_leverage"]),
         )
 
     async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool:
@@ -940,6 +979,7 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
         "position_side": identity.netting_domain.position_side,
         "netting_domain_key": identity.netting_domain.key(),
         "active_netting_domain_key": identity.netting_domain.key(),
+        "entry_reference_price": ticket.entry_reference_price,
         "quantity": ticket.quantity,
         "notional": ticket.notional,
         "leverage": ticket.leverage,
@@ -986,6 +1026,7 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         fact_digest=str(row["fact_digest"]),
         created_at_ms=int(row["created_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),
+        entry_reference_price=Decimal(row["entry_reference_price"]),
         quantity=Decimal(row["quantity"]),
         notional=Decimal(row["notional"]),
         leverage=Decimal(row["leverage"]),
@@ -999,6 +1040,100 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         initial_stop_price=Decimal(row["initial_stop_price"]),
         take_profit_prices=tuple(Decimal(value) for value in row["take_profit_prices"]),
         status=TicketStatus(str(row["status"])),
+    )
+
+
+def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
+    identity = claim.ticket_identity
+    return {
+        "capacity_claim_id": claim.capacity_claim_id,
+        "ticket_id": identity.ticket_id,
+        "signal_event_id": identity.signal_event_id,
+        "exposure_episode_id": identity.exposure_episode_id,
+        "strategy_group_id": identity.runtime.strategy_group_id,
+        "strategy_version_id": identity.runtime.strategy_version_id,
+        "event_spec_id": identity.runtime.event_spec_id,
+        "runtime_profile_id": identity.runtime.runtime_profile_id,
+        "owner_policy_id": claim.owner_policy_id,
+        "owner_policy_version": claim.owner_policy_version,
+        "runtime_scope_id": claim.runtime_scope_id,
+        "runtime_scope_version": claim.runtime_scope_version,
+        "account_id": identity.netting_domain.account_id,
+        "venue_id": identity.netting_domain.venue_id,
+        "exchange_instrument_id": (
+            identity.netting_domain.exchange_instrument_id
+        ),
+        "position_side": identity.netting_domain.position_side,
+        "netting_domain_key": identity.netting_domain.key(),
+        "fact_digest": claim.fact_digest,
+        "action_facts_digest": claim.action_facts_digest,
+        "instrument_rules_projection_version": (
+            claim.instrument_rules_projection_version
+        ),
+        "entry_reference_price": claim.entry_reference_price,
+        "quantity": claim.quantity,
+        "notional": claim.notional,
+        "leverage": claim.leverage,
+        "risk_at_stop": claim.risk_at_stop,
+        "entry_order_type": claim.entry_order_type.value,
+        "entry_limit_price": claim.entry_limit_price,
+        "initial_stop_price": claim.initial_stop_price,
+        "take_profit_prices": [str(value) for value in claim.take_profit_prices],
+        "decision_digest": claim.decision_digest,
+        "created_at_ms": claim.created_at_ms,
+        "expires_at_ms": claim.expires_at_ms,
+    }
+
+
+def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
+    runtime = RuntimeIdentity(
+        runtime_profile_id=str(row["runtime_profile_id"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        strategy_version_id=str(row["strategy_version_id"]),
+        event_spec_id=str(row["event_spec_id"]),
+    )
+    domain = NettingDomain(
+        venue_id=str(row["venue_id"]),
+        account_id=str(row["account_id"]),
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
+        position_side=_position_side(row["position_side"]),
+    )
+    return CapacityClaim(
+        capacity_claim_id=str(row["capacity_claim_id"]),
+        ticket_identity=TicketIdentity(
+            ticket_id=str(row["ticket_id"]),
+            exposure_episode_id=str(row["exposure_episode_id"]),
+            signal_event_id=str(row["signal_event_id"]),
+            runtime=runtime,
+            netting_domain=domain,
+        ),
+        owner_policy_id=str(row["owner_policy_id"]),
+        owner_policy_version=int(row["owner_policy_version"]),
+        runtime_scope_id=str(row["runtime_scope_id"]),
+        runtime_scope_version=int(row["runtime_scope_version"]),
+        fact_digest=str(row["fact_digest"]),
+        action_facts_digest=str(row["action_facts_digest"]),
+        instrument_rules_projection_version=int(
+            row["instrument_rules_projection_version"]
+        ),
+        created_at_ms=int(row["created_at_ms"]),
+        expires_at_ms=int(row["expires_at_ms"]),
+        entry_reference_price=Decimal(row["entry_reference_price"]),
+        quantity=Decimal(row["quantity"]),
+        notional=Decimal(row["notional"]),
+        leverage=Decimal(row["leverage"]),
+        risk_at_stop=Decimal(row["risk_at_stop"]),
+        entry_order_type=EntryOrderType(str(row["entry_order_type"])),
+        entry_limit_price=(
+            None
+            if row["entry_limit_price"] is None
+            else Decimal(row["entry_limit_price"])
+        ),
+        initial_stop_price=Decimal(row["initial_stop_price"]),
+        take_profit_prices=tuple(
+            Decimal(value) for value in row["take_profit_prices"]
+        ),
+        decision_digest=str(row["decision_digest"]),
     )
 
 

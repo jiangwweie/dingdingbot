@@ -227,7 +227,7 @@ Expected: failure because current persistence columns and issuer still read sign
 
 - [x] **Step 7: Change persistence and ingestion semantics**
 
-Remove financial columns from `brc_signal_events`; add `brc_signal_fact_snapshots`; rename readiness state from `ticket_ready` to `candidate_ready`; keep duplicate signal identity idempotent. Ticket issuance must temporarily return `CAPACITY_CLAIM_MISSING` until Task 5 provides the claim.
+Remove financial columns from `brc_signal_events`; add `brc_signal_fact_snapshots`; rename readiness state from `ticket_ready` to `candidate_ready`; keep duplicate signal identity idempotent. Task 5 replaced the temporary refusal with the only Ticket-capable immutable `CapacityClaim` boundary.
 
 - [x] **Step 8: Run focused tests**
 
@@ -438,7 +438,7 @@ git commit -m "feat(kernel): produce live strategy signals from closed market da
 - Produces: `build_capacity_claim(policy, action_facts, signal_facts) -> CapacityClaimDecision`.
 - Produces: immutable `brc_capacity_claims` rows and atomic Claim-to-Ticket issuance.
 
-- [ ] **Step 1: Write failing deterministic arbitration tests**
+- [x] **Step 1: Write failing deterministic arbitration tests**
 
 ```python
 def test_arbitration_orders_priority_then_event_time_then_identity() -> None:
@@ -446,17 +446,17 @@ def test_arbitration_orders_priority_then_event_time_then_identity() -> None:
     assert [item.signal_event_id for item in ranked] == ["signal:b", "signal:a", "signal:c"]
 ```
 
-- [ ] **Step 2: Run arbitration test and verify RED**
+- [x] **Step 2: Run arbitration test and verify RED**
 
 Run: `pytest -q tests/trading_kernel/unit/test_arbitration.py`
 
 Expected: failure because the new arbitration module does not exist.
 
-- [ ] **Step 3: Implement the accepted ordering and bounded batch size**
+- [x] **Step 3: Implement the accepted ordering and bounded batch size**
 
 Use Owner Policy Priority, Candidate Scope Priority, Event Time, Observed Time, and Signal Event ID. Accept at most 64 fresh candidates per selector call.
 
-- [ ] **Step 4: Write failing CapacityClaim tests**
+- [x] **Step 4: Write failing CapacityClaim tests**
 
 ```python
 def test_capacity_claim_computes_quantity_from_stop_risk_and_instrument_steps() -> None:
@@ -466,17 +466,17 @@ def test_capacity_claim_computes_quantity_from_stop_risk_and_instrument_steps() 
     assert decision.claim.risk_at_stop <= policy().max_ticket_open_risk
 ```
 
-- [ ] **Step 5: Run Capacity tests and verify RED**
+- [x] **Step 5: Run Capacity tests and verify RED**
 
 Run: `pytest -q tests/trading_kernel/unit/test_capacity.py`
 
 Expected: failure because CapacityClaim and action-time models do not exist.
 
-- [ ] **Step 6: Implement action-time pricing and capacity mathematics**
+- [x] **Step 6: Implement action-time pricing and capacity mathematics**
 
 Use fresh bid/ask, account balance, margin, open positions, current reservations, quantity step, price tick, minimum quantity, minimum notional, strategy stop reference, Owner capacity limits, and Netting Domain occupancy. All arithmetic uses `Decimal`. The claim contains a canonical SHA-256 decision digest.
 
-- [ ] **Step 7: Write failing atomic Claim-to-Ticket integration test**
+- [x] **Step 7: Write failing atomic Claim-to-Ticket integration test**
 
 ```python
 async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(pg_uow) -> None:
@@ -486,23 +486,23 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(pg
     assert await pg_uow.commands.get_entry_for_ticket(result.ticket_id) is not None
 ```
 
-- [ ] **Step 8: Run integration test and verify RED**
+- [x] **Step 8: Run integration test and verify RED**
 
 Run: `pytest -q tests/trading_kernel/integration/test_capacity_claim_to_ticket.py`
 
 Expected: failure because the issuer does not yet build or persist Capacity Claims.
 
-- [ ] **Step 9: Implement one atomic issuance transaction**
+- [x] **Step 9: Implement one atomic issuance transaction**
 
 Revalidate signal expiry, scope, account mode, instrument rules, capacity, same-domain occupancy, and schema identity inside the global ENTRY lane transaction. Persist Capacity Claim, Ticket, budget reservation, active Netting Domain key, aggregate, creation event, and durable ENTRY command together.
 
-- [ ] **Step 10: Run focused tests**
+- [x] **Step 10: Run focused tests**
 
 Run: `pytest -q tests/trading_kernel/unit/test_arbitration.py tests/trading_kernel/unit/test_capacity.py tests/trading_kernel/integration/test_capacity_claim_to_ticket.py tests/trading_kernel/integration/test_issue_ticket.py`
 
 Expected: all tests pass.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add src/trading_kernel/domain/arbitration.py src/trading_kernel/domain/capacity.py src/trading_kernel/application/select_entry_candidate.py src/trading_kernel/application/build_capacity_claim.py src/trading_kernel/application/issue_ready_signal.py src/trading_kernel/application/ports.py src/trading_kernel/infrastructure/pg_models.py src/trading_kernel/infrastructure/pg_repositories.py migrations/trading_kernel/versions/0001_initial.py tests/trading_kernel/unit/test_arbitration.py tests/trading_kernel/unit/test_capacity.py tests/trading_kernel/integration/test_capacity_claim_to_ticket.py

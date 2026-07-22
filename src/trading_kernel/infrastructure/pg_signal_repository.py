@@ -21,6 +21,7 @@ from src.trading_kernel.application.ports import (
     StrategyGroupSnapshot,
     StrategyVersionSnapshot,
 )
+from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -37,9 +38,11 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_scopes_current,
     signal_events,
     signal_fact_snapshots,
+    strategy_candidate_scopes,
     strategy_groups,
     strategy_versions,
     trade_tickets,
+    owner_policy_current,
 )
 
 
@@ -157,6 +160,82 @@ class PostgresSignalRepository:
         return await self._get_next_candidate_ready(
             expiry_predicate=signal_events.c.expires_at_ms <= now_ms
         )
+
+    async def list_ready_candidates(
+        self,
+        *,
+        now_ms: int,
+        limit: int,
+    ) -> tuple[EntryCandidate, ...]:
+        if limit <= 0 or limit > 64:
+            raise ValueError("ready candidate limit must be between 1 and 64")
+        already_ticketed = sa.exists(
+            sa.select(trade_tickets.c.ticket_id).where(
+                trade_tickets.c.signal_event_id == signal_events.c.signal_event_id
+            )
+        )
+        result = await self._connection.execute(
+            sa.select(
+                signal_events,
+                owner_policy_current.c.priority_rank.label("owner_priority"),
+                strategy_candidate_scopes.c.priority_rank.label("scope_priority"),
+            )
+            .join(
+                readiness_current,
+                readiness_current.c.signal_event_id
+                == signal_events.c.signal_event_id,
+            )
+            .join(
+                runtime_scopes_current,
+                runtime_scopes_current.c.runtime_scope_id
+                == signal_events.c.runtime_scope_id,
+            )
+            .join(
+                owner_policy_current,
+                owner_policy_current.c.owner_policy_id
+                == runtime_scopes_current.c.owner_policy_id,
+            )
+            .join(
+                strategy_candidate_scopes,
+                sa.and_(
+                    strategy_candidate_scopes.c.event_spec_id
+                    == signal_events.c.event_spec_id,
+                    strategy_candidate_scopes.c.exchange_instrument_id
+                    == signal_events.c.exchange_instrument_id,
+                    strategy_candidate_scopes.c.position_side
+                    == signal_events.c.position_side,
+                ),
+            )
+            .where(
+                readiness_current.c.readiness_state == "candidate_ready",
+                signal_events.c.expires_at_ms > now_ms,
+                runtime_scopes_current.c.enabled.is_(True),
+                owner_policy_current.c.enabled.is_(True),
+                owner_policy_current.c.real_submit_enabled.is_(True),
+                strategy_candidate_scopes.c.status == "active",
+                ~already_ticketed,
+            )
+            .order_by(
+                owner_policy_current.c.priority_rank,
+                strategy_candidate_scopes.c.priority_rank,
+                signal_events.c.occurred_at_ms,
+                signal_events.c.observed_at_ms,
+                signal_events.c.signal_event_id,
+            )
+            .limit(limit)
+        )
+        candidates: list[EntryCandidate] = []
+        for row in result.mappings():
+            signal_event_id = str(row["signal_event_id"])
+            facts = await self.get_fact_snapshots(signal_event_id)
+            candidates.append(
+                EntryCandidate(
+                    signal=_signal_from_row(row, facts),
+                    owner_policy_priority=int(row["owner_priority"]),
+                    candidate_scope_priority=int(row["scope_priority"]),
+                )
+            )
+        return tuple(candidates)
 
     async def _get_next_candidate_ready(
         self,
@@ -439,6 +518,7 @@ def _signal_values(signal: StrategySignal) -> dict[str, object]:
         "position_side": signal.position_side,
         "fact_digest": signal.fact_digest,
         "occurred_at_ms": signal.occurred_at_ms,
+        "observed_at_ms": signal.observed_at_ms,
         "expires_at_ms": signal.expires_at_ms,
     }
 
@@ -474,6 +554,7 @@ def _signal_from_row(
         position_side=cast(Literal["long", "short"], str(row["position_side"])),
         fact_digest=str(row["fact_digest"]),
         occurred_at_ms=int(row["occurred_at_ms"]),
+        observed_at_ms=int(row["observed_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),
         facts=facts,
     )

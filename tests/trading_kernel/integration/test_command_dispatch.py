@@ -19,11 +19,7 @@ from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandStatus,
     dispatch_one_command,
 )
-from src.trading_kernel.application.issue_ticket import (
-    IssueTicketRequest,
-    IssueTicketStatus,
-    issue_ticket,
-)
+from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue_ticket
 from src.trading_kernel.application.ports import VenueCommandRequest
 from src.trading_kernel.application.reconcile_ticket import (
     ExitTicketRequest,
@@ -40,6 +36,7 @@ from src.trading_kernel.infrastructure.pg_models import owner_policy_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.integration.test_issue_ticket import _issue_request
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -733,6 +730,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 real_submit_enabled=True,
                 max_concurrent_tickets=2,
                 max_gross_notional="1000",
+                target_leverage="5",
                 scope={},
                 updated_at_ms=1_000,
             )
@@ -743,7 +741,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         result = await issue_ticket(
             uow,
-            IssueTicketRequest(ticket=ticket, now_ms=1_001, claim_owner="issuer-1"),
+            _issue_request(ticket=ticket, now_ms=1_001, claim_owner="issuer-1"),
         )
     assert result.status is IssueTicketStatus.ISSUED
 

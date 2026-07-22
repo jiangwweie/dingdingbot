@@ -77,6 +77,7 @@ def produce_strategy_signal(
         position_side=contract.position_side,
         fact_digest=fact_digest,
         occurred_at_ms=occurred_at_ms,
+        observed_at_ms=max(item.observed_at_ms for item in facts),
         expires_at_ms=expires_at_ms,
         facts=facts,
     )

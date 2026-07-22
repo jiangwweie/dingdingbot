@@ -157,10 +157,56 @@ owner_policy_current = sa.Table(
     sa.Column("policy_version", sa.Integer, nullable=False),
     sa.Column("enabled", sa.Boolean, nullable=False),
     sa.Column("real_submit_enabled", sa.Boolean, nullable=False),
+    sa.Column(
+        "priority_rank",
+        sa.Integer,
+        nullable=False,
+        server_default=sa.text("100"),
+    ),
     sa.Column("max_concurrent_tickets", sa.Integer, nullable=False),
     sa.Column("max_gross_notional", MONEY, nullable=False),
+    sa.Column(
+        "max_gross_risk_at_stop",
+        MONEY,
+        nullable=False,
+        server_default=sa.text("1000000000"),
+    ),
+    sa.Column(
+        "max_ticket_risk_at_stop",
+        MONEY,
+        nullable=False,
+        server_default=sa.text("1000000000"),
+    ),
+    sa.Column(
+        "target_leverage",
+        MONEY,
+        nullable=False,
+        server_default=sa.text("1"),
+    ),
     _json("scope"),
     _time("updated_at_ms"),
+    sa.CheckConstraint("priority_rank > 0", name="priority_positive"),
+    sa.CheckConstraint(
+        "max_concurrent_tickets > 0",
+        name="max_concurrent_tickets_positive",
+    ),
+    sa.CheckConstraint(
+        "max_gross_notional > 0",
+        name="max_gross_notional_positive",
+    ),
+    sa.CheckConstraint(
+        "max_gross_risk_at_stop > 0",
+        name="max_gross_risk_positive",
+    ),
+    sa.CheckConstraint(
+        "max_ticket_risk_at_stop > 0",
+        name="max_ticket_risk_positive",
+    ),
+    sa.CheckConstraint(
+        "max_ticket_risk_at_stop <= max_gross_risk_at_stop",
+        name="ticket_risk_within_gross_risk",
+    ),
+    sa.CheckConstraint("target_leverage > 0", name="target_leverage_positive"),
 )
 
 runtime_profiles = sa.Table(
@@ -225,6 +271,7 @@ signal_events = sa.Table(
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("fact_digest", LONG_TEXT, nullable=False),
     _time("occurred_at_ms"),
+    _time("observed_at_ms"),
     _time("expires_at_ms"),
     sa.CheckConstraint(
         "position_side IN ('long', 'short')",
@@ -233,6 +280,10 @@ signal_events = sa.Table(
     sa.CheckConstraint(
         "expires_at_ms > occurred_at_ms",
         name="time_window_valid",
+    ),
+    sa.CheckConstraint(
+        "observed_at_ms >= occurred_at_ms AND expires_at_ms > observed_at_ms",
+        name="observation_window_valid",
     ),
     sa.CheckConstraint(
         "fact_digest ~ '^sha256:[0-9a-f]{64}$'",
@@ -278,6 +329,19 @@ readiness_current = sa.Table(
     sa.Column("projection_version", sa.BigInteger, nullable=False),
 )
 
+sa.Index(
+    "ix_brc_readiness_current_readiness_state_signal_event_id",
+    readiness_current.c.readiness_state,
+    readiness_current.c.signal_event_id,
+)
+sa.Index(
+    "ix_brc_signal_events_candidate_order",
+    signal_events.c.expires_at_ms,
+    signal_events.c.occurred_at_ms,
+    signal_events.c.observed_at_ms,
+    signal_events.c.signal_event_id,
+)
+
 entry_lane_current = sa.Table(
     "brc_entry_lane_current",
     metadata,
@@ -302,6 +366,51 @@ runtime_capabilities_current = sa.Table(
     _time("updated_at_ms"),
 )
 
+capacity_claims = sa.Table(
+    "brc_capacity_claims",
+    metadata,
+    _id("capacity_claim_id", primary_key=True),
+    _id("ticket_id"),
+    _id("signal_event_id"),
+    _id("exposure_episode_id"),
+    _id("strategy_group_id"),
+    _id("strategy_version_id"),
+    _id("event_spec_id"),
+    _id("runtime_profile_id"),
+    _id("owner_policy_id"),
+    sa.Column("owner_policy_version", sa.Integer, nullable=False),
+    _id("runtime_scope_id"),
+    sa.Column("runtime_scope_version", sa.Integer, nullable=False),
+    _id("account_id"),
+    sa.Column("venue_id", SHORT_TEXT, nullable=False),
+    _id("exchange_instrument_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
+    sa.Column("fact_digest", LONG_TEXT, nullable=False),
+    sa.Column("action_facts_digest", LONG_TEXT, nullable=False),
+    sa.Column("instrument_rules_projection_version", sa.BigInteger, nullable=False),
+    sa.Column("entry_reference_price", MONEY, nullable=False),
+    sa.Column("quantity", MONEY, nullable=False),
+    sa.Column("notional", MONEY, nullable=False),
+    sa.Column("leverage", MONEY, nullable=False),
+    sa.Column("risk_at_stop", MONEY, nullable=False),
+    sa.Column("entry_order_type", SHORT_TEXT, nullable=False),
+    sa.Column("entry_limit_price", MONEY, nullable=True),
+    sa.Column("initial_stop_price", MONEY, nullable=False),
+    _json("take_profit_prices"),
+    sa.Column("decision_digest", LONG_TEXT, nullable=False),
+    _time("created_at_ms"),
+    _time("expires_at_ms"),
+    sa.UniqueConstraint("ticket_id"),
+    sa.UniqueConstraint("signal_event_id"),
+    sa.UniqueConstraint("decision_digest"),
+    sa.CheckConstraint("quantity > 0", name="quantity_positive"),
+    sa.CheckConstraint("notional > 0", name="notional_positive"),
+    sa.CheckConstraint("leverage > 0", name="leverage_positive"),
+    sa.CheckConstraint("risk_at_stop >= 0", name="risk_nonnegative"),
+    sa.CheckConstraint("expires_at_ms > created_at_ms", name="time_window_valid"),
+)
+
 trade_tickets = sa.Table(
     "brc_trade_tickets",
     metadata,
@@ -322,6 +431,7 @@ trade_tickets = sa.Table(
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
     sa.Column("active_netting_domain_key", LONG_TEXT, nullable=True),
+    sa.Column("entry_reference_price", MONEY, nullable=False),
     sa.Column("quantity", MONEY, nullable=False),
     sa.Column("notional", MONEY, nullable=False),
     sa.Column("leverage", MONEY, nullable=False),

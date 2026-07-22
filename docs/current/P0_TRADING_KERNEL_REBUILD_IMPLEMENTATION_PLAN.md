@@ -142,7 +142,8 @@ Current implementation evidence:
 | StrategySignal boundary | Complete | Immutable Fact Bundle and append-only lineage; no capital authority |
 | Pure Event detectors | Complete | Six positive vectors and full negative matrix |
 | Closed-market observation | Complete | Six-Event observation matrix, bounded current Facts, deterministic Signal identity, and Live/Replay parity; `52 passed`, Ruff and Mypy clean |
-| Candidate arbitration and CapacityClaim | Active next task | Owner-approved deterministic ordering and action-time capital boundary |
+| Candidate arbitration and CapacityClaim | Complete | Five-level deterministic ordering, bounded 64-candidate selector, action-time sizing, immutable claim lineage, and atomic Claim-to-Ticket issuance |
+| Venue Truth and unknown-outcome recovery | Active next task | One lookup authority must resolve unknown exchange outcomes without redispatch |
 
 The accepted exit-policy family is 1R TP1 for 50% plus a right-tail structural
 ATR runner. SOR-LONG retains its exact committed time-stop policy. Candidate

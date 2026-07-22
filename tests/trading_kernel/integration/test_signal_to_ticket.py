@@ -19,6 +19,12 @@ from src.trading_kernel.application.issue_ready_signal import (
     issue_ready_signal,
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus
+from src.trading_kernel.application.select_entry_candidate import (
+    SelectEntryCandidateRequest,
+    SelectEntryCandidateStatus,
+    select_entry_candidate,
+)
+from src.trading_kernel.domain.capacity import ActionTimeFacts
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -107,20 +113,17 @@ async def test_ingest_persists_signal_and_fact_lineage_without_ticket_terms(
     }
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        issuance = await issue_ready_signal(
+        selected = await select_entry_candidate(
             uow,
-            IssueReadySignalRequest(
-                claim_owner="signal-worker-1",
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=1_002,
-            ),
+            SelectEntryCandidateRequest(now_ms=1_002),
         )
 
-    assert issuance.status is IssueTicketStatus.CAPACITY_CLAIM_MISSING
-    assert issuance.ticket_id is None
+    assert selected.status is SelectEntryCandidateStatus.SELECTED
+    assert selected.candidate is not None
+    assert selected.candidate.signal.signal_event_id == signal.signal_event_id
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+        assert await uow.capacity_claims.get_for_signal(signal.signal_event_id) is None
         assert not await uow.entry_admission.has_ticket_for_signal(
             signal.signal_event_id
         )
@@ -297,6 +300,8 @@ async def test_expired_candidate_is_terminally_blocked(
         result = await issue_ready_signal(
             uow,
             IssueReadySignalRequest(
+                signal_event_id=signal.signal_event_id,
+                action_time_facts=_action_time_facts(signal.signal_event_id),
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
                 schema_revision="0001_initial",
@@ -319,18 +324,13 @@ async def test_no_candidate_returns_explicit_idle_result(
     await _seed_runtime_authority(issue_engine)
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        result = await issue_ready_signal(
+        result = await select_entry_candidate(
             uow,
-            IssueReadySignalRequest(
-                claim_owner="signal-worker-idle",
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=1_001,
-            ),
+            SelectEntryCandidateRequest(now_ms=1_001),
         )
 
-    assert result.status is IssueTicketStatus.NO_READY_SIGNAL
-    assert result.ticket_id is None
+    assert result.status is SelectEntryCandidateStatus.NO_CANDIDATE
+    assert result.candidate is None
 
 
 def _signal(
@@ -358,6 +358,7 @@ def _signal(
         position_side=position_side,
         fact_digest=build_signal_fact_digest(facts),
         occurred_at_ms=occurred_at_ms,
+        observed_at_ms=occurred_at_ms + 1,
         expires_at_ms=10_000,
         facts=facts,
     )
@@ -494,3 +495,22 @@ async def _insert_scope_facts(
                 projection_version=fact.projection_version,
             )
         )
+
+
+def _action_time_facts(signal_event_id: str) -> ActionTimeFacts:
+    return ActionTimeFacts(
+        signal_event_id=signal_event_id,
+        runtime_scope_id="scope-sor-btc-long",
+        venue_id="binance-usdm",
+        account_id="subaccount-main",
+        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+        position_side="long",
+        best_bid_price=Decimal("9999.9"),
+        best_ask_price=Decimal("10000"),
+        account_equity=Decimal("1000"),
+        available_margin=Decimal("1000"),
+        netting_domain_position_qty=Decimal("0"),
+        netting_domain_open_order_count=0,
+        observed_at_ms=1_001,
+        valid_until_ms=10_000,
+    )

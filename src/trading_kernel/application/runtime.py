@@ -15,6 +15,11 @@ from src.trading_kernel.application.issue_ready_signal import (
     issue_ready_signal,
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus
+from src.trading_kernel.application.select_entry_candidate import (
+    SelectEntryCandidateRequest,
+    SelectEntryCandidateStatus,
+    select_entry_candidate,
+)
 from src.trading_kernel.application.ports import (
     MonitorOwnerStatus,
     MonitorStateRecord,
@@ -22,6 +27,7 @@ from src.trading_kernel.application.ports import (
     VenuePort,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
+from src.trading_kernel.domain.capacity import ActionTimeFacts
 
 
 class RuntimeActionStatus(StrEnum):
@@ -39,6 +45,8 @@ class RuntimeTickRequest(BaseModel):
     runtime_commit: str
     schema_revision: str
     ticket_id: str | None = None
+    signal_event_id: str | None = None
+    action_time_facts: ActionTimeFacts | None = None
     worker_id: str
     now_ms: int
     lease_until_ms: int
@@ -75,6 +83,10 @@ class RuntimeTickRequest(BaseModel):
             raise ValueError("runtime lease must end after a positive tick time")
         if self.timeout_seconds <= 0:
             raise ValueError("runtime timeout must be positive")
+        if (self.signal_event_id is None) != (self.action_time_facts is None):
+            raise ValueError(
+                "signal_event_id and action_time_facts must be supplied together"
+            )
         return self
 
 
@@ -97,19 +109,30 @@ async def run_runtime_once(
     issuance_status: IssueTicketStatus | None = None
     if ticket_id is None:
         async with uow_factory() as uow:
-            issuance = await issue_ready_signal(
+            selected = await select_entry_candidate(
                 uow,
-                IssueReadySignalRequest(
-                    claim_owner=request.worker_id,
-                    runtime_commit=request.runtime_commit,
-                    schema_revision=request.schema_revision,
-                    now_ms=request.now_ms,
-                ),
+                SelectEntryCandidateRequest(now_ms=request.now_ms),
             )
-        issuance_status = issuance.status
-        if issuance.status is IssueTicketStatus.ISSUED:
-            ticket_id = issuance.ticket_id
-            issued_ticket_id = issuance.ticket_id
+            if selected.status is SelectEntryCandidateStatus.NO_CANDIDATE:
+                issuance_status = IssueTicketStatus.NO_READY_SIGNAL
+            elif request.signal_event_id is None or request.action_time_facts is None:
+                issuance_status = IssueTicketStatus.CAPACITY_CLAIM_MISSING
+            else:
+                issuance = await issue_ready_signal(
+                    uow,
+                    IssueReadySignalRequest(
+                        signal_event_id=request.signal_event_id,
+                        action_time_facts=request.action_time_facts,
+                        claim_owner=request.worker_id,
+                        runtime_commit=request.runtime_commit,
+                        schema_revision=request.schema_revision,
+                        now_ms=request.now_ms,
+                    ),
+                )
+                issuance_status = issuance.status
+                if issuance.status is IssueTicketStatus.ISSUED:
+                    ticket_id = issuance.ticket_id
+                    issued_ticket_id = issuance.ticket_id
 
     dispatch = await dispatch_one_command(
         uow_factory,

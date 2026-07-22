@@ -21,11 +21,7 @@ from src.trading_kernel.application.ingest_signal import (
     IngestSignalStatus,
     ingest_signal,
 )
-from src.trading_kernel.application.issue_ticket import (
-    IssueTicketRequest,
-    IssueTicketStatus,
-    issue_ticket,
-)
+from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue_ticket
 from src.trading_kernel.application.ports import VenueCommandRequest
 from src.trading_kernel.application.runtime import (
     MonitorOwnerStatus,
@@ -55,6 +51,7 @@ from tests.trading_kernel.integration.test_signal_to_ticket import (
     _seed_runtime_authority,
     _signal,
 )
+from tests.trading_kernel.integration.test_issue_ticket import _issue_request
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -266,7 +263,7 @@ async def test_one_worker_invocation_processes_one_command_without_history_scan(
     async with PostgresKernelUnitOfWork(runtime_engine) as uow:
         issued = await issue_ticket(
             uow,
-            IssueTicketRequest(
+            _issue_request(
                 ticket=ticket,
                 now_ms=1_001,
                 claim_owner="issuer-1",
@@ -397,7 +394,7 @@ async def test_unknown_command_outcome_projects_owner_intervention_state(
     async with PostgresKernelUnitOfWork(runtime_engine) as uow:
         issued = await issue_ticket(
             uow,
-            IssueTicketRequest(
+            _issue_request(
                 ticket=ticket,
                 now_ms=1_001,
                 claim_owner="issuer-1",
@@ -581,6 +578,7 @@ async def _seed_policy(engine: AsyncEngine, *, enabled: bool) -> None:
                 real_submit_enabled=enabled,
                 max_concurrent_tickets=2,
                 max_gross_notional="1000",
+                target_leverage="5",
                 scope={},
                 updated_at_ms=1_000,
             )

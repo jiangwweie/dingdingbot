@@ -40,6 +40,10 @@ def test_strategy_signal_rejects_blank_identity_and_invalid_deadline() -> None:
         _signal(runtime_scope_version=0)
     with pytest.raises(ValidationError):
         _signal(occurred_at_ms=1_000, expires_at_ms=1_000)
+    with pytest.raises(ValidationError):
+        _signal(occurred_at_ms=1_000, observed_at_ms=999)
+    with pytest.raises(ValidationError):
+        _signal(observed_at_ms=2_000, expires_at_ms=2_000)
 
 
 def test_strategy_signal_requires_exact_nonduplicate_fact_bundle() -> None:
@@ -92,6 +96,7 @@ def _signal(
     signal_event_id: str = "signal-1",
     runtime_scope_version: int = 1,
     occurred_at_ms: int = 1_000,
+    observed_at_ms: int = 1_001,
     expires_at_ms: int = 2_000,
     facts: tuple[SignalFactSnapshot, ...] | None = None,
     fact_digest: str | None = None,
@@ -108,6 +113,7 @@ def _signal(
         position_side="short",
         fact_digest=fact_digest or build_signal_fact_digest(selected_facts),
         occurred_at_ms=occurred_at_ms,
+        observed_at_ms=observed_at_ms,
         expires_at_ms=expires_at_ms,
         facts=selected_facts,
     )

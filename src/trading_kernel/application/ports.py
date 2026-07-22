@@ -10,6 +10,8 @@ from typing import Callable, Literal, Protocol, Self
 from pydantic import BaseModel, ConfigDict, JsonValue
 
 from src.trading_kernel.domain.aggregate import TradeAggregate
+from src.trading_kernel.domain.arbitration import EntryCandidate
+from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
@@ -102,8 +104,12 @@ class OwnerPolicySnapshot(BaseModel):
     policy_version: int
     enabled: bool
     real_submit_enabled: bool
+    priority_rank: int
     max_concurrent_tickets: int
     max_gross_notional: Decimal
+    max_gross_risk_at_stop: Decimal
+    max_ticket_risk_at_stop: Decimal
+    target_leverage: Decimal
 
 
 class AccountExposureSnapshot(BaseModel):
@@ -198,7 +204,9 @@ class InstrumentRulesSnapshot(BaseModel):
     price_tick: Decimal
     min_quantity: Decimal
     min_notional: Decimal
+    observed_at_ms: int
     valid_until_ms: int
+    projection_version: int
 
 
 class RuntimeCapabilitySnapshot(BaseModel):
@@ -328,6 +336,16 @@ class BudgetRepository(Protocol):
     async def release(self, ticket_id: str, *, released_at_ms: int) -> None: ...
 
 
+class CapacityClaimRepository(Protocol):
+    async def add(self, claim: CapacityClaim) -> None: ...
+
+    async def get(self, capacity_claim_id: str) -> CapacityClaim | None: ...
+
+    async def get_for_signal(self, signal_event_id: str) -> CapacityClaim | None: ...
+
+    async def get_for_ticket(self, ticket_id: str) -> CapacityClaim | None: ...
+
+
 class IncidentRepository(Protocol):
     async def add(self, incident: RuntimeIncidentRecord) -> None: ...
 
@@ -448,6 +466,13 @@ class SignalRepository(Protocol):
         now_ms: int,
     ) -> StrategySignal | None: ...
 
+    async def list_ready_candidates(
+        self,
+        *,
+        now_ms: int,
+        limit: int,
+    ) -> tuple[EntryCandidate, ...]: ...
+
     async def get_readiness(
         self,
         runtime_scope_id: str,
@@ -554,6 +579,7 @@ class KernelUnitOfWork(Protocol):
     events: EventRepository
     exchange_commands: ExchangeCommandRepository
     budgets: BudgetRepository
+    capacity_claims: CapacityClaimRepository
     incidents: IncidentRepository
     positions: PositionRepository
     reviews: ReviewRepository

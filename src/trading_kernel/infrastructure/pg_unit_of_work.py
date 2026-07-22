@@ -11,6 +11,7 @@ from src.trading_kernel.application.ports import (
     AggregateVersionConflict,
     AggregateRepository,
     BudgetRepository,
+    CapacityClaimRepository,
     EntryAdmissionRepository,
     EventRepository,
     ExchangeCommandRepository,
@@ -55,6 +56,7 @@ from src.trading_kernel.domain.ticket import EntryOrderType
 from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresAggregateRepository,
     PostgresBudgetRepository,
+    PostgresCapacityClaimRepository,
     PostgresEventRepository,
     PostgresEntryAdmissionRepository,
     PostgresExchangeCommandRepository,
@@ -81,6 +83,7 @@ class PostgresKernelUnitOfWork:
     events: EventRepository
     exchange_commands: ExchangeCommandRepository
     budgets: BudgetRepository
+    capacity_claims: CapacityClaimRepository
     incidents: IncidentRepository
     monitors: MonitorRepository
     positions: PositionRepository
@@ -104,6 +107,7 @@ class PostgresKernelUnitOfWork:
         self.events = PostgresEventRepository(self._connection)
         self.exchange_commands = PostgresExchangeCommandRepository(self._connection)
         self.budgets = PostgresBudgetRepository(self._connection)
+        self.capacity_claims = PostgresCapacityClaimRepository(self._connection)
         self.incidents = PostgresIncidentRepository(self._connection)
         self.monitors = PostgresMonitorRepository(self._connection)
         self.positions = PostgresPositionRepository(self._connection)
