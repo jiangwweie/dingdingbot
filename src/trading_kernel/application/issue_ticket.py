@@ -17,6 +17,12 @@ from src.trading_kernel.domain.ticket import TradeTicket
 
 class IssueTicketStatus(StrEnum):
     ISSUED = "issued"
+    NO_READY_SIGNAL = "no_ready_signal"
+    SIGNAL_INVALID_OR_STALE = "signal_invalid_or_stale"
+    SCOPE_OR_POLICY_MISMATCH = "scope_or_policy_mismatch"
+    ACCOUNT_MODE_INVALID = "account_mode_invalid"
+    INSTRUMENT_RULES_INVALID = "instrument_rules_invalid"
+    SCHEMA_IDENTITY_MISMATCH = "schema_identity_mismatch"
     ENTRY_LANE_OCCUPIED = "entry_lane_occupied"
     FACTS_EXPIRED = "facts_expired"
     ACTIVE_NETTING_DOMAIN = "active_netting_domain"

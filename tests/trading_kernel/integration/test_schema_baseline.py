@@ -77,6 +77,24 @@ def test_financial_columns_use_fixed_precision_numeric() -> None:
         assert column.type.scale == 18
 
 
+def test_signal_schema_enforces_typed_identity_order_and_time_shape() -> None:
+    signals = metadata.tables["brc_signal_events"]
+    check_sql = {
+        str(constraint.sqltext)
+        for constraint in signals.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+
+    assert "position_side IN ('long', 'short')" in check_sql
+    assert "entry_order_type IN ('market', 'limit')" in check_sql
+    assert (
+        "(entry_order_type = 'market' AND entry_limit_price IS NULL) OR "
+        "(entry_order_type = 'limit' AND entry_limit_price > 0)"
+    ) in check_sql
+    assert "expires_at_ms > occurred_at_ms" in check_sql
+    assert "fact_digest ~ '^sha256:[0-9a-f]{64}$'" in check_sql
+
+
 def test_ticket_schema_freezes_runtime_scope_identity_and_version() -> None:
     tickets = metadata.tables["brc_trade_tickets"]
 

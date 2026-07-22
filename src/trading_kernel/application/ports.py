@@ -19,6 +19,7 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import Reduction
+from src.trading_kernel.domain.signal import ActionableSignal, SignalFactSnapshot
 from src.trading_kernel.domain.ticket import TradeTicket
 
 
@@ -71,6 +72,7 @@ class TradeReviewRecord(BaseModel):
 class MonitorOwnerStatus(StrEnum):
     WAITING_FOR_OPPORTUNITY = "waiting_for_opportunity"
     PROCESSING = "processing"
+    TEMPORARILY_UNAVAILABLE = "temporarily_unavailable"
     NEEDS_INTERVENTION = "needs_intervention"
     PAUSED = "paused"
     COMPLETED = "completed"
@@ -122,6 +124,98 @@ class EntryLaneSnapshot(BaseModel):
     lease_until_ms: int | None
     claim_owner: str | None
     version: int
+
+
+class StrategyGroupSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    strategy_group_id: str
+    active_version_id: str | None
+    status: str
+
+
+class StrategyVersionSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    strategy_version_id: str
+    strategy_group_id: str
+    status: str
+
+
+class EventSpecSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str
+    strategy_version_id: str
+    position_side: Literal["long", "short"]
+    entry_order_type: str
+    status: str
+
+
+class RuntimeScopeSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime_scope_id: str
+    strategy_group_id: str
+    strategy_version_id: str
+    event_spec_id: str
+    runtime_profile_id: str
+    owner_policy_id: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
+    enabled: bool
+    scope_version: int
+
+
+class RuntimeProfileSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime_profile_id: str
+    venue_id: str
+    account_id: str
+    environment: str
+    position_mode: str
+    status: str
+
+
+class InstrumentSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_instrument_id: str
+    venue_id: str
+    status: str
+
+
+class InstrumentRulesSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_instrument_id: str
+    quantity_step: Decimal
+    price_tick: Decimal
+    min_quantity: Decimal
+    min_notional: Decimal
+    valid_until_ms: int
+
+
+class RuntimeCapabilitySnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    capability_key: str
+    enabled: bool
+    certified_commit: str
+    schema_revision: str
+
+
+class ReadinessSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime_scope_id: str
+    readiness_state: str
+    first_blocker: str | None
+    signal_event_id: str | None
+    fact_summary: dict[str, JsonValue]
+    updated_at_ms: int
+    projection_version: int
 
 
 class TicketRepository(Protocol):
@@ -321,6 +415,87 @@ class EntryAdmissionRepository(Protocol):
     async def release_global_lane(self, *, ticket_id: str) -> None: ...
 
 
+class SignalRepository(Protocol):
+    async def add(self, signal: ActionableSignal) -> bool: ...
+
+    async def get(self, signal_event_id: str) -> ActionableSignal | None: ...
+
+    async def get_next_ready(
+        self,
+        *,
+        now_ms: int,
+    ) -> ActionableSignal | None: ...
+
+    async def get_next_stale_ready(
+        self,
+        *,
+        now_ms: int,
+    ) -> ActionableSignal | None: ...
+
+    async def get_readiness(
+        self,
+        runtime_scope_id: str,
+    ) -> ReadinessSnapshot | None: ...
+
+    async def save_readiness(
+        self,
+        *,
+        runtime_scope_id: str,
+        readiness_state: str,
+        first_blocker: str | None,
+        signal_event_id: str | None,
+        fact_summary: dict[str, JsonValue],
+        updated_at_ms: int,
+    ) -> ReadinessSnapshot: ...
+
+    async def get_strategy_group(
+        self,
+        strategy_group_id: str,
+    ) -> StrategyGroupSnapshot | None: ...
+
+    async def get_strategy_version(
+        self,
+        strategy_version_id: str,
+    ) -> StrategyVersionSnapshot | None: ...
+
+    async def get_event_spec(
+        self,
+        event_spec_id: str,
+    ) -> EventSpecSnapshot | None: ...
+
+    async def get_runtime_scope(
+        self,
+        runtime_scope_id: str,
+    ) -> RuntimeScopeSnapshot | None: ...
+
+    async def get_runtime_profile(
+        self,
+        runtime_profile_id: str,
+    ) -> RuntimeProfileSnapshot | None: ...
+
+    async def get_instrument(
+        self,
+        exchange_instrument_id: str,
+    ) -> InstrumentSnapshot | None: ...
+
+    async def get_instrument_rules(
+        self,
+        exchange_instrument_id: str,
+    ) -> InstrumentRulesSnapshot | None: ...
+
+    async def get_runtime_capability(
+        self,
+        capability_key: str,
+    ) -> RuntimeCapabilitySnapshot | None: ...
+
+    async def get_required_facts(
+        self,
+        *,
+        runtime_scope_id: str,
+        event_spec_id: str,
+    ) -> tuple[SignalFactSnapshot, ...] | None: ...
+
+
 class VenueCommandRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -356,6 +531,7 @@ class KernelUnitOfWork(Protocol):
     reviews: ReviewRepository
     monitors: MonitorRepository
     entry_admission: EntryAdmissionRepository
+    signals: SignalRepository
 
     async def __aenter__(self) -> Self: ...
 

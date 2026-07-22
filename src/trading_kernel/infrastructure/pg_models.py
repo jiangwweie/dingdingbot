@@ -192,14 +192,50 @@ signal_events = sa.Table(
     metadata,
     _id("signal_event_id", primary_key=True),
     _id("runtime_scope_id"),
+    sa.Column("runtime_scope_version", sa.Integer, nullable=False),
     _id("strategy_group_id"),
+    _id("strategy_version_id"),
     _id("event_spec_id"),
     _id("exchange_instrument_id"),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("signal_grade", SHORT_TEXT, nullable=False),
-    _json("fact_digest"),
+    sa.Column("fact_digest", LONG_TEXT, nullable=False),
+    sa.Column("quantity", MONEY, nullable=False),
+    sa.Column("notional", MONEY, nullable=False),
+    sa.Column("leverage", MONEY, nullable=False),
+    sa.Column("risk_at_stop", MONEY, nullable=False),
+    sa.Column("entry_order_type", SHORT_TEXT, nullable=False),
+    sa.Column("entry_limit_price", MONEY, nullable=True),
+    sa.Column("initial_stop_price", MONEY, nullable=False),
+    _json("take_profit_prices"),
     _time("occurred_at_ms"),
     _time("expires_at_ms"),
+    sa.CheckConstraint("quantity > 0", name="quantity_positive"),
+    sa.CheckConstraint("notional > 0", name="notional_positive"),
+    sa.CheckConstraint("leverage > 0", name="leverage_positive"),
+    sa.CheckConstraint("risk_at_stop >= 0", name="risk_nonnegative"),
+    sa.CheckConstraint("initial_stop_price > 0", name="stop_positive"),
+    sa.CheckConstraint(
+        "position_side IN ('long', 'short')",
+        name="position_side_valid",
+    ),
+    sa.CheckConstraint(
+        "entry_order_type IN ('market', 'limit')",
+        name="entry_order_type_valid",
+    ),
+    sa.CheckConstraint(
+        "(entry_order_type = 'market' AND entry_limit_price IS NULL) OR "
+        "(entry_order_type = 'limit' AND entry_limit_price > 0)",
+        name="entry_order_shape_valid",
+    ),
+    sa.CheckConstraint(
+        "expires_at_ms > occurred_at_ms",
+        name="time_window_valid",
+    ),
+    sa.CheckConstraint(
+        "fact_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="fact_digest_valid",
+    ),
 )
 
 readiness_current = sa.Table(

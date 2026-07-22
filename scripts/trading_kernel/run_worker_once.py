@@ -39,6 +39,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--venue-factory", required=True, help="module:callable")
     parser.add_argument("--monitor-key", required=True)
     parser.add_argument("--owner-policy-id", required=True)
+    parser.add_argument(
+        "--runtime-commit",
+        default=os.getenv("TRADING_KERNEL_RUNTIME_COMMIT", ""),
+    )
+    parser.add_argument(
+        "--schema-revision",
+        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", ""),
+    )
     parser.add_argument("--ticket-id")
     parser.add_argument("--worker-id", required=True)
     parser.add_argument("--now-ms", type=int)
@@ -80,6 +88,8 @@ async def _run(args: argparse.Namespace) -> int:
             RuntimeTickRequest(
                 monitor_key=args.monitor_key,
                 owner_policy_id=args.owner_policy_id,
+                runtime_commit=args.runtime_commit,
+                schema_revision=args.schema_revision,
                 ticket_id=args.ticket_id,
                 worker_id=args.worker_id,
                 now_ms=now_ms,

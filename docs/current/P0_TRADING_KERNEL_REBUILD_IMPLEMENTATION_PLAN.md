@@ -51,10 +51,10 @@ Tickets progress concurrently through one reducer and durable command model.
 
 **Done when:**
 
-- [ ] architecture test proves the exact current document allowlist;
-- [ ] entry documents reference only existing current documents;
-- [ ] retired execution markers are absent from current authority;
-- [ ] focused architecture suite passes.
+- [x] architecture test proves the exact current document allowlist;
+- [x] entry documents reference only existing current documents;
+- [x] retired execution markers are absent from current authority;
+- [x] focused architecture suite passes.
 
 ## Task 14: Typed Signal To Frozen Ticket
 
@@ -63,6 +63,7 @@ Tickets progress concurrently through one reducer and durable command model.
 - Create: `src/trading_kernel/domain/signal.py`
 - Create: `src/trading_kernel/application/ingest_signal.py`
 - Create: `src/trading_kernel/application/issue_ready_signal.py`
+- Create: `src/trading_kernel/infrastructure/pg_signal_repository.py`
 - Modify: `src/trading_kernel/application/ports.py`
 - Modify: `src/trading_kernel/infrastructure/pg_models.py`
 - Modify: `src/trading_kernel/infrastructure/pg_repositories.py`
@@ -80,17 +81,17 @@ Tickets progress concurrently through one reducer and durable command model.
 
 **TDD sequence:**
 
-- [ ] RED: valid typed signal persists readiness and issues one Ticket.
-- [ ] RED: wrong scope, version, side, account mode, capability, instrument,
+- [x] RED: valid typed signal persists readiness and issues one Ticket.
+- [x] RED: wrong scope, version, side, account mode, capability, instrument,
   fact digest, or expiry fails before Ticket creation.
-- [ ] RED: two ready signals persist concurrently but issue Tickets serially.
-- [ ] RED: lane release permits the second still-fresh signal to issue.
-- [ ] RED: duplicate signal cannot create a second Ticket identity.
-- [ ] RED: policy or budget changes are revalidated at issuance.
-- [ ] GREEN: implement only the typed models, repository queries, and services
+- [x] RED: two ready signals persist concurrently but issue Tickets serially.
+- [x] RED: lane release permits the second still-fresh signal to issue.
+- [x] RED: duplicate signal cannot create a second Ticket identity.
+- [x] RED: policy or budget changes are revalidated at issuance.
+- [x] GREEN: implement only the typed models, repository queries, and services
   required by each failing test.
-- [ ] Run focused unit, integration, schema, Ruff, and Mypy checks.
-- [ ] Commit with `feat(kernel): connect typed signals to ticket issuance`.
+- [x] Run focused unit, integration, schema, Ruff, and Mypy checks.
+- [x] Commit with `feat(kernel): connect typed signals to ticket issuance`.
 
 ## Task 15: Crash-Safe Destructive Cutover
 

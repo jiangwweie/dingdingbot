@@ -12,9 +12,15 @@ import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from pydantic import ValidationError
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.trading_kernel.application.ingest_signal import (
+    IngestSignalRequest,
+    IngestSignalStatus,
+    ingest_signal,
+)
 from src.trading_kernel.application.issue_ticket import (
     IssueTicketRequest,
     IssueTicketStatus,
@@ -39,11 +45,16 @@ from src.trading_kernel.infrastructure.pg_models import (
     monitor_current,
     monitor_events,
     owner_policy_current,
+    runtime_profiles,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.interfaces.readonly_api import get_monitor_state
 from src.trading_kernel.interfaces.worker import run_worker_once
 from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.integration.test_signal_to_ticket import (
+    _seed_runtime_authority,
+    _signal,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -104,6 +115,152 @@ class SlowVenue:
         )
 
 
+def test_runtime_tick_requires_exact_code_and_schema_identity() -> None:
+    with pytest.raises(ValidationError):
+        RuntimeTickRequest(
+            monitor_key="strategy:SOR-001",
+            owner_policy_id="policy-main",
+            worker_id="runtime-worker-1",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_worker_issues_ready_signal_and_dispatches_entry_in_one_tick(
+    runtime_engine: AsyncEngine,
+) -> None:
+    await _seed_runtime_authority(runtime_engine)
+    signal = _signal()
+    async with PostgresKernelUnitOfWork(runtime_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0001",
+                now_ms=1_001,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.TICKET_READY
+
+    venue = AcceptingVenue()
+    result = await run_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_engine),
+        venue,
+        RuntimeTickRequest(
+            monitor_key="strategy:SOR-001",
+            owner_policy_id="policy-main",
+            runtime_commit="kernel-test-head",
+            schema_revision="0001",
+            worker_id="runtime-worker-signal",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.issued_ticket_id is not None
+    assert result.action_status is RuntimeActionStatus.ACCEPTED
+    assert result.command_id is not None
+    assert venue.calls == 1
+    async with PostgresKernelUnitOfWork(runtime_engine) as uow:
+        ticket = await uow.tickets.get(result.issued_ticket_id)
+        aggregate = await uow.aggregates.get(result.issued_ticket_id)
+    assert ticket is not None
+    assert ticket.identity.signal_event_id == signal.signal_event_id
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.ENTRY_ACCEPTED
+
+
+@pytest.mark.asyncio
+async def test_schema_blocked_readiness_projects_and_retains_temporarily_unavailable(
+    runtime_engine: AsyncEngine,
+) -> None:
+    await _seed_runtime_authority(runtime_engine)
+    signal = _signal()
+    async with PostgresKernelUnitOfWork(runtime_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0001",
+                now_ms=1_001,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.TICKET_READY
+    request = RuntimeTickRequest(
+        monitor_key="strategy:SOR-001",
+        owner_policy_id="policy-main",
+        runtime_commit="wrong-runtime-head",
+        schema_revision="0001",
+        worker_id="runtime-worker-schema-blocked",
+        now_ms=1_100,
+        lease_until_ms=6_100,
+        timeout_seconds=1,
+    )
+
+    first = await run_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_engine),
+        NoCallVenue(),
+        request,
+    )
+    repeated = await run_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_engine),
+        NoCallVenue(),
+        request.model_copy(update={"now_ms": 1_200, "lease_until_ms": 6_200}),
+    )
+
+    assert first.action_status is RuntimeActionStatus.NO_COMMAND
+    assert first.monitor.owner_status.value == "temporarily_unavailable"
+    assert repeated.monitor.owner_status.value == "temporarily_unavailable"
+    assert repeated.monitor.projection_version == first.monitor.projection_version
+
+
+@pytest.mark.asyncio
+async def test_account_mode_blocked_readiness_requires_intervention(
+    runtime_engine: AsyncEngine,
+) -> None:
+    await _seed_runtime_authority(runtime_engine)
+    signal = _signal()
+    async with PostgresKernelUnitOfWork(runtime_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0001",
+                now_ms=1_001,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.TICKET_READY
+    async with runtime_engine.begin() as connection:
+        await connection.execute(
+            sa.update(runtime_profiles).values(position_mode="one_way")
+        )
+
+    result = await run_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_engine),
+        NoCallVenue(),
+        RuntimeTickRequest(
+            monitor_key="strategy:SOR-001",
+            owner_policy_id="policy-main",
+            runtime_commit="kernel-test-head",
+            schema_revision="0001",
+            worker_id="runtime-worker-account-mode",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.action_status is RuntimeActionStatus.NO_COMMAND
+    assert result.monitor.owner_status is MonitorOwnerStatus.NEEDS_INTERVENTION
+    assert result.monitor.intervention == "需要介入"
+
+
 @pytest.mark.asyncio
 async def test_one_worker_invocation_processes_one_command_without_history_scan(
     runtime_engine: AsyncEngine,
@@ -142,6 +299,8 @@ async def test_one_worker_invocation_processes_one_command_without_history_scan(
             RuntimeTickRequest(
                 monitor_key="strategy:SOR-001",
                 owner_policy_id=ticket.owner_policy_id,
+                runtime_commit="kernel-test-head",
+                schema_revision="0001",
                 ticket_id=ticket.identity.ticket_id,
                 worker_id="runtime-worker-1",
                 now_ms=1_100,
@@ -211,6 +370,8 @@ async def test_ticket_scoped_worker_never_claims_another_ticket_command(
         RuntimeTickRequest(
             monitor_key="strategy:SOR-001:short",
             owner_policy_id=second_ticket.owner_policy_id,
+            runtime_commit="kernel-test-head",
+            schema_revision="0001",
             ticket_id=second_ticket.identity.ticket_id,
             worker_id="runtime-worker-short",
             now_ms=1_100,
@@ -254,6 +415,8 @@ async def test_unknown_command_outcome_projects_owner_intervention_state(
         RuntimeTickRequest(
             monitor_key="strategy:SOR-001",
             owner_policy_id=ticket.owner_policy_id,
+            runtime_commit="kernel-test-head",
+            schema_revision="0001",
             ticket_id=ticket.identity.ticket_id,
             worker_id="runtime-worker-1",
             now_ms=1_100,
@@ -294,6 +457,8 @@ async def test_no_signal_tick_writes_no_files_and_only_material_monitor_transiti
     request = RuntimeTickRequest(
         monitor_key="strategy:SOR-001",
         owner_policy_id="policy-main",
+        runtime_commit="kernel-test-head",
+        schema_revision="0001",
         ticket_id=None,
         worker_id="runtime-worker-1",
         now_ms=1_100,

@@ -19,6 +19,7 @@ from src.trading_kernel.application.ports import (
     PositionRepository,
     ReviewRepository,
     RuntimeIncidentRecord,
+    SignalRepository,
     TicketRepository,
     UnsupportedKernelEffect,
 )
@@ -62,6 +63,9 @@ from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresReviewRepository,
     PostgresTicketRepository,
 )
+from src.trading_kernel.infrastructure.pg_signal_repository import (
+    PostgresSignalRepository,
+)
 
 
 __all__ = ["AggregateVersionConflict", "PostgresKernelUnitOfWork"]
@@ -78,6 +82,7 @@ class PostgresKernelUnitOfWork:
     positions: PositionRepository
     reviews: ReviewRepository
     entry_admission: EntryAdmissionRepository
+    signals: SignalRepository
 
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
@@ -99,6 +104,7 @@ class PostgresKernelUnitOfWork:
         self.positions = PostgresPositionRepository(self._connection)
         self.reviews = PostgresReviewRepository(self._connection)
         self.entry_admission = PostgresEntryAdmissionRepository(self._connection)
+        self.signals = PostgresSignalRepository(self._connection)
         return self
 
     async def __aexit__(
