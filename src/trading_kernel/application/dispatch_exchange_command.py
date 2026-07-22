@@ -43,6 +43,7 @@ class DispatchCommandRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     worker_id: str
+    ticket_id: str | None = None
     now_ms: int
     lease_until_ms: int
     timeout_seconds: float
@@ -53,6 +54,16 @@ class DispatchCommandRequest(BaseModel):
         normalized = str(value or "").strip()
         if not normalized:
             raise ValueError("dispatcher worker identity must be non-blank")
+        return normalized
+
+    @field_validator("ticket_id", mode="before")
+    @classmethod
+    def _normalize_optional_ticket(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("dispatcher ticket identity must be non-blank")
         return normalized
 
     @field_validator("now_ms", "lease_until_ms")
@@ -90,7 +101,8 @@ async def dispatch_one_command(
 ) -> DispatchCommandResult:
     async with uow_factory() as uow:
         expired = await uow.exchange_commands.get_one_expired_claim(
-            now_ms=request.now_ms
+            now_ms=request.now_ms,
+            ticket_id=request.ticket_id,
         )
         if expired is not None:
             result = ExchangeCommandResult(
@@ -125,6 +137,7 @@ async def dispatch_one_command(
             worker_id=request.worker_id,
             now_ms=request.now_ms,
             lease_until_ms=request.lease_until_ms,
+            ticket_id=request.ticket_id,
         )
     if command is None:
         return DispatchCommandResult(status=DispatchCommandStatus.NO_COMMAND)

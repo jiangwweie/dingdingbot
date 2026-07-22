@@ -41,6 +41,7 @@ from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresEntryAdmissionRepository,
     PostgresExchangeCommandRepository,
     PostgresIncidentRepository,
+    PostgresMonitorRepository,
     PostgresPositionRepository,
     PostgresReviewRepository,
     PostgresTicketRepository,
@@ -67,6 +68,7 @@ class PostgresKernelUnitOfWork:
         self.exchange_commands = PostgresExchangeCommandRepository(self._connection)
         self.budgets = PostgresBudgetRepository(self._connection)
         self.incidents = PostgresIncidentRepository(self._connection)
+        self.monitors = PostgresMonitorRepository(self._connection)
         self.positions = PostgresPositionRepository(self._connection)
         self.reviews = PostgresReviewRepository(self._connection)
         self.entry_admission = PostgresEntryAdmissionRepository(self._connection)

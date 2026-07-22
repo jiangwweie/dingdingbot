@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from enum import StrEnum
 from typing import Callable, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, JsonValue
@@ -64,6 +65,27 @@ class TradeReviewRecord(BaseModel):
     metrics: dict[str, JsonValue]
     decision_impact: dict[str, JsonValue]
     created_at_ms: int
+
+
+class MonitorOwnerStatus(StrEnum):
+    WAITING_FOR_OPPORTUNITY = "waiting_for_opportunity"
+    PROCESSING = "processing"
+    NEEDS_INTERVENTION = "needs_intervention"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+
+
+class MonitorStateRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    monitor_key: str
+    owner_status: MonitorOwnerStatus
+    summary: str
+    intervention: str
+    ticket_id: str | None = None
+    incident_id: str | None = None
+    updated_at_ms: int
+    projection_version: int = 0
 
 
 class OwnerPolicySnapshot(BaseModel):
@@ -162,6 +184,7 @@ class ExchangeCommandRepository(Protocol):
         worker_id: str,
         now_ms: int,
         lease_until_ms: int,
+        ticket_id: str | None = None,
     ) -> ExchangeCommand | None: ...
 
     async def record_result(
@@ -172,7 +195,12 @@ class ExchangeCommandRepository(Protocol):
         result: ExchangeCommandResult,
     ) -> None: ...
 
-    async def get_one_expired_claim(self, *, now_ms: int) -> ExchangeCommand | None: ...
+    async def get_one_expired_claim(
+        self,
+        *,
+        now_ms: int,
+        ticket_id: str | None = None,
+    ) -> ExchangeCommand | None: ...
 
     async def record_expired_claim_unknown(
         self,
@@ -219,6 +247,15 @@ class ReviewRepository(Protocol):
     async def add(self, review: TradeReviewRecord) -> None: ...
 
     async def get_for_ticket(self, ticket_id: str) -> TradeReviewRecord | None: ...
+
+
+class MonitorRepository(Protocol):
+    async def get(self, monitor_key: str) -> MonitorStateRecord | None: ...
+
+    async def save_if_changed(
+        self,
+        state: MonitorStateRecord,
+    ) -> MonitorStateRecord: ...
 
 
 class EntryAdmissionRepository(Protocol):
@@ -308,6 +345,7 @@ class KernelUnitOfWork(Protocol):
     incidents: IncidentRepository
     positions: PositionRepository
     reviews: ReviewRepository
+    monitors: MonitorRepository
     entry_admission: EntryAdmissionRepository
 
     async def __aenter__(self) -> Self: ...

@@ -15,6 +15,7 @@ from src.trading_kernel.application.ports import (
     AccountExposureSnapshot,
     BudgetReservationRecord,
     EntryLaneSnapshot,
+    MonitorStateRecord,
     OwnerPolicySnapshot,
     RuntimeIncidentRecord,
     TradeReviewRecord,
@@ -63,6 +64,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     budget_reservations,
     entry_lane_current,
     exchange_commands,
+    monitor_current,
+    monitor_events,
     owner_policy_current,
     positions_current,
     runtime_incidents,
@@ -309,13 +312,17 @@ class PostgresExchangeCommandRepository:
         worker_id: str,
         now_ms: int,
         lease_until_ms: int,
+        ticket_id: str | None = None,
     ) -> ExchangeCommand | None:
+        conditions = [
+            exchange_commands.c.status == ExchangeCommandStatus.PREPARED.value,
+            exchange_commands.c.deadline_at_ms > now_ms,
+        ]
+        if ticket_id is not None:
+            conditions.append(exchange_commands.c.ticket_id == ticket_id)
         result = await self._connection.execute(
             sa.select(exchange_commands.c.command_id)
-            .where(
-                exchange_commands.c.status == ExchangeCommandStatus.PREPARED.value,
-                exchange_commands.c.deadline_at_ms > now_ms,
-            )
+            .where(*conditions)
             .order_by(exchange_commands.c.created_at_ms, exchange_commands.c.command_id)
             .with_for_update(skip_locked=True, of=exchange_commands)
             .limit(1)
@@ -363,13 +370,21 @@ class PostgresExchangeCommandRepository:
         if updated.rowcount != 1:
             raise AggregateVersionConflict("command claim changed before result")
 
-    async def get_one_expired_claim(self, *, now_ms: int) -> ExchangeCommand | None:
+    async def get_one_expired_claim(
+        self,
+        *,
+        now_ms: int,
+        ticket_id: str | None = None,
+    ) -> ExchangeCommand | None:
+        conditions = [
+            exchange_commands.c.status == ExchangeCommandStatus.CLAIMED.value,
+            exchange_commands.c.lease_until_ms <= now_ms,
+        ]
+        if ticket_id is not None:
+            conditions.append(exchange_commands.c.ticket_id == ticket_id)
         result = await self._connection.execute(
             sa.select(exchange_commands.c.command_id)
-            .where(
-                exchange_commands.c.status == ExchangeCommandStatus.CLAIMED.value,
-                exchange_commands.c.lease_until_ms <= now_ms,
-            )
+            .where(*conditions)
             .order_by(exchange_commands.c.lease_until_ms, exchange_commands.c.command_id)
             .with_for_update(skip_locked=True, of=exchange_commands)
             .limit(1)
@@ -576,6 +591,62 @@ class PostgresReviewRepository:
         )
         row = result.mappings().one_or_none()
         return None if row is None else TradeReviewRecord.model_validate(row)
+
+
+class PostgresMonitorRepository:
+    def __init__(self, connection: AsyncConnection) -> None:
+        self._connection = connection
+
+    async def get(self, monitor_key: str) -> MonitorStateRecord | None:
+        result = await self._connection.execute(
+            sa.select(monitor_current).where(
+                monitor_current.c.monitor_key == monitor_key
+            )
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else MonitorStateRecord.model_validate(row)
+
+    async def save_if_changed(
+        self,
+        state: MonitorStateRecord,
+    ) -> MonitorStateRecord:
+        result = await self._connection.execute(
+            sa.select(monitor_current)
+            .where(monitor_current.c.monitor_key == state.monitor_key)
+            .with_for_update(of=monitor_current)
+        )
+        current_row = result.mappings().one_or_none()
+        if current_row is not None and _same_monitor_state(current_row, state):
+            return MonitorStateRecord.model_validate(current_row)
+
+        version = 1 if current_row is None else int(current_row["projection_version"]) + 1
+        persisted = state.model_copy(update={"projection_version": version})
+        values = persisted.model_dump(mode="json")
+        if current_row is None:
+            await self._connection.execute(sa.insert(monitor_current).values(**values))
+        else:
+            await self._connection.execute(
+                sa.update(monitor_current)
+                .where(monitor_current.c.monitor_key == state.monitor_key)
+                .values(**values)
+            )
+        await self._connection.execute(
+            sa.insert(monitor_events).values(
+                monitor_event_id=f"monitor-event:{state.monitor_key}:{version}",
+                monitor_key=state.monitor_key,
+                event_type="state_changed",
+                payload={
+                    "owner_status": state.owner_status,
+                    "summary": state.summary,
+                    "intervention": state.intervention,
+                    "ticket_id": state.ticket_id,
+                    "incident_id": state.incident_id,
+                    "projection_version": version,
+                },
+                created_at_ms=state.updated_at_ms,
+            )
+        )
+        return persisted
 
 
 class PostgresEntryAdmissionRepository:
@@ -940,3 +1011,19 @@ def _event_ticket_id(event: TradeEvent) -> str:
     if isinstance(event, TicketIssued):
         return event.ticket.identity.ticket_id
     return event.ticket_id
+
+
+def _same_monitor_state(
+    current: Mapping[str, object],
+    requested: MonitorStateRecord,
+) -> bool:
+    return all(
+        current[field] == getattr(requested, field)
+        for field in (
+            "owner_status",
+            "summary",
+            "intervention",
+            "ticket_id",
+            "incident_id",
+        )
+    )
