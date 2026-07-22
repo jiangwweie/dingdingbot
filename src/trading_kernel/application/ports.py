@@ -429,6 +429,13 @@ class SignalRepository(Protocol):
         signal_event_id: str,
     ) -> tuple[SignalFactSnapshot, ...]: ...
 
+    async def upsert_current_facts(
+        self,
+        *,
+        runtime_scope_id: str,
+        facts: tuple[SignalFactSnapshot, ...],
+    ) -> tuple[SignalFactSnapshot, ...]: ...
+
     async def get_next_ready(
         self,
         *,

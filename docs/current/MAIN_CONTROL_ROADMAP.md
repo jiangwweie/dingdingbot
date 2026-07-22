@@ -27,6 +27,7 @@ multi-StrategyGroup typed observation
 | Multi-position certification | `104 passed` at commit `5946cbf1` |
 | StrategySignal boundary | Immutable Fact Bundle, append-only lineage, and candidate persistence implemented; direct Signal-to-Ticket authority removed |
 | Six Event detectors | Pure deterministic CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, and BRF2-SHORT calculations implemented from committed old main-program semantics |
+| Observation and signal production | Closed-candle public market reads, bounded current Fact upserts, deterministic Signal identity, six-Event observation matrix, and Live/Replay detector parity verified; `52 passed` with Ruff and Mypy clean |
 | Destructive cutover tooling | Local state machine and disposable-PG rehearsal pass |
 | Database | One `0001_initial`, 29 target tables, downgrade/upgrade certified |
 | Static checks | Ruff pass; production Mypy zero errors |

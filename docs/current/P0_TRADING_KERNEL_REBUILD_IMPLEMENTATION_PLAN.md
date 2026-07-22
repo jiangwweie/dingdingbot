@@ -134,6 +134,16 @@ The accepted scope is:
    Owner projection;
 7. local six-Event full-chain certification and destructive-cutover rehearsal.
 
+Current implementation evidence:
+
+| Capability | Status | Evidence |
+| --- | --- | --- |
+| Registry Seed | Complete | Six exact Event contracts, 19 Fact bindings, and 22 candidate scopes |
+| StrategySignal boundary | Complete | Immutable Fact Bundle and append-only lineage; no capital authority |
+| Pure Event detectors | Complete | Six positive vectors and full negative matrix |
+| Closed-market observation | Complete | Six-Event observation matrix, bounded current Facts, deterministic Signal identity, and Live/Replay parity; `52 passed`, Ruff and Mypy clean |
+| Candidate arbitration and CapacityClaim | Active next task | Owner-approved deterministic ordering and action-time capital boundary |
+
 The accepted exit-policy family is 1R TP1 for 50% plus a right-tail structural
 ATR runner. SOR-LONG retains its exact committed time-stop policy. Candidate
 selection orders Owner Policy Priority, Candidate Scope Priority, Event Time,

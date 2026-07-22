@@ -87,6 +87,67 @@ class PostgresSignalRepository:
             for row in result.mappings()
         )
 
+    async def upsert_current_facts(
+        self,
+        *,
+        runtime_scope_id: str,
+        facts: tuple[SignalFactSnapshot, ...],
+    ) -> tuple[SignalFactSnapshot, ...]:
+        persisted: list[SignalFactSnapshot] = []
+        for fact in sorted(facts, key=lambda item: item.fact_definition_id):
+            result = await self._connection.execute(
+                sa.select(facts_current)
+                .where(
+                    facts_current.c.runtime_scope_id == runtime_scope_id,
+                    facts_current.c.fact_definition_id
+                    == fact.fact_definition_id,
+                )
+                .with_for_update()
+            )
+            row = result.mappings().one_or_none()
+            if row is None:
+                projection_version = 1
+                await self._connection.execute(
+                    sa.insert(facts_current).values(
+                        fact_current_id=(
+                            f"fact-current:{runtime_scope_id}:"
+                            f"{fact.fact_definition_id}"
+                        ),
+                        runtime_scope_id=runtime_scope_id,
+                        fact_definition_id=fact.fact_definition_id,
+                        value=fact.value,
+                        satisfied=fact.satisfied,
+                        observed_at_ms=fact.observed_at_ms,
+                        valid_until_ms=fact.valid_until_ms,
+                        projection_version=projection_version,
+                    )
+                )
+            elif _current_fact_matches(row, fact):
+                projection_version = int(row["projection_version"])
+            else:
+                projection_version = int(row["projection_version"]) + 1
+                await self._connection.execute(
+                    sa.update(facts_current)
+                    .where(
+                        facts_current.c.runtime_scope_id == runtime_scope_id,
+                        facts_current.c.fact_definition_id
+                        == fact.fact_definition_id,
+                    )
+                    .values(
+                        value=fact.value,
+                        satisfied=fact.satisfied,
+                        observed_at_ms=fact.observed_at_ms,
+                        valid_until_ms=fact.valid_until_ms,
+                        projection_version=projection_version,
+                    )
+                )
+            persisted.append(
+                fact.model_copy(
+                    update={"projection_version": projection_version}
+                )
+            )
+        return tuple(persisted)
+
     async def get_next_ready(self, *, now_ms: int) -> StrategySignal | None:
         return await self._get_next_candidate_ready(
             expiry_predicate=signal_events.c.expires_at_ms > now_ms
@@ -415,4 +476,16 @@ def _signal_from_row(
         occurred_at_ms=int(row["occurred_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),
         facts=facts,
+    )
+
+
+def _current_fact_matches(
+    row: RowMapping,
+    fact: SignalFactSnapshot,
+) -> bool:
+    return (
+        row["value"] == fact.value
+        and bool(row["satisfied"]) is fact.satisfied
+        and int(row["observed_at_ms"]) == fact.observed_at_ms
+        and int(row["valid_until_ms"]) == fact.valid_until_ms
     )

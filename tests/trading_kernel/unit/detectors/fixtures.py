@@ -14,6 +14,9 @@ NOW_MS = 1_800_000_000_000
 BTC = "binance-usdm:BTCUSDT:perpetual"
 ETH = "binance-usdm:ETHUSDT:perpetual"
 SOL = "binance-usdm:SOLUSDT:perpetual"
+AVAX = "binance-usdm:AVAXUSDT:perpetual"
+OP = "binance-usdm:OPUSDT:perpetual"
+SUI = "binance-usdm:SUIUSDT:perpetual"
 
 
 def cpm_long_snapshot() -> MarketSnapshot:
@@ -240,6 +243,10 @@ def snapshot(
         candles_4h=candles_4h,
         comparative_strength=comparative_strength,
     )
+
+
+def flat_candles(count: int, duration_ms: int) -> tuple[ClosedCandle, ...]:
+    return _flat_candles(count, duration_ms)
 
 
 def _up_context_4h() -> tuple[ClosedCandle, ...]:

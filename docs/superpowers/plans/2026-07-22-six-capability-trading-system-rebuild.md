@@ -363,7 +363,7 @@ git commit -m "feat(kernel): add six pure strategy event detectors"
 - Produces: stable signal identity from Event Spec, instrument, side, occurrence time, and fact digest.
 - Live and replay call the same detector function with the same `MarketSnapshot` type.
 
-- [ ] **Step 1: Write failing closed-candle and no-signal cadence tests**
+- [x] **Step 1: Write failing closed-candle and no-signal cadence tests**
 
 ```python
 async def test_observer_ignores_open_candle_and_creates_no_signal(pg_uow, market_source) -> None:
@@ -374,17 +374,17 @@ async def test_observer_ignores_open_candle_and_creates_no_signal(pg_uow, market
     assert await pg_uow.signals.count() == 0
 ```
 
-- [ ] **Step 2: Run observation tests and verify RED**
+- [x] **Step 2: Run observation tests and verify RED**
 
 Run: `pytest -q tests/trading_kernel/integration/test_observation_to_signal.py`
 
 Expected: failure because no observation service or market source port exists.
 
-- [ ] **Step 3: Implement bounded observation**
+- [x] **Step 3: Implement bounded observation**
 
 Fetch only required 15m/1h/4h closed candles, compute a `MarketSnapshot`, evaluate exactly one scope, upsert changed current facts, and append a signal plus fact snapshots only when triggered. A no-signal evaluation writes no files and appends no signal history.
 
-- [ ] **Step 4: Write failing Live/Replay parity test**
+- [x] **Step 4: Write failing Live/Replay parity test**
 
 ```python
 def test_live_and_replay_use_the_same_detector_result() -> None:
@@ -392,23 +392,23 @@ def test_live_and_replay_use_the_same_detector_result() -> None:
     assert evaluate_live_snapshot(cpm_contract(), snapshot) == evaluate_replay_snapshot(cpm_contract(), snapshot)
 ```
 
-- [ ] **Step 5: Run parity test and verify RED**
+- [x] **Step 5: Run parity test and verify RED**
 
 Run: `pytest -q tests/trading_kernel/integration/test_live_replay_detector_parity.py`
 
 Expected: failure because the shared evaluation boundary is missing.
 
-- [ ] **Step 6: Implement one shared evaluation boundary and worker cadence**
+- [x] **Step 6: Implement one shared evaluation boundary and worker cadence**
 
 The worker schedules by closed-bar event time, not a two-second heavy recomputation loop. Network calls have explicit timeout seconds. Current fact rows are bounded upserts; signal and fact-history rows grow only on actual signals.
 
-- [ ] **Step 7: Run focused observation tests**
+- [x] **Step 7: Run focused observation tests**
 
 Run: `pytest -q tests/trading_kernel/unit/detectors tests/trading_kernel/integration/test_observation_to_signal.py tests/trading_kernel/integration/test_live_replay_detector_parity.py`
 
 Expected: all tests pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/trading_kernel/application/observe_strategy_scope.py src/trading_kernel/application/produce_strategy_signal.py src/trading_kernel/application/market_ports.py src/trading_kernel/infrastructure/binance_public_market_source.py src/trading_kernel/interfaces/observation_worker.py src/trading_kernel/application/ports.py src/trading_kernel/infrastructure/pg_models.py migrations/trading_kernel/versions/0001_initial.py tests/trading_kernel/integration/test_observation_to_signal.py tests/trading_kernel/integration/test_live_replay_detector_parity.py
