@@ -384,7 +384,7 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
 
 
 @pytest.mark.asyncio
-async def test_initial_stop_timeout_is_conserved_and_prepares_controlled_exit(
+async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
     dispatch_engine: AsyncEngine,
 ) -> None:
     ticket = _ticket()
@@ -433,18 +433,17 @@ async def test_initial_stop_timeout_is_conserved_and_prepares_controlled_exit(
         )
         incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
 
-    assert aggregate is not None and aggregate.status is AggregateStatus.EXIT_PENDING
+    assert (
+        aggregate is not None
+        and aggregate.status is AggregateStatus.INITIAL_STOP_OUTCOME_UNKNOWN
+    )
     assert [
         command.status
         for command in commands
         if command.kind.value == "initial_stop"
     ] == [ExchangeCommandStatus.OUTCOME_UNKNOWN]
     assert [command.kind.value for command in commands].count("initial_stop") == 1
-    assert any(
-        command.kind.value == "exit"
-        and command.status is ExchangeCommandStatus.PREPARED
-        for command in commands
-    )
+    assert all(command.kind.value != "exit" for command in commands)
     assert incident is not None
     assert incident.incident_kind == "initial_stop_outcome_unknown"
 

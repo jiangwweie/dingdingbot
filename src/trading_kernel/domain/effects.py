@@ -58,6 +58,11 @@ class OpenIncident(_Effect):
     incident_kind: str
 
 
+class ResolveIncident(_Effect):
+    ticket_id: str
+    incident_kind: str
+
+
 class ReleaseEntryLane(_Effect):
     ticket_id: str
 
@@ -80,6 +85,7 @@ KernelEffect = (
     | CancelProtectionOrders
     | MarkCancelCommandReconciledAbsent
     | OpenIncident
+    | ResolveIncident
     | ReleaseEntryLane
     | SettleBudget
     | ReleaseBudget

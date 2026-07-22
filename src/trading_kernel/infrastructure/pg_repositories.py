@@ -36,10 +36,12 @@ from src.trading_kernel.domain.events import (
     CancelOrderAbsenceConfirmed,
     CancelOrderOutcomeUnknown,
     CancelOrderRejected,
+    ControlledFlattenAbsenceConfirmed,
     ControlledFlattenAccepted,
     ControlledFlattenOutcomeUnknown,
     ControlledFlattenRejected,
     EntryAccepted,
+    EntryAbsenceConfirmed,
     EntryFilled,
     EntryOutcomeUnknown,
     EntryPartiallyFilled,
@@ -49,10 +51,12 @@ from src.trading_kernel.domain.events import (
     EntryRemainderCancelRejected,
     ExternalFlatDetected,
     ExitAccepted,
+    ExitAbsenceConfirmed,
     ExitOutcomeUnknown,
     ExitRejected,
     ExitRequested,
     InitialStopConfirmed,
+    InitialStopAbsenceConfirmed,
     InitialStopOutcomeUnknown,
     InitialStopRejected,
     OwnedOrphanOrderDetected,
@@ -95,6 +99,7 @@ _EVENT_MODELS = {
     for event_type in (
         TicketIssued,
         EntryAccepted,
+        EntryAbsenceConfirmed,
         EntryRejected,
         EntryOutcomeUnknown,
         EntryFilled,
@@ -105,13 +110,16 @@ _EVENT_MODELS = {
         InitialStopConfirmed,
         InitialStopRejected,
         InitialStopOutcomeUnknown,
+        InitialStopAbsenceConfirmed,
         ExitRequested,
         ExitAccepted,
         ExitRejected,
         ExitOutcomeUnknown,
+        ExitAbsenceConfirmed,
         ControlledFlattenAccepted,
         ControlledFlattenRejected,
         ControlledFlattenOutcomeUnknown,
+        ControlledFlattenAbsenceConfirmed,
         PositionFlatConfirmed,
         ExternalFlatDetected,
         OwnedOrphanOrderDetected,
@@ -471,6 +479,64 @@ class PostgresExchangeCommandRepository:
                 "unknown cancel command was not available for absence reconciliation"
             )
 
+    async def reconcile_unknown_submitted(
+        self,
+        *,
+        command_id: str,
+        exchange_order_id: str,
+        observed_at_ms: int,
+    ) -> None:
+        updated = await self._connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.command_id == command_id,
+                exchange_commands.c.status
+                == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
+            )
+            .values(
+                status=ExchangeCommandStatus.RECONCILED_ACCEPTED.value,
+                result_payload={
+                    "status": "reconciled_accepted",
+                    "exchange_order_id": exchange_order_id,
+                    "observed_at_ms": observed_at_ms,
+                },
+                completed_at_ms=observed_at_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict(
+                "unknown command changed before submitted reconciliation"
+            )
+
+    async def reconcile_unknown_absent(
+        self,
+        *,
+        command_id: str,
+        observed_at_ms: int,
+        reason: str,
+    ) -> None:
+        updated = await self._connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.command_id == command_id,
+                exchange_commands.c.status
+                == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
+            )
+            .values(
+                status=ExchangeCommandStatus.RECONCILED_ABSENT.value,
+                result_payload={
+                    "status": "reconciled_absent",
+                    "reason": reason,
+                    "observed_at_ms": observed_at_ms,
+                },
+                completed_at_ms=observed_at_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict(
+                "unknown command changed before absence reconciliation"
+            )
+
     async def _command_from_row(self, row: RowMapping) -> ExchangeCommand:
         ticket = await self._tickets.get(str(row["ticket_id"]))
         if ticket is None:
@@ -573,6 +639,27 @@ class PostgresIncidentRepository:
             sa.select(runtime_incidents)
             .where(
                 runtime_incidents.c.ticket_id == ticket_id,
+                runtime_incidents.c.status == "open",
+            )
+            .order_by(
+                runtime_incidents.c.opened_at_ms.desc(),
+                runtime_incidents.c.incident_id.desc(),
+            )
+            .limit(1)
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else RuntimeIncidentRecord.model_validate(row)
+
+    async def get_open_for_ticket_kind(
+        self,
+        ticket_id: str,
+        incident_kind: str,
+    ) -> RuntimeIncidentRecord | None:
+        result = await self._connection.execute(
+            sa.select(runtime_incidents)
+            .where(
+                runtime_incidents.c.ticket_id == ticket_id,
+                runtime_incidents.c.incident_kind == incident_kind,
                 runtime_incidents.c.status == "open",
             )
             .order_by(

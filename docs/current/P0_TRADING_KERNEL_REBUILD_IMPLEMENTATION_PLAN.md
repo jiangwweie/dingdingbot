@@ -143,7 +143,7 @@ Current implementation evidence:
 | Pure Event detectors | Complete | Six positive vectors and full negative matrix |
 | Closed-market observation | Complete | Six-Event observation matrix, bounded current Facts, deterministic Signal identity, and Live/Replay parity; `52 passed`, Ruff and Mypy clean |
 | Candidate arbitration and CapacityClaim | Complete | Five-level deterministic ordering, bounded 64-candidate selector, action-time sizing, immutable claim lineage, and atomic Claim-to-Ticket issuance |
-| Venue Truth and unknown-outcome recovery | Active next task | One lookup authority must resolve unknown exchange outcomes without redispatch |
+| Venue Truth and unknown-outcome recovery | Complete | One timeout-bounded lookup authority covers ENTRY, Initial Stop, EXIT, Controlled Flatten, and Cancel; identity contradictions hard-stop, exact incidents resolve independently, and no unknown command is redispatched |
 
 The accepted exit-policy family is 1R TP1 for 50% plus a right-tail structural
 ATR runner. SOR-LONG retains its exact committed time-stop policy. Candidate

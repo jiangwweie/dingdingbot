@@ -19,6 +19,7 @@ from src.trading_kernel.domain.effects import (
     PrepareInitialStopCommand,
     ReleaseBudget,
     ReleaseEntryLane,
+    ResolveIncident,
     RequestControlledFlatten,
     SettleBudget,
 )
@@ -27,10 +28,12 @@ from src.trading_kernel.domain.events import (
     CancelOrderAbsenceConfirmed,
     CancelOrderOutcomeUnknown,
     CancelOrderRejected,
+    ControlledFlattenAbsenceConfirmed,
     ControlledFlattenAccepted,
     ControlledFlattenOutcomeUnknown,
     ControlledFlattenRejected,
     EntryAccepted,
+    EntryAbsenceConfirmed,
     EntryFilled,
     EntryOutcomeUnknown,
     EntryPartiallyFilled,
@@ -40,10 +43,12 @@ from src.trading_kernel.domain.events import (
     EntryRejected,
     ExternalFlatDetected,
     ExitAccepted,
+    ExitAbsenceConfirmed,
     ExitOutcomeUnknown,
     ExitRejected,
     ExitRequested,
     InitialStopConfirmed,
+    InitialStopAbsenceConfirmed,
     InitialStopOutcomeUnknown,
     InitialStopRejected,
     OwnedOrphanOrderDetected,
@@ -79,15 +84,30 @@ def reduce_event(
     _require_event_identity_and_sequence(current, event)
 
     if isinstance(event, EntryAccepted):
-        _require_status(current, AggregateStatus.ENTRY_PENDING)
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.ENTRY_PENDING,
+                AggregateStatus.ENTRY_OUTCOME_UNKNOWN,
+            },
+        )
         exchange_order_id = str(event.exchange_order_id or "").strip()
         if not exchange_order_id:
             raise InvalidLifecycleTransition("ENTRY acceptance requires order identity")
+        entry_accept_effects: tuple[KernelEffect, ...] = ()
+        if current.status is AggregateStatus.ENTRY_OUTCOME_UNKNOWN:
+            entry_accept_effects = (
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="entry_outcome_unknown",
+                ),
+            )
         return _transition(
             current,
             event,
             status=AggregateStatus.ENTRY_ACCEPTED,
             updates={"entry_exchange_order_id": exchange_order_id},
+            effects=entry_accept_effects,
         )
 
     if isinstance(event, EntryOutcomeUnknown):
@@ -114,6 +134,27 @@ def reduce_event(
             status=AggregateStatus.ENTRY_REJECTED,
             updates={"entry_lane_held": False},
             effects=(
+                ReleaseBudget(ticket_id=current.identity.ticket_id),
+                ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+            ),
+        )
+
+    if isinstance(event, EntryAbsenceConfirmed):
+        _require_status(current, AggregateStatus.ENTRY_OUTCOME_UNKNOWN)
+        if not str(event.command_id or "").strip():
+            raise InvalidLifecycleTransition(
+                "reconciled ENTRY absence requires command identity"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_RECONCILED_ABSENT,
+            updates={"entry_lane_held": False},
+            effects=(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="entry_outcome_unknown",
+                ),
                 ReleaseBudget(ticket_id=current.identity.ticket_id),
                 ReleaseEntryLane(ticket_id=current.identity.ticket_id),
             ),
@@ -176,19 +217,40 @@ def reduce_event(
         )
 
     if isinstance(event, EntryRemainderCancelConfirmed):
-        _require_status(current, AggregateStatus.PARTIAL_FILL_INCIDENT)
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.PARTIAL_FILL_INCIDENT,
+                AggregateStatus.PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN,
+            },
+        )
         if event.exchange_order_id != current.entry_exchange_order_id:
             raise InvalidLifecycleTransition("ENTRY remainder cancel identity mismatch")
+        cancel_recovery_effects: list[KernelEffect] = []
+        if current.status is AggregateStatus.PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN:
+            cancel_recovery_effects.extend(
+                (
+                    MarkCancelCommandReconciledAbsent(
+                        ticket_id=current.identity.ticket_id,
+                        exchange_order_id=event.exchange_order_id,
+                    ),
+                    ResolveIncident(
+                        ticket_id=current.identity.ticket_id,
+                        incident_kind="entry_remainder_cancel_outcome_unknown",
+                    ),
+                )
+            )
+        cancel_recovery_effects.append(
+            PrepareControlledFlattenCommand(
+                ticket_id=current.identity.ticket_id,
+                quantity=current.position_qty,
+            )
+        )
         return _transition(
             current,
             event,
             status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
-            effects=(
-                PrepareControlledFlattenCommand(
-                    ticket_id=current.identity.ticket_id,
-                    quantity=current.position_qty,
-                ),
-            ),
+            effects=tuple(cancel_recovery_effects),
         )
 
     if isinstance(event, EntryRemainderCancelRejected):
@@ -227,11 +289,28 @@ def reduce_event(
             ),
         )
     if isinstance(event, InitialStopConfirmed):
-        _require_status(current, AggregateStatus.PROTECTION_PENDING)
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.PROTECTION_PENDING,
+                AggregateStatus.INITIAL_STOP_OUTCOME_UNKNOWN,
+            },
+        )
         if event.protected_qty != current.position_qty:
             raise InvalidLifecycleTransition("initial stop does not cover exact position")
         if not str(event.exchange_order_id or "").strip():
             raise InvalidLifecycleTransition("initial stop order identity is required")
+        initial_stop_effects: list[KernelEffect] = []
+        if current.status is AggregateStatus.INITIAL_STOP_OUTCOME_UNKNOWN:
+            initial_stop_effects.append(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="initial_stop_outcome_unknown",
+                )
+            )
+        initial_stop_effects.append(
+            ReleaseEntryLane(ticket_id=current.identity.ticket_id)
+        )
         return _transition(
             current,
             event,
@@ -241,7 +320,7 @@ def reduce_event(
                 "protected_qty": event.protected_qty,
                 "initial_stop_exchange_order_id": event.exchange_order_id.strip(),
             },
-            effects=(ReleaseEntryLane(ticket_id=current.identity.ticket_id),),
+            effects=tuple(initial_stop_effects),
         )
 
     if isinstance(event, InitialStopRejected):
@@ -274,16 +353,38 @@ def reduce_event(
         return _transition(
             current,
             event,
-            status=AggregateStatus.EXIT_PENDING,
+            status=AggregateStatus.INITIAL_STOP_OUTCOME_UNKNOWN,
             effects=(
                 OpenIncident(
                     ticket_id=current.identity.ticket_id,
                     incident_kind="initial_stop_outcome_unknown",
                 ),
+            ),
+        )
+
+    if isinstance(event, InitialStopAbsenceConfirmed):
+        _require_status(current, AggregateStatus.INITIAL_STOP_OUTCOME_UNKNOWN)
+        if not str(event.command_id or "").strip():
+            raise InvalidLifecycleTransition(
+                "reconciled initial stop absence requires command identity"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.EXIT_PENDING,
+            effects=(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="initial_stop_outcome_unknown",
+                ),
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="initial_stop_absent",
+                ),
                 PrepareExitCommand(
                     ticket_id=current.identity.ticket_id,
                     quantity=current.position_qty,
-                    reason="initial_stop_outcome_unknown",
+                    reason="initial_stop_absent",
                 ),
             ),
         )
@@ -310,15 +411,30 @@ def reduce_event(
         )
 
     if isinstance(event, ExitAccepted):
-        _require_status(current, AggregateStatus.EXIT_PENDING)
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.EXIT_PENDING,
+                AggregateStatus.EXIT_OUTCOME_UNKNOWN,
+            },
+        )
         exchange_order_id = str(event.exchange_order_id or "").strip()
         if not exchange_order_id:
             raise InvalidLifecycleTransition("EXIT acceptance requires order identity")
+        exit_accept_effects: tuple[KernelEffect, ...] = ()
+        if current.status is AggregateStatus.EXIT_OUTCOME_UNKNOWN:
+            exit_accept_effects = (
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="exit_outcome_unknown",
+                ),
+            )
         return _transition(
             current,
             event,
             status=AggregateStatus.EXIT_ACCEPTED,
             updates={"exit_exchange_order_id": exchange_order_id},
+            effects=exit_accept_effects,
         )
 
     if isinstance(event, ExitRejected):
@@ -355,16 +471,49 @@ def reduce_event(
             ),
         )
 
+    if isinstance(event, ExitAbsenceConfirmed):
+        _require_status(current, AggregateStatus.EXIT_OUTCOME_UNKNOWN)
+        if not str(event.command_id or "").strip():
+            raise InvalidLifecycleTransition(
+                "reconciled EXIT absence requires command identity"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.EXIT_REJECTED,
+            effects=(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="exit_outcome_unknown",
+                ),
+            ),
+        )
+
     if isinstance(event, ControlledFlattenAccepted):
-        _require_status(current, AggregateStatus.CONTROLLED_FLATTEN_PENDING)
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+                AggregateStatus.CONTROLLED_FLATTEN_OUTCOME_UNKNOWN,
+            },
+        )
         exchange_order_id = str(event.exchange_order_id or "").strip()
         if not exchange_order_id:
             raise InvalidLifecycleTransition("controlled flatten requires order identity")
+        flatten_accept_effects: tuple[KernelEffect, ...] = ()
+        if current.status is AggregateStatus.CONTROLLED_FLATTEN_OUTCOME_UNKNOWN:
+            flatten_accept_effects = (
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="controlled_flatten_outcome_unknown",
+                ),
+            )
         return _transition(
             current,
             event,
             status=AggregateStatus.CONTROLLED_FLATTEN_ACCEPTED,
             updates={"exit_exchange_order_id": exchange_order_id},
+            effects=flatten_accept_effects,
         )
 
     if isinstance(event, ControlledFlattenRejected):
@@ -399,6 +548,28 @@ def reduce_event(
             ),
         )
 
+    if isinstance(event, ControlledFlattenAbsenceConfirmed):
+        _require_status(current, AggregateStatus.CONTROLLED_FLATTEN_OUTCOME_UNKNOWN)
+        if not str(event.command_id or "").strip():
+            raise InvalidLifecycleTransition(
+                "reconciled controlled flatten absence requires command identity"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.CONTROLLED_FLATTEN_REJECTED,
+            effects=(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="controlled_flatten_outcome_unknown",
+                ),
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="controlled_flatten_absent",
+                ),
+            ),
+        )
+
     if isinstance(event, PositionFlatConfirmed):
         _require_status_in(
             current,
@@ -414,12 +585,12 @@ def reduce_event(
             },
         )
         updates: dict[str, object] = {"position_qty": Decimal("0")}
-        effects: list[KernelEffect] = []
+        flat_effects: list[KernelEffect] = []
         if current.initial_stop_exchange_order_id is not None:
             updates["pending_cancel_exchange_order_id"] = (
                 current.initial_stop_exchange_order_id
             )
-            effects.append(
+            flat_effects.append(
                 CancelProtectionOrders(
                     ticket_id=current.identity.ticket_id,
                     exchange_order_id=current.initial_stop_exchange_order_id,
@@ -427,13 +598,15 @@ def reduce_event(
             )
         if current.entry_lane_held:
             updates["entry_lane_held"] = False
-            effects.append(ReleaseEntryLane(ticket_id=current.identity.ticket_id))
+            flat_effects.append(
+                ReleaseEntryLane(ticket_id=current.identity.ticket_id)
+            )
         return _transition(
             current,
             event,
             status=AggregateStatus.RECONCILIATION_PENDING,
             updates=updates,
-            effects=tuple(effects),
+            effects=tuple(flat_effects),
         )
 
     if isinstance(event, ExternalFlatDetected):
@@ -591,6 +764,10 @@ def reduce_event(
                 MarkCancelCommandReconciledAbsent(
                     ticket_id=current.identity.ticket_id,
                     exchange_order_id=event.exchange_order_id,
+                ),
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="cancel_order_outcome_unknown",
                 ),
             )
         return _transition(

@@ -60,6 +60,10 @@ class EntryOutcomeUnknown(_TicketEvent):
     reason: str
 
 
+class EntryAbsenceConfirmed(_TicketEvent):
+    command_id: str
+
+
 class EntryFilled(_TicketEvent):
     filled_qty: Decimal
     average_fill_price: Decimal
@@ -98,6 +102,10 @@ class InitialStopOutcomeUnknown(_TicketEvent):
     reason: str
 
 
+class InitialStopAbsenceConfirmed(_TicketEvent):
+    command_id: str
+
+
 class ExitRequested(_TicketEvent):
     reason: str
 
@@ -114,6 +122,10 @@ class ExitOutcomeUnknown(_TicketEvent):
     reason: str
 
 
+class ExitAbsenceConfirmed(_TicketEvent):
+    command_id: str
+
+
 class ControlledFlattenAccepted(_TicketEvent):
     exchange_order_id: str
 
@@ -124,6 +136,10 @@ class ControlledFlattenRejected(_TicketEvent):
 
 class ControlledFlattenOutcomeUnknown(_TicketEvent):
     reason: str
+
+
+class ControlledFlattenAbsenceConfirmed(_TicketEvent):
+    command_id: str
 
 
 class PositionFlatConfirmed(_TicketEvent):
@@ -181,6 +197,7 @@ TradeEvent = (
     | EntryAccepted
     | EntryRejected
     | EntryOutcomeUnknown
+    | EntryAbsenceConfirmed
     | EntryFilled
     | EntryPartiallyFilled
     | EntryRemainderCancelConfirmed
@@ -189,13 +206,16 @@ TradeEvent = (
     | InitialStopConfirmed
     | InitialStopRejected
     | InitialStopOutcomeUnknown
+    | InitialStopAbsenceConfirmed
     | ExitRequested
     | ExitAccepted
     | ExitRejected
     | ExitOutcomeUnknown
+    | ExitAbsenceConfirmed
     | ControlledFlattenAccepted
     | ControlledFlattenRejected
     | ControlledFlattenOutcomeUnknown
+    | ControlledFlattenAbsenceConfirmed
     | PositionFlatConfirmed
     | ExternalFlatDetected
     | OwnedOrphanOrderDetected

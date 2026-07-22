@@ -47,6 +47,7 @@ from src.trading_kernel.domain.effects import (
     PrepareInitialStopCommand,
     ReleaseBudget,
     ReleaseEntryLane,
+    ResolveIncident,
     RequestControlledFlatten,
     SettleBudget,
 )
@@ -335,6 +336,20 @@ class PostgresKernelUnitOfWork:
                     )
                 )
                 continue
+            if isinstance(effect, ResolveIncident):
+                incident = await self.incidents.get_open_for_ticket_kind(
+                    effect.ticket_id,
+                    effect.incident_kind,
+                )
+                if incident is None:
+                    raise UnsupportedKernelEffect(
+                        "expected runtime incident is missing during resolution"
+                    )
+                await self.incidents.resolve(
+                    incident.incident_id,
+                    resolved_at_ms=event.occurred_at_ms,
+                )
+                continue
             if isinstance(effect, SettleBudget):
                 await self.budgets.release(
                     effect.ticket_id,
@@ -355,6 +370,12 @@ class PostgresKernelUnitOfWork:
             await self.tickets.mark_terminal(
                 ticket_id,
                 status="entry_rejected",
+                terminal_at_ms=event.occurred_at_ms,
+            )
+        elif aggregate.status is AggregateStatus.ENTRY_RECONCILED_ABSENT:
+            await self.tickets.mark_terminal(
+                ticket_id,
+                status="entry_reconciled_absent",
                 terminal_at_ms=event.occurred_at_ms,
             )
         elif aggregate.status is AggregateStatus.TERMINAL:

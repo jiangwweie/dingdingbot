@@ -509,6 +509,12 @@ async def test_no_signal_tick_writes_no_files_and_only_material_monitor_transiti
             "incident-1",
             MonitorOwnerStatus.NEEDS_INTERVENTION,
         ),
+        (
+            True,
+            AggregateStatus.ENTRY_RECONCILED_ABSENT,
+            None,
+            MonitorOwnerStatus.COMPLETED,
+        ),
         (True, AggregateStatus.TERMINAL, None, MonitorOwnerStatus.COMPLETED),
     ],
 )

@@ -206,6 +206,7 @@ def derive_monitor_state(
     elif aggregate is not None and aggregate.status in {
         AggregateStatus.TERMINAL,
         AggregateStatus.ENTRY_REJECTED,
+        AggregateStatus.ENTRY_RECONCILED_ABSENT,
     }:
         owner_status = MonitorOwnerStatus.COMPLETED
         summary = "本次交易已完成"

@@ -27,6 +27,7 @@ from src.trading_kernel.domain.strategy_registry import (
     RegistrySeedResult,
 )
 from src.trading_kernel.domain.ticket import TradeTicket
+from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
 
 
 class AggregateVersionConflict(RuntimeError):
@@ -324,6 +325,22 @@ class ExchangeCommandRepository(Protocol):
         observed_at_ms: int,
     ) -> None: ...
 
+    async def reconcile_unknown_submitted(
+        self,
+        *,
+        command_id: str,
+        exchange_order_id: str,
+        observed_at_ms: int,
+    ) -> None: ...
+
+    async def reconcile_unknown_absent(
+        self,
+        *,
+        command_id: str,
+        observed_at_ms: int,
+        reason: str,
+    ) -> None: ...
+
 
 class BudgetRepository(Protocol):
     async def add(self, reservation: BudgetReservationRecord) -> None: ...
@@ -352,6 +369,12 @@ class IncidentRepository(Protocol):
     async def get_open_for_ticket(
         self,
         ticket_id: str,
+    ) -> RuntimeIncidentRecord | None: ...
+
+    async def get_open_for_ticket_kind(
+        self,
+        ticket_id: str,
+        incident_kind: str,
     ) -> RuntimeIncidentRecord | None: ...
 
     async def resolve(self, incident_id: str, *, resolved_at_ms: int) -> None: ...
@@ -568,6 +591,27 @@ class VenuePort(Protocol):
         self,
         request: VenueCommandRequest,
     ) -> ExchangeCommandResult: ...
+
+
+class VenueTruthRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    command_id: str
+    kind: ExchangeCommandKind
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
+    venue_client_order_id: str
+    payload: CommandPayload
+    observed_at_ms: int
+
+
+class VenueTruthPort(Protocol):
+    async def lookup_command_truth(
+        self,
+        request: VenueTruthRequest,
+    ) -> VenueTruthSnapshot: ...
 
 
 UnitOfWorkFactory = Callable[[], "KernelUnitOfWork"]

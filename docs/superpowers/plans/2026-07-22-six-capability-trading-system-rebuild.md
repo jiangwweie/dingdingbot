@@ -527,7 +527,7 @@ git commit -m "feat(kernel): issue tickets from deterministic capacity claims"
 - Extends venue access with `find_order_by_client_id`, position snapshot, fills, regular open orders, and conditional open orders.
 - Produces: `recover_unknown_command(uow, venue, request) -> UnknownRecoveryResult`.
 
-- [ ] **Step 1: Write failing decision tests**
+- [x] **Step 1: Write failing decision tests**
 
 ```python
 def test_visible_matching_order_resolves_unknown_as_submitted() -> None:
@@ -540,17 +540,17 @@ def test_identity_contradiction_opens_hard_incident() -> None:
     assert result.status is UnknownRecoveryStatus.IDENTITY_CONTRADICTION
 ```
 
-- [ ] **Step 2: Run unit tests and verify RED**
+- [x] **Step 2: Run unit tests and verify RED**
 
 Run: `pytest -q tests/trading_kernel/unit/test_unknown_command_recovery.py`
 
 Expected: failure because venue-truth models and recovery decisions do not exist.
 
-- [ ] **Step 3: Implement pure lookup decisions**
+- [x] **Step 3: Implement pure lookup decisions**
 
 States are `pending_visibility`, `reconciled_submitted`, `reconciled_absent`, `identity_contradiction`, and `lookup_failed`. `reconciled_absent` never authorizes a second ENTRY generation.
 
-- [ ] **Step 4: Write failing integration tests for visibility and restart**
+- [x] **Step 4: Write failing integration tests for visibility and restart**
 
 ```python
 async def test_unknown_entry_survives_restart_and_is_never_redispatched(pg_uow, venue) -> None:
@@ -561,23 +561,25 @@ async def test_unknown_entry_survives_restart_and_is_never_redispatched(pg_uow, 
     assert venue.create_order_calls == 0
 ```
 
-- [ ] **Step 5: Run integration test and verify RED**
+- [x] **Step 5: Run integration test and verify RED**
 
 Run: `pytest -q tests/trading_kernel/integration/test_unknown_outcome_reconciliation.py`
 
 Expected: failure because the current runtime records unknown outcomes but cannot resolve them through venue lookup.
 
-- [ ] **Step 6: Implement the VenueTruthPort and runtime recovery selector**
+- [x] **Step 6: Implement the VenueTruthPort and recovery use case**
 
-All venue calls are timeout-bounded and occur outside DB transactions. Identity contradiction creates a runtime incident and hard stop. A proven submitted ENTRY proceeds to protection recovery; a proven absent authoritative outcome closes pre-exposure terminally without retry.
+All venue calls are timeout-bounded and occur outside DB transactions. Identity contradiction creates a runtime incident and hard stop. Proven ENTRY submission proceeds to protection recovery, while authoritative ENTRY absence closes pre-exposure terminally without retry. Initial Stop, EXIT, Controlled Flatten, and Cancel use the same truth boundary; Cancel queries the exact target order, and Initial Stop uncertainty never creates a speculative EXIT.
 
-- [ ] **Step 7: Run focused command and recovery tests**
+- [x] **Step 7: Run focused command and recovery tests**
 
 Run: `pytest -q tests/trading_kernel/unit/test_unknown_command_recovery.py tests/trading_kernel/integration/test_unknown_outcome_reconciliation.py tests/trading_kernel/integration/test_command_dispatch.py`
 
 Expected: all tests pass.
 
-- [ ] **Step 8: Commit**
+Verified evidence: `65 passed` across reducer, adapter, dispatch, and unknown-recovery suites; `28 passed` across lifecycle, fault, UOW, and runtime regression suites; Ruff clean; Mypy clean across 51 production source files; suspicious runtime file authority `0`; frequent report writes `0`.
+
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/trading_kernel/application/recover_unknown_command.py src/trading_kernel/domain/venue_truth.py src/trading_kernel/application/ports.py src/trading_kernel/application/dispatch_exchange_command.py src/trading_kernel/infrastructure/venue_adapter.py src/trading_kernel/application/runtime.py tests/trading_kernel/unit/test_unknown_command_recovery.py tests/trading_kernel/integration/test_unknown_outcome_reconciliation.py

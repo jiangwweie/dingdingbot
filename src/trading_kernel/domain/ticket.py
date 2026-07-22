@@ -25,6 +25,7 @@ class TicketStatus(StrEnum):
     ISSUED = "issued"
     EXPIRED_BEFORE_SUBMIT = "expired_before_submit"
     ENTRY_REJECTED = "entry_rejected"
+    ENTRY_RECONCILED_ABSENT = "entry_reconciled_absent"
     TERMINAL = "terminal"
 
 
