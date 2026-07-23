@@ -16,6 +16,8 @@ from src.trading_kernel.application.runtime_facts import (
     InstrumentRulesRequest,
 )
 from src.trading_kernel.domain.capacity import ActionTimeFacts
+from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 
 
 class FakeCcxtExchange:
@@ -52,8 +54,27 @@ class FakeCcxtExchange:
                     {"filterType": "PRICE_FILTER", "tickSize": "0.1"},
                     {"filterType": "MIN_NOTIONAL", "notional": "5"},
                 ]
-            }
+            },
+            "limits": {"leverage": {"max": 20}},
         }
+
+    async def fapiPrivateGetLeverageBracket(self, params: dict[str, object]) -> list[dict[str, object]]:
+        assert params == {"symbol": "BTCUSDT"}
+        return [
+            {
+                "symbol": "BTCUSDT",
+                "brackets": [
+                    {
+                        "bracket": 1,
+                        "initialLeverage": 20,
+                        "notionalFloor": "0",
+                        "notionalCap": "0",
+                        "maintMarginRatio": "0.004",
+                        "cum": "0",
+                    }
+                ],
+            }
+        ]
 
     async def close(self) -> None:
         self.closed = True
@@ -98,6 +119,9 @@ class FakeProbeAdapter:
             price_tick=Decimal("0.1"),
             min_quantity=Decimal("0.001"),
             min_notional=Decimal("5"),
+            exchange_max_leverage=10,
+            maintenance_margin_brackets=_maintenance_brackets(),
+            maintenance_margin_brackets_digest=canonical_digest(_maintenance_brackets()),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -123,6 +147,18 @@ class FakeProbeAdapter:
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
+
+
+def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
+    return (
+        MaintenanceMarginBracket(
+            bracket_id="test:1",
+            notional_floor=Decimal("0"),
+            notional_cap=None,
+            maintenance_margin_rate=Decimal("0.005"),
+            maintenance_amount=Decimal("0"),
+        ),
+    )
 
 
 def _set_valid_runtime_environment(monkeypatch: pytest.MonkeyPatch) -> None:

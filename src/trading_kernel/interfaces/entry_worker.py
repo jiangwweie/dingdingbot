@@ -171,11 +171,17 @@ async def run_entry_worker_once(
 
     async with uow_factory() as uow:
         await uow.signals.upsert_instrument_rules(
+            venue_id=profile.venue_id,
             exchange_instrument_id=instrument_rules.exchange_instrument_id,
             quantity_step=instrument_rules.quantity_step,
             price_tick=instrument_rules.price_tick,
             min_quantity=instrument_rules.min_quantity,
             min_notional=instrument_rules.min_notional,
+            exchange_max_leverage=instrument_rules.exchange_max_leverage,
+            maintenance_margin_brackets=instrument_rules.maintenance_margin_brackets,
+            maintenance_margin_brackets_digest=(
+                instrument_rules.maintenance_margin_brackets_digest
+            ),
             observed_at_ms=instrument_rules.observed_at_ms,
             valid_until_ms=instrument_rules.valid_until_ms,
         )

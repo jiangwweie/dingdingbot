@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity import CapacityClaim
+from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
@@ -214,11 +215,15 @@ class InstrumentSnapshot(BaseModel):
 class InstrumentRulesSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    venue_id: str
     exchange_instrument_id: str
     quantity_step: Decimal
     price_tick: Decimal
     min_quantity: Decimal
     min_notional: Decimal
+    exchange_max_leverage: int
+    maintenance_margin_brackets: tuple[MaintenanceMarginBracket, ...]
+    maintenance_margin_brackets_digest: str
     observed_at_ms: int
     valid_until_ms: int
     projection_version: int
@@ -617,17 +622,22 @@ class SignalRepository(Protocol):
 
     async def get_instrument_rules(
         self,
+        venue_id: str,
         exchange_instrument_id: str,
     ) -> InstrumentRulesSnapshot | None: ...
 
     async def upsert_instrument_rules(
         self,
         *,
+        venue_id: str,
         exchange_instrument_id: str,
         quantity_step: Decimal,
         price_tick: Decimal,
         min_quantity: Decimal,
         min_notional: Decimal,
+        exchange_max_leverage: int,
+        maintenance_margin_brackets: tuple[MaintenanceMarginBracket, ...],
+        maintenance_margin_brackets_digest: str,
         observed_at_ms: int,
         valid_until_ms: int,
     ) -> InstrumentRulesSnapshot: ...

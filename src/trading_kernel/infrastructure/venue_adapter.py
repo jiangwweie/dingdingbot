@@ -24,11 +24,13 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
 from src.trading_kernel.domain.capacity import ActionTimeFacts
+from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionInstrumentFacts,
     AdmissionOrder,
     AdmissionPosition,
     EntryAdmissionSnapshot,
+    canonical_digest,
 )
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
@@ -366,10 +368,35 @@ class CcxtVenueAdapter:
             account_id=request.account_id,
             exchange_instrument_id=request.exchange_instrument_id,
         )
+        if request.venue_id != "binance-usdm":
+            raise RuntimeError("maintenance-margin rules are unsupported for venue")
+        raw_leverage_brackets = getattr(exchange, "fapiPrivateGetLeverageBracket", None)
+        if not callable(raw_leverage_brackets):
+            raise RuntimeError("venue does not expose maintenance-margin brackets")
         await _call_raw_exchange(exchange.load_markets, False)
         market = exchange.market(symbol)
         quantity_step, price_tick, min_quantity, min_notional = (
             _instrument_rules(market)
+        )
+        market_id = _binance_market_id(symbol)
+        bracket_rows = _require_list(
+            await _call_raw_exchange(
+                raw_leverage_brackets,
+                {"symbol": market_id},
+            ),
+            name="maintenance-margin brackets",
+        )
+        maintenance_margin_brackets, bracket_max_leverage = (
+            _binance_maintenance_margin_brackets(
+                bracket_rows,
+                venue_id=request.venue_id,
+                market_id=market_id,
+            )
+        )
+        market_max_leverage = _market_max_leverage(market)
+        exchange_max_leverage = min(
+            bracket_max_leverage,
+            market_max_leverage,
         )
         return InstrumentRulesFacts(
             exchange_instrument_id=request.exchange_instrument_id,
@@ -377,6 +404,11 @@ class CcxtVenueAdapter:
             price_tick=price_tick,
             min_quantity=min_quantity,
             min_notional=min_notional,
+            exchange_max_leverage=exchange_max_leverage,
+            maintenance_margin_brackets=maintenance_margin_brackets,
+            maintenance_margin_brackets_digest=canonical_digest(
+                maintenance_margin_brackets
+            ),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -1211,6 +1243,85 @@ def _instrument_rules(
         name="minimum notional",
     )
     return quantity_step, price_tick, min_quantity, min_notional
+
+
+def _binance_market_id(symbol: str) -> str:
+    base_quote = symbol.split(":", 1)[0]
+    parts = base_quote.split("/")
+    if len(parts) != 2 or not all(parts):
+        raise RuntimeError("venue symbol cannot produce a Binance market identity")
+    return "".join(parts)
+
+
+def _market_max_leverage(market: Mapping[str, object]) -> int:
+    raw = _nested_market_value(market, "limits", "leverage", "max")
+    try:
+        parsed = int(str(raw))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("venue market lacks a valid maximum leverage") from exc
+    if str(raw).strip() != str(parsed) or parsed <= 0:
+        raise RuntimeError("venue market maximum leverage must be a positive integer")
+    return parsed
+
+
+def _binance_maintenance_margin_brackets(
+    rows: list[object],
+    *,
+    venue_id: str,
+    market_id: str,
+) -> tuple[tuple[MaintenanceMarginBracket, ...], int]:
+    matching = tuple(
+        row
+        for row in rows
+        if isinstance(row, Mapping) and str(row.get("symbol") or "") == market_id
+    )
+    if len(matching) != 1:
+        raise RuntimeError("venue maintenance-margin brackets lack exact instrument truth")
+    raw_brackets = matching[0].get("brackets")
+    if not isinstance(raw_brackets, list) or not raw_brackets:
+        raise RuntimeError("venue maintenance-margin bracket rows are invalid")
+    parsed: list[MaintenanceMarginBracket] = []
+    max_leverages: list[int] = []
+    for row in raw_brackets:
+        if not isinstance(row, Mapping):
+            raise RuntimeError("venue maintenance-margin bracket is not a mapping")
+        raw_number = row.get("bracket")
+        try:
+            number = int(str(raw_number))
+            initial_leverage = int(str(row.get("initialLeverage")))
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("venue maintenance-margin leverage is invalid") from exc
+        if (
+            str(raw_number).strip() != str(number)
+            or str(row.get("initialLeverage")).strip() != str(initial_leverage)
+            or number <= 0
+            or initial_leverage <= 0
+        ):
+            raise RuntimeError("venue maintenance-margin bracket identities are invalid")
+        cap_value = Decimal(str(row.get("notionalCap") or "0"))
+        parsed.append(
+            MaintenanceMarginBracket(
+                bracket_id=f"{venue_id}:{market_id}:{number}",
+                notional_floor=Decimal(str(row.get("notionalFloor") or "0")),
+                notional_cap=None if cap_value == 0 else cap_value,
+                maintenance_margin_rate=Decimal(
+                    str(row.get("maintMarginRatio") or "0")
+                ),
+                maintenance_amount=Decimal(str(row.get("cum") or "0")),
+            )
+        )
+        max_leverages.append(initial_leverage)
+    ordered = tuple(sorted(parsed, key=lambda item: item.notional_floor))
+    if tuple(item.bracket_id for item in ordered) != tuple(
+        item.bracket_id for item in parsed
+    ):
+        raise RuntimeError("venue maintenance-margin brackets are not sorted")
+    for previous, current in zip(ordered, ordered[1:], strict=False):
+        if previous.notional_cap != current.notional_floor:
+            raise RuntimeError("venue maintenance-margin brackets are discontinuous")
+    if ordered[-1].notional_cap is not None:
+        raise RuntimeError("venue maintenance-margin brackets lack an open final tier")
+    return ordered, max(max_leverages)
 
 
 def _nested_market_value(

@@ -8,6 +8,7 @@ from src.trading_kernel.application.ports import VenueCommandRequest, VenueTruth
 from src.trading_kernel.application.runtime_facts import (
     ActionTimeFactsRequest,
     EntryAdmissionSnapshotRequest,
+    InstrumentRulesRequest,
     LifecycleFactsRequest,
     PositionSnapshotRequest,
     ReviewEconomicsRequest,
@@ -305,6 +306,55 @@ class AdmissionSnapshotExchange:
         ]
 
 
+class InstrumentRulesExchange:
+    def __init__(self) -> None:
+        self.loaded = False
+
+    async def load_markets(self, reload):
+        assert reload is False
+        self.loaded = True
+        return {}
+
+    def market(self, symbol):
+        assert self.loaded is True
+        assert symbol == "BTC/USDT:USDT"
+        return {
+            "info": {
+                "filters": [
+                    {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+                    {"filterType": "PRICE_FILTER", "tickSize": "0.1"},
+                    {"filterType": "MIN_NOTIONAL", "notional": "5"},
+                ]
+            },
+            "limits": {"leverage": {"max": 20}},
+        }
+
+    async def fapiPrivateGetLeverageBracket(self, params):
+        assert params == {"symbol": "BTCUSDT"}
+        return [
+            {
+                "symbol": "BTCUSDT",
+                "brackets": [
+                    {
+                        "bracket": 1,
+                        "initialLeverage": 20,
+                        "notionalFloor": "0",
+                        "notionalCap": "50000",
+                        "maintMarginRatio": "0.004",
+                        "cum": "0",
+                    },
+                    {
+                        "bracket": 2,
+                        "initialLeverage": 10,
+                        "notionalFloor": "50000",
+                        "notionalCap": "0",
+                        "maintMarginRatio": "0.005",
+                        "cum": "50",
+                    },
+                ],
+            }
+        ]
+
 class LifecycleFactsExchange:
     async def fetch_positions(self, symbols, params):
         return [
@@ -578,6 +628,35 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
         (None, {"conditional": True}),
     ]
     assert snapshot.valid_until_ms == 7_000
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_reads_typed_leverage_and_maintenance_rules() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): InstrumentRulesExchange()},
+        venue_symbols={
+            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT"
+        },
+        clock_ms=lambda: 2_000,
+    )
+
+    facts = await adapter.read_instrument_rules(
+        InstrumentRulesRequest(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            observed_at_ms=2_000,
+            valid_for_ms=5_000,
+        )
+    )
+
+    assert facts.exchange_max_leverage == 20
+    assert tuple(item.bracket_id for item in facts.maintenance_margin_brackets) == (
+        "binance-usdm:BTCUSDT:1",
+        "binance-usdm:BTCUSDT:2",
+    )
+    assert facts.maintenance_margin_brackets[1].maintenance_amount == Decimal("50")
+    assert facts.maintenance_margin_brackets_digest.startswith("sha256:")
 
 
 @pytest.mark.asyncio

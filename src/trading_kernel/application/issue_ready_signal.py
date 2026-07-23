@@ -126,7 +126,14 @@ async def issue_ready_signal(
         )
     profile = await uow.signals.get_runtime_profile(scope.runtime_profile_id)
     policy = await uow.entry_admission.get_owner_policy(scope.owner_policy_id)
-    rules = await uow.signals.get_instrument_rules(signal.exchange_instrument_id)
+    rules = (
+        None
+        if profile is None
+        else await uow.signals.get_instrument_rules(
+            profile.venue_id,
+            signal.exchange_instrument_id,
+        )
+    )
     event_spec = await uow.signals.get_event_spec(signal.event_spec_id)
     if (
         profile is None

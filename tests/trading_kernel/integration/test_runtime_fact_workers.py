@@ -13,6 +13,8 @@ from src.trading_kernel.application.runtime_facts import (
     PositionSnapshotRequest,
 )
 from src.trading_kernel.domain.capacity import ActionTimeFacts
+from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
@@ -91,9 +93,26 @@ class FakeActionTimeFactsSource:
             price_tick=Decimal("0.1"),
             min_quantity=Decimal("0.001"),
             min_notional=Decimal("5"),
+            exchange_max_leverage=10,
+            maintenance_margin_brackets=_maintenance_brackets(),
+            maintenance_margin_brackets_digest=canonical_digest(
+                _maintenance_brackets()
+            ),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
+
+
+def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
+    return (
+        MaintenanceMarginBracket(
+            bracket_id="test:1",
+            notional_floor=Decimal("0"),
+            notional_cap=None,
+            maintenance_margin_rate=Decimal("0.005"),
+            maintenance_amount=Decimal("0"),
+        ),
+    )
 
 
 class RecordingAcceptingVenue:
@@ -246,7 +265,8 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
         ticket = await uow.tickets.get(result.ticket_id)
         commands = await uow.exchange_commands.list_for_ticket(result.ticket_id)
         rules = await uow.signals.get_instrument_rules(
-            signal.exchange_instrument_id
+            "binance-usdm",
+            signal.exchange_instrument_id,
         )
     assert ticket is not None
     assert rules is not None

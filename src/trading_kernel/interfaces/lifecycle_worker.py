@@ -122,6 +122,7 @@ async def run_lifecycle_worker_once(
             aggregate.identity.runtime.event_spec_id
         )
         rules = await uow.signals.get_instrument_rules(
+            aggregate.identity.netting_domain.venue_id,
             aggregate.identity.netting_domain.exchange_instrument_id
         )
         commands = await uow.exchange_commands.list_for_ticket(

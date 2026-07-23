@@ -146,15 +146,27 @@ strategy_candidate_scopes = sa.Table(
 instrument_rules_current = sa.Table(
     "brc_instrument_rules_current",
     metadata,
+    sa.Column("venue_id", SHORT_TEXT, primary_key=True),
     _id("exchange_instrument_id", primary_key=True),
     sa.Column("quantity_step", MONEY, nullable=False),
     sa.Column("price_tick", MONEY, nullable=False),
     sa.Column("min_quantity", MONEY, nullable=False),
     sa.Column("min_notional", MONEY, nullable=False),
+    sa.Column("exchange_max_leverage", sa.Integer, nullable=False),
+    _json("maintenance_margin_brackets"),
+    sa.Column("maintenance_margin_brackets_digest", LONG_TEXT, nullable=False),
     _json("session_and_settlement"),
     _time("observed_at_ms"),
     _time("valid_until_ms"),
     sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.CheckConstraint(
+        "exchange_max_leverage > 0",
+        name="exchange_max_leverage_positive",
+    ),
+    sa.CheckConstraint(
+        "maintenance_margin_brackets_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="brackets_digest_valid",
+    ),
 )
 
 owner_policy_events = sa.Table(

@@ -33,6 +33,8 @@ from src.trading_kernel.application.runtime_facts import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.capacity import ActionTimeFacts
+from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandResult,
@@ -210,6 +212,11 @@ class CertifiedActionFactsSource:
             price_tick=Decimal("0.1"),
             min_quantity=Decimal("0.001"),
             min_notional=Decimal("5"),
+            exchange_max_leverage=10,
+            maintenance_margin_brackets=_maintenance_brackets(),
+            maintenance_margin_brackets_digest=canonical_digest(
+                _maintenance_brackets()
+            ),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -331,6 +338,18 @@ class CertifiedReviewEconomicsSource:
             funding_unavailable_reason=None,
             observed_at_ms=request.observed_at_ms,
         )
+
+
+def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
+    return (
+        MaintenanceMarginBracket(
+            bracket_id="test:1",
+            notional_floor=Decimal("0"),
+            notional_cap=None,
+            maintenance_margin_rate=Decimal("0.005"),
+            maintenance_amount=Decimal("0"),
+        ),
+    )
 
 
 @pytest.mark.parametrize(
@@ -577,11 +596,19 @@ async def _seed_runtime(
     async with engine.begin() as connection:
         await connection.execute(
             sa.insert(instrument_rules_current).values(
+                venue_id="binance-usdm",
                 exchange_instrument_id=instrument_id,
                 quantity_step=Decimal("0.001"),
                 price_tick=Decimal("0.1"),
                 min_quantity=Decimal("0.001"),
                 min_notional=Decimal("5"),
+                exchange_max_leverage=10,
+                maintenance_margin_brackets=[
+                    item.model_dump(mode="json") for item in _maintenance_brackets()
+                ],
+                maintenance_margin_brackets_digest=canonical_digest(
+                    _maintenance_brackets()
+                ),
                 session_and_settlement={},
                 observed_at_ms=NOW_MS - 1,
                 valid_until_ms=NOW_MS + 86_400_000,

@@ -24,6 +24,7 @@ from src.trading_kernel.application.ports import (
     StrategyVersionSnapshot,
 )
 from src.trading_kernel.domain.arbitration import EntryCandidate
+from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -213,7 +214,7 @@ class PostgresSignalRepository:
                 signal_events.c.expires_at_ms > now_ms,
                 runtime_scopes_current.c.enabled.is_(True),
                 owner_policy_current.c.enabled.is_(True),
-                owner_policy_current.c.real_submit_enabled.is_(True),
+                owner_policy_current.c.new_entry_submit_enabled.is_(True),
                 strategy_candidate_scopes.c.status == "active",
                 ~already_ticketed,
             )
@@ -515,10 +516,12 @@ class PostgresSignalRepository:
 
     async def get_instrument_rules(
         self,
+        venue_id: str,
         exchange_instrument_id: str,
     ) -> InstrumentRulesSnapshot | None:
         result = await self._connection.execute(
             sa.select(instrument_rules_current).where(
+                instrument_rules_current.c.venue_id == venue_id,
                 instrument_rules_current.c.exchange_instrument_id
                 == exchange_instrument_id
             )
@@ -533,17 +536,22 @@ class PostgresSignalRepository:
     async def upsert_instrument_rules(
         self,
         *,
+        venue_id: str,
         exchange_instrument_id: str,
         quantity_step: Decimal,
         price_tick: Decimal,
         min_quantity: Decimal,
         min_notional: Decimal,
+        exchange_max_leverage: int,
+        maintenance_margin_brackets: tuple[MaintenanceMarginBracket, ...],
+        maintenance_margin_brackets_digest: str,
         observed_at_ms: int,
         valid_until_ms: int,
     ) -> InstrumentRulesSnapshot:
         result = await self._connection.execute(
             sa.select(instrument_rules_current)
             .where(
+                instrument_rules_current.c.venue_id == venue_id,
                 instrument_rules_current.c.exchange_instrument_id
                 == exchange_instrument_id
             )
@@ -552,11 +560,18 @@ class PostgresSignalRepository:
         row = result.mappings().one_or_none()
         projection_version = 1 if row is None else int(row["projection_version"]) + 1
         values = {
+            "venue_id": venue_id,
             "exchange_instrument_id": exchange_instrument_id,
             "quantity_step": quantity_step,
             "price_tick": price_tick,
             "min_quantity": min_quantity,
             "min_notional": min_notional,
+            "exchange_max_leverage": exchange_max_leverage,
+            "maintenance_margin_brackets": [
+                item.model_dump(mode="json")
+                for item in maintenance_margin_brackets
+            ],
+            "maintenance_margin_brackets_digest": maintenance_margin_brackets_digest,
             "session_and_settlement": {},
             "observed_at_ms": observed_at_ms,
             "valid_until_ms": valid_until_ms,
@@ -570,6 +585,7 @@ class PostgresSignalRepository:
             await self._connection.execute(
                 sa.update(instrument_rules_current)
                 .where(
+                    instrument_rules_current.c.venue_id == venue_id,
                     instrument_rules_current.c.exchange_instrument_id
                     == exchange_instrument_id
                 )

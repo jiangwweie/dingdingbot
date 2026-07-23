@@ -186,6 +186,20 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
     ) in check_sql
 
 
+def test_instrument_rules_are_venue_scoped_and_freeze_leverage_brackets() -> None:
+    rules = metadata.tables["brc_instrument_rules_current"]
+
+    assert tuple(column.name for column in rules.primary_key.columns) == (
+        "venue_id",
+        "exchange_instrument_id",
+    )
+    assert {
+        "exchange_max_leverage",
+        "maintenance_margin_brackets",
+        "maintenance_margin_brackets_digest",
+    }.issubset(rules.c.keys())
+
+
 def test_signal_fact_snapshots_are_append_only_per_signal_and_definition() -> None:
     snapshots = metadata.tables["brc_signal_fact_snapshots"]
 

@@ -25,6 +25,8 @@ from src.trading_kernel.application.select_entry_candidate import (
     select_entry_candidate,
 )
 from src.trading_kernel.domain.capacity import ActionTimeFacts
+from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -364,6 +366,18 @@ def _signal(
     )
 
 
+def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
+    return (
+        MaintenanceMarginBracket(
+            bracket_id="test:1",
+            notional_floor=Decimal("0"),
+            notional_cap=None,
+            maintenance_margin_rate=Decimal("0.005"),
+            maintenance_amount=Decimal("0"),
+        ),
+    )
+
+
 async def _seed_runtime_authority(engine: AsyncEngine) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
@@ -371,11 +385,19 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
         await connection.execute(
             sa.insert(instrument_rules_current).values(
+                venue_id="binance-usdm",
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
                 quantity_step=Decimal("0.001"),
                 price_tick=Decimal("0.1"),
                 min_quantity=Decimal("0.001"),
                 min_notional=Decimal("5"),
+                exchange_max_leverage=10,
+                maintenance_margin_brackets=[
+                    item.model_dump(mode="json") for item in _maintenance_brackets()
+                ],
+                maintenance_margin_brackets_digest=canonical_digest(
+                    _maintenance_brackets()
+                ),
                 session_and_settlement={},
                 observed_at_ms=1_000,
                 valid_until_ms=10_000,
@@ -387,9 +409,15 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 owner_policy_id="policy-main",
                 policy_version=7,
                 enabled=True,
-                real_submit_enabled=True,
+                new_entry_submit_enabled=True,
+                priority_rank=1,
                 max_concurrent_tickets=8,
-                max_gross_notional=Decimal("1000"),
+                planned_stop_risk_fraction=Decimal("0.03"),
+                max_initial_margin_utilization=Decimal("0.90"),
+                max_leverage=10,
+                supported_margin_mode="cross",
+                min_liquidation_distance_to_stop_distance_ratio=Decimal("2.0"),
+                max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
                 scope={},
                 updated_at_ms=1_000,
             )

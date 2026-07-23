@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.capacity import ActionTimeFacts
+from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.position import PositionSnapshot
@@ -134,6 +135,9 @@ class InstrumentRulesFacts(BaseModel):
     price_tick: Decimal
     min_quantity: Decimal
     min_notional: Decimal
+    exchange_max_leverage: int
+    maintenance_margin_brackets: tuple[MaintenanceMarginBracket, ...]
+    maintenance_margin_brackets_digest: str
     observed_at_ms: int
     valid_until_ms: int
 
@@ -157,10 +161,27 @@ class InstrumentRulesFacts(BaseModel):
             raise ValueError("instrument rules must be positive")
         return value
 
+    @field_validator("exchange_max_leverage")
+    @classmethod
+    def _require_positive_exchange_leverage(cls, value: int) -> int:
+        if isinstance(value, bool) or value <= 0:
+            raise ValueError("exchange maximum leverage must be a positive integer")
+        return value
+
+    @field_validator("maintenance_margin_brackets_digest")
+    @classmethod
+    def _require_bracket_digest(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if len(normalized) != 71 or not normalized.startswith("sha256:"):
+            raise ValueError("maintenance brackets require a canonical digest")
+        return normalized
+
     @model_validator(mode="after")
     def _validate_rule_window(self) -> "InstrumentRulesFacts":
         if self.observed_at_ms <= 0 or self.valid_until_ms <= self.observed_at_ms:
             raise ValueError("instrument rule window must be current")
+        if not self.maintenance_margin_brackets:
+            raise ValueError("instrument rules require maintenance margin brackets")
         return self
 
 
