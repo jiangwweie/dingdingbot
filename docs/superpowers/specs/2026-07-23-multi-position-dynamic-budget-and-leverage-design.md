@@ -1,8 +1,8 @@
 ---
 title: Multi-Position Dynamic Budget And Leverage Design
-status: OWNER_REVIEW_REQUIRED
+status: OWNER_APPROVED_DESIGN
 date: 2026-07-23
-revision: 2
+revision: 3
 ---
 
 # Multi-Position Dynamic Budget And Leverage Design
@@ -57,19 +57,17 @@ Fees, funding, and realized slippage remain separate economics. The 3% value
 is the planned price loss from entry reference to Initial Stop, not a guarantee
 that realized loss cannot exceed 3% in a gap, rejection, or venue-failure case.
 
-## Owner Decisions Still Required
+## Approved Safety Decisions
 
-The conflict, capacity, and leverage ownership semantics are now complete.
-Three real-funds decisions remain intentionally unresolved and must not be
-guessed during implementation:
+The Owner approved the final real-funds safety values for this design:
 
-| Decision | Options | Recommendation |
+| Decision | Final value | Semantics |
 | --- | --- | --- |
-| Supported margin mode | Cross only; or Cross plus Isolated | **Cross only** for this account-wide shared budget model |
-| Pre-entry liquidation safety | No explicit proof; fixed distance rule; or venue-bracket-derived proof | **Venue-bracket-derived proof** with a configurable stop-to-liquidation safety ratio |
-| Post-fill stop-risk overrun | Continue and report; immediately flatten; or protect then conditionally flatten | **Install protection first, then controlled-flatten when typed tolerance is exceeded** |
+| Supported margin mode | **Cross only** | Isolated margin fails closed |
+| Pre-entry liquidation safety | **Venue-bracket-derived proof; ratio `2.0`** | Conservative liquidation distance must be at least twice the Initial Stop distance |
+| Post-fill stop-risk overrun | **Tolerance `0.10`; protect then conditionally flatten** | Hard ceiling is 110% of the frozen planned risk budget |
 
-The concrete recommended values are:
+The committed policy values are:
 
 ```text
 supported_margin_mode = cross
@@ -81,16 +79,15 @@ max_post_fill_stop_risk_overrun_fraction = 0.10
 twice the Initial Stop distance. `0.10` is a relative tolerance on the frozen
 3% budget, so the hard post-fill ceiling would be 3.3% of
 `total_wallet_balance_at_claim`; it does not mean ten percentage points of the
-account. These values need explicit Owner approval before the implementation
-plan is final. They belong in versioned Owner Policy, not in code constants or
-environment variables.
+account. These values belong in versioned Owner Policy, not in code constants
+or environment variables.
 
 Position mode and margin mode are separate facts:
 
 | Fact | Required value | Meaning |
 | --- | --- | --- |
 | Position mode | `independent_sides` | Venue Hedge Mode; long and short position rows can coexist |
-| Margin mode | Proposed `cross` | All supported Tickets consume one account-wide shared margin pool |
+| Margin mode | `cross` | All supported Tickets consume one account-wide shared margin pool |
 
 Independent long/short support does not prove Cross margin. Both facts must be
 read and verified independently.
@@ -146,13 +143,16 @@ Observation
 -> fresh account and instrument facts
 -> slot-aware CapacityClaim
 -> immutable Ticket
+-> optional durable SET_LEVERAGE Exchange Command
+-> exact leverage read-back
 -> durable ENTRY Exchange Command
--> leverage set/read-back when permitted
 -> ENTRY order
 -> exact fill and post-fill safety disposition
 -> Initial Stop
 -> concurrent protected lifecycle
 -> reconciliation
+-> ReconciliationMatched
+-> release Budget / Account Capacity count / Netting Domain
 -> settlement
 -> review
 ```
@@ -237,10 +237,16 @@ must not mutate it while either side is open.
 | Exact instrument is flat, order-free, Incident-free, and unowned exposure is absent | Either supported direction | Normal arbitration and capacity evaluation |
 | Different instrument has a healthy Ticket | Any supported direction | No instrument conflict; account count and margin still apply |
 
-### Instrument Ownership And Health
+### Admission Snapshot And Derived Health
 
-The Entry boundary must classify exact-instrument facts, not rely on raw order
-counts. A typed `InstrumentEntryHealth` decision distinguishes:
+The venue boundary returns one frozen `EntryAdmissionSnapshot` for the exact
+`venue + account` observation cycle. It contains the signed current account
+financials, every currently open position and order, exact-instrument mark and
+leverage facts, and one shared `observed_at_ms`, `valid_until_ms`, and canonical
+`snapshot_digest`.
+
+The application passes that one snapshot through pure domain classifiers. A
+typed `InstrumentEntryHealth` decision distinguishes:
 
 ```text
 owned active Tickets and their sides
@@ -255,12 +261,15 @@ configured leverage
 observed_at_ms / valid_until_ms / digest
 ```
 
-A separate typed `AccountEntryHealth` validates every currently open position
-and order returned for the exact `venue + account` and matches BRC-owned rows to
-current Ticket/command identities. It distinguishes owned healthy exposure,
-owned recovery work, unowned exposure, unowned orders, and contradictory or
-incomplete venue truth. This is a bounded current-state snapshot, not a history
-scan and not a new persistence authority.
+A typed `AccountEntryHealth` validates every position and order in the same
+snapshot and matches BRC-owned rows to current Ticket/command identities. It
+distinguishes owned healthy exposure, owned recovery work, unowned exposure,
+unowned orders, and contradictory or incomplete venue truth.
+
+Both decisions freeze the same parent `snapshot_digest`; neither classifier may
+perform network I/O or accept an independently timed venue response. This is a
+bounded current-state snapshot, not a history scan and not a new persistence
+authority.
 
 Expected protection orders belonging to a healthy opposite-side BRC Ticket do
 not by themselves block coexistence. Because the proposed model is Cross margin,
@@ -282,7 +291,7 @@ Incident an explicit new-ENTRY blocking scope:
 | --- | --- | --- | --- |
 | Active Ticket in the same Netting Domain | Exact Netting Domain; normal occupancy | Refuse that candidate | Existing Ticket continues normally |
 | Healthy protected Ticket in another domain | None beyond count and margin | May admit after fresh checks | Lifecycle remains concurrent |
-| Schema/commit mismatch or duplicate writer authority | Runtime | Block every new ENTRY | Existing exposure remains fail-closed under the current recovery contract |
+| Schema/commit mismatch or duplicate writer authority | Runtime | Block every new ENTRY | Suspect writers stop mutation; only a subsequently certified single writer may resume durable recovery |
 | Unknown exchange mutation outcome on any active Ticket | Exact Account Capacity Domain | Block all new ENTRY for the account | Reconciliation resolves exact external truth |
 | Partial fill, unprotected exposure, protection shortfall, controlled flatten, or any unowned account position/order | Exact Account Capacity Domain | Block all new ENTRY for the account | Lifecycle/recovery retains write authority only for BRC-owned exposure |
 | Residual owned order after flatness or leverage contradiction | Exact Leverage Domain | Block both directions of that instrument | Other healthy instruments may continue |
@@ -302,6 +311,22 @@ none             -> null
 ```
 
 Database constraints enforce those scope/key shapes.
+
+#### Runtime Fence With Existing Exposure
+
+A runtime-scoped Incident separates the suspected writer from the recovery
+authority:
+
+| Runtime fact | New ENTRY | Existing exposure |
+| --- | --- | --- |
+| Commit/schema identity mismatch in this worker | Blocked | This worker performs no exchange mutation; readonly reconciliation and probes may continue |
+| Duplicate old/new writers are both capable | Blocked | All competing writers are fenced before any lifecycle mutation resumes |
+| One exact deployed writer is certified after fencing | Still blocked until the Incident resolves | The certified writer may resume durable protection, exit, cancel, and controlled-flatten commands |
+| No certified writer can safely resume while exposure is unprotected | Blocked | Owner-facing intervention Incident; preserve readonly truth and do not improvise a bypass writer |
+
+Runtime mismatch never grants a suspect process permission to “repair” an
+existing Ticket. Safety writes resume only through the exact deployed release,
+schema, command identity, and single-writer fence.
 
 Authoritative rejection, ordinary budget exhaustion, stale Signal, and active
 Netting Domain occupancy are terminal admission outcomes but are not runtime
@@ -350,7 +375,7 @@ The policy model becomes:
 owner_policy_id
 policy_version
 enabled
-real_submit_enabled
+new_entry_submit_enabled
 priority_rank
 max_concurrent_tickets
 planned_stop_risk_fraction
@@ -363,10 +388,9 @@ scope
 updated_at_ms
 ```
 
-The committed deterministic seed installs `3`, `0.03`, `0.90`, and `10`. The
-supported margin mode and two remaining safety ratios are installed only after
-explicit Owner approval. Policy literals may exist in the seed and its exact
-tests, but not inside the domain calculation or worker orchestration.
+The committed deterministic seed installs `3`, `0.03`, `0.90`, `10`, `cross`,
+`2.0`, and `0.10`. Policy literals may exist in the seed and its exact tests,
+but not inside the domain calculation or worker orchestration.
 
 ### Fresh Exchange Facts
 
@@ -383,6 +407,7 @@ Action-time account facts must distinguish loss capacity from margin capacity:
 | `margin_mode` | Exact Cross or Isolated account/instrument mode | Supported-mode admission gate |
 | `configured_leverage` | Exact account/instrument leverage read-back | Existing-position leverage constraint |
 | `instrument_open_position_count` | Both long and short rows for the exact instrument | Whether leverage mutation is allowed |
+| `entry_admission_snapshot_digest` | Canonical digest shared by all account/instrument admission facts | Proves one observation cycle |
 | `instrument_entry_health` | Typed owned/unowned position, order, Incident, and unknown-outcome classification | Direction and leverage-domain admission |
 | `account_entry_health` | Typed ownership classification across all current account positions and orders | Cross-margin account admission fence |
 | `maintenance_margin_brackets` | Signed current venue tiers for the exact instrument | Conservative liquidation proof |
@@ -391,10 +416,9 @@ All values are fresh, bounded, identity-matched, and included in the
 action-facts digest. Missing, stale, non-finite, negative, or contradictory
 facts block the CapacityClaim.
 
-The design currently assumes an account-wide Cross-margin model because its
-slot allocation uses shared `total_margin_balance` and `total_initial_margin`.
-Until the Owner confirms Cross-only support or defines isolated-margin
-allocation, an Isolated fact must fail closed.
+The design supports only an account-wide Cross-margin model because its slot
+allocation uses shared `total_margin_balance` and `total_initial_margin`. An
+Isolated fact fails closed.
 
 ### Instrument Rules
 
@@ -573,8 +597,7 @@ The selected projected liquidation price, bracket identity, calculated
 distance, and ratio are frozen into the Claim. They are a conservative
 pre-entry safety proof, not a promise that a Cross-margin liquidation boundary
 can never move after other positions, PnL, fees, or venue rules change. The
-exact safety ratio remains an Owner decision and is versioned in policy; the
-recommended value is `2.0`.
+exact safety ratio is versioned in Owner Policy as `2.0`.
 
 ## Immutable CapacityClaim
 
@@ -589,6 +612,7 @@ leverage_domain_key
 owner_policy_id / owner_policy_version
 runtime_scope_id / runtime_scope_version
 fact_digest / action_facts_digest
+entry_admission_snapshot_digest
 account_entry_health_digest
 instrument_entry_health_digest
 instrument_rules_projection_version
@@ -611,6 +635,7 @@ ticket_margin_budget
 required_leverage
 selected_leverage
 configured_leverage_at_claim
+leverage_change_required
 exchange_max_leverage
 reserved_margin
 entry_reference_price
@@ -637,6 +662,7 @@ after the action-time facts expire:
 planned_stop_risk_budget
 post_fill_stop_risk_limit
 selected_leverage
+leverage_change_required
 reserved_margin
 risk_reservation_basis
 margin_mode
@@ -674,50 +700,84 @@ for subsequent Ticket sizing.
 
 ## ENTRY Leverage Application
 
-No new business table or parallel command chain is introduced.
+No new business table or parallel execution chain is introduced. The existing
+`brc_exchange_commands` lineage gains a distinct `SET_LEVERAGE` command kind so
+each external mutation has one durable command identity.
 
-The existing durable ENTRY command payload gains:
+The `SET_LEVERAGE` command payload freezes:
 
 ```text
 desired_leverage
-leverage_policy_version
+owner_policy_version
+entry_admission_snapshot_digest
 leverage_fact_digest
 ```
 
-The existing command result payload records:
+Its result records:
 
 ```text
-selected_leverage
+desired_leverage
 exchange_configured_leverage
 leverage_verified_at_ms
 leverage_verification_digest
 ```
 
-For a flat exact account/instrument, the command worker executes outside any
-open PostgreSQL transaction:
+The ENTRY command payload contains no leverage mutation intent. It freezes the
+already-proved requirement:
 
 ```text
-claim durable ENTRY command
--> complete fresh dispatch preflight with zero venue mutations
--> set_leverage(selected_leverage)
--> signed exact-instrument leverage read-back
--> require exact equality
--> create_order with deterministic client_order_id
--> persist accepted, rejected, or outcome_unknown result
+required_configured_leverage
+leverage_verification_digest
 ```
 
-For an instrument with an existing position, `set_leverage` is skipped and the
-command revalidates that the current configured leverage equals the Ticket’s
-selected leverage before `create_order`.
+Ticket issuance persists exactly one initial prepared command:
+
+```text
+flat instrument and configured leverage differs
+-> SET_LEVERAGE generation 1
+
+instrument already has a healthy opposite-side position
+or flat instrument already has exact selected leverage
+-> ENTRY generation 1
+```
+
+For a required leverage change, the command worker executes outside any open
+PostgreSQL transaction:
+
+```text
+claim durable SET_LEVERAGE command
+-> complete fresh mutation preflight
+-> set_leverage(selected_leverage)
+-> signed exact-instrument leverage read-back
+-> persist confirmed, rejected, or outcome_unknown result
+-> on exact confirmation, persist durable ENTRY generation 1 in a new short transaction
+```
+
+An authoritative leverage rejection terminally releases the unexposed Ticket;
+it never creates ENTRY. An unknown leverage outcome is never resent. Readonly
+reconciliation reads exact leverage, position, and order truth:
+
+- desired leverage confirmed, instrument flat, and no order exists: resolve the
+  unknown result and prepare ENTRY generation 1;
+- different leverage confirmed with instrument flat and no order: terminally
+  reject and release without a second leverage generation;
+- position/order contradiction: retain the Incident and block release until
+  exact ownership is resolved.
+
+For an instrument with an existing position, no `SET_LEVERAGE` command is
+created. ENTRY dispatch revalidates that current configured leverage equals the
+Ticket’s selected leverage before `create_order`.
 
 Protection, take-profit, exit, cancel, replacement, and controlled-flatten
 commands never carry leverage mutation intent.
 
 ### Dispatch-Time Revalidation
 
-Ticket issuance and exchange dispatch are separate transactions, and a crash may
-delay a prepared command. Immediately before the first exchange mutation, the
-Entry worker performs one fresh read-only preflight. It verifies:
+Ticket issuance, optional leverage dispatch, and ENTRY dispatch are separate
+transactions, and a crash may delay either prepared command. Immediately before
+each external mutation, the Entry worker performs a fresh read-only preflight.
+The `SET_LEVERAGE` preflight additionally requires both instrument sides flat;
+the ENTRY preflight verifies:
 
 ```text
 Ticket and durable command are still the one applicable ENTRY generation
@@ -757,8 +817,8 @@ The Ticket is already counted in PostgreSQL, but its unsubmitted order is not
 assumed to be present in exchange `total_initial_margin`. The frozen reservation
 is compared once; it is not subtracted and then compared again.
 
-If preflight fails before any exchange mutation, the durable ENTRY command is
-authoritatively refused with a typed reason, the unexposed Ticket becomes
+If preflight fails before any exchange mutation, the applicable durable command
+is authoritatively refused with a typed reason. The unexposed Ticket becomes
 terminal, and its lane, reservation, count, and Netting Domain are released in
 the normal reducer path. The Signal and Ticket are not retried.
 
@@ -766,12 +826,13 @@ Preflight never resizes or reprices the immutable Ticket. A favorable quote may
 pass with lower projected stop risk; an unfavorable quote that breaches the
 frozen hard risk or liquidation boundary is refused before exposure.
 
-Once `set_leverage` or `create_order` may have reached the venue, timeout or
-process loss is an unknown mutation outcome. It must be reconciled from exact
-leverage, order, fill, and position truth before release. A successfully changed
-flat-instrument leverage is not restored merely because the later ENTRY order is
-authoritatively rejected; it is harmless configuration state and may be changed
-by a later flat-instrument Ticket.
+Once a `SET_LEVERAGE` or ENTRY command may have reached the venue, timeout or
+process loss is unknown only for that exact durable command. It must be
+reconciled from exact leverage, order, fill, and position truth before the next
+command or release. A successfully changed flat-instrument leverage is not
+restored merely because the later ENTRY command is authoritatively rejected; it
+is harmless configuration state and may be changed by a later flat-instrument
+Ticket.
 
 ### Post-Fill Stop-Risk Reconciliation
 
@@ -850,7 +911,7 @@ lock global ENTRY lane
 -> reserve account exposure count and display aggregates
 -> claim Netting Domain
 -> create Trade Aggregate and first Trade Event
--> persist durable ENTRY command
+-> persist initial durable SET_LEVERAGE or ENTRY command
 -> commit
 ```
 
@@ -876,8 +937,8 @@ may already have occurred:
 | Ticket point | Policy/scope change result | Exchange-write authority |
 | --- | --- | --- |
 | No Ticket issued | Latest current policy and scope apply | No old authority exists |
-| Ticket issued; ENTRY command still prepared and no venue mutation attempted | Any policy-version mismatch, policy disable, write disable, scope-version mismatch, or scope disable terminally supersedes ENTRY and releases the unexposed Ticket | No ENTRY is sent |
-| ENTRY command claimed and mutation outcome is uncertain | Do not assume cancellation | Reconciliation alone determines whether exposure exists |
+| Ticket issued; SET_LEVERAGE or ENTRY command still prepared and no venue mutation attempted | Any policy-version mismatch, policy disable, write disable, scope-version mismatch, or scope disable terminally supersedes admission and releases the unexposed Ticket | No mutation is sent |
+| SET_LEVERAGE or ENTRY command claimed and its mutation outcome is uncertain | Do not assume cancellation | Reconciliation resolves that exact command before progression or release |
 | ENTRY filled or an open position exists | Ticket keeps its frozen policy, strategy version, Event Spec, exit policy, quantity, stop, and leverage evidence | Protection, recovery, exit, reconciliation, Settlement, and Review continue through terminal completion |
 | Reconciliation matched; Settlement or Review pending | Capital and Netting Domain authority are already released; audit retains frozen identity | No exposure write remains; later Tickets use current policy |
 | Ticket terminal and released | No retained execution authority | A later market event uses only the latest current policy and scope |
@@ -887,7 +948,7 @@ resize or automatically flatten an already protected Ticket. It blocks or sizes
 only later Tickets unless the Owner invokes a separate explicit emergency
 flatten operation within the existing durable command chain.
 
-`real_submit_enabled=false` is a new-ENTRY authority fence. It must not disable
+`new_entry_submit_enabled=false` is a new-ENTRY authority fence. It must not disable
 Initial Stop, protection repair, exit, controlled flatten, cancellation, or
 reconciliation writes needed to make existing exposure safe and flat. A total
 service/write fence is valid only after external flatness and zero open orders
@@ -913,15 +974,18 @@ settled, and reviewed.
 | Three capital-owning Tickets | Capacity exhausted |
 | Same Netting Domain occupied | Admission refused |
 | Open account/runtime Incident fence | Admission refused for the applicable scope |
-| External position/order or residual exact-instrument order | Leverage Domain blocked; no adoption or cancellation |
+| Unowned external position/order anywhere in the Cross account | Account Capacity Domain blocked; no adoption or cancellation |
+| Owned residual exact-instrument order after flatness | Leverage Domain blocked until exact cleanup |
 | Existing instrument leverage above policy maximum | Admission refused |
 | Existing instrument leverage insufficient for full target | Shrink using existing leverage |
 | Liquidation proof missing, stale, or below policy ratio | No CapacityClaim |
 | Policy or Runtime Scope version changes before dispatch | Unexposed Ticket terminally superseded and released |
 | Fresh margin or wallet budget no longer carries frozen Ticket | Pre-dispatch ENTRY refusal; no venue mutation |
 | Fresh quote breaks protection direction, risk tolerance, or liquidation safety | Pre-dispatch ENTRY refusal; no venue mutation |
-| `set_leverage` rejected | ENTRY command rejected; no order submit |
-| Leverage read-back missing or mismatched | No order submit; fail-closed |
+| `SET_LEVERAGE` authoritatively rejected | Ticket admission rejected; no ENTRY command generated |
+| Leverage read-back missing or contradictory | `SET_LEVERAGE` outcome unknown; no ENTRY command generated |
+| Unknown leverage outcome reconciles to desired value while flat and order-free | Resolve Incident and generate the first and only ENTRY command |
+| Unknown leverage outcome reconciles to a different value while flat and order-free | Terminal admission rejection; no leverage resend and no ENTRY |
 | Timeout after any exchange mutation | `outcome_unknown`; never blind resend |
 | ENTRY authoritative rejection | Terminal; release budget and lane |
 | Partial ENTRY fill | Existing Incident and controlled-flatten contract |
@@ -929,9 +993,10 @@ settled, and reviewed.
 | Frozen stop is no longer protective relative to fill | Immediate controlled-flatten Incident |
 | Initial Stop unresolved | Global ENTRY lane remains held |
 
-Leverage mutation and order submission form one durable ENTRY intent. Exact
-reconciliation must distinguish “no order exists,” “order exists,” and
-“external outcome remains unknown” without generating a second ENTRY.
+Leverage mutation and order submission remain one Ticket admission lineage but
+use separate durable command identities. Exact reconciliation must resolve the
+current command before the next command is created and must never generate a
+second SET_LEVERAGE generation or a second ENTRY generation.
 
 Refusal classifications remain specific. `budget_exhausted` is used only for
 count, wallet-risk, margin, or venue-minimum exhaustion. Margin-mode mismatch,
@@ -946,21 +1011,23 @@ No new business table is required.
 
 | Existing table | Change |
 | --- | --- |
-| `brc_owner_policy_current` | Replace fixed gross/fixed-ticket fields and `target_leverage` with risk fraction, margin utilization, max leverage, supported margin mode, safety ratios, and count policy |
+| `brc_owner_policy_current` | Replace fixed gross/fixed-ticket fields and `target_leverage`; rename `real_submit_enabled` to `new_entry_submit_enabled`; add risk fraction, margin utilization, max leverage, supported margin mode, safety ratios, and count policy |
 | `brc_instrument_rules_current` | Key by `venue_id + exchange_instrument_id`; add `exchange_max_leverage`, typed maintenance-margin bracket payload, schema version, and digest |
 | `brc_capacity_claims` | Add frozen account, slot, margin, instrument-health, liquidation-proof, tolerance, and selected-leverage decision fields |
 | `brc_trade_tickets` | Add Claim identity and frozen budget/safety outputs; rename leverage semantics |
-| `brc_trade_aggregates` | Add actual stop risk, actual liquidation evidence at fill, and typed post-fill risk disposition |
+| `brc_trade_aggregates` | Add leverage-admission statuses, actual stop risk, actual liquidation evidence at fill, and typed post-fill risk disposition |
 | `brc_budget_reservations` | Add exact venue/account identity, reserved margin, planned budget, and risk basis |
 | `brc_account_exposure_current` | Key the projection by exact `venue_id + account_id`; retain current count and display aggregates |
 | `brc_runtime_incidents` | Add typed `entry_block_scope` and canonical `entry_block_key` |
+| `brc_exchange_commands` | Add typed `SET_LEVERAGE` kind and payload/result schemas; retain the existing table and command identity model |
 
 `brc_owner_policy_events` and `brc_exchange_commands` already use typed identity
 plus JSON payloads and do not need new tables. `brc_account_exposure_current`
 retains gross notional and gross stop risk as observability projections, but
 they are no longer admission caps. `active_ticket_count` remains authoritative
 for the configured Ticket count boundary. The baseline keeps the same business
-table set; this program changes columns and constraints, not table count.
+table set; this program changes columns, command kinds, and constraints, not
+table count.
 
 Because the current program uses one clean baseline and the Owner authorized a
 forward-only BRC rebuild, implementation modifies `0001_initial` directly and
@@ -976,13 +1043,16 @@ The implementation keeps responsibilities narrow:
 | --- | --- |
 | `domain/capacity.py` | Frozen capacity facts, policy, Claim, statuses, and decision identities |
 | `domain/capacity_sizing.py` | Pure slot allocation, leverage selection, quantity rounding, and refusal reasons |
+| `domain/entry_admission_snapshot.py` | One frozen venue/account observation cycle shared by account and instrument health |
 | `domain/account_entry_health.py` | Pure account-wide current ownership and Cross-margin admission classification |
 | `domain/instrument_entry_health.py` | Pure owned/unowned position, order, leverage-domain, and conflict classification |
 | `domain/incident_blocking.py` | Typed Incident-to-entry-fence scope without free-form string inference |
 | `domain/post_fill_risk.py` | Pure actual fill risk calculation and lifecycle disposition |
+| `domain/commands.py` | Separate typed SET_LEVERAGE and ENTRY command intents and results |
 | `application/build_capacity_claim.py` | Gather typed inputs and invoke the pure decision |
 | `application/issue_ticket.py` | Revalidate and atomically issue one Ticket |
 | `application/revalidate_entry_dispatch.py` | Perform fresh read-only preflight before the first exchange mutation |
+| `application/reconcile_leverage_command.py` | Resolve unknown leverage mutation from exact read-back before ENTRY or release |
 | `application/runtime_facts.py` | Frozen action-time, account-health, maintenance, dispatch, and post-fill risk facts |
 | `application/ports.py` | Named repository and venue contracts |
 | `infrastructure/pg_models.py` | SQLAlchemy table declarations matching the single baseline |
@@ -1019,6 +1089,8 @@ max_gross_notional admission gate
 max_gross_risk_at_stop admission gate
 max_ticket_risk_at_stop fixed-USDT gate
 target_leverage fixed for every Ticket
+real_submit_enabled ambiguous all-write naming
+set_leverage and create_order inside one durable ENTRY command
 Acceptance=1 Ticket / Full=2 Tickets fixed envelope
 20/40 USDT production notional defaults
 10/20 USDT fixed risk defaults
@@ -1076,6 +1148,8 @@ Tests must prove:
 - external/manual account ownership classifies to the Account Capacity Domain,
   while owned residue and leverage contradiction classify to the exact
   Leverage Domain;
+- AccountEntryHealth and InstrumentEntryHealth reject different parent snapshot
+  digests or observation windows;
 - runtime, account, instrument, and non-blocking Incident scopes classify
   deterministically;
 - Cross and independent-sides facts are validated separately;
@@ -1100,6 +1174,10 @@ Tests must prove:
 - Account Capacity projections and reservations use exact venue/account keys;
 - instrument-rule projections use exact venue/instrument keys;
 - Incident entry-block scope and canonical key are constrained and queryable;
+- Owner Policy contains `new_entry_submit_enabled` and no
+  `real_submit_enabled` compatibility column;
+- SET_LEVERAGE and ENTRY persist as separate command kinds with at most one
+  generation of each per Ticket;
 - actual stop risk and post-fill disposition persist without mutating the
   immutable Ticket;
 - three Tickets can exist across independent Netting Domains;
@@ -1115,19 +1193,27 @@ Tests must prove:
 
 Tests must prove:
 
-- flat instrument calls `set_leverage`, then signed read-back, then
+- a flat instrument requiring change persists and dispatches SET_LEVERAGE before
+  an ENTRY command exists;
+- confirmed exact leverage creates ENTRY generation 1 in a later short
+  transaction;
+- a flat instrument already at the selected leverage and an instrument with a
+  healthy opposite-side position skip SET_LEVERAGE and create ENTRY directly;
+- dispatch preflight occurs separately before `set_leverage` and before
   `create_order`;
-- dispatch preflight occurs before `set_leverage` or `create_order`;
 - stale policy/scope, an Incident fence, external ownership, insufficient fresh
   wallet risk, insufficient fresh margin, or unsafe fresh quote causes zero
   venue mutations;
-- read-back mismatch emits no order;
+- read-back mismatch creates no ENTRY command;
+- unknown SET_LEVERAGE resolving to the desired value creates exactly one ENTRY;
+- unknown SET_LEVERAGE resolving to another value releases without resend;
 - either-side existing position emits no leverage mutation;
 - existing matching leverage permits order submit;
 - a successful flat-instrument leverage change followed by authoritative order
   rejection does not issue a compensating leverage mutation;
 - protection and exit commands never set leverage;
-- timeout and unknown outcomes never create a second ENTRY generation.
+- timeout and unknown outcomes never create a second SET_LEVERAGE or ENTRY
+  generation.
 
 ### Lifecycle And Policy Tests
 
@@ -1152,6 +1238,11 @@ Tests must prove:
 
 Full-chain tests must prove:
 
+- a flat-instrument Ticket that needs a leverage change persists and resolves
+  `SET_LEVERAGE` generation 1 before `ENTRY` generation 1 exists, with no
+  durable command representing more than one exchange mutation;
+- a leverage timeout is reconciled by exact read-back and either creates the
+  first ENTRY command or terminally releases without resending leverage;
 - three natural StrategySignals in distinct Netting Domains can create three
   serial Tickets and then progress concurrently;
 - two of those Tickets may be opposite sides of one instrument, but two
@@ -1177,12 +1268,11 @@ Implementation and deployment proceed fix-forward:
 
 ```text
 keep Tokyo exchange writes disabled
--> freeze the three remaining Owner safety decisions in the committed design
 -> implement and certify locally from an empty PostgreSQL database
 -> prove current exchange flatness and zero open orders
 -> fence all BRC writers
 -> rebuild only the isolated BRC PostgreSQL database from revised 0001_initial
--> seed the exact versioned dynamic and safety policy with real_submit_enabled=false
+-> seed the exact versioned dynamic and safety policy with new_entry_submit_enabled=false
 -> deploy the exact committed release
 -> start the four persistent workers
 -> run readonly schema, seed, position-mode, margin-mode, balance, maintenance,
@@ -1200,9 +1290,12 @@ program data remain outside the mutable allowlist.
 
 The program is complete only when all of the following are current and direct:
 
-1. Owner Policy is versioned in PostgreSQL with `3`, `0.03`, `0.90`, and `10`.
-2. Supported margin mode, liquidation-distance ratio, and post-fill overrun
-   tolerance are explicitly Owner-approved and versioned in the same policy.
+1. Owner Policy is versioned in PostgreSQL with `3`, `0.03`, `0.90`, `10`,
+   `cross`, `2.0`, and `0.10`, and new ENTRY authority is named
+   `new_entry_submit_enabled`.
+2. One fresh `EntryAdmissionSnapshot` and one parent digest own every account
+   and instrument fact used by one admission decision; independently timed
+   account and instrument health reads are impossible at the core boundary.
 3. Fixed gross-notional, fixed gross-risk, fixed per-Ticket USDT risk, and fixed
    target-leverage semantics are absent from production authority.
 4. Capacity uses fresh signed wallet, margin, initial-margin, available-margin,
@@ -1221,21 +1314,30 @@ The program is complete only when all of the following are current and direct:
 9. A same-direction second Ticket and a fourth capital-owning Ticket are refused
    without exchange side effects.
 10. Same-instrument leverage is never mutated while either side is open.
-11. ENTRY is submitted only after fresh dispatch preflight and exact leverage
-    equality are proven.
-12. Policy/scope changes before dispatch release unexposed Tickets, while
+11. Every exchange mutation owns one durable command: optional
+    `SET_LEVERAGE` generation 1 resolves before `ENTRY` generation 1 is
+    created, and neither mutation is blindly resent after an unknown outcome.
+12. ENTRY is submitted only after its own fresh dispatch preflight and exact
+    leverage equality are proven.
+13. Policy/scope changes before dispatch release unexposed Tickets, while
     exposed Tickets retain lifecycle and recovery authority under frozen terms.
-13. Post-fill actual stop risk and liquidation evidence are recorded; hard
+14. A runtime identity or duplicate-writer Incident blocks every new ENTRY;
+    suspect writers perform no mutation, and existing-exposure recovery resumes
+    only through one subsequently certified exact writer.
+15. Post-fill actual stop risk and liquidation evidence are recorded; hard
     overrun or degraded liquidation safety protects then flattens and leaves no
     TP or stop residue.
-14. Unknown outcomes, rejection, and partial fill retain current fail-closed
+16. Unknown outcomes, rejection, and partial fill retain current fail-closed
     lifecycle semantics.
-15. The clean baseline rebuilds from zero, keeps the same business-table set,
+17. `ReconciliationMatched` atomically releases Budget Reservation, Account
+    Capacity count, and Netting Domain exactly once; Settlement and Review may
+    remain pending without consuming a position slot.
+18. The clean baseline rebuilds from zero, keeps the same business-table set,
     and contains no compatibility path.
-16. Targeted tests, full Trading Kernel tests, Ruff, Mypy, schema certification,
+19. Targeted tests, full Trading Kernel tests, Ruff, Mypy, schema certification,
     document authority checks, retired-semantics scans, and `git diff --check`
     pass.
-17. Tokyo runs the exact release with writes initially disabled and one
+20. Tokyo runs the exact release with writes initially disabled and one
     controlled terminal Ticket proves the new budget model before full
     three-Ticket authority is enabled.
 
@@ -1247,5 +1349,5 @@ execution path. The core architectural change is one pure, slot-aware capacity
 decision whose complete inputs and outputs are frozen into the existing Claim,
 Ticket, reservation, and durable command lineage. Conflict ownership,
 dispatch-time drift, post-fill risk, policy change, and StrategyGroup disable
-semantics are explicit. Only the three Owner safety values listed above remain
-outside final authority.
+semantics are explicit. All policy and safety decisions required by this design
+are Owner-approved and ready for a test-first implementation plan.
