@@ -405,7 +405,7 @@ class SshTokyoSystem:
                 == plan.target_seed_identity
             ),
             release_active=(await self._readlink(CURRENT_RELEASE)) == str(release),
-            readonly_certified=await self._readonly_certified(release),
+            readonly_certified=await self._readonly_certified(release, plan),
             observation_enabled=all(
                 [
                     await self._unit_enabled(unit)
@@ -577,10 +577,17 @@ class SshTokyoSystem:
 
     async def seed_target_authority(self, plan: CutoverPlan) -> None:
         release = _release_path(plan)
+        await self._install_runtime_identity(plan)
         result = await self._release_python(
             release,
             "scripts/trading_kernel/seed_runtime_authority.py",
             "seed",
+            "--account-id",
+            plan.account_id,
+            "--runtime-commit",
+            plan.target_commit,
+            "--schema-revision",
+            plan.target_schema_revision,
         )
         payload = json.loads(result.stdout)
         if payload.get("runtime_seed_semantic_hash") != plan.target_seed_identity:
@@ -588,6 +595,7 @@ class SshTokyoSystem:
 
     async def activate_release(self, plan: CutoverPlan) -> None:
         release = _release_path(plan)
+        await self._install_runtime_identity(plan)
         for unit in sorted(EXPECTED_NEW_BRC_UNITS):
             await self._runner.run(
                 (
@@ -617,6 +625,23 @@ class SshTokyoSystem:
             payload = json.loads(result.stdout)
             if payload.get("status", "pass") != "pass":
                 raise RuntimeError(f"readonly certification failed: {script}")
+            if script.endswith("certify_readonly.py"):
+                runtime_identity = payload.get("runtime_identity")
+                if not isinstance(runtime_identity, Mapping):
+                    raise RuntimeError(
+                        "readonly certification omitted runtime identity"
+                    )
+                _require_runtime_identity(runtime_identity, plan)
+            if script.endswith("probe_production_runtime.py"):
+                if (
+                    payload.get("venue_id") != plan.venue_id
+                    or payload.get("account_id") != plan.account_id
+                    or payload.get("account_position_mode")
+                    != "independent_sides"
+                ):
+                    raise RuntimeError(
+                        "readonly production identity differs from plan"
+                    )
 
     async def enable_observation(self, plan: CutoverPlan) -> None:
         del plan
@@ -770,7 +795,11 @@ class SshTokyoSystem:
             return False
         return json.loads(result.stdout).get("status") == "pass"
 
-    async def _readonly_certified(self, release: PurePosixPath) -> bool:
+    async def _readonly_certified(
+        self,
+        release: PurePosixPath,
+        plan: CutoverPlan,
+    ) -> bool:
         result = await self._release_python(
             release,
             "scripts/trading_kernel/certify_readonly.py",
@@ -779,7 +808,44 @@ class SshTokyoSystem:
         )
         if result.returncode != 0:
             return False
-        return json.loads(result.stdout).get("status") == "pass"
+        payload = json.loads(result.stdout)
+        runtime_identity = payload.get("runtime_identity")
+        if payload.get("status") != "pass" or not isinstance(
+            runtime_identity,
+            Mapping,
+        ):
+            return False
+        try:
+            _require_runtime_identity(runtime_identity, plan)
+        except RuntimeError:
+            return False
+        return True
+
+    async def _install_runtime_identity(self, plan: CutoverPlan) -> None:
+        replacements = (
+            ("TRADING_KERNEL_RUNTIME_COMMIT", plan.target_commit),
+            ("TRADING_KERNEL_SCHEMA_REVISION", plan.target_schema_revision),
+        )
+        for key, value in replacements:
+            await self._runner.run(
+                (
+                    "sudo",
+                    "sed",
+                    "-i",
+                    f"s/^{key}=.*/{key}={value}/",
+                    str(RUNTIME_ENV),
+                )
+            )
+        for key, value in replacements:
+            await self._runner.run(
+                (
+                    "sudo",
+                    "grep",
+                    "-Fx",
+                    f"{key}={value}",
+                    str(RUNTIME_ENV),
+                )
+            )
 
     async def _release_json(
         self,
@@ -926,6 +992,20 @@ def _release_path(plan: CutoverPlan) -> PurePosixPath:
     if "/" in plan.target_release_id or ".." in plan.target_release_id:
         raise ValueError("target release identity must not contain a path")
     return RELEASE_ROOT / plan.target_release_id
+
+
+def _require_runtime_identity(
+    runtime_identity: Mapping[str, object],
+    plan: CutoverPlan,
+) -> None:
+    expected = {
+        "runtime_commit": plan.target_commit,
+        "schema_revision": plan.target_schema_revision,
+        "seed_identity": plan.target_seed_identity,
+    }
+    actual = {key: str(runtime_identity.get(key) or "") for key in expected}
+    if actual != expected or set(runtime_identity) != set(expected):
+        raise RuntimeError("readonly runtime identity differs from cutover plan")
 
 
 def _snapshot_path(plan: CutoverPlan) -> PurePosixPath:

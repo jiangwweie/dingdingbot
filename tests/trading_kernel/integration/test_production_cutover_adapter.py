@@ -167,6 +167,116 @@ async def test_target_database_waits_for_postgres_health_before_bootstrap() -> N
     )
 
 
+@pytest.mark.asyncio
+async def test_runtime_identity_env_is_updated_and_verified_exactly() -> None:
+    module = _production_adapter_module()
+    runner = RecordingRunner(module)
+    system = module.SshTokyoSystem(runner)
+    plan = _plan()
+
+    await system._install_runtime_identity(plan)
+
+    assert runner.commands == [
+        (
+            "sudo",
+            "sed",
+            "-i",
+            "s/^TRADING_KERNEL_RUNTIME_COMMIT=.*/"
+            f"TRADING_KERNEL_RUNTIME_COMMIT={plan.target_commit}/",
+            "/etc/brc/trading-kernel.env",
+        ),
+        (
+            "sudo",
+            "sed",
+            "-i",
+            "s/^TRADING_KERNEL_SCHEMA_REVISION=.*/"
+            f"TRADING_KERNEL_SCHEMA_REVISION={plan.target_schema_revision}/",
+            "/etc/brc/trading-kernel.env",
+        ),
+        (
+            "sudo",
+            "grep",
+            "-Fx",
+            f"TRADING_KERNEL_RUNTIME_COMMIT={plan.target_commit}",
+            "/etc/brc/trading-kernel.env",
+        ),
+        (
+            "sudo",
+            "grep",
+            "-Fx",
+            f"TRADING_KERNEL_SCHEMA_REVISION={plan.target_schema_revision}",
+            "/etc/brc/trading-kernel.env",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_seed_uses_explicit_plan_identity_not_stale_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _production_adapter_module()
+    system = module.SshTokyoSystem(RecordingRunner(module))
+    plan = _plan()
+    calls: list[tuple[str, ...]] = []
+
+    async def install_identity(received_plan: CutoverPlan) -> None:
+        assert received_plan == plan
+
+    async def release_python(
+        release,
+        script: str,
+        *args: str,
+        check: bool = True,
+    ) -> object:
+        del release, check
+        calls.append((script, *args))
+        return module._RemoteResult(
+            returncode=0,
+            stdout=(
+                '{"runtime_seed_semantic_hash":"'
+                f'{plan.target_seed_identity}'
+                '"}'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(system, "_install_runtime_identity", install_identity)
+    monkeypatch.setattr(system, "_release_python", release_python)
+
+    await system.seed_target_authority(plan)
+
+    assert calls == [
+        (
+            "scripts/trading_kernel/seed_runtime_authority.py",
+            "seed",
+            "--account-id",
+            plan.account_id,
+            "--runtime-commit",
+            plan.target_commit,
+            "--schema-revision",
+            plan.target_schema_revision,
+        )
+    ]
+
+
+def test_readonly_certification_requires_exact_plan_identity() -> None:
+    module = _production_adapter_module()
+    plan = _plan()
+    exact = {
+        "runtime_commit": plan.target_commit,
+        "schema_revision": plan.target_schema_revision,
+        "seed_identity": plan.target_seed_identity,
+    }
+
+    module._require_runtime_identity(exact, plan)
+
+    with pytest.raises(RuntimeError, match="runtime identity differs"):
+        module._require_runtime_identity(
+            {**exact, "runtime_commit": "c" * 40},
+            plan,
+        )
+
+
 class AlwaysMissingRunner:
     def __init__(self, module: ModuleType) -> None:
         self.module = module
