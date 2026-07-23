@@ -2,7 +2,7 @@
 title: Multi-Position Dynamic Budget And Leverage Design
 status: OWNER_APPROVED_DESIGN
 date: 2026-07-23
-revision: 4
+revision: 5
 ---
 
 # Multi-Position Dynamic Budget And Leverage Design
@@ -899,8 +899,9 @@ The existing short issue transaction remains atomic:
 ```text
 lock global ENTRY lane
 -> lock exact venue + account exposure row
+-> lock exact Runtime Scope current row
 -> re-read current Owner Policy
--> re-read exact Runtime Scope and applicable open Incident fences
+-> perform bounded ordinary reads of admission ownership and applicable Incident fences
 -> verify Claim identity, version, digest, and expiry
 -> verify active Ticket count remains below current policy
 -> verify exact Netting Domain remains unoccupied
@@ -916,6 +917,43 @@ lock global ENTRY lane
 ```
 
 No venue call occurs inside this transaction.
+
+#### Admission Lock Contract
+
+The Ticket issue path has one deliberate, complete lock order:
+
+```text
+global ENTRY lane
+-> exact Account Capacity projection (venue + account)
+-> exact Runtime Scope current row
+```
+
+These are the only admission-time `FOR UPDATE` locks.  The Lane serializes
+new ENTRY decisions globally; the Account Capacity row owns the count and
+reservation transition; the Runtime Scope row makes the enabled/versioned
+scope decision stable through commit.  The Owner Policy is re-read by exact
+identity and the Claim freezes its required version.
+
+`AdmissionOwnership` remains a bounded *ordinary* current-state read of active
+Ticket domain keys, owned aggregate order identities, unknown command Ticket
+identities, and applicable typed Incident scopes.  It must not acquire
+`FOR UPDATE` locks on `brc_trade_tickets`, `brc_trade_aggregates`,
+`brc_exchange_commands`, or `brc_runtime_incidents`.
+
+This separation is an explicit deadlock-prevention boundary.  Lifecycle and
+reconciliation transitions legitimately start by locking the exact Trade
+Aggregate and may later update account exposure.  Admission must never invert
+that relationship by holding the Account Capacity lock while waiting for an
+Aggregate, Command, or Incident lock.  No repository method may expose an
+admission-ownership locking flag that makes this inversion possible.
+
+The ordinary ownership reads remain safe for Ticket admission because the
+Lane and Account Capacity authority locks prevent two admissions from
+committing competing capacity/domain claims; the final Ticket/domain unique
+constraints remain the database backstop.  A newly opened Incident is resolved
+by its owning lifecycle/reconciliation transition and blocks the next fresh
+admission snapshot.  A Ticket is never used to bypass an unresolved Incident
+or unknown command outcome.
 
 ### Release
 

@@ -13,17 +13,81 @@
 | Work | Status | Evidence / next boundary |
 | --- | --- | --- |
 | Tasks 1-5 | Complete and committed | `edad2c70`, `89c4e64a`, `6a6c14b6`, `7b2cb127`; dynamic policy, one admission snapshot, slot-aware sizing, frozen Claim/Ticket/reservation evidence, and scoped admission ownership exist |
-| Task 6 | Next implementation boundary | Add the separate durable `SET_LEVERAGE` command and prohibit same-transaction leverage mutation plus ENTRY creation |
-| Tasks 7-14 | Pending | Must follow the ordered mutation, safety, release, production-contract, certification, and retirement gates below |
+| Task 6 core | Implemented; review remediation required | `56f21d7b` separates durable `SET_LEVERAGE` and `ENTRY`; the required lock-order correction below must land before Task 7 begins |
+| Task 6R | Next implementation boundary | Retire ownership-row `FOR UPDATE` from admission while retaining `Lane -> Account Capacity -> Runtime Scope` locking and the scope/Incident revalidation semantics |
+| Tasks 7-14 | Pending after Task 6R | Must follow the ordered mutation, safety, release, production-contract, certification, and retirement gates below |
 | Task 15 | Separately gated | No Tokyo rebuild or exchange write occurs until Tasks 1-14 have direct local certification |
 
 The checklists below are the original test-first task recipes. This status table,
 not an unchecked historical RED/GREEN sub-step, is the current execution
 position.
 
+### Task 6R: Correct admission locking without weakening admission authority
+
+**Goal:** Preserve the bounded, atomic Ticket issue decision while removing the
+reverse lock order that can deadlock against Lifecycle/Reconciliation.
+
+**Allowed files:**
+
+- Modify: `src/trading_kernel/application/issue_ticket.py`
+- Modify: `src/trading_kernel/application/ports.py`
+- Modify: `src/trading_kernel/infrastructure/pg_repositories.py`
+- Modify: `tests/trading_kernel/integration/test_issue_ticket.py`
+
+**Forbidden:** venue dispatch/read-back, SET_LEVERAGE recovery, lifecycle
+behavior, schema changes, Task 7/Task 8 work, compatibility APIs, and any
+Tokyo or exchange mutation.
+
+**Required behavior:**
+
+```text
+lock global ENTRY lane
+-> lock exact venue + account Account Capacity row
+-> lock exact Runtime Scope row
+-> ordinary bounded AdmissionOwnership read
+-> revalidate scope/version/policy/Incident/domain/Claim
+-> issue all durable Ticket authority atomically or issue nothing
+```
+
+`read_admission_ownership` must have no `for_update` parameter.  Its bounded
+queries over active Tickets, Aggregates, Exchange Commands, and open Incidents
+must be ordinary reads.  `get_account_exposure(..., for_update=True)` and
+`get_runtime_scope(..., for_update=True)` remain required.  Scope drift and
+applicable Incident drift must retain their existing zero-durable-side-effect
+refusal behavior.
+
+**Test-first verification:**
+
+1. Add a real PostgreSQL Ticket-issue integration test that wraps the
+   ownership repository call, proves it receives no locking argument, delegates
+   to the real bounded query, and still issues a valid Ticket.
+2. Run the test before implementation and record the expected RED failure
+   against the current locking API/call.
+3. Remove the locking API and SQL `FOR UPDATE` branches; retain only the three
+   authority locks above.
+4. Run:
+
+   ```bash
+   python3 -m pytest -q tests/trading_kernel/integration/test_issue_ticket.py
+   python3 -m pytest -q tests/trading_kernel/integration/test_issue_ticket.py tests/trading_kernel/integration/test_command_dispatch.py tests/trading_kernel/full_chain/test_fault_matrix.py
+   git diff --check
+   ```
+
+5. Commit independently as:
+
+   ```bash
+   git commit -m "fix(kernel): preserve admission lock order"
+   ```
+
+**Done condition:** the only Ticket-issue `FOR UPDATE` acquisition order is
+**Lane → exact Account Capacity → exact Runtime Scope**; all Ownership reads
+are bounded ordinary reads; scope/Incident-drift refusals still create no Claim,
+Ticket, reservation, command, or lane occupancy; focused regression tests and
+whitespace checks pass.
+
 ## Global Constraints
 
-- The approved design is `docs/superpowers/specs/2026-07-23-multi-position-dynamic-budget-and-leverage-design.md`, revision 4.
+- The approved design is `docs/superpowers/specs/2026-07-23-multi-position-dynamic-budget-and-leverage-design.md`, revision 5.
 - Production execution remains exclusively under `src/trading_kernel/**`; the only schema baseline remains `migrations/trading_kernel/versions/0001_initial.py`.
 - Owner Policy values are exactly: `max_concurrent_tickets=3`, `planned_stop_risk_fraction=0.03`, `max_initial_margin_utilization=0.90`, `max_leverage=10`, `supported_margin_mode=cross`, `min_liquidation_distance_to_stop_distance_ratio=2.0`, and `max_post_fill_stop_risk_overrun_fraction=0.10`.
 - `new_entry_submit_enabled` controls only new ENTRY authority; it never suppresses Initial Stop, protection repair, exit, cancellation, controlled flatten, reconciliation, Settlement, or Review for existing exposure.
@@ -597,7 +661,7 @@ Extend `CommandPayload` with `SetLeverageCommandPayload`. SET_LEVERAGE forbids `
 
 - [ ] **Step 4: Implement reducer states and atomic issue selection**
 
-Add `LEVERAGE_PENDING`, `LEVERAGE_CONFIRMED`, `LEVERAGE_REJECTED`, and `LEVERAGE_OUTCOME_UNKNOWN` aggregate states and typed leverage events. `issue_ticket` revalidates `new_entry_submit_enabled`, exact policy version, count, domain, Incident scope, and Claim digest while holding the global lane and exact venue/account exposure row. The same transaction persists Claim, Ticket, reservation, count, domain, aggregate, first event, and only the applicable first command.
+Add `LEVERAGE_PENDING`, `LEVERAGE_CONFIRMED`, `LEVERAGE_REJECTED`, and `LEVERAGE_OUTCOME_UNKNOWN` aggregate states and typed leverage events. `issue_ticket` revalidates `new_entry_submit_enabled`, exact policy version, count, domain, Incident scope, and Claim digest while locking, in order, the global lane, the exact venue/account exposure row, and the exact Runtime Scope row. Admission ownership is then read through bounded ordinary queries; it never locks Ticket, Aggregate, Command, or Incident rows. The same transaction persists Claim, Ticket, reservation, count, domain, aggregate, first event, and only the applicable first command.
 
 - [ ] **Step 5: Run tests and verify GREEN**
 
