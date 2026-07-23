@@ -30,15 +30,15 @@ EXPECTED_OLD_BRC_UNITS = frozenset(
 )
 EXPECTED_NEW_BRC_UNITS = frozenset(
     {
+        "brc-trading-kernel.slice",
         "brc-trading-kernel-entry-worker.service",
-        "brc-trading-kernel-entry-worker.timer",
         "brc-trading-kernel-lifecycle-worker.service",
-        "brc-trading-kernel-lifecycle-worker.timer",
         "brc-trading-kernel-observation-worker.service",
-        "brc-trading-kernel-observation-worker.timer",
         "brc-trading-kernel-reconciliation-worker.service",
-        "brc-trading-kernel-reconciliation-worker.timer",
     }
+)
+EXPECTED_NEW_BRC_WRITER_UNITS = frozenset(
+    unit for unit in EXPECTED_NEW_BRC_UNITS if unit.endswith(".service")
 )
 MUTABLE_CONTAINERS = frozenset({"dingdingbot-pg", "brc-trading-kernel-pg"})
 PROTECTED_CONTAINERS = (
@@ -47,11 +47,11 @@ PROTECTED_CONTAINERS = (
     "owner_ai_pg",
     "owner_ai_redis",
 )
-ENTRY_TIMER = "brc-trading-kernel-entry-worker.timer"
-OBSERVATION_TIMERS = (
-    "brc-trading-kernel-observation-worker.timer",
-    "brc-trading-kernel-lifecycle-worker.timer",
-    "brc-trading-kernel-reconciliation-worker.timer",
+ENTRY_WORKER = "brc-trading-kernel-entry-worker.service"
+OBSERVATION_WORKERS = (
+    "brc-trading-kernel-observation-worker.service",
+    "brc-trading-kernel-lifecycle-worker.service",
+    "brc-trading-kernel-reconciliation-worker.service",
 )
 WRITE_FENCE = PurePosixPath("/etc/brc/trading-kernel.write-fenced")
 RUNTIME_ENV = PurePosixPath("/etc/brc/trading-kernel.env")
@@ -92,7 +92,7 @@ class TokyoPhaseState(BaseModel):
     readonly_certified: bool = False
     observation_enabled: bool = False
     signal_to_ticket_no_write_certified: bool = False
-    entry_timer_enabled: bool = False
+    entry_worker_enabled: bool = False
     exchange_commands_enabled: bool = False
 
 
@@ -161,7 +161,7 @@ class TokyoCutoverAdapter:
         inspection = await self.system.inspect_preconditions(
             plan,
             old_units=EXPECTED_OLD_BRC_UNITS,
-            new_units=EXPECTED_NEW_BRC_UNITS,
+            new_units=EXPECTED_NEW_BRC_WRITER_UNITS,
         )
         persisted = await self.system.read_persisted_non_quant_baseline(plan)
         if persisted is not None:
@@ -219,7 +219,7 @@ class TokyoCutoverAdapter:
         if phase_value == CutoverPhase.FENCE_EXCHANGE_WRITES.value:
             return (
                 state.exchange_writes_fenced
-                and not state.entry_timer_enabled
+                and not state.entry_worker_enabled
                 and not state.exchange_commands_enabled
             )
         if phase_value == CutoverPhase.STOP_OLD_WRITERS.value:
@@ -244,7 +244,7 @@ class TokyoCutoverAdapter:
         if phase_value == CutoverPhase.CERTIFY_ENTRY_FENCED.value:
             return (
                 state.exchange_writes_fenced
-                and not state.entry_timer_enabled
+                and not state.entry_worker_enabled
                 and not state.exchange_commands_enabled
             )
         return False
@@ -383,8 +383,8 @@ class SshTokyoSystem:
     async def inspect_phase_state(self, plan: CutoverPlan) -> TokyoPhaseState:
         release = _release_path(plan)
         entry_enabled = (
-            await self._unit_enabled(ENTRY_TIMER)
-            or await self._unit_active(ENTRY_TIMER)
+            await self._unit_enabled(ENTRY_WORKER)
+            or await self._unit_active(ENTRY_WORKER)
         )
         exchange_commands_enabled = await self._target_boolean(
             "SELECT enabled FROM brc_runtime_capabilities_current "
@@ -410,7 +410,7 @@ class SshTokyoSystem:
                 [
                     await self._unit_enabled(unit)
                     and await self._unit_active(unit)
-                    for unit in OBSERVATION_TIMERS
+                    for unit in OBSERVATION_WORKERS
                 ]
             ),
             signal_to_ticket_no_write_certified=(
@@ -422,7 +422,7 @@ class SshTokyoSystem:
                 )
                 == 0
             ),
-            entry_timer_enabled=entry_enabled,
+            entry_worker_enabled=entry_enabled,
             exchange_commands_enabled=exchange_commands_enabled,
         )
 
@@ -485,7 +485,7 @@ class SshTokyoSystem:
             ("sudo", "touch", str(WRITE_FENCE))
         )
         await self._runner.run(
-            ("sudo", "systemctl", "disable", "--now", ENTRY_TIMER),
+            ("sudo", "systemctl", "disable", "--now", ENTRY_WORKER),
             check=False,
         )
 
@@ -602,7 +602,7 @@ class SshTokyoSystem:
         await self._runner.run(("sudo", "ln", "-sfn", str(release), str(CURRENT_RELEASE)))
         await self._runner.run(("sudo", "systemctl", "daemon-reload"))
         await self._runner.run(
-            ("sudo", "systemctl", "disable", "--now", ENTRY_TIMER),
+            ("sudo", "systemctl", "disable", "--now", ENTRY_WORKER),
             check=False,
         )
 
@@ -620,12 +620,12 @@ class SshTokyoSystem:
 
     async def enable_observation(self, plan: CutoverPlan) -> None:
         del plan
-        for unit in OBSERVATION_TIMERS:
+        for unit in OBSERVATION_WORKERS:
             await self._runner.run(
                 ("sudo", "systemctl", "enable", "--now", unit)
             )
         await self._runner.run(
-            ("sudo", "systemctl", "disable", "--now", ENTRY_TIMER),
+            ("sudo", "systemctl", "disable", "--now", ENTRY_WORKER),
             check=False,
         )
 
@@ -653,8 +653,10 @@ class SshTokyoSystem:
         del plan
         if not await self._path_exists(WRITE_FENCE):
             raise RuntimeError("new ENTRY write fence is missing")
-        if await self._unit_enabled(ENTRY_TIMER):
-            raise RuntimeError("ENTRY timer is enabled during readonly cutover")
+        if await self._unit_enabled(ENTRY_WORKER) or await self._unit_active(
+            ENTRY_WORKER
+        ):
+            raise RuntimeError("ENTRY worker is enabled during readonly cutover")
         if await self._target_boolean(
             "SELECT real_submit_enabled FROM brc_owner_policy_current "
             "WHERE owner_policy_id = 'policy-main'"

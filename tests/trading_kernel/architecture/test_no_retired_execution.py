@@ -74,17 +74,16 @@ def test_production_code_does_not_import_retired_execution_modules() -> None:
     )
 
 
-def test_systemd_contains_only_the_four_runtime_worker_pairs() -> None:
+def test_systemd_contains_only_four_persistent_workers_and_resource_slice() -> None:
     expected = {
-        f"brc-trading-kernel-{worker}.{unit_kind}"
+        f"brc-trading-kernel-{worker}.service"
         for worker in (
             "observation-worker",
             "entry-worker",
             "lifecycle-worker",
             "reconciliation-worker",
         )
-        for unit_kind in ("service", "timer")
-    }
+    } | {"brc-trading-kernel.slice"}
     actual = {
         path.name
         for path in (REPO_ROOT / "deploy" / "systemd").iterdir()

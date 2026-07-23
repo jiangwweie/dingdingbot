@@ -70,7 +70,7 @@ async def test_public_source_returns_only_last_requested_closed_candles() -> Non
     )
 
     assert len(candles) == 5
-    assert candles[-1].close_time_ms <= closed_at_ms
+    assert candles[-1].close_time_ms == closed_at_ms
     assert exchange.calls == [("ETH/USDT:USDT", "15m", 6)]
 
 

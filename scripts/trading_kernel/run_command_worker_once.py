@@ -7,7 +7,6 @@ import argparse
 import asyncio
 import importlib
 import inspect
-import json
 import os
 from pathlib import Path
 import sys
@@ -38,6 +37,9 @@ from src.trading_kernel.interfaces.lifecycle_worker import (  # noqa: E402
     LifecycleWorkerRequest,
     LifecycleWorkerResult,
     run_lifecycle_worker_once,
+)
+from src.trading_kernel.interfaces.worker_process import (  # noqa: E402
+    run_worker_process,
 )
 
 
@@ -71,6 +73,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
     parser.add_argument("--action-fact-validity-ms", type=int, default=5_000)
     parser.add_argument("--idle-poll-interval-ms", type=int, default=2_000)
+    parser.add_argument("--run-forever", action="store_true")
+    parser.add_argument("--poll-interval-ms", type=int, default=2_000)
+    parser.add_argument("--idle-log-interval-ms", type=int, default=300_000)
     return parser
 
 
@@ -88,7 +93,8 @@ async def _run(args: argparse.Namespace) -> int:
     database_url = str(args.database_url or "").strip()
     if not database_url.startswith("postgresql+asyncpg://"):
         raise ValueError("database URL must use postgresql+asyncpg")
-    now_ms = args.now_ms or int(time.time() * 1_000)
+    if args.run_forever and args.now_ms is not None:
+        raise ValueError("fixed now-ms is incompatible with run-forever")
     if args.lease_ms <= 0:
         raise ValueError("lease-ms must be positive")
 
@@ -102,36 +108,39 @@ async def _run(args: argparse.Namespace) -> int:
     engine = create_async_engine(database_url)
     try:
         role = cast(WorkerRole, args.worker_role)
-        result: EntryWorkerResult | LifecycleWorkerResult
-        if role == "entry":
-            if not callable(getattr(adapter, "read_action_time_facts", None)):
-                raise TypeError(
-                    "ENTRY venue factory must provide ActionTimeFactsSource"
-                )
-            if not callable(getattr(adapter, "read_instrument_rules", None)):
-                raise TypeError(
-                    "ENTRY venue factory must provide InstrumentRulesSource"
-                )
-            result = await run_entry_worker_once(
-                lambda: PostgresKernelUnitOfWork(engine),
-                venue_port,
-                cast(EntryFactsSource, adapter),
-                EntryWorkerRequest(
-                    worker_id=args.worker_id,
-                    runtime_commit=args.runtime_commit,
-                    schema_revision=args.schema_revision,
-                    now_ms=now_ms,
-                    lease_until_ms=now_ms + args.lease_ms,
-                    timeout_seconds=args.timeout_seconds,
-                    action_fact_validity_ms=args.action_fact_validity_ms,
-                ),
+        if role == "entry" and not callable(
+            getattr(adapter, "read_action_time_facts", None)
+        ):
+            raise TypeError("ENTRY venue factory must provide ActionTimeFactsSource")
+        if role == "entry" and not callable(
+            getattr(adapter, "read_instrument_rules", None)
+        ):
+            raise TypeError("ENTRY venue factory must provide InstrumentRulesSource")
+        if role == "lifecycle" and not callable(
+            getattr(adapter, "read_lifecycle_facts", None)
+        ):
+            raise TypeError(
+                "lifecycle venue factory must provide LifecycleFactsSource"
             )
-        else:
-            if not callable(getattr(adapter, "read_lifecycle_facts", None)):
-                raise TypeError(
-                    "lifecycle venue factory must provide LifecycleFactsSource"
+
+        async def tick() -> EntryWorkerResult | LifecycleWorkerResult:
+            now_ms = args.now_ms or int(time.time() * 1_000)
+            if role == "entry":
+                return await run_entry_worker_once(
+                    lambda: PostgresKernelUnitOfWork(engine),
+                    venue_port,
+                    cast(EntryFactsSource, adapter),
+                    EntryWorkerRequest(
+                        worker_id=args.worker_id,
+                        runtime_commit=args.runtime_commit,
+                        schema_revision=args.schema_revision,
+                        now_ms=now_ms,
+                        lease_until_ms=now_ms + args.lease_ms,
+                        timeout_seconds=args.timeout_seconds,
+                        action_fact_validity_ms=args.action_fact_validity_ms,
+                    ),
                 )
-            result = await run_lifecycle_worker_once(
+            return await run_lifecycle_worker_once(
                 lambda: PostgresKernelUnitOfWork(engine),
                 venue_port,
                 cast(LifecycleFactsSource, adapter),
@@ -143,8 +152,19 @@ async def _run(args: argparse.Namespace) -> int:
                     idle_poll_interval_ms=args.idle_poll_interval_ms,
                 ),
             )
-        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
-        return 0
+
+        idle_statuses = (
+            {"no_candidate", "entry_lane_busy"}
+            if role == "entry"
+            else {"no_work", "no_change"}
+        )
+        return await run_worker_process(
+            tick,
+            run_forever=args.run_forever,
+            poll_interval_ms=args.poll_interval_ms,
+            idle_log_interval_ms=args.idle_log_interval_ms,
+            idle_statuses=idle_statuses,
+        )
     finally:
         close = getattr(adapter, "close", None)
         if callable(close):

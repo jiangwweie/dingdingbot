@@ -260,7 +260,8 @@ brc-owner-console-backend.service
 brc-runtime-monitor.timer/service
 brc-runtime-signal-watcher.timer/service
 brc-ticket-lifecycle-maintenance.timer/service
-brc-trading-kernel-*.timer/service
+brc-trading-kernel.slice
+brc-trading-kernel-*.service
 dingdingbot-pg
 brc-trading-kernel-pg
 /home/ubuntu/brc-deploy
@@ -289,24 +290,30 @@ git commit -m "ops(kernel): add production Tokyo cutover adapter"
 ### Task 5: Deployment Units And Readonly Certification
 
 **Files:**
-- Modify: `deploy/systemd/brc-trading-kernel-observation-worker.timer`
-- Modify: `deploy/systemd/brc-trading-kernel-entry-worker.service`
-- Modify: `deploy/systemd/brc-trading-kernel-reconciliation-worker.timer`
+- Add: `deploy/systemd/brc-trading-kernel.slice`
+- Modify: four `deploy/systemd/brc-trading-kernel-*-worker.service` units
+- Delete: four high-frequency `deploy/systemd/brc-trading-kernel-*-worker.timer`
+- Modify: three `scripts/trading_kernel/run_*worker_once.py` entry points
 - Modify: `scripts/trading_kernel/certify_readonly.py`
 - Test: `tests/trading_kernel/integration/test_cutover_state_machine.py`
 
 **Interfaces:**
-- Observation cadence: 5 seconds with bounded one-scope claims.
-- Entry cadence: 2 seconds and explicit write-fence condition.
-- Lifecycle cadence: 2 seconds.
-- Reconciliation cadence: 5 seconds.
+- Four persistent, independently restartable worker processes.
+- Python, PostgreSQL engine, and venue/market clients are initialized once and reused.
+- Entry and Lifecycle poll every 2 seconds; Observation and Reconciliation poll every 5 seconds.
+- Idle results are journaled at a bounded interval instead of every poll.
+- All four services share `brc-trading-kernel.slice` with `CPUQuota=100%`,
+  `MemoryMax=1G`, and `TasksMax=128` for the 2C4G host.
+- ENTRY remains independently disabled and guarded by the explicit write fence.
 
 - [ ] **Step 1: Write failing unit and certification assertions**
 
 ```python
-assert "OnUnitActiveSec=5s" in observation_timer
+assert "Type=simple" in observation_service
+assert "--run-forever" in observation_service
 assert "ConditionPathExists=!/etc/brc/trading-kernel.write-fenced" in entry_service
-assert "OnUnitActiveSec=5s" in reconciliation_timer
+assert "CPUQuota=100%" in runtime_slice
+assert not observation_timer.exists()
 ```
 
 - [ ] **Step 2: Verify RED**

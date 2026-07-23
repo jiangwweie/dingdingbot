@@ -7,7 +7,6 @@ import argparse
 import asyncio
 import importlib
 import inspect
-import json
 import os
 from pathlib import Path
 import sys
@@ -33,6 +32,9 @@ from src.trading_kernel.interfaces.reconciliation_worker import (  # noqa: E402
     ReconciliationWorkerRequest,
     run_reconciliation_worker_once,
 )
+from src.trading_kernel.interfaces.worker_process import (  # noqa: E402
+    run_worker_process,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -48,6 +50,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
     parser.add_argument("--unknown-visibility-grace-ms", type=int, default=30_000)
     parser.add_argument("--idle-poll-interval-ms", type=int, default=2_000)
+    parser.add_argument("--run-forever", action="store_true")
+    parser.add_argument("--poll-interval-ms", type=int, default=5_000)
+    parser.add_argument("--idle-log-interval-ms", type=int, default=300_000)
     return parser
 
 
@@ -65,7 +70,8 @@ async def _run(args: argparse.Namespace) -> int:
     database_url = str(args.database_url or "").strip()
     if not database_url.startswith("postgresql+asyncpg://"):
         raise ValueError("database URL must use postgresql+asyncpg")
-    now_ms = args.now_ms or int(time.time() * 1_000)
+    if args.run_forever and args.now_ms is not None:
+        raise ValueError("fixed now-ms is incompatible with run-forever")
 
     adapter = _load_factory(args.venue_factory)()
     if inspect.isawaitable(adapter):
@@ -79,21 +85,31 @@ async def _run(args: argparse.Namespace) -> int:
 
     engine = create_async_engine(database_url)
     try:
-        result = await run_reconciliation_worker_once(
-            lambda: PostgresKernelUnitOfWork(engine),
-            cast(VenueTruthPort, adapter),
-            cast(PositionSnapshotSource, adapter),
-            ReconciliationWorkerRequest(
-                worker_id=args.worker_id,
-                now_ms=now_ms,
-                timeout_seconds=args.timeout_seconds,
-                unknown_visibility_grace_ms=args.unknown_visibility_grace_ms,
-                idle_poll_interval_ms=args.idle_poll_interval_ms,
-            ),
-            review_economics_source=cast(ReviewEconomicsSource, adapter),
+        async def tick():
+            now_ms = args.now_ms or int(time.time() * 1_000)
+            return await run_reconciliation_worker_once(
+                lambda: PostgresKernelUnitOfWork(engine),
+                cast(VenueTruthPort, adapter),
+                cast(PositionSnapshotSource, adapter),
+                ReconciliationWorkerRequest(
+                    worker_id=args.worker_id,
+                    now_ms=now_ms,
+                    timeout_seconds=args.timeout_seconds,
+                    unknown_visibility_grace_ms=(
+                        args.unknown_visibility_grace_ms
+                    ),
+                    idle_poll_interval_ms=args.idle_poll_interval_ms,
+                ),
+                review_economics_source=cast(ReviewEconomicsSource, adapter),
+            )
+
+        return await run_worker_process(
+            tick,
+            run_forever=args.run_forever,
+            poll_interval_ms=args.poll_interval_ms,
+            idle_log_interval_ms=args.idle_log_interval_ms,
+            idle_statuses={"no_work"},
         )
-        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
-        return 0
     finally:
         close = getattr(adapter, "close", None)
         if callable(close):

@@ -78,7 +78,7 @@ async def test_cutover_phase_actions_preserve_entry_fence_and_exact_old_units() 
         plan,
     )
     assert system.phase_state.exchange_writes_fenced is True
-    assert system.phase_state.entry_timer_enabled is False
+    assert system.phase_state.entry_worker_enabled is False
     assert system.phase_state.exchange_commands_enabled is False
 
 
@@ -107,7 +107,7 @@ async def test_ssh_system_phase_inspection_returns_typed_state() -> None:
 
     assert isinstance(state, module.TokyoPhaseState)
     assert state.old_writers_stopped is True
-    assert state.entry_timer_enabled is False
+    assert state.entry_worker_enabled is False
     assert state.exchange_commands_enabled is False
 
 
@@ -279,7 +279,7 @@ class FakeTokyoSystem:
         self.phase_state = self.phase_state.model_copy(
             update={
                 "exchange_writes_fenced": True,
-                "entry_timer_enabled": False,
+                "entry_worker_enabled": False,
                 "exchange_commands_enabled": False,
             }
         )

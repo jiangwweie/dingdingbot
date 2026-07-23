@@ -1,24 +1,30 @@
 [Unit]
-Description=BRC trading kernel bounded lifecycle worker tick
+Description=BRC trading kernel persistent lifecycle worker
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/etc/brc/trading-kernel.env
 
 [Service]
-Type=oneshot
+Type=simple
 User=brc
 Group=brc
 WorkingDirectory=/opt/brc/current
 EnvironmentFile=/etc/brc/trading-kernel.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Slice=brc-trading-kernel.slice
 ExecStart=/opt/brc/current/.venv/bin/python scripts/trading_kernel/run_command_worker_once.py \
     --venue-factory ${TRADING_KERNEL_VENUE_FACTORY} \
     --worker-role lifecycle \
     --worker-id ${TRADING_KERNEL_LIFECYCLE_WORKER_ID} \
     --lease-ms ${TRADING_KERNEL_LEASE_MS} \
     --timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS} \
-    --idle-poll-interval-ms ${TRADING_KERNEL_IDLE_POLL_INTERVAL_MS}
-TimeoutStartSec=30
+    --idle-poll-interval-ms ${TRADING_KERNEL_IDLE_POLL_INTERVAL_MS} \
+    --run-forever \
+    --poll-interval-ms 2000
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true

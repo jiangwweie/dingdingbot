@@ -1,0 +1,9 @@
+[Unit]
+Description=BRC trading kernel resource boundary
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+CPUQuota=100%
+MemoryMax=1G
+TasksMax=128

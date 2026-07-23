@@ -1,23 +1,29 @@
 [Unit]
-Description=BRC trading kernel bounded reconciliation worker tick
+Description=BRC trading kernel persistent reconciliation worker
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/etc/brc/trading-kernel.env
 
 [Service]
-Type=oneshot
+Type=simple
 User=brc
 Group=brc
 WorkingDirectory=/opt/brc/current
 EnvironmentFile=/etc/brc/trading-kernel.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Slice=brc-trading-kernel.slice
 ExecStart=/opt/brc/current/.venv/bin/python scripts/trading_kernel/run_reconciliation_worker_once.py \
     --venue-factory ${TRADING_KERNEL_VENUE_FACTORY} \
     --worker-id ${TRADING_KERNEL_RECONCILIATION_WORKER_ID} \
     --timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS} \
     --unknown-visibility-grace-ms ${TRADING_KERNEL_UNKNOWN_VISIBILITY_GRACE_MS} \
-    --idle-poll-interval-ms ${TRADING_KERNEL_IDLE_POLL_INTERVAL_MS}
-TimeoutStartSec=30
+    --idle-poll-interval-ms ${TRADING_KERNEL_IDLE_POLL_INTERVAL_MS} \
+    --run-forever \
+    --poll-interval-ms 5000
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true

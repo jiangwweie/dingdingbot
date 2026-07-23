@@ -101,7 +101,7 @@ def _parse_row(row: object, duration_ms: int) -> ClosedCandle:
     open_time_ms = int(row[0])
     return ClosedCandle(
         open_time_ms=open_time_ms,
-        close_time_ms=open_time_ms + duration_ms - 1,
+        close_time_ms=open_time_ms + duration_ms,
         open=Decimal(str(row[1])),
         high=Decimal(str(row[2])),
         low=Decimal(str(row[3])),

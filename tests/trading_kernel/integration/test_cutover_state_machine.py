@@ -343,17 +343,29 @@ def test_systemd_runtime_workers_are_four_explicit_bounded_roles() -> None:
     assert not (systemd_dir / "brc-trading-kernel-worker.service").exists()
     assert not (systemd_dir / "brc-trading-kernel-worker.timer").exists()
 
+    runtime_slice = (
+        systemd_dir / "brc-trading-kernel.slice"
+    ).read_text(encoding="utf-8")
+    assert "CPUQuota=100%" in runtime_slice
+    assert "MemoryMax=1G" in runtime_slice
+    assert "TasksMax=128" in runtime_slice
+
     for role in ("entry", "lifecycle"):
         service = (
             systemd_dir / f"brc-trading-kernel-{role}-worker.service"
         ).read_text(encoding="utf-8")
-        timer = (
+        assert not (
             systemd_dir / f"brc-trading-kernel-{role}-worker.timer"
-        ).read_text(encoding="utf-8")
+        ).exists()
 
-        assert "Type=oneshot" in service
+        assert "Type=simple" in service
+        assert "Restart=on-failure" in service
+        assert "RestartSec=5s" in service
+        assert "Slice=brc-trading-kernel.slice" in service
         assert "scripts/trading_kernel/run_command_worker_once.py" in service
         assert f"--worker-role {role}" in service
+        assert "--run-forever" in service
+        assert "--poll-interval-ms 2000" in service
         assert "--timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS}" in service
         if role == "entry":
             assert (
@@ -371,34 +383,36 @@ def test_systemd_runtime_workers_are_four_explicit_bounded_roles() -> None:
                 "--idle-poll-interval-ms ${TRADING_KERNEL_IDLE_POLL_INTERVAL_MS}"
                 in service
             )
-        assert "OnUnitActiveSec=2s" in timer
-        assert "Persistent=false" in timer
 
     observation_service = (
         systemd_dir / "brc-trading-kernel-observation-worker.service"
     ).read_text(encoding="utf-8")
-    observation_timer = (
+    assert not (
         systemd_dir / "brc-trading-kernel-observation-worker.timer"
-    ).read_text(encoding="utf-8")
-    assert "Type=oneshot" in observation_service
+    ).exists()
+    assert "Type=simple" in observation_service
+    assert "Restart=on-failure" in observation_service
+    assert "Slice=brc-trading-kernel.slice" in observation_service
     assert "scripts/trading_kernel/run_observation_worker_once.py" in observation_service
+    assert "--run-forever" in observation_service
+    assert "--poll-interval-ms 5000" in observation_service
     assert "--runtime-scope-id" not in observation_service
-    assert "OnUnitActiveSec=5s" in observation_timer
-    assert "Persistent=false" in observation_timer
 
     reconciliation_service = (
         systemd_dir / "brc-trading-kernel-reconciliation-worker.service"
     ).read_text(encoding="utf-8")
-    reconciliation_timer = (
+    assert not (
         systemd_dir / "brc-trading-kernel-reconciliation-worker.timer"
-    ).read_text(encoding="utf-8")
-    assert "Type=oneshot" in reconciliation_service
+    ).exists()
+    assert "Type=simple" in reconciliation_service
+    assert "Restart=on-failure" in reconciliation_service
+    assert "Slice=brc-trading-kernel.slice" in reconciliation_service
     assert (
         "scripts/trading_kernel/run_reconciliation_worker_once.py"
         in reconciliation_service
     )
-    assert "OnUnitActiveSec=5s" in reconciliation_timer
-    assert "Persistent=false" in reconciliation_timer
+    assert "--run-forever" in reconciliation_service
+    assert "--poll-interval-ms 5000" in reconciliation_service
 
 
 @pytest.mark.asyncio

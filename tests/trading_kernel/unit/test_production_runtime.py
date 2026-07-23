@@ -33,7 +33,7 @@ class FakeCcxtExchange:
     ) -> list[list[object]]:
         del timeframe, since, limit
         self.ohlcv_symbols.append(symbol)
-        return [[1, "10", "11", "9", "10.5", "20"]]
+        return [[3_600_000, "10", "11", "9", "10.5", "20"]]
 
     async def load_markets(self, reload: bool = False) -> dict[str, object]:
         assert reload is False
@@ -199,7 +199,7 @@ async def test_public_factory_uses_only_canonical_registry_symbols_and_closes(
             exchange_instrument_id="binance-usdm:OPUSDT:perpetual",
             timeframe="1h",
             limit=1,
-            closed_at_ms=3_600_000,
+            closed_at_ms=7_200_000,
         )
     )
 
@@ -260,7 +260,10 @@ async def test_command_worker_closes_factory_resource(
 
     async def run_worker(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        return SimpleNamespace(model_dump=lambda **kwargs: {"status": "idle"})
+        return SimpleNamespace(
+            model_dump=lambda **kwargs: {"status": "no_candidate"},
+            status=SimpleNamespace(value="no_candidate"),
+        )
 
     monkeypatch.setattr(command_cli, "run_entry_worker_once", run_worker)
 
@@ -277,10 +280,79 @@ async def test_command_worker_closes_factory_resource(
             timeout_seconds=10.0,
             action_fact_validity_ms=5_000,
             idle_poll_interval_ms=2_000,
+            run_forever=False,
+            poll_interval_ms=2_000,
+            idle_log_interval_ms=300_000,
         )
     )
 
     assert exit_code == 0
+    assert adapter.closed is True
+    assert engine.disposed is True
+
+
+@pytest.mark.asyncio
+async def test_command_worker_long_running_mode_reuses_factory_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = FakeWorkerAdapter()
+    engine = FakeEngine()
+    factory_calls = 0
+    worker_calls = 0
+
+    def load_factory(spec: str):
+        del spec
+
+        def factory() -> FakeWorkerAdapter:
+            nonlocal factory_calls
+            factory_calls += 1
+            return adapter
+
+        return factory
+
+    async def run_worker(*args: object, **kwargs: object) -> object:
+        nonlocal worker_calls
+        del args, kwargs
+        worker_calls += 1
+        return SimpleNamespace(
+            model_dump=lambda **kwargs: {"status": "no_candidate"},
+            status=SimpleNamespace(value="no_candidate"),
+        )
+
+    async def run_process(tick, **kwargs: object) -> int:
+        assert kwargs["run_forever"] is True
+        assert kwargs["poll_interval_ms"] == 2_000
+        await tick()
+        await tick()
+        return 0
+
+    monkeypatch.setattr(command_cli, "_load_factory", load_factory)
+    monkeypatch.setattr(command_cli, "create_async_engine", lambda url: engine)
+    monkeypatch.setattr(command_cli, "run_entry_worker_once", run_worker)
+    monkeypatch.setattr(command_cli, "run_worker_process", run_process)
+
+    exit_code = await command_cli._run(
+        argparse.Namespace(
+            database_url="postgresql+asyncpg://kernel:test@localhost/kernel",
+            venue_factory="module:factory",
+            worker_role="entry",
+            worker_id="entry-1",
+            runtime_commit="commit-1",
+            schema_revision="0001_initial",
+            now_ms=None,
+            lease_ms=30_000,
+            timeout_seconds=10.0,
+            action_fact_validity_ms=5_000,
+            idle_poll_interval_ms=2_000,
+            run_forever=True,
+            poll_interval_ms=2_000,
+            idle_log_interval_ms=300_000,
+        )
+    )
+
+    assert exit_code == 0
+    assert factory_calls == 1
+    assert worker_calls == 2
     assert adapter.closed is True
     assert engine.disposed is True
 
