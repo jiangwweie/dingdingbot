@@ -8,9 +8,22 @@
 
 **Tech Stack:** Python 3.11+, Pydantic v2 frozen models, `decimal.Decimal`, SQLAlchemy 2, PostgreSQL 16/Alembic, pytest, Ruff, Mypy, CCXT-compatible Binance USD-M adapter, persistent systemd workers.
 
+## Execution Status At Plan Publication
+
+| Work | Status | Evidence / next boundary |
+| --- | --- | --- |
+| Tasks 1-3 | Complete and committed | `edad2c70`, `89c4e64a`, `6a6c14b6`; clean policy baseline, one admission snapshot, and pure slot-aware sizing exist |
+| Task 4 | In progress | Claim, Ticket, and reservation persistence is being completed; it is not a review gate until its round-trip tests and focused commit pass |
+| Tasks 5-14 | Pending | Must follow the ordered mutation, safety, release, production-contract, certification, and retirement gates below |
+| Task 15 | Separately gated | No Tokyo rebuild or exchange write occurs until Tasks 1-14 have direct local certification |
+
+The checklists below are the original test-first task recipes. This status table,
+not an unchecked historical RED/GREEN sub-step, is the current execution
+position.
+
 ## Global Constraints
 
-- The approved design is `docs/superpowers/specs/2026-07-23-multi-position-dynamic-budget-and-leverage-design.md`, revision 3.
+- The approved design is `docs/superpowers/specs/2026-07-23-multi-position-dynamic-budget-and-leverage-design.md`, revision 4.
 - Production execution remains exclusively under `src/trading_kernel/**`; the only schema baseline remains `migrations/trading_kernel/versions/0001_initial.py`.
 - Owner Policy values are exactly: `max_concurrent_tickets=3`, `planned_stop_risk_fraction=0.03`, `max_initial_margin_utilization=0.90`, `max_leverage=10`, `supported_margin_mode=cross`, `min_liquidation_distance_to_stop_distance_ratio=2.0`, and `max_post_fill_stop_risk_overrun_fraction=0.10`.
 - `new_entry_submit_enabled` controls only new ENTRY authority; it never suppresses Initial Stop, protection repair, exit, cancellation, controlled flatten, reconciliation, Settlement, or Review for existing exposure.
