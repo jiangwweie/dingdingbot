@@ -19,7 +19,10 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandStatus,
 )
 from src.trading_kernel.application.ports import RuntimeIncidentRecord
-from src.trading_kernel.domain.incident_blocking import EntryBlockScope
+from src.trading_kernel.domain.incident_blocking import (
+    EntryBlockScope,
+    canonical_entry_block_key,
+)
 from src.trading_kernel.domain.events import TicketIssued
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.reducer import reduce_event
@@ -237,6 +240,52 @@ async def test_admission_ownership_is_bounded_to_exact_account_and_instrument(
         ticket.identity.netting_domain.key(),
     )
     assert ownership.open_incident_scopes == (EntryBlockScope.ACCOUNT_CAPACITY,)
+
+
+@pytest.mark.asyncio
+async def test_admission_ownership_reads_the_canonical_leverage_domain_incident_key(
+    kernel_engine: AsyncEngine,
+) -> None:
+    ticket, claim = _claimed_ticket(_ticket(), now_ms=1_001)
+    event = TicketIssued(
+        event_id="event-leverage-incident-1",
+        ticket=ticket,
+        sequence=1,
+        occurred_at_ms=1_001,
+    )
+    domain = ticket.identity.netting_domain
+    async with PostgresKernelUnitOfWork(kernel_engine) as uow:
+        await uow.capacity_claims.add(claim)
+        await uow.commit_reduction(
+            event=event,
+            reduction=reduce_event(None, event),
+            expected_version=0,
+        )
+        await uow.incidents.add(
+            RuntimeIncidentRecord(
+                incident_id="incident:leverage-domain",
+                ticket_id=ticket.identity.ticket_id,
+                incident_kind="leverage_truth_contradiction",
+                status="open",
+                first_blocker="leverage_truth_contradiction",
+                entry_block_scope=EntryBlockScope.LEVERAGE_DOMAIN,
+                entry_block_key=canonical_entry_block_key(
+                    EntryBlockScope.LEVERAGE_DOMAIN,
+                    venue_id=domain.venue_id,
+                    account_id=domain.account_id,
+                    exchange_instrument_id=domain.exchange_instrument_id,
+                ),
+                details={},
+                opened_at_ms=1_002,
+            )
+        )
+        ownership = await uow.entry_admission.read_admission_ownership(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+        )
+
+    assert ownership.open_incident_scopes == (EntryBlockScope.LEVERAGE_DOMAIN,)
 
 
 def _ticket_for_signal(

@@ -24,7 +24,10 @@ from src.trading_kernel.application.ports import (
 )
 from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
-from src.trading_kernel.domain.incident_blocking import EntryBlockScope
+from src.trading_kernel.domain.incident_blocking import (
+    EntryBlockScope,
+    canonical_entry_block_key,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     CommandPayload,
@@ -1242,8 +1245,17 @@ class PostgresEntryAdmissionRepository:
             sorted({str(value) for value in unknown_result.scalars().all()})
         )
 
-        account_key = f"{venue_id}:{account_id}"
-        leverage_key = f"{account_key}:{exchange_instrument_id}"
+        account_key = canonical_entry_block_key(
+            EntryBlockScope.ACCOUNT_CAPACITY,
+            venue_id=venue_id,
+            account_id=account_id,
+        )
+        leverage_key = canonical_entry_block_key(
+            EntryBlockScope.LEVERAGE_DOMAIN,
+            venue_id=venue_id,
+            account_id=account_id,
+            exchange_instrument_id=exchange_instrument_id,
+        )
         incident_statement = sa.select(runtime_incidents.c.entry_block_scope)
         incident_statement = incident_statement.where(
             runtime_incidents.c.status == "open",
