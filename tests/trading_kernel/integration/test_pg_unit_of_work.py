@@ -29,6 +29,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
 from tests.trading_kernel.unit.test_ticket import _identity, _ticket
+from tests.trading_kernel.integration.test_issue_ticket import _issue_request
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -65,7 +66,7 @@ async def kernel_engine() -> AsyncEngine:
 async def test_reduction_commits_ticket_aggregate_event_and_command_atomically(
     kernel_engine: AsyncEngine,
 ) -> None:
-    ticket = _ticket()
+    ticket, claim = _claimed_ticket(_ticket(), now_ms=1_001)
     event = TicketIssued(
         event_id="event-issued-1",
         ticket=ticket,
@@ -75,6 +76,7 @@ async def test_reduction_commits_ticket_aggregate_event_and_command_atomically(
     reduction = reduce_event(None, event)
 
     async with PostgresKernelUnitOfWork(kernel_engine) as uow:
+        await uow.capacity_claims.add(claim)
         await uow.commit_reduction(
             event=event,
             reduction=reduction,
@@ -99,7 +101,7 @@ async def test_reduction_commits_ticket_aggregate_event_and_command_atomically(
 async def test_event_uniqueness_failure_rolls_back_every_new_projection(
     kernel_engine: AsyncEngine,
 ) -> None:
-    first_ticket = _ticket()
+    first_ticket, first_claim = _claimed_ticket(_ticket(), now_ms=1_001)
     first_event = TicketIssued(
         event_id="event-duplicate",
         ticket=first_ticket,
@@ -107,13 +109,17 @@ async def test_event_uniqueness_failure_rolls_back_every_new_projection(
         occurred_at_ms=1_001,
     )
     async with PostgresKernelUnitOfWork(kernel_engine) as uow:
+        await uow.capacity_claims.add(first_claim)
         await uow.commit_reduction(
             event=first_event,
             reduction=reduce_event(None, first_event),
             expected_version=0,
         )
 
-    second_ticket = _ticket_for_signal("signal-2", "episode-2", position_side="short")
+    second_ticket, second_claim = _claimed_ticket(
+        _ticket_for_signal("signal-2", "episode-2", position_side="short"),
+        now_ms=1_002,
+    )
     duplicate_event = TicketIssued(
         event_id="event-duplicate",
         ticket=second_ticket,
@@ -122,6 +128,7 @@ async def test_event_uniqueness_failure_rolls_back_every_new_projection(
     )
     with pytest.raises(IntegrityError):
         async with PostgresKernelUnitOfWork(kernel_engine) as uow:
+            await uow.capacity_claims.add(second_claim)
             await uow.commit_reduction(
                 event=duplicate_event,
                 reduction=reduce_event(None, duplicate_event),
@@ -144,7 +151,7 @@ async def test_event_uniqueness_failure_rolls_back_every_new_projection(
 async def test_two_workers_enforce_optimistic_aggregate_version(
     kernel_engine: AsyncEngine,
 ) -> None:
-    ticket = _ticket()
+    ticket, claim = _claimed_ticket(_ticket(), now_ms=1_001)
     event = TicketIssued(
         event_id="event-version-1",
         ticket=ticket,
@@ -153,6 +160,7 @@ async def test_two_workers_enforce_optimistic_aggregate_version(
     )
     aggregate = reduce_event(None, event).aggregate
     async with PostgresKernelUnitOfWork(kernel_engine) as uow:
+        await uow.capacity_claims.add(claim)
         await uow.commit_reduction(
             event=event,
             reduction=reduce_event(None, event),
@@ -187,7 +195,7 @@ async def test_two_workers_enforce_optimistic_aggregate_version(
 async def test_admission_ownership_is_bounded_to_exact_account_and_instrument(
     kernel_engine: AsyncEngine,
 ) -> None:
-    ticket = _ticket()
+    ticket, claim = _claimed_ticket(_ticket(), now_ms=1_001)
     event = TicketIssued(
         event_id="event-ownership-1",
         ticket=ticket,
@@ -195,6 +203,7 @@ async def test_admission_ownership_is_bounded_to_exact_account_and_instrument(
         occurred_at_ms=1_001,
     )
     async with PostgresKernelUnitOfWork(kernel_engine) as uow:
+        await uow.capacity_claims.add(claim)
         await uow.commit_reduction(
             event=event,
             reduction=reduce_event(None, event),
@@ -255,6 +264,15 @@ def _ticket_for_signal(
         netting_domain=domain,
     )
     return _ticket(identity=identity, runtime_scope_id=f"scope-{signal_event_id}")
+
+
+def _claimed_ticket(ticket, *, now_ms: int):
+    request = _issue_request(
+        ticket=ticket,
+        now_ms=now_ms,
+        claim_owner="pg-uow-test",
+    )
+    return request.capacity_claim.to_ticket(), request.capacity_claim
 
 
 def _database_url(database_name: str) -> str:

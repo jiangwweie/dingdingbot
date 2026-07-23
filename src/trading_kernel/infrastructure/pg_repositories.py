@@ -1123,7 +1123,6 @@ class PostgresEntryAdmissionRepository:
         venue_id: str,
         account_id: str,
         exchange_instrument_id: str,
-        for_update: bool = False,
     ) -> AdmissionOwnership:
         """Load only current BRC ownership relevant to one admission snapshot."""
 
@@ -1136,8 +1135,6 @@ class PostgresEntryAdmissionRepository:
         domains_statement = domains_statement.where(active_ticket).order_by(
             trade_tickets.c.active_netting_domain_key
         )
-        if for_update:
-            domains_statement = domains_statement.with_for_update(of=trade_tickets)
         domains_result = await self._connection.execute(
             domains_statement
         )
@@ -1163,10 +1160,6 @@ class PostgresEntryAdmissionRepository:
                 trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
             )
         ).where(active_ticket)
-        if for_update:
-            orders_statement = orders_statement.with_for_update(
-                of=(trade_aggregates, trade_tickets)
-            )
         order_rows = await self._connection.execute(
             orders_statement
         )
@@ -1192,10 +1185,6 @@ class PostgresEntryAdmissionRepository:
             exchange_commands.c.status
             == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
         ).order_by(exchange_commands.c.ticket_id)
-        if for_update:
-            unknown_statement = unknown_statement.with_for_update(
-                of=(exchange_commands, trade_tickets)
-            )
         unknown_result = await self._connection.execute(
             unknown_statement
         )
@@ -1223,10 +1212,6 @@ class PostgresEntryAdmissionRepository:
                 ),
             ),
         ).order_by(runtime_incidents.c.entry_block_scope)
-        if for_update:
-            incident_statement = incident_statement.with_for_update(
-                of=runtime_incidents
-            )
         incident_result = await self._connection.execute(
             incident_statement
         )

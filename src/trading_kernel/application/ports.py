@@ -507,7 +507,6 @@ class EntryAdmissionRepository(Protocol):
         venue_id: str,
         account_id: str,
         exchange_instrument_id: str,
-        for_update: bool = False,
     ) -> AdmissionOwnership: ...
 
     async def get_account_exposure(

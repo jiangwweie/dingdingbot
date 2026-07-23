@@ -118,11 +118,6 @@ async def issue_ticket(
         venue_id=ticket.identity.netting_domain.venue_id,
         account_id=ticket.identity.netting_domain.account_id,
         exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
-        # The global ENTRY lane and exact account exposure row already own
-        # admission serialization.  Ownership is a bounded current-state
-        # verification; locking its active Ticket/Aggregate/Command rows here
-        # would invert Lifecycle's Aggregate -> Account Capacity lock order.
-        for_update=False,
     )
     if ownership.open_incident_scopes:
         return IssueTicketResult(
