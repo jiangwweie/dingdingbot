@@ -1,0 +1,685 @@
+---
+title: Multi-Position Dynamic Budget And Leverage Design
+status: OWNER_APPROVED_DESIGN
+date: 2026-07-23
+---
+
+# Multi-Position Dynamic Budget And Leverage Design
+
+## Objective
+
+Replace the current fixed-USDT capacity envelope with one versioned,
+balance-relative budget model that supports up to three concurrent Tickets
+without creating a second execution chain.
+
+The design must:
+
+- size each new Ticket from fresh account balance and its Initial Stop;
+- preserve margin capacity for the remaining Ticket slots;
+- select a bounded leverage that is sufficient for the allocated slot rather
+  than blindly using either the smallest account-wide leverage or a fixed 10x;
+- keep one globally serialized new-ENTRY lane while existing protected Tickets
+  progress concurrently;
+- remove retired fixed gross-notional and fixed-USDT stop-risk policy semantics;
+- keep all runtime authority in PostgreSQL and all production execution under
+  `src/trading_kernel`;
+- remain readable, typed, auditable, and fail-closed.
+
+This program changes capacity, sizing, leverage application, persistence, and
+certification. It does not change strategy definitions, signal detectors, exit
+policies, settlement formulas, or the protected lifecycle state machine except
+where leverage evidence must be recorded.
+
+## Owner Decisions
+
+The following decisions are final for this design:
+
+| Decision | Final value |
+| --- | --- |
+| Planned Stop Risk per Ticket | `totalWalletBalance * 0.03` |
+| Maximum concurrent active Tickets | `3` |
+| Account-wide gross stop-risk cap | None |
+| Account-wide gross notional cap | None |
+| Strategy-cluster risk cap | None |
+| Maximum configured leverage | `10x` |
+| Maximum account initial-margin utilization | `0.90` |
+| Margin allocation | Slot-aware across remaining Ticket capacity |
+| Quantity when full risk cannot fit | Shrink to the executable capacity |
+| Minimum economic utilization threshold | None beyond venue minimum quantity/notional |
+| Adding to an existing position | Forbidden |
+| New ENTRY scheduling | Globally serialized |
+| Existing Ticket lifecycle | Concurrent across independent Netting Domains |
+| Production writes during implementation | Disabled until certification and controlled re-enable |
+
+Fees, funding, and realized slippage remain separate economics. The 3% value
+is the planned price loss from entry reference to Initial Stop, not a guarantee
+that realized loss cannot exceed 3% in a gap, rejection, or venue-failure case.
+
+## Known Current State
+
+Current tracked code has the correct multi-position execution architecture but
+the wrong capacity policy for this target:
+
+- `CapacityPolicy` uses fixed `max_gross_notional`,
+  `max_gross_risk_at_stop`, and `max_ticket_risk_at_stop` values;
+- `target_leverage` is one fixed value, currently seeded as 2x;
+- capacity uses all fresh available margin multiplied by that fixed leverage;
+- the Ticket and CapacityClaim already freeze notional, leverage, and stop risk;
+- the global ENTRY lane is released only after Initial Stop confirmation, so a
+  second Ticket cannot allocate margin while the first ENTRY outcome or
+  protection installation is unresolved;
+- the current venue adapter creates orders but does not set and verify the
+  Ticket leverage before ENTRY.
+
+Historical commits are provenance, not runtime authority:
+
+| Commit | Reusable evidence | Treatment |
+| --- | --- | --- |
+| `2df39c1c` | Wallet-fraction stop sizing, quantity rounding, leverage ceiling, margin capacity | Re-express as pure Trading Kernel domain behavior |
+| `7f4a5253` | `set_leverage`, signed read-back, mismatch refusal | Re-implement inside the current venue boundary |
+| `e5a8ed72` / `b3aedb2c` / `a5d72996` | Versioned risk authority and atomic account capacity | Reuse invariants and tests only |
+
+No retired module, table generation, migration chain, compatibility reader, or
+alternate application service may be restored.
+
+## Alternatives Considered
+
+| Approach | Concurrency | Liquidation buffer | Simplicity | Decision |
+| --- | --- | --- | --- | --- |
+| Keep fixed-USDT Envelope and only raise limits | Weakly related to balance | Unchanged | Superficially simple, semantically wrong | Rejected |
+| Always configure 10x | Maximizes margin efficiency | Smallest | Simple but unnecessarily aggressive | Rejected |
+| Choose the minimum leverage against all available margin | First Ticket consumes the most margin | Largest | Reuses historical algorithm unchanged | Rejected |
+| Allocate margin by remaining slots, then choose the minimum sufficient leverage | Preserves multi-Ticket capacity | Bounded and larger than fixed 10x where possible | Moderate, explicit | Selected |
+
+The selected approach changes the optimization target from “minimize the
+leverage of the current Ticket” to “use the lowest leverage that fits the
+current Ticket inside its fair share of remaining account margin.”
+
+## Authoritative Chain
+
+The existing chain remains the only production path:
+
+```text
+Observation
+-> StrategySignal
+-> Readiness/Authority
+-> fresh account and instrument facts
+-> slot-aware CapacityClaim
+-> immutable Ticket
+-> durable ENTRY Exchange Command
+-> leverage set/read-back when permitted
+-> ENTRY order
+-> Initial Stop
+-> concurrent protected lifecycle
+-> reconciliation
+-> settlement
+-> review
+```
+
+Strategy code still ends at `StrategySignal`. It cannot provide quantity,
+notional, leverage, account balance, margin allocation, or exchange commands.
+
+## Capacity Authorities
+
+### Owner Policy
+
+PostgreSQL `brc_owner_policy_current` is the only runtime authority for the
+capital policy. Production code must not use environment variables, Markdown,
+or hidden constants for these values.
+
+The policy model becomes:
+
+```text
+owner_policy_id
+policy_version
+enabled
+real_submit_enabled
+priority_rank
+max_concurrent_tickets
+planned_stop_risk_fraction
+max_initial_margin_utilization
+max_leverage
+scope
+updated_at_ms
+```
+
+The committed deterministic seed installs `3`, `0.03`, `0.90`, and `10`.
+Those literals may exist in the seed and its exact tests, but not inside the
+domain calculation or worker orchestration.
+
+### Fresh Exchange Facts
+
+Action-time account facts must distinguish loss capacity from margin capacity:
+
+| Fact | Meaning | Use |
+| --- | --- | --- |
+| `total_wallet_balance` | Wallet balance excluding temporary unrealized PnL | Planned Stop Risk budget |
+| `total_margin_balance` | Current signed cross-margin balance | Account initial-margin ceiling |
+| `total_initial_margin` | Margin already committed by current positions/orders | Remaining account margin capacity |
+| `available_margin` | Venue-reported currently available margin | Final executable margin bound |
+| `configured_leverage` | Exact account/instrument leverage read-back | Existing-position leverage constraint |
+| `instrument_open_position_count` | Both long and short rows for the exact instrument | Whether leverage mutation is allowed |
+
+All values are fresh, bounded, identity-matched, and included in the
+action-facts digest. Missing, stale, non-finite, negative, or contradictory
+facts block the CapacityClaim.
+
+### Instrument Rules
+
+`brc_instrument_rules_current` remains the current projection for executable
+venue constraints. It gains a typed `exchange_max_leverage` value. Quantity
+step, minimum quantity, minimum notional, price tick, leverage limit, observed
+time, expiry, and projection version must belong to the same exact instrument
+projection.
+
+The selected maximum is always:
+
+```text
+permitted_max_leverage
+= min(owner_policy.max_leverage, instrument_rules.exchange_max_leverage)
+```
+
+The system never assumes that every instrument supports 10x merely because the
+Owner policy allows 10x.
+
+## Slot-Aware Budget Algorithm
+
+### Step 1: Validate Capacity Count
+
+```text
+active_ticket_count < max_concurrent_tickets
+remaining_slots = max_concurrent_tickets - active_ticket_count
+```
+
+An active Ticket includes every non-terminal Ticket that still owns budget or a
+Netting Domain. A terminal Ticket with unreleased budget remains active for
+admission purposes until release is committed.
+
+### Step 2: Compute Planned Stop Risk
+
+```text
+planned_stop_risk_budget
+= total_wallet_balance * planned_stop_risk_fraction
+
+risk_per_unit
+= abs(entry_reference_price - initial_stop_price)
+
+risk_quantity
+= floor_to_step(planned_stop_risk_budget / risk_per_unit)
+
+risk_target_notional
+= risk_quantity * entry_reference_price
+```
+
+The rounded final `planned_stop_risk` must be positive and must not exceed the
+frozen `planned_stop_risk_budget`.
+
+### Step 3: Compute Account Margin Capacity
+
+The 90% policy is an account-wide initial-margin ceiling, not permission for
+each Ticket to consume 90% independently.
+
+```text
+account_initial_margin_limit
+= total_margin_balance * max_initial_margin_utilization
+
+remaining_policy_margin
+= max(account_initial_margin_limit - total_initial_margin, 0)
+
+remaining_executable_margin
+= min(available_margin, remaining_policy_margin)
+```
+
+The global ENTRY lane prevents another Claim from being issued while a prior
+ENTRY or Initial Stop is unresolved. Existing accepted positions are already
+represented by signed `total_initial_margin` and `available_margin`; they must
+not be subtracted a second time from PostgreSQL reservations.
+
+### Step 4: Allocate One Slot
+
+```text
+ticket_margin_budget
+= remaining_executable_margin / remaining_slots
+```
+
+Unused prior-slot margin remains visible through the next fresh account facts
+and is redistributed across the then-remaining slots. There is no fixed symbol,
+strategy, or Ticket-specific quota.
+
+### Step 5: Select Leverage
+
+When the exact account/instrument is flat:
+
+```text
+required_leverage
+= ceil(risk_target_notional / ticket_margin_budget)
+
+selected_leverage
+= min(max(required_leverage, 1), permitted_max_leverage)
+```
+
+When either side of the exact instrument already has an open position:
+
+- no leverage mutation is permitted;
+- `configured_leverage` must be present, positive, and no greater than the
+  permitted policy maximum;
+- `selected_leverage` equals the existing configured leverage;
+- if it cannot carry the full risk target inside the slot margin budget, the
+  new Ticket is shrunk rather than changing existing exposure configuration.
+
+### Step 6: Compute Executable Quantity
+
+```text
+margin_quantity
+= floor_to_step(
+    ticket_margin_budget * selected_leverage / entry_reference_price
+)
+
+final_quantity
+= min(risk_quantity, margin_quantity)
+
+final_notional
+= final_quantity * entry_reference_price
+
+reserved_margin
+= final_notional / selected_leverage
+
+planned_stop_risk
+= final_quantity * risk_per_unit
+```
+
+The Claim is refused when the final quantity is below the venue minimum,
+final notional is below the venue minimum, stop risk is zero, no remaining slot
+exists, or the resulting margin/risk values violate the frozen policy facts.
+
+There is no separate minimum percentage of the 3% budget. A smaller valid
+Ticket may proceed when venue minimums are satisfied.
+
+## Immutable CapacityClaim
+
+The CapacityClaim becomes the complete audit record for one action-time capital
+decision. It freezes:
+
+```text
+capacity_claim_id
+ticket_identity
+owner_policy_id / owner_policy_version
+runtime_scope_id / runtime_scope_version
+fact_digest / action_facts_digest
+instrument_rules_projection_version
+total_wallet_balance_at_claim
+total_margin_balance_at_claim
+total_initial_margin_at_claim
+available_margin_at_claim
+active_ticket_count_at_claim
+remaining_slots_at_claim
+planned_stop_risk_fraction
+planned_stop_risk_budget
+max_initial_margin_utilization
+ticket_margin_budget
+required_leverage
+selected_leverage
+exchange_max_leverage
+reserved_margin
+entry_reference_price
+quantity / notional / risk_at_stop
+entry and protection plan
+decision_digest
+created_at_ms / expires_at_ms
+```
+
+Every financial value uses `Decimal`. Leverage and count fields use integers.
+The decision digest covers the complete typed decision and prevents consumers
+from silently recomputing or replacing one component.
+
+## Immutable Ticket
+
+The Ticket remains one Exposure Episode’s immutable execution contract. It
+adds an explicit `capacity_claim_id` and freezes the selected outputs required
+after the action-time facts expire:
+
+```text
+planned_stop_risk_budget
+selected_leverage
+reserved_margin
+risk_reservation_basis
+```
+
+The existing `notional`, `risk_at_stop`, quantity, entry plan, stop plan, and
+take-profit plan remain. The old generic `leverage` field is renamed to
+`selected_leverage` and becomes an integer.
+
+No lifecycle service may resize the Ticket, change leverage, add to the
+position, or consume a new balance snapshot after issuance.
+
+## Budget Reservation
+
+`brc_budget_reservations` remains one Ticket-bound reservation. It stores:
+
+```text
+reserved_notional
+reserved_risk
+reserved_margin
+planned_stop_risk_budget
+risk_reservation_basis
+status
+created_at_ms
+released_at_ms
+```
+
+The reservation protects the atomic issue transaction and provides an auditable
+release record. Fresh exchange margin facts remain the action-time authority
+for subsequent Ticket sizing.
+
+## ENTRY Leverage Application
+
+No new business table or parallel command chain is introduced.
+
+The existing durable ENTRY command payload gains:
+
+```text
+desired_leverage
+leverage_policy_version
+leverage_fact_digest
+```
+
+The existing command result payload records:
+
+```text
+selected_leverage
+exchange_configured_leverage
+leverage_verified_at_ms
+leverage_verification_digest
+```
+
+For a flat exact account/instrument, the command worker executes outside any
+open PostgreSQL transaction:
+
+```text
+claim durable ENTRY command
+-> re-read exact instrument position rows
+-> refuse mutation if either side is non-flat
+-> set_leverage(selected_leverage)
+-> signed exact-instrument leverage read-back
+-> require exact equality
+-> create_order with deterministic client_order_id
+-> persist accepted, rejected, or outcome_unknown result
+```
+
+For an instrument with an existing position, `set_leverage` is skipped and the
+command revalidates that the current configured leverage equals the Ticket’s
+selected leverage before `create_order`.
+
+Protection, take-profit, exit, cancel, replacement, and controlled-flatten
+commands never carry leverage mutation intent.
+
+## Transaction Ownership
+
+### Claim Construction
+
+Network facts are gathered before opening a database transaction. The
+application then reads exact current policy, active Ticket count, Netting Domain
+occupancy, and instrument-rule projection in bounded queries.
+
+Pure domain calculation performs no SQLAlchemy, CCXT, filesystem, subprocess,
+or logging work.
+
+### Ticket Issue
+
+The existing short issue transaction remains atomic:
+
+```text
+lock global ENTRY lane
+-> lock exact account exposure row
+-> re-read current Owner Policy
+-> verify Claim identity, version, digest, and expiry
+-> verify active Ticket count remains below 3
+-> verify exact Netting Domain remains unoccupied
+-> persist CapacityClaim
+-> persist immutable Ticket
+-> persist Budget Reservation
+-> reserve account exposure count and display aggregates
+-> claim Netting Domain
+-> create Trade Aggregate and first Trade Event
+-> persist durable ENTRY command
+-> commit
+```
+
+No venue call occurs inside this transaction.
+
+### Release
+
+Budget, Netting Domain, and active Ticket count release only through existing
+terminal reducer effects and reconciliation truth. A manually changed database
+row is never a normal runtime release path.
+
+## Failure Semantics
+
+| Failure | Result |
+| --- | --- |
+| Missing/stale account facts | No CapacityClaim |
+| Missing/stale instrument rules | No CapacityClaim |
+| Invalid or non-protective stop | No CapacityClaim |
+| Three active Tickets | Capacity exhausted |
+| Same Netting Domain occupied | Admission refused |
+| Existing instrument leverage above policy maximum | Admission refused |
+| Existing instrument leverage insufficient for full target | Shrink using existing leverage |
+| `set_leverage` rejected | ENTRY command rejected; no order submit |
+| Leverage read-back missing or mismatched | No order submit; fail-closed |
+| Timeout after any exchange mutation | `outcome_unknown`; never blind resend |
+| ENTRY authoritative rejection | Terminal; release budget and lane |
+| Partial ENTRY fill | Existing Incident and controlled-flatten contract |
+| Initial Stop unresolved | Global ENTRY lane remains held |
+
+Leverage mutation and order submission form one durable ENTRY intent. Exact
+reconciliation must distinguish “no order exists,” “order exists,” and
+“external outcome remains unknown” without generating a second ENTRY.
+
+## PostgreSQL Changes
+
+No new business table is required.
+
+| Existing table | Change |
+| --- | --- |
+| `brc_owner_policy_current` | Replace fixed gross/fixed-ticket fields and `target_leverage` with fraction, margin utilization, max leverage, and count policy |
+| `brc_instrument_rules_current` | Add typed `exchange_max_leverage` |
+| `brc_capacity_claims` | Add frozen balance, slot, margin, and selected-leverage decision fields |
+| `brc_trade_tickets` | Add Claim identity and frozen budget outputs; rename leverage semantics |
+| `brc_budget_reservations` | Add reserved margin, planned budget, and risk basis |
+
+`brc_owner_policy_events` and `brc_exchange_commands` already use typed identity
+plus JSON payloads and do not need new tables. `brc_account_exposure_current`
+retains gross notional and gross stop risk as observability projections, but
+they are no longer admission caps. `active_ticket_count` remains authoritative
+for the configured Ticket count boundary.
+
+Because the current program uses one clean baseline and the Owner authorized a
+forward-only BRC rebuild, implementation modifies `0001_initial` directly and
+rebuilds the isolated BRC PostgreSQL database after exact flatness and
+write-fence checks. No compatibility migration or old-column fallback is
+created.
+
+## Code Structure And Coding Standards
+
+The implementation keeps responsibilities narrow:
+
+| File or module | Responsibility |
+| --- | --- |
+| `domain/capacity.py` | Frozen capacity facts, policy, Claim, statuses, and decision identities |
+| `domain/capacity_sizing.py` | Pure slot allocation, leverage selection, quantity rounding, and refusal reasons |
+| `application/build_capacity_claim.py` | Gather typed inputs and invoke the pure decision |
+| `application/issue_ticket.py` | Revalidate and atomically issue one Ticket |
+| `application/ports.py` | Named repository and venue contracts |
+| `infrastructure/pg_models.py` | SQLAlchemy table declarations matching the single baseline |
+| `infrastructure/pg_repositories.py` | Exact typed persistence mapping |
+| `infrastructure/venue_adapter.py` | Signed account facts, leverage set/read-back, and venue order mutation |
+| `infrastructure/runtime_authority_seed.py` | Deterministic versioned policy bootstrap |
+
+Required coding rules:
+
+- use frozen Pydantic models with `extra="forbid"` at every core boundary;
+- use `Decimal` for all financial arithmetic and explicit floor/ceiling modes;
+- use integer leverage values and reject booleans or fractional leverage;
+- keep domain modules free of infrastructure imports and side effects;
+- avoid loose dictionaries between application and domain layers;
+- use exact identity and bounded current-state queries;
+- keep venue I/O outside transactions and timeout-bounded;
+- persist every exchange mutation under a durable command identity;
+- delete fixed-Envelope tests and fields instead of preserving compatibility;
+- place policy literals only in deterministic seed/test authority;
+- log identities and refusal classifications, never credentials or full signed
+  exchange payloads;
+- do not add a generic rules engine, plugin system, or strategy-specific budget
+  branch for this program.
+
+## Hardcoding Retirement
+
+The following production semantics disappear:
+
+```text
+max_gross_notional admission gate
+max_gross_risk_at_stop admission gate
+max_ticket_risk_at_stop fixed-USDT gate
+target_leverage fixed for every Ticket
+Acceptance=1 Ticket / Full=2 Tickets fixed envelope
+20/40 USDT production notional defaults
+10/20 USDT fixed risk defaults
+```
+
+The following remain explicit by design:
+
+- one global ENTRY lane;
+- one Ticket per Exposure Episode;
+- one active Ticket per Netting Domain;
+- maximum three Tickets from Owner Policy;
+- 3%, 90%, and 10x in the committed policy seed;
+- exact six-strategy Registry scope outside this capacity program.
+
+## Runtime Ownership And Performance
+
+The four persistent workers remain unchanged:
+
+| Worker | Ownership |
+| --- | --- |
+| Observation | Market observation and StrategySignal production |
+| Entry | Candidate arbitration, fresh facts, CapacityClaim, Ticket issue, ENTRY dispatch |
+| Lifecycle | Initial Stop, TP1, runner, exit, flatten, and terminal transitions |
+| Reconciliation | External truth, unknown outcomes, residue, Settlement, and Review handoff |
+
+Each Entry cadence performs only bounded queries for one candidate, one policy,
+one account projection, one exact instrument rule, and one exact Netting Domain.
+No full-history scan, generated file, or timer cold start is introduced.
+
+## Test Strategy
+
+### Pure Domain Tests
+
+Tests must prove:
+
+- `totalWalletBalance * 0.03` produces the exact Decimal budget;
+- active counts 0, 1, and 2 allocate across 3, 2, and 1 remaining slots;
+- active count 3 refuses capacity;
+- account-wide initial-margin utilization never exceeds 90%;
+- the selected leverage is the lowest integer that fits the slot budget;
+- the selected leverage never exceeds Owner or venue maximum;
+- a 10x-insufficient target shrinks rather than consuming another slot;
+- venue quantity step and minimums are applied after both risk and margin caps;
+- existing configured leverage is adopted without mutation;
+- non-finite, stale, negative, or contradictory inputs fail closed.
+
+### PostgreSQL Tests
+
+Tests must prove:
+
+- the empty baseline contains only the new policy fields and constraints;
+- fixed Envelope columns are absent;
+- Claim, Ticket, and Budget Reservation persist exact Decimal and integer values;
+- policy versions are monotonic and events preserve the full payload;
+- three Tickets can exist across independent Netting Domains;
+- a fourth Ticket cannot commit;
+- concurrent issue attempts serialize on the global lane and exact account row;
+- terminal release makes capacity available exactly once.
+
+### Venue And Command Tests
+
+Tests must prove:
+
+- flat instrument calls `set_leverage`, then signed read-back, then
+  `create_order`;
+- read-back mismatch emits no order;
+- either-side existing position emits no leverage mutation;
+- existing matching leverage permits order submit;
+- protection and exit commands never set leverage;
+- timeout and unknown outcomes never create a second ENTRY generation.
+
+### Full-Chain Certification
+
+Full-chain tests must prove:
+
+- three natural StrategySignals in distinct Netting Domains can create three
+  serial Tickets and then progress concurrently;
+- the slot algorithm preserves capacity for later Tickets;
+- each Ticket owns one immutable Claim, reservation, command lineage, position,
+  settlement, and review;
+- no strategy detector contains capital or leverage decisions;
+- no retired fixed-Envelope name remains in production code, schema, seed,
+  tests, or current documents;
+- healthy idle cadence creates no JSON or Markdown output.
+
+## Deployment And Cutover
+
+Implementation and deployment proceed fix-forward:
+
+```text
+keep Tokyo exchange writes disabled
+-> implement and certify locally from an empty PostgreSQL database
+-> prove current exchange flatness and zero open orders
+-> fence all BRC writers
+-> rebuild only the isolated BRC PostgreSQL database from revised 0001_initial
+-> seed the exact versioned dynamic policy with real_submit_enabled=false
+-> deploy the exact committed release
+-> start the four persistent workers
+-> run readonly schema, seed, account-mode, balance, leverage, and scope probes
+-> arm one controlled Ticket under the new model
+-> prove ENTRY leverage, Initial Stop, terminal flatness, release, Settlement,
+   Review, and zero Incident
+-> enable normal three-Ticket authority only after certification
+```
+
+Non-quantitative services, databases, containers, nginx configuration, and
+program data remain outside the mutable allowlist.
+
+## Acceptance Criteria
+
+The program is complete only when all of the following are current and direct:
+
+1. Owner Policy is versioned in PostgreSQL with `3`, `0.03`, `0.90`, and `10`.
+2. Fixed gross-notional, fixed gross-risk, fixed per-Ticket USDT risk, and fixed
+   target-leverage semantics are absent from production authority.
+3. Capacity uses fresh signed wallet, margin, initial-margin, available-margin,
+   instrument, and configured-leverage facts.
+4. Slot-aware sizing preserves remaining Ticket capacity and uses no more than
+   the account-wide initial-margin policy.
+5. Claim, Ticket, reservation, event, and command retain exact versioned audit
+   identity.
+6. Three independent Tickets issue serially and progress concurrently.
+7. A fourth active Ticket is refused without side effects.
+8. Same-instrument leverage is never mutated while either side is open.
+9. ENTRY is submitted only after exact leverage equality is proven.
+10. Unknown outcomes, rejection, and partial fill retain current fail-closed
+    lifecycle semantics.
+11. The clean baseline rebuilds from zero and contains no compatibility path.
+12. Targeted tests, full Trading Kernel tests, Ruff, Mypy, schema certification,
+    document authority checks, retired-semantics scans, and `git diff --check`
+    pass.
+13. Tokyo runs the exact release with writes initially disabled and one
+    controlled terminal Ticket proves the new budget model before full
+    three-Ticket authority is enabled.
+
+## Final Decision
+
+This design extends the existing Trading Kernel rather than restoring the old
+account-risk system. It introduces no new business table and no parallel
+execution path. The core architectural change is one pure, slot-aware capacity
+decision whose complete inputs and outputs are frozen into the existing Claim,
+Ticket, reservation, and durable command lineage.
