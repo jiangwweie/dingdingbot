@@ -17,6 +17,10 @@ class PrepareEntryCommand(_Effect):
     ticket: TradeTicket
 
 
+class PrepareSetLeverageCommand(_Effect):
+    ticket: TradeTicket
+
+
 class PrepareInitialStopCommand(_Effect):
     ticket_id: str
     quantity: Decimal
@@ -91,6 +95,7 @@ class ReleaseBudget(_Effect):
 
 KernelEffect = (
     PrepareEntryCommand
+    | PrepareSetLeverageCommand
     | PrepareInitialStopCommand
     | PrepareTakeProfitCommand
     | PrepareProtectionReplacementCommand

@@ -154,7 +154,7 @@ def _admission_snapshot() -> EntryAdmissionSnapshot:
             AdmissionInstrumentFacts(
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
                 mark_price=Decimal("10000"),
-                configured_leverage=1,
+                configured_leverage=10,
             ),
         ),
         positions=(),

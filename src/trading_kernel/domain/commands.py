@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
@@ -17,6 +18,7 @@ class CommandGenerationError(ValueError):
 
 
 class ExchangeCommandKind(StrEnum):
+    SET_LEVERAGE = "set_leverage"
     ENTRY = "entry"
     INITIAL_STOP = "initial_stop"
     TAKE_PROFIT = "take_profit"
@@ -48,6 +50,8 @@ class OrderCommandPayload(BaseModel):
     stop_price: Decimal | None = None
     replaces_exchange_order_id: str | None = None
     source_watermark_ms: int | None = None
+    required_configured_leverage: int | None = None
+    leverage_verification_digest: str | None = None
 
     @field_validator("quantity")
     @classmethod
@@ -86,6 +90,21 @@ class OrderCommandPayload(BaseModel):
                 raise ValueError("replacement payload requires prior order identity")
             if self.source_watermark_ms is None or self.source_watermark_ms <= 0:
                 raise ValueError("replacement payload requires a positive watermark")
+        leverage_fields = (
+            self.required_configured_leverage,
+            self.leverage_verification_digest,
+        )
+        if any(value is not None for value in leverage_fields):
+            if (
+                isinstance(self.required_configured_leverage, bool)
+                or not isinstance(self.required_configured_leverage, int)
+                or self.required_configured_leverage <= 0
+            ):
+                raise ValueError("entry leverage requirement must be a positive integer")
+            if not _SHA256_DIGEST.fullmatch(
+                str(self.leverage_verification_digest or "")
+            ):
+                raise ValueError("entry leverage verification requires a sha256 digest")
         return self
 
 
@@ -103,7 +122,38 @@ class CancelCommandPayload(BaseModel):
         return normalized
 
 
-CommandPayload = OrderCommandPayload | CancelCommandPayload
+_SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+class SetLeverageCommandPayload(BaseModel):
+    """Immutable non-order mutation requested before a new ENTRY."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    desired_leverage: int
+    owner_policy_version: int
+    entry_admission_snapshot_digest: str
+    leverage_fact_digest: str
+
+    @field_validator("desired_leverage", "owner_policy_version", mode="before")
+    @classmethod
+    def _require_positive_integer(cls, value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError("leverage command integers must be positive integers")
+        return value
+
+    @field_validator(
+        "entry_admission_snapshot_digest",
+        "leverage_fact_digest",
+    )
+    @classmethod
+    def _require_digest(cls, value: str) -> str:
+        if _SHA256_DIGEST.fullmatch(value) is None:
+            raise ValueError("leverage command requires canonical sha256 digests")
+        return value
+
+
+CommandPayload = OrderCommandPayload | CancelCommandPayload | SetLeverageCommandPayload
 
 
 class ExchangeCommand(BaseModel):
@@ -114,7 +164,7 @@ class ExchangeCommand(BaseModel):
     kind: ExchangeCommandKind
     generation: int
     idempotency_key: str
-    venue_client_order_id: str
+    venue_client_order_id: str | None
     payload: CommandPayload
     status: ExchangeCommandStatus
     created_at_ms: int
@@ -123,7 +173,6 @@ class ExchangeCommand(BaseModel):
     @field_validator(
         "command_id",
         "idempotency_key",
-        "venue_client_order_id",
         mode="before",
     )
     @classmethod
@@ -132,6 +181,12 @@ class ExchangeCommand(BaseModel):
         if not normalized:
             raise ValueError("command identities must be non-blank")
         return normalized
+
+    @field_validator("venue_client_order_id", mode="before")
+    @classmethod
+    def _normalize_optional_venue_client_order_id(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
 
     @field_validator("generation", "created_at_ms", "deadline_at_ms")
     @classmethod
@@ -142,18 +197,43 @@ class ExchangeCommand(BaseModel):
 
     @model_validator(mode="after")
     def _validate_command(self) -> "ExchangeCommand":
-        if self.kind is ExchangeCommandKind.ENTRY and self.generation != 1:
-            raise ValueError("ENTRY command cannot have a retry generation")
+        if self.kind in {
+            ExchangeCommandKind.SET_LEVERAGE,
+            ExchangeCommandKind.ENTRY,
+        } and self.generation != 1:
+            raise ValueError(f"{self.kind.value.upper()} command cannot have a retry generation")
         if self.deadline_at_ms <= self.created_at_ms:
             raise ValueError("command deadline must be after creation")
-        if len(self.venue_client_order_id) > 36:
+        if (
+            self.venue_client_order_id is not None
+            and len(self.venue_client_order_id) > 36
+        ):
             raise ValueError("venue client order id exceeds supported boundary")
+        if self.kind is ExchangeCommandKind.SET_LEVERAGE:
+            if self.venue_client_order_id is not None:
+                raise ValueError("SET_LEVERAGE command forbids venue_client_order_id")
+            if not isinstance(self.payload, SetLeverageCommandPayload):
+                raise ValueError("SET_LEVERAGE command requires leverage payload")
+            return self
+        if self.venue_client_order_id is None:
+            raise ValueError("order command requires deterministic venue_client_order_id")
         if self.kind is ExchangeCommandKind.CANCEL_ORDER:
             if not isinstance(self.payload, CancelCommandPayload):
                 raise ValueError("cancel command requires cancel payload")
         elif not isinstance(self.payload, OrderCommandPayload):
             raise ValueError("order command requires order payload")
         if isinstance(self.payload, OrderCommandPayload):
+            leverage_fields = (
+                self.payload.required_configured_leverage,
+                self.payload.leverage_verification_digest,
+            )
+            if self.kind is ExchangeCommandKind.ENTRY:
+                if any(value is None for value in leverage_fields):
+                    raise ValueError(
+                        "ENTRY command requires leverage verification evidence"
+                    )
+            elif any(value is not None for value in leverage_fields):
+                raise ValueError("only ENTRY command allows leverage verification evidence")
             has_replacement_metadata = (
                 self.payload.replaces_exchange_order_id is not None
                 or self.payload.source_watermark_ms is not None
@@ -207,6 +287,34 @@ class ExchangeCommandResult(BaseModel):
         return self
 
 
+class SetLeverageCommandResult(BaseModel):
+    """Authoritative confirmation shape for an exact leverage mutation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_configured_leverage: int
+    leverage_verified_at_ms: int
+    leverage_verification_digest: str
+
+    @field_validator(
+        "exchange_configured_leverage",
+        "leverage_verified_at_ms",
+        mode="before",
+    )
+    @classmethod
+    def _require_positive_integer(cls, value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError("leverage result integers must be positive integers")
+        return value
+
+    @field_validator("leverage_verification_digest")
+    @classmethod
+    def _require_verification_digest(cls, value: str) -> str:
+        if _SHA256_DIGEST.fullmatch(value) is None:
+            raise ValueError("leverage result requires a canonical sha256 digest")
+        return value
+
+
 def build_command_id(
     *,
     ticket_id: str,
@@ -238,8 +346,8 @@ def require_next_generation_allowed(
 ) -> None:
     if next_generation <= 1:
         raise CommandGenerationError("next generation must be greater than one")
-    if kind is ExchangeCommandKind.ENTRY:
-        raise CommandGenerationError("ENTRY is never retried")
+    if kind in {ExchangeCommandKind.ENTRY, ExchangeCommandKind.SET_LEVERAGE}:
+        raise CommandGenerationError(f"{kind.value.upper()} is never retried")
     if prior_status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
         raise CommandGenerationError("unknown outcome must be reconciled first")
     if (

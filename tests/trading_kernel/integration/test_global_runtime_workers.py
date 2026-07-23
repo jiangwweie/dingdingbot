@@ -53,7 +53,7 @@ def test_command_worker_cli_requires_one_explicit_complete_worker_role(
     assert "--worker-role {entry,lifecycle}" in result.stdout
     assert "--runtime-commit" in result.stdout
     assert "--schema-revision" in result.stdout
-    assert "--action-fact-validity-ms" in result.stdout
+    assert "--admission-snapshot-validity-ms" in result.stdout
     assert "--idle-poll-interval-ms" in result.stdout
     assert list(tmp_path.rglob("*")) == []
 

@@ -83,7 +83,7 @@ class FakeEntryAdmissionFactsSource:
                 AdmissionInstrumentFacts(
                     exchange_instrument_id=request.exchange_instrument_id,
                     mark_price=Decimal("10000"),
-                    configured_leverage=1,
+                    configured_leverage=10,
                 ),
             ),
             positions=(),

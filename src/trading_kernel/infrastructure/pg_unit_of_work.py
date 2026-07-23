@@ -32,6 +32,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandStatus,
     OrderCommandPayload,
+    SetLeverageCommandPayload,
     build_command_id,
     build_venue_client_order_id,
     require_next_generation_allowed,
@@ -42,6 +43,7 @@ from src.trading_kernel.domain.effects import (
     MarkCancelCommandReconciledAbsent,
     OpenIncident,
     PrepareEntryCommand,
+    PrepareSetLeverageCommand,
     PrepareControlledFlattenCommand,
     PrepareExitCommand,
     PrepareInitialStopCommand,
@@ -184,7 +186,28 @@ class PostgresKernelUnitOfWork:
         for effect in reduction.effects:
             if isinstance(effect, PrepareEntryCommand):
                 await self.exchange_commands.add(
-                    _entry_command(effect, occurred_at_ms=event.occurred_at_ms)
+                    _entry_command(
+                        effect,
+                        leverage_verification_digest=effect.ticket.decision_digest(),
+                        occurred_at_ms=event.occurred_at_ms,
+                    )
+                )
+                continue
+            if isinstance(effect, PrepareSetLeverageCommand):
+                claim = await self.capacity_claims.get(effect.ticket.capacity_claim_id)
+                if claim is None:
+                    raise UnsupportedKernelEffect(
+                        "SET_LEVERAGE command requires its immutable CapacityClaim"
+                    )
+                await self.exchange_commands.add(
+                    _set_leverage_command(
+                        effect,
+                        entry_admission_snapshot_digest=(
+                            claim.entry_admission_snapshot_digest
+                        ),
+                        leverage_fact_digest=claim.decision_digest,
+                        occurred_at_ms=event.occurred_at_ms,
+                    )
                 )
                 continue
             if isinstance(effect, PrepareInitialStopCommand):
@@ -414,7 +437,13 @@ class PostgresKernelUnitOfWork:
                 f"no durable materializer for {type(effect).__name__}"
             )
 
-        if aggregate.status is AggregateStatus.ENTRY_REJECTED:
+        if aggregate.status is AggregateStatus.LEVERAGE_REJECTED:
+            await self.tickets.mark_terminal(
+                ticket_id,
+                status="leverage_rejected",
+                terminal_at_ms=event.occurred_at_ms,
+            )
+        elif aggregate.status is AggregateStatus.ENTRY_REJECTED:
             await self.tickets.mark_terminal(
                 ticket_id,
                 status="entry_rejected",
@@ -473,6 +502,7 @@ class PostgresKernelUnitOfWork:
 def _entry_command(
     effect: PrepareEntryCommand,
     *,
+    leverage_verification_digest: str,
     occurred_at_ms: int,
 ) -> ExchangeCommand:
     ticket = effect.ticket
@@ -500,6 +530,40 @@ def _entry_command(
             order_type=order_type,
             reduce_only=False,
             limit_price=ticket.entry_limit_price,
+            required_configured_leverage=ticket.selected_leverage,
+            leverage_verification_digest=leverage_verification_digest,
+        ),
+        status=ExchangeCommandStatus.PREPARED,
+        created_at_ms=occurred_at_ms,
+        deadline_at_ms=ticket.expires_at_ms,
+    )
+
+
+def _set_leverage_command(
+    effect: PrepareSetLeverageCommand,
+    *,
+    entry_admission_snapshot_digest: str,
+    leverage_fact_digest: str,
+    occurred_at_ms: int,
+) -> ExchangeCommand:
+    ticket = effect.ticket
+    command_id = build_command_id(
+        ticket_id=ticket.identity.ticket_id,
+        kind=ExchangeCommandKind.SET_LEVERAGE,
+        generation=1,
+    )
+    return ExchangeCommand(
+        command_id=command_id,
+        ticket_identity=ticket.identity,
+        kind=ExchangeCommandKind.SET_LEVERAGE,
+        generation=1,
+        idempotency_key=command_id,
+        venue_client_order_id=None,
+        payload=SetLeverageCommandPayload(
+            desired_leverage=ticket.selected_leverage,
+            owner_policy_version=ticket.owner_policy_version,
+            entry_admission_snapshot_digest=entry_admission_snapshot_digest,
+            leverage_fact_digest=leverage_fact_digest,
         ),
         status=ExchangeCommandStatus.PREPARED,
         created_at_ms=occurred_at_ms,
@@ -675,6 +739,8 @@ def _incident_entry_block_scope(incident_kind: str) -> EntryBlockScope:
 
     if incident_kind == "external_flat":
         return EntryBlockScope.NONE
+    if incident_kind == "leverage_outcome_unknown":
+        return EntryBlockScope.LEVERAGE_DOMAIN
     return EntryBlockScope.ACCOUNT_CAPACITY
 
 

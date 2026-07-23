@@ -15,6 +15,7 @@ from src.trading_kernel.domain.effects import (
     PrepareExitCommand,
     PrepareInitialStopCommand,
     PrepareProtectionReplacementCommand,
+    PrepareSetLeverageCommand,
     PrepareTakeProfitCommand,
     ReleaseBudget,
     ReleaseEntryLane,
@@ -37,6 +38,9 @@ from src.trading_kernel.domain.events import (
     EntryRemainderCancelConfirmed,
     EntryRemainderCancelOutcomeUnknown,
     EntryRejected,
+    LeverageConfirmed,
+    LeverageOutcomeUnknown,
+    LeverageRejected,
     ExternalFlatDetected,
     ExitAccepted,
     ExitAbsenceConfirmed,
@@ -68,8 +72,26 @@ from src.trading_kernel.domain.reducer import InvalidLifecycleTransition, reduce
 from tests.trading_kernel.unit.test_ticket import _ticket
 
 
-def test_ticket_issued_creates_entry_pending_aggregate_and_entry_effect() -> None:
-    ticket = _ticket()
+def test_ticket_issue_prepares_only_set_leverage_when_change_is_required() -> None:
+    ticket = _ticket(leverage_change_required=True)
+
+    reduction = reduce_event(
+        None,
+        TicketIssued(
+            event_id="event-1",
+            ticket=ticket,
+            sequence=1,
+            occurred_at_ms=1_001,
+        ),
+    )
+
+    assert reduction.aggregate.status is AggregateStatus.LEVERAGE_PENDING
+    assert reduction.aggregate.version == 1
+    assert reduction.effects == (PrepareSetLeverageCommand(ticket=ticket),)
+
+
+def test_ticket_issue_prepares_entry_when_leverage_already_matches() -> None:
+    ticket = _ticket(leverage_change_required=False)
 
     reduction = reduce_event(
         None,
@@ -82,8 +104,69 @@ def test_ticket_issued_creates_entry_pending_aggregate_and_entry_effect() -> Non
     )
 
     assert reduction.aggregate.status is AggregateStatus.ENTRY_PENDING
-    assert reduction.aggregate.version == 1
     assert reduction.effects == (PrepareEntryCommand(ticket=ticket),)
+
+
+def test_leverage_terminal_and_unknown_states_are_explicit() -> None:
+    issued = reduce_event(
+        None,
+        TicketIssued(
+            event_id="event-1",
+            ticket=_ticket(leverage_change_required=True),
+            sequence=1,
+            occurred_at_ms=1_001,
+        ),
+    ).aggregate
+
+    confirmed = reduce_event(
+        issued,
+        LeverageConfirmed(
+            event_id="event-2",
+            ticket_id=issued.identity.ticket_id,
+            sequence=2,
+            occurred_at_ms=1_002,
+            exchange_configured_leverage=issued.ticket.selected_leverage,
+            leverage_verified_at_ms=1_002,
+            leverage_verification_digest="sha256:" + "3" * 64,
+        ),
+    )
+    assert confirmed.aggregate.status is AggregateStatus.LEVERAGE_CONFIRMED
+    assert confirmed.effects == ()
+
+    rejected = reduce_event(
+        issued,
+        LeverageRejected(
+            event_id="event-3",
+            ticket_id=issued.identity.ticket_id,
+            sequence=2,
+            occurred_at_ms=1_003,
+            reason="venue_rejected",
+        ),
+    )
+    assert rejected.aggregate.status is AggregateStatus.LEVERAGE_REJECTED
+    assert rejected.aggregate.entry_lane_held is False
+    assert rejected.effects == (
+        ReleaseBudget(ticket_id=issued.identity.ticket_id),
+        ReleaseEntryLane(ticket_id=issued.identity.ticket_id),
+    )
+
+    unknown = reduce_event(
+        issued,
+        LeverageOutcomeUnknown(
+            event_id="event-4",
+            ticket_id=issued.identity.ticket_id,
+            sequence=2,
+            occurred_at_ms=1_004,
+            reason="timeout",
+        ),
+    )
+    assert unknown.aggregate.status is AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN
+    assert unknown.effects == (
+        OpenIncident(
+            ticket_id=issued.identity.ticket_id,
+            incident_kind="leverage_outcome_unknown",
+        ),
+    )
 
 
 def test_authoritative_entry_rejection_is_terminal_and_never_retries() -> None:

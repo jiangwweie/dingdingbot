@@ -20,6 +20,10 @@ from src.trading_kernel.application.issue_ticket import (
     IssueTicketStatus,
     issue_ticket,
 )
+from src.trading_kernel.domain.commands import (
+    ExchangeCommandKind,
+    SetLeverageCommandPayload,
+)
 from src.trading_kernel.domain.capacity import freeze_capacity_claim
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.ticket import build_ticket_id
@@ -65,7 +69,7 @@ async def issue_engine() -> AsyncEngine:
 async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
     issue_engine: AsyncEngine,
 ) -> None:
-    ticket = _ticket()
+    ticket = _ticket(leverage_change_required=True)
     await _seed_policy(issue_engine)
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
@@ -89,6 +93,9 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
             ticket.identity.netting_domain.venue_id,
             ticket.identity.netting_domain.account_id
         )
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
 
     assert persisted is not None
     assert persisted.identity == ticket.identity
@@ -103,6 +110,34 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
     assert exposure is not None
     assert exposure.gross_notional == ticket.notional
     assert exposure.active_ticket_count == 1
+    assert [(command.kind, command.generation) for command in commands] == [
+        (ExchangeCommandKind.SET_LEVERAGE, 1)
+    ]
+    assert isinstance(commands[0].payload, SetLeverageCommandPayload)
+    assert commands[0].venue_client_order_id is None
+
+
+@pytest.mark.asyncio
+async def test_issue_ticket_prepares_only_entry_when_leverage_already_matches(
+    issue_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket(leverage_change_required=False)
+    await _seed_policy(issue_engine)
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result = await issue_ticket(
+            uow,
+            _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
+        )
+
+    assert result.status is IssueTicketStatus.ISSUED
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert [(command.kind, command.generation) for command in commands] == [
+        (ExchangeCommandKind.ENTRY, 1)
+    ]
 
 
 @pytest.mark.asyncio

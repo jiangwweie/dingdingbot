@@ -203,7 +203,7 @@ class CertifiedEntryAdmissionFactsSource:
                 AdmissionInstrumentFacts(
                     exchange_instrument_id=request.exchange_instrument_id,
                     mark_price=(self.best_bid + self.best_ask) / Decimal("2"),
-                    configured_leverage=1,
+                    configured_leverage=10,
                 ),
             ),
             positions=(),

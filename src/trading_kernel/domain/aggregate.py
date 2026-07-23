@@ -12,6 +12,10 @@ from src.trading_kernel.domain.ticket import TradeTicket
 
 
 class AggregateStatus(StrEnum):
+    LEVERAGE_PENDING = "leverage_pending"
+    LEVERAGE_CONFIRMED = "leverage_confirmed"
+    LEVERAGE_REJECTED = "leverage_rejected"
+    LEVERAGE_OUTCOME_UNKNOWN = "leverage_outcome_unknown"
     ENTRY_PENDING = "entry_pending"
     ENTRY_ACCEPTED = "entry_accepted"
     ENTRY_REJECTED = "entry_rejected"

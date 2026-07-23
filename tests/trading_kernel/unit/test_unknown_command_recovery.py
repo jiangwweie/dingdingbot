@@ -239,6 +239,8 @@ def _entry_command():
             quantity=ticket.quantity,
             order_type="market",
             reduce_only=False,
+            required_configured_leverage=ticket.selected_leverage,
+            leverage_verification_digest=ticket.decision_digest(),
         ),
         status="outcome_unknown",
         created_at_ms=1_001,

@@ -208,6 +208,16 @@ def _command(ticket, kind: ExchangeCommandKind, *, reduce_only: bool) -> Exchang
             quantity=ticket.quantity,
             order_type="market",
             reduce_only=reduce_only,
+            required_configured_leverage=(
+                ticket.selected_leverage
+                if kind is ExchangeCommandKind.ENTRY
+                else None
+            ),
+            leverage_verification_digest=(
+                ticket.decision_digest()
+                if kind is ExchangeCommandKind.ENTRY
+                else None
+            ),
         ),
         status=ExchangeCommandStatus.ACCEPTED,
         created_at_ms=1_000 if not reduce_only else 2_000,

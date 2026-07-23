@@ -623,7 +623,7 @@ exchange_commands = sa.Table(
     sa.Column("command_kind", SHORT_TEXT, nullable=False),
     sa.Column("generation", sa.Integer, nullable=False),
     sa.Column("idempotency_key", LONG_TEXT, nullable=False),
-    sa.Column("venue_client_order_id", SHORT_TEXT, nullable=False),
+    sa.Column("venue_client_order_id", SHORT_TEXT, nullable=True),
     sa.Column("status", SHORT_TEXT, nullable=False),
     sa.Column("quantity", MONEY, nullable=True),
     _json("request_payload"),
@@ -636,6 +636,11 @@ exchange_commands = sa.Table(
     sa.UniqueConstraint("idempotency_key"),
     sa.UniqueConstraint("venue_client_order_id"),
     sa.UniqueConstraint("ticket_id", "command_kind", "generation"),
+    sa.CheckConstraint(
+        "(command_kind = 'set_leverage' AND venue_client_order_id IS NULL) "
+        "OR (command_kind <> 'set_leverage' AND venue_client_order_id IS NOT NULL)",
+        name="command_order_identity_shape",
+    ),
     sa.CheckConstraint("generation > 0", name="generation_positive"),
     sa.CheckConstraint(
         "quantity IS NULL OR quantity > 0",

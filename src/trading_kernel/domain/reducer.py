@@ -14,6 +14,7 @@ from src.trading_kernel.domain.effects import (
     MarkCancelCommandReconciledAbsent,
     OpenIncident,
     PrepareEntryCommand,
+    PrepareSetLeverageCommand,
     PrepareControlledFlattenCommand,
     PrepareExitCommand,
     PrepareInitialStopCommand,
@@ -53,6 +54,9 @@ from src.trading_kernel.domain.events import (
     InitialStopAbsenceConfirmed,
     InitialStopOutcomeUnknown,
     InitialStopRejected,
+    LeverageConfirmed,
+    LeverageOutcomeUnknown,
+    LeverageRejected,
     OwnedOrphanOrderDetected,
     OwnedOrderAbsenceConfirmed,
     OwnedOrphanCancelConfirmed,
@@ -98,6 +102,85 @@ def reduce_event(
         return _issue_ticket(event)
 
     _require_event_identity_and_sequence(current, event)
+
+    if isinstance(event, LeverageConfirmed):
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.LEVERAGE_PENDING,
+                AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN,
+            },
+        )
+        if event.exchange_configured_leverage != current.ticket.selected_leverage:
+            raise InvalidLifecycleTransition(
+                "confirmed leverage differs from immutable Ticket"
+            )
+        if event.leverage_verified_at_ms <= 0:
+            raise InvalidLifecycleTransition("leverage confirmation time must be positive")
+        if not str(event.leverage_verification_digest or "").startswith("sha256:"):
+            raise InvalidLifecycleTransition("leverage confirmation requires a digest")
+        effects: tuple[KernelEffect, ...] = ()
+        if current.status is AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN:
+            effects = (
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="leverage_outcome_unknown",
+                ),
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.LEVERAGE_CONFIRMED,
+            effects=effects,
+        )
+
+    if isinstance(event, LeverageRejected):
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.LEVERAGE_PENDING,
+                AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN,
+            },
+        )
+        if not str(event.reason or "").strip():
+            raise InvalidLifecycleTransition("leverage rejection requires reason")
+        effects: list[KernelEffect] = []
+        if current.status is AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN:
+            effects.append(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="leverage_outcome_unknown",
+                )
+            )
+        effects.extend(
+            (
+                ReleaseBudget(ticket_id=current.identity.ticket_id),
+                ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+            )
+        )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.LEVERAGE_REJECTED,
+            updates={"entry_lane_held": False},
+            effects=tuple(effects),
+        )
+
+    if isinstance(event, LeverageOutcomeUnknown):
+        _require_status(current, AggregateStatus.LEVERAGE_PENDING)
+        if not str(event.reason or "").strip():
+            raise InvalidLifecycleTransition("unknown leverage outcome requires reason")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="leverage_outcome_unknown",
+                ),
+            ),
+        )
 
     if isinstance(event, EntryAccepted):
         _require_status_in(
@@ -1251,16 +1334,27 @@ def _issue_ticket(event: TradeEvent) -> Reduction:
         raise InvalidLifecycleTransition("first event must issue a Ticket")
     if event.sequence != 1:
         raise InvalidLifecycleTransition("first event sequence must be one")
+    requires_leverage_change = event.ticket.leverage_change_required
     aggregate = TradeAggregate(
         identity=event.ticket.identity,
         ticket=event.ticket,
-        status=AggregateStatus.ENTRY_PENDING,
+        status=(
+            AggregateStatus.LEVERAGE_PENDING
+            if requires_leverage_change
+            else AggregateStatus.ENTRY_PENDING
+        ),
         version=1,
         last_event_sequence=event.sequence,
     )
     return Reduction(
         aggregate=aggregate,
-        effects=(PrepareEntryCommand(ticket=event.ticket),),
+        effects=(
+            (
+                PrepareSetLeverageCommand(ticket=event.ticket)
+                if requires_leverage_change
+                else PrepareEntryCommand(ticket=event.ticket)
+            ),
+        ),
     )
 
 

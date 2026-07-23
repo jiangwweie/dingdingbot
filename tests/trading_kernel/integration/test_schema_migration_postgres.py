@@ -47,9 +47,14 @@ async def test_clean_alembic_baseline_upgrades_and_downgrades_postgres() -> None
                     "uq_brc_exchange_commands_ticket_kind_generation",
                     "uq_brc_exchange_commands_venue_client_order_id",
                 },
+                "command_checks": {
+                    "ck_brc_exchange_commands_command_order_identity_shape",
+                    "ck_brc_exchange_commands_generation_positive",
+                    "ck_brc_exchange_commands_quantity_positive",
+                },
                 "event_uniques": {"uq_brc_trade_events_ticket_id_sequence"},
                 "ticket_checks": {
-                    "ck_brc_trade_tickets_leverage_positive",
+                    "ck_brc_trade_tickets_selected_leverage_positive",
                     "ck_brc_trade_tickets_notional_positive",
                     "ck_brc_trade_tickets_quantity_positive",
                     "ck_brc_trade_tickets_risk_nonnegative",
@@ -136,6 +141,7 @@ def _inspect_schema(sync_conn: object) -> tuple[set[str], dict[str, set[str]]]:
     return set(inspector.get_table_names()), {
         "ticket_uniques": unique_names("brc_trade_tickets"),
         "command_uniques": unique_names("brc_exchange_commands"),
+        "command_checks": check_names("brc_exchange_commands"),
         "event_uniques": unique_names("brc_trade_events"),
         "ticket_checks": check_names("brc_trade_tickets"),
         "aggregate_checks": check_names("brc_trade_aggregates"),

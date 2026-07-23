@@ -68,6 +68,21 @@ def test_kernel_schema_has_core_uniqueness_constraints() -> None:
     assert ("ticket_id", "sequence") in event_uniques
 
 
+def test_leverage_commands_are_the_only_commands_without_order_identity() -> None:
+    commands = metadata.tables["brc_exchange_commands"]
+    check_sql = {
+        str(constraint.sqltext)
+        for constraint in commands.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+
+    assert commands.c.venue_client_order_id.nullable is True
+    assert (
+        "(command_kind = 'set_leverage' AND venue_client_order_id IS NULL) "
+        "OR (command_kind <> 'set_leverage' AND venue_client_order_id IS NOT NULL)"
+    ) in check_sql
+
+
 def test_financial_columns_use_fixed_precision_numeric() -> None:
     required = {
         ("brc_trade_tickets", "quantity"),

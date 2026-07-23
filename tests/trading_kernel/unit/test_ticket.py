@@ -61,7 +61,7 @@ def _ticket(**updates: object) -> TradeTicket:
         "planned_stop_risk_budget": Decimal("3"),
         "post_fill_stop_risk_limit": Decimal("3.3"),
         "selected_leverage": 5,
-        "leverage_change_required": True,
+        "leverage_change_required": False,
         "reserved_margin": Decimal("12"),
         "risk_reservation_basis": "planned_stop_distance",
         "margin_mode": "cross",

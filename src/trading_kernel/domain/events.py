@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import re
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -46,6 +47,57 @@ class _TicketEvent(_Event):
 
 class TicketIssued(_Event):
     ticket: TradeTicket
+
+
+_SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+class LeverageConfirmed(_TicketEvent):
+    exchange_configured_leverage: int
+    leverage_verified_at_ms: int
+    leverage_verification_digest: str
+
+    @field_validator(
+        "exchange_configured_leverage",
+        "leverage_verified_at_ms",
+        mode="before",
+    )
+    @classmethod
+    def _require_positive_integer(cls, value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError("leverage confirmation integers must be positive")
+        return value
+
+    @field_validator("leverage_verification_digest")
+    @classmethod
+    def _require_verification_digest(cls, value: str) -> str:
+        if _SHA256_DIGEST.fullmatch(value) is None:
+            raise ValueError("leverage confirmation requires a sha256 digest")
+        return value
+
+
+class LeverageRejected(_TicketEvent):
+    reason: str
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _require_reason(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("leverage rejection requires reason")
+        return normalized
+
+
+class LeverageOutcomeUnknown(_TicketEvent):
+    reason: str
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _require_reason(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("unknown leverage outcome requires reason")
+        return normalized
 
 
 class EntryRejected(_TicketEvent):
@@ -260,6 +312,9 @@ class ReviewRecorded(_TicketEvent):
 
 TradeEvent = (
     TicketIssued
+    | LeverageConfirmed
+    | LeverageRejected
+    | LeverageOutcomeUnknown
     | EntryAccepted
     | EntryRejected
     | EntryOutcomeUnknown

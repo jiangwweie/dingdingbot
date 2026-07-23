@@ -13,6 +13,8 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
     OrderCommandPayload,
+    SetLeverageCommandPayload,
+    SetLeverageCommandResult,
     build_command_id,
     build_venue_client_order_id,
     require_next_generation_allowed,
@@ -26,6 +28,8 @@ def _payload(*, reduce_only: bool = False) -> OrderCommandPayload:
         quantity=Decimal("0.001"),
         order_type="market",
         reduce_only=reduce_only,
+        required_configured_leverage=5,
+        leverage_verification_digest="sha256:" + "1" * 64,
     )
 
 
@@ -160,6 +164,71 @@ def test_entry_command_cannot_have_retry_generation() -> None:
             status=ExchangeCommandStatus.PREPARED,
             created_at_ms=1_000,
             deadline_at_ms=10_000,
+        )
+
+
+def test_set_leverage_generation_is_exactly_one_and_has_no_order_identity() -> None:
+    identity = _identity()
+    command = ExchangeCommand(
+        command_id=build_command_id(
+            ticket_id=identity.ticket_id,
+            kind=ExchangeCommandKind.SET_LEVERAGE,
+            generation=1,
+        ),
+        ticket_identity=identity,
+        kind=ExchangeCommandKind.SET_LEVERAGE,
+        generation=1,
+        idempotency_key="set-leverage-idempotency-1",
+        venue_client_order_id=None,
+        payload=SetLeverageCommandPayload(
+            desired_leverage=5,
+            owner_policy_version=7,
+            entry_admission_snapshot_digest="sha256:" + "1" * 64,
+            leverage_fact_digest="sha256:" + "2" * 64,
+        ),
+        status=ExchangeCommandStatus.PREPARED,
+        created_at_ms=1_000,
+        deadline_at_ms=10_000,
+    )
+
+    assert command.kind is ExchangeCommandKind.SET_LEVERAGE
+    assert command.venue_client_order_id is None
+    assert command.payload.desired_leverage == 5
+
+    with pytest.raises(
+        ValidationError,
+        match="SET_LEVERAGE command cannot have a retry generation",
+    ):
+        ExchangeCommand.model_validate(
+            {
+                **command.model_dump(),
+                "generation": 2,
+            }
+        )
+
+    with pytest.raises(ValidationError, match="forbids venue_client_order_id"):
+        ExchangeCommand.model_validate(
+            {
+                **command.model_dump(),
+                "venue_client_order_id": "brc-not-an-order",
+            }
+        )
+
+
+def test_set_leverage_result_is_distinct_from_order_result() -> None:
+    result = SetLeverageCommandResult(
+        exchange_configured_leverage=5,
+        leverage_verified_at_ms=2_000,
+        leverage_verification_digest="sha256:" + "3" * 64,
+    )
+
+    assert result.exchange_configured_leverage == 5
+
+    with pytest.raises(ValidationError):
+        SetLeverageCommandResult(
+            exchange_configured_leverage=0,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "3" * 64,
         )
 
 

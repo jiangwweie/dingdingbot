@@ -62,6 +62,9 @@ from src.trading_kernel.domain.events import (
     InitialStopAbsenceConfirmed,
     InitialStopOutcomeUnknown,
     InitialStopRejected,
+    LeverageConfirmed,
+    LeverageOutcomeUnknown,
+    LeverageRejected,
     OwnedOrphanOrderDetected,
     OwnedOrderAbsenceConfirmed,
     OwnedOrphanCancelConfirmed,
@@ -114,6 +117,9 @@ _EVENT_MODELS = {
     event_type.__name__: event_type
     for event_type in (
         TicketIssued,
+        LeverageConfirmed,
+        LeverageRejected,
+        LeverageOutcomeUnknown,
         EntryAccepted,
         EntryAbsenceConfirmed,
         EntryRejected,
@@ -742,7 +748,11 @@ class PostgresExchangeCommandRepository:
             kind=ExchangeCommandKind(str(row["command_kind"])),
             generation=int(row["generation"]),
             idempotency_key=str(row["idempotency_key"]),
-            venue_client_order_id=str(row["venue_client_order_id"]),
+            venue_client_order_id=(
+                None
+                if row["venue_client_order_id"] is None
+                else str(row["venue_client_order_id"])
+            ),
             payload=_COMMAND_PAYLOAD_ADAPTER.validate_python(row["request_payload"]),
             status=ExchangeCommandStatus(str(row["status"])),
             created_at_ms=int(row["created_at_ms"]),

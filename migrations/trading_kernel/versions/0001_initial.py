@@ -688,7 +688,7 @@ def upgrade() -> None:
         sa.Column("command_kind", SHORT_TEXT, nullable=False),
         sa.Column("generation", sa.Integer, nullable=False),
         sa.Column("idempotency_key", LONG_TEXT, nullable=False),
-        sa.Column("venue_client_order_id", SHORT_TEXT, nullable=False),
+        sa.Column("venue_client_order_id", SHORT_TEXT, nullable=True),
         sa.Column("status", SHORT_TEXT, nullable=False),
         sa.Column("quantity", MONEY, nullable=True),
         _json("request_payload"),
@@ -711,6 +711,11 @@ def upgrade() -> None:
             "command_kind",
             "generation",
             name="uq_brc_exchange_commands_ticket_kind_generation",
+        ),
+        sa.CheckConstraint(
+            "(command_kind = 'set_leverage' AND venue_client_order_id IS NULL) "
+            "OR (command_kind <> 'set_leverage' AND venue_client_order_id IS NOT NULL)",
+            name="ck_brc_exchange_commands_command_order_identity_shape",
         ),
         sa.CheckConstraint(
             "generation > 0",
