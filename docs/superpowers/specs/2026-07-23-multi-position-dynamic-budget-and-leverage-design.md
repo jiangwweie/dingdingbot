@@ -2,7 +2,7 @@
 title: Multi-Position Dynamic Budget And Leverage Design
 status: OWNER_APPROVED_DESIGN
 date: 2026-07-23
-revision: 3
+revision: 4
 ---
 
 # Multi-Position Dynamic Budget And Leverage Design
@@ -1277,7 +1277,7 @@ keep Tokyo exchange writes disabled
 -> start the four persistent workers
 -> run readonly schema, seed, position-mode, margin-mode, balance, maintenance,
    leverage, ownership, Incident-fence, and scope probes
--> arm one controlled Ticket under the new model
+-> enable new-ENTRY submission only for naturally observed, registered StrategySignals
 -> prove ENTRY leverage, Initial Stop, terminal flatness, release, Settlement,
    Review, and zero Incident
 -> enable normal three-Ticket authority only after certification
@@ -1338,8 +1338,9 @@ The program is complete only when all of the following are current and direct:
     document authority checks, retired-semantics scans, and `git diff --check`
     pass.
 20. Tokyo runs the exact release with writes initially disabled and one
-    controlled terminal Ticket proves the new budget model before full
-    three-Ticket authority is enabled.
+    naturally triggered terminal Ticket proves the new budget model before full
+    three-Ticket authority is enabled. Manual Signal construction and every
+    exchange-write path outside the kernel are forbidden.
 
 ## Final Decision
 

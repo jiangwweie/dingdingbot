@@ -1127,7 +1127,7 @@ git commit -m "docs(kernel): publish dynamic multi-position authority"
 
 ---
 
-### Task 15: Perform the separately gated Tokyo rebuild and controlled real-funds certification
+### Task 15: Perform the separately gated Tokyo rebuild and natural-signal real-funds certification
 
 **Files:**
 - Deployment input: exact reviewed implementation commit from Tasks 1-14
@@ -1142,7 +1142,7 @@ git commit -m "docs(kernel): publish dynamic multi-position authority"
 
 **Interfaces:**
 - Consumes: one reviewed commit, exact `0001_initial`, exact runtime seed identity, exchange-flat/account-order-free proof, and the BRC-only Tokyo mutation allowlist.
-- Produces: one terminal controlled Ticket under the new budget model, zero residual order, released capacity, Settlement, Review, zero open Incident, and normal three-Ticket authority.
+- Produces: one terminal Ticket from a naturally observed registered StrategySignal under the new budget model, zero residual order, released capacity, Settlement, Review, zero open Incident, and normal three-Ticket authority.
 
 - [ ] **Step 1: Run predeployment certification and verify the expected production RED**
 
@@ -1167,13 +1167,13 @@ Stop the four BRC workers, deploy the exact reviewed release, destroy and recrea
 
 Start Observation, Entry, Lifecycle, and Reconciliation persistent services. Verify zero BRC timers, stable idle CPU/memory on the 2c4g host, no recurring JSON/Markdown output, no warning/error loop, and correct Runtime Fence behavior. Entry may observe and classify but must perform zero mutation while the policy flag is false.
 
-- [ ] **Step 5: Arm one controlled natural Ticket**
+- [ ] **Step 5: Enable natural-signal acceptance only**
 
-Use the monotonic policy transition to set only `new_entry_submit_enabled=true` under controlled acceptance authority. Wait for a natural registered StrategySignal. Certify the exact Admission Snapshot, Claim sizing, selected leverage, optional SET_LEVERAGE command, ENTRY, full fill, Initial Stop, lifecycle exit, exchange flatness, residue cleanup, ReconciliationMatched release, Settlement, Review, and zero Incident. Do not construct a manual signal or bypass the kernel.
+Use the monotonic policy transition to set only `new_entry_submit_enabled=true` under controlled acceptance authority. Wait for a newly observed registered StrategySignal; do not construct, replay-as-live, or manually inject a Signal. Certify the exact Admission Snapshot, Claim sizing, selected leverage, optional SET_LEVERAGE command, ENTRY, full fill, Initial Stop, lifecycle exit, exchange flatness, residue cleanup, ReconciliationMatched release, Settlement, Review, and zero Incident. Do not bypass the kernel.
 
 - [ ] **Step 6: Enable normal three-Ticket authority only after terminal proof**
 
-Run `promote-full` only after the controlled Ticket is terminal, exchange-flat, order-free, reconciliation-matched, released, settled, reviewed, and Incident-free. Re-run readonly production certification and verify that the current policy remains exactly `3 / 0.03 / 0.90 / 10 / cross / 2.0 / 0.10` with no fixed notional or gross-risk cap.
+Run `promote-full` only after the naturally triggered Ticket is terminal, exchange-flat, order-free, reconciliation-matched, released, settled, reviewed, and Incident-free. Re-run readonly production certification and verify that the current policy remains exactly `3 / 0.03 / 0.90 / 10 / cross / 2.0 / 0.10` with no fixed notional or gross-risk cap.
 
 - [ ] **Step 7: Re-run production certification and verify GREEN**
 
@@ -1186,7 +1186,7 @@ Expected: exact target commit, `0001_initial`, dynamic seed identity, approved p
 
 - [ ] **Step 8: Record the production anchor and final evidence**
 
-Update the production commit, immutable tag, schema identity, seed digest, worker health, controlled Ticket identity, terminal economics, release evidence, and final requirement audit in current documents. Commit only those durable current-state documents; do not commit generated runtime output.
+Update the production commit, immutable tag, schema identity, seed digest, worker health, naturally triggered Ticket identity, terminal economics, release evidence, and final requirement audit in current documents. Commit only those durable current-state documents; do not commit generated runtime output.
 
 ```bash
 git add docs/current/MAIN_CONTROL_ROADMAP.md docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md
