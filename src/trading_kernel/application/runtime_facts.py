@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.capacity import ActionTimeFacts
+from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.review import ReviewEconomicsFacts
@@ -55,6 +56,44 @@ class ActionTimeFactsSource(Protocol):
         self,
         request: ActionTimeFactsRequest,
     ) -> ActionTimeFacts: ...
+
+
+class EntryAdmissionSnapshotRequest(BaseModel):
+    """Exact account observation requested before one new-ENTRY decision."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    observed_at_ms: int
+    valid_for_ms: int
+
+    @field_validator(
+        "venue_id",
+        "account_id",
+        "exchange_instrument_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_admission_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("entry admission request identities must be non-blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_admission_window(self) -> "EntryAdmissionSnapshotRequest":
+        if self.observed_at_ms <= 0 or self.valid_for_ms <= 0:
+            raise ValueError("entry admission request window must be positive")
+        return self
+
+
+class EntryAdmissionFactsSource(Protocol):
+    async def read_entry_admission_snapshot(
+        self,
+        request: EntryAdmissionSnapshotRequest,
+    ) -> EntryAdmissionSnapshot: ...
 
 
 class InstrumentRulesRequest(BaseModel):
@@ -132,7 +171,12 @@ class InstrumentRulesSource(Protocol):
     ) -> InstrumentRulesFacts: ...
 
 
-class EntryFactsSource(ActionTimeFactsSource, InstrumentRulesSource, Protocol):
+class EntryFactsSource(
+    EntryAdmissionFactsSource,
+    ActionTimeFactsSource,
+    InstrumentRulesSource,
+    Protocol,
+):
     pass
 
 

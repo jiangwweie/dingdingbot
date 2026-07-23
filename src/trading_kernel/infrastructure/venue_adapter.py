@@ -13,6 +13,7 @@ from pydantic import JsonValue
 from src.trading_kernel.application.ports import VenueCommandRequest, VenueTruthRequest
 from src.trading_kernel.application.runtime_facts import (
     ActionTimeFactsRequest,
+    EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
     InstrumentRulesRequest,
     LifecycleFactsRequest,
@@ -23,6 +24,12 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
 from src.trading_kernel.domain.capacity import ActionTimeFacts
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    AdmissionOrder,
+    AdmissionPosition,
+    EntryAdmissionSnapshot,
+)
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandResult,
@@ -84,7 +91,7 @@ class _CcxtExchange(Protocol):
 
     def fetch_open_orders(
         self,
-        symbol: str,
+        symbol: str | None,
         since: object,
         limit: int,
         params: Mapping[str, object],
@@ -228,6 +235,123 @@ class CcxtVenueAdapter:
                 (*regular_rows, *conditional_rows),
                 expected_symbol=symbol,
                 position_side=request.position_side,
+            ),
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_entry_admission_snapshot(
+        self,
+        request: EntryAdmissionSnapshotRequest,
+    ) -> EntryAdmissionSnapshot:
+        """Read one bounded Cross-account truth window for a new ENTRY."""
+
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+        )
+        (
+            order_book,
+            balance,
+            position_mode,
+            positions,
+            regular_orders,
+            conditional_orders,
+        ) = await asyncio.gather(
+            _call_raw_exchange(exchange.fetch_order_book, symbol, 5),
+            _call_raw_exchange(exchange.fetch_balance, {"type": "future"}),
+            _call_raw_exchange(exchange.fetch_position_mode, symbol, {}),
+            _call_raw_exchange(exchange.fetch_positions, [], {}),
+            _call_raw_exchange(
+                exchange.fetch_open_orders,
+                None,
+                None,
+                1_000,
+                {"conditional": False},
+            ),
+            _call_raw_exchange(
+                exchange.fetch_open_orders,
+                None,
+                None,
+                1_000,
+                {"conditional": True},
+            ),
+        )
+        order_book_mapping = _require_mapping(order_book, name="admission order book")
+        balance_mapping = _require_mapping(balance, name="admission balance")
+        position_mode_mapping = _require_mapping(
+            position_mode,
+            name="admission position mode",
+        )
+        position_rows = _require_list(positions, name="admission positions")
+        regular_order_rows = _require_list(
+            regular_orders,
+            name="admission regular open orders",
+        )
+        conditional_order_rows = _require_list(
+            conditional_orders,
+            name="admission conditional open orders",
+        )
+        target_rows = tuple(
+            row
+            for row in position_rows
+            if isinstance(row, Mapping) and str(row.get("symbol") or "") == symbol
+        )
+        if not target_rows:
+            raise RuntimeError("venue admission snapshot lacks requested instrument position")
+        return EntryAdmissionSnapshot(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            position_mode=_account_position_mode(position_mode_mapping),
+            margin_mode=_admission_margin_mode(position_rows),
+            total_wallet_balance=_admission_balance_decimal(
+                balance_mapping,
+                key="totalWalletBalance",
+            ),
+            total_margin_balance=_admission_balance_decimal(
+                balance_mapping,
+                key="totalMarginBalance",
+            ),
+            total_initial_margin=_admission_balance_decimal(
+                balance_mapping,
+                key="totalInitialMargin",
+            ),
+            total_maintenance_margin=_admission_balance_decimal(
+                balance_mapping,
+                key="totalMaintMargin",
+            ),
+            available_margin=_admission_balance_decimal(
+                balance_mapping,
+                key="availableBalance",
+            ),
+            best_bid_price=_top_of_book_price(order_book_mapping, "bids"),
+            best_ask_price=_top_of_book_price(order_book_mapping, "asks"),
+            instrument_facts=(
+                _admission_instrument_facts(
+                    target_rows,
+                    exchange_instrument_id=request.exchange_instrument_id,
+                ),
+            ),
+            positions=tuple(
+                _admission_position(
+                    row,
+                    exchange_instrument_id=self._instrument_id_for_symbol(
+                        venue_id=request.venue_id,
+                        symbol=_venue_row_symbol(row, row_kind="position"),
+                    ),
+                )
+                for row in position_rows
+            ),
+            open_orders=tuple(
+                _admission_order(
+                    row,
+                    exchange_instrument_id=self._instrument_id_for_symbol(
+                        venue_id=request.venue_id,
+                        symbol=_venue_row_symbol(row, row_kind="open-order"),
+                    ),
+                )
+                for row in (*regular_order_rows, *conditional_order_rows)
             ),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
@@ -696,6 +820,19 @@ class CcxtVenueAdapter:
             raise RuntimeError("canonical instrument has no venue symbol mapping")
         return exchange, symbol
 
+    def _instrument_id_for_symbol(
+        self,
+        *,
+        venue_id: str,
+        symbol: str,
+    ) -> str:
+        for (configured_venue_id, exchange_instrument_id), venue_symbol in (
+            self._venue_symbols.items()
+        ):
+            if configured_venue_id == venue_id and venue_symbol == symbol:
+                return exchange_instrument_id
+        return f"unmapped:{symbol}"
+
 
 async def _call_exchange(
     operation: Callable[..., object],
@@ -774,6 +911,125 @@ def _parse_order_truth(
         order_side=order_side,
         quantity=Decimal(str(value.get("amount") or "0")),
         reduce_only=bool(value.get("reduceOnly", False)),
+    )
+
+
+def _admission_balance_decimal(
+    balance: Mapping[object, object],
+    *,
+    key: str,
+) -> Decimal:
+    info = balance.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    value = raw_info.get(key)
+    if value is None:
+        raise RuntimeError(f"venue admission balance lacks {key}")
+    result = Decimal(str(value))
+    if not result.is_finite() or result < 0:
+        raise RuntimeError(f"venue admission balance {key} is invalid")
+    return result
+
+
+def _admission_margin_mode(rows: list[object]) -> Literal["cross", "isolated"]:
+    modes: set[str] = set()
+    for row in rows:
+        mapping = _require_mapping(row, name="admission position row")
+        raw = _mapping_value(mapping.get("info"), "marginType")
+        if raw is None:
+            raw = mapping.get("marginMode")
+        normalized = str(raw or "").strip().lower()
+        if normalized not in {"cross", "isolated"}:
+            raise RuntimeError("venue admission position lacks valid margin mode")
+        modes.add(normalized)
+    if len(modes) != 1:
+        raise RuntimeError("venue admission margin mode is absent or contradictory")
+    return next(iter(modes))  # type: ignore[return-value]
+
+
+def _admission_instrument_facts(
+    rows: tuple[object, ...],
+    *,
+    exchange_instrument_id: str,
+) -> AdmissionInstrumentFacts:
+    values: set[tuple[Decimal, int]] = set()
+    for row in rows:
+        mapping = _require_mapping(row, name="requested admission position row")
+        info = mapping.get("info")
+        raw_info = info if isinstance(info, Mapping) else {}
+        mark_price = Decimal(str(mapping.get("markPrice") or raw_info.get("markPrice") or "0"))
+        leverage_raw = mapping.get("leverage") or raw_info.get("leverage")
+        try:
+            leverage = int(str(leverage_raw))
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("venue admission leverage is invalid") from exc
+        if str(leverage_raw).strip() != str(leverage) or leverage <= 0:
+            raise RuntimeError("venue admission leverage must be a positive integer")
+        if not mark_price.is_finite() or mark_price <= 0:
+            raise RuntimeError("venue admission mark price is invalid")
+        values.add((mark_price, leverage))
+    if len(values) != 1:
+        raise RuntimeError("venue admission instrument facts are absent or contradictory")
+    mark_price, configured_leverage = next(iter(values))
+    return AdmissionInstrumentFacts(
+        exchange_instrument_id=exchange_instrument_id,
+        mark_price=mark_price,
+        configured_leverage=configured_leverage,
+    )
+
+
+def _venue_row_symbol(value: object, *, row_kind: str) -> str:
+    mapping = _require_mapping(value, name=f"admission {row_kind} row")
+    symbol = str(mapping.get("symbol") or "").strip()
+    if not symbol:
+        raise RuntimeError(f"venue admission {row_kind} lacks symbol")
+    return symbol
+
+
+def _admission_position(
+    value: object,
+    *,
+    exchange_instrument_id: str,
+) -> AdmissionPosition:
+    mapping = _require_mapping(value, name="admission position row")
+    quantity = abs(Decimal(str(mapping.get("contracts") or "0")))
+    if not quantity.is_finite():
+        raise RuntimeError("venue admission position quantity is invalid")
+    if quantity == 0:
+        average_entry_price = None
+    else:
+        average_entry_price = Decimal(
+            str(
+                mapping.get("entryPrice")
+                or _mapping_value(mapping.get("info"), "entryPrice")
+                or "0"
+            )
+        )
+        if not average_entry_price.is_finite() or average_entry_price <= 0:
+            raise RuntimeError("open venue admission position lacks entry price")
+    return AdmissionPosition(
+        exchange_instrument_id=exchange_instrument_id,
+        position_side=_row_position_side(mapping),
+        quantity=quantity,
+        average_entry_price=average_entry_price,
+    )
+
+
+def _admission_order(
+    value: object,
+    *,
+    exchange_instrument_id: str,
+) -> AdmissionOrder:
+    mapping = _require_mapping(value, name="admission open-order row")
+    return AdmissionOrder(
+        exchange_order_id=str(mapping.get("id") or "").strip(),
+        venue_client_order_id=(
+            str(mapping.get("clientOrderId")).strip()
+            if mapping.get("clientOrderId") is not None
+            else None
+        ),
+        exchange_instrument_id=exchange_instrument_id,
+        position_side=_row_position_side(mapping),
+        reduce_only=_boolean_field(mapping, "reduceOnly"),
     )
 
 

@@ -7,6 +7,7 @@ import pytest
 from src.trading_kernel.application.ports import VenueCommandRequest, VenueTruthRequest
 from src.trading_kernel.application.runtime_facts import (
     ActionTimeFactsRequest,
+    EntryAdmissionSnapshotRequest,
     LifecycleFactsRequest,
     PositionSnapshotRequest,
     ReviewEconomicsRequest,
@@ -229,6 +230,79 @@ class OneWayActionFactsExchange(ActionFactsExchange):
         assert symbol == "BTC/USDT:USDT"
         assert params == {}
         return {"hedged": False}
+
+
+class AdmissionSnapshotExchange:
+    def __init__(self) -> None:
+        self.position_calls: list[tuple[list[str], dict[str, object]]] = []
+        self.order_calls: list[tuple[str | None, dict[str, object]]] = []
+
+    async def fetch_order_book(self, symbol, limit):
+        assert symbol == "SOL/USDT:USDT"
+        assert limit == 5
+        return {"bids": [["99.9", "1"]], "asks": [["100.1", "1"]]}
+
+    async def fetch_balance(self, params):
+        assert params == {"type": "future"}
+        return {
+            "info": {
+                "totalWalletBalance": "1200",
+                "totalMarginBalance": "1198",
+                "totalInitialMargin": "250",
+                "totalMaintMargin": "13",
+                "availableBalance": "948",
+            }
+        }
+
+    async def fetch_position_mode(self, symbol, params):
+        assert symbol == "SOL/USDT:USDT"
+        assert params == {}
+        return {"hedged": True}
+
+    async def fetch_positions(self, symbols, params):
+        self.position_calls.append((list(symbols), dict(params)))
+        return [
+            {
+                "symbol": "SOL/USDT:USDT",
+                "contracts": "0.25",
+                "entryPrice": "101",
+                "side": "short",
+                "info": {
+                    "positionSide": "SHORT",
+                    "marginType": "cross",
+                    "leverage": "4",
+                    "markPrice": "100",
+                },
+            },
+            {
+                "symbol": "BTC/USDT:USDT",
+                "contracts": "0.01",
+                "entryPrice": "60000",
+                "side": "long",
+                "info": {
+                    "positionSide": "LONG",
+                    "marginType": "cross",
+                    "leverage": "3",
+                    "markPrice": "60100",
+                },
+            },
+        ]
+
+    async def fetch_open_orders(self, symbol, since, limit, params):
+        del since
+        assert symbol is None
+        assert limit == 1_000
+        self.order_calls.append((symbol, dict(params)))
+        suffix = "conditional" if params["conditional"] else "regular"
+        return [
+            {
+                "id": f"{suffix}-btc-order",
+                "clientOrderId": None,
+                "symbol": "BTC/USDT:USDT",
+                "reduceOnly": False,
+                "info": {"positionSide": "LONG"},
+            }
+        ]
 
 
 class LifecycleFactsExchange:
@@ -454,6 +528,56 @@ async def test_ccxt_adapter_reports_actual_one_way_account_mode() -> None:
     )
 
     assert facts.account_position_mode == "one_way"
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> None:
+    exchange = AdmissionSnapshotExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            ("binance-usdm", "SOLUSDT"): "SOL/USDT:USDT",
+            ("binance-usdm", "BTCUSDT"): "BTC/USDT:USDT",
+        },
+        settlement_assets={("binance-usdm", "SOLUSDT"): "USDT"},
+        clock_ms=lambda: 2_000,
+    )
+
+    snapshot = await adapter.read_entry_admission_snapshot(
+        EntryAdmissionSnapshotRequest(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="SOLUSDT",
+            observed_at_ms=2_000,
+            valid_for_ms=5_000,
+        )
+    )
+
+    assert snapshot.position_mode == "independent_sides"
+    assert snapshot.margin_mode == "cross"
+    assert snapshot.total_wallet_balance == Decimal("1200")
+    assert snapshot.total_margin_balance == Decimal("1198")
+    assert snapshot.total_initial_margin == Decimal("250")
+    assert snapshot.total_maintenance_margin == Decimal("13")
+    assert snapshot.available_margin == Decimal("948")
+    assert snapshot.best_bid_price == Decimal("99.9")
+    assert snapshot.best_ask_price == Decimal("100.1")
+    assert snapshot.instrument_facts_for("SOLUSDT").mark_price == Decimal("100")
+    assert snapshot.instrument_facts_for("SOLUSDT").configured_leverage == 4
+    assert {(row.exchange_instrument_id, row.position_side) for row in snapshot.positions} == {
+        ("SOLUSDT", "short"),
+        ("BTCUSDT", "long"),
+    }
+    assert {order.exchange_order_id for order in snapshot.open_orders} == {
+        "regular-btc-order",
+        "conditional-btc-order",
+    }
+    assert exchange.position_calls == [([], {})]
+    assert exchange.order_calls == [
+        (None, {"conditional": False}),
+        (None, {"conditional": True}),
+    ]
+    assert snapshot.valid_until_ms == 7_000
 
 
 @pytest.mark.asyncio
