@@ -13,6 +13,7 @@ import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.issue_ticket import (
@@ -25,11 +26,18 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandPayload,
 )
 from src.trading_kernel.domain.capacity import freeze_capacity_claim
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    canonical_digest,
+)
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
+from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
     entry_lane_current,
     owner_policy_current,
+    runtime_incidents,
+    runtime_scopes_current,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from tests.trading_kernel.unit.test_ticket import _identity, _ticket
@@ -115,6 +123,13 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
     ]
     assert isinstance(commands[0].payload, SetLeverageCommandPayload)
     assert commands[0].venue_client_order_id is None
+    assert commands[0].payload.leverage_fact_digest == _expected_leverage_fact_digest(
+        claim=_issue_request(
+            ticket=ticket,
+            now_ms=1_001,
+            claim_owner="worker-1",
+        ).capacity_claim,
+    )
 
 
 @pytest.mark.asyncio
@@ -138,6 +153,93 @@ async def test_issue_ticket_prepares_only_entry_when_leverage_already_matches(
     assert [(command.kind, command.generation) for command in commands] == [
         (ExchangeCommandKind.ENTRY, 1)
     ]
+    assert commands[0].payload.leverage_verification_digest == (
+        _expected_leverage_fact_digest(
+            claim=_issue_request(
+                ticket=ticket,
+                now_ms=1_001,
+                claim_owner="worker-1",
+            ).capacity_claim,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_scope_drift_after_lane_and_account_lock_leaves_no_durable_entry_state(
+    issue_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(issue_engine)
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        original_get_account_exposure = uow.entry_admission.get_account_exposure
+
+        async def drift_scope_after_account_lock(*args, **kwargs):
+            exposure = await original_get_account_exposure(*args, **kwargs)
+            async with issue_engine.begin() as connection:
+                await connection.execute(
+                    sa.update(runtime_scopes_current)
+                    .where(
+                        runtime_scopes_current.c.runtime_scope_id
+                        == ticket.runtime_scope_id
+                    )
+                    .values(
+                        enabled=False,
+                        scope_version=ticket.runtime_scope_version + 1,
+                    )
+                )
+            return exposure
+
+        uow.entry_admission.get_account_exposure = drift_scope_after_account_lock
+        result = await issue_ticket(
+            uow,
+            _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
+        )
+
+    assert result.status is IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH
+    await _assert_no_durable_entry_state(issue_engine, ticket.identity.ticket_id)
+
+
+@pytest.mark.asyncio
+async def test_exact_account_incident_drift_after_lane_and_account_lock_leaves_no_durable_entry_state(
+    issue_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(issue_engine)
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        original_get_account_exposure = uow.entry_admission.get_account_exposure
+
+        async def open_incident_after_account_lock(*args, **kwargs):
+            exposure = await original_get_account_exposure(*args, **kwargs)
+            async with issue_engine.begin() as connection:
+                await connection.execute(
+                    sa.insert(runtime_incidents).values(
+                        incident_id="incident:account-capacity-drift",
+                        ticket_id=None,
+                        incident_kind="account_capacity_unknown",
+                        status="open",
+                        first_blocker="account_capacity_unknown",
+                        entry_block_scope=EntryBlockScope.ACCOUNT_CAPACITY.value,
+                        entry_block_key=(
+                            f"{ticket.identity.netting_domain.venue_id}:"
+                            f"{ticket.identity.netting_domain.account_id}"
+                        ),
+                        details={},
+                        opened_at_ms=1_000,
+                        resolved_at_ms=None,
+                    )
+                )
+            return exposure
+
+        uow.entry_admission.get_account_exposure = open_incident_after_account_lock
+        result = await issue_ticket(
+            uow,
+            _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
+        )
+
+    assert result.status is IssueTicketStatus.ADMISSION_INCIDENT_OPEN
+    await _assert_no_durable_entry_state(issue_engine, ticket.identity.ticket_id)
 
 
 @pytest.mark.asyncio
@@ -221,6 +323,7 @@ async def test_policy_and_budget_limits_fail_closed(
 
     async with issue_engine.begin() as connection:
         await connection.execute(sa.delete(owner_policy_current))
+        await connection.execute(sa.delete(runtime_scopes_current))
     await _seed_policy(issue_engine, max_concurrent_tickets=1)
     first = _ticket()
     await _issue_and_release_lane(issue_engine, first)
@@ -369,6 +472,41 @@ async def _seed_policy(
                 updated_at_ms=1_000,
             )
         )
+        identity = _identity()
+        await connection.execute(
+            sa.insert(runtime_scopes_current).values(
+                runtime_scope_id="scope-sor-btc-long",
+                strategy_group_id=identity.runtime.strategy_group_id,
+                strategy_version_id=identity.runtime.strategy_version_id,
+                event_spec_id=identity.runtime.event_spec_id,
+                runtime_profile_id=identity.runtime.runtime_profile_id,
+                owner_policy_id="policy-main",
+                exchange_instrument_id=(
+                    identity.netting_domain.exchange_instrument_id
+                ),
+                position_side="long",
+                enabled=True,
+                scope_version=4,
+                updated_at_ms=1_000,
+            )
+        )
+        await connection.execute(
+            sa.insert(runtime_scopes_current).values(
+                runtime_scope_id="scope-short",
+                strategy_group_id=identity.runtime.strategy_group_id,
+                strategy_version_id=identity.runtime.strategy_version_id,
+                event_spec_id=identity.runtime.event_spec_id,
+                runtime_profile_id=identity.runtime.runtime_profile_id,
+                owner_policy_id="policy-main",
+                exchange_instrument_id=(
+                    identity.netting_domain.exchange_instrument_id
+                ),
+                position_side="short",
+                enabled=True,
+                scope_version=4,
+                updated_at_ms=1_000,
+            )
+        )
 
 
 async def _issue_and_release_lane(engine: AsyncEngine, ticket) -> None:
@@ -416,10 +554,20 @@ def _ticket_for_signal(
         runtime=original.runtime,
         netting_domain=domain,
     )
-    return _ticket(identity=identity, runtime_scope_id=f"scope-{position_side}")
+    return _ticket(
+        identity=identity,
+        runtime_scope_id=(
+            "scope-sor-btc-long" if position_side == "long" else "scope-short"
+        ),
+    )
 
 
 def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketRequest:
+    configured_leverage = (
+        ticket.selected_leverage - 1
+        if ticket.leverage_change_required
+        else ticket.selected_leverage
+    )
     return IssueTicketRequest(
         capacity_claim=freeze_capacity_claim(
             ticket_identity=ticket.identity,
@@ -462,7 +610,7 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
             ticket_margin_budget=Decimal("30"),
             required_leverage=ticket.selected_leverage,
             selected_leverage=ticket.selected_leverage,
-            configured_leverage_at_claim=ticket.selected_leverage,
+            configured_leverage_at_claim=configured_leverage,
             leverage_change_required=ticket.leverage_change_required,
             exchange_max_leverage=10,
             reserved_margin=ticket.reserved_margin,
@@ -487,6 +635,67 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
         now_ms=now_ms,
         claim_owner=claim_owner,
     )
+
+
+def _expected_leverage_fact_digest(*, claim) -> str:
+    instrument_facts = AdmissionInstrumentFacts(
+        exchange_instrument_id=(
+            claim.ticket_identity.netting_domain.exchange_instrument_id
+        ),
+        mark_price=claim.mark_price_at_claim,
+        configured_leverage=claim.configured_leverage_at_claim,
+    )
+    return canonical_digest(
+        {
+            "entry_admission_snapshot_digest": (
+                claim.entry_admission_snapshot_digest
+            ),
+            "instrument_facts": instrument_facts,
+        }
+    )
+
+
+async def _assert_no_durable_entry_state(
+    engine: AsyncEngine,
+    ticket_id: str,
+) -> None:
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        assert await uow.tickets.get(ticket_id) is None
+        assert await uow.capacity_claims.get_for_ticket(ticket_id) is None
+        assert await uow.budgets.get_for_ticket(ticket_id) is None
+        assert await uow.exchange_commands.list_for_ticket(ticket_id) == []
+        lane = await uow.entry_admission.get_global_lane()
+        assert lane is not None
+        assert lane.status == "idle"
+        assert lane.ticket_id is None
+
+
+async def _seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:
+    """Give direct Ticket tests the same current Scope authority as production."""
+
+    identity = ticket.identity
+    values = {
+        "runtime_scope_id": ticket.runtime_scope_id,
+        "strategy_group_id": identity.runtime.strategy_group_id,
+        "strategy_version_id": identity.runtime.strategy_version_id,
+        "event_spec_id": identity.runtime.event_spec_id,
+        "runtime_profile_id": identity.runtime.runtime_profile_id,
+        "owner_policy_id": ticket.owner_policy_id,
+        "exchange_instrument_id": identity.netting_domain.exchange_instrument_id,
+        "position_side": identity.netting_domain.position_side,
+        "enabled": True,
+        "scope_version": ticket.runtime_scope_version,
+        "updated_at_ms": ticket.created_at_ms,
+    }
+    async with engine.begin() as connection:
+        await connection.execute(
+            pg_insert(runtime_scopes_current)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=[runtime_scopes_current.c.runtime_scope_id],
+                set_=values,
+            )
+        )
 
 
 def _database_url(database_name: str) -> str:

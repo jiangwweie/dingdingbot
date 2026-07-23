@@ -5,11 +5,15 @@ from __future__ import annotations
 from decimal import Decimal
 from hashlib import sha256
 import json
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
+
+
+_CANONICAL_SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _require_identity(value: object, *, label: str) -> str:
@@ -67,6 +71,24 @@ class AdmissionInstrumentFacts(BaseModel):
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise ValueError("configured leverage must be an integer")
         return value
+
+
+def bound_admission_instrument_facts_digest(
+    *,
+    entry_admission_snapshot_digest: str,
+    instrument_facts: AdmissionInstrumentFacts,
+) -> str:
+    """Bind one exact instrument fact to the immutable admission snapshot."""
+
+    normalized_snapshot_digest = str(entry_admission_snapshot_digest or "").strip()
+    if _CANONICAL_SHA256_DIGEST.fullmatch(normalized_snapshot_digest) is None:
+        raise ValueError("admission snapshot binding requires a sha256 digest")
+    return canonical_digest(
+        {
+            "entry_admission_snapshot_digest": normalized_snapshot_digest,
+            "instrument_facts": instrument_facts,
+        }
+    )
 
 
 class AdmissionPosition(BaseModel):

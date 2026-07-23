@@ -37,6 +37,7 @@ from src.trading_kernel.domain.commands import (
     build_venue_client_order_id,
     require_next_generation_allowed,
 )
+from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.effects import (
     CancelEntryRemainder,
     CancelProtectionOrders,
@@ -55,13 +56,17 @@ from src.trading_kernel.domain.effects import (
     RequestControlledFlatten,
     SettleBudget,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    bound_admission_instrument_facts_digest,
+)
 from src.trading_kernel.domain.events import TicketIssued, TradeEvent
 from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
 )
 from src.trading_kernel.domain.reducer import Reduction
-from src.trading_kernel.domain.ticket import EntryOrderType
+from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
 from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresAggregateRepository,
     PostgresBudgetRepository,
@@ -185,27 +190,26 @@ class PostgresKernelUnitOfWork:
         await self.events.append(event)
         for effect in reduction.effects:
             if isinstance(effect, PrepareEntryCommand):
+                claim = await self._initial_command_claim(effect.ticket)
                 await self.exchange_commands.add(
                     _entry_command(
                         effect,
-                        leverage_verification_digest=effect.ticket.decision_digest(),
+                        leverage_verification_digest=(
+                            _initial_leverage_fact_digest(claim)
+                        ),
                         occurred_at_ms=event.occurred_at_ms,
                     )
                 )
                 continue
             if isinstance(effect, PrepareSetLeverageCommand):
-                claim = await self.capacity_claims.get(effect.ticket.capacity_claim_id)
-                if claim is None:
-                    raise UnsupportedKernelEffect(
-                        "SET_LEVERAGE command requires its immutable CapacityClaim"
-                    )
+                claim = await self._initial_command_claim(effect.ticket)
                 await self.exchange_commands.add(
                     _set_leverage_command(
                         effect,
                         entry_admission_snapshot_digest=(
                             claim.entry_admission_snapshot_digest
                         ),
-                        leverage_fact_digest=claim.decision_digest,
+                        leverage_fact_digest=_initial_leverage_fact_digest(claim),
                         occurred_at_ms=event.occurred_at_ms,
                     )
                 )
@@ -498,6 +502,36 @@ class PostgresKernelUnitOfWork:
             raise RuntimeError("unit of work transaction is not active")
         return self._transaction
 
+    async def _initial_command_claim(
+        self,
+        ticket: TradeTicket,
+    ) -> CapacityClaim:
+        claim = await self.capacity_claims.get(ticket.capacity_claim_id)
+        if claim is None:
+            raise UnsupportedKernelEffect(
+                "initial command requires its immutable CapacityClaim"
+            )
+        if (
+            claim.capacity_claim_id != ticket.capacity_claim_id
+            or claim.ticket_identity != ticket.identity
+            or claim.owner_policy_id != ticket.owner_policy_id
+            or claim.owner_policy_version != ticket.owner_policy_version
+            or claim.runtime_scope_id != ticket.runtime_scope_id
+            or claim.runtime_scope_version != ticket.runtime_scope_version
+            or claim.selected_leverage != ticket.selected_leverage
+            or claim.leverage_change_required != ticket.leverage_change_required
+        ):
+            raise UnsupportedKernelEffect(
+                "initial command Claim differs from immutable Ticket authority"
+            )
+        if ticket.leverage_change_required == (
+            claim.configured_leverage_at_claim == ticket.selected_leverage
+        ):
+            raise UnsupportedKernelEffect(
+                "initial command Claim has contradictory leverage-change evidence"
+            )
+        return claim
+
 
 def _entry_command(
     effect: PrepareEntryCommand,
@@ -536,6 +570,22 @@ def _entry_command(
         status=ExchangeCommandStatus.PREPARED,
         created_at_ms=occurred_at_ms,
         deadline_at_ms=ticket.expires_at_ms,
+    )
+
+
+def _initial_leverage_fact_digest(claim: CapacityClaim) -> str:
+    """Freeze the pre-mutation exact instrument leverage fact from admission."""
+
+    instrument_facts = AdmissionInstrumentFacts(
+        exchange_instrument_id=(
+            claim.ticket_identity.netting_domain.exchange_instrument_id
+        ),
+        mark_price=claim.mark_price_at_claim,
+        configured_leverage=claim.configured_leverage_at_claim,
+    )
+    return bound_admission_instrument_facts_digest(
+        entry_admission_snapshot_digest=claim.entry_admission_snapshot_digest,
+        instrument_facts=instrument_facts,
     )
 
 

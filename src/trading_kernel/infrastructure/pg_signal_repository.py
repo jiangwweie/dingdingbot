@@ -469,12 +469,15 @@ class PostgresSignalRepository:
     async def get_runtime_scope(
         self,
         runtime_scope_id: str,
+        *,
+        for_update: bool = False,
     ) -> RuntimeScopeSnapshot | None:
-        result = await self._connection.execute(
-            sa.select(runtime_scopes_current).where(
-                runtime_scopes_current.c.runtime_scope_id == runtime_scope_id
-            )
+        statement = sa.select(runtime_scopes_current).where(
+            runtime_scopes_current.c.runtime_scope_id == runtime_scope_id
         )
+        if for_update:
+            statement = statement.with_for_update(of=runtime_scopes_current)
+        result = await self._connection.execute(statement)
         row = result.mappings().one_or_none()
         return (
             None

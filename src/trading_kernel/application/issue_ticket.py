@@ -9,10 +9,12 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from src.trading_kernel.application.ports import (
     BudgetReservationRecord,
     KernelUnitOfWork,
+    RuntimeScopeSnapshot,
 )
 from src.trading_kernel.domain.events import TicketIssued
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.capacity import CapacityClaim
+from src.trading_kernel.domain.ticket import TradeTicket
 
 
 class IssueTicketStatus(StrEnum):
@@ -32,6 +34,7 @@ class IssueTicketStatus(StrEnum):
     BUDGET_EXHAUSTED = "budget_exhausted"
     PROTECTION_UNAVAILABLE = "protection_unavailable"
     CAPACITY_CLAIM_MISSING = "capacity_claim_missing"
+    ADMISSION_INCIDENT_OPEN = "admission_incident_open"
 
 
 class IssueTicketRequest(BaseModel):
@@ -77,6 +80,12 @@ async def issue_ticket(
             ticket_id=None,
         )
 
+    exposure = await uow.entry_admission.get_account_exposure(
+        ticket.identity.netting_domain.venue_id,
+        ticket.identity.netting_domain.account_id,
+        for_update=True,
+    )
+
     if request.now_ms >= claim.expires_at_ms:
         return IssueTicketResult(
             status=IssueTicketStatus.FACTS_EXPIRED,
@@ -95,6 +104,28 @@ async def issue_ticket(
             ticket_id=None,
         )
 
+    scope = await uow.signals.get_runtime_scope(
+        ticket.runtime_scope_id,
+        for_update=True,
+    )
+    if not _scope_matches_ticket(scope, ticket):
+        return IssueTicketResult(
+            status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
+            ticket_id=None,
+        )
+
+    ownership = await uow.entry_admission.read_admission_ownership(
+        venue_id=ticket.identity.netting_domain.venue_id,
+        account_id=ticket.identity.netting_domain.account_id,
+        exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+        for_update=True,
+    )
+    if ownership.open_incident_scopes:
+        return IssueTicketResult(
+            status=IssueTicketStatus.ADMISSION_INCIDENT_OPEN,
+            ticket_id=None,
+        )
+
     if await uow.entry_admission.has_active_ticket_in_domain(
         ticket.identity.netting_domain.key()
     ):
@@ -110,11 +141,6 @@ async def issue_ticket(
             ticket_id=None,
         )
 
-    exposure = await uow.entry_admission.get_account_exposure(
-        ticket.identity.netting_domain.venue_id,
-        ticket.identity.netting_domain.account_id,
-        for_update=True,
-    )
     current_tickets = exposure.active_ticket_count if exposure is not None else 0
     if (
         current_tickets >= policy.max_concurrent_tickets
@@ -178,4 +204,27 @@ async def issue_ticket(
     return IssueTicketResult(
         status=IssueTicketStatus.ISSUED,
         ticket_id=ticket.identity.ticket_id,
+    )
+
+
+def _scope_matches_ticket(
+    scope: RuntimeScopeSnapshot | None,
+    ticket: TradeTicket,
+) -> bool:
+    """Require the locked current Scope to match the frozen Claim/Ticket authority."""
+
+    if scope is None or not scope.enabled:
+        return False
+    identity = ticket.identity
+    return (
+        scope.runtime_scope_id == ticket.runtime_scope_id
+        and scope.scope_version == ticket.runtime_scope_version
+        and scope.strategy_group_id == identity.runtime.strategy_group_id
+        and scope.strategy_version_id == identity.runtime.strategy_version_id
+        and scope.event_spec_id == identity.runtime.event_spec_id
+        and scope.runtime_profile_id == identity.runtime.runtime_profile_id
+        and scope.owner_policy_id == ticket.owner_policy_id
+        and scope.exchange_instrument_id
+        == identity.netting_domain.exchange_instrument_id
+        and scope.position_side == identity.netting_domain.position_side
     )

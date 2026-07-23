@@ -1123,6 +1123,7 @@ class PostgresEntryAdmissionRepository:
         venue_id: str,
         account_id: str,
         exchange_instrument_id: str,
+        for_update: bool = False,
     ) -> AdmissionOwnership:
         """Load only current BRC ownership relevant to one admission snapshot."""
 
@@ -1131,10 +1132,14 @@ class PostgresEntryAdmissionRepository:
             trade_tickets.c.account_id == account_id,
             trade_tickets.c.active_netting_domain_key.is_not(None),
         )
+        domains_statement = sa.select(trade_tickets.c.active_netting_domain_key)
+        domains_statement = domains_statement.where(active_ticket).order_by(
+            trade_tickets.c.active_netting_domain_key
+        )
+        if for_update:
+            domains_statement = domains_statement.with_for_update(of=trade_tickets)
         domains_result = await self._connection.execute(
-            sa.select(trade_tickets.c.active_netting_domain_key)
-            .where(active_ticket)
-            .order_by(trade_tickets.c.active_netting_domain_key)
+            domains_statement
         )
         owned_position_domain_keys = tuple(
             str(value)
@@ -1151,15 +1156,19 @@ class PostgresEntryAdmissionRepository:
             trade_aggregates.c.pending_cancel_exchange_order_id,
             trade_aggregates.c.exit_exchange_order_id,
         )
-        order_rows = await self._connection.execute(
-            sa.select(*order_id_columns)
-            .select_from(
-                trade_aggregates.join(
-                    trade_tickets,
-                    trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
-                )
+        orders_statement = sa.select(*order_id_columns)
+        orders_statement = orders_statement.select_from(
+            trade_aggregates.join(
+                trade_tickets,
+                trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
             )
-            .where(active_ticket)
+        ).where(active_ticket)
+        if for_update:
+            orders_statement = orders_statement.with_for_update(
+                of=(trade_aggregates, trade_tickets)
+            )
+        order_rows = await self._connection.execute(
+            orders_statement
         )
         owned_exchange_order_ids = tuple(
             sorted(
@@ -1172,53 +1181,63 @@ class PostgresEntryAdmissionRepository:
             )
         )
 
+        unknown_statement = sa.select(exchange_commands.c.ticket_id)
+        unknown_statement = unknown_statement.select_from(
+            exchange_commands.join(
+                trade_tickets,
+                trade_tickets.c.ticket_id == exchange_commands.c.ticket_id,
+            )
+        ).where(
+            active_ticket,
+            exchange_commands.c.status
+            == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
+        ).order_by(exchange_commands.c.ticket_id)
+        if for_update:
+            unknown_statement = unknown_statement.with_for_update(
+                of=(exchange_commands, trade_tickets)
+            )
         unknown_result = await self._connection.execute(
-            sa.select(exchange_commands.c.ticket_id)
-            .select_from(
-                exchange_commands.join(
-                    trade_tickets,
-                    trade_tickets.c.ticket_id == exchange_commands.c.ticket_id,
-                )
-            )
-            .where(
-                active_ticket,
-                exchange_commands.c.status
-                == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
-            )
-            .distinct()
-            .order_by(exchange_commands.c.ticket_id)
+            unknown_statement
         )
         unknown_command_outcome_ticket_ids = tuple(
-            str(value) for value in unknown_result.scalars().all()
+            sorted({str(value) for value in unknown_result.scalars().all()})
         )
 
         account_key = f"{venue_id}:{account_id}"
         leverage_key = f"{account_key}:{exchange_instrument_id}"
-        incident_result = await self._connection.execute(
-            sa.select(runtime_incidents.c.entry_block_scope)
-            .where(
-                runtime_incidents.c.status == "open",
-                sa.or_(
+        incident_statement = sa.select(runtime_incidents.c.entry_block_scope)
+        incident_statement = incident_statement.where(
+            runtime_incidents.c.status == "open",
+            sa.or_(
+                runtime_incidents.c.entry_block_scope
+                == EntryBlockScope.RUNTIME.value,
+                sa.and_(
                     runtime_incidents.c.entry_block_scope
-                    == EntryBlockScope.RUNTIME.value,
-                    sa.and_(
-                        runtime_incidents.c.entry_block_scope
-                        == EntryBlockScope.ACCOUNT_CAPACITY.value,
-                        runtime_incidents.c.entry_block_key == account_key,
-                    ),
-                    sa.and_(
-                        runtime_incidents.c.entry_block_scope
-                        == EntryBlockScope.LEVERAGE_DOMAIN.value,
-                        runtime_incidents.c.entry_block_key == leverage_key,
-                    ),
+                    == EntryBlockScope.ACCOUNT_CAPACITY.value,
+                    runtime_incidents.c.entry_block_key == account_key,
                 ),
+                sa.and_(
+                    runtime_incidents.c.entry_block_scope
+                    == EntryBlockScope.LEVERAGE_DOMAIN.value,
+                    runtime_incidents.c.entry_block_key == leverage_key,
+                ),
+            ),
+        ).order_by(runtime_incidents.c.entry_block_scope)
+        if for_update:
+            incident_statement = incident_statement.with_for_update(
+                of=runtime_incidents
             )
-            .distinct()
-            .order_by(runtime_incidents.c.entry_block_scope)
+        incident_result = await self._connection.execute(
+            incident_statement
         )
         open_incident_scopes = tuple(
-            EntryBlockScope(str(value))
-            for value in incident_result.scalars().all()
+            sorted(
+                {
+                    EntryBlockScope(str(value))
+                    for value in incident_result.scalars().all()
+                },
+                key=lambda scope: scope.value,
+            )
         )
         return AdmissionOwnership(
             owned_position_domain_keys=owned_position_domain_keys,

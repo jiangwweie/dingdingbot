@@ -39,7 +39,10 @@ from src.trading_kernel.infrastructure.pg_models import (
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from tests.trading_kernel.unit.test_ticket import _ticket
-from tests.trading_kernel.integration.test_issue_ticket import _issue_request
+from tests.trading_kernel.integration.test_issue_ticket import (
+    _issue_request,
+    _seed_ticket_runtime_scope,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -191,6 +194,7 @@ async def _issue(
     claim_owner: str,
     now_ms: int,
 ) -> None:
+    await _seed_ticket_runtime_scope(engine, ticket)
     async with PostgresKernelUnitOfWork(engine) as uow:
         result = await issue_ticket(
             uow,

@@ -41,7 +41,10 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     seed_runtime_authority,
 )
 from tests.trading_kernel.unit.test_ticket import _ticket
-from tests.trading_kernel.integration.test_issue_ticket import _issue_request
+from tests.trading_kernel.integration.test_issue_ticket import (
+    _issue_request,
+    _seed_ticket_runtime_scope,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -98,6 +101,7 @@ async def test_partial_fill_cancels_remainder_before_controlled_flatten(
     ticket = _ticket()
     venue = AcceptingFaultVenue()
     await _seed_policy(fault_engine)
+    await _seed_ticket_runtime_scope(fault_engine, ticket)
     async with PostgresKernelUnitOfWork(fault_engine) as uow:
         issued = await issue_ticket(
             uow,
