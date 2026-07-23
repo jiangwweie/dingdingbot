@@ -1,29 +1,37 @@
 ---
 name: kaigong
-description: Codex session start workflow. Use when the user types `/kaigong` or says "开工/开始/继续".
+description: Use when the user says 开工, 开始, 继续, or requests a fresh session orientation for this repository.
 user-invocable: true
 ---
 
-# Kaigong (Codex Session Start)
+# Kaigong
 
-## Read
+## Required Authority
+
+Read:
 
 - `AGENTS.md`
-- `CLAUDE.md`
-- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`
 - `docs/current/AI_AGENT_CONSTRAINTS.md`
-- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 - `docs/current/MAIN_CONTROL_ROADMAP.md`
-- `docs/current/strategy-group-handoffs/main-control-handoff-index.md`
+- `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`
+
+## Workflow
+
+1. Inspect current branch, HEAD, upstream, and worktree without mutating them.
+2. Read the active roadmap and production identity.
+3. If runtime facts matter, use readonly PostgreSQL/exchange/service evidence.
+4. State the current phase, unfinished acceptance condition, active hard stops,
+   and exact task boundary.
+5. Continue the active task unless the user replaced it.
 
 ## Output
 
-- Current git branch and status summary.
-- Current runtime-governance roadmap or handoff summary.
-- Whether the task should stay with Codex or be handed to Claude via task card.
-- Current hard blockers, if any.
-- Safety boundary summary.
+- Git identity and cleanliness.
+- Current production commit and deployment phase.
+- Active Ticket or runtime blocker when relevant.
+- Work authorized for this session.
+- Verification required before completion.
 
-Do not recreate removed `docs/ops/*`, `docs/canon/*`, or `docs/planning/*` as active state.
-Do not output a next recommended task. The project controller decides
-sequencing.
+Do not recreate retired planning files, invent a new roadmap lane, or imply
+`promote-full` is complete without current evidence.

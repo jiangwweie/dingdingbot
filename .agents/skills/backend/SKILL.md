@@ -1,70 +1,65 @@
 ---
 name: backend
-description: Codex backend/core implementation workflow. Use for backend, execution, risk, infrastructure, API, or domain changes.
+description: Use when implementing or changing Trading Kernel domain, application, PostgreSQL, exchange, risk, lifecycle, reconciliation, or runtime behavior.
 user-invocable: true
 ---
 
-# Backend (Codex Core Implementation)
+# Backend
 
-## Read First
+## Required Authority
+
+Read before acting:
 
 - `AGENTS.md`
-- `CLAUDE.md`
-- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`
 - `docs/current/AI_AGENT_CONSTRAINTS.md`
-- `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`
-- `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`
-- `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`
-- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
-- The relevant Codex task card and current source files
+- `docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md`
+- the relevant task card and current source files
 
-## Role
+## Code Boundary
 
-Codex owns core backend implementation and skeleton development, especially execution, risk, reconciliation, order lifecycle, exchange gateway, and account safety.
+Production execution code belongs only in:
 
-Claude may receive only bounded local backend tasks via task card.
+```text
+src/trading_kernel/domain
+src/trading_kernel/application
+src/trading_kernel/infrastructure
+src/trading_kernel/interfaces
+```
 
-Controlled testnet/dev/readiness execution-chain work is allowed when scoped by
-the active task. Real live / real-funds order placement remains separately
-Owner-authorized only.
+Schema ownership belongs only in `migrations/trading_kernel`.
 
-Backend work touching StrategyGroup detector, watcher, replay/live parity,
-scope, Tradeability Decision, or action-time rehearsal must implement a precise
-Live Enablement state transition. Artifact creation is not done unless the
-artifact is consumed by the standard monitor path and proves a blocker class,
-removes the blocker, or validates `market_wait_validated`.
+## Workflow
 
-If backend work changes daily status or lane membership, it must preserve the
-daily table fields and WIP stop conditions. Do not add a new active StrategyGroup
-lane from backend code without the WIP contract admitting a replacement.
+1. State the invariant and exact authority affected.
+2. Write the smallest failing test and confirm the expected failure.
+3. Implement the minimum behavior in the existing kernel boundary.
+4. Keep database transactions short and network I/O outside them.
+5. Persist every exchange mutation as a durable Exchange Command before dispatch.
+6. Run targeted tests, then proportional regression and static checks.
+7. Delete retired code/tests instead of preserving compatibility.
 
-## Core Files
+## Engineering Contract
 
-Codex-owned by default:
+- Pure domain code; no SQLAlchemy, venue client, filesystem, subprocess, or web
+  framework in domain modules.
+- `Decimal` for financial values and frozen named models at core boundaries.
+- Exact identities, optimistic versions, bounded selectors, and explicit errors.
+- ENTRY rejection is terminal; unknown outcome is never blindly resent.
+- Partial fill creates an Incident and controlled flatten workflow.
+- Healthy idle cadence creates no JSON or Markdown output.
+- Logs mask credentials and sensitive exchange values.
 
-- `src/application/execution_orchestrator.py`
-- `src/application/order_lifecycle_service.py`
-- `src/application/position_projection_service.py`
-- `src/application/capital_protection.py`
-- `src/infrastructure/exchange_gateway.py`
-- `src/application/reconciliation.py`
-- `src/application/startup_reconciliation_service.py`
+## Verification
 
-## Engineering Constraints
+Report commands actually run, result counts, and skipped checks. Do not claim
+completion from a targeted test alone when the change crosses Ticket,
+Exchange Command, lifecycle, schema, or runtime ownership boundaries.
 
-- Keep `domain/` free of I/O frameworks.
-- Use `decimal.Decimal` for financial calculations.
-- Mask sensitive values in logs.
-- Prefer named Pydantic models over `Dict[str, Any]`.
-- Preserve per-symbol / per-fact blocker evidence for detector and watcher
-  work. If facts are computed but false, classify the lane as
-  `computed_not_satisfied`, not as missing detector.
-- Do not implement current backend/runtime behavior through JSON/Markdown file
-  readers, file-backed repositories, artifact-file validators, or fixture-file
-  CLIs. Current runtime state belongs in PG/current services; history is
-  archive-only.
-- Do not add dynamic-path evidence JSON writers, YAML config import/export
-  file interfaces, JSONL trace/observe sidecars, or tests that create legacy
-  report JSON fixtures for current backend code. Use PG/current services or
-  in-memory typed fixtures.
-- Ask before long test suites.
+## Hard Stops
+
+- No second execution chain, compatibility import, old-table reader, schema
+  fallback, or file-backed runtime source.
+- No strategy producer may create quantity, budget, Ticket, or exchange order.
+- No live profile, capital, sizing, credential, or exchange-write expansion
+  without explicit current authority.

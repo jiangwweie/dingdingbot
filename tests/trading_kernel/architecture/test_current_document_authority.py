@@ -6,6 +6,7 @@ import re
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CURRENT_DOCS_ROOT = REPO_ROOT / "docs" / "current"
+PROJECT_SKILLS_ROOT = REPO_ROOT / ".agents" / "skills"
 
 CURRENT_DOCUMENT_ALLOWLIST = {
     "AI_AGENT_CONSTRAINTS.md",
@@ -39,6 +40,22 @@ RETIRED_AUTHORITY_MARKERS = (
     "brc_account_risk_policy_current",
     "src/application/action_time",
     "src/application/runtime_execution",
+)
+
+PRODUCTION_STATE_DOCUMENTS = (
+    "docs/current/MAIN_CONTROL_ROADMAP.md",
+    "docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md",
+    "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md",
+    "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
+)
+
+CURRENT_PRODUCTION_COMMIT = "f9fda21c"
+CURRENT_LOCAL_CERTIFICATION = "331 passed"
+RESIDENT_WORKER_NAMES = (
+    "Observation",
+    "Entry",
+    "Lifecycle",
+    "Reconciliation",
 )
 
 
@@ -84,5 +101,46 @@ def test_current_authority_does_not_reintroduce_retired_execution_semantics() ->
                 )
 
     assert not violations, "retired authority semantics remain:\n" + "\n".join(
+        sorted(violations)
+    )
+
+
+def test_production_state_documents_match_the_deployed_kernel() -> None:
+    violations: list[str] = []
+
+    for relative_path in PRODUCTION_STATE_DOCUMENTS:
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        if CURRENT_PRODUCTION_COMMIT not in source:
+            violations.append(f"{relative_path}: missing production commit")
+        if CURRENT_LOCAL_CERTIFICATION not in source:
+            violations.append(f"{relative_path}: missing 331-test certification")
+        for worker_name in RESIDENT_WORKER_NAMES:
+            if worker_name not in source:
+                violations.append(f"{relative_path}: missing {worker_name} worker")
+        if "303 passed" in source:
+            violations.append(f"{relative_path}: stale 303-test certification")
+        if "no Tokyo mutation claimed" in source:
+            violations.append(f"{relative_path}: stale pre-cutover Tokyo status")
+
+    assert not violations, "production-state drift remains:\n" + "\n".join(
+        sorted(violations)
+    )
+
+
+def test_current_runtime_documents_do_not_deploy_timer_workers() -> None:
+    violations: list[str] = []
+    timer_deployment_patterns = (
+        re.compile(r"deploy/systemd/[^`\s]*\.timer", re.IGNORECASE),
+        re.compile(r"systemctl\s+enable\s+[^\n]*\.timer", re.IGNORECASE),
+        re.compile(r"systemctl\s+start\s+[^\n]*\.timer", re.IGNORECASE),
+    )
+
+    for relative_path in PRODUCTION_STATE_DOCUMENTS:
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        for pattern in timer_deployment_patterns:
+            for match in pattern.finditer(source):
+                violations.append(f"{relative_path}: {match.group(0)}")
+
+    assert not violations, "timer-based worker deployment remains:\n" + "\n".join(
         sorted(violations)
     )

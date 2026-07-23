@@ -1,87 +1,71 @@
 ---
 name: architect
-description: Codex architecture workflow. Use for system-level decisions, ADRs, trade-offs, boundaries, or Live-safe v1 core design.
+description: Use when making system-level decisions, defining boundaries, comparing architectural options, or recording durable trade-offs for the Trading Kernel.
 user-invocable: true
 ---
 
-# Architect (Codex)
+# Architect
 
-## Read First
+## Required Authority
+
+Read before acting:
 
 - `AGENTS.md`
-- `CLAUDE.md`
-- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`
 - `docs/current/AI_AGENT_CONSTRAINTS.md`
-- `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`
-- `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`
-- `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`
-- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
+- `docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md`
 - `docs/current/MAIN_CONTROL_ROADMAP.md`
-- `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md`
-- `docs/current/strategy-group-handoffs/main-control-handoff-index.md`
 
-Current required context is `AGENTS.md` plus `docs/current/*`.
-Historical archive material is recovery/provenance only and must not be used as current project truth.
+Current tracked code and live readonly facts outrank documents. Historical files
+are provenance only.
 
-## Role
+## Core Principle
 
-Codex owns architecture decisions. Provide options and trade-offs when the decision is meaningful, then wait for user confirmation before implementing high-impact changes.
+Preserve one execution authority and reduce concepts. Extend or replace the
+Trading Kernel; never create a parallel chain to avoid changing it.
 
-Prefer current tracked code, `docs/current/*`, and accepted Owner decisions over historical ADR or archive material.
+```text
+Observation
+-> StrategySignal
+-> Readiness/Authority
+-> CapacityClaim
+-> immutable Ticket
+-> durable Exchange Command
+-> protected lifecycle
+-> reconciliation
+-> settlement
+-> review
+```
 
-## Deliverables
+## Required Output
 
-- Architecture assessment.
-- 2+ options with trade-offs when appropriate.
-- Recommended direction.
-- Affected core files.
-- Test and rollback strategy.
-- ADR when a durable decision is accepted.
-- Live Enablement state transition when the decision touches StrategyGroup,
-  detector, watcher, scope, blocker, replay/live parity, or execution path.
-- WIP impact and stop condition when the decision changes active mainline work.
+1. Decision or unresolved decision.
+2. Known facts separated from analysis.
+3. Options and trade-offs when more than one valid design exists.
+4. Recommended boundary and deleted/replaced concepts.
+5. Data, transaction, failure, and runtime ownership.
+6. Tests, migration/cutover impact, and rollback or fix-forward posture.
+7. Owner decision required only when scope, policy, capital, or safety changes.
 
-## Constraints
+## Architecture Checks
 
-- Do not force OpenAPI or PRD artifacts unless the task actually changes an API/product contract.
-- Do not optimize strategies during P0 Live-safe work.
-- Do not change live profiles or real-funds permissions without explicit user
-  approval. Testnet/dev/profile-scoped readiness or cleanup is governed by the
-  current agent baseline.
-- Treat new packet, bridge, adapter, readiness, evidence, compatibility, or
-  other glue layers as architecture smell. Before accepting one, state whether
-  the core abstraction should instead be extended, replaced, or deleted; whether
-  the requirement or project goal has changed; and which old path is replaced,
-  removed, or retired. Glue is acceptable only with a bounded replacement or
-  removal condition and without becoming a second source of truth.
-- Treat runtime JSON/Markdown file reads and recurring JSON/Markdown report
-  writes as architecture debt, not as a stable integration layer. The preferred
-  architecture action is delete; if current runtime state is needed, migrate it
-  to PG/current services; if only provenance remains, move it to archive-only
-  tooling. Do not design new production flows that depend on repo/output/report
-  files.
-- Treat dynamic-path evidence JSON writers, YAML config import/export file
-  interfaces, JSONL trace/observe sidecars, and tests that create legacy report
-  JSON fixtures as file-authority debt even when they are not literal
-  `latest-*.json` paths. Delete them, migrate useful current semantics to
-  PG/current services, or move pure history to archive-only provenance.
-- Treat current artifact/proof/evidence scripts with JSON/Markdown file
-  inputs/outputs, report directories, or artifact file CLI parameters as
-  architecture debt even when they are outside production cadence. Delete them
-  by family, migrate useful semantics to PG/current projections, or move pure
-  history to archive-only provenance.
-- Treat file-backed repositories, local comparison readers, artifact-file
-  validators, and JSON fixture CLIs in current `src/` or runtime `scripts/` as
-  architecture debt. They must be deleted from the current path or rewritten to
-  PG/current services; "non-production fallback" is not an acceptable current
-  abstraction.
-- Every runtime, deploy, monitor, readmodel, watcher, action-time, or Owner
-  explanation architecture decision must include cadence and performance
-  impact: no-signal tick file growth target, PG row growth, CPU-heavy trigger,
-  timeout boundary, disk/retention behavior, and archive-only cleanup rule.
-- Do not accept explanation-only, audit-only, or artifact-only completion for
-  live-enablement work. The architecture outcome must remove a blocker,
-  reclassify it with per-symbol / per-fact evidence, prove
-  `market_wait_validated`, or stop at explicit Owner policy / hard safety.
-- Do not add or preserve active roadmap lanes outside the WIP contract unless a
-  current lane exits mainline or Owner explicitly changes scope.
+| Concern | Required answer |
+| --- | --- |
+| Authority | Which single source owns the decision? |
+| Identity | Which exact version, Ticket, command, or Netting Domain is used? |
+| Transactions | What commits atomically and where does network I/O occur? |
+| Failure | How are rejection, timeout, unknown outcome, and partial fill represented? |
+| Runtime | Which of Observation, Entry, Lifecycle, or Reconciliation owns cadence? |
+| Performance | What is the bounded query, poll, timeout, CPU, memory, and file-I/O cost? |
+| Retirement | Which old code, table, test, document, or service disappears? |
+
+## Hard Stops
+
+- No compatibility generation, dual write, file-backed authority, or hidden
+  alternate execution path.
+- No strategy logic below StrategySignal.
+- No exchange mutation without a durable Exchange Command.
+- No design that weakens one Ticket per Exposure Episode, no adding to a
+  position, global new-ENTRY serialization, or Netting Domain isolation.
+- No Tokyo write, policy expansion, or real-funds change without current task
+  authority and every exchange-write hard gate.

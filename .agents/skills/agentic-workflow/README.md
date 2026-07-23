@@ -254,7 +254,7 @@ jobs:
       - name: Check for float in financial code
         run: |
           # 禁止在 domain/ 使用 float
-          if grep -r "float" src/domain/ --include="*.py"; then
+          if grep -r "float" src/trading_kernel/domain/ --include="*.py"; then
             echo "❌ float detected in domain layer"
             exit 1
           fi
@@ -356,9 +356,9 @@ if __name__ == "__main__":
 ```
 
 **关键文件路径** (修改这些文件触发审查):
-- `src/infrastructure/exchange_gateway.py`
-- `src/domain/position_manager.py`
-- `src/infrastructure/signal_repository.py`
+- `src/trading_kernel/infrastructure/venue_adapter.py`
+- `src/trading_kernel/domain/position.py`
+- `src/trading_kernel/infrastructure/pg_signal_repository.py`
 
 **AST 反模式检测** (`scripts/audit_concurrency.py`):
 
@@ -427,9 +427,9 @@ def check_body_for_blocking(
 
 if __name__ == "__main__":
     critical_files = [
-        Path("src/infrastructure/exchange_gateway.py"),
-        Path("src/domain/position_manager.py"),
-        Path("src/infrastructure/signal_repository.py"),
+        Path("src/trading_kernel/infrastructure/venue_adapter.py"),
+        Path("src/trading_kernel/domain/position.py"),
+        Path("src/trading_kernel/infrastructure/pg_signal_repository.py"),
     ]
     
     all_issues = []

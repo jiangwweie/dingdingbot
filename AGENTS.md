@@ -1,7 +1,7 @@
 # AGENTS.md - BRC Trading Kernel Operating Guide
 
-Last updated: 2026-07-22
-Current phase: Trading Kernel Rebuild And Cutover
+Last updated: 2026-07-23
+Current phase: Tokyo Controlled Real-Funds Acceptance
 
 ## Authority Order
 
@@ -33,14 +33,13 @@ The target is a single-Owner, small-capital, controlled real-profit experiment
 system with one readable multi-position trading chain:
 
 ```text
-StrategyGroup observation
--> typed live signal
--> readiness and current authority checks
--> immutable Trade Ticket
--> durable ENTRY command
--> Initial Stop
--> concurrent protected position lifecycle
--> EXIT / recovery
+Observation
+-> StrategySignal
+-> Readiness/Authority
+-> CapacityClaim
+-> immutable Ticket
+-> durable Exchange Command
+-> protected lifecycle
 -> reconciliation
 -> settlement
 -> review
@@ -49,6 +48,22 @@ StrategyGroup observation
 The Owner controls policy. The system performs normal operation. The Owner is
 not required to assemble facts, approve each in-scope order, or operate internal
 gates.
+
+## Current Production Baseline
+
+- Tokyo runs commit `f9fda21c91482b050e2a630e163f3213386ae6d7`.
+- Remote production anchor `tokyo-runtime-2026.07.23.1` points permanently to
+  that commit.
+- Local certification at the deployed commit is `331 passed`, Ruff clean,
+  Mypy clean, and production file-I/O audit clean.
+- Runtime cadence is owned by four persistent systemd services: Observation,
+  Entry, Lifecycle, and Reconciliation. Do not restore timer-based cold starts.
+- Natural `SOR-001 / SOR-SHORT / SOLUSDT` acceptance Ticket
+  `ticket:c1ebc24a178a3ae4d87978e2fa1204ae` is in protected lifecycle at the
+  verified production snapshot.
+- Full runtime policy promotion through `promote-full` remains blocked until
+  that Ticket is terminal, exchange-flat, reconciled, settled, reviewed, and
+  leaves zero incidents or residual orders.
 
 ## Final Business Semantics
 
@@ -127,7 +142,7 @@ The active rebuild goal authorizes:
 - focused `codex/*` branches and local commits;
 - destructive local/disposable PostgreSQL operations;
 - reviewed Tokyo database cutover operations;
-- server service, timer, release, and deployment operations;
+- server service, release, and deployment operations;
 - readonly exchange/account/position/order verification;
 - controlled in-scope real-funds acceptance after all current hard gates pass.
 
@@ -150,11 +165,12 @@ Do not write to the exchange when any of these is true:
 
 ## Cutover Rule
 
-Cutover is destructive and forward-only after acceptance. It requires exchange
-flatness, no open orders, no protection residue, no unknown outcomes, all old
-writers stopped and fenced, and exact code/schema identity. The short-lived
-rollback snapshot is operational insurance only and must not restore retired
-runtime authority after the new baseline is accepted.
+Cutover is destructive and forward-only after acceptance. For the completed
+Tokyo rebuild, the Owner explicitly authorized deleting the BRC application,
+container, PostgreSQL database data, releases, and services without backup,
+while preserving every non-quantitative service. The rebuilt baseline is now
+the only runtime authority; retired program or database generations must not be
+restored.
 
 ## Git Discipline
 
@@ -162,5 +178,7 @@ runtime authority after the new baseline is accepted.
 - Rebuild work remains on focused `codex/*` branches until reviewed.
 - Preserve unrelated user changes.
 - Do not commit generated runtime output.
-- Do not claim completion before local certification, Tokyo cutover, one
-  terminal controlled real-funds Ticket, and the final requirement audit.
+- Do not claim completion before the active acceptance Ticket is terminal and
+  flat, all residual orders are absent, budget is released, Reconciliation,
+  Settlement, and Review are complete, incident count is zero, `promote-full`
+  is certified, and the final requirement audit passes.

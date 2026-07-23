@@ -126,12 +126,12 @@ class TestTrailingStopLogic:
 ```bash
 cd /Users/jiangwei/Documents/final
 source venv/bin/activate
-pytest tests/unit/test_risk_manager_trailing_stop.py -v
+pytest tests/trading_kernel/unit/test_exit_policy.py -v
 ```
 
 **预期输出** (失败):
 ```
-FAILED test_risk_manager_trailing_stop.py::TestTrailingStopLogic::test_ut_005_trailing_stop_triggers_after_1pct_profit
+FAILED test_exit_policy.py::TestTrailingStopLogic::test_ut_005_trailing_stop_triggers_after_1pct_profit
 AssertionError: assert PositionStatus.OPEN == PositionStatus.CLOSED
 ```
 
@@ -139,10 +139,10 @@ AssertionError: assert PositionStatus.OPEN == PositionStatus.CLOSED
 
 **AI 分析失败原因并实现**:
 ```python
-# src/domain/risk_manager.py
+# src/trading_kernel/domain/exit_policy.py
 
 from decimal import Decimal
-from src.domain.models import Position, PositionStatus
+from trading_kernel.domain.position import Position, PositionStatus
 
 class DynamicRiskManager:
     """动态风控管理器"""
@@ -238,13 +238,13 @@ pytest tests/unit/test_risk_manager_trailing_stop.py -v
 **AI 执行**:
 ```bash
 # 类型检查
-mypy src/domain/risk_manager.py
+mypy src/trading_kernel/domain/exit_policy.py
 
 # 格式化
-black src/domain/risk_manager.py
+black src/trading_kernel/domain/exit_policy.py
 
 # 提交
-git add src/domain/risk_manager.py tests/unit/test_risk_manager_trailing_stop.py
+git add src/trading_kernel/domain/exit_policy.py tests/trading_kernel/unit/test_exit_policy.py
 git commit -m "feat(domain): 实现移动止损逻辑 (UT-005 ~ UT-008)
 
 - 添加 DynamicRiskManager.check_trailing_stop() 方法
@@ -301,8 +301,8 @@ DynamicRiskManager 移动止损逻辑
 - ✅ UT-008: 移动止损价格更新
 
 ### 代码变更
-- `src/domain/risk_manager.py` (+45 行)
-- `tests/unit/test_risk_manager_trailing_stop.py` (+89 行)
+- `src/trading_kernel/domain/exit_policy.py` (+45 行)
+- `tests/trading_kernel/unit/test_exit_policy.py` (+89 行)
 
 ### 提交
 - abc1234 feat(domain): 实现移动止损逻辑

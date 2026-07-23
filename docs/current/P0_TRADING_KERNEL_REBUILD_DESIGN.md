@@ -1,134 +1,105 @@
 ---
 title: P0_TRADING_KERNEL_REBUILD_DESIGN
-status: OWNER_APPROVED_IMPLEMENTATION
+status: DEPLOYED_ACCEPTANCE_ACTIVE
 program_id: P0-TKR
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 ---
 
 # P0 Trading Kernel Rebuild Design
 
 ## Decision
 
-The repository and Tokyo runtime are replaced by one multi-position trading
-kernel and one clean PostgreSQL baseline. There is no compatibility migration,
-dual write, or retired-runtime fallback.
+The repository and Tokyo runtime use one multi-position Trading Kernel and one
+clean PostgreSQL baseline. There is no compatibility migration, dual write,
+retired-runtime fallback, or alternate execution chain.
 
-## Final Chain
+## Authoritative Chain
 
 ```text
-StrategyGroup observer
--> immutable StrategySignal + fact lineage
--> persisted candidate readiness
--> deterministic candidate arbitration
--> action-time CapacityClaim
--> globally serialized Ticket issuance
--> durable ENTRY command
--> Initial Stop
--> concurrent Ticket lifecycle
--> EXIT / recovery
--> exchange reconciliation
+Observation
+-> StrategySignal
+-> Readiness/Authority
+-> CapacityClaim
+-> immutable Ticket
+-> durable Exchange Command
+-> protected lifecycle
+-> reconciliation
 -> settlement
 -> review
 ```
 
+Strategy code ends at `StrategySignal`. It cannot assign account capital,
+create a Ticket, write to the exchange, or mutate lifecycle state.
+
 ## Core Invariants
 
-1. One Exposure Episode owns one immutable Ticket.
-2. Adding to a position is forbidden.
-3. Each Ticket may have one ENTRY generation only.
-4. New ENTRY work is globally serialized.
-5. Existing Ticket lifecycle work is concurrent.
-6. One active Ticket exists per Netting Domain.
-7. Long and short are independent sides and may coexist.
-8. Multi-position is a default capability, not a fixed two-position model.
-9. Policy may impose bounded account capacity without changing the architecture.
-10. ENTRY rejection is terminal.
-11. Unknown outcome is reconciled and never blindly resent.
-12. Partial ENTRY fill is an incident followed by exact remainder cancel and
-    controlled flatten.
+1. One Exposure Episode owns exactly one immutable Ticket.
+2. Adding to an existing position is forbidden.
+3. One Ticket may produce only one ENTRY command generation.
+4. New ENTRY admission is globally serialized.
+5. Existing protected Tickets progress concurrently.
+6. One active Ticket is allowed per Netting Domain:
+   `venue + account + instrument + position_side`.
+7. Long and short are independent Netting Domains and may coexist by default.
+8. Multi-position is architectural; policy may bound capacity without changing
+   the model.
+9. Authoritative ENTRY rejection is terminal and is not retried.
+10. Unknown exchange outcome is reconciled and never blindly resent.
+11. Partial ENTRY fill is an Incident followed by exact remainder cancellation
+    and controlled flatten.
+12. Strategy kill occurs only after exposure is flat and terminal.
 
-## Code Ownership
+## Code And Data Ownership
 
 ```text
 src/trading_kernel/domain         pure lifecycle and identity rules
 src/trading_kernel/application    typed use cases and ports
 src/trading_kernel/infrastructure PostgreSQL and venue adapters
-src/trading_kernel/interfaces     bounded worker and readonly surfaces
+src/trading_kernel/interfaces     bounded runtime and readonly surfaces
 ```
 
-No production module outside this package may own trading execution behavior.
+The only database baseline is
+`migrations/trading_kernel/versions/0001_initial.py`. PostgreSQL owns current
+runtime truth and append-only lifecycle facts. Exchange readonly facts own
+external truth. Repository documents and generated output never own production
+decisions.
 
-## Signal Boundary
+## Signal, Capacity, And Ticket Boundary
 
-`StrategySignal` is the only strategy-to-kernel observation input. It freezes:
+`StrategySignal` freezes exact strategy, version, Event, scope, instrument,
+side, occurrence, expiry, and immutable Fact lineage. Ingestion validates
+Registry identity, runtime scope, current Fact equality, freshness, and schema
+identity, then records readiness without capital authority.
 
-- signal, StrategyGroup, strategy version, event, scope, instrument, and side;
-- occurrence and expiry;
-- the complete immutable Fact Bundle and its exact digest.
+At action time, deterministic arbitration selects a bounded candidate. Current
+Owner Policy, account mode, balance, margin, reservations, instrument rules,
+Netting Domain occupancy, entry price, stop plan, and stop risk produce an
+immutable `CapacityClaim`.
 
-The strategy boundary cannot assign quantity, notional, leverage, account
-budget, order price, Initial Stop order, or take-profit orders. Signal ingestion
-validates Registry identity, runtime scope identity, current Fact equality,
-freshness, instrument identity, and code/schema capability before recording a
-candidate. Owner policy, account mode, action-time venue rules, current balance,
-margin, budget, and Netting Domain occupancy are evaluated only when a fresh
-candidate is narrowed and an immutable `CapacityClaim` is built.
+The Entry worker revalidates the Claim and atomically commits the Ticket,
+budget reservation, Netting Domain hold, aggregate, first event, and durable
+ENTRY command. Two Signals may coexist, but their Tickets are issued serially.
 
-The globally serialized issuer accepts only a current `CapacityClaim`. It
-revalidates authority and atomically commits the Claim, Ticket, budget
-reservation, active Netting Domain hold, aggregate, first event, and durable
-ENTRY command. A `StrategySignal` can never issue a Ticket directly.
+## Transaction And Exchange Model
 
-Two fresh signals may be persisted concurrently. Their Tickets are issued
-serially. Once the first Ticket has protected exposure or a proven terminal
-pre-exposure outcome and releases the lane, the next unexpired ready signal may
-issue a Ticket.
-
-## Persistence Model
-
-The clean baseline contains stable registry, policy, observation, lifecycle,
-and operations tables only. Signal rows contain observation identity and time;
-their immutable Fact Bundles live in append-only typed snapshot rows. Financial
-and order terms exist only at the CapacityClaim and Ticket boundaries. JSONB is
-limited to typed fact values, bounded metadata, summaries, command payloads,
-and review data.
-
-Key lifecycle authorities are:
-
-```text
-brc_signal_events
-brc_signal_fact_snapshots
-brc_readiness_current
-brc_entry_lane_current
-brc_trade_tickets
-brc_trade_aggregates
-brc_trade_events
-brc_exchange_commands
-brc_positions_current
-brc_budget_reservations
-brc_runtime_incidents
-brc_trade_reviews
-```
-
-## Transaction Model
-
-Every aggregate mutation performs one short PostgreSQL transaction:
+Each aggregate mutation uses one short PostgreSQL transaction:
 
 ```text
 lock exact current row
--> validate expected version and current authority
+-> validate expected version and authority
 -> append Trade Event
 -> update Aggregate and projections
--> materialize Exchange Command or incident effect
+-> persist Exchange Command or Incident effect
 -> commit
 ```
 
-Venue I/O happens after a durable command lease commits and before its result is
-recorded in a second short transaction.
+Venue I/O occurs only after a durable command lease commits. Its result is
+recorded in a separate short transaction. Unknown outcomes block redispatch
+until exact exchange truth resolves them.
 
-## Runtime Ownership And Review
+## Runtime Model
 
-Production cadence is split across four independently bounded workers:
+Production cadence is owned by four persistent systemd services:
 
 ```text
 Observation Worker
@@ -137,46 +108,52 @@ Lifecycle Worker
 Reconciliation Worker
 ```
 
-The Entry Worker is the only owner of new Ticket issuance. Lifecycle and
-reconciliation continue concurrently for existing Tickets. The terminal Review
-records realized PnL, fees, funding, net PnL, and R-Multiple from exact Ticket
-order identities. When funding cannot be attributed exactly, Review records
-`funding_unavailable` and does not fabricate net economics.
+They are long-running processes with bounded polling and restart-on-failure.
+Timer-based cold starts are retired because idle Python import and initialization
+cost exceeded the 2c4g Tokyo budget.
 
-## Cutover
+## Destructive Cutover Model
 
-The old writers are fenced only after exchange flatness, order absence,
-protection absence, and outcome certainty are proven. A crash-safe state machine
-takes a short-lived backup, recreates the application schema from `0001_initial`,
-seeds current authority, deploys the exact commit, and restores capabilities in
-stages.
+For this cutover, the Owner explicitly authorized no backup of BRC program or
+database state. Old BRC services, containers, releases, and PostgreSQL data were
+deleted, including the application data volume, then rebuilt from committed
+code, `0001_initial`, and deterministic Registry/Policy seed. Non-quantitative
+programs and their data were outside scope and had to remain unaffected.
+
+This was a forward-only replacement. The retired application and schema are
+not rollback authorities.
+
+## Current Deployment Evidence
+
+| Evidence | Current value |
+| --- | --- |
+| Tokyo commit | `f9fda21c91482b050e2a630e163f3213386ae6d7` |
+| Immutable production tag | `tokyo-runtime-2026.07.23.1` |
+| Local certification | `331 passed`; Ruff clean; Mypy clean; file-I/O audit clean |
+| Runtime services | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
+| Natural acceptance flow | `SOR-001 / SOR-SHORT / SOLUSDT` |
+| Ticket | `ticket:c1ebc24a178a3ae4d87978e2fa1204ae` |
+| Verified lifecycle state | `position_protected`; ENTRY, Initial Stop, and TP1 accepted |
+| Full runtime promotion | `promote-full` pending |
 
 ## Acceptance
 
 The rebuild is complete only when:
 
-1. typed live StrategySignal reaches an action-time CapacityClaim and frozen
-   Ticket without retired code;
-2. serial Ticket issuance can create concurrent protected positions across
-   distinct Netting Domains;
-3. same-instrument long and short remain isolated;
-4. all lifecycle and fault branches are certified;
-5. retired code, tests, tables, migrations, units, and current documents are
-   absent;
-6. the clean baseline rebuilds from empty PostgreSQL;
-7. Tokyo runs the exact commit and schema;
-8. one controlled real-funds Ticket reaches terminal review and final flatness;
-9. the final audit finds no unverified requirement or fallback path.
+1. the six registered Events can naturally produce typed StrategySignals;
+2. current authority can issue serial Tickets and manage concurrent protected
+   positions across independent Netting Domains;
+3. lifecycle, fault, unknown-outcome, and reconciliation branches are certified;
+4. retired code, tests, tables, migrations, deployment units, and current
+   document references are absent;
+5. the clean baseline rebuilds from empty PostgreSQL;
+6. Tokyo runs the exact commit, schema, seed, and four persistent workers;
+7. one natural real-funds Ticket reaches terminal exchange-flat state with no
+   residual order;
+8. budget and domain holds release, Reconciliation matches, Settlement and
+   Review complete, and Incident count is zero;
+9. `promote-full` passes its hard gates;
+10. the final requirement audit finds no unverified requirement or fallback.
 
-Local implementation currently satisfies items 1-6 with `303 passed`, Ruff
-clean, Mypy clean across 68 source files, zero runtime file-authority findings,
-and one clean 33-table `0001_initial` rebuild. The Owner has authorized Tokyo
-cutover and controlled real-funds acceptance; no Tokyo mutation is claimed by
-this local evidence.
-
-## Exchange-Write Hard Stops
-
-Wrong identity, invalid account mode, stale facts, same-domain occupancy,
-missing budget, missing protection, duplicate command, unknown outcome,
-code/schema mismatch, old-writer overlap, credential mutation, withdrawal,
-transfer, and official-path bypass all fail closed.
+Items 1-6 are deployed and locally certified. Item 7 is currently active under
+the protected acceptance Ticket. Items 8-10 remain incomplete.

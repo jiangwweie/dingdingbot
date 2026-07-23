@@ -1,124 +1,85 @@
 ---
 name: chain-position
-description: Use for live-enablement chain-position work in /Users/jiangwei/Documents/final: replay-live parity, first blocker classification, symbol scope decision, action-time boundary, or daily live-enablement status. This skill must be used whenever a task asks what to do next for real trading progress, why no trade happened, whether a StrategyGroup or symbol should advance, or whether replay/live detector/scope/facts/action-time blockers moved.
+description: Use when determining how far a live or recent signal progressed, why no Ticket or order appeared, what the first blocker is, or what single action advances real trading safely.
 user-invocable: true
 ---
 
-# Chain Position Live Enablement
+# Chain Position
 
-## Read First
+## Required Authority
+
+Read before acting:
 
 - `AGENTS.md`
-- `CLAUDE.md`
+- `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`
 - `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`
-- `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`
-- `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`
 - `docs/current/TRADEABILITY_DECISION_CONTRACT.md`
 - `docs/current/MAIN_CONTROL_ROADMAP.md`
-- `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`
-- `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md`
 
-## Role
+Use current PostgreSQL and exchange readonly facts. Generated reports and
+historical files cannot establish current chain position.
 
-This skill constrains work by trading-chain position, not by expert domain.
+## Chain
 
-Allowed chain positions:
+```text
+Observation
+-> StrategySignal
+-> Readiness/Authority
+-> CapacityClaim
+-> immutable Ticket
+-> durable Exchange Command
+-> protected lifecycle
+-> reconciliation
+-> settlement
+-> review
+```
 
-| Chain position | Only question it answers |
-| --- | --- |
-| `replay_live_parity` | Did replay-observed signal reproduce in live/current detector under the same symbol, timeframe, venue, and fact rules? |
-| `pretrade_candidate_readiness` | What is the current readiness and first blocker for this StrategyGroup + candidate symbol? |
-| `tradeability_first_blocker` | What is the current first blocker for this StrategyGroup or candidate symbol? |
-| `symbol_scope_decision` | Should a symbol move from observed/read-only to scoped promotion or explicit deferral? |
-| `fresh_signal_promotion` | Can a fresh satisfied candidate become a promotion candidate or action-time lane input? |
-| `action_time_boundary` | If a fresh live signal appears, can one narrowed lane reach candidate/auth, FinalGate, and Operation Layer without manual operation? |
-| `daily_live_enablement_status` | Which active StrategyGroup/candidate symbol moved closer to promotion or live submit today, and what is the next single action? |
-
-Do not answer broad strategy, architecture, governance, or documentation
-questions inside this skill. Route those only after the chain-position output
-proves they are the first blocker.
-
-After PG cutover, chain position must be derived from PG current state and
-audit lineage. Generated JSON/MD, output artifacts, Single Lane Packet, local
-cache, and old watcher reports are exports or diagnostics only. They must not
-override PG signal, promotion, lane, ticket, policy, fact, or blocker state.
+Find the first transition whose required object or authority is absent,
+rejected, stale, occupied, or unresolved.
 
 ## Required Output
 
-Every output must fit this shape:
-
 ```text
-chain_position:
 strategy_group_id:
-symbol:
-stage:
+event_spec_id:
+instrument:
+position_side:
+time_window:
+last_proven_stage:
 first_blocker:
 evidence:
+signal_event_id:
+capacity_claim_id:
+ticket_id:
+command_id:
+incident_id:
 next_action:
 stop_condition:
 owner_action_required:
-authority_boundary:
 ```
 
-When a fresh signal or no-trade question is involved, include the nearest
-lineage object that exists:
+Use `none` only after checking the authoritative current table or exchange fact.
 
-```text
-signal_event_id:
-promotion_candidate_id:
-action_time_lane_input_id:
-ticket_id:
-```
+## Interpretation
 
-Use `none` when the object does not exist, and make the missing object part of
-the first-blocker explanation.
+| Missing or blocked object | Typical class |
+| --- | --- |
+| Observation coverage or required Fact | `observation_unavailable` |
+| Fresh StrategySignal | `signal_absent` or `signal_invalid_or_stale` |
+| Current scope/policy authority | `scope_or_policy_mismatch` |
+| CapacityClaim | account mode, lane, domain, budget, or protection blocker |
+| Ticket | Claim invalidation or global ENTRY serialization |
+| Exchange Command result | rejection, unknown outcome, or runtime Incident |
+| Protected lifecycle | protection or reconciliation blocker |
+| Settlement/Review | terminal truth or exact economics not yet complete |
 
-No long narrative, no broad roadmap, no new artifact proposal unless the
-artifact removes/reclassifies the first blocker and is consumed by the standard
-monitor path.
+## Rules
 
-## Forbidden Outputs
-
-Do not output:
-
-- long-term governance suggestions;
-- generic project summaries;
-- new packet/projection/readiness layers;
-- multiple next actions for one lane;
-- `waiting_for_market` unless `market_wait_validated` checklist is proven;
-- live profile expansion;
-- order-sizing expansion;
-- FinalGate bypass;
-- Operation Layer bypass;
-- exchange-write authority from replay, synthetic, read-only, or audit evidence.
-- chain-position conclusions from JSON exports when PG current state exists;
-- FinalGate readiness without `ticket_id`;
-- Operation Layer readiness without `ticket_id + finalgate_pass_id`;
-- unsupported side mirroring or generated_at-based freshness.
-
-## WIP Discipline
-
-Use `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`.
-
-The active mainline lanes are limited to:
-
-- `CPM-RO-001`;
-- `MPG-001`;
-- `MI-001`;
-- `SOR-001`;
-- `BRF2-001`.
-
-Any other StrategyGroup is support-only unless the output explicitly exits an
-active lane and admits a replacement under the WIP contract.
-
-## Acceptance
-
-A chain-position task is accepted only when it:
-
-- names one chain position;
-- names one StrategyGroup + symbol candidate when symbol-specific;
-- names one first blocker;
-- provides one evidence reference;
-- provides one next engineering or policy action;
-- states a stop condition;
-- preserves the authority boundary.
+- Give one first blocker and one next action, not a broad roadmap.
+- `waiting_for_opportunity` is valid only after the blocker contract checklist
+  proves every non-market prerequisite.
+- Arbitration loss or a busy ENTRY lane is normal serialization, not a system
+  failure.
+- A protected Ticket is not terminal completion.
+- Never infer exchange-write authority from replay, fixtures, documents, or
+  readonly evidence.

@@ -1,38 +1,49 @@
 ---
 name: qa
-description: QA planning and scoped verification workflow. Use for test strategy, bounded test implementation, regression review, or verification plans.
+description: Use when designing tests, adding regression coverage, verifying a task, triaging failures, or defining release and production acceptance evidence.
 user-invocable: true
 ---
 
-# QA (Scoped Verification)
+# QA
 
-## Read First
+## Required Authority
+
+Read:
 
 - `AGENTS.md`
-- `CLAUDE.md`
-- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`
 - `docs/current/AI_AGENT_CONSTRAINTS.md`
-- `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`
-- `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`
-- `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`
-- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
-- The relevant task card or ADR
-
-## Role
-
-QA designs and implements scoped tests. New tests should be tied to the current StrategyGroup runtime-governance pilot and Owner supervisor model.
-
-If QA finds a business logic bug, report it and let Codex decide whether to patch or create a new task card.
+- `docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md`
+- the relevant requirement and changed files
 
 ## Test Discipline
 
-- Ask before long or expensive suites.
-- Prefer targeted tests for the active task.
-- For detector, watcher, replay/live parity, scope, and Tradeability changes,
-  require tests that distinguish missing artifact, missing detector, missing
-  watcher input, computed false facts, replay/live rule mismatch, and validated
-  market wait.
-- For daily status or WIP changes, require checks that row fields, next action,
-  and stop condition are present for active lanes.
-- Record tests run and tests skipped.
-- Do not expand implementation scope while writing tests.
+1. Convert each required behavior into one observable assertion.
+2. Run the new test before implementation and confirm the expected failure.
+3. Add the minimum behavior needed to pass.
+4. Cover negative, stale, duplicate, timeout, rejection, unknown, partial-fill,
+   and identity-mismatch cases where relevant.
+5. Run targeted tests, then the proportional integration/full-chain suite,
+   Ruff, Mypy, and architecture audits.
+6. Report exact commands, counts, failures, and skipped checks.
+
+## Required Coverage By Boundary
+
+| Boundary | Required evidence |
+| --- | --- |
+| StrategySignal | Registry/version/scope/fact/freshness validation and Live/Replay parity |
+| CapacityClaim | current account, budget, domain, instrument, price, stop, and arbitration facts |
+| Ticket | atomic issuance, one ENTRY generation, global serialization |
+| Exchange Command | durable-before-dispatch, terminal rejection, unknown reconciliation |
+| Lifecycle | Initial Stop, TP1/runner, controlled exit, partial-fill Incident |
+| Multi-position | independent Netting Domains and same-domain exclusion |
+| Closure | flatness, no residual order, released budget/domain, Reconciliation, Settlement, Review |
+| Architecture | no retired path, table, service, document reference, file authority, or fallback |
+
+## Rules
+
+- Tests must encode current semantics, not preserve retired behavior.
+- Use typed in-memory fixtures or disposable PostgreSQL, never report files as
+  runtime authority.
+- Do not change business behavior while supposedly writing tests.
+- Do not claim a production lifecycle complete from fixture-only evidence.

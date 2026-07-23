@@ -1,22 +1,32 @@
 ---
 name: shougong
-description: Codex session wrap-up workflow. Use when the user types `/shougong` or says "收工/结束/下班".
+description: Use when the user says 收工, 结束, 下班, or requests a durable session handoff and verified repository status.
 user-invocable: true
 ---
 
-# Shougong (Codex Session Wrap-up)
+# Shougong
 
-## Read
+## Required Authority
+
+Read:
 
 - `AGENTS.md`
-- `CLAUDE.md`
+- `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`
 - `docs/current/MAIN_CONTROL_ROADMAP.md`
-- `docs/current/strategy-group-handoffs/main-control-handoff-index.md`
+- `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`
 
-## Do
+## Workflow
 
-- Update current docs only when explicitly asked or when the task card requires a durable artifact.
-- Write Memory MCP only for durable rules or accepted decisions.
-- Return a concise handoff note in chat.
+1. Re-read the task requirements and inspect the final diff/status.
+2. Run fresh verification appropriate to the claims being handed off.
+3. Update current documents only when the task requires durable state changes.
+4. State completed work, incomplete work, exact blockers, production state,
+   tests run, and git identity.
+5. Keep runtime and exchange facts separate from local implementation evidence.
 
-Do not recreate removed `docs/ops/*`, `docs/canon/*`, or `docs/planning/*` files.
+## Handoff Contract
+
+- Never call protected exposure, deployment, or partial tests “complete”.
+- Preserve the immutable production tag and identify any newer unpromoted commit.
+- Record whether `promote-full` remains pending.
+- Do not create retired planning, packet, report, or compatibility artifacts.

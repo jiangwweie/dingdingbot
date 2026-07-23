@@ -1,87 +1,51 @@
 ---
 name: reviewer
-description: Codex code review workflow. Use when the user types `/reviewer`, requests a review, or wants risk/regression assessment.
+description: Use when reviewing code, tests, migrations, deployment changes, or runtime behavior for defects, regressions, safety gaps, and architecture drift.
 user-invocable: true
 ---
 
-# Reviewer (Codex)
+# Reviewer
 
-## Read First
+## Required Authority
+
+Read before reviewing:
 
 - `AGENTS.md`
-- `CLAUDE.md`
-- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`
 - `docs/current/AI_AGENT_CONSTRAINTS.md`
-- `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`
-- `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`
-- `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`
-- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
-- `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`
-- `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md`
-- Relevant task card and diff
+- `docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md`
+- relevant task requirements, diff, tests, and live facts
 
 ## Review Stance
 
-Findings first. Prioritize bugs, behavioral regressions, safety gaps, architecture boundary violations, runtime/profile risk, and missing tests.
+Findings first. Report only actionable defects or material residual risk. Do not
+patch during a review unless the user also asked for implementation.
 
-Do not patch code during review unless the user explicitly asks.
+## Required Checks
 
-## Must Check
+| Area | Review question |
+| --- | --- |
+| Scope | Did the change stay within authorized files and behavior? |
+| Chain | Does it preserve Observation → StrategySignal → Readiness/Authority → CapacityClaim → Ticket → Exchange Command → lifecycle → reconciliation → settlement → review? |
+| Authority | Is there exactly one current source for each decision? |
+| Ticket semantics | One Exposure Episode, no adding, one ENTRY generation, global ENTRY serialization? |
+| Exchange safety | Durable command before write, terminal rejection, no blind resend, exact unknown recovery? |
+| Position safety | Netting Domain isolation, independent long/short, Initial Stop, partial-fill Incident? |
+| Transactions | Short PG transactions and network I/O outside them? |
+| Runtime | Exactly one persistent owner for Observation, Entry, Lifecycle, and Reconciliation? |
+| Performance | Bounded queries, polling, timeouts, memory/CPU, and zero idle report-file growth? |
+| Retirement | No old code path, table, migration, test, document, service, fallback, or dual authority? |
+| Tests | Was RED observed, are negative/fault cases covered, and did proportional verification run? |
 
-- Did the change stay inside `Allowed files`?
-- Did it touch a Codex-owned core file?
-- Did it modify live profiles, real-funds permissions, or strategy parameters?
-- Did it add packet, bridge, adapter, readiness, evidence, compatibility, or
-  other glue code without proving the main abstraction is still right, naming a
-  replacement/removal condition, and replacing, removing, or retiring an old
-  path?
-- If it touched detector, watcher, replay/live parity, scope, or Tradeability,
-  did it classify blockers with `BLOCKER_CLASSIFICATION_CONTRACT.md` instead of
-  broad `waiting_for_market`, `missing_fact`, or
-  `live_detector_artifact_missing` labels?
-- Did it include per-symbol / per-fact evidence where facts were computed?
-- Did it avoid marking artifact-only or no-trade explanation work as complete?
-- Did it preserve the daily table shape when changing daily status?
-- Did it respect active WIP limits and stop rules when adding or advancing
-  StrategyGroup lanes?
-- If it touched testnet/dev/profile-scoped execution-chain code, did it stay
-  inside the allowed scoped safety gates?
-- If it touched PG migration, runtime control state, Candidate Pool, Daily
-  Table, Goal Status, server monitor, forensics, FinalGate, or Operation Layer,
-  did it remove or fail-close old repo MD/JSON/output authority instead of
-  preserving fallback?
-- If it touched runtime, deploy, monitor, readmodel, watcher, action-time, or
-  Owner explanation paths, did it identify cadence and file I/O impact, and did
-  it delete/migrate file readers or recurring JSON/MD writers instead of merely
-  documenting them?
-- Did it avoid new production reads from repo/output/report JSON or Markdown?
-- Did it avoid new recurring JSON/MD writes in watcher tick, server monitor,
-  product refresh, dispatcher, FinalGate, Operation Layer, or Owner console
-  readmodel paths?
-- Did it avoid dynamic-path evidence JSON writers, YAML config import/export
-  file interfaces, JSONL trace/observe sidecars, and tests that create legacy
-  report JSON fixtures for current code?
-- Did it avoid adding or preserving current artifact/proof/evidence scripts
-  whose main interface is JSON/Markdown files, report directories, or artifact
-  file CLI parameters?
-- Did it avoid adding or preserving file-backed repositories, local comparison
-  readers, artifact-file validators, or JSON fixture CLIs in current `src/` or
-  runtime `scripts/`?
-- Did it state a bounded performance budget: no-signal tick file growth, PG row
-  growth, subprocess/API timeout, CPU-heavy work trigger, disk retention, and
-  archive-only cleanup rule?
-- Did it preserve the Owner-confirmed L2-L7 chain:
-  `event_spec -> fact_snapshot -> live_signal_event -> promotion_candidate -> action_time_lane_input -> Action-Time Ticket -> FinalGate -> Operation Layer`?
-- Does FinalGate consume `ticket_id` rather than loose strategy/symbol/side or
-  generated JSON identity?
-- Does Operation Layer consume `ticket_id + finalgate_pass_id` rather than loose
-  submit parameters?
-- Are unsupported sides, unsupported symbols, generated_at freshness,
-  replay-as-live, duplicate signal/ticket/submit, and JSON authority inputs
-  covered by negative tests where relevant?
-- Did the change avoid long-term PG + file dual authority, MVP fallback, or
-  compatibility paths without removal conditions?
-- Did any validator used actually cover invoked scripts and cadence, not just
-  the systemd drop-in line?
-- Were tests appropriate and approved?
-- Are Decimal, logging, async, and domain purity constraints preserved?
+## Finding Format
+
+Each finding contains severity, exact file/line, failing scenario, consequence,
+and smallest correct direction. Separate findings from assumptions and open
+questions.
+
+## Hard Stops
+
+- Treat any exchange-write bypass, unknown-outcome redispatch, missing Initial
+  Stop, same-domain overlap, identity mismatch, or old-writer overlap as P0/P1.
+- Treat a protected but nonterminal acceptance Ticket as incomplete.
+- Do not accept tests that reintroduce retired semantics to make the suite pass.

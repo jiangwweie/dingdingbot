@@ -54,7 +54,10 @@ ALLOWED_PATTERNS = {
 }
 
 # 禁止 float 的目录
-STRICT_DIRS = ["src/domain/", "src/application/"]
+STRICT_DIRS = [
+    "src/trading_kernel/domain/",
+    "src/trading_kernel/application/",
+]
 
 def check_float_in_file(filepath: Path) -> list[dict]:
     """检查文件中的 float 使用"""
@@ -195,7 +198,7 @@ def get_parent_node(tree: ast.AST, target: ast.AST) -> ast.AST | None:
     return None
 
 if __name__ == "__main__":
-    target_dir = Path("src/domain")
+    target_dir = Path("src/trading_kernel/domain")
     all_violations = []
     
     for py_file in target_dir.rglob("*.py"):
@@ -298,8 +301,8 @@ def has_quantize_or_decimal(node: ast.AST) -> bool:
 if __name__ == "__main__":
     # 检查基础设施层 (CCXT 调用集中地)
     target_dirs = [
-        Path("src/infrastructure"),
-        Path("src/domain"),
+        Path("src/trading_kernel/infrastructure"),
+        Path("src/trading_kernel/domain"),
     ]
     
     all_errors = []
@@ -406,7 +409,7 @@ def is_union_type(annotation: ast.AST) -> bool:
     return False
 
 if __name__ == "__main__":
-    target_dir = Path("src/domain")
+    target_dir = Path("src/trading_kernel/domain")
     all_issues = []
     
     for py_file in target_dir.rglob("*.py"):
@@ -461,7 +464,7 @@ jobs:
           
       - name: Run mypy --strict
         run: |
-          mypy --strict src/domain/ || echo "mypy warnings (non-blocking)"
+          mypy src/trading_kernel
           
       - name: Check for float in domain layer
         run: |
@@ -521,14 +524,14 @@ jobs:
 
 | 位置 | 问题 | 建议修复 |
 |------|------|----------|
-| src/domain/risk_manager.py:45 | float type annotation | Use Decimal instead |
-| src/domain/risk_manager.py:52 | float() call | Use Decimal() |
+| src/trading_kernel/domain/capacity.py:45 | float type annotation | Use Decimal instead |
+| src/trading_kernel/domain/capacity.py:52 | float() call | Use Decimal() |
 
 ### TickSize 格式化失败 (阻塞)
 
 | 位置 | 调用 | 问题 |
 |------|------|------|
-| src/infrastructure/exchange_gateway.py:123 | create_order() | price 参数缺少 quantize() |
+| src/trading_kernel/infrastructure/venue_adapter.py:123 | create_order() | price 参数缺少 quantize() |
 
 ### 修复建议
 

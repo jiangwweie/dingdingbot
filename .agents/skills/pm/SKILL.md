@@ -1,75 +1,71 @@
 ---
 name: pm
-description: Codex program planning and task-card workflow. Use when the user types `/pm`, asks for task breakdown, sequencing, agent handoff, or Live-safe v1 planning.
+description: Use when breaking down work, sequencing a program, defining task cards, identifying decisions, or evaluating remaining Trading Kernel scope.
 user-invocable: true
 ---
 
-# PM (Codex Program Lead)
+# PM
 
-## Read First
+## Required Authority
+
+Read:
 
 - `AGENTS.md`
-- `CLAUDE.md`
-- `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md`
+- `docs/current/PROJECT_INFORMATION_ARCHITECTURE.md`
 - `docs/current/AI_AGENT_CONSTRAINTS.md`
-- `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`
-- `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`
-- `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`
-- `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
+- `docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md`
 - `docs/current/MAIN_CONTROL_ROADMAP.md`
-- `docs/current/strategy-group-handoffs/main-control-handoff-index.md`
 
-## Role
+## Planning Principle
 
-Codex PM owns requirements analysis, sequencing, task boundaries, task cards, and merge-readiness judgment.
+Plan by the earliest unfinished transition in the single authoritative chain:
 
-Do not default to broad parallel implementation. Identify possible parallel work, but protect core execution files from concurrent edits.
+```text
+Observation
+-> StrategySignal
+-> Readiness/Authority
+-> CapacityClaim
+-> immutable Ticket
+-> durable Exchange Command
+-> protected lifecycle
+-> reconciliation
+-> settlement
+-> review
+```
 
-## Planning
+Do not create document work, reports, compatibility, or parallel orchestration
+as substitutes for closing the actual transition.
 
-Use current-doc scoped planning:
+## Required Plan Shape
 
-- Treat `docs/current/MAIN_CONTROL_ROADMAP.md` as the current roadmap surface.
-- Treat Pre-Trade Runtime blocker closure as the current planning unit:
-  active StrategyGroup + candidate symbol readiness -> exact blocker -> next state,
-  then narrow to one action-time lane only after fresh-signal promotion.
-- Enforce the daily table and WIP contracts before adding or sequencing work.
-- Treat PG StrategyGroup registry/version/event/policy/current projection rows
-  as StrategyGroup intake. `docs/current/strategy-group-handoffs/` is
-  explanatory/provenance indexing only, not runtime input.
-- Do not recreate removed `docs/ops/*` tracking files.
-- Use Memory MCP only for durable rules and accepted decisions.
+| Field | Requirement |
+| --- | --- |
+| Objective | Concrete observable outcome |
+| Known state | Current code, test, PG, exchange, and deployment facts |
+| Gap | Earliest missing capability or acceptance evidence |
+| Tasks | Ordered, bounded changes with one owner each |
+| Dependencies | Explicit data/code/runtime predecessor |
+| Tests | RED condition and proportional verification |
+| Hard stops | Safety, scope, and authority boundaries |
+| Done | Exact terminal evidence, not activity |
 
-## Output For Claude Handoff
+## Task Card
 
-When handing work to Claude, produce a task card with:
+Every delegated implementation card states Task ID, goal, allowed files,
+forbidden files, requirements, tests, done condition, and hard stops. It must
+not authorize production mutation unless the Owner's active scope does.
 
-- Task ID
-- Goal
-- Why
-- Allowed files
-- Forbidden files
-- Requirements
-- Chain Position
-- Live Enablement State Before
-- Live Enablement State After
-- Blocker Removed Or Reclassified
-- Per-Symbol / Per-Fact Acceptance
-- Stop Condition
-- Tests
-- Done When
+## Sequencing Rules
 
-Claude must stop if it needs files outside `Allowed files`.
+- Protect shared kernel and schema files from concurrent edits.
+- Separate readonly diagnosis from implementation and deployment.
+- Strategy research changes require a separate Owner decision; registered
+  producer maintenance stays above StrategySignal.
+- Production completion requires terminal flatness, no residual orders,
+  released budget/domain, Reconciliation, Settlement, Review, zero Incident,
+  full policy promotion, and final audit.
 
-## Red Lines
+## Hard Stops
 
-- Do not route core execution/risk ownership away from Codex unless explicitly approved.
-- Do not optimize strategy returns during P0 Live-safe work.
-- Do not modify live profiles or real-funds permissions without explicit user
-  approval.
-- Do not treat controlled testnet/dev/readiness work as prohibited merely
-  because it touches execution-chain concepts.
-- Do not accept read-only expansion, report generation, or no-trade explanation
-  as a milestone unless it removes/reclassifies a blocker or creates a scoped
-  live-enable proposal.
-- Ask before long test suites.
+No plan may expand capital, sizing, credentials, instruments, or exchange-write
+scope by implication. No task may restore retired program or database authority.

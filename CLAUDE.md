@@ -1,6 +1,6 @@
 # CLAUDE.md - BRC Trading Kernel Worker Guide
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 ## Role
 
@@ -14,6 +14,7 @@ Read these before a task:
 
 ```text
 AGENTS.md
+docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
 docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md
 docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md
 ```
@@ -37,6 +38,20 @@ Hard stops
 
 Do not widen scope or change strategy, capital, runtime profile, deployment, or
 real-funds authority.
+
+## Current Production Boundary
+
+- Tokyo production identity is
+  `f9fda21c91482b050e2a630e163f3213386ae6d7` with immutable anchor
+  `tokyo-runtime-2026.07.23.1`.
+- The deployed baseline passed `331 passed` locally before cutover.
+- Observation, Entry, Lifecycle, and Reconciliation run as persistent services;
+  timer-based worker cold starts are retired.
+- A natural SOR-SHORT acceptance Ticket is in protected lifecycle. Worker tasks
+  must not deploy, restart, mutate PostgreSQL, or alter exchange state unless
+  the task card explicitly authorizes that exact production action.
+- `promote-full` is not complete and must not be inferred from deployment or
+  protected-position status.
 
 ## Implementation Rules
 

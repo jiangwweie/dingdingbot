@@ -126,14 +126,14 @@ PUA 输出:
    - 禁止阻塞事件循环
 
 3. **架构分层**:
-   - 止损逻辑放在 `src/domain/risk_calculator.py`
-   - 数据库操作放在 `src/infrastructure/position_repository.py`
+   - 纯止损与退出规则放在 `src/trading_kernel/domain/exit_policy.py`
+   - 数据库操作放在 `src/trading_kernel/infrastructure/pg_repositories.py`
 
 ## 验收标准
 - [ ] 实现三种止损类型
 - [ ] 单元测试覆盖率 ≥ 80%
-- [ ] 通过 `pytest tests/unit/test_risk_calculator.py -v`
-- [ ] 通过 `mypy --strict src/domain/risk_calculator.py`
+- [ ] 通过 `pytest tests/trading_kernel/unit/test_exit_policy.py -v`
+- [ ] 通过 `mypy src/trading_kernel`
 
 ## 边界条件
 - **空值处理**: 仓位为 None 时如何处理
@@ -141,8 +141,8 @@ PUA 输出:
 - **异常处理**: 交易所 API 失败时是否重试
 
 ## 输出要求
-- 修改：`src/domain/risk_calculator.py`
-- 测试：`tests/unit/test_risk_calculator.py`
+- 修改：`src/trading_kernel/domain/exit_policy.py`
+- 测试：`tests/trading_kernel/unit/test_exit_policy.py`
 - 文档：`docs/features/stop-loss.md`（如需要）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```

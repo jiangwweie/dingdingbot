@@ -1,203 +1,139 @@
 ---
 title: P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN
-status: ACTIVE
+status: ACCEPTANCE_ACTIVE
 program_id: P0-TKR
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 ---
 
 # P0 Trading Kernel Rebuild Implementation Plan
 
-> Production behavior uses test-first red/green/refactor. Tasks execute serially
-> because they replace one shared execution authority.
+## Goal
 
-**Goal:** Deliver one clean multi-position kernel, destructive Tokyo cutover,
-and one controlled real-funds terminal lifecycle.
+Deliver one readable multi-StrategyGroup, multi-position trading system from
+natural market Observation through terminal Review, with one clean PostgreSQL
+authority and one Tokyo runtime.
 
-**Architecture:** Typed StrategyGroup signals enter one PostgreSQL authority,
-one global new-ENTRY lane issues immutable Tickets serially, and protected
-Tickets progress concurrently through one reducer and durable command model.
+## Architecture
+
+```text
+Observation
+-> StrategySignal
+-> Readiness/Authority
+-> CapacityClaim
+-> immutable Ticket
+-> durable Exchange Command
+-> protected lifecycle
+-> reconciliation
+-> settlement
+-> review
+```
+
+New ENTRY is globally serialized. Existing Tickets protect, exit, reconcile,
+settle, and review concurrently.
 
 ## Global Constraints
 
-- One Ticket per Exposure Episode.
-- No add-to-position capability.
-- One ENTRY generation per Ticket.
-- No retry after authoritative ENTRY rejection.
-- No blind resend after unknown outcome.
-- Partial fill is incident plus controlled flatten.
-- Long/short independent sides are required.
-- No retired imports, tables, tests, documents, or fallback authority.
-- No runtime JSON/Markdown source or recurring report writes.
+- One Ticket per Exposure Episode; no add-to-position capability.
+- One ENTRY generation per Ticket; authoritative rejection is terminal.
+- Unknown outcomes are reconciled and never blindly resent.
+- Partial fill creates an Incident and controlled flatten.
+- Long and short require independent exchange position sides.
+- No retired imports, tables, tests, deployment units, file authority, dual
+  writes, compatibility fallback, or parallel execution chain.
+- All production behavior follows test-first red/green/refactor.
 
-## Completed Foundation
-
-| Task | Result | Evidence |
-| --- | --- | --- |
-| 1-4 | Identities, Ticket, reducer, events, effects, durable commands | Unit tests |
-| 5-7 | Clean baseline, repositories, global lane, budget and domain constraints | PostgreSQL integration tests |
-| 8-10 | Venue dispatch, reconciliation, settlement, runtime and monitor | Integration and full-chain tests |
-| 11 | Multi-position and fault certification | Included in the current `303 passed` full suite |
-| 12 | Retired production generations deleted | Commit `d570018a`, architecture tests |
-
-## Task 13: Retire Current Documentation Generation
-
-**Files:**
-
-- Keep and rewrite only the current authority allowlist in
-  `tests/trading_kernel/architecture/test_current_document_authority.py`.
-- Delete every other Markdown file under `docs/current`.
-- Rewrite `AGENTS.md`, `CLAUDE.md`, `README.md`, `MEMORY.md`, and
-  `docs/README.md`.
-
-**Done when:**
-
-- [x] architecture test proves the exact current document allowlist;
-- [x] entry documents reference only existing current documents;
-- [x] retired execution markers are absent from current authority;
-- [x] focused architecture suite passes.
-
-## Task 14: Typed Signal Foundation
-
-**Files:**
-
-- Create: `src/trading_kernel/domain/signal.py`
-- Create: `src/trading_kernel/application/ingest_signal.py`
-- Create: `src/trading_kernel/application/issue_ready_signal.py`
-- Create: `src/trading_kernel/infrastructure/pg_signal_repository.py`
-- Modify: `src/trading_kernel/application/ports.py`
-- Modify: `src/trading_kernel/infrastructure/pg_models.py`
-- Modify: `src/trading_kernel/infrastructure/pg_repositories.py`
-- Modify: `migrations/trading_kernel/versions/0001_initial.py`
-- Test: `tests/trading_kernel/integration/test_signal_to_ticket.py`
-
-This task established the first typed persistence and issuance skeleton. Its
-capital-bearing signal semantics were intentionally replaced by Tasks 16-24 and
-are not current authority.
-
-The current boundary is:
-
-- `StrategySignal` contains only Event identity, occurrence/expiry, and an exact
-  immutable Fact Bundle;
-- `ingest_signal(uow, request) -> IngestSignalResult` persists the Signal, Fact
-  lineage, and `candidate_ready` state after Registry/Scope/Fact/schema checks;
-- Signal ingestion does not consume Owner capital, account mode, venue rule, or
-  order authority;
-- Ticket issuance requires the action-time `CapacityClaim` introduced by the
-  active six-capability rebuild and cannot derive financial terms from Signal.
-
-## Task 15: Crash-Safe Destructive Cutover
-
-**Files:**
-
-- Create: `scripts/trading_kernel/verify_flat_cutover.py`
-- Create: `scripts/trading_kernel/cutover_tokyo.py`
-- Create: `deploy/systemd/brc-trading-kernel-observation-worker.service`
-- Create: `deploy/systemd/brc-trading-kernel-observation-worker.timer`
-- Create: `deploy/systemd/brc-trading-kernel-entry-worker.service`
-- Create: `deploy/systemd/brc-trading-kernel-entry-worker.timer`
-- Create: `deploy/systemd/brc-trading-kernel-lifecycle-worker.service`
-- Create: `deploy/systemd/brc-trading-kernel-lifecycle-worker.timer`
-- Create: `deploy/systemd/brc-trading-kernel-reconciliation-worker.service`
-- Create: `deploy/systemd/brc-trading-kernel-reconciliation-worker.timer`
-- Test: `tests/trading_kernel/integration/test_cutover_state_machine.py`
-
-**TDD sequence:**
-
-- [x] RED: exact plan phases and identities.
-- [x] GREEN: side-effect-free plan mode.
-- [x] RED: every flatness, order, protection, outcome, writer, and identity
-  precondition independently blocks destruction.
-- [x] RED: interrupted apply resumes at the first unverified phase.
-- [x] GREEN: implement explicit phase journal, writer fence, final verification,
-  short-lived backup, schema rebuild, seed, deploy, readonly certification, and
-  staged capability restore.
-- [x] Rehearse on disposable PostgreSQL and local service substitutes.
-- [x] Commit with `ops(kernel): add destructive flat-state cutover`.
-
-## Resolved Owner Gate Before Task 16
-
-The trading main chain and local cutover capability are completed first. Tokyo,
-server mutation, and controlled real-funds acceptance must not begin until the
-Owner and Codex review and decide the separate aggressive StrategyGroup and
-strategy-signal refactor. Existing strategy models and producers are not
-implicitly accepted merely because the trading kernel is ready. That review
-occurred, the six registered Events were rebuilt under Tasks 16-24, and the
-Owner subsequently authorized Task 25.
-
-## Tasks 16-24: Six-Capability Strategy And Runtime Rebuild
-
-The Owner approved the aggressive rebuild of the six formally registered Event
-contracts before Tokyo deployment. The detailed task-by-task execution plan is
-`docs/superpowers/plans/2026-07-22-six-capability-trading-system-rebuild.md`.
-
-The accepted scope is:
-
-1. deterministic Registry Seed for CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG,
-   SOR-SHORT, and BRF2-SHORT;
-2. pure Event detectors and closed-market observation;
-3. immutable Strategy Signals without capital authority;
-4. deterministic candidate arbitration and action-time Capacity Claims;
-5. Venue Truth and unknown-outcome recovery;
-6. versioned Initial Stop, TP1, runner, lifecycle, settlement, review, and one
-   Owner projection;
-7. local six-Event full-chain certification and destructive-cutover rehearsal.
-
-Current implementation evidence:
+## Completed Implementation
 
 | Capability | Status | Evidence |
 | --- | --- | --- |
-| Registry Seed | Complete | Six exact Event contracts, 19 Fact bindings, and 22 candidate scopes |
-| StrategySignal boundary | Complete | Immutable Fact Bundle and append-only lineage; no capital authority |
-| Pure Event detectors | Complete | Six positive vectors and full negative matrix |
-| Closed-market observation | Complete | Six-Event observation matrix, bounded current Facts, deterministic Signal identity, and Live/Replay parity |
-| Candidate arbitration and CapacityClaim | Complete | Five-level deterministic ordering, bounded 64-candidate selector, action-time sizing, immutable claim lineage, and atomic Claim-to-Ticket issuance |
-| Venue Truth and unknown-outcome recovery | Complete | One timeout-bounded lookup authority covers ENTRY, Initial Stop, EXIT, Controlled Flatten, and Cancel; identity contradictions hard-stop, exact incidents resolve independently, and no unknown command is redispatched |
-| Exit, settlement, and Review Economics | Complete | Initial Stop, TP1, Break-Even, structural ATR runner, controlled exit, exact-order realized PnL and fees, funding attribution state, net PnL, and R-Multiple |
-| Runtime worker ownership | Complete | Four unique workers: Observation, Entry, Lifecycle, and Reconciliation |
-| Local full-chain certification | Complete | `303 passed in 78.65s`; Ruff clean; Mypy zero errors across 68 source files; runtime file authority zero; clean 33-table schema rebuild and downgrade/upgrade |
+| Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
+| Clean PostgreSQL baseline | Complete | One 33-table `0001_initial`, clean rebuild and downgrade/upgrade certification |
+| Six Strategy Events | Complete | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, BRF2-SHORT |
+| Observation and StrategySignal | Complete | Closed candles, bounded Facts, deterministic identity, Live/Replay parity |
+| Arbitration and CapacityClaim | Complete | Deterministic priority, bounded selector, action-time facts and stop risk |
+| Ticket issuance | Complete | Atomic Claim, budget, domain, Ticket, aggregate, event, and ENTRY command |
+| Venue Truth and recovery | Complete | ENTRY, protection, EXIT, flatten, cancel, timeout and unknown resolution |
+| Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |
+| Reconciliation, Settlement, Review | Complete | Exact Ticket identities and explicit funding availability semantics |
+| Runtime ownership | Complete | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
+| Local certification | Complete | `331 passed`; Ruff clean; Mypy clean; production file-I/O audit clean |
+| Tokyo zero rebuild | Complete | Commit `f9fda21c91482b050e2a630e163f3213386ae6d7` deployed from an empty BRC database baseline |
 
-The accepted exit-policy family is 1R TP1 for 50% plus a right-tail structural
-ATR runner. SOR-LONG retains its exact committed time-stop policy. Candidate
-selection orders Owner Policy Priority, Candidate Scope Priority, Event Time,
-Observed Time, then Signal Event ID.
+## Deployment Implementation
 
-Production Capacity values and the first real-submit scope remain Tokyo-stage
-Owner Policy decisions. They do not block local implementation or local DB
-rebuild tests.
+The deployed service set is:
 
-## Task 25: Tokyo Cutover And Controlled Real-Funds Acceptance
+```text
+deploy/systemd/brc-trading-kernel-observation-worker.service
+deploy/systemd/brc-trading-kernel-entry-worker.service
+deploy/systemd/brc-trading-kernel-lifecycle-worker.service
+deploy/systemd/brc-trading-kernel-reconciliation-worker.service
+deploy/systemd/brc-trading-kernel.slice
+```
 
-Tasks 16-24 have passed local certification. The Owner has explicitly
-authorized Tokyo deployment, precise deletion of retired quantitative services,
-releases, databases, schemas, and backups, one small controlled real-funds
-Ticket, and full in-boundary exchange-write capability only after that Ticket
-closes successfully. Non-quantitative programs and services are outside the
-deletion scope and must remain unaffected. Tokyo has not yet been mutated by
-the local certification work.
+All four workers are persistent long-running processes. Timer deployment is
+forbidden. The service slice and bounded polling protect the 2c4g host from the
+retired high-frequency Python cold-start failure mode.
 
-- [ ] Read current Tokyo commit, schema, services, DB roles, account mode,
-  positions, orders, protection, and unresolved outcomes.
-- [ ] Fence and stop old writers.
-- [ ] Run the committed destructive cutover tool.
-- [ ] Verify exact new commit, `0001_initial`, seed identity, table allowlist,
-  roles, services, and zero legacy tables.
-- [ ] Enable readonly observation and monitor.
-- [ ] Certify typed signal-to-Ticket with exchange writes disabled.
-- [ ] Enable exchange-command capability after all hard gates pass.
-- [ ] Run one bounded in-scope Ticket through ENTRY, Initial Stop, EXIT, flat,
-  reconciliation, settlement, review, and completed Owner state.
-- [ ] Delete short-lived backup and retired releases.
-- [ ] Delete all precisely identified retired BRC databases, schemas, services,
-  timers, releases, and backups without changing non-quantitative assets.
-- [ ] Install the one-hour Tokyo runtime observation automation and verify its
-  first successful run.
+## Completed Destructive Cutover
 
-## Task 26: Final Completion Audit
+The Owner authorized a clean, no-backup replacement of BRC-only runtime state.
+Execution therefore:
 
-- [ ] Run the complete current test suite, Ruff, Mypy, schema rebuild,
-  downgrade/upgrade, file-I/O audit, and readonly certification.
-- [ ] Prove every design acceptance item from current local and Tokyo evidence.
-- [ ] Prove no retired import, table, current document, deployment unit, or
-  compatibility fallback remains.
-- [ ] Mark the active goal complete only after all evidence is current and
-  direct.
+1. stopped and fenced every BRC writer;
+2. verified exchange and old-runtime preconditions;
+3. deleted BRC program services, containers, releases, and PostgreSQL data;
+4. rebuilt PostgreSQL from `0001_initial` and deterministic seeds;
+5. deployed exact commit `f9fda21c`;
+6. enabled the four persistent workers;
+7. preserved non-quantitative Nginx, PostgreSQL host, Docker, and unrelated
+   services/data;
+8. activated hourly read-only runtime supervision.
+
+No retired BRC backup is a current rollback source. Fixes proceed forward from
+the production anchor `tokyo-runtime-2026.07.23.1`.
+
+## Active Acceptance Ticket
+
+| Field | Value |
+| --- | --- |
+| Ticket | `ticket:c1ebc24a178a3ae4d87978e2fa1204ae` |
+| Origin | Natural Observation, not constructed signal |
+| Event | `SOR-001 / SOR-SHORT / SOLUSDT` |
+| Exposure | 0.25 SOL short |
+| Entry | 77.51 |
+| Initial Stop | 78.50 |
+| TP1 | 76.52 |
+| Verified state | `position_protected` |
+| Accepted effects | ENTRY, Initial Stop, TP1 |
+
+## Remaining Execution Stages
+
+### Stage 1: Terminal Lifecycle
+
+- [ ] Let the official Lifecycle worker reach the accepted exit policy.
+- [ ] Confirm terminal Ticket and exchange-flat position.
+- [ ] Confirm no residual protection, TP, EXIT, cancel, or ENTRY order.
+
+### Stage 2: Internal Closure
+
+- [ ] Confirm budget and Netting Domain release.
+- [ ] Confirm Reconciliation matches exact exchange truth.
+- [ ] Confirm Settlement and Review persisted exact economics.
+- [ ] Confirm zero open Incident and zero unknown command outcome.
+
+### Stage 3: Full Capability Promotion
+
+- [ ] Run `promote-full` only after Stages 1-2 pass.
+- [ ] Verify runtime capability, commit, schema, seed, account, policy, and
+  acceptance-Ticket identity together.
+- [ ] Keep exchange writes fail-closed if any gate disagrees.
+
+### Stage 4: Final Audit
+
+- [ ] Run the complete Trading Kernel test suite, Ruff, Mypy, schema rebuild,
+  downgrade/upgrade, production file-I/O audit, and readonly Tokyo certification.
+- [ ] Prove every design acceptance item from current evidence.
+- [ ] Prove no retired code, table, migration, service, document, Skill
+  reference, or compatibility path remains.
+- [ ] Mark the program complete only when every item is direct and current.
