@@ -175,7 +175,7 @@ owner_policy_current = sa.Table(
     _id("owner_policy_id", primary_key=True),
     sa.Column("policy_version", sa.Integer, nullable=False),
     sa.Column("enabled", sa.Boolean, nullable=False),
-    sa.Column("real_submit_enabled", sa.Boolean, nullable=False),
+    sa.Column("new_entry_submit_enabled", sa.Boolean, nullable=False),
     sa.Column(
         "priority_rank",
         sa.Integer,
@@ -183,25 +183,16 @@ owner_policy_current = sa.Table(
         server_default=sa.text("100"),
     ),
     sa.Column("max_concurrent_tickets", sa.Integer, nullable=False),
-    sa.Column("max_gross_notional", MONEY, nullable=False),
+    sa.Column("planned_stop_risk_fraction", MONEY, nullable=False),
+    sa.Column("max_initial_margin_utilization", MONEY, nullable=False),
+    sa.Column("max_leverage", sa.Integer, nullable=False),
+    sa.Column("supported_margin_mode", SHORT_TEXT, nullable=False),
     sa.Column(
-        "max_gross_risk_at_stop",
+        "min_liquidation_distance_to_stop_distance_ratio",
         MONEY,
         nullable=False,
-        server_default=sa.text("1000000000"),
     ),
-    sa.Column(
-        "max_ticket_risk_at_stop",
-        MONEY,
-        nullable=False,
-        server_default=sa.text("1000000000"),
-    ),
-    sa.Column(
-        "target_leverage",
-        MONEY,
-        nullable=False,
-        server_default=sa.text("1"),
-    ),
+    sa.Column("max_post_fill_stop_risk_overrun_fraction", MONEY, nullable=False),
     _json("scope"),
     _time("updated_at_ms"),
     sa.CheckConstraint("priority_rank > 0", name="priority_positive"),
@@ -210,22 +201,30 @@ owner_policy_current = sa.Table(
         name="max_concurrent_tickets_positive",
     ),
     sa.CheckConstraint(
-        "max_gross_notional > 0",
-        name="max_gross_notional_positive",
+        "planned_stop_risk_fraction > 0 AND planned_stop_risk_fraction < 1",
+        name="planned_stop_risk_fraction_valid",
     ),
     sa.CheckConstraint(
-        "max_gross_risk_at_stop > 0",
-        name="max_gross_risk_positive",
+        "max_initial_margin_utilization > 0 AND max_initial_margin_utilization <= 1",
+        name="margin_utilization_valid",
     ),
     sa.CheckConstraint(
-        "max_ticket_risk_at_stop > 0",
-        name="max_ticket_risk_positive",
+        "max_leverage >= 1 AND max_leverage <= 10",
+        name="max_leverage_valid",
     ),
     sa.CheckConstraint(
-        "max_ticket_risk_at_stop <= max_gross_risk_at_stop",
-        name="ticket_risk_within_gross_risk",
+        "supported_margin_mode = 'cross'",
+        name="supported_margin_mode_cross_only",
     ),
-    sa.CheckConstraint("target_leverage > 0", name="target_leverage_positive"),
+    sa.CheckConstraint(
+        "min_liquidation_distance_to_stop_distance_ratio > 0",
+        name="liq_ratio_positive",
+    ),
+    sa.CheckConstraint(
+        "max_post_fill_stop_risk_overrun_fraction >= 0 "
+        "AND max_post_fill_stop_risk_overrun_fraction < 1",
+        name="post_fill_overrun_valid",
+    ),
 )
 
 runtime_profiles = sa.Table(
@@ -616,6 +615,7 @@ budget_reservations = sa.Table(
 account_exposure_current = sa.Table(
     "brc_account_exposure_current",
     metadata,
+    sa.Column("venue_id", SHORT_TEXT, primary_key=True),
     _id("account_id", primary_key=True),
     sa.Column("gross_notional", MONEY, nullable=False),
     sa.Column("gross_risk_at_stop", MONEY, nullable=False),

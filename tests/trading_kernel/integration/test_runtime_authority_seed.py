@@ -121,13 +121,15 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         )
 
     assert first.runtime_scope_count == 22
-    assert first.real_submit_enabled is False
+    assert first.new_entry_submit_enabled is False
     assert first.policy_version == 1
-    assert first.max_concurrent_tickets == 1
-    assert first.max_gross_notional == Decimal("20")
-    assert first.max_gross_risk_at_stop == Decimal("10")
-    assert first.max_ticket_risk_at_stop == Decimal("10")
-    assert first.target_leverage == Decimal("2")
+    assert first.max_concurrent_tickets == 3
+    assert first.planned_stop_risk_fraction == Decimal("0.03")
+    assert first.max_initial_margin_utilization == Decimal("0.90")
+    assert first.max_leverage == 10
+    assert first.supported_margin_mode == "cross"
+    assert first.min_liquidation_distance_to_stop_distance_ratio == Decimal("2.0")
+    assert first.max_post_fill_stop_risk_overrun_fraction == Decimal("0.10")
     assert first.total_inserted_count > 0
     assert second.total_inserted_count == 0
     assert second.runtime_seed_semantic_hash == first.runtime_seed_semantic_hash
@@ -141,12 +143,18 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         ).mappings().one()
         assert policy["policy_version"] == 1
         assert policy["enabled"] is True
-        assert policy["real_submit_enabled"] is False
-        assert policy["max_concurrent_tickets"] == 1
-        assert Decimal(policy["max_gross_notional"]) == Decimal("20")
-        assert Decimal(policy["max_gross_risk_at_stop"]) == Decimal("10")
-        assert Decimal(policy["max_ticket_risk_at_stop"]) == Decimal("10")
-        assert Decimal(policy["target_leverage"]) == Decimal("2")
+        assert policy["new_entry_submit_enabled"] is False
+        assert policy["max_concurrent_tickets"] == 3
+        assert Decimal(policy["planned_stop_risk_fraction"]) == Decimal("0.03")
+        assert Decimal(policy["max_initial_margin_utilization"]) == Decimal("0.90")
+        assert policy["max_leverage"] == 10
+        assert policy["supported_margin_mode"] == "cross"
+        assert Decimal(
+            policy["min_liquidation_distance_to_stop_distance_ratio"]
+        ) == Decimal("2.0")
+        assert Decimal(
+            policy["max_post_fill_stop_risk_overrun_fraction"]
+        ) == Decimal("0.10")
 
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(runtime_profiles)
@@ -170,6 +178,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         exposure = (
             await connection.execute(sa.select(account_exposure_current))
         ).mappings().one()
+        assert exposure["venue_id"] == "binance-usdm"
         assert exposure["account_id"] == "subaccount-main"
         assert Decimal(exposure["gross_notional"]) == 0
         assert Decimal(exposure["gross_risk_at_stop"]) == 0
@@ -241,7 +250,7 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
             await connection.execute(sa.select(owner_policy_current))
         ).mappings().one()
         assert policy["policy_version"] == 2
-        assert policy["real_submit_enabled"] is True
+        assert policy["new_entry_submit_enabled"] is True
         metadata_rows = {
             str(row["metadata_key"]): str(row["metadata_value"])
             for row in (
@@ -286,9 +295,11 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
         )
 
     assert armed.policy_version == 2
-    assert armed.real_submit_enabled is True
-    assert armed.max_concurrent_tickets == 1
-    assert armed.max_gross_notional == Decimal("20")
+    assert armed.new_entry_submit_enabled is True
+    assert armed.max_concurrent_tickets == 3
+    assert armed.planned_stop_risk_fraction == Decimal("0.03")
+    assert armed.max_initial_margin_utilization == Decimal("0.90")
+    assert armed.max_leverage == 10
 
     with pytest.raises(
         runtime_seed.RuntimeAuthorityTransitionRefused,
@@ -315,12 +326,12 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
         )
 
     assert promoted.policy_version == 3
-    assert promoted.real_submit_enabled is True
-    assert promoted.max_concurrent_tickets == 2
-    assert promoted.max_gross_notional == Decimal("40")
-    assert promoted.max_gross_risk_at_stop == Decimal("20")
-    assert promoted.max_ticket_risk_at_stop == Decimal("10")
-    assert promoted.target_leverage == Decimal("2")
+    assert promoted.new_entry_submit_enabled is True
+    assert promoted.max_concurrent_tickets == 3
+    assert promoted.planned_stop_risk_fraction == Decimal("0.03")
+    assert promoted.max_initial_margin_utilization == Decimal("0.90")
+    assert promoted.max_leverage == 10
+    assert promoted.supported_margin_mode == "cross"
 
     async with runtime_seed_engine.connect() as connection:
         exchange_commands_enabled = await connection.scalar(

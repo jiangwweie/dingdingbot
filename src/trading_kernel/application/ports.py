@@ -107,18 +107,21 @@ class OwnerPolicySnapshot(BaseModel):
     owner_policy_id: str
     policy_version: int
     enabled: bool
-    real_submit_enabled: bool
+    new_entry_submit_enabled: bool
     priority_rank: int
     max_concurrent_tickets: int
-    max_gross_notional: Decimal
-    max_gross_risk_at_stop: Decimal
-    max_ticket_risk_at_stop: Decimal
-    target_leverage: Decimal
+    planned_stop_risk_fraction: Decimal
+    max_initial_margin_utilization: Decimal
+    max_leverage: int
+    supported_margin_mode: Literal["cross"]
+    min_liquidation_distance_to_stop_distance_ratio: Decimal
+    max_post_fill_stop_risk_overrun_fraction: Decimal
 
 
 class AccountExposureSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    venue_id: str
     account_id: str
     gross_notional: Decimal
     gross_risk_at_stop: Decimal
@@ -473,6 +476,7 @@ class EntryAdmissionRepository(Protocol):
 
     async def get_account_exposure(
         self,
+        venue_id: str,
         account_id: str,
         *,
         for_update: bool = False,
@@ -481,6 +485,7 @@ class EntryAdmissionRepository(Protocol):
     async def reserve_account_exposure(
         self,
         *,
+        venue_id: str,
         account_id: str,
         notional: Decimal,
         risk_at_stop: Decimal,
@@ -491,6 +496,7 @@ class EntryAdmissionRepository(Protocol):
     async def release_account_exposure(
         self,
         *,
+        venue_id: str,
         account_id: str,
         notional: Decimal,
         risk_at_stop: Decimal,

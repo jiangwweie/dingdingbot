@@ -143,7 +143,7 @@ def test_review_funding_attribution_has_bounded_instrument_window_index() -> Non
     ) in _index_column_sets(tickets)
 
 
-def test_owner_capacity_policy_has_positive_database_constraints() -> None:
+def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> None:
     policies = metadata.tables["brc_owner_policy_current"]
     check_sql = {
         str(constraint.sqltext)
@@ -151,13 +151,39 @@ def test_owner_capacity_policy_has_positive_database_constraints() -> None:
         if isinstance(constraint, sa.CheckConstraint)
     }
 
+    assert {
+        "new_entry_submit_enabled",
+        "planned_stop_risk_fraction",
+        "max_initial_margin_utilization",
+        "max_leverage",
+        "supported_margin_mode",
+        "min_liquidation_distance_to_stop_distance_ratio",
+        "max_post_fill_stop_risk_overrun_fraction",
+    }.issubset(policies.c.keys())
+    assert {
+        "real_submit_enabled",
+        "max_gross_notional",
+        "max_gross_risk_at_stop",
+        "max_ticket_risk_at_stop",
+        "target_leverage",
+    }.isdisjoint(policies.c.keys())
     assert "priority_rank > 0" in check_sql
     assert "max_concurrent_tickets > 0" in check_sql
-    assert "max_gross_notional > 0" in check_sql
-    assert "max_gross_risk_at_stop > 0" in check_sql
-    assert "max_ticket_risk_at_stop > 0" in check_sql
-    assert "max_ticket_risk_at_stop <= max_gross_risk_at_stop" in check_sql
-    assert "target_leverage > 0" in check_sql
+    assert (
+        "planned_stop_risk_fraction > 0 AND planned_stop_risk_fraction < 1"
+        in check_sql
+    )
+    assert (
+        "max_initial_margin_utilization > 0 "
+        "AND max_initial_margin_utilization <= 1"
+    ) in check_sql
+    assert "max_leverage >= 1 AND max_leverage <= 10" in check_sql
+    assert "supported_margin_mode = 'cross'" in check_sql
+    assert "min_liquidation_distance_to_stop_distance_ratio > 0" in check_sql
+    assert (
+        "max_post_fill_stop_risk_overrun_fraction >= 0 "
+        "AND max_post_fill_stop_risk_overrun_fraction < 1"
+    ) in check_sql
 
 
 def test_signal_fact_snapshots_are_append_only_per_signal_and_definition() -> None:

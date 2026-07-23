@@ -78,13 +78,13 @@ def _parser() -> argparse.ArgumentParser:
 
     arm = subparsers.add_parser(
         "arm-acceptance",
-        help="enable one 20 USDT / 2x acceptance Ticket",
+        help="enable new ENTRY under the approved dynamic budget policy",
     )
     arm.add_argument("--now-ms", type=int)
 
     promote = subparsers.add_parser(
         "promote-full",
-        help="promote to two Tickets / 40 USDT after reviewed closure",
+        help="certify normal three-Ticket authority after reviewed closure",
     )
     promote.add_argument("--acceptance-ticket-id", required=True)
     promote.add_argument("--now-ms", type=int)

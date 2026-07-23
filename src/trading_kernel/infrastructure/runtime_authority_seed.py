@@ -117,12 +117,14 @@ class RuntimePolicyState(BaseModel):
 
     owner_policy_id: str
     policy_version: int
-    real_submit_enabled: bool
+    new_entry_submit_enabled: bool
     max_concurrent_tickets: int
-    max_gross_notional: Decimal
-    max_gross_risk_at_stop: Decimal
-    max_ticket_risk_at_stop: Decimal
-    target_leverage: Decimal
+    planned_stop_risk_fraction: Decimal
+    max_initial_margin_utilization: Decimal
+    max_leverage: int
+    supported_margin_mode: Literal["cross"]
+    min_liquidation_distance_to_stop_distance_ratio: Decimal
+    max_post_fill_stop_risk_overrun_fraction: Decimal
 
 
 class RuntimeAuthoritySeedResult(RuntimePolicyState):
@@ -147,44 +149,45 @@ class RuntimeDeploymentIdentityResult(BaseModel):
 
 
 @dataclass(frozen=True)
-class _PolicyEnvelope:
+class _DynamicPolicy:
     max_concurrent_tickets: int
-    max_gross_notional: Decimal
-    max_gross_risk_at_stop: Decimal
-    max_ticket_risk_at_stop: Decimal
-    target_leverage: Decimal = Decimal("2")
+    planned_stop_risk_fraction: Decimal
+    max_initial_margin_utilization: Decimal
+    max_leverage: int
+    supported_margin_mode: Literal["cross"]
+    min_liquidation_distance_to_stop_distance_ratio: Decimal
+    max_post_fill_stop_risk_overrun_fraction: Decimal
 
 
 @dataclass(frozen=True)
 class _ExactRow:
     table: sa.Table
-    identity_column: str
+    identity_columns: str | tuple[str, ...]
     values: Mapping[str, Any]
     compare_keys: tuple[str, ...]
 
 
-ACCEPTANCE = _PolicyEnvelope(
-    max_concurrent_tickets=1,
-    max_gross_notional=Decimal("20"),
-    max_gross_risk_at_stop=Decimal("10"),
-    max_ticket_risk_at_stop=Decimal("10"),
-)
-FULL = _PolicyEnvelope(
-    max_concurrent_tickets=2,
-    max_gross_notional=Decimal("40"),
-    max_gross_risk_at_stop=Decimal("20"),
-    max_ticket_risk_at_stop=Decimal("10"),
+DYNAMIC_POLICY = _DynamicPolicy(
+    max_concurrent_tickets=3,
+    planned_stop_risk_fraction=Decimal("0.03"),
+    max_initial_margin_utilization=Decimal("0.90"),
+    max_leverage=10,
+    supported_margin_mode="cross",
+    min_liquidation_distance_to_stop_distance_ratio=Decimal("2.0"),
+    max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
 )
 _POLICY_COMPARE_KEYS = (
     "policy_version",
     "enabled",
-    "real_submit_enabled",
+    "new_entry_submit_enabled",
     "priority_rank",
     "max_concurrent_tickets",
-    "max_gross_notional",
-    "max_gross_risk_at_stop",
-    "max_ticket_risk_at_stop",
-    "target_leverage",
+    "planned_stop_risk_fraction",
+    "max_initial_margin_utilization",
+    "max_leverage",
+    "supported_margin_mode",
+    "min_liquidation_distance_to_stop_distance_ratio",
+    "max_post_fill_stop_risk_overrun_fraction",
     "scope",
 )
 
@@ -220,8 +223,7 @@ async def seed_runtime_authority(
     )
     policy = _policy_values(
         version=1,
-        real_submit_enabled=False,
-        envelope=ACCEPTANCE,
+        new_entry_submit_enabled=False,
         scope_ids=scope_ids,
         updated_at_ms=request.seeded_at_ms,
     )
@@ -288,8 +290,9 @@ async def seed_runtime_authority(
         ),
         _ExactRow(
             account_exposure_current,
-            "account_id",
+            ("venue_id", "account_id"),
             {
+                "venue_id": VENUE_ID,
                 "account_id": request.account_id,
                 "gross_notional": Decimal("0"),
                 "gross_risk_at_stop": Decimal("0"),
@@ -298,6 +301,7 @@ async def seed_runtime_authority(
                 "updated_at_ms": request.seeded_at_ms,
             },
             (
+                "venue_id",
                 "gross_notional",
                 "gross_risk_at_stop",
                 "active_ticket_count",
@@ -538,7 +542,6 @@ async def arm_acceptance_policy(
         expected_version=1,
         expected_submit=False,
         target_version=2,
-        target_envelope=ACCEPTANCE,
         operation="arm_acceptance_ticket",
         stage="acceptance_armed",
         occurred_at_ms=request.armed_at_ms,
@@ -554,7 +557,6 @@ async def promote_full_policy(
         expected_version=2,
         expected_submit=True,
         target_version=3,
-        target_envelope=FULL,
         operation="promote_full_runtime",
         stage="full_runtime",
         occurred_at_ms=request.promoted_at_ms,
@@ -568,7 +570,6 @@ async def _transition_policy(
     expected_version: int,
     expected_submit: bool,
     target_version: int,
-    target_envelope: _PolicyEnvelope,
     operation: str,
     stage: str,
     occurred_at_ms: int,
@@ -580,16 +581,14 @@ async def _transition_policy(
     if _policy_matches(
         current,
         version=target_version,
-        real_submit_enabled=True,
-        envelope=target_envelope,
+        new_entry_submit_enabled=True,
         scope_ids=scope_ids,
     ):
         return _policy_state(current)
     if not _policy_matches(
         current,
         version=expected_version,
-        real_submit_enabled=expected_submit,
-        envelope=ACCEPTANCE,
+        new_entry_submit_enabled=expected_submit,
         scope_ids=scope_ids,
     ):
         raise RuntimeAuthorityTransitionRefused(
@@ -606,8 +605,7 @@ async def _transition_policy(
 
     target = _policy_values(
         version=target_version,
-        real_submit_enabled=True,
-        envelope=target_envelope,
+        new_entry_submit_enabled=True,
         scope_ids=scope_ids,
         updated_at_ms=occurred_at_ms,
     )
@@ -699,8 +697,7 @@ async def _load_scope_ids(connection: AsyncConnection) -> tuple[str, ...]:
 def _policy_values(
     *,
     version: int,
-    real_submit_enabled: bool,
-    envelope: _PolicyEnvelope,
+    new_entry_submit_enabled: bool,
     scope_ids: tuple[str, ...],
     updated_at_ms: int,
 ) -> dict[str, object]:
@@ -708,13 +705,21 @@ def _policy_values(
         "owner_policy_id": OWNER_POLICY_ID,
         "policy_version": version,
         "enabled": True,
-        "real_submit_enabled": real_submit_enabled,
+        "new_entry_submit_enabled": new_entry_submit_enabled,
         "priority_rank": 1,
-        "max_concurrent_tickets": envelope.max_concurrent_tickets,
-        "max_gross_notional": envelope.max_gross_notional,
-        "max_gross_risk_at_stop": envelope.max_gross_risk_at_stop,
-        "max_ticket_risk_at_stop": envelope.max_ticket_risk_at_stop,
-        "target_leverage": envelope.target_leverage,
+        "max_concurrent_tickets": DYNAMIC_POLICY.max_concurrent_tickets,
+        "planned_stop_risk_fraction": DYNAMIC_POLICY.planned_stop_risk_fraction,
+        "max_initial_margin_utilization": (
+            DYNAMIC_POLICY.max_initial_margin_utilization
+        ),
+        "max_leverage": DYNAMIC_POLICY.max_leverage,
+        "supported_margin_mode": DYNAMIC_POLICY.supported_margin_mode,
+        "min_liquidation_distance_to_stop_distance_ratio": (
+            DYNAMIC_POLICY.min_liquidation_distance_to_stop_distance_ratio
+        ),
+        "max_post_fill_stop_risk_overrun_fraction": (
+            DYNAMIC_POLICY.max_post_fill_stop_risk_overrun_fraction
+        ),
         "scope": {
             "runtime_profile_id": RUNTIME_PROFILE_ID,
             "runtime_scope_ids": list(scope_ids),
@@ -753,8 +758,7 @@ def _seed_identity(
 ) -> str:
     semantics = _policy_values(
         version=1,
-        real_submit_enabled=False,
-        envelope=ACCEPTANCE,
+        new_entry_submit_enabled=False,
         scope_ids=scope_ids,
         updated_at_ms=1,
     )
@@ -780,14 +784,12 @@ def _policy_matches(
     row: Mapping[str, object],
     *,
     version: int,
-    real_submit_enabled: bool,
-    envelope: _PolicyEnvelope,
+    new_entry_submit_enabled: bool,
     scope_ids: tuple[str, ...],
 ) -> bool:
     expected = _policy_values(
         version=version,
-        real_submit_enabled=real_submit_enabled,
-        envelope=envelope,
+        new_entry_submit_enabled=new_entry_submit_enabled,
         scope_ids=scope_ids,
         updated_at_ms=int(str(row["updated_at_ms"])),
     )
@@ -798,12 +800,22 @@ def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
     return RuntimePolicyState(
         owner_policy_id=str(values["owner_policy_id"]),
         policy_version=int(str(values["policy_version"])),
-        real_submit_enabled=bool(values["real_submit_enabled"]),
+        new_entry_submit_enabled=bool(values["new_entry_submit_enabled"]),
         max_concurrent_tickets=int(str(values["max_concurrent_tickets"])),
-        max_gross_notional=Decimal(str(values["max_gross_notional"])),
-        max_gross_risk_at_stop=Decimal(str(values["max_gross_risk_at_stop"])),
-        max_ticket_risk_at_stop=Decimal(str(values["max_ticket_risk_at_stop"])),
-        target_leverage=Decimal(str(values["target_leverage"])),
+        planned_stop_risk_fraction=Decimal(
+            str(values["planned_stop_risk_fraction"])
+        ),
+        max_initial_margin_utilization=Decimal(
+            str(values["max_initial_margin_utilization"])
+        ),
+        max_leverage=int(str(values["max_leverage"])),
+        supported_margin_mode=str(values["supported_margin_mode"]),
+        min_liquidation_distance_to_stop_distance_ratio=Decimal(
+            str(values["min_liquidation_distance_to_stop_distance_ratio"])
+        ),
+        max_post_fill_stop_risk_overrun_fraction=Decimal(
+            str(values["max_post_fill_stop_risk_overrun_fraction"])
+        ),
     )
 
 
@@ -954,13 +966,18 @@ async def _set_exchange_command_capability(
 
 
 async def _insert_exact(connection: AsyncConnection, row: _ExactRow) -> int:
+    identity_columns = (
+        (row.identity_columns,)
+        if isinstance(row.identity_columns, str)
+        else row.identity_columns
+    )
+    predicate = sa.and_(
+        *(row.table.c[column] == row.values[column] for column in identity_columns)
+    )
     existing = (
         await connection.execute(
             sa.select(row.table)
-            .where(
-                row.table.c[row.identity_column]
-                == row.values[row.identity_column]
-            )
+            .where(predicate)
             .limit(1)
         )
     ).mappings().one_or_none()
@@ -969,7 +986,8 @@ async def _insert_exact(connection: AsyncConnection, row: _ExactRow) -> int:
         return 1
     if not all(existing[key] == row.values[key] for key in row.compare_keys):
         raise RuntimeAuthoritySeedConflict(
-            f"runtime authority conflict for {row.values[row.identity_column]}"
+            "runtime authority conflict for "
+            + ":".join(str(row.values[column]) for column in identity_columns)
         )
     return 0
 

@@ -1070,13 +1070,21 @@ class PostgresEntryAdmissionRepository:
             owner_policy_id=str(row["owner_policy_id"]),
             policy_version=int(row["policy_version"]),
             enabled=bool(row["enabled"]),
-            real_submit_enabled=bool(row["real_submit_enabled"]),
+            new_entry_submit_enabled=bool(row["new_entry_submit_enabled"]),
             priority_rank=int(row["priority_rank"]),
             max_concurrent_tickets=int(row["max_concurrent_tickets"]),
-            max_gross_notional=Decimal(row["max_gross_notional"]),
-            max_gross_risk_at_stop=Decimal(row["max_gross_risk_at_stop"]),
-            max_ticket_risk_at_stop=Decimal(row["max_ticket_risk_at_stop"]),
-            target_leverage=Decimal(row["target_leverage"]),
+            planned_stop_risk_fraction=Decimal(row["planned_stop_risk_fraction"]),
+            max_initial_margin_utilization=Decimal(
+                row["max_initial_margin_utilization"]
+            ),
+            max_leverage=int(row["max_leverage"]),
+            supported_margin_mode=str(row["supported_margin_mode"]),
+            min_liquidation_distance_to_stop_distance_ratio=Decimal(
+                row["min_liquidation_distance_to_stop_distance_ratio"]
+            ),
+            max_post_fill_stop_risk_overrun_fraction=Decimal(
+                row["max_post_fill_stop_risk_overrun_fraction"]
+            ),
         )
 
     async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool:
@@ -1099,11 +1107,13 @@ class PostgresEntryAdmissionRepository:
 
     async def get_account_exposure(
         self,
+        venue_id: str,
         account_id: str,
         *,
         for_update: bool = False,
     ) -> AccountExposureSnapshot | None:
         statement = sa.select(account_exposure_current).where(
+            account_exposure_current.c.venue_id == venue_id,
             account_exposure_current.c.account_id == account_id
         )
         if for_update:
@@ -1119,6 +1129,7 @@ class PostgresEntryAdmissionRepository:
     async def reserve_account_exposure(
         self,
         *,
+        venue_id: str,
         account_id: str,
         notional: Decimal,
         risk_at_stop: Decimal,
@@ -1128,6 +1139,7 @@ class PostgresEntryAdmissionRepository:
         if expected_version is None:
             await self._connection.execute(
                 sa.insert(account_exposure_current).values(
+                    venue_id=venue_id,
                     account_id=account_id,
                     gross_notional=notional,
                     gross_risk_at_stop=risk_at_stop,
@@ -1140,6 +1152,7 @@ class PostgresEntryAdmissionRepository:
         result = await self._connection.execute(
             sa.update(account_exposure_current)
             .where(
+                account_exposure_current.c.venue_id == venue_id,
                 account_exposure_current.c.account_id == account_id,
                 account_exposure_current.c.projection_version == expected_version,
             )
@@ -1159,12 +1172,17 @@ class PostgresEntryAdmissionRepository:
     async def release_account_exposure(
         self,
         *,
+        venue_id: str,
         account_id: str,
         notional: Decimal,
         risk_at_stop: Decimal,
         updated_at_ms: int,
     ) -> None:
-        current = await self.get_account_exposure(account_id, for_update=True)
+        current = await self.get_account_exposure(
+            venue_id,
+            account_id,
+            for_update=True,
+        )
         if current is None or current.active_ticket_count <= 0:
             raise AggregateVersionConflict("account exposure is missing during release")
         if current.gross_notional < notional or current.gross_risk_at_stop < risk_at_stop:
@@ -1172,6 +1190,7 @@ class PostgresEntryAdmissionRepository:
         updated = await self._connection.execute(
             sa.update(account_exposure_current)
             .where(
+                account_exposure_current.c.venue_id == venue_id,
                 account_exposure_current.c.account_id == account_id,
                 account_exposure_current.c.projection_version
                 == current.projection_version,

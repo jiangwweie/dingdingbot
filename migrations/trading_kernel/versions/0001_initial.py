@@ -193,7 +193,7 @@ def upgrade() -> None:
         _id("owner_policy_id", primary_key=True),
         sa.Column("policy_version", sa.Integer, nullable=False),
         sa.Column("enabled", sa.Boolean, nullable=False),
-        sa.Column("real_submit_enabled", sa.Boolean, nullable=False),
+        sa.Column("new_entry_submit_enabled", sa.Boolean, nullable=False),
         sa.Column(
             "priority_rank",
             sa.Integer,
@@ -201,24 +201,19 @@ def upgrade() -> None:
             server_default=sa.text("100"),
         ),
         sa.Column("max_concurrent_tickets", sa.Integer, nullable=False),
-        sa.Column("max_gross_notional", MONEY, nullable=False),
+        sa.Column("planned_stop_risk_fraction", MONEY, nullable=False),
+        sa.Column("max_initial_margin_utilization", MONEY, nullable=False),
+        sa.Column("max_leverage", sa.Integer, nullable=False),
+        sa.Column("supported_margin_mode", SHORT_TEXT, nullable=False),
         sa.Column(
-            "max_gross_risk_at_stop",
+            "min_liquidation_distance_to_stop_distance_ratio",
             MONEY,
             nullable=False,
-            server_default=sa.text("1000000000"),
         ),
         sa.Column(
-            "max_ticket_risk_at_stop",
+            "max_post_fill_stop_risk_overrun_fraction",
             MONEY,
             nullable=False,
-            server_default=sa.text("1000000000"),
-        ),
-        sa.Column(
-            "target_leverage",
-            MONEY,
-            nullable=False,
-            server_default=sa.text("1"),
         ),
         _json("scope"),
         _time("updated_at_ms"),
@@ -231,24 +226,30 @@ def upgrade() -> None:
             name="ck_brc_owner_policy_current_max_concurrent_tickets_positive",
         ),
         sa.CheckConstraint(
-            "max_gross_notional > 0",
-            name="ck_brc_owner_policy_current_max_gross_notional_positive",
+            "planned_stop_risk_fraction > 0 AND planned_stop_risk_fraction < 1",
+            name="ck_brc_owner_policy_current_planned_stop_risk_fraction_valid",
         ),
         sa.CheckConstraint(
-            "max_gross_risk_at_stop > 0",
-            name="ck_brc_owner_policy_current_max_gross_risk_positive",
+            "max_initial_margin_utilization > 0 "
+            "AND max_initial_margin_utilization <= 1",
+            name="ck_brc_owner_policy_current_margin_utilization_valid",
         ),
         sa.CheckConstraint(
-            "max_ticket_risk_at_stop > 0",
-            name="ck_brc_owner_policy_current_max_ticket_risk_positive",
+            "max_leverage >= 1 AND max_leverage <= 10",
+            name="ck_brc_owner_policy_current_max_leverage_valid",
         ),
         sa.CheckConstraint(
-            "max_ticket_risk_at_stop <= max_gross_risk_at_stop",
-            name="ck_brc_owner_policy_current_ticket_risk_within_gross_risk",
+            "supported_margin_mode = 'cross'",
+            name="ck_brc_owner_policy_current_supported_margin_mode_cross_only",
         ),
         sa.CheckConstraint(
-            "target_leverage > 0",
-            name="ck_brc_owner_policy_current_target_leverage_positive",
+            "min_liquidation_distance_to_stop_distance_ratio > 0",
+            name="ck_brc_owner_policy_current_liq_ratio_positive",
+        ),
+        sa.CheckConstraint(
+            "max_post_fill_stop_risk_overrun_fraction >= 0 "
+            "AND max_post_fill_stop_risk_overrun_fraction < 1",
+            name="ck_brc_owner_policy_current_post_fill_overrun_valid",
         ),
     )
     op.create_table(
@@ -699,6 +700,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "brc_account_exposure_current",
+        sa.Column("venue_id", SHORT_TEXT, primary_key=True),
         _id("account_id", primary_key=True),
         sa.Column("gross_notional", MONEY, nullable=False),
         sa.Column("gross_risk_at_stop", MONEY, nullable=False),
