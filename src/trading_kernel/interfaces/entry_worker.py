@@ -89,7 +89,13 @@ async def run_entry_worker_once(
     facts_source: EntryFactsSource,
     request: EntryWorkerRequest,
 ) -> EntryWorkerResult:
-    existing = await _dispatch_entry(uow_factory, venue, request, ticket_id=None)
+    existing = await _dispatch_entry(
+        uow_factory,
+        venue,
+        request,
+        ticket_id=None,
+        entry_facts_source=facts_source,
+    )
     if existing.status is not DispatchCommandStatus.NO_COMMAND:
         return EntryWorkerResult(
             status=(
@@ -204,6 +210,7 @@ async def run_entry_worker_once(
         venue,
         request,
         ticket_id=issued.ticket_id,
+        entry_facts_source=facts_source,
     )
     return EntryWorkerResult(
         status=(
@@ -224,6 +231,7 @@ async def _dispatch_entry(
     request: EntryWorkerRequest,
     *,
     ticket_id: str | None,
+    entry_facts_source: EntryFactsSource | None = None,
 ):
     return await dispatch_one_command(
         uow_factory,
@@ -238,5 +246,9 @@ async def _dispatch_entry(
             now_ms=request.now_ms,
             lease_until_ms=request.lease_until_ms,
             timeout_seconds=request.timeout_seconds,
+            runtime_commit=request.runtime_commit,
+            schema_revision=request.schema_revision,
+            admission_snapshot_validity_ms=request.admission_snapshot_validity_ms,
         ),
+        entry_facts_source=entry_facts_source,
     )

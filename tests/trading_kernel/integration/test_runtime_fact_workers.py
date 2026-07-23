@@ -23,6 +23,8 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandStatus,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
+import sqlalchemy as sa
 from src.trading_kernel.interfaces.entry_worker import (
     EntryWorkerRequest,
     EntryWorkerStatus,
@@ -176,6 +178,20 @@ class FakeLifecycleFactsSource:
         return self.facts.model_copy(update={"observed_at_ms": request.observed_at_ms})
 
 
+async def _enable_exchange_commands(engine) -> None:
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(runtime_capabilities_current).values(
+                capability_key="exchange_commands",
+                enabled=True,
+                certified_commit="kernel-test-head",
+                schema_revision="0001_initial",
+                certification={},
+                updated_at_ms=1_000,
+            )
+        )
+
+
 @pytest.mark.asyncio
 async def test_runtime_selector_reschedules_no_change_ticket_without_starving_next(
     runtime_fact_worker_engine,
@@ -237,6 +253,7 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
     runtime_fact_worker_engine,
 ) -> None:
     await _seed_runtime_authority(runtime_fact_worker_engine)
+    await _enable_exchange_commands(runtime_fact_worker_engine)
     signal = _signal(signal_event_id="signal-entry-worker-owned")
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         await ingest_signal(
@@ -268,8 +285,8 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
 
     assert result.status is EntryWorkerStatus.DISPATCHED
     assert result.ticket_id is not None
-    assert len(facts.requests) == 1
-    assert len(facts.rule_requests) == 1
+    assert len(facts.requests) == 2
+    assert len(facts.rule_requests) == 2
     assert venue.command_kinds == ["entry"]
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         ticket = await uow.tickets.get(result.ticket_id)
@@ -292,6 +309,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
     runtime_fact_worker_engine,
 ) -> None:
     await _seed_runtime_authority(runtime_fact_worker_engine)
+    await _enable_exchange_commands(runtime_fact_worker_engine)
     signal = _signal(signal_event_id="signal-reconciliation-worker-owned")
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         await ingest_signal(
@@ -353,6 +371,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     runtime_fact_worker_engine,
 ) -> None:
     await _seed_runtime_authority(runtime_fact_worker_engine)
+    await _enable_exchange_commands(runtime_fact_worker_engine)
     signal = _signal(signal_event_id="signal-lifecycle-worker-owned")
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         await ingest_signal(

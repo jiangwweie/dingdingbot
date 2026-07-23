@@ -22,6 +22,11 @@ from src.trading_kernel.application.dispatch_exchange_command import (
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue_ticket
 from src.trading_kernel.application.ports import VenueCommandRequest
+from src.trading_kernel.application.runtime_facts import (
+    EntryAdmissionSnapshotRequest,
+    InstrumentRulesFacts,
+    InstrumentRulesRequest,
+)
 from src.trading_kernel.application.reconcile_ticket import (
     ExitTicketRequest,
     ReconcileTicketRequest,
@@ -40,8 +45,15 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.events import TakeProfitFilled
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.infrastructure.pg_models import owner_policy_current
+from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    EntryAdmissionSnapshot,
+    canonical_digest,
+)
+from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from tests.trading_kernel.unit.test_ticket import _ticket
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
@@ -134,6 +146,61 @@ class CountingVenue:
         )
 
 
+class PreflightFacts:
+    async def read_entry_admission_snapshot(
+        self, request: EntryAdmissionSnapshotRequest
+    ) -> EntryAdmissionSnapshot:
+        return EntryAdmissionSnapshot(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            position_mode="independent_sides",
+            margin_mode="cross",
+            total_wallet_balance=Decimal("100"),
+            total_margin_balance=Decimal("100"),
+            total_initial_margin=Decimal("10"),
+            total_maintenance_margin=Decimal("1"),
+            available_margin=Decimal("90"),
+            best_bid_price=Decimal("59999"),
+            best_ask_price=Decimal("60000"),
+            instrument_facts=(
+                AdmissionInstrumentFacts(
+                    exchange_instrument_id=request.exchange_instrument_id,
+                    mark_price=Decimal("60000"),
+                    configured_leverage=5,
+                ),
+            ),
+            positions=(),
+            open_orders=(),
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_instrument_rules(
+        self, request: InstrumentRulesRequest
+    ) -> InstrumentRulesFacts:
+        brackets = (
+            MaintenanceMarginBracket(
+                bracket_id="test:1",
+                notional_floor=Decimal("0"),
+                notional_cap=None,
+                maintenance_margin_rate=Decimal("0.005"),
+                maintenance_amount=Decimal("0"),
+            ),
+        )
+        return InstrumentRulesFacts(
+            exchange_instrument_id=request.exchange_instrument_id,
+            quantity_step=Decimal("0.001"),
+            price_tick=Decimal("0.1"),
+            min_quantity=Decimal("0.001"),
+            min_notional=Decimal("5"),
+            exchange_max_leverage=10,
+            maintenance_margin_brackets=brackets,
+            maintenance_margin_brackets_digest=canonical_digest(brackets),
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+
 class KindAwareAcceptingVenue:
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
         exchange_order_id = (
@@ -186,6 +253,55 @@ class LeverageReadbackMismatchVenue(LeverageThenEntryVenue):
             leverage_verified_at_ms=2_000,
             leverage_verification_digest="sha256:" + "5" * 64,
         )
+
+
+@pytest.mark.asyncio
+async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    async with dispatch_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(runtime_capabilities_current).values(
+                capability_key="exchange_commands",
+                enabled=True,
+                certified_commit="kernel-test-head",
+                schema_revision="0001_initial",
+                certification={},
+                updated_at_ms=1_000,
+            )
+        )
+        await connection.execute(
+            sa.update(owner_policy_current)
+            .where(owner_policy_current.c.owner_policy_id == "policy-main")
+            .values(new_entry_submit_enabled=False)
+        )
+    venue = CountingVenue()
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0001_initial",
+            admission_snapshot_validity_ms=1_000,
+        ),
+        entry_facts_source=PreflightFacts(),
+    )
+
+    assert result.status is DispatchCommandStatus.SUPERSEDED
+    assert venue.calls == 0
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        command = await uow.exchange_commands.get(result.command_id or "")
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert command is not None and command.status is ExchangeCommandStatus.REJECTED
+    assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
 
 
 @pytest.mark.asyncio

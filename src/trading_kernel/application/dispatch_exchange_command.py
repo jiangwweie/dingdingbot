@@ -14,6 +14,18 @@ from src.trading_kernel.application.ports import (
     VenuePort,
     VenueSetLeverageRequest,
 )
+from src.trading_kernel.application.runtime_facts import (
+    EntryAdmissionSnapshotRequest,
+    EntryFactsSource,
+    InstrumentRulesRequest,
+)
+from src.trading_kernel.application.revalidate_entry_dispatch import (
+    EntryDispatchPreflightRequest,
+    EntryDispatchPreflightStatus,
+    revalidate_entry_dispatch,
+)
+from src.trading_kernel.domain.account_entry_health import classify_account_entry_health
+from src.trading_kernel.domain.instrument_entry_health import classify_instrument_entry_health
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
@@ -77,6 +89,9 @@ class DispatchCommandRequest(BaseModel):
     now_ms: int
     lease_until_ms: int
     timeout_seconds: float
+    runtime_commit: str | None = None
+    schema_revision: str | None = None
+    admission_snapshot_validity_ms: int | None = None
 
     @field_validator("worker_id", mode="before")
     @classmethod
@@ -128,6 +143,8 @@ async def dispatch_one_command(
     uow_factory: UnitOfWorkFactory,
     venue: VenuePort,
     request: DispatchCommandRequest,
+    *,
+    entry_facts_source: EntryFactsSource | None = None,
 ) -> DispatchCommandResult:
     async with uow_factory() as uow:
         expired = await uow.exchange_commands.get_one_expired_claim(
@@ -193,6 +210,29 @@ async def dispatch_one_command(
                 )
     if command is None:
         return DispatchCommandResult(status=DispatchCommandStatus.NO_COMMAND)
+
+    if (
+        command.kind in {ExchangeCommandKind.SET_LEVERAGE, ExchangeCommandKind.ENTRY}
+        and entry_facts_source is not None
+    ):
+        preflight = await _preflight_new_entry_mutation(
+            uow_factory,
+            command=command,
+            request=request,
+            entry_facts_source=entry_facts_source,
+        )
+        if preflight is not EntryDispatchPreflightStatus.ALLOWED:
+            await _record_preflight_refusal(
+                uow_factory,
+                command=command,
+                worker_id=request.worker_id,
+                now_ms=request.now_ms,
+                status=preflight,
+            )
+            return DispatchCommandResult(
+                status=DispatchCommandStatus.SUPERSEDED,
+                command_id=command.command_id,
+            )
 
     try:
         if command.kind is ExchangeCommandKind.SET_LEVERAGE:
@@ -299,6 +339,124 @@ async def dispatch_one_command(
         ),
         command_id=command.command_id,
     )
+
+
+async def _preflight_new_entry_mutation(
+    uow_factory: UnitOfWorkFactory,
+    *,
+    command: ExchangeCommand,
+    request: DispatchCommandRequest,
+    entry_facts_source: EntryFactsSource | None,
+) -> EntryDispatchPreflightStatus:
+    if (
+        entry_facts_source is None
+        or not request.runtime_commit
+        or not request.schema_revision
+        or request.admission_snapshot_validity_ms is None
+        or request.admission_snapshot_validity_ms <= 0
+    ):
+        return EntryDispatchPreflightStatus.RUNTIME_FENCED
+    domain = command.ticket_identity.netting_domain
+    snapshot_request = EntryAdmissionSnapshotRequest(
+        venue_id=domain.venue_id,
+        account_id=domain.account_id,
+        exchange_instrument_id=domain.exchange_instrument_id,
+        observed_at_ms=request.now_ms,
+        valid_for_ms=request.admission_snapshot_validity_ms,
+    )
+    rules_request = InstrumentRulesRequest(
+        venue_id=domain.venue_id,
+        account_id=domain.account_id,
+        exchange_instrument_id=domain.exchange_instrument_id,
+        observed_at_ms=request.now_ms,
+        valid_for_ms=request.admission_snapshot_validity_ms,
+    )
+    try:
+        snapshot, rules = await asyncio.wait_for(
+            asyncio.gather(
+                entry_facts_source.read_entry_admission_snapshot(snapshot_request),
+                entry_facts_source.read_instrument_rules(rules_request),
+            ),
+            timeout=request.timeout_seconds,
+        )
+    except Exception:
+        return EntryDispatchPreflightStatus.STALE_SNAPSHOT
+    async with uow_factory() as uow:
+        current_command = await uow.exchange_commands.get(command.command_id)
+        aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
+        claim = await uow.capacity_claims.get_for_ticket(
+            command.ticket_identity.ticket_id
+        )
+        if current_command is None or aggregate is None or claim is None:
+            return EntryDispatchPreflightStatus.COMMAND_MISMATCH
+        policy = await uow.entry_admission.get_owner_policy(
+            aggregate.ticket.owner_policy_id
+        )
+        scope = await uow.signals.get_runtime_scope(aggregate.ticket.runtime_scope_id)
+        capability = await uow.signals.get_runtime_capability("exchange_commands")
+        ownership = await uow.entry_admission.read_admission_ownership(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+        )
+    decision = revalidate_entry_dispatch(
+        EntryDispatchPreflightRequest(
+            command=current_command,
+            ticket=aggregate.ticket,
+            capacity_claim=claim,
+            owner_policy=policy,
+            runtime_scope=scope,
+            runtime_capability=capability,
+            runtime_commit=request.runtime_commit,
+            schema_revision=request.schema_revision,
+            admission_snapshot=snapshot,
+            instrument_rules=rules,
+            account_entry_health=classify_account_entry_health(snapshot, ownership),
+            instrument_entry_health=classify_instrument_entry_health(
+                snapshot,
+                ownership,
+                exchange_instrument_id=domain.exchange_instrument_id,
+                requested_position_side=domain.position_side,
+            ),
+            now_ms=request.now_ms,
+        )
+    )
+    return decision.status
+
+
+async def _record_preflight_refusal(
+    uow_factory: UnitOfWorkFactory,
+    *,
+    command: ExchangeCommand,
+    worker_id: str,
+    now_ms: int,
+    status: EntryDispatchPreflightStatus,
+) -> None:
+    result = ExchangeCommandResult(
+        status=ExchangeCommandStatus.REJECTED,
+        observed_at_ms=now_ms,
+        reason=f"dispatch_preflight:{status.value}",
+    )
+    async with uow_factory() as uow:
+        current_command = await uow.exchange_commands.get(command.command_id)
+        aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
+        if current_command is None or aggregate is None:
+            raise RuntimeError("claimed command changed before preflight refusal")
+        event = _command_result_event(
+            command=current_command,
+            aggregate=aggregate,
+            result=result,
+        )
+        await uow.exchange_commands.record_result(
+            command_id=current_command.command_id,
+            worker_id=worker_id,
+            result=result,
+        )
+        await uow.commit_reduction(
+            event=event,
+            reduction=reduce_event(aggregate, event),
+            expected_version=aggregate.version,
+        )
 
 
 def _command_is_applicable(
