@@ -25,8 +25,10 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (  # noqa: 
     PromoteFullPolicyRequest,
     RuntimeAuthoritySeedRequest,
     RuntimeAuthoritySeedResult,
+    RuntimeDeploymentIdentityResult,
     RuntimePolicyState,
     arm_acceptance_policy,
+    deploy_runtime_identity,
     promote_full_policy,
     seed_runtime_authority,
 )
@@ -56,6 +58,24 @@ def _parser() -> argparse.ArgumentParser:
     )
     seed.add_argument("--now-ms", type=int)
 
+    deploy = subparsers.add_parser(
+        "deploy-identity",
+        help="install or refresh exact flat-state deployment identity",
+    )
+    deploy.add_argument(
+        "--account-id",
+        default=os.getenv("TRADING_KERNEL_ACCOUNT_ID", ""),
+    )
+    deploy.add_argument(
+        "--runtime-commit",
+        default=os.getenv("TRADING_KERNEL_RUNTIME_COMMIT", ""),
+    )
+    deploy.add_argument(
+        "--schema-revision",
+        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+    )
+    deploy.add_argument("--now-ms", type=int)
+
     arm = subparsers.add_parser(
         "arm-acceptance",
         help="enable one 20 USDT / 2x acceptance Ticket",
@@ -79,9 +99,23 @@ async def _run(args: argparse.Namespace) -> int:
     engine = create_async_engine(database_url)
     try:
         async with PostgresKernelUnitOfWork(engine) as uow:
-            result: RuntimeAuthoritySeedResult | RuntimePolicyState
+            result: (
+                RuntimeAuthoritySeedResult
+                | RuntimeDeploymentIdentityResult
+                | RuntimePolicyState
+            )
             if args.action == "seed":
                 result = await seed_runtime_authority(
+                    uow,
+                    RuntimeAuthoritySeedRequest(
+                        account_id=args.account_id,
+                        runtime_commit=args.runtime_commit,
+                        schema_revision=args.schema_revision,
+                        seeded_at_ms=now_ms,
+                    ),
+                )
+            elif args.action == "deploy-identity":
+                result = await deploy_runtime_identity(
                     uow,
                     RuntimeAuthoritySeedRequest(
                         account_id=args.account_id,

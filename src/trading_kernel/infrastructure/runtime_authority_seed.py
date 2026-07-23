@@ -21,6 +21,7 @@ from src.trading_kernel.domain.strategy_registry import (
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     entry_lane_current,
+    exchange_commands,
     owner_policy_current,
     owner_policy_events,
     runtime_capabilities_current,
@@ -134,6 +135,15 @@ class RuntimeAuthoritySeedResult(RuntimePolicyState):
     @property
     def total_inserted_count(self) -> int:
         return self.registry_inserted_count + self.runtime_inserted_count
+
+
+class RuntimeDeploymentIdentityResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime_commit: str
+    schema_revision: Literal["0001_initial"]
+    runtime_seed_semantic_hash: str
+    refreshed_existing_authority: bool
 
 
 @dataclass(frozen=True)
@@ -386,6 +396,136 @@ async def seed_runtime_authority(
         runtime_scope_count=len(scope_rows),
         registry_inserted_count=registry.total_inserted_count,
         runtime_inserted_count=inserted,
+    )
+
+
+async def deploy_runtime_identity(
+    uow: PostgresKernelUnitOfWork,
+    request: RuntimeAuthoritySeedRequest,
+) -> RuntimeDeploymentIdentityResult:
+    """Install fresh authority or rotate only deployment identity while flat."""
+
+    connection = uow._require_connection()
+    metadata_count = int(
+        await connection.scalar(
+            sa.select(sa.func.count()).select_from(schema_metadata)
+        )
+        or 0
+    )
+    if metadata_count == 0:
+        seeded = await seed_runtime_authority(uow, request)
+        return RuntimeDeploymentIdentityResult(
+            runtime_commit=request.runtime_commit,
+            schema_revision=request.schema_revision,
+            runtime_seed_semantic_hash=seeded.runtime_seed_semantic_hash,
+            refreshed_existing_authority=False,
+        )
+
+    await _require_zero_runtime_activity(connection)
+    expected_registry_hash = build_registry_semantic_hash(
+        registered_strategy_contracts()
+    )
+    expected_seed_identity = build_runtime_seed_identity(request)
+    metadata_rows = {
+        str(row["metadata_key"]): str(row["metadata_value"])
+        for row in (
+            await connection.execute(
+                sa.select(schema_metadata).with_for_update(of=schema_metadata)
+            )
+        ).mappings()
+    }
+    required_metadata = {
+        "registry_semantic_hash": expected_registry_hash,
+        "schema_revision": request.schema_revision,
+        "seed_identity": expected_seed_identity,
+    }
+    if any(
+        metadata_rows.get(key) != value
+        for key, value in required_metadata.items()
+    ):
+        raise RuntimeAuthoritySeedConflict(
+            "runtime deployment identity differs from committed semantics"
+        )
+
+    profile = (
+        await connection.execute(
+            sa.select(runtime_profiles)
+            .where(runtime_profiles.c.runtime_profile_id == RUNTIME_PROFILE_ID)
+            .with_for_update(of=runtime_profiles)
+        )
+    ).mappings().one_or_none()
+    if profile is None or any(
+        (
+            profile["venue_id"] != VENUE_ID,
+            profile["account_id"] != request.account_id,
+            profile["environment"] != "live",
+            profile["position_mode"] != POSITION_MODE,
+            profile["status"] != "active",
+        )
+    ):
+        raise RuntimeAuthoritySeedConflict(
+            "runtime profile differs from deployment identity"
+        )
+
+    expected_scope_ids = set(_scope_ids(_runtime_scope_rows(request.seeded_at_ms)))
+    await _assert_exact_identity_set(
+        connection,
+        runtime_scopes_current,
+        "runtime_scope_id",
+        expected_scope_ids,
+    )
+    capabilities = (
+        await connection.execute(
+            sa.select(runtime_capabilities_current).with_for_update(
+                of=runtime_capabilities_current
+            )
+        )
+    ).mappings().all()
+    if {str(row["capability_key"]) for row in capabilities} != {
+        "exchange_commands",
+        "strategy_signal_ingest",
+    }:
+        raise RuntimeAuthoritySeedConflict(
+            "runtime capability identities differ from deployment contract"
+        )
+
+    updated_metadata = await connection.execute(
+        sa.update(schema_metadata)
+        .where(schema_metadata.c.metadata_key == "runtime_commit")
+        .values(
+            metadata_value=request.runtime_commit,
+            updated_at_ms=request.seeded_at_ms,
+        )
+    )
+    if updated_metadata.rowcount != 1:
+        raise RuntimeAuthoritySeedConflict(
+            "runtime commit metadata row is missing"
+        )
+    for capability in capabilities:
+        certification = dict(capability["certification"])
+        certification["deployment_commit"] = request.runtime_commit
+        updated = await connection.execute(
+            sa.update(runtime_capabilities_current)
+            .where(
+                runtime_capabilities_current.c.capability_key
+                == capability["capability_key"]
+            )
+            .values(
+                certified_commit=request.runtime_commit,
+                schema_revision=request.schema_revision,
+                certification=certification,
+                updated_at_ms=request.seeded_at_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            raise RuntimeAuthoritySeedConflict(
+                "runtime capability deployment identity update was lost"
+            )
+    return RuntimeDeploymentIdentityResult(
+        runtime_commit=request.runtime_commit,
+        schema_revision=request.schema_revision,
+        runtime_seed_semantic_hash=expected_seed_identity,
+        refreshed_existing_authority=True,
     )
 
 
@@ -727,6 +867,13 @@ async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
             runtime_incidents.c.status != "resolved"
         )
     )
+    unresolved_commands = await connection.scalar(
+        sa.select(sa.func.count()).select_from(exchange_commands).where(
+            exchange_commands.c.status.in_(
+                ("prepared", "claimed", "dispatch_started", "outcome_unknown")
+            )
+        )
+    )
     if int(active_tickets or 0) != 0:
         raise RuntimeAuthorityTransitionRefused(
             "runtime transition requires zero active Tickets"
@@ -734,6 +881,10 @@ async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
     if int(open_incidents or 0) != 0:
         raise RuntimeAuthorityTransitionRefused(
             "runtime transition requires zero open Incidents"
+        )
+    if int(unresolved_commands or 0) != 0:
+        raise RuntimeAuthorityTransitionRefused(
+            "runtime transition requires zero unresolved Exchange Commands"
         )
 
 

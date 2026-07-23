@@ -196,14 +196,14 @@ async def test_runtime_identity_env_is_updated_and_verified_exactly() -> None:
         (
             "sudo",
             "grep",
-            "-Fx",
+            "-Fxc",
             f"TRADING_KERNEL_RUNTIME_COMMIT={plan.target_commit}",
             "/etc/brc/trading-kernel.env",
         ),
         (
             "sudo",
             "grep",
-            "-Fx",
+            "-Fxc",
             f"TRADING_KERNEL_SCHEMA_REVISION={plan.target_schema_revision}",
             "/etc/brc/trading-kernel.env",
         ),
@@ -248,7 +248,7 @@ async def test_seed_uses_explicit_plan_identity_not_stale_environment(
     assert calls == [
         (
             "scripts/trading_kernel/seed_runtime_authority.py",
-            "seed",
+            "deploy-identity",
             "--account-id",
             plan.account_id,
             "--runtime-commit",
@@ -275,6 +275,44 @@ def test_readonly_certification_requires_exact_plan_identity() -> None:
             {**exact, "runtime_commit": "c" * 40},
             plan,
         )
+
+
+@pytest.mark.asyncio
+async def test_seed_phase_identity_requires_metadata_capabilities_and_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _production_adapter_module()
+    system = module.SshTokyoSystem(RecordingRunner(module))
+    plan = _plan()
+    values = {
+        "runtime_commit": plan.target_commit,
+        "schema_revision": plan.target_schema_revision,
+        "seed_identity": plan.target_seed_identity,
+        "capability_mismatch_count": "0",
+    }
+
+    async def target_scalar(query: str) -> str | None:
+        for key in (
+            "capability_mismatch_count",
+            "seed_identity",
+            "schema_revision",
+            "runtime_commit",
+        ):
+            if key in query:
+                return values[key]
+        raise AssertionError(f"unexpected identity query: {query}")
+
+    async def env_matches(received_plan: CutoverPlan) -> bool:
+        assert received_plan == plan
+        return True
+
+    monkeypatch.setattr(system, "_target_scalar", target_scalar)
+    monkeypatch.setattr(system, "_runtime_identity_env_matches", env_matches)
+
+    assert await system._target_authority_identity_matches(plan) is True
+
+    values["runtime_commit"] = "c" * 40
+    assert await system._target_authority_identity_matches(plan) is False
 
 
 class AlwaysMissingRunner:

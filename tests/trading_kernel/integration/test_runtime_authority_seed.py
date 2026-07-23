@@ -72,6 +72,7 @@ def test_runtime_authority_seed_cli_is_runnable_outside_repo(
     )
 
     assert result.returncode == 0, result.stderr
+    assert "deploy-identity" in result.stdout
     assert "arm-acceptance" in result.stdout
     assert "promote-full" in result.stdout
     assert list(tmp_path.rglob("*")) == []
@@ -195,6 +196,72 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         assert metadata_rows["schema_revision"] == "0001_initial"
         assert metadata_rows["registry_semantic_hash"].startswith("sha256:")
         assert metadata_rows["seed_identity"].startswith("sha256:")
+
+
+@pytest.mark.asyncio
+async def test_deploy_identity_refreshes_commit_without_resetting_policy(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.arm_acceptance_policy(
+            uow,
+            runtime_seed.ArmAcceptancePolicyRequest(
+                armed_at_ms=1_800_000_000_100,
+            ),
+        )
+
+    refreshed = initial.model_copy(
+        update={
+            "runtime_commit": "b" * 40,
+            "seeded_at_ms": 1_800_000_000_200,
+        }
+    )
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        first = await runtime_seed.deploy_runtime_identity(uow, refreshed)
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        second = await runtime_seed.deploy_runtime_identity(
+            uow,
+            refreshed.model_copy(update={"seeded_at_ms": 1_800_000_000_300}),
+        )
+
+    assert first.runtime_commit == "b" * 40
+    assert second.runtime_commit == "b" * 40
+    assert first.runtime_seed_semantic_hash == second.runtime_seed_semantic_hash
+    async with runtime_seed_engine.connect() as connection:
+        policy = (
+            await connection.execute(sa.select(owner_policy_current))
+        ).mappings().one()
+        assert policy["policy_version"] == 2
+        assert policy["real_submit_enabled"] is True
+        metadata_rows = {
+            str(row["metadata_key"]): str(row["metadata_value"])
+            for row in (
+                await connection.execute(sa.select(schema_metadata))
+            ).mappings()
+        }
+        assert metadata_rows["runtime_commit"] == "b" * 40
+        capabilities = (
+            await connection.execute(sa.select(runtime_capabilities_current))
+        ).mappings().all()
+        assert {str(row["certified_commit"]) for row in capabilities} == {
+            "b" * 40
+        }
+        assert {
+            str(row["capability_key"]): bool(row["enabled"])
+            for row in capabilities
+        } == {
+            "exchange_commands": True,
+            "strategy_signal_ingest": True,
+        }
 
 
 @pytest.mark.asyncio

@@ -398,11 +398,7 @@ class SshTokyoSystem:
             snapshot_exists=await self._path_exists(_snapshot_path(plan)),
             target_schema_ready=await self._target_schema_ready(release),
             seed_identity_matches=(
-                await self._target_scalar(
-                    "SELECT metadata_value FROM brc_schema_metadata "
-                    "WHERE metadata_key = 'seed_identity'"
-                )
-                == plan.target_seed_identity
+                await self._target_authority_identity_matches(plan)
             ),
             release_active=(await self._readlink(CURRENT_RELEASE)) == str(release),
             readonly_certified=await self._readonly_certified(release, plan),
@@ -581,7 +577,7 @@ class SshTokyoSystem:
         result = await self._release_python(
             release,
             "scripts/trading_kernel/seed_runtime_authority.py",
-            "seed",
+            "deploy-identity",
             "--account-id",
             plan.account_id,
             "--runtime-commit",
@@ -841,11 +837,63 @@ class SshTokyoSystem:
                 (
                     "sudo",
                     "grep",
-                    "-Fx",
+                    "-Fxc",
                     f"{key}={value}",
                     str(RUNTIME_ENV),
                 )
             )
+
+    async def _target_authority_identity_matches(
+        self,
+        plan: CutoverPlan,
+    ) -> bool:
+        runtime_commit = await self._target_scalar(
+            "SELECT metadata_value AS runtime_commit "
+            "FROM brc_schema_metadata "
+            "WHERE metadata_key = 'runtime_commit'"
+        )
+        schema_revision = await self._target_scalar(
+            "SELECT metadata_value AS schema_revision "
+            "FROM brc_schema_metadata "
+            "WHERE metadata_key = 'schema_revision'"
+        )
+        seed_identity = await self._target_scalar(
+            "SELECT metadata_value AS seed_identity "
+            "FROM brc_schema_metadata "
+            "WHERE metadata_key = 'seed_identity'"
+        )
+        capability_mismatch_count = await self._target_scalar(
+            "SELECT count(*) AS capability_mismatch_count "
+            "FROM brc_runtime_capabilities_current "
+            f"WHERE certified_commit <> '{plan.target_commit}' "
+            f"OR schema_revision <> '{plan.target_schema_revision}'"
+        )
+        return (
+            runtime_commit == plan.target_commit
+            and schema_revision == plan.target_schema_revision
+            and seed_identity == plan.target_seed_identity
+            and capability_mismatch_count == "0"
+            and await self._runtime_identity_env_matches(plan)
+        )
+
+    async def _runtime_identity_env_matches(self, plan: CutoverPlan) -> bool:
+        for key, value in (
+            ("TRADING_KERNEL_RUNTIME_COMMIT", plan.target_commit),
+            ("TRADING_KERNEL_SCHEMA_REVISION", plan.target_schema_revision),
+        ):
+            result = await self._runner.run(
+                (
+                    "sudo",
+                    "grep",
+                    "-Fxc",
+                    f"{key}={value}",
+                    str(RUNTIME_ENV),
+                ),
+                check=False,
+            )
+            if result.returncode != 0 or result.stdout != "1":
+                return False
+        return True
 
     async def _release_json(
         self,
