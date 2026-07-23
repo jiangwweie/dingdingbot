@@ -6,15 +6,18 @@ import pytest
 
 from src.trading_kernel.application.ingest_signal import IngestSignalRequest, ingest_signal
 from src.trading_kernel.application.runtime_facts import (
-    ActionTimeFactsRequest,
+    EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
     InstrumentRulesRequest,
     LifecycleFactsRequest,
     PositionSnapshotRequest,
 )
-from src.trading_kernel.domain.capacity import ActionTimeFacts
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
-from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    EntryAdmissionSnapshot,
+    canonical_digest,
+)
 from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
@@ -54,30 +57,37 @@ from tests.trading_kernel.unit.test_ticket import _ticket
 runtime_fact_worker_engine = dispatch_fixture.dispatch_engine
 
 
-class FakeActionTimeFactsSource:
+class FakeEntryAdmissionFactsSource:
     def __init__(self) -> None:
-        self.requests: list[ActionTimeFactsRequest] = []
+        self.requests: list[EntryAdmissionSnapshotRequest] = []
         self.rule_requests: list[InstrumentRulesRequest] = []
 
-    async def read_action_time_facts(
+    async def read_entry_admission_snapshot(
         self,
-        request: ActionTimeFactsRequest,
-    ) -> ActionTimeFacts:
+        request: EntryAdmissionSnapshotRequest,
+    ) -> EntryAdmissionSnapshot:
         self.requests.append(request)
-        return ActionTimeFacts(
-            signal_event_id=request.signal_event_id,
-            runtime_scope_id=request.runtime_scope_id,
+        return EntryAdmissionSnapshot(
             venue_id=request.venue_id,
             account_id=request.account_id,
-            exchange_instrument_id=request.exchange_instrument_id,
-            position_side=request.position_side,
-            account_position_mode="independent_sides",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            total_wallet_balance=Decimal("1000"),
+            total_margin_balance=Decimal("1000"),
+            total_initial_margin=Decimal("0"),
+            total_maintenance_margin=Decimal("0"),
+            available_margin=Decimal("1000"),
             best_bid_price=Decimal("9999.9"),
             best_ask_price=Decimal("10000"),
-            account_equity=Decimal("1000"),
-            available_margin=Decimal("1000"),
-            netting_domain_position_qty=Decimal("0"),
-            netting_domain_open_order_count=0,
+            instrument_facts=(
+                AdmissionInstrumentFacts(
+                    exchange_instrument_id=request.exchange_instrument_id,
+                    mark_price=Decimal("10000"),
+                    configured_leverage=1,
+                ),
+            ),
+            positions=(),
+            open_orders=(),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -239,7 +249,7 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
             ),
         )
 
-    facts = FakeActionTimeFactsSource()
+    facts = FakeEntryAdmissionFactsSource()
     venue = RecordingAcceptingVenue()
     result = await run_entry_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
@@ -252,7 +262,7 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
-            action_fact_validity_ms=1_000,
+            admission_snapshot_validity_ms=1_000,
         ),
     )
 
@@ -296,7 +306,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
     entry = await run_entry_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         RecordingAcceptingVenue(),
-        FakeActionTimeFactsSource(),
+        FakeEntryAdmissionFactsSource(),
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
@@ -304,7 +314,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
-            action_fact_validity_ms=1_000,
+            admission_snapshot_validity_ms=1_000,
         ),
     )
     assert entry.ticket_id is not None
@@ -358,7 +368,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     entry = await run_entry_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
-        FakeActionTimeFactsSource(),
+        FakeEntryAdmissionFactsSource(),
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
@@ -366,7 +376,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
-            action_fact_validity_ms=1_000,
+            admission_snapshot_validity_ms=1_000,
         ),
     )
     assert entry.ticket_id is not None

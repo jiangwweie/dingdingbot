@@ -20,8 +20,11 @@ from src.trading_kernel.application.select_entry_candidate import (
     SelectEntryCandidateStatus,
     select_entry_candidate,
 )
-from src.trading_kernel.domain.capacity import ActionTimeFacts
 from src.trading_kernel.domain.commands import ExchangeCommandKind
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    EntryAdmissionSnapshot,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from tests.trading_kernel.integration.test_signal_to_ticket import (
     _seed_runtime_authority,
@@ -64,7 +67,7 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
             uow,
             IssueReadySignalRequest(
                 signal_event_id=signal.signal_event_id,
-                action_time_facts=_action_facts(signal.signal_event_id),
+                admission_snapshot=_admission_snapshot(),
                 claim_owner="entry-worker-1",
                 runtime_commit="kernel-test-head",
                 schema_revision="0001_initial",
@@ -110,7 +113,7 @@ async def test_capacity_refusal_persists_no_partial_issuance(issue_engine) -> No
             ),
         )
 
-    stale = _action_facts(signal.signal_event_id).model_copy(
+    stale = _admission_snapshot().model_copy(
         update={"valid_until_ms": 1_004}
     )
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
@@ -118,7 +121,7 @@ async def test_capacity_refusal_persists_no_partial_issuance(issue_engine) -> No
             uow,
             IssueReadySignalRequest(
                 signal_event_id=signal.signal_event_id,
-                action_time_facts=stale,
+                admission_snapshot=stale,
                 claim_owner="entry-worker-1",
                 runtime_commit="kernel-test-head",
                 schema_revision="0001_initial",
@@ -134,21 +137,28 @@ async def test_capacity_refusal_persists_no_partial_issuance(issue_engine) -> No
         )
 
 
-def _action_facts(signal_event_id: str) -> ActionTimeFacts:
-    return ActionTimeFacts(
-        signal_event_id=signal_event_id,
-        runtime_scope_id="scope-sor-btc-long",
+def _admission_snapshot() -> EntryAdmissionSnapshot:
+    return EntryAdmissionSnapshot(
         venue_id="binance-usdm",
         account_id="subaccount-main",
-        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-        position_side="long",
-        account_position_mode="independent_sides",
+        position_mode="independent_sides",
+        margin_mode="cross",
+        total_wallet_balance=Decimal("1000"),
+        total_margin_balance=Decimal("1000"),
+        total_initial_margin=Decimal("0"),
+        total_maintenance_margin=Decimal("0"),
+        available_margin=Decimal("1000"),
         best_bid_price=Decimal("9999.9"),
         best_ask_price=Decimal("10000"),
-        account_equity=Decimal("1000"),
-        available_margin=Decimal("1000"),
-        netting_domain_position_qty=Decimal("0"),
-        netting_domain_open_order_count=0,
+        instrument_facts=(
+            AdmissionInstrumentFacts(
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                mark_price=Decimal("10000"),
+                configured_leverage=1,
+            ),
+        ),
+        positions=(),
+        open_orders=(),
         observed_at_ms=1_003,
         valid_until_ms=1_100,
     )

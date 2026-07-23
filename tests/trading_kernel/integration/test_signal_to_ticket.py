@@ -24,9 +24,12 @@ from src.trading_kernel.application.select_entry_candidate import (
     SelectEntryCandidateStatus,
     select_entry_candidate,
 )
-from src.trading_kernel.domain.capacity import ActionTimeFacts
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
-from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    EntryAdmissionSnapshot,
+    canonical_digest,
+)
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -143,7 +146,7 @@ async def test_signal_ingest_does_not_consume_action_time_capital_authority(
         await connection.execute(
             sa.update(owner_policy_current).values(
                 enabled=False,
-                real_submit_enabled=False,
+                new_entry_submit_enabled=False,
             )
         )
         await connection.execute(
@@ -303,7 +306,7 @@ async def test_expired_candidate_is_terminally_blocked(
             uow,
             IssueReadySignalRequest(
                 signal_event_id=signal.signal_event_id,
-                action_time_facts=_action_time_facts(signal.signal_event_id),
+                admission_snapshot=_admission_snapshot(),
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
                 schema_revision="0001_initial",
@@ -525,21 +528,28 @@ async def _insert_scope_facts(
         )
 
 
-def _action_time_facts(signal_event_id: str) -> ActionTimeFacts:
-    return ActionTimeFacts(
-        signal_event_id=signal_event_id,
-        runtime_scope_id="scope-sor-btc-long",
+def _admission_snapshot() -> EntryAdmissionSnapshot:
+    return EntryAdmissionSnapshot(
         venue_id="binance-usdm",
         account_id="subaccount-main",
-        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-        position_side="long",
-        account_position_mode="independent_sides",
+        position_mode="independent_sides",
+        margin_mode="cross",
+        total_wallet_balance=Decimal("1000"),
+        total_margin_balance=Decimal("1000"),
+        total_initial_margin=Decimal("0"),
+        total_maintenance_margin=Decimal("0"),
+        available_margin=Decimal("1000"),
         best_bid_price=Decimal("9999.9"),
         best_ask_price=Decimal("10000"),
-        account_equity=Decimal("1000"),
-        available_margin=Decimal("1000"),
-        netting_domain_position_qty=Decimal("0"),
-        netting_domain_open_order_count=0,
+        instrument_facts=(
+            AdmissionInstrumentFacts(
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                mark_price=Decimal("10000"),
+                configured_leverage=1,
+            ),
+        ),
+        positions=(),
+        open_orders=(),
         observed_at_ms=1_001,
         valid_until_ms=10_000,
     )

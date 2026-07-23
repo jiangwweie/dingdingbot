@@ -6,6 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 import json
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -40,12 +41,22 @@ class TradeTicket(BaseModel):
     runtime_scope_id: str
     runtime_scope_version: int
     fact_digest: str
+    capacity_claim_id: str
     created_at_ms: int
     expires_at_ms: int
     entry_reference_price: Decimal
     quantity: Decimal
     notional: Decimal
-    leverage: Decimal
+    planned_stop_risk_budget: Decimal
+    post_fill_stop_risk_limit: Decimal
+    selected_leverage: int
+    leverage_change_required: bool
+    reserved_margin: Decimal
+    risk_reservation_basis: str
+    margin_mode: Literal["cross"]
+    min_liquidation_distance_to_stop_distance_ratio: Decimal
+    projected_liquidation_price: Decimal
+    projected_liquidation_distance_to_stop_distance_ratio: Decimal
     risk_at_stop: Decimal
     entry_order_type: EntryOrderType
     entry_limit_price: Decimal | None = None
@@ -58,6 +69,8 @@ class TradeTicket(BaseModel):
         "owner_policy_id",
         "runtime_scope_id",
         "fact_digest",
+        "capacity_claim_id",
+        "risk_reservation_basis",
         mode="before",
     )
     @classmethod
@@ -76,9 +89,14 @@ class TradeTicket(BaseModel):
     @field_validator(
         "quantity",
         "notional",
-        "leverage",
+        "planned_stop_risk_budget",
+        "post_fill_stop_risk_limit",
+        "reserved_margin",
         "entry_reference_price",
         "initial_stop_price",
+        "min_liquidation_distance_to_stop_distance_ratio",
+        "projected_liquidation_price",
+        "projected_liquidation_distance_to_stop_distance_ratio",
     )
     @classmethod
     def _require_positive_decimal(cls, value: Decimal) -> Decimal:
@@ -91,6 +109,13 @@ class TradeTicket(BaseModel):
     def _require_nonnegative_risk(cls, value: Decimal) -> Decimal:
         if value < 0:
             raise ValueError("risk_at_stop must be nonnegative")
+        return value
+
+    @field_validator("selected_leverage")
+    @classmethod
+    def _require_positive_integer_leverage(cls, value: int) -> int:
+        if isinstance(value, bool) or value <= 0:
+            raise ValueError("selected leverage must be a positive integer")
         return value
 
     @field_validator("take_profit_prices")
@@ -126,6 +151,15 @@ class TradeTicket(BaseModel):
             raise ValueError("take-profit prices and quantities must align")
         if sum(self.take_profit_quantities, Decimal("0")) >= self.quantity:
             raise ValueError("take-profit quantities must preserve a runner position")
+        if self.risk_at_stop > self.planned_stop_risk_budget:
+            raise ValueError("Ticket stop risk cannot exceed planned risk budget")
+        if self.post_fill_stop_risk_limit < self.planned_stop_risk_budget:
+            raise ValueError("Ticket post-fill stop risk limit cannot undercut plan")
+        if (
+            self.projected_liquidation_distance_to_stop_distance_ratio
+            < self.min_liquidation_distance_to_stop_distance_ratio
+        ):
+            raise ValueError("Ticket liquidation proof is below the required ratio")
         return self
 
     def decision_digest(self) -> str:

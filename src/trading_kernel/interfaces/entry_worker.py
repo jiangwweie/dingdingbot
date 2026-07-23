@@ -19,8 +19,8 @@ from src.trading_kernel.application.issue_ready_signal import (
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus
 from src.trading_kernel.application.ports import UnitOfWorkFactory, VenuePort
 from src.trading_kernel.application.runtime_facts import (
-    ActionTimeFactsRequest,
     EntryFactsSource,
+    EntryAdmissionSnapshotRequest,
     InstrumentRulesRequest,
 )
 from src.trading_kernel.application.select_entry_candidate import (
@@ -49,7 +49,7 @@ class EntryWorkerRequest(BaseModel):
     now_ms: int
     lease_until_ms: int
     timeout_seconds: float
-    action_fact_validity_ms: int
+    admission_snapshot_validity_ms: int
 
     @field_validator(
         "worker_id",
@@ -68,7 +68,7 @@ class EntryWorkerRequest(BaseModel):
     def _validate_window(self) -> "EntryWorkerRequest":
         if self.now_ms <= 0 or self.lease_until_ms <= self.now_ms:
             raise ValueError("ENTRY worker lease must end after its tick")
-        if self.timeout_seconds <= 0 or self.action_fact_validity_ms <= 0:
+        if self.timeout_seconds <= 0 or self.admission_snapshot_validity_ms <= 0:
             raise ValueError("ENTRY worker timeouts must be positive")
         return self
 
@@ -132,27 +132,24 @@ async def run_entry_worker_once(
             )
             return EntryWorkerResult(status=EntryWorkerStatus.ISSUE_REFUSED)
 
-    facts_request = ActionTimeFactsRequest(
-        signal_event_id=signal.signal_event_id,
-        runtime_scope_id=signal.runtime_scope_id,
+    snapshot_request = EntryAdmissionSnapshotRequest(
         venue_id=profile.venue_id,
         account_id=profile.account_id,
         exchange_instrument_id=signal.exchange_instrument_id,
-        position_side=signal.position_side,
         observed_at_ms=request.now_ms,
-        valid_for_ms=request.action_fact_validity_ms,
+        valid_for_ms=request.admission_snapshot_validity_ms,
     )
     rules_request = InstrumentRulesRequest(
         venue_id=profile.venue_id,
         account_id=profile.account_id,
         exchange_instrument_id=signal.exchange_instrument_id,
         observed_at_ms=request.now_ms,
-        valid_for_ms=request.action_fact_validity_ms,
+        valid_for_ms=request.admission_snapshot_validity_ms,
     )
     try:
-        action_facts, instrument_rules = await asyncio.wait_for(
+        admission_snapshot, instrument_rules = await asyncio.wait_for(
             asyncio.gather(
-                facts_source.read_action_time_facts(facts_request),
+                facts_source.read_entry_admission_snapshot(snapshot_request),
                 facts_source.read_instrument_rules(rules_request),
             ),
             timeout=request.timeout_seconds,
@@ -189,7 +186,7 @@ async def run_entry_worker_once(
             uow,
             IssueReadySignalRequest(
                 signal_event_id=signal.signal_event_id,
-                action_time_facts=action_facts,
+                admission_snapshot=admission_snapshot,
                 claim_owner=request.worker_id,
                 runtime_commit=request.runtime_commit,
                 schema_revision=request.schema_revision,

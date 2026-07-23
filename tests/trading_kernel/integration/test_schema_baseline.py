@@ -225,6 +225,30 @@ def test_ticket_schema_freezes_runtime_scope_identity_and_version() -> None:
     assert "take_profit_quantities" in tickets.c
 
 
+def test_dynamic_claim_and_incident_storage_enforce_typed_safety_boundaries() -> None:
+    claims = metadata.tables["brc_capacity_claims"]
+    incidents = metadata.tables["brc_runtime_incidents"]
+    claim_checks = {
+        str(constraint.sqltext)
+        for constraint in claims.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+    incident_checks = {
+        str(constraint.sqltext)
+        for constraint in incidents.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+
+    assert {
+        "selected_leverage <= exchange_max_leverage",
+        "risk_at_stop <= planned_stop_risk_budget",
+        "post_fill_stop_risk_limit >= planned_stop_risk_budget",
+    }.issubset(claim_checks)
+    assert {"entry_block_scope", "entry_block_key"}.issubset(incidents.c.keys())
+    assert any("entry_block_scope IN" in check for check in incident_checks)
+    assert any("entry_block_key" in check for check in incident_checks)
+
+
 def test_exit_policy_registry_and_capacity_claim_freeze_runner_split() -> None:
     policies = metadata.tables["brc_exit_policies"]
     claims = metadata.tables["brc_capacity_claims"]

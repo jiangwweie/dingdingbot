@@ -7,7 +7,6 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from src.trading_kernel.domain.capacity import ActionTimeFacts
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.identities import NettingDomain
@@ -16,47 +15,6 @@ from src.trading_kernel.domain.review import ReviewEconomicsFacts
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
-
-
-class ActionTimeFactsRequest(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    signal_event_id: str
-    runtime_scope_id: str
-    venue_id: str
-    account_id: str
-    exchange_instrument_id: str
-    position_side: Literal["long", "short"]
-    observed_at_ms: int
-    valid_for_ms: int
-
-    @field_validator(
-        "signal_event_id",
-        "runtime_scope_id",
-        "venue_id",
-        "account_id",
-        "exchange_instrument_id",
-        mode="before",
-    )
-    @classmethod
-    def _require_identity(cls, value: object) -> str:
-        normalized = str(value or "").strip()
-        if not normalized:
-            raise ValueError("action-time fact request identities must be non-blank")
-        return normalized
-
-    @model_validator(mode="after")
-    def _validate_window(self) -> "ActionTimeFactsRequest":
-        if self.observed_at_ms <= 0 or self.valid_for_ms <= 0:
-            raise ValueError("action-time fact request window must be positive")
-        return self
-
-
-class ActionTimeFactsSource(Protocol):
-    async def read_action_time_facts(
-        self,
-        request: ActionTimeFactsRequest,
-    ) -> ActionTimeFacts: ...
 
 
 class EntryAdmissionSnapshotRequest(BaseModel):
@@ -194,7 +152,6 @@ class InstrumentRulesSource(Protocol):
 
 class EntryFactsSource(
     EntryAdmissionFactsSource,
-    ActionTimeFactsSource,
     InstrumentRulesSource,
     Protocol,
 ):

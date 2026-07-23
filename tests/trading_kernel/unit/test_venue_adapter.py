@@ -6,7 +6,6 @@ import pytest
 
 from src.trading_kernel.application.ports import VenueCommandRequest, VenueTruthRequest
 from src.trading_kernel.application.runtime_facts import (
-    ActionTimeFactsRequest,
     EntryAdmissionSnapshotRequest,
     InstrumentRulesRequest,
     LifecycleFactsRequest,
@@ -497,87 +496,6 @@ async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> N
             "positionSide": "LONG",
         },
     )
-
-
-@pytest.mark.asyncio
-async def test_ccxt_adapter_builds_exact_hedge_side_action_time_facts() -> None:
-    adapter = CcxtVenueAdapter(
-        exchanges={
-            ("binance-usdm", "experiment-1"): ActionFactsExchange()
-        },
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
-        settlement_assets={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "USDT"
-        },
-        clock_ms=lambda: 2_000,
-    )
-
-    facts = await adapter.read_action_time_facts(
-        ActionTimeFactsRequest(
-            signal_event_id="signal-1",
-            runtime_scope_id="scope-1",
-            venue_id="binance-usdm",
-            account_id="experiment-1",
-            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-            position_side="long",
-            observed_at_ms=2_000,
-            valid_for_ms=5_000,
-        )
-    )
-
-    assert facts.account_position_mode == "independent_sides"
-    assert facts.best_bid_price == Decimal("59999.9")
-    assert facts.best_ask_price == Decimal("60000.1")
-    assert facts.account_equity == Decimal("1200")
-    assert facts.available_margin == Decimal("800")
-    assert facts.netting_domain_position_qty == Decimal("0.01")
-    assert facts.netting_domain_open_order_count == 2
-    assert facts.valid_until_ms == 7_000
-
-
-@pytest.mark.asyncio
-async def test_ccxt_adapter_reports_actual_one_way_account_mode() -> None:
-    adapter = CcxtVenueAdapter(
-        exchanges={
-            ("binance-usdm", "experiment-1"): OneWayActionFactsExchange()
-        },
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
-        settlement_assets={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "USDT"
-        },
-        clock_ms=lambda: 2_000,
-    )
-
-    facts = await adapter.read_action_time_facts(
-        ActionTimeFactsRequest(
-            signal_event_id="signal-1",
-            runtime_scope_id="scope-1",
-            venue_id="binance-usdm",
-            account_id="experiment-1",
-            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-            position_side="long",
-            observed_at_ms=2_000,
-            valid_for_ms=5_000,
-        )
-    )
-
-    assert facts.account_position_mode == "one_way"
 
 
 @pytest.mark.asyncio

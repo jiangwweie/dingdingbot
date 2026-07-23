@@ -23,6 +23,8 @@ from src.trading_kernel.application.ports import (
     TradeReviewRecord,
 )
 from src.trading_kernel.domain.capacity import CapacityClaim
+from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
+from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     CommandPayload,
@@ -1105,6 +1107,116 @@ class PostgresEntryAdmissionRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def read_admission_ownership(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+        exchange_instrument_id: str,
+    ) -> AdmissionOwnership:
+        """Load only current BRC ownership relevant to one admission snapshot."""
+
+        active_ticket = sa.and_(
+            trade_tickets.c.venue_id == venue_id,
+            trade_tickets.c.account_id == account_id,
+            trade_tickets.c.active_netting_domain_key.is_not(None),
+        )
+        domains_result = await self._connection.execute(
+            sa.select(trade_tickets.c.active_netting_domain_key)
+            .where(active_ticket)
+            .order_by(trade_tickets.c.active_netting_domain_key)
+        )
+        owned_position_domain_keys = tuple(
+            str(value)
+            for value in domains_result.scalars().all()
+            if value is not None
+        )
+
+        order_id_columns = (
+            trade_aggregates.c.entry_exchange_order_id,
+            trade_aggregates.c.initial_stop_exchange_order_id,
+            trade_aggregates.c.active_stop_exchange_order_id,
+            trade_aggregates.c.tp1_exchange_order_id,
+            trade_aggregates.c.pending_replaced_stop_exchange_order_id,
+            trade_aggregates.c.pending_cancel_exchange_order_id,
+            trade_aggregates.c.exit_exchange_order_id,
+        )
+        order_rows = await self._connection.execute(
+            sa.select(*order_id_columns)
+            .select_from(
+                trade_aggregates.join(
+                    trade_tickets,
+                    trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
+                )
+            )
+            .where(active_ticket)
+        )
+        owned_exchange_order_ids = tuple(
+            sorted(
+                {
+                    str(value)
+                    for row in order_rows.mappings()
+                    for value in row.values()
+                    if value is not None and str(value).strip()
+                }
+            )
+        )
+
+        unknown_result = await self._connection.execute(
+            sa.select(exchange_commands.c.ticket_id)
+            .select_from(
+                exchange_commands.join(
+                    trade_tickets,
+                    trade_tickets.c.ticket_id == exchange_commands.c.ticket_id,
+                )
+            )
+            .where(
+                active_ticket,
+                exchange_commands.c.status
+                == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
+            )
+            .distinct()
+            .order_by(exchange_commands.c.ticket_id)
+        )
+        unknown_command_outcome_ticket_ids = tuple(
+            str(value) for value in unknown_result.scalars().all()
+        )
+
+        account_key = f"{venue_id}:{account_id}"
+        leverage_key = f"{account_key}:{exchange_instrument_id}"
+        incident_result = await self._connection.execute(
+            sa.select(runtime_incidents.c.entry_block_scope)
+            .where(
+                runtime_incidents.c.status == "open",
+                sa.or_(
+                    runtime_incidents.c.entry_block_scope
+                    == EntryBlockScope.RUNTIME.value,
+                    sa.and_(
+                        runtime_incidents.c.entry_block_scope
+                        == EntryBlockScope.ACCOUNT_CAPACITY.value,
+                        runtime_incidents.c.entry_block_key == account_key,
+                    ),
+                    sa.and_(
+                        runtime_incidents.c.entry_block_scope
+                        == EntryBlockScope.LEVERAGE_DOMAIN.value,
+                        runtime_incidents.c.entry_block_key == leverage_key,
+                    ),
+                ),
+            )
+            .distinct()
+            .order_by(runtime_incidents.c.entry_block_scope)
+        )
+        open_incident_scopes = tuple(
+            EntryBlockScope(str(value))
+            for value in incident_result.scalars().all()
+        )
+        return AdmissionOwnership(
+            owned_position_domain_keys=owned_position_domain_keys,
+            owned_exchange_order_ids=owned_exchange_order_ids,
+            open_incident_scopes=open_incident_scopes,
+            unknown_command_outcome_ticket_ids=unknown_command_outcome_ticket_ids,
+        )
+
     async def get_account_exposure(
         self,
         venue_id: str,
@@ -1281,7 +1393,21 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
         "entry_reference_price": ticket.entry_reference_price,
         "quantity": ticket.quantity,
         "notional": ticket.notional,
-        "leverage": ticket.leverage,
+        "capacity_claim_id": ticket.capacity_claim_id,
+        "planned_stop_risk_budget": ticket.planned_stop_risk_budget,
+        "post_fill_stop_risk_limit": ticket.post_fill_stop_risk_limit,
+        "selected_leverage": ticket.selected_leverage,
+        "leverage_change_required": ticket.leverage_change_required,
+        "reserved_margin": ticket.reserved_margin,
+        "risk_reservation_basis": ticket.risk_reservation_basis,
+        "margin_mode": ticket.margin_mode,
+        "min_liquidation_distance_to_stop_distance_ratio": (
+            ticket.min_liquidation_distance_to_stop_distance_ratio
+        ),
+        "projected_liquidation_price": ticket.projected_liquidation_price,
+        "projected_liquidation_distance_to_stop_distance_ratio": (
+            ticket.projected_liquidation_distance_to_stop_distance_ratio
+        ),
         "risk_at_stop": ticket.risk_at_stop,
         "entry_order_type": ticket.entry_order_type.value,
         "entry_limit_price": ticket.entry_limit_price,
@@ -1326,12 +1452,26 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         runtime_scope_id=str(row["runtime_scope_id"]),
         runtime_scope_version=int(row["runtime_scope_version"]),
         fact_digest=str(row["fact_digest"]),
+        capacity_claim_id=str(row["capacity_claim_id"]),
         created_at_ms=int(row["created_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),
         entry_reference_price=Decimal(row["entry_reference_price"]),
         quantity=Decimal(row["quantity"]),
         notional=Decimal(row["notional"]),
-        leverage=Decimal(row["leverage"]),
+        planned_stop_risk_budget=Decimal(row["planned_stop_risk_budget"]),
+        post_fill_stop_risk_limit=Decimal(row["post_fill_stop_risk_limit"]),
+        selected_leverage=int(row["selected_leverage"]),
+        leverage_change_required=bool(row["leverage_change_required"]),
+        reserved_margin=Decimal(row["reserved_margin"]),
+        risk_reservation_basis=str(row["risk_reservation_basis"]),
+        margin_mode=str(row["margin_mode"]),
+        min_liquidation_distance_to_stop_distance_ratio=Decimal(
+            row["min_liquidation_distance_to_stop_distance_ratio"]
+        ),
+        projected_liquidation_price=Decimal(row["projected_liquidation_price"]),
+        projected_liquidation_distance_to_stop_distance_ratio=Decimal(
+            row["projected_liquidation_distance_to_stop_distance_ratio"]
+        ),
         risk_at_stop=Decimal(row["risk_at_stop"]),
         entry_order_type=EntryOrderType(str(row["entry_order_type"])),
         entry_limit_price=(
@@ -1371,14 +1511,50 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "position_side": identity.netting_domain.position_side,
         "netting_domain_key": identity.netting_domain.key(),
         "fact_digest": claim.fact_digest,
-        "action_facts_digest": claim.action_facts_digest,
+        "entry_admission_snapshot_digest": claim.entry_admission_snapshot_digest,
+        "account_entry_health_digest": claim.account_entry_health_digest,
+        "instrument_entry_health_digest": claim.instrument_entry_health_digest,
         "instrument_rules_projection_version": (
             claim.instrument_rules_projection_version
+        ),
+        "account_capacity_domain_key": claim.account_capacity_domain_key,
+        "leverage_domain_key": claim.leverage_domain_key,
+        "total_wallet_balance_at_claim": claim.total_wallet_balance_at_claim,
+        "total_margin_balance_at_claim": claim.total_margin_balance_at_claim,
+        "total_initial_margin_at_claim": claim.total_initial_margin_at_claim,
+        "total_maintenance_margin_at_claim": claim.total_maintenance_margin_at_claim,
+        "available_margin_at_claim": claim.available_margin_at_claim,
+        "mark_price_at_claim": claim.mark_price_at_claim,
+        "position_mode_at_claim": claim.position_mode_at_claim,
+        "margin_mode_at_claim": claim.margin_mode_at_claim,
+        "active_ticket_count_at_claim": claim.active_ticket_count_at_claim,
+        "remaining_slots_at_claim": claim.remaining_slots_at_claim,
+        "planned_stop_risk_fraction": claim.planned_stop_risk_fraction,
+        "planned_stop_risk_budget": claim.planned_stop_risk_budget,
+        "max_post_fill_stop_risk_overrun_fraction": (
+            claim.max_post_fill_stop_risk_overrun_fraction
+        ),
+        "post_fill_stop_risk_limit": claim.post_fill_stop_risk_limit,
+        "max_initial_margin_utilization": claim.max_initial_margin_utilization,
+        "min_liquidation_distance_to_stop_distance_ratio": (
+            claim.min_liquidation_distance_to_stop_distance_ratio
+        ),
+        "ticket_margin_budget": claim.ticket_margin_budget,
+        "required_leverage": claim.required_leverage,
+        "selected_leverage": claim.selected_leverage,
+        "configured_leverage_at_claim": claim.configured_leverage_at_claim,
+        "leverage_change_required": claim.leverage_change_required,
+        "exchange_max_leverage": claim.exchange_max_leverage,
+        "reserved_margin": claim.reserved_margin,
+        "maintenance_margin_bracket_id": claim.maintenance_margin_bracket_id,
+        "projected_liquidation_price": claim.projected_liquidation_price,
+        "projected_liquidation_distance": claim.projected_liquidation_distance,
+        "projected_liquidation_distance_to_stop_distance_ratio": (
+            claim.projected_liquidation_distance_to_stop_distance_ratio
         ),
         "entry_reference_price": claim.entry_reference_price,
         "quantity": claim.quantity,
         "notional": claim.notional,
-        "leverage": claim.leverage,
         "risk_at_stop": claim.risk_at_stop,
         "entry_order_type": claim.entry_order_type.value,
         "entry_limit_price": claim.entry_limit_price,
@@ -1420,16 +1596,56 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         runtime_scope_id=str(row["runtime_scope_id"]),
         runtime_scope_version=int(row["runtime_scope_version"]),
         fact_digest=str(row["fact_digest"]),
-        action_facts_digest=str(row["action_facts_digest"]),
+        entry_admission_snapshot_digest=str(row["entry_admission_snapshot_digest"]),
+        account_entry_health_digest=str(row["account_entry_health_digest"]),
+        instrument_entry_health_digest=str(row["instrument_entry_health_digest"]),
         instrument_rules_projection_version=int(
             row["instrument_rules_projection_version"]
+        ),
+        account_capacity_domain_key=str(row["account_capacity_domain_key"]),
+        leverage_domain_key=str(row["leverage_domain_key"]),
+        total_wallet_balance_at_claim=Decimal(row["total_wallet_balance_at_claim"]),
+        total_margin_balance_at_claim=Decimal(row["total_margin_balance_at_claim"]),
+        total_initial_margin_at_claim=Decimal(row["total_initial_margin_at_claim"]),
+        total_maintenance_margin_at_claim=Decimal(
+            row["total_maintenance_margin_at_claim"]
+        ),
+        available_margin_at_claim=Decimal(row["available_margin_at_claim"]),
+        mark_price_at_claim=Decimal(row["mark_price_at_claim"]),
+        position_mode_at_claim=str(row["position_mode_at_claim"]),
+        margin_mode_at_claim=str(row["margin_mode_at_claim"]),
+        active_ticket_count_at_claim=int(row["active_ticket_count_at_claim"]),
+        remaining_slots_at_claim=int(row["remaining_slots_at_claim"]),
+        planned_stop_risk_fraction=Decimal(row["planned_stop_risk_fraction"]),
+        planned_stop_risk_budget=Decimal(row["planned_stop_risk_budget"]),
+        max_post_fill_stop_risk_overrun_fraction=Decimal(
+            row["max_post_fill_stop_risk_overrun_fraction"]
+        ),
+        post_fill_stop_risk_limit=Decimal(row["post_fill_stop_risk_limit"]),
+        max_initial_margin_utilization=Decimal(
+            row["max_initial_margin_utilization"]
+        ),
+        min_liquidation_distance_to_stop_distance_ratio=Decimal(
+            row["min_liquidation_distance_to_stop_distance_ratio"]
+        ),
+        ticket_margin_budget=Decimal(row["ticket_margin_budget"]),
+        required_leverage=int(row["required_leverage"]),
+        selected_leverage=int(row["selected_leverage"]),
+        configured_leverage_at_claim=int(row["configured_leverage_at_claim"]),
+        leverage_change_required=bool(row["leverage_change_required"]),
+        exchange_max_leverage=int(row["exchange_max_leverage"]),
+        reserved_margin=Decimal(row["reserved_margin"]),
+        maintenance_margin_bracket_id=str(row["maintenance_margin_bracket_id"]),
+        projected_liquidation_price=Decimal(row["projected_liquidation_price"]),
+        projected_liquidation_distance=Decimal(row["projected_liquidation_distance"]),
+        projected_liquidation_distance_to_stop_distance_ratio=Decimal(
+            row["projected_liquidation_distance_to_stop_distance_ratio"]
         ),
         created_at_ms=int(row["created_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),
         entry_reference_price=Decimal(row["entry_reference_price"]),
         quantity=Decimal(row["quantity"]),
         notional=Decimal(row["notional"]),
-        leverage=Decimal(row["leverage"]),
         risk_at_stop=Decimal(row["risk_at_stop"]),
         entry_order_type=EntryOrderType(str(row["entry_order_type"])),
         entry_limit_price=(

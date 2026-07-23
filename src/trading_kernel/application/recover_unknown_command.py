@@ -40,6 +40,10 @@ from src.trading_kernel.domain.events import (
     TakeProfitConfirmed,
     TradeEvent,
 )
+from src.trading_kernel.domain.incident_blocking import (
+    EntryBlockScope,
+    canonical_entry_block_key,
+)
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.venue_truth import (
     UnknownRecoveryDecision,
@@ -162,6 +166,12 @@ async def recover_unknown_command(
                     incident_kind="venue_identity_contradiction",
                     status="open",
                     first_blocker="hard_safety_stop",
+                    entry_block_scope=EntryBlockScope.ACCOUNT_CAPACITY,
+                    entry_block_key=canonical_entry_block_key(
+                        EntryBlockScope.ACCOUNT_CAPACITY,
+                        venue_id=aggregate.identity.netting_domain.venue_id,
+                        account_id=aggregate.identity.netting_domain.account_id,
+                    ),
                     details={
                         "command_id": current_command.command_id,
                         "reason": str(decision.reason),

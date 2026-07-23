@@ -7,12 +7,14 @@ from enum import StrEnum
 from types import TracebackType
 from typing import Callable, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, JsonValue, model_validator
 
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
+from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
@@ -46,9 +48,13 @@ class BudgetReservationRecord(BaseModel):
     budget_reservation_id: str
     ticket_id: str
     owner_policy_id: str
+    venue_id: str
     account_id: str
     reserved_notional: Decimal
     reserved_risk: Decimal
+    reserved_margin: Decimal
+    planned_stop_risk_budget: Decimal
+    risk_reservation_basis: str
     status: str
     created_at_ms: int
     released_at_ms: int | None = None
@@ -62,9 +68,25 @@ class RuntimeIncidentRecord(BaseModel):
     incident_kind: str
     status: str
     first_blocker: str
+    entry_block_scope: EntryBlockScope
+    entry_block_key: str | None
     details: dict[str, JsonValue]
     opened_at_ms: int
     resolved_at_ms: int | None = None
+
+    @model_validator(mode="after")
+    def _validate_entry_block_identity(self) -> "RuntimeIncidentRecord":
+        if self.entry_block_scope is EntryBlockScope.NONE:
+            if self.entry_block_key is not None:
+                raise ValueError("non-blocking Incident must not carry a block key")
+            return self
+        if self.entry_block_scope is EntryBlockScope.RUNTIME:
+            if self.entry_block_key != "global":
+                raise ValueError("runtime Incident must use the global block key")
+            return self
+        if not self.entry_block_key:
+            raise ValueError("scoped Incident requires a canonical block key")
+        return self
 
 
 class TradeReviewRecord(BaseModel):
@@ -478,6 +500,14 @@ class EntryAdmissionRepository(Protocol):
     async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool: ...
 
     async def has_ticket_for_signal(self, signal_event_id: str) -> bool: ...
+
+    async def read_admission_ownership(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+        exchange_instrument_id: str,
+    ) -> AdmissionOwnership: ...
 
     async def get_account_exposure(
         self,

@@ -12,7 +12,6 @@ from pydantic import JsonValue
 
 from src.trading_kernel.application.ports import VenueCommandRequest, VenueTruthRequest
 from src.trading_kernel.application.runtime_facts import (
-    ActionTimeFactsRequest,
     EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
     InstrumentRulesRequest,
@@ -23,7 +22,6 @@ from src.trading_kernel.application.runtime_facts import (
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
-from src.trading_kernel.domain.capacity import ActionTimeFacts
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionInstrumentFacts,
@@ -155,92 +153,6 @@ class CcxtVenueAdapter:
             close = getattr(exchange, "close", None)
             if callable(close):
                 await _call_raw_exchange(close)
-
-    async def read_action_time_facts(
-        self,
-        request: ActionTimeFactsRequest,
-    ) -> ActionTimeFacts:
-        exchange, symbol = self._resolve_exchange_and_symbol(
-            venue_id=request.venue_id,
-            account_id=request.account_id,
-            exchange_instrument_id=request.exchange_instrument_id,
-        )
-        settlement_asset = self._settlement_assets.get(
-            (request.venue_id, request.exchange_instrument_id)
-        )
-        if not settlement_asset:
-            raise RuntimeError("canonical instrument has no settlement asset mapping")
-
-        order_book, balance, mode, positions, regular_orders, conditional_orders = (
-            await asyncio.gather(
-                _call_raw_exchange(exchange.fetch_order_book, symbol, 5),
-                _call_raw_exchange(exchange.fetch_balance, {"type": "future"}),
-                _call_raw_exchange(exchange.fetch_position_mode, symbol, {}),
-                _call_raw_exchange(
-                    exchange.fetch_positions,
-                    [symbol],
-                    {"positionSide": request.position_side.upper()},
-                ),
-                _call_raw_exchange(
-                    exchange.fetch_open_orders,
-                    symbol,
-                    None,
-                    100,
-                    {"conditional": False},
-                ),
-                _call_raw_exchange(
-                    exchange.fetch_open_orders,
-                    symbol,
-                    None,
-                    100,
-                    {"conditional": True},
-                ),
-            )
-        )
-        order_book_mapping = _require_mapping(order_book, name="order book")
-        balance_mapping = _require_mapping(balance, name="balance")
-        mode_mapping = _require_mapping(mode, name="position mode")
-        position_rows = _require_list(positions, name="positions")
-        regular_rows = _require_list(regular_orders, name="regular open orders")
-        conditional_rows = _require_list(
-            conditional_orders,
-            name="conditional open orders",
-        )
-        return ActionTimeFacts(
-            signal_event_id=request.signal_event_id,
-            runtime_scope_id=request.runtime_scope_id,
-            venue_id=request.venue_id,
-            account_id=request.account_id,
-            exchange_instrument_id=request.exchange_instrument_id,
-            position_side=request.position_side,
-            account_position_mode=_account_position_mode(mode_mapping),
-            best_bid_price=_top_of_book_price(order_book_mapping, "bids"),
-            best_ask_price=_top_of_book_price(order_book_mapping, "asks"),
-            account_equity=_balance_decimal(
-                balance_mapping,
-                bucket="total",
-                asset=settlement_asset,
-                fallback_info_key="totalWalletBalance",
-            ),
-            available_margin=_balance_decimal(
-                balance_mapping,
-                bucket="free",
-                asset=settlement_asset,
-                fallback_info_key="availableBalance",
-            ),
-            netting_domain_position_qty=_position_quantity(
-                position_rows,
-                expected_symbol=symbol,
-                position_side=request.position_side,
-            ),
-            netting_domain_open_order_count=_open_order_count(
-                (*regular_rows, *conditional_rows),
-                expected_symbol=symbol,
-                position_side=request.position_side,
-            ),
-            observed_at_ms=request.observed_at_ms,
-            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
-        )
 
     async def read_entry_admission_snapshot(
         self,

@@ -71,7 +71,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--now-ms", type=int)
     parser.add_argument("--lease-ms", type=int, default=30_000)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
-    parser.add_argument("--action-fact-validity-ms", type=int, default=5_000)
+    parser.add_argument("--admission-snapshot-validity-ms", type=int, default=5_000)
     parser.add_argument("--idle-poll-interval-ms", type=int, default=2_000)
     parser.add_argument("--run-forever", action="store_true")
     parser.add_argument("--poll-interval-ms", type=int, default=2_000)
@@ -109,9 +109,9 @@ async def _run(args: argparse.Namespace) -> int:
     try:
         role = cast(WorkerRole, args.worker_role)
         if role == "entry" and not callable(
-            getattr(adapter, "read_action_time_facts", None)
+            getattr(adapter, "read_entry_admission_snapshot", None)
         ):
-            raise TypeError("ENTRY venue factory must provide ActionTimeFactsSource")
+            raise TypeError("ENTRY venue factory must provide EntryAdmissionFactsSource")
         if role == "entry" and not callable(
             getattr(adapter, "read_instrument_rules", None)
         ):
@@ -137,7 +137,9 @@ async def _run(args: argparse.Namespace) -> int:
                         now_ms=now_ms,
                         lease_until_ms=now_ms + args.lease_ms,
                         timeout_seconds=args.timeout_seconds,
-                        action_fact_validity_ms=args.action_fact_validity_ms,
+                        admission_snapshot_validity_ms=(
+                            args.admission_snapshot_validity_ms
+                        ),
                     ),
                 )
             return await run_lifecycle_worker_once(

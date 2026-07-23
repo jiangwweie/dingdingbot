@@ -534,6 +534,7 @@ async def test_authoritative_entry_rejection_releases_lane_and_budget_without_re
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
         lane = await uow.entry_admission.get_global_lane()
         exposure = await uow.entry_admission.get_account_exposure(
+            ticket.identity.netting_domain.venue_id,
             ticket.identity.netting_domain.account_id
         )
         persisted_ticket = await uow.tickets.get(ticket.identity.ticket_id)
@@ -1086,10 +1087,15 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 owner_policy_id="policy-main",
                 policy_version=7,
                 enabled=True,
-                real_submit_enabled=True,
-                max_concurrent_tickets=2,
-                max_gross_notional="1000",
-                target_leverage="5",
+                new_entry_submit_enabled=True,
+                priority_rank=1,
+                max_concurrent_tickets=3,
+                planned_stop_risk_fraction="0.03",
+                max_initial_margin_utilization="0.90",
+                max_leverage=10,
+                supported_margin_mode="cross",
+                min_liquidation_distance_to_stop_distance_ratio="2.0",
+                max_post_fill_stop_risk_overrun_fraction="0.10",
                 scope={},
                 updated_at_ms=1_000,
             )

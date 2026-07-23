@@ -54,6 +54,10 @@ from src.trading_kernel.domain.effects import (
     SettleBudget,
 )
 from src.trading_kernel.domain.events import TicketIssued, TradeEvent
+from src.trading_kernel.domain.incident_blocking import (
+    EntryBlockScope,
+    canonical_entry_block_key,
+)
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import EntryOrderType
 from src.trading_kernel.infrastructure.pg_repositories import (
@@ -339,6 +343,7 @@ class PostgresKernelUnitOfWork:
                     released_at_ms=event.occurred_at_ms,
                 )
                 await self.entry_admission.release_account_exposure(
+                    venue_id=aggregate.ticket.identity.netting_domain.venue_id,
                     account_id=aggregate.ticket.identity.netting_domain.account_id,
                     notional=aggregate.ticket.notional,
                     risk_at_stop=aggregate.ticket.risk_at_stop,
@@ -351,6 +356,9 @@ class PostgresKernelUnitOfWork:
                 )
                 continue
             if isinstance(effect, OpenIncident):
+                entry_block_scope = _incident_entry_block_scope(
+                    effect.incident_kind
+                )
                 await self.incidents.add(
                     RuntimeIncidentRecord(
                         incident_id=(
@@ -361,6 +369,15 @@ class PostgresKernelUnitOfWork:
                         incident_kind=effect.incident_kind,
                         status="open",
                         first_blocker=effect.incident_kind,
+                        entry_block_scope=entry_block_scope,
+                        entry_block_key=canonical_entry_block_key(
+                            entry_block_scope,
+                            venue_id=aggregate.ticket.identity.netting_domain.venue_id,
+                            account_id=aggregate.ticket.identity.netting_domain.account_id,
+                            exchange_instrument_id=(
+                                aggregate.ticket.identity.netting_domain.exchange_instrument_id
+                            ),
+                        ),
                         details={"event_id": event.event_id},
                         opened_at_ms=event.occurred_at_ms,
                     )
@@ -386,6 +403,7 @@ class PostgresKernelUnitOfWork:
                     released_at_ms=event.occurred_at_ms,
                 )
                 await self.entry_admission.release_account_exposure(
+                    venue_id=aggregate.ticket.identity.netting_domain.venue_id,
                     account_id=aggregate.ticket.identity.netting_domain.account_id,
                     notional=aggregate.ticket.notional,
                     risk_at_stop=aggregate.ticket.risk_at_stop,
@@ -650,6 +668,14 @@ def _order_command(
 
 def _closing_side(aggregate) -> Literal["buy", "sell"]:
     return "sell" if aggregate.identity.netting_domain.position_side == "long" else "buy"
+
+
+def _incident_entry_block_scope(incident_kind: str) -> EntryBlockScope:
+    """Classify reducer safety failures without relying on free-form storage."""
+
+    if incident_kind == "external_flat":
+        return EntryBlockScope.NONE
+    return EntryBlockScope.ACCOUNT_CAPACITY
 
 
 def _event_ticket_id(event: TradeEvent) -> str:

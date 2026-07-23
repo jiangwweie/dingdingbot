@@ -19,7 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.trading_kernel.application.runtime_facts import (  # noqa: E402
-    ActionTimeFactsRequest,
+    EntryAdmissionSnapshotRequest,
     EntryFactsSource,
     InstrumentRulesRequest,
 )
@@ -52,7 +52,7 @@ class ProductionRuntimeProbe(BaseModel):
     netting_domain_count: int
     non_flat_domain_count: int
     open_order_domain_count: int
-    account_equity: Decimal
+    total_wallet_balance: Decimal
     available_margin: Decimal
     rules: tuple[InstrumentRuleProbe, ...]
     observed_at_ms: int
@@ -79,8 +79,7 @@ async def probe_production_runtime(
     netting_domain_count = 0
     non_flat_domain_count = 0
     open_order_domain_count = 0
-    account_equity: Decimal | None = None
-    available_margin: Decimal | None = None
+    admission_snapshot = None
 
     for exchange_instrument_id in canonical_binance_usdm_instruments():
         rules = await adapter.read_instrument_rules(
@@ -103,54 +102,41 @@ async def probe_production_runtime(
             )
         )
 
-        for position_side in ("long", "short"):
-            facts = await adapter.read_action_time_facts(
-                ActionTimeFactsRequest(
-                    signal_event_id=(
-                        f"readonly-probe:{exchange_instrument_id}:{position_side}"
-                    ),
-                    runtime_scope_id=(
-                        f"readonly-probe:{exchange_instrument_id}:{position_side}"
-                    ),
+        if admission_snapshot is None:
+            admission_snapshot = await adapter.read_entry_admission_snapshot(
+                EntryAdmissionSnapshotRequest(
                     venue_id=settings.venue_id,
                     account_id=settings.account_id,
                     exchange_instrument_id=exchange_instrument_id,
-                    position_side=position_side,
                     observed_at_ms=now_ms,
                     valid_for_ms=validity_ms,
                 )
             )
-            if facts.account_position_mode != settings.account_position_mode:
+            if admission_snapshot.position_mode != settings.account_position_mode:
                 raise RuntimeError("production account position mode differs from config")
-            account_equity = (
-                facts.account_equity
-                if account_equity is None
-                else min(account_equity, facts.account_equity)
-            )
-            available_margin = (
-                facts.available_margin
-                if available_margin is None
-                else min(available_margin, facts.available_margin)
-            )
-            netting_domain_count += 1
-            if facts.netting_domain_position_qty != 0:
-                non_flat_domain_count += 1
-            if facts.netting_domain_open_order_count != 0:
-                open_order_domain_count += 1
-
-    if account_equity is None or available_margin is None:
+    if admission_snapshot is None:
         raise RuntimeError("production probe did not inspect any Netting Domain")
+    netting_domain_count = len(canonical_binance_usdm_instruments()) * 2
+    non_flat_domain_count = sum(
+        position.quantity > 0 for position in admission_snapshot.positions
+    )
+    open_order_domain_count = len(
+        {
+            (order.exchange_instrument_id, order.position_side)
+            for order in admission_snapshot.open_orders
+        }
+    )
     return ProductionRuntimeProbe(
         environment=settings.environment,
         venue_id=settings.venue_id,
         account_id=settings.account_id,
-        account_position_mode=settings.account_position_mode,
+        account_position_mode=admission_snapshot.position_mode,
         instrument_rule_count=len(rule_rows),
         netting_domain_count=netting_domain_count,
         non_flat_domain_count=non_flat_domain_count,
         open_order_domain_count=open_order_domain_count,
-        account_equity=account_equity,
-        available_margin=available_margin,
+        total_wallet_balance=admission_snapshot.total_wallet_balance,
+        available_margin=admission_snapshot.available_margin,
         rules=tuple(rule_rows),
         observed_at_ms=now_ms,
     )

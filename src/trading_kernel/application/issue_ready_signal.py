@@ -1,4 +1,4 @@
-"""Issue the currently selected Signal through one action-time CapacityClaim."""
+"""Issue the selected Signal from one immutable admission snapshot."""
 
 from __future__ import annotations
 
@@ -19,14 +19,20 @@ from src.trading_kernel.application.issue_ticket import (
 )
 from src.trading_kernel.application.ports import KernelUnitOfWork
 from src.trading_kernel.domain.arbitration import rank_candidates
+from src.trading_kernel.domain.account_entry_health import (
+    classify_account_entry_health,
+)
 from src.trading_kernel.domain.capacity import (
-    ActionTimeFacts,
     CapacityClaimStatus,
     CapacityInstrumentRules,
     CapacityPolicy,
     CapacityUsage,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.identities import NettingDomain
+from src.trading_kernel.domain.instrument_entry_health import (
+    classify_instrument_entry_health,
+)
 from src.trading_kernel.domain.ticket import EntryOrderType
 
 
@@ -34,7 +40,7 @@ class IssueReadySignalRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     signal_event_id: str
-    action_time_facts: ActionTimeFacts
+    admission_snapshot: EntryAdmissionSnapshot
     claim_owner: str
     runtime_commit: str
     schema_revision: str
@@ -138,11 +144,11 @@ async def issue_ready_signal(
     if (
         profile is None
         or profile.status != "active"
-        or profile.venue_id != request.action_time_facts.venue_id
-        or profile.account_id != request.action_time_facts.account_id
+        or profile.venue_id != request.admission_snapshot.venue_id
+        or profile.account_id != request.admission_snapshot.account_id
         or policy is None
         or not policy.enabled
-        or not policy.real_submit_enabled
+        or not policy.new_entry_submit_enabled
         or event_spec is None
         or event_spec.status != "active"
     ):
@@ -160,7 +166,25 @@ async def issue_ready_signal(
             request.now_ms,
         )
 
-    exposure = await uow.entry_admission.get_account_exposure(profile.account_id)
+    ownership = await uow.entry_admission.read_admission_ownership(
+        venue_id=profile.venue_id,
+        account_id=profile.account_id,
+        exchange_instrument_id=signal.exchange_instrument_id,
+    )
+    account_entry_health = classify_account_entry_health(
+        request.admission_snapshot,
+        ownership,
+    )
+    instrument_entry_health = classify_instrument_entry_health(
+        request.admission_snapshot,
+        ownership,
+        exchange_instrument_id=signal.exchange_instrument_id,
+        requested_position_side=signal.position_side,
+    )
+    exposure = await uow.entry_admission.get_account_exposure(
+        profile.venue_id,
+        profile.account_id,
+    )
     usage = CapacityUsage(
         gross_notional=(
             exposure.gross_notional if exposure else Decimal("0")
@@ -186,22 +210,39 @@ async def issue_ready_signal(
             owner_policy_id=policy.owner_policy_id,
             policy_version=policy.policy_version,
             max_concurrent_tickets=policy.max_concurrent_tickets,
-            max_gross_notional=policy.max_gross_notional,
-            max_gross_risk_at_stop=policy.max_gross_risk_at_stop,
-            max_ticket_risk_at_stop=policy.max_ticket_risk_at_stop,
-            target_leverage=policy.target_leverage,
+            planned_stop_risk_fraction=policy.planned_stop_risk_fraction,
+            max_initial_margin_utilization=(
+                policy.max_initial_margin_utilization
+            ),
+            max_leverage=policy.max_leverage,
+            supported_margin_mode=policy.supported_margin_mode,
+            min_liquidation_distance_to_stop_distance_ratio=(
+                policy.min_liquidation_distance_to_stop_distance_ratio
+            ),
+            max_post_fill_stop_risk_overrun_fraction=(
+                policy.max_post_fill_stop_risk_overrun_fraction
+            ),
         ),
         usage=usage,
         instrument_rules=CapacityInstrumentRules(
+            venue_id=rules.venue_id,
+            exchange_instrument_id=rules.exchange_instrument_id,
             quantity_step=rules.quantity_step,
             price_tick=rules.price_tick,
             min_quantity=rules.min_quantity,
             min_notional=rules.min_notional,
+            exchange_max_leverage=rules.exchange_max_leverage,
+            maintenance_margin_brackets=rules.maintenance_margin_brackets,
+            maintenance_margin_brackets_digest=(
+                rules.maintenance_margin_brackets_digest
+            ),
             projection_version=rules.projection_version,
             observed_at_ms=rules.observed_at_ms,
             valid_until_ms=rules.valid_until_ms,
         ),
-        action_facts=request.action_time_facts,
+        admission_snapshot=request.admission_snapshot,
+        account_entry_health=account_entry_health,
+        instrument_entry_health=instrument_entry_health,
         entry_order_type=EntryOrderType(event_spec.entry_order_type),
         netting_domain_occupied=(
             await uow.entry_admission.has_active_ticket_in_domain(domain.key())

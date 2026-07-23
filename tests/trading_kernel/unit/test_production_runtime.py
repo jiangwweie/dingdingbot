@@ -11,13 +11,16 @@ import pytest
 from scripts.trading_kernel import run_command_worker_once as command_cli
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
 from src.trading_kernel.application.runtime_facts import (
-    ActionTimeFactsRequest,
+    EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
     InstrumentRulesRequest,
 )
-from src.trading_kernel.domain.capacity import ActionTimeFacts
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
-from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    EntryAdmissionSnapshot,
+    canonical_digest,
+)
 
 
 class FakeCcxtExchange:
@@ -96,7 +99,7 @@ class FakeWorkerAdapter:
         del request
         raise AssertionError("worker stub must replace dispatch")
 
-    async def read_action_time_facts(self, request: object) -> object:
+    async def read_entry_admission_snapshot(self, request: object) -> object:
         del request
         raise AssertionError("worker stub must replace fact collection")
 
@@ -126,24 +129,31 @@ class FakeProbeAdapter:
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
 
-    async def read_action_time_facts(
+    async def read_entry_admission_snapshot(
         self,
-        request: ActionTimeFactsRequest,
-    ) -> ActionTimeFacts:
-        return ActionTimeFacts(
-            signal_event_id=request.signal_event_id,
-            runtime_scope_id=request.runtime_scope_id,
+        request: EntryAdmissionSnapshotRequest,
+    ) -> EntryAdmissionSnapshot:
+        return EntryAdmissionSnapshot(
             venue_id=request.venue_id,
             account_id=request.account_id,
-            exchange_instrument_id=request.exchange_instrument_id,
-            position_side=request.position_side,
-            account_position_mode="independent_sides",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            total_wallet_balance=Decimal("1000"),
+            total_margin_balance=Decimal("1000"),
+            total_initial_margin=Decimal("0"),
+            total_maintenance_margin=Decimal("0"),
+            available_margin=Decimal("900"),
             best_bid_price=Decimal("99"),
             best_ask_price=Decimal("100"),
-            account_equity=Decimal("1000"),
-            available_margin=Decimal("900"),
-            netting_domain_position_qty=Decimal("0"),
-            netting_domain_open_order_count=0,
+            instrument_facts=(
+                AdmissionInstrumentFacts(
+                    exchange_instrument_id=request.exchange_instrument_id,
+                    mark_price=Decimal("99.5"),
+                    configured_leverage=1,
+                ),
+            ),
+            positions=(),
+            open_orders=(),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -314,7 +324,7 @@ async def test_command_worker_closes_factory_resource(
             now_ms=1_000,
             lease_ms=30_000,
             timeout_seconds=10.0,
-            action_fact_validity_ms=5_000,
+            admission_snapshot_validity_ms=5_000,
             idle_poll_interval_ms=2_000,
             run_forever=False,
             poll_interval_ms=2_000,
@@ -378,7 +388,7 @@ async def test_command_worker_long_running_mode_reuses_factory_resource(
             now_ms=None,
             lease_ms=30_000,
             timeout_seconds=10.0,
-            action_fact_validity_ms=5_000,
+            admission_snapshot_validity_ms=5_000,
             idle_poll_interval_ms=2_000,
             run_forever=True,
             poll_interval_ms=2_000,

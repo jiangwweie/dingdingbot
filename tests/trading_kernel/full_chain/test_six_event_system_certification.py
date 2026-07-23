@@ -24,7 +24,7 @@ from src.trading_kernel.application.project_owner_state import (
     project_owner_state,
 )
 from src.trading_kernel.application.runtime_facts import (
-    ActionTimeFactsRequest,
+    EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
     InstrumentRulesRequest,
     LifecycleFactsRequest,
@@ -32,9 +32,12 @@ from src.trading_kernel.application.runtime_facts import (
     ReviewEconomicsRequest,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
-from src.trading_kernel.domain.capacity import ActionTimeFacts
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
-from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    EntryAdmissionSnapshot,
+    canonical_digest,
+)
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandResult,
@@ -170,7 +173,7 @@ class CertifiedMarketSource:
         )
 
 
-class CertifiedActionFactsSource:
+class CertifiedEntryAdmissionFactsSource:
     def __init__(self, *, reference_price: Decimal, position_side: str) -> None:
         offset = max(reference_price * Decimal("0.01"), Decimal("1"))
         if position_side == "long":
@@ -180,24 +183,31 @@ class CertifiedActionFactsSource:
             self.best_bid = reference_price - offset
             self.best_ask = self.best_bid + Decimal("0.1")
 
-    async def read_action_time_facts(
+    async def read_entry_admission_snapshot(
         self,
-        request: ActionTimeFactsRequest,
-    ) -> ActionTimeFacts:
-        return ActionTimeFacts(
-            signal_event_id=request.signal_event_id,
-            runtime_scope_id=request.runtime_scope_id,
+        request: EntryAdmissionSnapshotRequest,
+    ) -> EntryAdmissionSnapshot:
+        return EntryAdmissionSnapshot(
             venue_id=request.venue_id,
             account_id=request.account_id,
-            exchange_instrument_id=request.exchange_instrument_id,
-            position_side=request.position_side,
-            account_position_mode="independent_sides",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            total_wallet_balance=Decimal("1000000"),
+            total_margin_balance=Decimal("1000000"),
+            total_initial_margin=Decimal("0"),
+            total_maintenance_margin=Decimal("0"),
+            available_margin=Decimal("1000000"),
             best_bid_price=self.best_bid,
             best_ask_price=self.best_ask,
-            account_equity=Decimal("1000000"),
-            available_margin=Decimal("1000000"),
-            netting_domain_position_qty=Decimal("0"),
-            netting_domain_open_order_count=0,
+            instrument_facts=(
+                AdmissionInstrumentFacts(
+                    exchange_instrument_id=request.exchange_instrument_id,
+                    mark_price=(self.best_bid + self.best_ask) / Decimal("2"),
+                    configured_leverage=1,
+                ),
+            ),
+            positions=(),
+            open_orders=(),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -409,7 +419,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     entry = await run_entry_worker_once(
         uow_factory,
         venue,
-        CertifiedActionFactsSource(
+        CertifiedEntryAdmissionFactsSource(
             reference_price=reference_price,
             position_side=contract.position_side,
         ),
@@ -420,7 +430,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
             now_ms=NOW_MS + 1_000,
             lease_until_ms=NOW_MS + 6_000,
             timeout_seconds=1,
-            action_fact_validity_ms=30_000,
+            admission_snapshot_validity_ms=30_000,
         ),
     )
     assert entry.status is EntryWorkerStatus.DISPATCHED
@@ -620,13 +630,15 @@ async def _seed_runtime(
                 owner_policy_id="policy-certification",
                 policy_version=1,
                 enabled=True,
-                real_submit_enabled=True,
+                new_entry_submit_enabled=True,
                 priority_rank=1,
-                max_concurrent_tickets=8,
-                max_gross_notional=Decimal("1000000"),
-                max_gross_risk_at_stop=Decimal("10000"),
-                max_ticket_risk_at_stop=Decimal("1000"),
-                target_leverage=Decimal("2"),
+                max_concurrent_tickets=3,
+                planned_stop_risk_fraction=Decimal("0.03"),
+                max_initial_margin_utilization=Decimal("0.90"),
+                max_leverage=10,
+                supported_margin_mode="cross",
+                min_liquidation_distance_to_stop_distance_ratio=Decimal("2"),
+                max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
                 scope={},
                 updated_at_ms=NOW_MS - 1,
             )

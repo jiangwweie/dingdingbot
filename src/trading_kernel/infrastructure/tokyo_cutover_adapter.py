@@ -679,10 +679,10 @@ class SshTokyoSystem:
         ):
             raise RuntimeError("ENTRY worker is enabled during readonly cutover")
         if await self._target_boolean(
-            "SELECT real_submit_enabled FROM brc_owner_policy_current "
+            "SELECT new_entry_submit_enabled FROM brc_owner_policy_current "
             "WHERE owner_policy_id = 'policy-main'"
         ):
-            raise RuntimeError("Owner Policy grants real submit during cutover")
+            raise RuntimeError("Owner Policy grants new ENTRY submit during cutover")
         if await self._target_boolean(
             "SELECT enabled FROM brc_runtime_capabilities_current "
             "WHERE capability_key = 'exchange_commands'"

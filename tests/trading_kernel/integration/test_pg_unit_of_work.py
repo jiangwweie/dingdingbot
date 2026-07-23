@@ -18,6 +18,8 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandStatus,
 )
+from src.trading_kernel.application.ports import RuntimeIncidentRecord
+from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.events import TicketIssued
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.reducer import reduce_event
@@ -179,6 +181,53 @@ async def test_two_workers_enforce_optimistic_aggregate_version(
         current = await uow.aggregates.get(ticket.identity.ticket_id)
     assert current is not None
     assert current.version == 2
+
+
+@pytest.mark.asyncio
+async def test_admission_ownership_is_bounded_to_exact_account_and_instrument(
+    kernel_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    event = TicketIssued(
+        event_id="event-ownership-1",
+        ticket=ticket,
+        sequence=1,
+        occurred_at_ms=1_001,
+    )
+    async with PostgresKernelUnitOfWork(kernel_engine) as uow:
+        await uow.commit_reduction(
+            event=event,
+            reduction=reduce_event(None, event),
+            expected_version=0,
+        )
+        await uow.incidents.add(
+            RuntimeIncidentRecord(
+                incident_id="incident:account-capacity",
+                ticket_id=ticket.identity.ticket_id,
+                incident_kind="external_ownership",
+                status="open",
+                first_blocker="external_ownership",
+                entry_block_scope=EntryBlockScope.ACCOUNT_CAPACITY,
+                entry_block_key=(
+                    f"{ticket.identity.netting_domain.venue_id}:"
+                    f"{ticket.identity.netting_domain.account_id}"
+                ),
+                details={},
+                opened_at_ms=1_002,
+            )
+        )
+        ownership = await uow.entry_admission.read_admission_ownership(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id=ticket.identity.netting_domain.account_id,
+            exchange_instrument_id=(
+                ticket.identity.netting_domain.exchange_instrument_id
+            ),
+        )
+
+    assert ownership.owned_position_domain_keys == (
+        ticket.identity.netting_domain.key(),
+    )
+    assert ownership.open_incident_scopes == (EntryBlockScope.ACCOUNT_CAPACITY,)
 
 
 def _ticket_for_signal(

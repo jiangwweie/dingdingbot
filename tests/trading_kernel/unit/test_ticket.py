@@ -52,12 +52,22 @@ def _ticket(**updates: object) -> TradeTicket:
         "runtime_scope_id": "scope-sor-btc-long",
         "runtime_scope_version": 4,
         "fact_digest": "sha256:" + "1" * 64,
+        "capacity_claim_id": "claim:" + "2" * 32,
         "created_at_ms": 1_000,
         "expires_at_ms": 31_000,
         "entry_reference_price": Decimal("60000"),
         "quantity": Decimal("0.001"),
         "notional": Decimal("60"),
-        "leverage": Decimal("5"),
+        "planned_stop_risk_budget": Decimal("3"),
+        "post_fill_stop_risk_limit": Decimal("3.3"),
+        "selected_leverage": 5,
+        "leverage_change_required": True,
+        "reserved_margin": Decimal("12"),
+        "risk_reservation_basis": "planned_stop_distance",
+        "margin_mode": "cross",
+        "min_liquidation_distance_to_stop_distance_ratio": Decimal("2"),
+        "projected_liquidation_price": Decimal("57000"),
+        "projected_liquidation_distance_to_stop_distance_ratio": Decimal("2.5"),
         "risk_at_stop": Decimal("3"),
         "entry_order_type": EntryOrderType.MARKET,
         "entry_limit_price": None,
@@ -74,6 +84,8 @@ def test_trade_ticket_is_immutable_and_contains_complete_decision() -> None:
     ticket = _ticket()
 
     assert ticket.quantity == Decimal("0.001")
+    assert ticket.selected_leverage == 5
+    assert ticket.capacity_claim_id.startswith("claim:")
     assert ticket.identity.netting_domain.position_side == "long"
     assert ticket.decision_digest().startswith("sha256:")
 
@@ -95,7 +107,8 @@ def test_trade_ticket_freezes_policy_and_scope_identity_and_version() -> None:
     [
         ("quantity", Decimal("0")),
         ("notional", Decimal("-1")),
-        ("leverage", Decimal("0")),
+        ("selected_leverage", 0),
+        ("reserved_margin", Decimal("0")),
         ("entry_reference_price", Decimal("0")),
         ("risk_at_stop", Decimal("-0.1")),
         ("initial_stop_price", Decimal("0")),

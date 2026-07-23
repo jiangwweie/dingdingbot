@@ -89,7 +89,7 @@ async def issue_ticket(
             status=IssueTicketStatus.POLICY_MISSING_OR_STALE,
             ticket_id=None,
         )
-    if not policy.enabled or not policy.real_submit_enabled:
+    if not policy.enabled or not policy.new_entry_submit_enabled:
         return IssueTicketResult(
             status=IssueTicketStatus.POLICY_DISABLED,
             ticket_id=None,
@@ -111,18 +111,17 @@ async def issue_ticket(
         )
 
     exposure = await uow.entry_admission.get_account_exposure(
+        ticket.identity.netting_domain.venue_id,
         ticket.identity.netting_domain.account_id,
         for_update=True,
     )
-    current_notional = exposure.gross_notional if exposure is not None else 0
-    current_risk = exposure.gross_risk_at_stop if exposure is not None else 0
     current_tickets = exposure.active_ticket_count if exposure is not None else 0
     if (
         current_tickets >= policy.max_concurrent_tickets
-        or current_notional + ticket.notional > policy.max_gross_notional
-        or current_risk + ticket.risk_at_stop > policy.max_gross_risk_at_stop
-        or ticket.risk_at_stop > policy.max_ticket_risk_at_stop
-        or ticket.leverage != policy.target_leverage
+        or ticket.selected_leverage > policy.max_leverage
+        or ticket.margin_mode != policy.supported_margin_mode
+        or ticket.risk_at_stop > ticket.planned_stop_risk_budget
+        or ticket.post_fill_stop_risk_limit < ticket.planned_stop_risk_budget
     ):
         return IssueTicketResult(
             status=IssueTicketStatus.BUDGET_EXHAUSTED,
@@ -135,14 +134,19 @@ async def issue_ticket(
             budget_reservation_id=f"budget:{ticket.identity.ticket_id}",
             ticket_id=ticket.identity.ticket_id,
             owner_policy_id=ticket.owner_policy_id,
+            venue_id=ticket.identity.netting_domain.venue_id,
             account_id=ticket.identity.netting_domain.account_id,
             reserved_notional=ticket.notional,
             reserved_risk=ticket.risk_at_stop,
+            reserved_margin=ticket.reserved_margin,
+            planned_stop_risk_budget=ticket.planned_stop_risk_budget,
+            risk_reservation_basis=ticket.risk_reservation_basis,
             status="active",
             created_at_ms=request.now_ms,
         )
     )
     await uow.entry_admission.reserve_account_exposure(
+        venue_id=ticket.identity.netting_domain.venue_id,
         account_id=ticket.identity.netting_domain.account_id,
         notional=ticket.notional,
         risk_at_stop=ticket.risk_at_stop,

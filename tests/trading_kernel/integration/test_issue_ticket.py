@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 import os
 from pathlib import Path
 import re
@@ -85,10 +86,15 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
         lane = await uow.entry_admission.get_global_lane()
         exposure = await uow.entry_admission.get_account_exposure(
+            ticket.identity.netting_domain.venue_id,
             ticket.identity.netting_domain.account_id
         )
 
-    assert persisted == ticket
+    assert persisted is not None
+    assert persisted.identity == ticket.identity
+    assert persisted.selected_leverage == ticket.selected_leverage
+    assert persisted.reserved_margin == ticket.reserved_margin
+    assert persisted.capacity_claim_id.startswith("claim:")
     assert reservation is not None
     assert reservation.reserved_notional == ticket.notional
     assert reservation.reserved_risk == ticket.risk_at_stop
@@ -123,7 +129,7 @@ async def test_occupied_global_lane_serializes_two_different_tickets(
 
 
 @pytest.mark.asyncio
-async def test_expired_action_time_facts_cannot_issue_ticket(
+async def test_expired_admission_snapshot_cannot_issue_ticket(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_policy(issue_engine)
@@ -180,11 +186,18 @@ async def test_policy_and_budget_limits_fail_closed(
 
     async with issue_engine.begin() as connection:
         await connection.execute(sa.delete(owner_policy_current))
-    await _seed_policy(issue_engine, max_gross_notional="50")
+    await _seed_policy(issue_engine, max_concurrent_tickets=1)
+    first = _ticket()
+    await _issue_and_release_lane(issue_engine, first)
+    exhausted_ticket = _ticket_for_signal("signal-budget", "episode-budget", position_side="short")
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         exhausted = await issue_ticket(
             uow,
-            _issue_request(ticket=ticket, now_ms=1_002, claim_owner="worker-1"),
+            _issue_request(
+                ticket=exhausted_ticket,
+                now_ms=1_002,
+                claim_owner="worker-1",
+            ),
         )
     assert exhausted.status is IssueTicketStatus.BUDGET_EXHAUSTED
 
@@ -233,6 +246,7 @@ async def test_long_and_short_are_independent_default_netting_domains(
     assert result.status is IssueTicketStatus.ISSUED
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         exposure = await uow.entry_admission.get_account_exposure(
+            long_ticket.identity.netting_domain.venue_id,
             long_ticket.identity.netting_domain.account_id
         )
     assert exposure is not None
@@ -298,8 +312,8 @@ async def _seed_policy(
     *,
     policy_version: int = 7,
     enabled: bool = True,
-    real_submit_enabled: bool = True,
-    max_gross_notional: str = "1000",
+    new_entry_submit_enabled: bool = True,
+    max_concurrent_tickets: int = 3,
 ) -> None:
     async with engine.begin() as connection:
         await connection.execute(
@@ -307,10 +321,15 @@ async def _seed_policy(
                 owner_policy_id="policy-main",
                 policy_version=policy_version,
                 enabled=enabled,
-                real_submit_enabled=real_submit_enabled,
-                max_concurrent_tickets=2,
-                max_gross_notional=max_gross_notional,
-                target_leverage="5",
+                new_entry_submit_enabled=new_entry_submit_enabled,
+                priority_rank=1,
+                max_concurrent_tickets=max_concurrent_tickets,
+                planned_stop_risk_fraction="0.03",
+                max_initial_margin_utilization="0.90",
+                max_leverage=10,
+                supported_margin_mode="cross",
+                min_liquidation_distance_to_stop_distance_ratio="2.0",
+                max_post_fill_stop_risk_overrun_fraction="0.10",
                 scope={},
                 updated_at_ms=1_000,
             )
@@ -374,14 +393,55 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
             runtime_scope_id=ticket.runtime_scope_id,
             runtime_scope_version=ticket.runtime_scope_version,
             fact_digest=ticket.fact_digest,
-            action_facts_digest="sha256:" + "2" * 64,
+            entry_admission_snapshot_digest="sha256:" + "2" * 64,
+            account_entry_health_digest="sha256:" + "3" * 64,
+            instrument_entry_health_digest="sha256:" + "4" * 64,
             instrument_rules_projection_version=1,
+            account_capacity_domain_key=(
+                f"{ticket.identity.netting_domain.venue_id}:"
+                f"{ticket.identity.netting_domain.account_id}"
+            ),
+            leverage_domain_key=(
+                f"{ticket.identity.netting_domain.venue_id}:"
+                f"{ticket.identity.netting_domain.account_id}:"
+                f"{ticket.identity.netting_domain.exchange_instrument_id}"
+            ),
+            total_wallet_balance_at_claim=Decimal("100"),
+            total_margin_balance_at_claim=Decimal("100"),
+            total_initial_margin_at_claim=Decimal("0"),
+            total_maintenance_margin_at_claim=Decimal("0"),
+            available_margin_at_claim=Decimal("100"),
+            mark_price_at_claim=ticket.entry_reference_price,
+            position_mode_at_claim="independent_sides",
+            margin_mode_at_claim=ticket.margin_mode,
+            active_ticket_count_at_claim=0,
+            remaining_slots_at_claim=3,
+            planned_stop_risk_fraction=Decimal("0.03"),
+            planned_stop_risk_budget=ticket.planned_stop_risk_budget,
+            max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
+            post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
+            max_initial_margin_utilization=Decimal("0.90"),
+            min_liquidation_distance_to_stop_distance_ratio=(
+                ticket.min_liquidation_distance_to_stop_distance_ratio
+            ),
+            ticket_margin_budget=Decimal("30"),
+            required_leverage=ticket.selected_leverage,
+            selected_leverage=ticket.selected_leverage,
+            configured_leverage_at_claim=ticket.selected_leverage,
+            leverage_change_required=ticket.leverage_change_required,
+            exchange_max_leverage=10,
+            reserved_margin=ticket.reserved_margin,
+            maintenance_margin_bracket_id="test:1",
+            projected_liquidation_price=ticket.projected_liquidation_price,
+            projected_liquidation_distance=Decimal("2000"),
+            projected_liquidation_distance_to_stop_distance_ratio=(
+                ticket.projected_liquidation_distance_to_stop_distance_ratio
+            ),
             created_at_ms=ticket.created_at_ms,
             expires_at_ms=ticket.expires_at_ms,
             entry_reference_price=ticket.entry_reference_price,
             quantity=ticket.quantity,
             notional=ticket.notional,
-            leverage=ticket.leverage,
             risk_at_stop=ticket.risk_at_stop,
             entry_order_type=ticket.entry_order_type,
             entry_limit_price=ticket.entry_limit_price,
