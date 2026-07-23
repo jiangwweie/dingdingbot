@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from urllib.parse import quote
 
 
 class EntryBlockScope(StrEnum):
@@ -31,4 +32,4 @@ def canonical_entry_block_key(
         return f"{venue_id}:{account_id}"
     if not exchange_instrument_id:
         raise ValueError("leverage-domain block keys require instrument identity")
-    return f"{venue_id}:{account_id}:{exchange_instrument_id}"
+    return f"{venue_id}:{account_id}:{quote(exchange_instrument_id, safe='')}"

@@ -4,7 +4,11 @@ from decimal import Decimal
 
 import pytest
 
-from src.trading_kernel.application.ports import VenueCommandRequest, VenueTruthRequest
+from src.trading_kernel.application.ports import (
+    VenueCommandRequest,
+    VenueSetLeverageRequest,
+    VenueTruthRequest,
+)
 from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     InstrumentRulesRequest,
@@ -17,6 +21,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandStatus,
     OrderCommandPayload,
+    SetLeverageCommandPayload,
 )
 from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
 from src.trading_kernel.domain.venue_truth import VenueLookupStatus
@@ -74,6 +79,34 @@ class RejectingCancelExchange:
 class TimingOutCancelExchange:
     async def cancel_order(self, *args, **kwargs):
         raise TimeoutError("network outcome unknown")
+
+
+class LeverageMutationExchange:
+    def __init__(self) -> None:
+        self.set_call = None
+
+    async def create_order(self, *args, **kwargs):
+        raise AssertionError("SET_LEVERAGE must not create an order")
+
+    async def set_leverage(self, leverage, symbol, params):
+        self.set_call = (leverage, symbol, params)
+        return {"leverage": leverage}
+
+    async def fetch_positions(self, symbols, params):
+        assert symbols == ["BTC/USDT:USDT"]
+        assert params == {}
+        return [
+            {
+                "symbol": "BTC/USDT:USDT",
+                "contracts": "0",
+                "info": {"positionSide": "LONG", "leverage": "4"},
+            },
+            {
+                "symbol": "BTC/USDT:USDT",
+                "contracts": "0",
+                "info": {"positionSide": "SHORT", "leverage": "4"},
+            },
+        ]
 
 
 class OrderNotFound(Exception):
@@ -496,6 +529,39 @@ async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> N
             "positionSide": "LONG",
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_sets_leverage_then_reads_back_without_creating_order() -> None:
+    exchange = LeverageMutationExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT"
+        },
+        clock_ms=lambda: 2_000,
+    )
+
+    result = await adapter.set_leverage(
+        VenueSetLeverageRequest(
+            command_id="command:leverage-1",
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            payload=SetLeverageCommandPayload(
+                desired_leverage=4,
+                owner_policy_version=1,
+                entry_admission_snapshot_digest="sha256:" + "1" * 64,
+                leverage_fact_digest="sha256:" + "2" * 64,
+            ),
+            deadline_at_ms=30_000,
+        )
+    )
+
+    assert exchange.set_call == (4, "BTC/USDT:USDT", {})
+    assert result.exchange_configured_leverage == 4
+    assert result.leverage_verified_at_ms == 2_000
+    assert result.leverage_verification_digest.startswith("sha256:")
 
 
 @pytest.mark.asyncio

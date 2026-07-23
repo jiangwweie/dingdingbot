@@ -32,6 +32,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandResult,
     ExchangeCommandStatus,
+    SetLeverageCommandResult,
     OrderCommandPayload,
 )
 from src.trading_kernel.domain.events import (
@@ -549,6 +550,31 @@ class PostgresExchangeCommandRepository:
         if updated.rowcount != 1:
             raise AggregateVersionConflict("command claim changed before result")
 
+    async def record_leverage_result(
+        self,
+        *,
+        command_id: str,
+        worker_id: str,
+        result: SetLeverageCommandResult,
+    ) -> None:
+        updated = await self._connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.command_id == command_id,
+                exchange_commands.c.command_kind == ExchangeCommandKind.SET_LEVERAGE.value,
+                exchange_commands.c.status == ExchangeCommandStatus.CLAIMED.value,
+                exchange_commands.c.claim_owner == worker_id,
+            )
+            .values(
+                status=ExchangeCommandStatus.ACCEPTED.value,
+                result_payload=result.model_dump(mode="json"),
+                completed_at_ms=result.leverage_verified_at_ms,
+                lease_until_ms=None,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict("leverage command claim changed before result")
+
     async def mark_claimed_superseded(
         self,
         *,
@@ -707,6 +733,30 @@ class PostgresExchangeCommandRepository:
         if updated.rowcount != 1:
             raise AggregateVersionConflict(
                 "unknown command changed before submitted reconciliation"
+            )
+
+    async def reconcile_unknown_leverage_confirmed(
+        self,
+        *,
+        command_id: str,
+        result: SetLeverageCommandResult,
+    ) -> None:
+        updated = await self._connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.command_id == command_id,
+                exchange_commands.c.command_kind == ExchangeCommandKind.SET_LEVERAGE.value,
+                exchange_commands.c.status == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
+            )
+            .values(
+                status=ExchangeCommandStatus.RECONCILED_ACCEPTED.value,
+                result_payload=result.model_dump(mode="json"),
+                completed_at_ms=result.leverage_verified_at_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict(
+                "unknown leverage command changed before confirmation reconciliation"
             )
 
     async def reconcile_unknown_absent(

@@ -231,7 +231,10 @@ async def _dispatch_entry(
         DispatchCommandRequest(
             worker_id=request.worker_id,
             ticket_id=ticket_id,
-            command_kinds=(ExchangeCommandKind.ENTRY,),
+            command_kinds=(
+                ExchangeCommandKind.SET_LEVERAGE,
+                ExchangeCommandKind.ENTRY,
+            ),
             now_ms=request.now_ms,
             lease_until_ms=request.lease_until_ms,
             timeout_seconds=request.timeout_seconds,

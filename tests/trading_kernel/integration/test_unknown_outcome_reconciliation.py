@@ -14,7 +14,16 @@ from src.trading_kernel.application.recover_unknown_command import (
     RecoverUnknownCommandRequest,
     recover_unknown_command,
 )
-from src.trading_kernel.application.ports import VenueTruthRequest
+from src.trading_kernel.application.ports import (
+    LeverageTruthRequest,
+    LeverageTruthSnapshot,
+    VenueTruthRequest,
+)
+from src.trading_kernel.application.reconcile_leverage_command import (
+    ReconcileLeverageCommandRequest,
+    ReconcileLeverageStatus,
+    reconcile_leverage_command,
+)
 from src.trading_kernel.application.reconcile_ticket import (
     ExitTicketRequest,
     ReconcileTicketRequest,
@@ -68,6 +77,200 @@ class StaticTruthPort:
     ) -> VenueTruthSnapshot:
         self.requests.append(request)
         return self.truth
+
+
+class StaticLeverageTruthPort:
+    def __init__(self, truth: LeverageTruthSnapshot) -> None:
+        self.truth = truth
+        self.requests: list[LeverageTruthRequest] = []
+
+    async def read_configured_leverage(
+        self,
+        request: LeverageTruthRequest,
+    ) -> LeverageTruthSnapshot:
+        self.requests.append(request)
+        return self.truth
+
+
+class UnknownLeverageVenue:
+    async def set_leverage(self, request):
+        await __import__("asyncio").sleep(0.1)
+        raise AssertionError("timed-out mutation must not complete in test")
+
+    async def execute(self, request):
+        raise AssertionError("SET_LEVERAGE must not create an order")
+
+
+async def _unknown_leverage_command(dispatch_engine, ticket):
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        UnknownLeverageVenue(),
+        DispatchCommandRequest(
+            worker_id="leverage-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=0.001,
+        ),
+    )
+    assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
+    assert result.command_id is not None
+    return result.command_id
+
+
+@pytest.mark.asyncio
+async def test_unknown_leverage_readback_mismatch_releases_without_resend(
+    dispatch_engine,
+) -> None:
+    ticket = _ticket(leverage_change_required=True)
+    command_id = await _unknown_leverage_command(dispatch_engine, ticket)
+
+    result = await reconcile_leverage_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        StaticLeverageTruthPort(
+            LeverageTruthSnapshot(
+                exchange_configured_leverage=ticket.selected_leverage - 1,
+                long_position_quantity=Decimal("0"),
+                short_position_quantity=Decimal("0"),
+                regular_open_order_ids=(),
+                conditional_open_order_ids=(),
+                observed_at_ms=2_100,
+            )
+        ),
+        ReconcileLeverageCommandRequest(
+            command_id=command_id,
+            now_ms=2_100,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.status is ReconcileLeverageStatus.REJECTED_MISMATCH
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+    assert [(item.kind, item.generation) for item in commands] == [
+        (ExchangeCommandKind.SET_LEVERAGE, 1)
+    ]
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.LEVERAGE_REJECTED
+    assert reservation is not None and reservation.status == "released"
+
+
+@pytest.mark.asyncio
+async def test_unknown_leverage_readback_confirmation_prepares_only_one_entry(
+    dispatch_engine,
+) -> None:
+    ticket = _ticket(leverage_change_required=True)
+    command_id = await _unknown_leverage_command(dispatch_engine, ticket)
+
+    result = await reconcile_leverage_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        StaticLeverageTruthPort(
+            LeverageTruthSnapshot(
+                exchange_configured_leverage=ticket.selected_leverage,
+                long_position_quantity=Decimal("0"),
+                short_position_quantity=Decimal("0"),
+                regular_open_order_ids=(),
+                conditional_open_order_ids=(),
+                observed_at_ms=2_100,
+            )
+        ),
+        ReconcileLeverageCommandRequest(
+            command_id=command_id,
+            now_ms=2_100,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.status is ReconcileLeverageStatus.CONFIRMED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert [(item.kind, item.generation) for item in commands] == [
+        (ExchangeCommandKind.SET_LEVERAGE, 1),
+        (ExchangeCommandKind.ENTRY, 1),
+    ]
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.LEVERAGE_CONFIRMED
+
+
+@pytest.mark.asyncio
+async def test_unknown_leverage_position_contradiction_retains_block_and_never_enters(
+    dispatch_engine,
+) -> None:
+    ticket = _ticket(leverage_change_required=True)
+    command_id = await _unknown_leverage_command(dispatch_engine, ticket)
+
+    result = await reconcile_leverage_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        StaticLeverageTruthPort(
+            LeverageTruthSnapshot(
+                exchange_configured_leverage=ticket.selected_leverage,
+                long_position_quantity=Decimal("0.01"),
+                short_position_quantity=Decimal("0"),
+                regular_open_order_ids=(),
+                conditional_open_order_ids=(),
+                observed_at_ms=2_100,
+            )
+        ),
+        ReconcileLeverageCommandRequest(
+            command_id=command_id,
+            now_ms=2_100,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.status is ReconcileLeverageStatus.BLOCKED_CONTRADICTION
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN
+    assert [(item.kind, item.generation) for item in commands] == [
+        (ExchangeCommandKind.SET_LEVERAGE, 1)
+    ]
+    assert incident is not None
+    assert incident.incident_kind == "leverage_outcome_unknown"
+
+
+@pytest.mark.asyncio
+async def test_generic_unknown_recovery_routes_leverage_to_exact_readback(
+    dispatch_engine,
+) -> None:
+    ticket = _ticket(leverage_change_required=True)
+    command_id = await _unknown_leverage_command(dispatch_engine, ticket)
+
+    result = await recover_unknown_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        StaticLeverageTruthPort(
+            LeverageTruthSnapshot(
+                exchange_configured_leverage=ticket.selected_leverage,
+                long_position_quantity=Decimal("0"),
+                short_position_quantity=Decimal("0"),
+                regular_open_order_ids=(),
+                conditional_open_order_ids=(),
+                observed_at_ms=2_100,
+            )
+        ),
+        RecoverUnknownCommandRequest(
+            command_id=command_id,
+            now_ms=2_100,
+            visibility_deadline_ms=2_000,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.status is ReconcileLeverageStatus.CONFIRMED
 
 
 @pytest.mark.asyncio

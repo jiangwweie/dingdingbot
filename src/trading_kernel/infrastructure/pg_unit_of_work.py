@@ -195,7 +195,8 @@ class PostgresKernelUnitOfWork:
                     _entry_command(
                         effect,
                         leverage_verification_digest=(
-                            _initial_leverage_fact_digest(claim)
+                            effect.leverage_verification_digest
+                            or _initial_leverage_fact_digest(claim)
                         ),
                         occurred_at_ms=event.occurred_at_ms,
                     )

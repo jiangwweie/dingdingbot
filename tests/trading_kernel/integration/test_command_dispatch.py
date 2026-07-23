@@ -35,6 +35,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
     OrderCommandPayload,
+    SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.events import TakeProfitFilled
 from src.trading_kernel.domain.reducer import reduce_event
@@ -154,6 +155,108 @@ class CountingKindAwareAcceptingVenue(KindAwareAcceptingVenue):
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
         self.calls += 1
         return await super().execute(request)
+
+
+class LeverageThenEntryVenue:
+    def __init__(self) -> None:
+        self.mutations: list[str] = []
+
+    async def set_leverage(self, request):
+        self.mutations.append("set_leverage")
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "4" * 64,
+        )
+
+    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
+        self.mutations.append("create_order")
+        return ExchangeCommandResult(
+            status=ExchangeCommandStatus.ACCEPTED,
+            observed_at_ms=2_100,
+            exchange_order_id="venue-entry-1",
+        )
+
+
+class LeverageReadbackMismatchVenue(LeverageThenEntryVenue):
+    async def set_leverage(self, request):
+        self.mutations.append("set_leverage")
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage - 1,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "5" * 64,
+        )
+
+
+@pytest.mark.asyncio
+async def test_confirmed_leverage_creates_first_entry_command_in_later_transaction(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket(leverage_change_required=True)
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    venue = LeverageThenEntryVenue()
+
+    first = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="leverage-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert first.status is DispatchCommandStatus.ACCEPTED
+    assert venue.mutations == ["set_leverage"]
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert [(item.kind, item.generation) for item in commands] == [
+        (ExchangeCommandKind.SET_LEVERAGE, 1),
+        (ExchangeCommandKind.ENTRY, 1),
+    ]
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.LEVERAGE_CONFIRMED
+
+
+@pytest.mark.asyncio
+async def test_leverage_readback_mismatch_becomes_unknown_without_entry_or_resend(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket(leverage_change_required=True)
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    venue = LeverageReadbackMismatchVenue()
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="leverage-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
+    assert venue.mutations == ["set_leverage"]
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert [(item.kind, item.status) for item in commands] == [
+        (ExchangeCommandKind.SET_LEVERAGE, ExchangeCommandStatus.OUTCOME_UNKNOWN)
+    ]
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN
 
 
 @pytest.mark.asyncio

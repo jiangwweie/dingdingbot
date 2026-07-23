@@ -119,9 +119,15 @@ def reduce_event(
             raise InvalidLifecycleTransition("leverage confirmation time must be positive")
         if not str(event.leverage_verification_digest or "").startswith("sha256:"):
             raise InvalidLifecycleTransition("leverage confirmation requires a digest")
-        effects: tuple[KernelEffect, ...] = ()
+        effects: list[KernelEffect] = [
+            PrepareEntryCommand(
+                ticket=current.ticket,
+                leverage_verification_digest=event.leverage_verification_digest,
+            ),
+        ]
         if current.status is AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN:
-            effects = (
+            effects.insert(
+                0,
                 ResolveIncident(
                     ticket_id=current.identity.ticket_id,
                     incident_kind="leverage_outcome_unknown",
@@ -131,7 +137,7 @@ def reduce_event(
             current,
             event,
             status=AggregateStatus.LEVERAGE_CONFIRMED,
-            effects=effects,
+            effects=tuple(effects),
         )
 
     if isinstance(event, LeverageRejected):
@@ -187,6 +193,7 @@ def reduce_event(
             current,
             {
                 AggregateStatus.ENTRY_PENDING,
+                AggregateStatus.LEVERAGE_CONFIRMED,
                 AggregateStatus.ENTRY_OUTCOME_UNKNOWN,
             },
         )
@@ -210,7 +217,10 @@ def reduce_event(
         )
 
     if isinstance(event, EntryOutcomeUnknown):
-        _require_status(current, AggregateStatus.ENTRY_PENDING)
+        _require_status_in(
+            current,
+            {AggregateStatus.ENTRY_PENDING, AggregateStatus.LEVERAGE_CONFIRMED},
+        )
         if not str(event.reason or "").strip():
             raise InvalidLifecycleTransition("unknown ENTRY outcome requires reason")
         return _transition(
@@ -226,7 +236,10 @@ def reduce_event(
         )
 
     if isinstance(event, EntryRejected):
-        _require_status(current, AggregateStatus.ENTRY_PENDING)
+        _require_status_in(
+            current,
+            {AggregateStatus.ENTRY_PENDING, AggregateStatus.LEVERAGE_CONFIRMED},
+        )
         return _transition(
             current,
             event,
@@ -262,7 +275,11 @@ def reduce_event(
     if isinstance(event, EntryFilled):
         _require_status_in(
             current,
-            {AggregateStatus.ENTRY_PENDING, AggregateStatus.ENTRY_ACCEPTED},
+            {
+                AggregateStatus.ENTRY_PENDING,
+                AggregateStatus.LEVERAGE_CONFIRMED,
+                AggregateStatus.ENTRY_ACCEPTED,
+            },
         )
         if event.filled_qty != current.ticket.quantity:
             raise InvalidLifecycleTransition("full entry fill must equal Ticket quantity")
@@ -288,7 +305,11 @@ def reduce_event(
     if isinstance(event, EntryPartiallyFilled):
         _require_status_in(
             current,
-            {AggregateStatus.ENTRY_PENDING, AggregateStatus.ENTRY_ACCEPTED},
+            {
+                AggregateStatus.ENTRY_PENDING,
+                AggregateStatus.LEVERAGE_CONFIRMED,
+                AggregateStatus.ENTRY_ACCEPTED,
+            },
         )
         if not Decimal("0") < event.filled_qty < event.requested_qty:
             raise InvalidLifecycleTransition("partial fill quantity is contradictory")

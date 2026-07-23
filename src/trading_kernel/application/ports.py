@@ -20,6 +20,8 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandResult,
     CommandPayload,
+    SetLeverageCommandPayload,
+    SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.exit_policy import ExitPolicy
@@ -372,6 +374,14 @@ class ExchangeCommandRepository(Protocol):
         result: ExchangeCommandResult,
     ) -> None: ...
 
+    async def record_leverage_result(
+        self,
+        *,
+        command_id: str,
+        worker_id: str,
+        result: SetLeverageCommandResult,
+    ) -> None: ...
+
     async def mark_claimed_superseded(
         self,
         *,
@@ -412,6 +422,13 @@ class ExchangeCommandRepository(Protocol):
         command_id: str,
         exchange_order_id: str,
         observed_at_ms: int,
+    ) -> None: ...
+
+    async def reconcile_unknown_leverage_confirmed(
+        self,
+        *,
+        command_id: str,
+        result: SetLeverageCommandResult,
     ) -> None: ...
 
     async def reconcile_unknown_absent(
@@ -710,9 +727,66 @@ class VenueCommandRequest(BaseModel):
     account_id: str
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
-    venue_client_order_id: str
+    venue_client_order_id: str | None
     payload: CommandPayload
     deadline_at_ms: int
+
+
+class VenueSetLeverageRequest(BaseModel):
+    """The exact durable non-order mutation sent to one venue."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    command_id: str
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    payload: SetLeverageCommandPayload
+    deadline_at_ms: int
+
+
+class LeverageTruthRequest(BaseModel):
+    """Exact-instrument readonly truth used after a leverage mutation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    command_id: str
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    desired_leverage: int
+    observed_at_ms: int
+
+
+class LeverageTruthSnapshot(BaseModel):
+    """One bounded exact-instrument leverage/flatness observation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_configured_leverage: int
+    long_position_quantity: Decimal
+    short_position_quantity: Decimal
+    regular_open_order_ids: tuple[str, ...]
+    conditional_open_order_ids: tuple[str, ...]
+    observed_at_ms: int
+
+    @model_validator(mode="after")
+    def _validate_exact_truth(self) -> "LeverageTruthSnapshot":
+        if (
+            isinstance(self.exchange_configured_leverage, bool)
+            or not isinstance(self.exchange_configured_leverage, int)
+            or self.exchange_configured_leverage <= 0
+        ):
+            raise ValueError("configured leverage must be a positive integer")
+        if self.long_position_quantity < 0 or self.short_position_quantity < 0:
+            raise ValueError("leverage truth quantities must be nonnegative")
+        if self.observed_at_ms <= 0:
+            raise ValueError("leverage truth observation time must be positive")
+        return self
+
+
+class VenueMutationRejected(RuntimeError):
+    """A venue-authoritative non-order mutation rejection."""
 
 
 class VenuePort(Protocol):
@@ -720,6 +794,11 @@ class VenuePort(Protocol):
         self,
         request: VenueCommandRequest,
     ) -> ExchangeCommandResult: ...
+
+    async def set_leverage(
+        self,
+        request: VenueSetLeverageRequest,
+    ) -> SetLeverageCommandResult: ...
 
 
 class VenueTruthRequest(BaseModel):
@@ -741,6 +820,11 @@ class VenueTruthPort(Protocol):
         self,
         request: VenueTruthRequest,
     ) -> VenueTruthSnapshot: ...
+
+    async def read_configured_leverage(
+        self,
+        request: LeverageTruthRequest,
+    ) -> LeverageTruthSnapshot: ...
 
 
 UnitOfWorkFactory = Callable[[], "KernelUnitOfWork"]

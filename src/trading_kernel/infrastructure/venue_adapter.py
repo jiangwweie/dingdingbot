@@ -10,7 +10,14 @@ from typing import Literal, Protocol
 
 from pydantic import JsonValue
 
-from src.trading_kernel.application.ports import VenueCommandRequest, VenueTruthRequest
+from src.trading_kernel.application.ports import (
+    LeverageTruthRequest,
+    LeverageTruthSnapshot,
+    VenueCommandRequest,
+    VenueMutationRejected,
+    VenueSetLeverageRequest,
+    VenueTruthRequest,
+)
 from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
@@ -35,6 +42,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
     OrderCommandPayload,
+    SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.venue_truth import (
     VenueLookupStatus,
@@ -58,6 +66,13 @@ class _CcxtExchange(Protocol):
         side: str,
         amount: object,
         price: object,
+        params: Mapping[str, object],
+    ) -> object: ...
+
+    def set_leverage(
+        self,
+        leverage: int,
+        symbol: str,
         params: Mapping[str, object],
     ) -> object: ...
 
@@ -641,6 +656,99 @@ class CcxtVenueAdapter:
             venue_payload=_safe_response_payload(response),
         )
 
+    async def set_leverage(
+        self,
+        request: VenueSetLeverageRequest,
+    ) -> SetLeverageCommandResult:
+        """Perform one signed leverage mutation then prove its exact read-back."""
+
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+        )
+        response = await _call_exchange(
+            exchange.set_leverage,
+            request.payload.desired_leverage,
+            symbol,
+            {},
+            clock_ms=self._clock_ms,
+        )
+        if isinstance(response, ExchangeCommandResult):
+            if response.status is ExchangeCommandStatus.REJECTED:
+                raise VenueMutationRejected(str(response.reason))
+            raise RuntimeError("leverage mutation has no authoritative result")
+        configured_leverage, _, _ = await _read_exact_instrument_leverage(
+            exchange=exchange,
+            symbol=symbol,
+        )
+        observed_at_ms = self._clock_ms()
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=configured_leverage,
+            leverage_verified_at_ms=observed_at_ms,
+            leverage_verification_digest=canonical_digest(
+                {
+                    "command_id": request.command_id,
+                    "venue_id": request.venue_id,
+                    "account_id": request.account_id,
+                    "exchange_instrument_id": request.exchange_instrument_id,
+                    "desired_leverage": request.payload.desired_leverage,
+                    "exchange_configured_leverage": configured_leverage,
+                    "verified_at_ms": observed_at_ms,
+                }
+            ),
+        )
+
+    async def read_configured_leverage(
+        self,
+        request: LeverageTruthRequest,
+    ) -> LeverageTruthSnapshot:
+        """Read bounded exact-instrument truth without guessing mutation outcome."""
+
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+        )
+        positions, regular_orders, conditional_orders = await asyncio.gather(
+            _call_raw_exchange(exchange.fetch_positions, [symbol], {}),
+            _call_raw_exchange(
+                exchange.fetch_open_orders,
+                symbol,
+                None,
+                100,
+                {"conditional": False},
+            ),
+            _call_raw_exchange(
+                exchange.fetch_open_orders,
+                symbol,
+                None,
+                100,
+                {"conditional": True},
+            ),
+        )
+        configured_leverage, long_quantity, short_quantity = (
+            _configured_leverage_and_position_quantities(
+                _require_list(positions, name="leverage positions"),
+                expected_symbol=symbol,
+            )
+        )
+        return LeverageTruthSnapshot(
+            exchange_configured_leverage=configured_leverage,
+            long_position_quantity=long_quantity,
+            short_position_quantity=short_quantity,
+            regular_open_order_ids=_open_exchange_order_ids(
+                _require_list(regular_orders, name="regular leverage orders")
+            ),
+            conditional_open_order_ids=_open_exchange_order_ids(
+                _require_list(
+                    conditional_orders,
+                    name="conditional leverage orders",
+                )
+            ),
+            observed_at_ms=self._clock_ms(),
+        )
+
     async def lookup_command_truth(
         self,
         request: VenueTruthRequest,
@@ -993,6 +1101,55 @@ def _position_quantity(
             continue
         total += abs(Decimal(str(value.get("contracts") or "0")))
     return total
+
+
+async def _read_exact_instrument_leverage(
+    *,
+    exchange: _CcxtExchange,
+    symbol: str,
+) -> tuple[int, Decimal, Decimal]:
+    rows = _require_list(
+        await _call_raw_exchange(exchange.fetch_positions, [symbol], {}),
+        name="leverage positions",
+    )
+    return _configured_leverage_and_position_quantities(rows, expected_symbol=symbol)
+
+
+def _configured_leverage_and_position_quantities(
+    rows: list[object],
+    *,
+    expected_symbol: str,
+) -> tuple[int, Decimal, Decimal]:
+    leverage_values: set[int] = set()
+    long_quantity = Decimal("0")
+    short_quantity = Decimal("0")
+    matched_rows = 0
+    for value in rows:
+        mapping = _require_mapping(value, name="leverage position row")
+        if str(mapping.get("symbol") or "").strip() != expected_symbol:
+            continue
+        matched_rows += 1
+        raw_leverage = mapping.get("leverage") or _mapping_value(
+            mapping.get("info"), "leverage"
+        )
+        try:
+            leverage = int(str(raw_leverage))
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("venue leverage read-back is invalid") from exc
+        if str(raw_leverage).strip() != str(leverage) or leverage <= 0:
+            raise RuntimeError("venue leverage read-back must be a positive integer")
+        leverage_values.add(leverage)
+        quantity = abs(Decimal(str(mapping.get("contracts") or "0")))
+        if not quantity.is_finite():
+            raise RuntimeError("venue leverage position quantity is invalid")
+        side = _row_position_side(mapping)
+        if side == "long":
+            long_quantity += quantity
+        else:
+            short_quantity += quantity
+    if matched_rows == 0 or len(leverage_values) != 1:
+        raise RuntimeError("venue leverage read-back is absent or contradictory")
+    return next(iter(leverage_values)), long_quantity, short_quantity
 
 
 def _position_details(
@@ -1555,6 +1712,17 @@ def _open_client_order_ids(rows: list[object]) -> tuple[str, ...]:
         identity = str(value.get("clientOrderId") or "").strip()
         if identity:
             identities.add(identity)
+    return tuple(sorted(identities))
+
+
+def _open_exchange_order_ids(rows: list[object]) -> tuple[str, ...]:
+    identities: set[str] = set()
+    for value in rows:
+        mapping = _require_mapping(value, name="venue open-order row")
+        identity = str(mapping.get("id") or "").strip()
+        if not identity:
+            raise RuntimeError("venue open order lacks exchange identity")
+        identities.add(identity)
     return tuple(sorted(identities))
 
 

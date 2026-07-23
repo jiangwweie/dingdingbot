@@ -93,6 +93,22 @@ async def recover_unknown_command(
         if command.status is not ExchangeCommandStatus.OUTCOME_UNKNOWN:
             raise ValueError("command is not in unknown-outcome state")
 
+    if command.kind is ExchangeCommandKind.SET_LEVERAGE:
+        from src.trading_kernel.application.reconcile_leverage_command import (
+            ReconcileLeverageCommandRequest,
+            reconcile_leverage_command,
+        )
+
+        return await reconcile_leverage_command(
+            uow_factory,
+            venue_truth,
+            ReconcileLeverageCommandRequest(
+                command_id=command.command_id,
+                now_ms=request.now_ms,
+                timeout_seconds=request.timeout_seconds,
+            ),
+        )
+
     truth_request = VenueTruthRequest(
         command_id=command.command_id,
         kind=command.kind,

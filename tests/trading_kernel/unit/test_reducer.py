@@ -131,7 +131,12 @@ def test_leverage_terminal_and_unknown_states_are_explicit() -> None:
         ),
     )
     assert confirmed.aggregate.status is AggregateStatus.LEVERAGE_CONFIRMED
-    assert confirmed.effects == ()
+    assert confirmed.effects == (
+        PrepareEntryCommand(
+            ticket=issued.ticket,
+            leverage_verification_digest="sha256:" + "3" * 64,
+        ),
+    )
 
     rejected = reduce_event(
         issued,

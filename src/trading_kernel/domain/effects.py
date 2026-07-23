@@ -15,6 +15,7 @@ class _Effect(BaseModel):
 
 class PrepareEntryCommand(_Effect):
     ticket: TradeTicket
+    leverage_verification_digest: str | None = None
 
 
 class PrepareSetLeverageCommand(_Effect):

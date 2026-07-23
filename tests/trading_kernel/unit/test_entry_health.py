@@ -13,7 +13,10 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionPosition,
     EntryAdmissionSnapshot,
 )
-from src.trading_kernel.domain.incident_blocking import EntryBlockScope
+from src.trading_kernel.domain.incident_blocking import (
+    EntryBlockScope,
+    canonical_entry_block_key,
+)
 from src.trading_kernel.domain.instrument_entry_health import (
     InstrumentEntryHealthStatus,
     classify_instrument_entry_health,
@@ -86,6 +89,15 @@ def test_owned_opposite_side_position_allows_shared_leverage_without_mutation() 
     assert health.configured_leverage == 3
     assert health.leverage_change_allowed is False
     assert health.entry_block_scope is EntryBlockScope.NONE
+
+
+def test_leverage_domain_key_escapes_composite_instrument_identity() -> None:
+    assert canonical_entry_block_key(
+        EntryBlockScope.LEVERAGE_DOMAIN,
+        venue_id="binance-usdm",
+        account_id="experiment-1",
+        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+    ) == "binance-usdm:experiment-1:binance-usdm%3ABTCUSDT%3Aperpetual"
 
 
 def test_owned_residual_order_after_flatness_blocks_only_leverage_domain() -> None:

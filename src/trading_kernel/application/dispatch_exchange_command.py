@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from src.trading_kernel.application.ports import (
     UnitOfWorkFactory,
     VenueCommandRequest,
+    VenueMutationRejected,
     VenuePort,
+    VenueSetLeverageRequest,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
@@ -20,6 +22,8 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
     OrderCommandPayload,
+    SetLeverageCommandResult,
+    SetLeverageCommandPayload,
 )
 from src.trading_kernel.domain.events import (
     CancelOrderOutcomeUnknown,
@@ -30,6 +34,9 @@ from src.trading_kernel.domain.events import (
     EntryAccepted,
     EntryOutcomeUnknown,
     EntryRejected,
+    LeverageConfirmed,
+    LeverageOutcomeUnknown,
+    LeverageRejected,
     EntryRemainderCancelConfirmed,
     EntryRemainderCancelOutcomeUnknown,
     EntryRemainderCancelRejected,
@@ -187,23 +194,50 @@ async def dispatch_one_command(
     if command is None:
         return DispatchCommandResult(status=DispatchCommandStatus.NO_COMMAND)
 
-    venue_request = VenueCommandRequest(
-        command_id=command.command_id,
-        kind=command.kind,
-        venue_id=command.ticket_identity.netting_domain.venue_id,
-        account_id=command.ticket_identity.netting_domain.account_id,
-        exchange_instrument_id=(
-            command.ticket_identity.netting_domain.exchange_instrument_id
-        ),
-        position_side=command.ticket_identity.netting_domain.position_side,
-        venue_client_order_id=command.venue_client_order_id,
-        payload=command.payload,
-        deadline_at_ms=command.deadline_at_ms,
-    )
     try:
-        result = await asyncio.wait_for(
-            venue.execute(venue_request),
-            timeout=request.timeout_seconds,
+        if command.kind is ExchangeCommandKind.SET_LEVERAGE:
+            if not isinstance(command.payload, SetLeverageCommandPayload):
+                raise RuntimeError("SET_LEVERAGE command payload is invalid")
+            result: ExchangeCommandResult | SetLeverageCommandResult = (
+                await asyncio.wait_for(
+                    venue.set_leverage(
+                        VenueSetLeverageRequest(
+                            command_id=command.command_id,
+                            venue_id=command.ticket_identity.netting_domain.venue_id,
+                            account_id=command.ticket_identity.netting_domain.account_id,
+                            exchange_instrument_id=(
+                                command.ticket_identity.netting_domain.exchange_instrument_id
+                            ),
+                            payload=command.payload,
+                            deadline_at_ms=command.deadline_at_ms,
+                        )
+                    ),
+                    timeout=request.timeout_seconds,
+                )
+            )
+        else:
+            venue_request = VenueCommandRequest(
+                command_id=command.command_id,
+                kind=command.kind,
+                venue_id=command.ticket_identity.netting_domain.venue_id,
+                account_id=command.ticket_identity.netting_domain.account_id,
+                exchange_instrument_id=(
+                    command.ticket_identity.netting_domain.exchange_instrument_id
+                ),
+                position_side=command.ticket_identity.netting_domain.position_side,
+                venue_client_order_id=command.venue_client_order_id,
+                payload=command.payload,
+                deadline_at_ms=command.deadline_at_ms,
+            )
+            result = await asyncio.wait_for(
+                venue.execute(venue_request),
+                timeout=request.timeout_seconds,
+            )
+    except VenueMutationRejected as exc:
+        result = ExchangeCommandResult(
+            status=ExchangeCommandStatus.REJECTED,
+            observed_at_ms=request.now_ms,
+            reason=f"venue_rejected:{type(exc).__name__}",
         )
     except TimeoutError:
         result = ExchangeCommandResult(
@@ -218,6 +252,18 @@ async def dispatch_one_command(
             reason=f"venue_error:{type(exc).__name__}",
         )
 
+    if (
+        command.kind is ExchangeCommandKind.SET_LEVERAGE
+        and isinstance(result, SetLeverageCommandResult)
+        and isinstance(command.payload, SetLeverageCommandPayload)
+        and result.exchange_configured_leverage != command.payload.desired_leverage
+    ):
+        result = ExchangeCommandResult(
+            status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
+            observed_at_ms=result.leverage_verified_at_ms,
+            reason="leverage_readback_mismatch",
+        )
+
     async with uow_factory() as uow:
         aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
         if aggregate is None:
@@ -227,11 +273,18 @@ async def dispatch_one_command(
             aggregate=aggregate,
             result=result,
         )
-        await uow.exchange_commands.record_result(
-            command_id=command.command_id,
-            worker_id=request.worker_id,
-            result=result,
-        )
+        if isinstance(result, SetLeverageCommandResult):
+            await uow.exchange_commands.record_leverage_result(
+                command_id=command.command_id,
+                worker_id=request.worker_id,
+                result=result,
+            )
+        else:
+            await uow.exchange_commands.record_result(
+                command_id=command.command_id,
+                worker_id=request.worker_id,
+                result=result,
+            )
         await uow.commit_reduction(
             event=event,
             reduction=reduce_event(aggregate, event),
@@ -239,7 +292,11 @@ async def dispatch_one_command(
         )
 
     return DispatchCommandResult(
-        status=DispatchCommandStatus(result.status.value),
+        status=(
+            DispatchCommandStatus.ACCEPTED
+            if isinstance(result, SetLeverageCommandResult)
+            else DispatchCommandStatus(result.status.value)
+        ),
         command_id=command.command_id,
     )
 
@@ -249,7 +306,11 @@ def _command_is_applicable(
     aggregate_status: AggregateStatus,
 ) -> bool:
     applicable_statuses = {
-        ExchangeCommandKind.ENTRY: {AggregateStatus.ENTRY_PENDING},
+        ExchangeCommandKind.SET_LEVERAGE: {AggregateStatus.LEVERAGE_PENDING},
+        ExchangeCommandKind.ENTRY: {
+            AggregateStatus.ENTRY_PENDING,
+            AggregateStatus.LEVERAGE_CONFIRMED,
+        },
         ExchangeCommandKind.INITIAL_STOP: {AggregateStatus.PROTECTION_PENDING},
         ExchangeCommandKind.TAKE_PROFIT: {AggregateStatus.TP1_PENDING},
         ExchangeCommandKind.REPLACE_PROTECTION: {
@@ -272,7 +333,7 @@ def _command_result_event(
     *,
     command: ExchangeCommand,
     aggregate,
-    result: ExchangeCommandResult,
+    result: ExchangeCommandResult | SetLeverageCommandResult,
 ):
     kind = command.kind
     ticket_id = aggregate.identity.ticket_id
@@ -281,8 +342,25 @@ def _command_result_event(
         "event_id": f"event:{ticket_id}:{next_sequence}",
         "ticket_id": ticket_id,
         "sequence": next_sequence,
-        "occurred_at_ms": result.observed_at_ms,
+        "occurred_at_ms": (
+            result.leverage_verified_at_ms
+            if isinstance(result, SetLeverageCommandResult)
+            else result.observed_at_ms
+        ),
     }
+    if kind is ExchangeCommandKind.SET_LEVERAGE:
+        if isinstance(result, SetLeverageCommandResult):
+            return LeverageConfirmed(
+                **common,
+                exchange_configured_leverage=result.exchange_configured_leverage,
+                leverage_verified_at_ms=result.leverage_verified_at_ms,
+                leverage_verification_digest=result.leverage_verification_digest,
+            )
+        if result.status is ExchangeCommandStatus.REJECTED:
+            return LeverageRejected(**common, reason=str(result.reason))
+        if result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+            return LeverageOutcomeUnknown(**common, reason=str(result.reason))
+        raise RuntimeError("SET_LEVERAGE result is invalid")
     if kind is ExchangeCommandKind.ENTRY and result.status is ExchangeCommandStatus.ACCEPTED:
         return EntryAccepted(
             **common,
