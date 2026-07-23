@@ -12,9 +12,9 @@
 
 | Work | Status | Evidence / next boundary |
 | --- | --- | --- |
-| Tasks 1-3 | Complete and committed | `edad2c70`, `89c4e64a`, `6a6c14b6`; clean policy baseline, one admission snapshot, and pure slot-aware sizing exist |
-| Task 4 | In progress | Claim, Ticket, and reservation persistence is being completed; it is not a review gate until its round-trip tests and focused commit pass |
-| Tasks 5-14 | Pending | Must follow the ordered mutation, safety, release, production-contract, certification, and retirement gates below |
+| Tasks 1-5 | Complete and committed | `edad2c70`, `89c4e64a`, `6a6c14b6`, `7b2cb127`; dynamic policy, one admission snapshot, slot-aware sizing, frozen Claim/Ticket/reservation evidence, and scoped admission ownership exist |
+| Task 6 | Next implementation boundary | Add the separate durable `SET_LEVERAGE` command and prohibit same-transaction leverage mutation plus ENTRY creation |
+| Tasks 7-14 | Pending | Must follow the ordered mutation, safety, release, production-contract, certification, and retirement gates below |
 | Task 15 | Separately gated | No Tokyo rebuild or exchange write occurs until Tasks 1-14 have direct local certification |
 
 The checklists below are the original test-first task recipes. This status table,
