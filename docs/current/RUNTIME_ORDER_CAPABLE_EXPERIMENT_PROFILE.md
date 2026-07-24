@@ -30,6 +30,12 @@ finite `max_concurrent_tickets`, gross notional, risk, margin, or leverage cap.
 Those values are seeded from the current approved policy and must not be
 invented or expanded during cutover.
 
+The current approved seed is three concurrent Tickets, `0.03` planned stop-risk
+fraction, `0.90` maximum initial-margin utilization, maximum leverage `10`, and
+`cross` margin mode. The `new_entry_submit_enabled` setting controls only new
+ENTRY; it never removes protection, controlled flatten, reconciliation,
+Settlement, or Review authority from existing exchange exposure.
+
 ## Real-Order Permission
 
 Exchange-command capability may be enabled only after:

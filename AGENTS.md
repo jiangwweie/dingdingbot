@@ -79,6 +79,13 @@ gates.
 - Multi-position capability is architectural; a fixed two-position ceiling is
   not part of the model. Current budget policy may still impose a configured
   capacity.
+- The approved dynamic policy is three concurrent Tickets, `0.03` planned stop
+  risk, `0.90` maximum initial-margin utilization, maximum leverage `10`, and
+  `cross` margin mode; current account facts determine each Claim's size.
+- `new_entry_submit_enabled` governs only new ENTRY. Frozen authority continues
+  protection, exit, reconciliation, Settlement, and Review after exposure.
+- A worker whose commit or schema differs from certified runtime identity must
+  record/follow the Runtime Fence and perform no exchange mutation.
 - Authoritative ENTRY rejection is terminal and is not retried.
 - Unknown exchange outcome is never blindly resent.
 - Partial ENTRY fill is an incident: cancel the exact remainder, confirm the

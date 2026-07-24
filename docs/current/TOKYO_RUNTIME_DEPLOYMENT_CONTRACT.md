@@ -54,6 +54,12 @@ Observation
 No Tokyo command may bypass this chain or create an exchange mutation without a
 durable Exchange Command.
 
+The runtime seed uses the dynamic three-Ticket policy: `0.03` planned stop risk,
+`0.90` maximum initial-margin utilization, maximum leverage `10`, and `cross`
+margin. `new_entry_submit_enabled` is a new-ENTRY gate only. Every mutating
+worker must match the certified commit and schema; a mismatch records a runtime
+Incident and fences that writer while readonly checks remain allowed.
+
 ## Persistent Worker Contract
 
 | Worker | Exclusive responsibility | Idle behavior |

@@ -80,6 +80,16 @@ The Entry worker revalidates the Claim and atomically commits the Ticket,
 budget reservation, Netting Domain hold, aggregate, first event, and durable
 ENTRY command. Two Signals may coexist, but their Tickets are issued serially.
 
+## Approved Dynamic Policy
+
+The committed runtime seed defines one policy envelope: three concurrent
+Tickets, `0.03` planned stop-risk fraction, `0.90` maximum initial-margin
+utilization, maximum leverage `10`, and `cross` margin mode. Capacity is
+calculated from current account facts and Reservations, not from fixed per-Ticket
+notional amounts. `new_entry_submit_enabled` gates only new ENTRY; after venue
+exposure exists, the frozen Ticket retains protection, exit, reconciliation,
+Settlement, and Review authority.
+
 ## Transaction And Exchange Model
 
 Each aggregate mutation uses one short PostgreSQL transaction:
@@ -111,6 +121,11 @@ Reconciliation Worker
 They are long-running processes with bounded polling and restart-on-failure.
 Timer-based cold starts are retired because idle Python import and initialization
 cost exceeded the 2c4g Tokyo budget.
+
+Before any exchange mutation, the writer must match the certified runtime commit
+and schema. A mismatch creates a runtime-scoped Incident and fences that writer;
+readonly observation remains available and the exact certified writer may resume
+durable safety work for already-exposed Tickets.
 
 ## Destructive Cutover Model
 

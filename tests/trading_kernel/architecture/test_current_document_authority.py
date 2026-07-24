@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import subprocess
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -57,6 +60,48 @@ RESIDENT_WORKER_NAMES = (
     "Lifecycle",
     "Reconciliation",
 )
+RETIRED_CAPACITY_MARKERS = (
+    "real_submit" + "_enabled",
+    "max_gross" + "_notional",
+    "max_gross" + "_risk_at_stop",
+    "max_ticket" + "_risk_at_stop",
+    "target" + "_leverage",
+    "Acceptance=" + "1 Ticket",
+    "Full=" + "2 Tickets",
+    "20" + " USDT",
+    "40" + " USDT",
+)
+RETIRED_CAPACITY_SCAN_ROOTS = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    "docs/current",
+    "src/trading_kernel",
+    "scripts/trading_kernel",
+    "migrations/trading_kernel",
+    "deploy/systemd",
+    "tests/trading_kernel",
+)
+RETIRED_CAPACITY_SCAN_EXCLUSIONS = {
+    "tests/trading_kernel/architecture/test_current_document_authority.py",
+    "tests/trading_kernel/integration/test_schema_baseline.py",
+}
+
+
+def _current_authority_and_execution_text() -> str:
+    result = subprocess.run(
+        ("git", "ls-files", "-z", *RETIRED_CAPACITY_SCAN_ROOTS),
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=True,
+    )
+    sources: list[str] = []
+    for raw_path in result.stdout.decode("utf-8").split("\0"):
+        if not raw_path or raw_path in RETIRED_CAPACITY_SCAN_EXCLUSIONS:
+            continue
+        path = REPO_ROOT / raw_path
+        if path.is_file():
+            sources.append(path.read_text(encoding="utf-8"))
+    return "\n".join(sources)
 
 
 def test_current_documents_are_the_minimal_kernel_authority_set() -> None:
@@ -103,6 +148,13 @@ def test_current_authority_does_not_reintroduce_retired_execution_semantics() ->
     assert not violations, "retired authority semantics remain:\n" + "\n".join(
         sorted(violations)
     )
+
+
+@pytest.mark.parametrize("retired", RETIRED_CAPACITY_MARKERS)
+def test_retired_capacity_semantics_are_absent_from_current_execution(
+    retired: str,
+) -> None:
+    assert retired not in _current_authority_and_execution_text()
 
 
 def test_production_state_documents_match_the_deployed_kernel() -> None:

@@ -52,6 +52,12 @@ real-funds authority.
   the task card explicitly authorizes that exact production action.
 - `promote-full` is not complete and must not be inferred from deployment or
   protected-position status.
+- The approved dynamic policy is three concurrent Tickets, `0.03` planned stop
+  risk, `0.90` maximum initial-margin utilization, maximum leverage `10`, and
+  `cross` margin. `new_entry_submit_enabled` gates only new ENTRY; it does not
+  revoke protection or recovery authority from existing exposure.
+- A runtime commit/schema mismatch is a Runtime Fence: do not mutate the
+  exchange from that worker, while preserving readonly diagnosis.
 
 ## Implementation Rules
 

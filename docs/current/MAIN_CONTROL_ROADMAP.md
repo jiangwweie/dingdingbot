@@ -38,6 +38,9 @@ different Netting Domains progress concurrently.
 | PostgreSQL | BRC data was deleted without backup by explicit Owner decision, then rebuilt from the single 33-table `0001_initial` baseline |
 | Strategy capability | Six registered Events, deterministic detectors, closed-candle Observation, Live/Replay parity, and real StrategySignal production |
 | Ticket capability | CapacityClaim, immutable Ticket, budget reservation, Netting Domain hold, event, aggregate, and durable ENTRY command commit atomically |
+| Dynamic policy | Three concurrent Tickets; `0.03` planned stop risk; `0.90` initial-margin utilization; max `10` leverage; `cross` margin |
+| Entry authority | `new_entry_submit_enabled` applies only before ENTRY; existing exposure retains frozen safety authority |
+| Runtime fence | Commit/schema mismatch records an Incident and fences mutations from that writer |
 | Acceptance Ticket | `ticket:c1ebc24a178a3ae4d87978e2fa1204ae`; natural `SOR-001 / SOR-SHORT / SOLUSDT`; verified state `position_protected` |
 | Accepted exchange effects | ENTRY, Initial Stop, and TP1 accepted for the acceptance Ticket |
 | Hourly supervision | Active, read-only production observation automation |

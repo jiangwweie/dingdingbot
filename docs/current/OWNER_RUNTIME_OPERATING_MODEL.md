@@ -65,3 +65,9 @@ hold protected positions concurrently, including long and short sides of the
 same instrument. New ENTRY admission remains globally serialized. Capacity is
 controlled by current Owner budget policy, not by a hard-coded two-position
 architecture.
+
+The approved runtime policy allows up to three concurrent Tickets and derives
+size from current account facts, `0.03` planned stop risk, `0.90` initial-margin
+utilization, maximum `10` leverage, and `cross` margin. Disabling
+`new_entry_submit_enabled` stops only new ENTRY; it does not remove protection
+or recovery authority from a Ticket that already has exchange exposure.
