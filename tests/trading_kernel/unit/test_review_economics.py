@@ -13,7 +13,7 @@ from src.trading_kernel.domain.review import (
 )
 
 
-def test_complete_review_economics_uses_exact_fills_fees_funding_and_risk() -> None:
+def test_complete_review_economics_reports_planned_and_actual_r_multiples() -> None:
     economics = calculate_review_economics(
         facts=ReviewEconomicsFacts(
             ticket_id="ticket-1",
@@ -31,7 +31,8 @@ def test_complete_review_economics_uses_exact_fills_fees_funding_and_risk() -> N
         ),
         expected_entry_quantity=Decimal("1"),
         position_side="long",
-        risk_at_stop=Decimal("10"),
+        planned_risk_at_stop=Decimal("10"),
+        actual_risk_at_stop=Decimal("8"),
     )
 
     assert economics.entry_average_price == Decimal("101.2")
@@ -41,7 +42,8 @@ def test_complete_review_economics_uses_exact_fills_fees_funding_and_risk() -> N
     assert economics.net_pnl_before_funding_quote == Decimal("5.60")
     assert economics.funding_quote == Decimal("-0.3")
     assert economics.net_pnl_quote == Decimal("5.30")
-    assert economics.r_multiple == Decimal("0.53")
+    assert economics.planned_r_multiple == Decimal("0.53")
+    assert economics.actual_r_multiple == Decimal("0.6625")
     assert economics.economics_completeness is ReviewEconomicsCompleteness.COMPLETE
 
 
@@ -57,15 +59,17 @@ def test_short_review_economics_has_the_correct_pnl_direction() -> None:
         ),
         expected_entry_quantity=Decimal("2"),
         position_side="short",
-        risk_at_stop=Decimal("20"),
+        planned_risk_at_stop=Decimal("20"),
+        actual_risk_at_stop=Decimal("20"),
     )
 
     assert economics.gross_realized_pnl_quote == Decimal("20")
     assert economics.net_pnl_quote == Decimal("19.8")
-    assert economics.r_multiple == Decimal("0.99")
+    assert economics.planned_r_multiple == Decimal("0.99")
+    assert economics.actual_r_multiple == Decimal("0.99")
 
 
-def test_funding_unavailable_never_fabricates_net_pnl_or_r_multiple() -> None:
+def test_funding_unavailable_never_fabricates_net_pnl_or_r_multiples() -> None:
     economics = calculate_review_economics(
         facts=ReviewEconomicsFacts(
             ticket_id="ticket-overlap",
@@ -77,17 +81,41 @@ def test_funding_unavailable_never_fabricates_net_pnl_or_r_multiple() -> None:
         ),
         expected_entry_quantity=Decimal("1"),
         position_side="long",
-        risk_at_stop=Decimal("10"),
+        planned_risk_at_stop=Decimal("10"),
+        actual_risk_at_stop=Decimal("8"),
     )
 
     assert economics.net_pnl_before_funding_quote == Decimal("9.8")
     assert economics.funding_quote is None
     assert economics.net_pnl_quote is None
-    assert economics.r_multiple is None
+    assert economics.planned_r_multiple is None
+    assert economics.actual_r_multiple is None
     assert (
         economics.economics_completeness
         is ReviewEconomicsCompleteness.FUNDING_UNAVAILABLE
     )
+
+
+def test_missing_actual_stop_risk_keeps_only_the_planned_r_multiple() -> None:
+    economics = calculate_review_economics(
+        facts=ReviewEconomicsFacts(
+            ticket_id="ticket-without-post-fill-risk",
+            entry_fills=(_fill("entry", quantity="1", price="100", fee="0.1"),),
+            exit_fills=(_fill("exit", quantity="1", price="110", fee="0.1"),),
+            funding_quote=Decimal("0"),
+            funding_unavailable_reason=None,
+            observed_at_ms=5_000,
+        ),
+        expected_entry_quantity=Decimal("1"),
+        position_side="long",
+        planned_risk_at_stop=Decimal("10"),
+        actual_risk_at_stop=None,
+    )
+
+    assert economics.planned_r_multiple == Decimal("0.98")
+    assert economics.actual_r_multiple is None
+    assert economics.risk_variance is None
+    assert economics.risk_variance_fraction is None
 
 
 def test_review_economics_rejects_incomplete_exit_quantity() -> None:
@@ -110,7 +138,8 @@ def test_review_economics_rejects_incomplete_exit_quantity() -> None:
             ),
             expected_entry_quantity=Decimal("1"),
             position_side="long",
-            risk_at_stop=Decimal("10"),
+            planned_risk_at_stop=Decimal("10"),
+            actual_risk_at_stop=Decimal("10"),
         )
 
 

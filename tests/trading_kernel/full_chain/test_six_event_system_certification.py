@@ -594,7 +594,10 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     assert review.metrics["gross_realized_pnl_quote"] is not None
     assert review.metrics["trading_fees_quote"] == "0.20"
     assert review.metrics["net_pnl_quote"] is not None
-    assert review.metrics["r_multiple"] is not None
+    assert review.metrics["planned_r_multiple"] is not None
+    assert review.metrics["actual_r_multiple"] is not None
+    assert review.metrics["planned_stop_risk"] is not None
+    assert review.metrics["actual_stop_risk"] is not None
     assert len(review_source.requests) == 1
     assert incident is None
     assert owner_state.owner_status is MonitorOwnerStatus.COMPLETED

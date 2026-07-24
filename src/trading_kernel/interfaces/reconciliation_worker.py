@@ -314,7 +314,8 @@ async def run_reconciliation_worker_once(
                 facts=economics_facts,
                 expected_entry_quantity=executed_entry_quantity,
                 position_side=review.identity.netting_domain.position_side,
-                risk_at_stop=review.ticket.risk_at_stop,
+                planned_risk_at_stop=review.ticket.risk_at_stop,
+                actual_risk_at_stop=review.actual_stop_risk,
             )
         except Exception as exc:
             await _schedule_review_retry(
@@ -333,7 +334,6 @@ async def run_reconciliation_worker_once(
             "event_spec_id": review.identity.runtime.event_spec_id,
             "ticket_quantity": str(review.ticket.quantity),
             "executed_entry_quantity": str(executed_entry_quantity),
-            "risk_at_stop": str(review.ticket.risk_at_stop),
             **economics.model_dump(mode="json"),
         }
         async with uow_factory() as uow:

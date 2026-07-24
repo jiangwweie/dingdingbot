@@ -112,7 +112,12 @@ class ReviewEconomics(BaseModel):
     net_pnl_before_funding_quote: Decimal
     funding_quote: Decimal | None
     net_pnl_quote: Decimal | None
-    r_multiple: Decimal | None
+    planned_stop_risk: Decimal
+    actual_stop_risk: Decimal | None
+    risk_variance: Decimal | None
+    risk_variance_fraction: Decimal | None
+    planned_r_multiple: Decimal | None
+    actual_r_multiple: Decimal | None
     economics_completeness: ReviewEconomicsCompleteness
     funding_unavailable_reason: str | None
 
@@ -122,12 +127,15 @@ def calculate_review_economics(
     facts: ReviewEconomicsFacts,
     expected_entry_quantity: Decimal,
     position_side: Literal["long", "short"],
-    risk_at_stop: Decimal,
+    planned_risk_at_stop: Decimal,
+    actual_risk_at_stop: Decimal | None,
 ) -> ReviewEconomics:
     if expected_entry_quantity <= 0:
         raise ValueError("expected Ticket quantity must be positive")
-    if risk_at_stop <= 0:
-        raise ReviewEconomicsUnavailable("Ticket risk at stop must be positive")
+    if planned_risk_at_stop <= 0:
+        raise ReviewEconomicsUnavailable("planned Ticket risk at stop must be positive")
+    if actual_risk_at_stop is not None and actual_risk_at_stop <= 0:
+        raise ReviewEconomicsUnavailable("actual stop risk must be positive")
     if not facts.entry_fills:
         raise ReviewEconomicsUnavailable("entry fills are unavailable")
     if not facts.exit_fills:
@@ -159,13 +167,27 @@ def calculate_review_economics(
         Decimal("0"),
     )
     net_before_funding = gross_realized_pnl - trading_fees
+    risk_variance = (
+        None
+        if actual_risk_at_stop is None
+        else actual_risk_at_stop - planned_risk_at_stop
+    )
+    risk_variance_fraction = (
+        None
+        if risk_variance is None
+        else risk_variance / planned_risk_at_stop
+    )
     if facts.funding_quote is None:
         net_pnl = None
-        r_multiple = None
+        planned_r_multiple = None
+        actual_r_multiple = None
         completeness = ReviewEconomicsCompleteness.FUNDING_UNAVAILABLE
     else:
         net_pnl = net_before_funding + facts.funding_quote
-        r_multiple = net_pnl / risk_at_stop
+        planned_r_multiple = net_pnl / planned_risk_at_stop
+        actual_r_multiple = (
+            None if actual_risk_at_stop is None else net_pnl / actual_risk_at_stop
+        )
         completeness = ReviewEconomicsCompleteness.COMPLETE
 
     return ReviewEconomics(
@@ -178,7 +200,12 @@ def calculate_review_economics(
         net_pnl_before_funding_quote=net_before_funding,
         funding_quote=facts.funding_quote,
         net_pnl_quote=net_pnl,
-        r_multiple=r_multiple,
+        planned_stop_risk=planned_risk_at_stop,
+        actual_stop_risk=actual_risk_at_stop,
+        risk_variance=risk_variance,
+        risk_variance_fraction=risk_variance_fraction,
+        planned_r_multiple=planned_r_multiple,
+        actual_r_multiple=actual_r_multiple,
         economics_completeness=completeness,
         funding_unavailable_reason=facts.funding_unavailable_reason,
     )
