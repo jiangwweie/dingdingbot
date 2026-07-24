@@ -79,7 +79,7 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
     assert CUTOVER_PHASES == (
         CutoverPhase.PLAN_IDENTITIES,
         CutoverPhase.FENCE_EXCHANGE_WRITES,
-        CutoverPhase.STOP_OLD_WRITERS,
+        CutoverPhase.STOP_RUNTIME_WRITERS,
         CutoverPhase.VERIFY_FINAL_FLAT,
         CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT,
         CutoverPhase.REBUILD_APPLICATION_SCHEMA,
@@ -554,7 +554,7 @@ class FakeCutoverAdapter:
 
     async def inspect_preconditions(self, plan: CutoverPlan) -> CutoverFacts:
         del plan
-        if CutoverPhase.STOP_OLD_WRITERS in self.satisfied:
+        if CutoverPhase.STOP_RUNTIME_WRITERS in self.satisfied:
             return self.facts.model_copy(update=self.final_fact_change)
         return self.facts
 
@@ -565,8 +565,8 @@ class FakeCutoverAdapter:
             self.facts = self.facts.model_copy(
                 update={"exchange_writes_fenced": True}
             )
-        elif phase is CutoverPhase.STOP_OLD_WRITERS:
-            self.facts = self.facts.model_copy(update={"active_old_writers": ()})
+        elif phase is CutoverPhase.STOP_RUNTIME_WRITERS:
+            self.facts = self.facts.model_copy(update={"active_new_writers": ()})
         self.satisfied.add(phase)
         if phase is self.fail_after_effect_once and not self.failed_once:
             self.failed_once = True
@@ -659,8 +659,7 @@ class LocalPostgresCutoverAdapter:
         self.plan = plan
         self.engine: AsyncEngine = create_async_engine(database_url)
         self.writes_fenced = False
-        self.old_writers = ("legacy-writer",)
-        self.new_writers: tuple[str, ...] = ()
+        self.runtime_writers = ("runtime-writer",)
         self.release_deployed = False
         self.readonly_certified = False
         self.observation_enabled = False
@@ -672,8 +671,8 @@ class LocalPostgresCutoverAdapter:
     async def inspect_preconditions(self, plan: CutoverPlan) -> CutoverFacts:
         return _facts(plan).model_copy(
             update={
-                "active_old_writers": self.old_writers,
-                "active_new_writers": self.new_writers,
+                "active_old_writers": (),
+                "active_new_writers": self.runtime_writers,
                 "exchange_writes_fenced": self.writes_fenced,
             }
         )
@@ -681,8 +680,8 @@ class LocalPostgresCutoverAdapter:
     async def apply_phase(self, phase: CutoverPhase, plan: CutoverPlan) -> None:
         if phase is CutoverPhase.FENCE_EXCHANGE_WRITES:
             self.writes_fenced = True
-        elif phase is CutoverPhase.STOP_OLD_WRITERS:
-            self.old_writers = ()
+        elif phase is CutoverPhase.STOP_RUNTIME_WRITERS:
+            self.runtime_writers = ()
         elif phase is CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT:
             async with self.engine.begin() as connection:
                 await connection.execute(
@@ -732,8 +731,8 @@ class LocalPostgresCutoverAdapter:
         del plan
         if phase is CutoverPhase.FENCE_EXCHANGE_WRITES:
             return self.writes_fenced
-        if phase is CutoverPhase.STOP_OLD_WRITERS:
-            return not self.old_writers
+        if phase is CutoverPhase.STOP_RUNTIME_WRITERS:
+            return not self.runtime_writers
         if phase is CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT:
             return await self._relation_exists(
                 "brc_cutover_backup_test.legacy_execution_path"
@@ -866,7 +865,7 @@ def _facts(plan: CutoverPlan) -> CutoverFacts:
         active_budgets=0,
         unresolved_outcomes=0,
         open_incidents=0,
-        active_old_writers=("legacy-writer",),
-        active_new_writers=(),
+        active_old_writers=(),
+        active_new_writers=("runtime-writer",),
         exchange_writes_fenced=False,
     )

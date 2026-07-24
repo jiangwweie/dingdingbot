@@ -42,7 +42,7 @@ OPS_SCHEMA = "brc_cutover_ops"
 class CutoverPhase(StrEnum):
     PLAN_IDENTITIES = "plan_identities"
     FENCE_EXCHANGE_WRITES = "fence_exchange_writes"
-    STOP_OLD_WRITERS = "stop_old_writers"
+    STOP_RUNTIME_WRITERS = "stop_runtime_writers"
     VERIFY_FINAL_FLAT = "verify_final_flat"
     CREATE_SHORT_LIVED_SNAPSHOT = "create_short_lived_snapshot"
     REBUILD_APPLICATION_SCHEMA = "rebuild_application_schema"
@@ -57,7 +57,7 @@ class CutoverPhase(StrEnum):
 CUTOVER_PHASES = (
     CutoverPhase.PLAN_IDENTITIES,
     CutoverPhase.FENCE_EXCHANGE_WRITES,
-    CutoverPhase.STOP_OLD_WRITERS,
+    CutoverPhase.STOP_RUNTIME_WRITERS,
     CutoverPhase.VERIFY_FINAL_FLAT,
     CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT,
     CutoverPhase.REBUILD_APPLICATION_SCHEMA,

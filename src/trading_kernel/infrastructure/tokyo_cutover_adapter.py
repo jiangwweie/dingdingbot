@@ -17,17 +17,6 @@ from scripts.trading_kernel.cutover_tokyo import CutoverPhase
 from scripts.trading_kernel.verify_flat_cutover import CutoverFacts, CutoverPlan
 
 
-EXPECTED_OLD_BRC_UNITS = frozenset(
-    {
-        "brc-owner-console-backend.service",
-        "brc-runtime-monitor.service",
-        "brc-runtime-monitor.timer",
-        "brc-runtime-signal-watcher.service",
-        "brc-runtime-signal-watcher.timer",
-        "brc-ticket-lifecycle-maintenance.service",
-        "brc-ticket-lifecycle-maintenance.timer",
-    }
-)
 EXPECTED_NEW_BRC_UNITS = frozenset(
     {
         "brc-trading-kernel.slice",
@@ -40,7 +29,7 @@ EXPECTED_NEW_BRC_UNITS = frozenset(
 EXPECTED_NEW_BRC_WRITER_UNITS = frozenset(
     unit for unit in EXPECTED_NEW_BRC_UNITS if unit.endswith(".service")
 )
-MUTABLE_CONTAINERS = frozenset({"dingdingbot-pg", "brc-trading-kernel-pg"})
+MUTABLE_CONTAINERS = frozenset({"brc-trading-kernel-pg"})
 PROTECTED_CONTAINERS = (
     "owner_ai_cpa",
     "owner_ai_new_api",
@@ -57,9 +46,6 @@ WRITE_FENCE = PurePosixPath("/etc/brc/trading-kernel.write-fenced")
 RUNTIME_ENV = PurePosixPath("/etc/brc/trading-kernel.env")
 RELEASE_ROOT = PurePosixPath("/opt/brc/releases")
 CURRENT_RELEASE = PurePosixPath("/opt/brc/current")
-OLD_DATABASE_CONTAINER = "dingdingbot-pg"
-OLD_DATABASE_USER = "brc_dryrun"
-OLD_DATABASE_NAME = "brc_prelive_dryrun"
 TARGET_DATABASE_CONTAINER = "brc-trading-kernel-pg"
 TARGET_DATABASE_USER = "brc_kernel"
 TARGET_DATABASE_NAME = "brc_trading_kernel"
@@ -84,7 +70,7 @@ class TokyoPhaseState(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     exchange_writes_fenced: bool = False
-    old_writers_stopped: bool = False
+    runtime_writers_stopped: bool = False
     snapshot_exists: bool = False
     target_schema_ready: bool = False
     seed_identity_matches: bool = False
@@ -152,7 +138,7 @@ class TokyoCutoverAdapter:
 
     def __init__(self, system: TokyoSystem) -> None:
         self.system = system
-        self.mutable_units = EXPECTED_OLD_BRC_UNITS | EXPECTED_NEW_BRC_UNITS
+        self.mutable_units = EXPECTED_NEW_BRC_UNITS
         self.mutable_containers = set(MUTABLE_CONTAINERS)
         self._non_quant_baseline: str | None = None
         self._latest_non_quant_digest: str | None = None
@@ -160,7 +146,7 @@ class TokyoCutoverAdapter:
     async def inspect_preconditions(self, plan: CutoverPlan) -> CutoverFacts:
         inspection = await self.system.inspect_preconditions(
             plan,
-            old_units=EXPECTED_OLD_BRC_UNITS,
+            old_units=frozenset(),
             new_units=EXPECTED_NEW_BRC_WRITER_UNITS,
         )
         persisted = await self.system.read_persisted_non_quant_baseline(plan)
@@ -187,8 +173,11 @@ class TokyoCutoverAdapter:
                     raise RuntimeError("non-quantitative baseline is unavailable")
                 await self.system.persist_non_quant_baseline(plan, baseline)
             await self.system.fence_new_entry(plan)
-        elif phase_value == CutoverPhase.STOP_OLD_WRITERS.value:
-            await self.system.stop_units(plan, tuple(sorted(EXPECTED_OLD_BRC_UNITS)))
+        elif phase_value == CutoverPhase.STOP_RUNTIME_WRITERS.value:
+            await self.system.stop_units(
+                plan,
+                tuple(sorted(EXPECTED_NEW_BRC_WRITER_UNITS)),
+            )
         elif phase_value == CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT.value:
             await self.system.create_snapshot(plan)
         elif phase_value == CutoverPhase.REBUILD_APPLICATION_SCHEMA.value:
@@ -222,8 +211,8 @@ class TokyoCutoverAdapter:
                 and not state.entry_worker_enabled
                 and not state.exchange_commands_enabled
             )
-        if phase_value == CutoverPhase.STOP_OLD_WRITERS.value:
-            return state.old_writers_stopped
+        if phase_value == CutoverPhase.STOP_RUNTIME_WRITERS.value:
+            return state.runtime_writers_stopped
         if phase_value == CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT.value:
             return state.snapshot_exists
         if phase_value == CutoverPhase.REBUILD_APPLICATION_SCHEMA.value:
@@ -342,8 +331,7 @@ class SshTokyoSystem:
             release,
             "scripts/trading_kernel/probe_production_runtime.py",
         )
-        old_counts = await self._legacy_counts()
-        active_old = await self._active_units(old_units)
+        current_counts = await self._current_kernel_counts()
         active_new = await self._active_units(new_units)
         fenced = await self._path_exists(WRITE_FENCE)
         server_id = (await self._runner.run(("hostname",))).stdout
@@ -367,11 +355,11 @@ class SshTokyoSystem:
             non_flat_positions=non_flat_positions,
             open_orders=open_orders,
             protection_orders=0 if open_orders == 0 else open_orders,
-            nonterminal_tickets=old_counts["nonterminal_tickets"],
-            active_budgets=old_counts["active_budgets"],
-            unresolved_outcomes=old_counts["unresolved_outcomes"],
-            open_incidents=old_counts["open_incidents"],
-            active_old_writers=active_old,
+            nonterminal_tickets=current_counts["nonterminal_tickets"],
+            active_budgets=current_counts["active_budgets"],
+            unresolved_outcomes=current_counts["unresolved_outcomes"],
+            open_incidents=current_counts["open_incidents"],
+            active_old_writers=(),
             active_new_writers=active_new,
             exchange_writes_fenced=fenced,
         )
@@ -392,8 +380,8 @@ class SshTokyoSystem:
         )
         return TokyoPhaseState(
             exchange_writes_fenced=await self._path_exists(WRITE_FENCE),
-            old_writers_stopped=await self._units_stopped_and_disabled(
-                EXPECTED_OLD_BRC_UNITS
+            runtime_writers_stopped=await self._units_stopped_and_disabled(
+                EXPECTED_NEW_BRC_WRITER_UNITS
             ),
             snapshot_exists=await self._path_exists(_snapshot_path(plan)),
             target_schema_ready=await self._target_schema_ready(release),
@@ -491,8 +479,8 @@ class SshTokyoSystem:
         units: tuple[str, ...],
     ) -> None:
         del plan
-        if set(units) != set(EXPECTED_OLD_BRC_UNITS):
-            raise RuntimeError("old writer stop target differs from exact allowlist")
+        if set(units) != set(EXPECTED_NEW_BRC_WRITER_UNITS):
+            raise RuntimeError("runtime writer stop target differs from exact allowlist")
         for unit in units:
             await self._runner.run(
                 ("sudo", "systemctl", "stop", unit),
@@ -514,12 +502,12 @@ class SshTokyoSystem:
                 "sudo",
                 "docker",
                 "exec",
-                OLD_DATABASE_CONTAINER,
+                TARGET_DATABASE_CONTAINER,
                 "pg_dump",
                 "-U",
-                OLD_DATABASE_USER,
+                TARGET_DATABASE_USER,
                 "-d",
-                OLD_DATABASE_NAME,
+                TARGET_DATABASE_NAME,
                 "-Fc",
                 "-f",
                 container_snapshot,
@@ -530,7 +518,7 @@ class SshTokyoSystem:
                 "sudo",
                 "docker",
                 "cp",
-                f"{OLD_DATABASE_CONTAINER}:{container_snapshot}",
+                f"{TARGET_DATABASE_CONTAINER}:{container_snapshot}",
                 str(snapshot),
             )
         )
@@ -539,7 +527,7 @@ class SshTokyoSystem:
                 "sudo",
                 "docker",
                 "exec",
-                OLD_DATABASE_CONTAINER,
+                TARGET_DATABASE_CONTAINER,
                 "rm",
                 "-f",
                 container_snapshot,
@@ -550,6 +538,19 @@ class SshTokyoSystem:
     async def create_target_database(self, plan: CutoverPlan) -> None:
         release = _release_path(plan)
         compose = release / "deploy/docker/brc-trading-kernel-postgres.compose.yml"
+        await self._runner.run(
+            (
+                "sudo",
+                "docker",
+                "compose",
+                "--env-file",
+                str(RUNTIME_ENV),
+                "-f",
+                str(compose),
+                "down",
+                "-v",
+            )
+        )
         await self._runner.run(
             (
                 "sudo",
@@ -710,49 +711,30 @@ class SshTokyoSystem:
                 result[key] = value.stdout
         return result
 
-    async def _legacy_counts(self) -> dict[str, int]:
+    async def _current_kernel_counts(self) -> dict[str, int]:
         queries = {
             "nonterminal_tickets": (
-                "SELECT count(*) FROM brc_action_time_tickets "
-                "WHERE status NOT IN ('closed','expired')"
+                "SELECT count(*) FROM brc_trade_tickets "
+                "WHERE terminal_at_ms IS NULL"
             ),
             "active_budgets": (
                 "SELECT count(*) FROM brc_budget_reservations "
-                "WHERE status NOT IN ('released','expired')"
+                "WHERE status = 'active'"
             ),
             "unresolved_outcomes": (
-                "SELECT count(*) FROM brc_ticket_bound_exchange_commands "
-                "WHERE command_state IN "
+                "SELECT count(*) FROM brc_exchange_commands "
+                "WHERE status IN "
                 "('prepared','dispatch_started','claimed','outcome_unknown') "
-                "OR outcome_class IN ('unknown','outcome_unknown')"
             ),
             "open_incidents": (
                 "SELECT count(*) FROM brc_runtime_incidents "
-                "WHERE status NOT IN ('closed','resolved')"
+                "WHERE status <> 'resolved'"
             ),
         }
         return {
-            key: int(await self._old_scalar(query))
+            key: int((await self._target_scalar(query)) or "0")
             for key, query in queries.items()
         }
-
-    async def _old_scalar(self, query: str) -> str:
-        result = await self._runner.run(
-            (
-                "sudo",
-                "docker",
-                "exec",
-                OLD_DATABASE_CONTAINER,
-                "psql",
-                "-U",
-                OLD_DATABASE_USER,
-                "-d",
-                OLD_DATABASE_NAME,
-                "-Atqc",
-                query,
-            )
-        )
-        return result.stdout
 
     async def _target_scalar(self, query: str) -> str | None:
         result = await self._runner.run(

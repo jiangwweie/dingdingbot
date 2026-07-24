@@ -235,12 +235,13 @@ def verify_cutover_facts(
             facts.target_seed_identity != plan.target_seed_identity,
             CutoverBlocker.TARGET_SEED_IDENTITY_MISMATCH,
         ),
-        (bool(facts.active_new_writers), CutoverBlocker.NEW_WRITER_ACTIVE),
     )
     blockers.extend(blocker for failed, blocker in checks if failed)
     if require_writer_fence:
         if facts.active_old_writers:
             blockers.append(CutoverBlocker.OLD_WRITER_ACTIVE)
+        if facts.active_new_writers:
+            blockers.append(CutoverBlocker.NEW_WRITER_ACTIVE)
         if not facts.exchange_writes_fenced:
             blockers.append(CutoverBlocker.WRITER_FENCE_MISSING)
     return CutoverVerification(

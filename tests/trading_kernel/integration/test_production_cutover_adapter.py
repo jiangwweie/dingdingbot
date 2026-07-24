@@ -27,13 +27,8 @@ def test_cutover_targets_only_exact_brc_allowlist() -> None:
     module = _production_adapter_module()
     adapter = module.TokyoCutoverAdapter(FakeTokyoSystem(module, _facts()))
 
-    assert adapter.mutable_units == (
-        module.EXPECTED_OLD_BRC_UNITS | module.EXPECTED_NEW_BRC_UNITS
-    )
-    assert adapter.mutable_containers == {
-        "brc-trading-kernel-pg",
-        "dingdingbot-pg",
-    }
+    assert adapter.mutable_units == module.EXPECTED_NEW_BRC_UNITS
+    assert adapter.mutable_containers == {"brc-trading-kernel-pg"}
     assert "nginx.service" not in adapter.mutable_units
     assert "owner_ai_pg" not in adapter.mutable_containers
     assert "owner_ai_cpa" not in adapter.mutable_containers
@@ -57,7 +52,7 @@ async def test_non_quant_baseline_drift_blocks_every_mutating_phase() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cutover_phase_actions_preserve_entry_fence_and_exact_old_units() -> None:
+async def test_cutover_phase_actions_preserve_entry_fence_and_runtime_workers() -> None:
     module = _production_adapter_module()
     system = FakeTokyoSystem(module, _facts())
     adapter = module.TokyoCutoverAdapter(system)
@@ -65,12 +60,12 @@ async def test_cutover_phase_actions_preserve_entry_fence_and_exact_old_units() 
     await adapter.inspect_preconditions(plan)
 
     await adapter.apply_phase(CutoverPhase.FENCE_EXCHANGE_WRITES, plan)
-    await adapter.apply_phase(CutoverPhase.STOP_OLD_WRITERS, plan)
+    await adapter.apply_phase(CutoverPhase.STOP_RUNTIME_WRITERS, plan)
     await adapter.apply_phase(CutoverPhase.CERTIFY_ENTRY_FENCED, plan)
 
     assert system.actions == [
         ("fence_new_entry", ()),
-        ("stop_units", tuple(sorted(module.EXPECTED_OLD_BRC_UNITS))),
+        ("stop_units", tuple(sorted(module.EXPECTED_NEW_BRC_WRITER_UNITS))),
         ("certify_entry_fenced", ()),
     ]
     assert await adapter.phase_satisfied(
@@ -106,7 +101,7 @@ async def test_ssh_system_phase_inspection_returns_typed_state() -> None:
     state = await system.inspect_phase_state(_plan())
 
     assert isinstance(state, module.TokyoPhaseState)
-    assert state.old_writers_stopped is True
+    assert state.runtime_writers_stopped is True
     assert state.entry_worker_enabled is False
     assert state.exchange_commands_enabled is False
 
@@ -151,14 +146,15 @@ async def test_entry_fence_keeps_runtime_directory_traversable_by_brc() -> None:
 
 
 @pytest.mark.asyncio
-async def test_target_database_waits_for_postgres_health_before_bootstrap() -> None:
+async def test_target_database_rebuilds_only_brc_volume_before_bootstrap() -> None:
     module = _production_adapter_module()
     runner = RecordingRunner(module)
     system = module.SshTokyoSystem(runner)
 
     await system.create_target_database(_plan())
 
-    assert runner.commands[0][-5:] == (
+    assert runner.commands[0][-2:] == ("down", "-v")
+    assert runner.commands[1][-5:] == (
         "up",
         "-d",
         "--wait",
@@ -275,6 +271,26 @@ def test_readonly_certification_requires_exact_plan_identity() -> None:
             {**exact, "runtime_commit": "c" * 40},
             plan,
         )
+
+
+@pytest.mark.asyncio
+async def test_current_kernel_counts_never_read_retired_database() -> None:
+    module = _production_adapter_module()
+    runner = RecordingRunner(module)
+    system = module.SshTokyoSystem(runner)
+
+    counts = await system._current_kernel_counts()
+
+    assert counts == {
+        "nonterminal_tickets": 0,
+        "active_budgets": 0,
+        "unresolved_outcomes": 0,
+        "open_incidents": 0,
+    }
+    commands = "\n".join(" ".join(command) for command in runner.commands)
+    assert "brc-trading-kernel-pg" in commands
+    assert "brc_prelive_dryrun" not in commands
+    assert "dingdingbot-pg" not in commands
 
 
 @pytest.mark.asyncio
@@ -440,7 +456,7 @@ class FakeTokyoSystem:
         del plan
         self.actions.append(("stop_units", units))
         self.phase_state = self.phase_state.model_copy(
-            update={"old_writers_stopped": True}
+            update={"runtime_writers_stopped": True}
         )
 
     async def create_snapshot(self, plan: CutoverPlan) -> None:
@@ -534,7 +550,7 @@ def _facts() -> CutoverFacts:
         active_budgets=0,
         unresolved_outcomes=0,
         open_incidents=0,
-        active_old_writers=("brc-runtime-monitor.timer",),
-        active_new_writers=(),
+        active_old_writers=(),
+        active_new_writers=("brc-trading-kernel-entry-worker.service",),
         exchange_writes_fenced=False,
     )
