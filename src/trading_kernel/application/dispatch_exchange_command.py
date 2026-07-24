@@ -393,6 +393,15 @@ async def _preflight_new_entry_mutation(
             aggregate.ticket.owner_policy_id
         )
         scope = await uow.signals.get_runtime_scope(aggregate.ticket.runtime_scope_id)
+        strategy_group = await uow.signals.get_strategy_group(
+            aggregate.ticket.identity.runtime.strategy_group_id
+        )
+        strategy_version = await uow.signals.get_strategy_version(
+            aggregate.ticket.identity.runtime.strategy_version_id
+        )
+        event_spec = await uow.signals.get_event_spec(
+            aggregate.ticket.identity.runtime.event_spec_id
+        )
         capability = await uow.signals.get_runtime_capability("exchange_commands")
         ownership = await uow.entry_admission.read_admission_ownership(
             venue_id=domain.venue_id,
@@ -406,6 +415,9 @@ async def _preflight_new_entry_mutation(
             capacity_claim=claim,
             owner_policy=policy,
             runtime_scope=scope,
+            strategy_group=strategy_group,
+            strategy_version=strategy_version,
+            event_spec=event_spec,
             runtime_capability=capability,
             runtime_commit=request.runtime_commit,
             schema_revision=request.schema_revision,

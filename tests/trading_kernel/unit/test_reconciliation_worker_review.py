@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from src.trading_kernel.application.runtime_facts import ReviewEconomicsRequest
+from src.trading_kernel.application.ports import RuntimeCapabilitySnapshot
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
@@ -76,12 +77,33 @@ class _TicketRepository:
         return self.overlap
 
 
+class _SignalRepository:
+    async def get_runtime_capability(self, capability_key):
+        assert capability_key == "exchange_commands"
+        return RuntimeCapabilitySnapshot(
+            capability_key="exchange_commands",
+            enabled=True,
+            certified_commit="kernel-test-head",
+            schema_revision="0001_initial",
+        )
+
+
+class _IncidentRepository:
+    def __init__(self) -> None:
+        self.created = []
+
+    async def add(self, incident) -> None:
+        self.created.append(incident)
+
+
 class _FakeUnitOfWork:
     def __init__(self, state: "_WorkerState") -> None:
         self.aggregates = state.aggregates
         self.exchange_commands = state.commands
         self.events = state.events
         self.tickets = state.tickets
+        self.signals = state.signals
+        self.incidents = state.incidents
 
     async def __aenter__(self):
         return self
@@ -149,6 +171,8 @@ class _WorkerState:
             ]
         )
         self.tickets = _TicketRepository(overlap=overlap)
+        self.signals = _SignalRepository()
+        self.incidents = _IncidentRepository()
 
     def factory(self):
         return _FakeUnitOfWork(self)
@@ -201,6 +225,8 @@ async def test_review_worker_disables_funding_attribution_when_ticket_windows_ov
 def _request() -> ReconciliationWorkerRequest:
     return ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-test",
+        runtime_commit="kernel-test-head",
+        schema_revision="0001_initial",
         now_ms=5_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,

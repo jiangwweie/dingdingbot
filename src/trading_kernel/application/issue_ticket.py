@@ -11,6 +11,9 @@ from src.trading_kernel.application.ports import (
     KernelUnitOfWork,
     RuntimeScopeSnapshot,
 )
+from src.trading_kernel.application.strategy_authority import (
+    strategy_authority_matches_ticket,
+)
 from src.trading_kernel.domain.events import TicketIssued
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.capacity import CapacityClaim
@@ -109,6 +112,23 @@ async def issue_ticket(
         for_update=True,
     )
     if not _scope_matches_ticket(scope, ticket):
+        return IssueTicketResult(
+            status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
+            ticket_id=None,
+        )
+    strategy_group = await uow.signals.get_strategy_group(
+        ticket.identity.runtime.strategy_group_id
+    )
+    strategy_version = await uow.signals.get_strategy_version(
+        ticket.identity.runtime.strategy_version_id
+    )
+    event_spec = await uow.signals.get_event_spec(ticket.identity.runtime.event_spec_id)
+    if not strategy_authority_matches_ticket(
+        strategy_group,
+        strategy_version,
+        event_spec,
+        ticket,
+    ):
         return IssueTicketResult(
             status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
             ticket_id=None,

@@ -46,6 +46,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--venue-factory", required=True, help="module:callable")
     parser.add_argument("--worker-id", required=True)
+    parser.add_argument(
+        "--runtime-commit",
+        default=os.getenv("TRADING_KERNEL_RUNTIME_COMMIT", ""),
+    )
+    parser.add_argument(
+        "--schema-revision",
+        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", ""),
+    )
     parser.add_argument("--now-ms", type=int)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
     parser.add_argument("--unknown-visibility-grace-ms", type=int, default=30_000)
@@ -93,6 +101,8 @@ async def _run(args: argparse.Namespace) -> int:
                 cast(PositionSnapshotSource, adapter),
                 ReconciliationWorkerRequest(
                     worker_id=args.worker_id,
+                    runtime_commit=args.runtime_commit,
+                    schema_revision=args.schema_revision,
                     now_ms=now_ms,
                     timeout_seconds=args.timeout_seconds,
                     unknown_visibility_grace_ms=(

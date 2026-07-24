@@ -35,9 +35,12 @@ from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
     entry_lane_current,
+    event_specs,
     owner_policy_current,
     runtime_incidents,
     runtime_scopes_current,
+    strategy_groups,
+    strategy_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from tests.trading_kernel.unit.test_ticket import _identity, _ticket
@@ -191,6 +194,32 @@ async def test_scope_drift_after_lane_and_account_lock_leaves_no_durable_entry_s
             return exposure
 
         uow.entry_admission.get_account_exposure = drift_scope_after_account_lock
+        result = await issue_ticket(
+            uow,
+            _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
+        )
+
+    assert result.status is IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH
+    await _assert_no_durable_entry_state(issue_engine, ticket.identity.ticket_id)
+
+
+@pytest.mark.asyncio
+async def test_retired_strategy_version_blocks_ticket_issuance_before_durable_state(
+    issue_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(issue_engine)
+
+    async with issue_engine.begin() as connection:
+        await connection.execute(
+            sa.update(strategy_versions)
+            .where(
+                strategy_versions.c.strategy_version_id
+                == ticket.identity.runtime.strategy_version_id
+            )
+            .values(status="retired")
+        )
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
         result = await issue_ticket(
             uow,
             _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
@@ -473,6 +502,11 @@ async def _seed_policy(
             )
         )
         identity = _identity()
+        await _seed_ticket_registry(connection, _ticket())
+        await _seed_ticket_registry(
+            connection,
+            _ticket_for_signal("signal-seed-short", "episode-seed-short", position_side="short"),
+        )
         await connection.execute(
             sa.insert(runtime_scopes_current).values(
                 runtime_scope_id="scope-sor-btc-long",
@@ -495,7 +529,7 @@ async def _seed_policy(
                 runtime_scope_id="scope-short",
                 strategy_group_id=identity.runtime.strategy_group_id,
                 strategy_version_id=identity.runtime.strategy_version_id,
-                event_spec_id=identity.runtime.event_spec_id,
+                event_spec_id="sor-short-v2",
                 runtime_profile_id=identity.runtime.runtime_profile_id,
                 owner_policy_id="policy-main",
                 exchange_instrument_id=(
@@ -537,6 +571,11 @@ def _ticket_for_signal(
     position_side: str,
 ):
     original = _identity()
+    runtime = (
+        original.runtime
+        if position_side == "long"
+        else original.runtime.model_copy(update={"event_spec_id": "sor-short-v2"})
+    )
     domain = NettingDomain(
         venue_id=original.netting_domain.venue_id,
         account_id=original.netting_domain.account_id,
@@ -546,12 +585,12 @@ def _ticket_for_signal(
     identity = TicketIdentity(
         ticket_id=build_ticket_id(
             signal_event_id=signal_event_id,
-            runtime=original.runtime,
+            runtime=runtime,
             netting_domain=domain,
         ),
         exposure_episode_id=exposure_episode_id,
         signal_event_id=signal_event_id,
-        runtime=original.runtime,
+        runtime=runtime,
         netting_domain=domain,
     )
     terms: dict[str, object] = {
@@ -697,6 +736,7 @@ async def _seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:
         "updated_at_ms": ticket.created_at_ms,
     }
     async with engine.begin() as connection:
+        await _seed_ticket_registry(connection, ticket)
         await connection.execute(
             pg_insert(runtime_scopes_current)
             .values(**values)
@@ -705,6 +745,74 @@ async def _seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:
                 set_=values,
             )
         )
+
+
+async def _seed_ticket_registry(connection, ticket) -> None:
+    identity = ticket.identity
+    runtime = identity.runtime
+    await connection.execute(
+        pg_insert(strategy_groups)
+        .values(
+            strategy_group_id=runtime.strategy_group_id,
+            display_name=runtime.strategy_group_id,
+            active_version_id=runtime.strategy_version_id,
+            status="active",
+            updated_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_update(
+            index_elements=[strategy_groups.c.strategy_group_id],
+            set_={
+                "active_version_id": runtime.strategy_version_id,
+                "status": "active",
+                "updated_at_ms": ticket.created_at_ms,
+            },
+        )
+    )
+    await connection.execute(
+        pg_insert(strategy_versions)
+        .values(
+            strategy_version_id=runtime.strategy_version_id,
+            strategy_group_id=runtime.strategy_group_id,
+            version=1,
+            semantics={},
+            status="active",
+            created_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_update(
+            index_elements=[strategy_versions.c.strategy_version_id],
+            set_={
+                "strategy_group_id": runtime.strategy_group_id,
+                "status": "active",
+            },
+        )
+    )
+    await connection.execute(
+        pg_insert(event_specs)
+        .values(
+            event_spec_id=runtime.event_spec_id,
+            strategy_version_id=runtime.strategy_version_id,
+            event_id=f"event:{runtime.event_spec_id}",
+            position_side=identity.netting_domain.position_side,
+            timeframe="1h",
+            freshness_window_ms=1_000,
+            event_time_authority="close_time",
+            entry_order_type=ticket.entry_order_type.value,
+            protection_reference_fact_definition_id="fact:protection",
+            exit_policy_id=f"exit:{runtime.event_spec_id}",
+            execution_semantics={},
+            status="active",
+            created_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_update(
+            index_elements=[event_specs.c.event_spec_id],
+            set_={
+                "strategy_version_id": runtime.strategy_version_id,
+                "position_side": identity.netting_domain.position_side,
+                "entry_order_type": ticket.entry_order_type.value,
+                "status": "active",
+            },
+        )
+    )
 
 
 def _database_url(database_name: str) -> str:

@@ -907,7 +907,9 @@ class PostgresIncidentRepository:
 
     async def add(self, incident: RuntimeIncidentRecord) -> None:
         await self._connection.execute(
-            sa.insert(runtime_incidents).values(**incident.model_dump(mode="json"))
+            pg_insert(runtime_incidents)
+            .values(**incident.model_dump(mode="json"))
+            .on_conflict_do_nothing(index_elements=[runtime_incidents.c.incident_id])
         )
 
     async def get_open_for_ticket(

@@ -148,6 +148,8 @@ async def _run(args: argparse.Namespace) -> int:
                 cast(LifecycleFactsSource, adapter),
                 LifecycleWorkerRequest(
                     worker_id=args.worker_id,
+                    runtime_commit=args.runtime_commit,
+                    schema_revision=args.schema_revision,
                     now_ms=now_ms,
                     lease_until_ms=now_ms + args.lease_ms,
                     timeout_seconds=args.timeout_seconds,

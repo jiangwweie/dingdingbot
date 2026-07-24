@@ -44,8 +44,11 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.domain.events import TakeProfitFilled
 from src.trading_kernel.domain.reducer import reduce_event
-from src.trading_kernel.infrastructure.pg_models import owner_policy_current
-from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
+from src.trading_kernel.infrastructure.pg_models import (
+    owner_policy_current,
+    runtime_capabilities_current,
+    strategy_versions,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.entry_admission_snapshot import (
@@ -313,6 +316,68 @@ async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations
         command = await uow.exchange_commands.get(result.command_id or "")
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
     assert command is not None and command.status is ExchangeCommandStatus.REJECTED
+    assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+        exposure = await uow.entry_admission.get_account_exposure(
+            ticket.identity.netting_domain.venue_id,
+            ticket.identity.netting_domain.account_id,
+        )
+        domain_active = await uow.entry_admission.has_active_ticket_in_domain(
+            ticket.identity.netting_domain.key()
+        )
+    assert reservation is not None and reservation.status == "released"
+    assert exposure is not None and exposure.active_ticket_count == 0
+    assert domain_active is False
+
+
+@pytest.mark.asyncio
+async def test_retired_strategy_version_before_entry_preflight_causes_zero_venue_mutations(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    async with dispatch_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(runtime_capabilities_current).values(
+                capability_key="exchange_commands",
+                enabled=True,
+                certified_commit="kernel-test-head",
+                schema_revision="0001_initial",
+                certification={},
+                updated_at_ms=1_000,
+            )
+        )
+        await connection.execute(
+            sa.update(strategy_versions)
+            .where(
+                strategy_versions.c.strategy_version_id
+                == ticket.identity.runtime.strategy_version_id
+            )
+            .values(status="retired")
+        )
+    venue = CountingVenue()
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0001_initial",
+            admission_snapshot_validity_ms=1_000,
+        ),
+        entry_facts_source=PreflightFacts(),
+    )
+
+    assert result.status is DispatchCommandStatus.SUPERSEDED
+    assert venue.calls == 0
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
     assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
 
 

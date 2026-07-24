@@ -459,6 +459,8 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     )
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-certification",
+        runtime_commit="kernel-test-head",
+        schema_revision="0001_initial",
         now_ms=NOW_MS + 2_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -474,6 +476,8 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
 
     lifecycle_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-certification",
+        runtime_commit="kernel-test-head",
+        schema_revision="0001_initial",
         now_ms=NOW_MS + 3_000,
         lease_until_ms=NOW_MS + 8_000,
         timeout_seconds=1,

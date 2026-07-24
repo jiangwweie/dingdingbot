@@ -23,7 +23,10 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandStatus,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
+from src.trading_kernel.infrastructure.pg_models import (
+    owner_policy_current,
+    runtime_capabilities_current,
+)
 import sqlalchemy as sa
 from src.trading_kernel.interfaces.entry_worker import (
     EntryWorkerRequest,
@@ -45,6 +48,7 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
 )
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
+from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.identities import NettingDomain
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_signal_to_ticket import (
@@ -364,22 +368,41 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
             )
         ),
     )
+    reconciliation_request = ReconciliationWorkerRequest(
+        worker_id="reconciliation-worker-1",
+        runtime_commit="kernel-test-head",
+        schema_revision="0001_initial",
+        now_ms=1_006,
+        timeout_seconds=1,
+        unknown_visibility_grace_ms=30_000,
+        idle_poll_interval_ms=2_000,
+    )
+    fenced = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
+        RecordingAcceptingVenue(),
+        snapshots,
+        reconciliation_request.model_copy(
+            update={"runtime_commit": "wrong-commit"}
+        ),
+    )
+
+    assert fenced.status is ReconciliationWorkerStatus.RUNTIME_FENCED
+    assert len(snapshots.requests) == 1
+    async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
+        aggregate = await uow.aggregates.get(entry.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.ENTRY_ACCEPTED
+
     reconciled = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         RecordingAcceptingVenue(),
         snapshots,
-        ReconciliationWorkerRequest(
-            worker_id="reconciliation-worker-1",
-            now_ms=1_006,
-            timeout_seconds=1,
-            unknown_visibility_grace_ms=30_000,
-            idle_poll_interval_ms=2_000,
-        ),
+        reconciliation_request,
     )
 
     assert reconciled.status is ReconciliationWorkerStatus.POSITION_RECONCILED
     assert reconciled.ticket_id == entry.ticket_id
-    assert len(snapshots.requests) == 1
+    assert len(snapshots.requests) == 2
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         aggregate = await uow.aggregates.get(entry.ticket_id)
     assert aggregate is not None
@@ -422,6 +445,12 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         ticket = await uow.tickets.get(entry.ticket_id)
     assert ticket is not None
+    async with runtime_fact_worker_engine.begin() as connection:
+        await connection.execute(
+            sa.update(owner_policy_current)
+            .where(owner_policy_current.c.owner_policy_id == "policy-main")
+            .values(new_entry_submit_enabled=False)
+        )
     await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
@@ -438,6 +467,8 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         ),
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-1",
+            runtime_commit="kernel-test-head",
+            schema_revision="0001_initial",
             now_ms=1_007,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -459,11 +490,33 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     )
     worker_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-1",
+        runtime_commit="kernel-test-head",
+        schema_revision="0001_initial",
         now_ms=1_008,
         lease_until_ms=6_008,
         timeout_seconds=1,
         idle_poll_interval_ms=2_000,
     )
+    fenced = await run_lifecycle_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
+        venue,
+        no_fill_facts,
+        worker_request.model_copy(
+            update={"runtime_commit": "wrong-commit"}
+        ),
+    )
+    assert fenced.status is LifecycleWorkerStatus.RUNTIME_FENCED
+    assert venue.command_kinds == ["entry"]
+    async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
+        ownership = await uow.entry_admission.read_admission_ownership(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id=ticket.identity.netting_domain.account_id,
+            exchange_instrument_id=(
+                ticket.identity.netting_domain.exchange_instrument_id
+            ),
+        )
+    assert EntryBlockScope.RUNTIME in ownership.open_incident_scopes
+
     initial_stop = await run_lifecycle_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,

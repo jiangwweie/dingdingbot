@@ -17,6 +17,7 @@ from src.trading_kernel.application.reconcile_ticket import (
     ReconcileTicketStatus,
     reconcile_ticket,
 )
+from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
 from src.trading_kernel.application.recover_unknown_command import (
     RecoverUnknownCommandRequest,
     recover_unknown_command,
@@ -86,6 +87,7 @@ _POSITION_RECONCILIATION_STATUSES = (
 
 class ReconciliationWorkerStatus(StrEnum):
     NO_WORK = "no_work"
+    RUNTIME_FENCED = "runtime_fenced"
     UNKNOWN_RECOVERED = "unknown_recovered"
     POSITION_RECONCILED = "position_reconciled"
     FACTS_UNAVAILABLE = "facts_unavailable"
@@ -97,17 +99,19 @@ class ReconciliationWorkerRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     worker_id: str
+    runtime_commit: str
+    schema_revision: str
     now_ms: int
     timeout_seconds: float
     unknown_visibility_grace_ms: int
     idle_poll_interval_ms: int
 
-    @field_validator("worker_id", mode="before")
+    @field_validator("worker_id", "runtime_commit", "schema_revision", mode="before")
     @classmethod
     def _require_worker_id(cls, value: object) -> str:
         normalized = str(value or "").strip()
         if not normalized:
-            raise ValueError("reconciliation worker identity must be non-blank")
+            raise ValueError("reconciliation worker identities must be non-blank")
         return normalized
 
     @model_validator(mode="after")
@@ -143,6 +147,8 @@ async def run_reconciliation_worker_once(
     async with uow_factory() as uow:
         unknown = await uow.exchange_commands.get_one_unknown()
     if unknown is not None:
+        if not await _runtime_writer_is_certified(uow_factory, request):
+            return _runtime_fenced_result(ticket_id=unknown.ticket_identity.ticket_id)
         decision = await recover_unknown_command(
             uow_factory,
             venue_truth,
@@ -191,6 +197,8 @@ async def run_reconciliation_worker_once(
                 ticket_id=aggregate.identity.ticket_id,
                 detail=f"position_snapshot:{type(exc).__name__}",
             )
+        if not await _runtime_writer_is_certified(uow_factory, request):
+            return _runtime_fenced_result(ticket_id=aggregate.identity.ticket_id)
         async with uow_factory() as uow:
             reconciled = await reconcile_ticket(
                 uow,
@@ -209,6 +217,9 @@ async def run_reconciliation_worker_once(
             ticket_id=aggregate.identity.ticket_id,
             reconciliation_status=reconciled.status,
         )
+
+    if not await _runtime_writer_is_certified(uow_factory, request):
+        return _runtime_fenced_result()
 
     async with uow_factory() as uow:
         settlement = await uow.aggregates.get_next_for_statuses(
@@ -359,6 +370,27 @@ async def run_reconciliation_worker_once(
         )
 
     return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.NO_WORK)
+
+
+async def _runtime_writer_is_certified(
+    uow_factory: UnitOfWorkFactory,
+    request: ReconciliationWorkerRequest,
+) -> bool:
+    return await runtime_writer_is_certified(
+        uow_factory,
+        worker_id=request.worker_id,
+        runtime_commit=request.runtime_commit,
+        schema_revision=request.schema_revision,
+        observed_at_ms=request.now_ms,
+    )
+
+
+def _runtime_fenced_result(*, ticket_id: str | None = None) -> ReconciliationWorkerResult:
+    return ReconciliationWorkerResult(
+        status=ReconciliationWorkerStatus.RUNTIME_FENCED,
+        ticket_id=ticket_id,
+        detail="runtime_identity_mismatch",
+    )
 
 
 def _review_window(

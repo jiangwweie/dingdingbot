@@ -8,11 +8,17 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from src.trading_kernel.application.ports import (
+    EventSpecSnapshot,
     OwnerPolicySnapshot,
     RuntimeCapabilitySnapshot,
     RuntimeScopeSnapshot,
+    StrategyGroupSnapshot,
+    StrategyVersionSnapshot,
 )
 from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
+from src.trading_kernel.application.strategy_authority import (
+    strategy_authority_matches_ticket,
+)
 from src.trading_kernel.domain.account_entry_health import (
     AccountEntryHealth,
     AccountEntryHealthStatus,
@@ -64,6 +70,9 @@ class EntryDispatchPreflightRequest(BaseModel):
     capacity_claim: CapacityClaim
     owner_policy: OwnerPolicySnapshot | None
     runtime_scope: RuntimeScopeSnapshot | None
+    strategy_group: StrategyGroupSnapshot | None
+    strategy_version: StrategyVersionSnapshot | None
+    event_spec: EventSpecSnapshot | None
     runtime_capability: RuntimeCapabilitySnapshot | None
     runtime_commit: str
     schema_revision: str
@@ -120,6 +129,13 @@ def revalidate_entry_dispatch(
     if not request.owner_policy.new_entry_submit_enabled:
         return _refused(EntryDispatchPreflightStatus.NEW_ENTRY_DISABLED)
     if not _scope_matches(request.runtime_scope, ticket):
+        return _refused(EntryDispatchPreflightStatus.SCOPE_DRIFT)
+    if not strategy_authority_matches_ticket(
+        request.strategy_group,
+        request.strategy_version,
+        request.event_spec,
+        ticket,
+    ):
         return _refused(EntryDispatchPreflightStatus.SCOPE_DRIFT)
     if not _runtime_is_certified(
         request.runtime_capability,

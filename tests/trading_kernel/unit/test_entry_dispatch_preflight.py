@@ -5,9 +5,12 @@ from __future__ import annotations
 from decimal import Decimal
 
 from src.trading_kernel.application.ports import (
+    EventSpecSnapshot,
     OwnerPolicySnapshot,
     RuntimeCapabilitySnapshot,
     RuntimeScopeSnapshot,
+    StrategyGroupSnapshot,
+    StrategyVersionSnapshot,
 )
 from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
 from src.trading_kernel.application.revalidate_entry_dispatch import (
@@ -49,6 +52,35 @@ def test_entry_preflight_refuses_when_frozen_margin_no_longer_fits() -> None:
     decision = revalidate_entry_dispatch(request)
 
     assert decision.status is EntryDispatchPreflightStatus.MARGIN_DRIFT
+
+
+def test_entry_preflight_refuses_a_retired_current_strategy_version() -> None:
+    base = _preflight_request(snapshot=_snapshot())
+    payload = base.model_dump()
+    payload.update(
+        strategy_group=StrategyGroupSnapshot(
+            strategy_group_id=base.ticket.identity.runtime.strategy_group_id,
+            active_version_id="strategy-version-replacement",
+            status="active",
+        ),
+        strategy_version=StrategyVersionSnapshot(
+            strategy_version_id=base.ticket.identity.runtime.strategy_version_id,
+            strategy_group_id=base.ticket.identity.runtime.strategy_group_id,
+            status="retired",
+        ),
+        event_spec=EventSpecSnapshot(
+            event_spec_id=base.ticket.identity.runtime.event_spec_id,
+            strategy_version_id=base.ticket.identity.runtime.strategy_version_id,
+            position_side=base.ticket.identity.netting_domain.position_side,
+            entry_order_type=base.ticket.entry_order_type.value,
+            status="active",
+        ),
+    )
+    request = EntryDispatchPreflightRequest(**payload)
+
+    decision = revalidate_entry_dispatch(request)
+
+    assert decision.status is EntryDispatchPreflightStatus.SCOPE_DRIFT
 
 
 def _preflight_request(*, snapshot):
@@ -138,6 +170,23 @@ def _preflight_request(*, snapshot):
             position_side=ticket.identity.netting_domain.position_side,
             enabled=True,
             scope_version=ticket.runtime_scope_version,
+        ),
+        strategy_group=StrategyGroupSnapshot(
+            strategy_group_id=ticket.identity.runtime.strategy_group_id,
+            active_version_id=ticket.identity.runtime.strategy_version_id,
+            status="active",
+        ),
+        strategy_version=StrategyVersionSnapshot(
+            strategy_version_id=ticket.identity.runtime.strategy_version_id,
+            strategy_group_id=ticket.identity.runtime.strategy_group_id,
+            status="active",
+        ),
+        event_spec=EventSpecSnapshot(
+            event_spec_id=ticket.identity.runtime.event_spec_id,
+            strategy_version_id=ticket.identity.runtime.strategy_version_id,
+            position_side=ticket.identity.netting_domain.position_side,
+            entry_order_type=ticket.entry_order_type.value,
+            status="active",
         ),
         runtime_capability=RuntimeCapabilitySnapshot(
             capability_key="exchange_commands",

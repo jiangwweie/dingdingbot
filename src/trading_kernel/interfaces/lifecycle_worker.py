@@ -19,6 +19,7 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
     maintain_ticket_lifecycle,
 )
 from src.trading_kernel.application.ports import UnitOfWorkFactory, VenuePort
+from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
 from src.trading_kernel.application.runtime_facts import (
     LifecycleFactsRequest,
     LifecycleFactsSource,
@@ -40,6 +41,7 @@ _LIFECYCLE_COMMAND_KINDS = (
 
 class LifecycleWorkerStatus(StrEnum):
     NO_WORK = "no_work"
+    RUNTIME_FENCED = "runtime_fenced"
     DISPATCHED = "dispatched"
     SUPERSEDED = "superseded"
     FACTS_UNAVAILABLE = "facts_unavailable"
@@ -51,17 +53,19 @@ class LifecycleWorkerRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     worker_id: str
+    runtime_commit: str
+    schema_revision: str
     now_ms: int
     lease_until_ms: int
     timeout_seconds: float
     idle_poll_interval_ms: int
 
-    @field_validator("worker_id", mode="before")
+    @field_validator("worker_id", "runtime_commit", "schema_revision", mode="before")
     @classmethod
     def _require_worker_id(cls, value: object) -> str:
         normalized = str(value or "").strip()
         if not normalized:
-            raise ValueError("lifecycle worker identity must be non-blank")
+            raise ValueError("lifecycle worker identities must be non-blank")
         return normalized
 
     @model_validator(mode="after")
@@ -90,6 +94,18 @@ async def run_lifecycle_worker_once(
     facts_source: LifecycleFactsSource,
     request: LifecycleWorkerRequest,
 ) -> LifecycleWorkerResult:
+    if not await runtime_writer_is_certified(
+        uow_factory,
+        worker_id=request.worker_id,
+        runtime_commit=request.runtime_commit,
+        schema_revision=request.schema_revision,
+        observed_at_ms=request.now_ms,
+    ):
+        return LifecycleWorkerResult(
+            status=LifecycleWorkerStatus.RUNTIME_FENCED,
+            detail="runtime_identity_mismatch",
+        )
+
     dispatched = await _dispatch_lifecycle(
         uow_factory,
         venue,
