@@ -110,11 +110,13 @@ async def test_two_serial_entries_become_concurrent_protected_long_short_positio
     await _seed_policy(certification_engine)
     venue = MultiPositionVenue()
     long_ticket = _ticket()
-    short_ticket = _ticket_for_side(
+    short_ticket = _ticket_for_domain(
         long_ticket,
         signal_event_id="signal-2",
         exposure_episode_id="episode-2",
+        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side="short",
+        runtime_scope_id="scope-sor-btc-short",
     )
 
     await _issue(certification_engine, long_ticket, "issuer-long", 1_001)
@@ -201,6 +203,137 @@ async def test_two_serial_entries_become_concurrent_protected_long_short_positio
     ]
 
 
+@pytest.mark.asyncio
+async def test_three_serial_tickets_protect_independent_domains_and_fence_refusals(
+    certification_engine: AsyncEngine,
+) -> None:
+    await _seed_policy(certification_engine)
+    venue = MultiPositionVenue()
+    btc_long = _ticket()
+    btc_short = _ticket_for_domain(
+        btc_long,
+        signal_event_id="signal-btc-short",
+        exposure_episode_id="episode-btc-short",
+        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+        position_side="short",
+        runtime_scope_id="scope-sor-btc-short",
+    )
+    eth_long = _ticket_for_domain(
+        btc_long,
+        signal_event_id="signal-eth-long",
+        exposure_episode_id="episode-eth-long",
+        exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+        position_side="long",
+        runtime_scope_id="scope-sor-eth-long",
+    )
+
+    for index, ticket in enumerate((btc_long, btc_short, eth_long), start=1):
+        issued_at_ms = 1_000 + index * 1_000
+        await _issue(
+            certification_engine,
+            ticket,
+            f"issuer-{index}",
+            issued_at_ms,
+        )
+        await _protect(
+            certification_engine,
+            venue,
+            ticket,
+            entry_now_ms=issued_at_ms + 100,
+            fill_observed_at_ms=issued_at_ms + 200,
+            stop_now_ms=issued_at_ms + 300,
+        )
+
+    cpm_runtime = eth_long.identity.runtime.model_copy(
+        update={
+            "strategy_group_id": "CPM-RO-001",
+            "strategy_version_id": "sgv:CPM-RO-001:v2",
+            "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
+        }
+    )
+    same_direction = _ticket_for_domain(
+        eth_long,
+        signal_event_id="signal-eth-cpm-long",
+        exposure_episode_id="episode-eth-cpm-long",
+        exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+        position_side="long",
+        runtime_scope_id="scope-cpm-eth-long",
+        runtime=cpm_runtime,
+    )
+    fourth_ticket = _ticket_for_domain(
+        eth_long,
+        signal_event_id="signal-eth-short",
+        exposure_episode_id="episode-eth-short",
+        exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+        position_side="short",
+        runtime_scope_id="scope-sor-eth-short",
+    )
+    venue_call_count = len(venue.calls)
+
+    same_direction_result = await _attempt_issue(
+        certification_engine,
+        same_direction,
+        claim_owner="issuer-same-direction",
+        now_ms=5_100,
+    )
+    fourth_result = await _attempt_issue(
+        certification_engine,
+        fourth_ticket,
+        claim_owner="issuer-fourth",
+        now_ms=5_200,
+    )
+
+    async with PostgresKernelUnitOfWork(certification_engine) as uow:
+        aggregates = [
+            await uow.aggregates.get(ticket.identity.ticket_id)
+            for ticket in (btc_long, btc_short, eth_long)
+        ]
+        commands = [
+            await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+            for ticket in (btc_long, btc_short, eth_long)
+        ]
+        lane = await uow.entry_admission.get_global_lane()
+        exposure = await uow.entry_admission.get_account_exposure(
+            btc_long.identity.netting_domain.venue_id,
+            btc_long.identity.netting_domain.account_id,
+        )
+        rejected_tickets = [
+            await uow.tickets.get(ticket.identity.ticket_id)
+            for ticket in (same_direction, fourth_ticket)
+        ]
+
+    assert all(
+        aggregate is not None and aggregate.status is AggregateStatus.POSITION_PROTECTED
+        for aggregate in aggregates
+    )
+    assert {
+        ticket.identity.netting_domain.key()
+        for ticket in (btc_long, btc_short, eth_long)
+    } == {
+        btc_long.identity.netting_domain.key(),
+        btc_short.identity.netting_domain.key(),
+        eth_long.identity.netting_domain.key(),
+    }
+    assert all(
+        {command.kind.value for command in ticket_commands}
+        == {"entry", "initial_stop", "take_profit"}
+        and len(ticket_commands) == 3
+        and [
+            command.generation
+            for command in ticket_commands
+            if command.kind.value == "entry"
+        ]
+        == [1]
+        for ticket_commands in commands
+    )
+    assert same_direction_result.status is IssueTicketStatus.ACTIVE_NETTING_DOMAIN
+    assert fourth_result.status is IssueTicketStatus.BUDGET_EXHAUSTED
+    assert rejected_tickets == [None, None]
+    assert len(venue.calls) == venue_call_count
+    assert lane is not None and lane.status == "idle"
+    assert exposure is not None and exposure.active_ticket_count == 3
+
+
 async def _issue(
     engine: AsyncEngine,
     ticket,
@@ -218,6 +351,25 @@ async def _issue(
             ),
         )
     assert result.status is IssueTicketStatus.ISSUED
+
+
+async def _attempt_issue(
+    engine: AsyncEngine,
+    ticket,
+    *,
+    claim_owner: str,
+    now_ms: int,
+):
+    await _seed_ticket_runtime_scope(engine, ticket)
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        return await issue_ticket(
+            uow,
+            _issue_request(
+                ticket=ticket,
+                now_ms=now_ms,
+                claim_owner=claim_owner,
+            ),
+        )
 
 
 async def _protect(
@@ -278,35 +430,37 @@ async def _dispatch(
     )
 
 
-def _ticket_for_side(
+def _ticket_for_domain(
     template,
     *,
     signal_event_id: str,
     exposure_episode_id: str,
+    exchange_instrument_id: str,
     position_side: str,
+    runtime_scope_id: str,
+    runtime=None,
 ):
+    runtime = template.identity.runtime if runtime is None else runtime
     domain = NettingDomain(
         venue_id=template.identity.netting_domain.venue_id,
         account_id=template.identity.netting_domain.account_id,
-        exchange_instrument_id=(
-            template.identity.netting_domain.exchange_instrument_id
-        ),
+        exchange_instrument_id=exchange_instrument_id,
         position_side=position_side,
     )
     identity = TicketIdentity(
         ticket_id=build_ticket_id(
             signal_event_id=signal_event_id,
-            runtime=template.identity.runtime,
+            runtime=runtime,
             netting_domain=domain,
         ),
         exposure_episode_id=exposure_episode_id,
         signal_event_id=signal_event_id,
-        runtime=template.identity.runtime,
+        runtime=runtime,
         netting_domain=domain,
     )
     terms = {
         "identity": identity,
-        "runtime_scope_id": "scope-sor-btc-short",
+        "runtime_scope_id": runtime_scope_id,
         "fact_digest": "sha256:" + "3" * 64,
     }
     if position_side == "short":
