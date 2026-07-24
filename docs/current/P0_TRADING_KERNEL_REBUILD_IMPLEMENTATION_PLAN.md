@@ -118,7 +118,7 @@ the production anchor `tokyo-runtime-2026.07.23.1`.
 | Stage | **Acceptance-armed**; all four workers active |
 | Runtime commit | `4749174c64a6b369930ed91f09d7b9eba1fa0e7a` |
 | Schema and seed | `0001_initial`; `sha256:93539bd8c13f2b9c381caa50b921339fbc3c924c6fde3081c06ec96f47b148fe` |
-| Terminal safety Ticket | `ticket:e5c125d947e36f906b03f76dbea35b56`; `leverage_rejected` |
+| Historical safety Tickets | Three terminal `leverage_rejected`; all commands `reconciled_absent` |
 | Exchange command capability | Enabled; Entry service active |
 | Verified runtime state | Six instruments at `5x`; zero position, order, active Ticket, unresolved command, and open Incident |
 

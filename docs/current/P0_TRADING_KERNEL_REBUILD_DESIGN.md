@@ -159,8 +159,8 @@ not rollback authorities.
 | Local certification | `407 passed`; focused Ruff and Mypy checks pass |
 | Runtime services | **Acceptance-armed**: all four persistent workers enabled and active |
 | Natural acceptance flow | Natural `SOR-001 / ETHUSDT / long` reached the durable leverage safety branch |
-| Ticket | `ticket:e5c125d947e36f906b03f76dbea35b56` |
-| Verified lifecycle state | Prior Ticket terminal; six instruments at `5x`; exchange flat with no order or Incident |
+| Historical safety Tickets | Three terminal `leverage_rejected`; all commands `reconciled_absent` |
+| Verified lifecycle state | Six instruments at `5x`; exchange flat with no active Ticket, order, or Incident |
 | Full runtime promotion | `promote-full` pending |
 
 ## Acceptance

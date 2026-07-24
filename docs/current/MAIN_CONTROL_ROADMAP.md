@@ -40,7 +40,7 @@ different Netting Domains progress concurrently.
 | Dynamic policy | Three concurrent Tickets; `0.03` planned stop risk; demand-based remaining margin; fixed exchange `5x`; max `10x` safety ceiling; `cross` margin |
 | Entry authority | `new_entry_submit_enabled` applies only before ENTRY; existing exposure retains frozen safety authority |
 | Runtime fence | Commit/schema drift records an Incident; an exact but disabled command capability is a controlled readonly fence, not an Incident |
-| Acceptance Ticket | `ticket:e5c125d947e36f906b03f76dbea35b56` safely reached `leverage_rejected`; no ENTRY, order, or position was created |
+| Historical safety Tickets | Three safely reached `leverage_rejected`; no ENTRY, order, or position was created |
 | Hourly supervision | All four persistent workers active; Entry globally serialized |
 | Full capability | `promote-full` not yet completed |
 

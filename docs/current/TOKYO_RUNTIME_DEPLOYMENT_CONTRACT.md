@@ -94,11 +94,11 @@ blocker. Restoring periodic process creation is a production regression.
 
 Tokyo is **Acceptance-armed** with exact runtime commit `4749174c` and command
 capability certified. All six supported instruments are configured at `5x`.
-Natural Ticket `ticket:e5c125d947e36f906b03f76dbea35b56` remains the terminal
-audit record for the retired leverage-mutation path. The verified deployment
-snapshot has zero position, order, active Ticket, unresolved command, and open
-Incident. Entry is active for the next natural signal; constructed signals and
-direct exchange writes remain forbidden.
+Three terminal `leverage_rejected` Tickets remain audit records for the retired
+leverage-mutation path; all three commands are `reconciled_absent`. The
+verified deployment snapshot has zero position, order, active Ticket,
+unresolved command, and open Incident. Entry is active for the next natural
+signal; constructed signals and direct exchange writes remain forbidden.
 
 Do not call `promote-full` until that new Ticket is terminal, flat, reconciled,
 settled, reviewed, and leaves no residual order, budget, Incident, or unknown
