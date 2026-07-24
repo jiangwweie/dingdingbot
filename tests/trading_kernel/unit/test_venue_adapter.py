@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from src.trading_kernel.application.ports import (
+    LeverageTruthRequest,
     VenueCommandRequest,
     VenueSetLeverageRequest,
     VenueTruthRequest,
@@ -116,6 +117,7 @@ class TimingOutCancelExchange:
 class LeverageMutationExchange:
     def __init__(self) -> None:
         self.set_call = None
+        self.position_risk_calls: list[dict[str, object]] = []
 
     async def create_order(self, *args, **kwargs):
         raise AssertionError("SET_LEVERAGE must not create an order")
@@ -125,20 +127,33 @@ class LeverageMutationExchange:
         return {"leverage": leverage}
 
     async def fetch_positions(self, symbols, params):
-        assert symbols == ["BTC/USDT:USDT"]
-        assert params == {}
+        del symbols, params
+        raise AssertionError("leverage read-back must include flat position sides")
+
+    async def fapiPrivateV2GetPositionRisk(self, params):
+        self.position_risk_calls.append(dict(params))
+        assert params == {"symbol": "BTCUSDT"}
         return [
             {
-                "symbol": "BTC/USDT:USDT",
-                "contracts": "0",
-                "info": {"positionSide": "LONG", "leverage": "4"},
+                "symbol": "BTCUSDT",
+                "positionAmt": "0",
+                "leverage": "4",
+                "positionSide": "LONG",
             },
             {
-                "symbol": "BTC/USDT:USDT",
-                "contracts": "0",
-                "info": {"positionSide": "SHORT", "leverage": "4"},
+                "symbol": "BTCUSDT",
+                "positionAmt": "0",
+                "leverage": "4",
+                "positionSide": "SHORT",
             },
         ]
+
+    async def fetch_open_orders(self, symbol, since, limit, params):
+        assert symbol == "BTC/USDT:USDT"
+        assert since is None
+        assert limit == 100
+        assert params in ({"conditional": False}, {"conditional": True})
+        return []
 
 
 class OrderNotFound(Exception):
@@ -632,6 +647,35 @@ async def test_ccxt_adapter_sets_leverage_then_reads_back_without_creating_order
     assert result.exchange_configured_leverage == 4
     assert result.leverage_verified_at_ms == 2_000
     assert result.leverage_verification_digest.startswith("sha256:")
+    assert exchange.position_risk_calls == [{"symbol": "BTCUSDT"}]
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_recovers_flat_leverage_truth_from_position_risk() -> None:
+    exchange = LeverageMutationExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT"
+        },
+        clock_ms=lambda: 2_000,
+    )
+
+    truth = await adapter.read_configured_leverage(
+        LeverageTruthRequest(
+            command_id="command:leverage-1",
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            desired_leverage=4,
+            observed_at_ms=2_000,
+        )
+    )
+
+    assert truth.exchange_configured_leverage == 4
+    assert truth.long_position_quantity == Decimal("0")
+    assert truth.short_position_quantity == Decimal("0")
+    assert exchange.position_risk_calls == [{"symbol": "BTCUSDT"}]
 
 
 @pytest.mark.asyncio

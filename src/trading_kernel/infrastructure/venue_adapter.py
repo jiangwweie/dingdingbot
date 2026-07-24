@@ -724,8 +724,12 @@ class CcxtVenueAdapter:
             account_id=request.account_id,
             exchange_instrument_id=request.exchange_instrument_id,
         )
-        positions, regular_orders, conditional_orders = await asyncio.gather(
-            _call_raw_exchange(exchange.fetch_positions, [symbol], {}),
+        (
+            leverage_and_positions,
+            regular_orders,
+            conditional_orders,
+        ) = await asyncio.gather(
+            _read_exact_instrument_leverage(exchange=exchange, symbol=symbol),
             _call_raw_exchange(
                 exchange.fetch_open_orders,
                 symbol,
@@ -741,12 +745,7 @@ class CcxtVenueAdapter:
                 {"conditional": True},
             ),
         )
-        configured_leverage, long_quantity, short_quantity = (
-            _configured_leverage_and_position_quantities(
-                _require_list(positions, name="leverage positions"),
-                expected_symbol=symbol,
-            )
-        )
+        configured_leverage, long_quantity, short_quantity = leverage_and_positions
         return LeverageTruthSnapshot(
             exchange_configured_leverage=configured_leverage,
             long_position_quantity=long_quantity,
@@ -1167,9 +1166,9 @@ async def _read_exact_instrument_leverage(
     exchange: _CcxtExchange,
     symbol: str,
 ) -> tuple[int, Decimal, Decimal]:
-    rows = _require_list(
-        await _call_raw_exchange(exchange.fetch_positions, [symbol], {}),
-        name="leverage positions",
+    rows = await _read_binance_usdm_admission_target_positions(
+        exchange=exchange,
+        symbol=symbol,
     )
     return _configured_leverage_and_position_quantities(rows, expected_symbol=symbol)
 
