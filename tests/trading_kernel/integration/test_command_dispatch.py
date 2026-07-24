@@ -21,7 +21,10 @@ from src.trading_kernel.application.dispatch_exchange_command import (
     dispatch_one_command,
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue_ticket
-from src.trading_kernel.application.ports import VenueCommandRequest
+from src.trading_kernel.application.ports import (
+    VenueCommandRequest,
+    VenueMutationFailure,
+)
 from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
@@ -45,6 +48,7 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.events import TakeProfitFilled
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.infrastructure.pg_models import (
+    exchange_commands,
     owner_policy_current,
     runtime_capabilities_current,
     strategy_versions,
@@ -270,6 +274,16 @@ class LeverageReadbackMismatchVenue(LeverageThenEntryVenue):
         )
 
 
+class CodedLeverageFailureVenue:
+    async def set_leverage(self, request):
+        del request
+        raise VenueMutationFailure("exchange_code_-4164")
+
+    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
+        del request
+        raise AssertionError("SET_LEVERAGE must not create an order")
+
+
 @pytest.mark.asyncio
 async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations(
     dispatch_engine: AsyncEngine,
@@ -450,6 +464,43 @@ async def test_leverage_readback_mismatch_becomes_unknown_without_entry_or_resen
     ]
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_coded_leverage_failure_persists_sanitized_reason(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket(leverage_change_required=True)
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        CodedLeverageFailureVenue(),
+        DispatchCommandRequest(
+            worker_id="leverage-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
+    assert result.command_id is not None
+    async with dispatch_engine.connect() as connection:
+        payload = await connection.scalar(
+            sa.select(exchange_commands.c.result_payload).where(
+                exchange_commands.c.command_id == result.command_id
+            )
+        )
+    assert payload == {
+        "status": "outcome_unknown",
+        "observed_at_ms": 1_100,
+        "exchange_order_id": None,
+        "reason": "venue_error:exchange_code_-4164",
+        "venue_payload": {},
+    }
 
 
 @pytest.mark.asyncio

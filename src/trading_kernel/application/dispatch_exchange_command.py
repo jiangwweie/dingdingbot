@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from src.trading_kernel.application.ports import (
     UnitOfWorkFactory,
     VenueCommandRequest,
+    VenueMutationFailure,
     VenueMutationRejected,
     VenuePort,
     VenueSetLeverageRequest,
@@ -278,6 +279,12 @@ async def dispatch_one_command(
             status=ExchangeCommandStatus.REJECTED,
             observed_at_ms=request.now_ms,
             reason=f"venue_rejected:{type(exc).__name__}",
+        )
+    except VenueMutationFailure as exc:
+        result = ExchangeCommandResult(
+            status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
+            observed_at_ms=request.now_ms,
+            reason=f"venue_error:{exc.reason}",
         )
     except TimeoutError:
         result = ExchangeCommandResult(

@@ -7,6 +7,7 @@ import pytest
 from src.trading_kernel.application.ports import (
     LeverageTruthRequest,
     VenueCommandRequest,
+    VenueMutationFailure,
     VenueSetLeverageRequest,
     VenueTruthRequest,
 )
@@ -47,6 +48,10 @@ class FakeAsyncExchange:
 
 
 class InsufficientFunds(Exception):
+    pass
+
+
+class ExchangeError(Exception):
     pass
 
 
@@ -154,6 +159,14 @@ class LeverageMutationExchange:
         assert limit == 100
         assert params in ({"conditional": False}, {"conditional": True})
         return []
+
+
+class CodedLeverageFailureExchange(LeverageMutationExchange):
+    async def set_leverage(self, leverage, symbol, params):
+        del leverage, symbol, params
+        raise ExchangeError(
+            'binanceusdm {"code":-4164,"msg":"configuration rejected"}'
+        )
 
 
 class OrderNotFound(Exception):
@@ -648,6 +661,36 @@ async def test_ccxt_adapter_sets_leverage_then_reads_back_without_creating_order
     assert result.leverage_verified_at_ms == 2_000
     assert result.leverage_verification_digest.startswith("sha256:")
     assert exchange.position_risk_calls == [{"symbol": "BTCUSDT"}]
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_preserves_only_exchange_code_for_leverage_failure() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): CodedLeverageFailureExchange()
+        },
+        venue_symbols={
+            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT"
+        },
+        clock_ms=lambda: 2_000,
+    )
+
+    with pytest.raises(VenueMutationFailure, match="exchange_code_-4164"):
+        await adapter.set_leverage(
+            VenueSetLeverageRequest(
+                command_id="command:leverage-1",
+                venue_id="binance-usdm",
+                account_id="experiment-1",
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                payload=SetLeverageCommandPayload(
+                    desired_leverage=4,
+                    owner_policy_version=1,
+                    entry_admission_snapshot_digest="sha256:" + "1" * 64,
+                    leverage_fact_digest="sha256:" + "2" * 64,
+                ),
+                deadline_at_ms=30_000,
+            )
+        )
 
 
 @pytest.mark.asyncio

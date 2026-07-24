@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import StrEnum
+import re
 from types import TracebackType
 from typing import Callable, Literal, Protocol, Self
 
@@ -794,6 +795,18 @@ class LeverageTruthSnapshot(BaseModel):
 
 class VenueMutationRejected(RuntimeError):
     """A venue-authoritative non-order mutation rejection."""
+
+
+class VenueMutationFailure(RuntimeError):
+    """A sanitized non-order venue failure whose outcome remains unresolved."""
+
+    _REASON = re.compile(r"^exchange_code_-?[0-9]{1,6}$")
+
+    def __init__(self, reason: str) -> None:
+        if self._REASON.fullmatch(reason) is None:
+            raise ValueError("venue mutation failure reason is not sanitized")
+        self.reason = reason
+        super().__init__(reason)
 
 
 class VenuePort(Protocol):

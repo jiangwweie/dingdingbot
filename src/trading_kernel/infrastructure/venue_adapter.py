@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable, Mapping
 from decimal import Decimal
 import inspect
+import re
 from typing import Literal, Protocol
 
 from pydantic import JsonValue
@@ -14,6 +15,7 @@ from src.trading_kernel.application.ports import (
     LeverageTruthRequest,
     LeverageTruthSnapshot,
     VenueCommandRequest,
+    VenueMutationFailure,
     VenueMutationRejected,
     VenueSetLeverageRequest,
     VenueTruthRequest,
@@ -142,6 +144,7 @@ _AUTHORITATIVE_REJECTION_TYPES = {
     "OperationRejected",
 }
 _ORDER_NOT_FOUND_TYPES = {"OrderNotFound"}
+_EXCHANGE_CODE = re.compile(r'["\']code["\']\s*:\s*(-?[0-9]{1,6})')
 
 
 class CcxtVenueAdapter:
@@ -681,13 +684,21 @@ class CcxtVenueAdapter:
             account_id=request.account_id,
             exchange_instrument_id=request.exchange_instrument_id,
         )
-        response = await _call_exchange(
-            exchange.set_leverage,
-            request.payload.desired_leverage,
-            symbol,
-            {},
-            clock_ms=self._clock_ms,
-        )
+        try:
+            response = await _call_exchange(
+                exchange.set_leverage,
+                request.payload.desired_leverage,
+                symbol,
+                {},
+                clock_ms=self._clock_ms,
+            )
+        except Exception as exc:
+            exchange_code = _exchange_error_code(exc)
+            if exchange_code is None:
+                raise
+            raise VenueMutationFailure(
+                f"exchange_code_{exchange_code}"
+            ) from exc
         if isinstance(response, ExchangeCommandResult):
             if response.status is ExchangeCommandStatus.REJECTED:
                 raise VenueMutationRejected(str(response.reason))
@@ -933,6 +944,15 @@ async def _call_raw_exchange(
     if inspect.isawaitable(response):
         return await response
     return response
+
+
+def _exchange_error_code(exc: Exception) -> str | None:
+    if type(exc).__name__ != "ExchangeError":
+        return None
+    match = _EXCHANGE_CODE.search(str(exc))
+    if match is None:
+        return None
+    return str(int(match.group(1)))
 
 
 def _require_list(value: object, *, name: str) -> list[object]:
