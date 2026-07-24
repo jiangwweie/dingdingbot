@@ -24,7 +24,7 @@ from src.trading_kernel.domain.ticket import EntryOrderType
 from tests.trading_kernel.unit.test_signal import _signal
 
 
-def test_capacity_claim_freezes_dynamic_budget_and_leverage_evidence() -> None:
+def test_capacity_claim_freezes_configured_leverage_and_demand_based_margin() -> None:
     snapshot = _snapshot()
     ownership = AdmissionOwnership()
     decision = build_capacity_claim(
@@ -56,14 +56,15 @@ def test_capacity_claim_freezes_dynamic_budget_and_leverage_evidence() -> None:
     assert decision.status is CapacityClaimStatus.CLAIMED
     assert decision.claim is not None
     claim = decision.claim
-    assert claim.selected_leverage == 4
+    assert claim.selected_leverage == 5
     assert claim.planned_stop_risk_budget == Decimal("30")
     assert claim.post_fill_stop_risk_limit == Decimal("33")
-    assert claim.reserved_margin == Decimal("300")
+    assert claim.reserved_margin == Decimal("240")
     assert claim.entry_admission_snapshot_digest == snapshot.digest()
     assert claim.account_capacity_domain_key == "binance-usdm:experiment-1"
     assert claim.leverage_domain_key == "binance-usdm:experiment-1:binance-usdm:BTCUSDT:perpetual"
-    assert claim.to_ticket().selected_leverage == 4
+    assert claim.leverage_change_required is False
+    assert claim.to_ticket().selected_leverage == 5
 
 
 def _long_signal():
@@ -149,7 +150,7 @@ def _snapshot() -> EntryAdmissionSnapshot:
             AdmissionInstrumentFacts(
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
                 mark_price=Decimal("100"),
-                configured_leverage=1,
+                configured_leverage=5,
             ),
         ),
         positions=(),

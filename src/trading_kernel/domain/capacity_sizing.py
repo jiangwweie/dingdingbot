@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from enum import StrEnum
 from typing import Literal
 
@@ -212,9 +212,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
 
     if request.active_ticket_count >= request.max_concurrent_tickets:
         return _refused(CapacitySizingStatus.COUNT_EXHAUSTED)
-    if request.instrument_has_open_position and (
-        request.configured_leverage > request.permitted_max_leverage
-    ):
+    if request.configured_leverage > request.permitted_max_leverage:
         return _refused(CapacitySizingStatus.INVALID_FACTS)
 
     remaining_slots = request.max_concurrent_tickets - request.active_ticket_count
@@ -237,7 +235,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
         or remaining_executable_margin <= 0
     ):
         return _refused(CapacitySizingStatus.MARGIN_EXHAUSTED)
-    ticket_margin_budget = remaining_executable_margin / Decimal(remaining_slots)
+    ticket_margin_budget = remaining_executable_margin
     risk_per_unit = abs(request.entry_reference_price - request.initial_stop_price)
     risk_quantity = _floor_to_step(
         planned_stop_risk_budget / risk_per_unit,
@@ -251,11 +249,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
             rounding=ROUND_CEILING
         )
     )
-    leverages = (
-        (request.configured_leverage,)
-        if request.instrument_has_open_position
-        else tuple(range(1, request.permitted_max_leverage + 1))
-    )
+    leverages = (request.configured_leverage,)
     candidates: list[CapacitySizingSelection] = []
     venue_minimum_unmet = False
     exit_plan_unexecutable = False
@@ -379,10 +373,7 @@ def _evaluate_candidate(
         required_leverage=required_leverage,
         selected_leverage=leverage,
         configured_leverage=request.configured_leverage,
-        leverage_change_required=(
-            not request.instrument_has_open_position
-            and request.configured_leverage != leverage
-        ),
+        leverage_change_required=False,
         quantity=quantity,
         notional=notional,
         reserved_margin=notional / Decimal(leverage),

@@ -32,9 +32,13 @@ invented or expanded during cutover.
 
 The current approved seed is three concurrent Tickets, `0.03` planned stop-risk
 fraction, `0.90` maximum initial-margin utilization, maximum leverage `10`, and
-`cross` margin mode. The `new_entry_submit_enabled` setting controls only new
-ENTRY; it never removes protection, controlled flatten, reconciliation,
-Settlement, or Review authority from existing exchange exposure.
+`cross` margin mode. The supported exchange instruments are configured at
+fixed `5x`; the kernel freezes and revalidates that account fact and does not
+submit leverage changes. Remaining executable margin is allocated by the
+current Ticket's validated demand, not divided equally across unused Ticket
+slots. The `new_entry_submit_enabled` setting controls only new ENTRY; it never
+removes protection, controlled flatten, reconciliation, Settlement, or Review
+authority from existing exchange exposure.
 
 ## Real-Order Permission
 

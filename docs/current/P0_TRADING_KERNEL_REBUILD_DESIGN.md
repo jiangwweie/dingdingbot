@@ -90,6 +90,19 @@ notional amounts. `new_entry_submit_enabled` gates only new ENTRY; after venue
 exposure exists, the frozen Ticket retains protection, exit, reconciliation,
 Settlement, and Review authority.
 
+The production account keeps all supported instruments configured at **5x**.
+The `10x` policy value is an absolute Owner and venue safety ceiling, not a
+per-Ticket leverage selector. Capacity freezes the exchange-configured `5x`
+fact, never emits a new leverage-mutation command, and ENTRY revalidates that
+same frozen fact immediately before dispatch. A regular deployment is blocked
+unless every supported instrument is still configured at `5x`.
+
+An eligible Ticket may use the current remaining executable margin needed to
+reach its stop-risk target. The system does not divide that margin by unused
+future Ticket slots. `max_concurrent_tickets` remains a concurrency ceiling;
+current Reservations, available margin, the `0.90` utilization limit, Initial
+Stop risk, venue minimums, and liquidation distance still bound every Ticket.
+
 ## Transaction And Exchange Model
 
 Each aggregate mutation uses one short PostgreSQL transaction:

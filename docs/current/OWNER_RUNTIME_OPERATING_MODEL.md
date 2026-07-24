@@ -68,6 +68,10 @@ architecture.
 
 The approved runtime policy allows up to three concurrent Tickets and derives
 size from current account facts, `0.03` planned stop risk, `0.90` initial-margin
-utilization, maximum `10` leverage, and `cross` margin. Disabling
-`new_entry_submit_enabled` stops only new ENTRY; it does not remove protection
-or recovery authority from a Ticket that already has exchange exposure.
+utilization, maximum `10` leverage, and `cross` margin. Supported instruments
+are operationally configured at fixed `5x`; the kernel adopts and revalidates
+that fact without mutating leverage. A Ticket may use current remaining
+executable margin instead of reserving equal shares for empty future slots.
+Disabling `new_entry_submit_enabled` stops only new ENTRY; it does not remove
+protection or recovery authority from a Ticket that already has exchange
+exposure.

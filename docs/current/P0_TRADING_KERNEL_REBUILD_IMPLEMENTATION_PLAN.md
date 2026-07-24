@@ -50,7 +50,7 @@ settle, and review concurrently.
 | Clean PostgreSQL baseline | Complete | One 33-table `0001_initial`, clean rebuild and downgrade/upgrade certification |
 | Six Strategy Events | Complete | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, BRF2-SHORT |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, deterministic identity, Live/Replay parity |
-| Arbitration and CapacityClaim | Complete | Deterministic priority, bounded selector, action-time facts and stop risk |
+| Arbitration and CapacityClaim | Complete | Deterministic priority, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
 | Ticket issuance | Complete | Atomic Claim, budget, domain, Ticket, aggregate, event, and ENTRY command |
 | Venue Truth and recovery | Complete | ENTRY, protection, EXIT, flatten, cancel, timeout and unknown resolution |
 | Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |
@@ -78,6 +78,22 @@ until its Binance mutation reason is diagnosed. Timer deployment is forbidden.
 The service slice and bounded polling
 protect the 2c4g host from the retired high-frequency Python cold-start failure
 mode.
+
+Regular releases use one command:
+
+```text
+python3 scripts/trading_kernel/deploy_tokyo_release.py \
+  --commit <exact-commit> \
+  --enable-entry
+```
+
+The command stages the exact committed release, verifies database and exchange
+flatness, zero open orders, exact `5x` configuration, and current identity,
+stops the four workers, rotates runtime identity, switches the release, starts
+the three safety workers, repeats readonly certification, and starts Entry
+last. Any failure after service stop fences Entry and restores the safety
+workers. This bounded regular-release path does not rebuild PostgreSQL and does
+not run the historical destructive cutover.
 
 ## Completed Destructive Cutover
 

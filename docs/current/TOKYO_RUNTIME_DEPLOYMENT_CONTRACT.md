@@ -24,6 +24,20 @@ server source edits are forbidden. Production workers are persistent systemd
 services with bounded polling, restart-on-failure, and a shared resource slice.
 Timer-based worker cold starts are forbidden.
 
+Normal code updates use
+`scripts/trading_kernel/deploy_tokyo_release.py`. One command stages the exact
+commit, verifies PostgreSQL flatness and zero runtime activity, verifies
+exchange flatness, zero open orders, independent sides, Cross margin, and
+configured `5x` leverage for all supported instruments, then stops the old
+workers and switches the release. Schema rebuild and destructive cutover
+checks are outside this regular-release path.
+
+After switching, Observation, Lifecycle, and Reconciliation start first.
+Readonly database and exchange certification repeats against the target
+release. Entry starts last only when explicitly requested and every postflight
+gate passes. A failure after service stop writes the Entry fence and restores
+the three safety workers for fix-forward recovery.
+
 ## Destructive Rebuild Decision
 
 The completed cutover followed an explicit Owner decision to preserve no BRC
@@ -55,9 +69,11 @@ durable Exchange Command.
 
 The runtime seed uses the dynamic three-Ticket policy: `0.03` planned stop risk,
 `0.90` maximum initial-margin utilization, maximum leverage `10`, and `cross`
-margin. `new_entry_submit_enabled` is a new-ENTRY gate only. Every mutating
-worker must match the certified commit and schema; a mismatch records a runtime
-Incident and fences that writer while readonly checks remain allowed.
+margin. The exchange configuration is fixed at `5x`; the kernel freezes that
+fact and does not create a leverage-mutation command. `new_entry_submit_enabled`
+is a new-ENTRY gate only. Every mutating worker must match the certified commit
+and schema; a mismatch records a runtime Incident and fences that writer while
+readonly checks remain allowed.
 
 ## Persistent Worker Contract
 

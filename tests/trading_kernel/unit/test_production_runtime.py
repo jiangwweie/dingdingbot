@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from decimal import Decimal
 import importlib
-from types import SimpleNamespace
-from types import ModuleType
+from decimal import Decimal
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -112,6 +111,9 @@ class FakeWorkerAdapter:
 
 
 class FakeProbeAdapter:
+    def __init__(self, *, configured_leverage: int = 5) -> None:
+        self.configured_leverage = configured_leverage
+
     async def read_instrument_rules(
         self,
         request: InstrumentRulesRequest,
@@ -149,7 +151,7 @@ class FakeProbeAdapter:
                 AdmissionInstrumentFacts(
                     exchange_instrument_id=request.exchange_instrument_id,
                     mark_price=Decimal("99.5"),
-                    configured_leverage=1,
+                    configured_leverage=self.configured_leverage,
                 ),
             ),
             positions=(),
@@ -449,6 +451,7 @@ async def test_readonly_probe_reports_only_bounded_identity_and_counts(
     assert result.account_position_mode == "independent_sides"
     assert result.account_margin_mode == "cross"
     assert {rule.exchange_max_leverage for rule in result.rules} == {10}
+    assert {rule.configured_leverage for rule in result.rules} == {5}
     rendered = result.model_dump_json()
     assert "api-key-sensitive" not in rendered
     assert "api-secret-sensitive" not in rendered

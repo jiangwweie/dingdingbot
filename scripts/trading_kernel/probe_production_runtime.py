@@ -5,14 +5,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from decimal import Decimal
-from pathlib import Path
 import sys
 import time
+from decimal import Decimal
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -39,6 +38,7 @@ class InstrumentRuleProbe(BaseModel):
     min_quantity: Decimal
     min_notional: Decimal
     exchange_max_leverage: int
+    configured_leverage: int
     valid_until_ms: int
 
 
@@ -93,6 +93,22 @@ async def probe_production_runtime(
                 valid_for_ms=validity_ms,
             )
         )
+        instrument_snapshot = await adapter.read_entry_admission_snapshot(
+            EntryAdmissionSnapshotRequest(
+                venue_id=settings.venue_id,
+                account_id=settings.account_id,
+                exchange_instrument_id=exchange_instrument_id,
+                observed_at_ms=now_ms,
+                valid_for_ms=validity_ms,
+            )
+        )
+        if instrument_snapshot.position_mode != settings.account_position_mode:
+            raise RuntimeError("production account position mode differs from config")
+        if instrument_snapshot.margin_mode != "cross":
+            raise RuntimeError("production account margin mode differs from config")
+        configured_leverage = instrument_snapshot.instrument_facts_for(
+            exchange_instrument_id
+        ).configured_leverage
         rule_rows.append(
             InstrumentRuleProbe(
                 exchange_instrument_id=rules.exchange_instrument_id,
@@ -101,22 +117,13 @@ async def probe_production_runtime(
                 min_quantity=rules.min_quantity,
                 min_notional=rules.min_notional,
                 exchange_max_leverage=rules.exchange_max_leverage,
+                configured_leverage=configured_leverage,
                 valid_until_ms=rules.valid_until_ms,
             )
         )
 
         if admission_snapshot is None:
-            admission_snapshot = await adapter.read_entry_admission_snapshot(
-                EntryAdmissionSnapshotRequest(
-                    venue_id=settings.venue_id,
-                    account_id=settings.account_id,
-                    exchange_instrument_id=exchange_instrument_id,
-                    observed_at_ms=now_ms,
-                    valid_for_ms=validity_ms,
-                )
-            )
-            if admission_snapshot.position_mode != settings.account_position_mode:
-                raise RuntimeError("production account position mode differs from config")
+            admission_snapshot = instrument_snapshot
     if admission_snapshot is None:
         raise RuntimeError("production probe did not inspect any Netting Domain")
     netting_domain_count = len(canonical_binance_usdm_instruments()) * 2
