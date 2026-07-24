@@ -321,9 +321,10 @@ class CcxtVenueAdapter:
             )
         )
         market_max_leverage = _market_max_leverage(market)
-        exchange_max_leverage = min(
-            bracket_max_leverage,
-            market_max_leverage,
+        exchange_max_leverage = (
+            bracket_max_leverage
+            if market_max_leverage is None
+            else min(bracket_max_leverage, market_max_leverage)
         )
         return InstrumentRulesFacts(
             exchange_instrument_id=request.exchange_instrument_id,
@@ -1341,8 +1342,10 @@ def _binance_market_id(symbol: str) -> str:
     return "".join(parts)
 
 
-def _market_max_leverage(market: Mapping[str, object]) -> int:
+def _market_max_leverage(market: Mapping[str, object]) -> int | None:
     raw = _nested_market_value(market, "limits", "leverage", "max")
+    if raw is None:
+        return None
     try:
         parsed = int(str(raw))
     except (TypeError, ValueError) as exc:

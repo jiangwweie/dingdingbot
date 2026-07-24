@@ -419,6 +419,13 @@ class InstrumentRulesExchange:
             }
         ]
 
+
+class InstrumentRulesWithoutMarketLeverageExchange(InstrumentRulesExchange):
+    def market(self, symbol):
+        market = super().market(symbol)
+        market["limits"] = {}
+        return market
+
 class LifecycleFactsExchange:
     async def fetch_positions(self, symbols, params):
         return [
@@ -673,6 +680,33 @@ async def test_ccxt_adapter_reads_typed_leverage_and_maintenance_rules() -> None
     )
     assert facts.maintenance_margin_brackets[1].maintenance_amount == Decimal("50")
     assert facts.maintenance_margin_brackets_digest.startswith("sha256:")
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_uses_bracket_leverage_when_market_limit_is_absent() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): (
+                InstrumentRulesWithoutMarketLeverageExchange()
+            )
+        },
+        venue_symbols={
+            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT"
+        },
+        clock_ms=lambda: 2_000,
+    )
+
+    facts = await adapter.read_instrument_rules(
+        InstrumentRulesRequest(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            observed_at_ms=2_000,
+            valid_for_ms=5_000,
+        )
+    )
+
+    assert facts.exchange_max_leverage == 20
 
 
 def test_binance_rules_accept_a_finite_final_maintenance_tier() -> None:
