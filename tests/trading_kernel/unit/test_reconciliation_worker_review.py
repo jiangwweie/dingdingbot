@@ -19,6 +19,10 @@ from src.trading_kernel.domain.events import (
     ExternalFlatDetected,
     TicketIssued,
 )
+from src.trading_kernel.domain.post_fill_risk import (
+    PostFillRiskRequest,
+    assess_post_fill_risk,
+)
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
     ReconciliationWorkerStatus,
@@ -121,6 +125,20 @@ class _WorkerState:
                     occurred_at_ms=1_100,
                     filled_qty=ticket.quantity,
                     average_fill_price=Decimal("60000"),
+                    post_fill_risk=assess_post_fill_risk(
+                        PostFillRiskRequest(
+                            position_side=ticket.identity.netting_domain.position_side,
+                            filled_quantity=ticket.quantity,
+                            average_fill_price=Decimal("60000"),
+                            initial_stop_price=ticket.initial_stop_price,
+                            planned_stop_risk_budget=ticket.planned_stop_risk_budget,
+                            post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
+                            current_liquidation_price=Decimal("57000"),
+                            min_liquidation_distance_to_stop_distance_ratio=(
+                                ticket.min_liquidation_distance_to_stop_distance_ratio
+                            ),
+                        )
+                    ),
                 ),
                 ExternalFlatDetected(
                     event_id="event-3",

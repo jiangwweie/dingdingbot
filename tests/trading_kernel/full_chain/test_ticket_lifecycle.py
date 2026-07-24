@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 import os
 from pathlib import Path
 import re
@@ -61,6 +62,20 @@ ADMIN_DSN = os.getenv(
     "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
+
+
+def _safe_liquidation_price(ticket, average_fill_price) -> str:
+    fill = Decimal(str(average_fill_price))
+    liquidation_distance = (
+        abs(fill - ticket.initial_stop_price)
+        * ticket.min_liquidation_distance_to_stop_distance_ratio
+    )
+    value = (
+        ticket.initial_stop_price - liquidation_distance
+        if ticket.identity.netting_domain.position_side == "long"
+        else ticket.initial_stop_price + liquidation_distance
+    )
+    return str(value)
 
 
 @pytest_asyncio.fixture
@@ -142,6 +157,7 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(ticket, "60000"),
                     open_orders=(),
                     observed_at_ms=2_100,
                 ),
@@ -349,6 +365,7 @@ async def test_external_flat_opens_incident_and_enters_owned_protection_cleanup(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(ticket, "60000"),
                     open_orders=(),
                     observed_at_ms=2_100,
                 ),
@@ -465,6 +482,7 @@ async def test_exit_timeout_is_conserved_as_unknown_and_never_redispatched(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(ticket, "60000"),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -853,12 +871,19 @@ def _ticket_for_side(
             "netting_domain": domain,
         }
     )
-    return base_ticket.model_copy(
-        update={
-            "identity": identity,
-            "runtime_scope_id": f"scope-{side}",
-        }
-    )
+    terms = {
+        "identity": identity,
+        "runtime_scope_id": f"scope-{side}",
+    }
+    if side == "short":
+        terms.update(
+            {
+                "initial_stop_price": Decimal("61000"),
+                "take_profit_prices": (Decimal("58000"),),
+                "projected_liquidation_price": Decimal("63000"),
+            }
+        )
+    return base_ticket.model_copy(update=terms)
 
 
 async def _protect_ticket(
@@ -886,6 +911,7 @@ async def _protect_ticket(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(ticket, "60000"),
                     observed_at_ms=observed_at_ms,
                 ),
             ),
@@ -925,6 +951,7 @@ async def _reach_reconciliation_pending_after_cancel(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(ticket, "60000"),
                     observed_at_ms=2_100,
                 ),
             ),

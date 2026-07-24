@@ -66,6 +66,18 @@ from tests.trading_kernel.unit.test_ticket import _ticket
 dispatch_engine = dispatch_fixture.dispatch_engine
 
 
+def _safe_liquidation_price(ticket, average_fill_price: Decimal) -> Decimal:
+    liquidation_distance = (
+        abs(average_fill_price - ticket.initial_stop_price)
+        * ticket.min_liquidation_distance_to_stop_distance_ratio
+    )
+    return (
+        ticket.initial_stop_price - liquidation_distance
+        if ticket.identity.netting_domain.position_side == "long"
+        else ticket.initial_stop_price + liquidation_distance
+    )
+
+
 class StaticTruthPort:
     def __init__(self, truth: VenueTruthSnapshot) -> None:
         self.truth = truth
@@ -908,6 +920,9 @@ async def _make_unknown_initial_stop(engine):
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, Decimal("60000")
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -947,6 +962,9 @@ async def _make_unknown_tp1(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, ticket.entry_reference_price
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -991,6 +1009,9 @@ async def _make_unknown_replacement(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, ticket.entry_reference_price
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),

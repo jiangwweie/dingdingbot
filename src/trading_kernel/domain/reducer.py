@@ -81,6 +81,7 @@ from src.trading_kernel.domain.events import (
     TradeEvent,
     UnownedOrderDetected,
 )
+from src.trading_kernel.domain.post_fill_risk import PostFillDisposition
 
 
 class InvalidLifecycleTransition(ValueError):
@@ -285,21 +286,45 @@ def reduce_event(
             raise InvalidLifecycleTransition("full entry fill must equal Ticket quantity")
         if event.average_fill_price <= 0:
             raise InvalidLifecycleTransition("average fill price must be positive")
+        assessment = event.post_fill_risk
+        if assessment.disposition is PostFillDisposition.FLATTEN_IMMEDIATELY:
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+                updates=_post_fill_updates(event),
+                effects=(
+                    OpenIncident(
+                        ticket_id=current.identity.ticket_id,
+                        incident_kind=assessment.status.value,
+                    ),
+                    PrepareControlledFlattenCommand(
+                        ticket_id=current.identity.ticket_id,
+                        quantity=event.filled_qty,
+                    ),
+                ),
+            )
+        effects: list[KernelEffect] = [
+            PrepareInitialStopCommand(
+                ticket_id=current.identity.ticket_id,
+                quantity=event.filled_qty,
+                stop_price=current.ticket.initial_stop_price,
+            )
+        ]
+        if assessment.disposition is PostFillDisposition.FLATTEN_AFTER_PROTECTION:
+            effects.insert(
+                0,
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind=assessment.status.value,
+                ),
+            )
         return _transition(
             current,
             event,
             status=AggregateStatus.PROTECTION_PENDING,
-            updates={
-                "position_qty": event.filled_qty,
-                "average_fill_price": event.average_fill_price,
-            },
-            effects=(
-                PrepareInitialStopCommand(
-                    ticket_id=current.identity.ticket_id,
-                    quantity=event.filled_qty,
-                    stop_price=current.ticket.initial_stop_price,
-                ),
-            ),
+            updates=_post_fill_updates(event),
+            effects=tuple(effects),
         )
 
     if isinstance(event, EntryPartiallyFilled):
@@ -427,6 +452,26 @@ def reduce_event(
                     ticket_id=current.identity.ticket_id,
                     incident_kind="initial_stop_outcome_unknown",
                 )
+            )
+        if current.post_fill_disposition is PostFillDisposition.FLATTEN_AFTER_PROTECTION:
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+                updates={
+                    "entry_lane_held": False,
+                    "protected_qty": event.protected_qty,
+                    "initial_stop_exchange_order_id": event.exchange_order_id.strip(),
+                    "active_stop_exchange_order_id": event.exchange_order_id.strip(),
+                    "active_stop_price": current.ticket.initial_stop_price,
+                },
+                effects=(
+                    ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+                    PrepareControlledFlattenCommand(
+                        ticket_id=current.identity.ticket_id,
+                        quantity=current.position_qty,
+                    ),
+                ),
             )
         tp_prices = current.ticket.take_profit_prices
         tp_quantities = current.ticket.take_profit_quantities
@@ -1426,6 +1471,22 @@ def _transition(
         }
     )
     return Reduction(aggregate=aggregate, effects=effects)
+
+
+def _post_fill_updates(event: EntryFilled) -> dict[str, object]:
+    assessment = event.post_fill_risk
+    return {
+        "position_qty": event.filled_qty,
+        "average_fill_price": event.average_fill_price,
+        "actual_stop_risk": assessment.actual_stop_risk,
+        "actual_liquidation_price": assessment.actual_liquidation_price,
+        "actual_liquidation_distance": assessment.actual_liquidation_distance,
+        "actual_liquidation_distance_to_stop_distance_ratio": (
+            assessment.actual_liquidation_distance_to_stop_distance_ratio
+        ),
+        "post_fill_risk_status": assessment.status,
+        "post_fill_disposition": assessment.disposition,
+    }
 
 
 def _known_cleanup_order_ids(current: TradeAggregate) -> tuple[str, ...]:

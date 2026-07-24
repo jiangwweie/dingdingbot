@@ -175,13 +175,14 @@ class CertifiedMarketSource:
 
 class CertifiedEntryAdmissionFactsSource:
     def __init__(self, *, reference_price: Decimal, position_side: str) -> None:
-        offset = max(reference_price * Decimal("0.01"), Decimal("1"))
+        offset = max(reference_price * Decimal("0.0001"), Decimal("0.01"))
+        spread = offset / Decimal("2")
         if position_side == "long":
             self.best_ask = reference_price + offset
-            self.best_bid = self.best_ask - Decimal("0.1")
+            self.best_bid = self.best_ask - spread
         else:
             self.best_bid = reference_price - offset
-            self.best_ask = self.best_bid + Decimal("0.1")
+            self.best_ask = self.best_bid + spread
 
     async def read_entry_admission_snapshot(
         self,
@@ -261,14 +262,25 @@ class CertifiedPositionSource:
     def __init__(self) -> None:
         self.quantity = Decimal("0")
         self.average_entry_price: Decimal | None = None
+        self.liquidation_price: Decimal | None = None
 
-    def set_open(self, *, quantity: Decimal, average_entry_price: Decimal) -> None:
+    def set_open(
+        self,
+        *,
+        quantity: Decimal,
+        average_entry_price: Decimal,
+        position_side: str,
+    ) -> None:
         self.quantity = quantity
         self.average_entry_price = average_entry_price
+        self.liquidation_price = average_entry_price * (
+            Decimal("0.75") if position_side == "long" else Decimal("1.25")
+        )
 
     def set_flat(self) -> None:
         self.quantity = Decimal("0")
         self.average_entry_price = None
+        self.liquidation_price = None
 
     async def read_position_snapshot(
         self,
@@ -278,6 +290,7 @@ class CertifiedPositionSource:
             netting_domain=request.netting_domain,
             quantity=self.quantity,
             average_entry_price=self.average_entry_price,
+            liquidation_price=self.liquidation_price,
             open_orders=(),
             observed_at_ms=request.observed_at_ms,
         )
@@ -442,6 +455,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     position_source.set_open(
         quantity=ticket.quantity,
         average_entry_price=ticket.entry_reference_price,
+        position_side=ticket.identity.netting_domain.position_side,
     )
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-certification",
@@ -672,6 +686,16 @@ async def _seed_runtime(
         await connection.execute(
             sa.insert(runtime_capabilities_current).values(
                 capability_key="strategy_signal_ingest",
+                enabled=True,
+                certified_commit="kernel-test-head",
+                schema_revision="0001_initial",
+                certification={},
+                updated_at_ms=NOW_MS - 1,
+            )
+        )
+        await connection.execute(
+            sa.insert(runtime_capabilities_current).values(
+                capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
                 schema_revision="0001_initial",

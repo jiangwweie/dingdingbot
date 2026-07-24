@@ -554,12 +554,21 @@ def _ticket_for_signal(
         runtime=original.runtime,
         netting_domain=domain,
     )
-    return _ticket(
-        identity=identity,
-        runtime_scope_id=(
+    terms: dict[str, object] = {
+        "identity": identity,
+        "runtime_scope_id": (
             "scope-sor-btc-long" if position_side == "long" else "scope-short"
         ),
-    )
+    }
+    if position_side == "short":
+        terms.update(
+            {
+                "initial_stop_price": Decimal("61000"),
+                "take_profit_prices": (Decimal("58000"),),
+                "projected_liquidation_price": Decimal("63000"),
+            }
+        )
+    return _ticket(**terms)
 
 
 def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketRequest:

@@ -566,6 +566,14 @@ trade_aggregates = sa.Table(
     sa.Column("entry_lane_held", sa.Boolean, nullable=False),
     sa.Column("position_qty", MONEY, nullable=False),
     sa.Column("average_fill_price", MONEY, nullable=True),
+    sa.Column("actual_stop_risk", MONEY, nullable=True),
+    sa.Column("actual_liquidation_price", MONEY, nullable=True),
+    sa.Column("actual_liquidation_distance", MONEY, nullable=True),
+    sa.Column(
+        "actual_liquidation_distance_to_stop_distance_ratio", MONEY, nullable=True
+    ),
+    sa.Column("post_fill_risk_status", SHORT_TEXT, nullable=True),
+    sa.Column("post_fill_disposition", SHORT_TEXT, nullable=True),
     sa.Column("protected_qty", MONEY, nullable=False),
     _id("entry_exchange_order_id", nullable=True),
     _id("initial_stop_exchange_order_id", nullable=True),

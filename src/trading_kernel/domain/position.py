@@ -33,6 +33,7 @@ class PositionSnapshot(BaseModel):
     netting_domain: NettingDomain
     quantity: Decimal
     average_entry_price: Decimal | None
+    liquidation_price: Decimal | None = None
     open_orders: tuple[VenueOrderSnapshot, ...] = ()
     observed_at_ms: int
 
@@ -55,6 +56,11 @@ class PositionSnapshot(BaseModel):
         if self.quantity > 0:
             if self.average_entry_price is None or self.average_entry_price <= 0:
                 raise ValueError("open position requires average entry price")
-        elif self.average_entry_price is not None:
-            raise ValueError("flat position forbids average entry price")
+        elif (
+            self.average_entry_price is not None
+            or self.liquidation_price is not None
+        ):
+            raise ValueError("flat position forbids entry and liquidation prices")
+        if self.liquidation_price is not None and self.liquidation_price <= 0:
+            raise ValueError("liquidation price must be positive when present")
         return self

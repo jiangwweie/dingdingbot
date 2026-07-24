@@ -372,7 +372,7 @@ class CcxtVenueAdapter:
             ),
         )
         position_rows = _require_list(positions, name="positions")
-        quantity, average_entry_price = _position_details(
+        quantity, average_entry_price, liquidation_price = _position_details(
             position_rows,
             expected_symbol=symbol,
             position_side=domain.position_side,
@@ -392,6 +392,7 @@ class CcxtVenueAdapter:
             netting_domain=domain,
             quantity=quantity,
             average_entry_price=average_entry_price,
+            liquidation_price=liquidation_price,
             open_orders=open_orders,
             observed_at_ms=request.observed_at_ms,
         )
@@ -456,7 +457,7 @@ class CcxtVenueAdapter:
             tp1_fills_call,
             candles_call,
         )
-        position_quantity, _ = _position_details(
+        position_quantity, _, _ = _position_details(
             _require_list(positions, name="positions"),
             expected_symbol=symbol,
             position_side=domain.position_side,
@@ -1157,9 +1158,11 @@ def _position_details(
     *,
     expected_symbol: str,
     position_side: Literal["long", "short"],
-) -> tuple[Decimal, Decimal | None]:
+) -> tuple[Decimal, Decimal | None, Decimal | None]:
     total_quantity = Decimal("0")
     weighted_entry = Decimal("0")
+    liquidation_prices: set[Decimal] = set()
+    liquidation_evidence_missing = False
     for value in rows:
         if not isinstance(value, Mapping):
             raise RuntimeError("venue position row is not a mapping")
@@ -1181,9 +1184,25 @@ def _position_details(
             raise RuntimeError("open venue position lacks entry price")
         total_quantity += quantity
         weighted_entry += quantity * price
+        raw_liquidation = (
+            value.get("liquidationPrice")
+            or _mapping_value(value.get("info"), "liquidationPrice")
+        )
+        if raw_liquidation in (None, "", "0", 0):
+            liquidation_evidence_missing = True
+            continue
+        liquidation = Decimal(str(raw_liquidation))
+        if not liquidation.is_finite() or liquidation <= 0:
+            raise RuntimeError("venue liquidation evidence is invalid")
+        liquidation_prices.add(liquidation)
     if total_quantity == 0:
-        return Decimal("0"), None
-    return total_quantity, weighted_entry / total_quantity
+        return Decimal("0"), None, None
+    liquidation_price = (
+        next(iter(liquidation_prices))
+        if not liquidation_evidence_missing and len(liquidation_prices) == 1
+        else None
+    )
+    return total_quantity, weighted_entry / total_quantity, liquidation_price
 
 
 def _position_open_orders(

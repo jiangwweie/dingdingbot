@@ -98,6 +98,10 @@ from src.trading_kernel.domain.identities import (
     TicketIdentity,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.post_fill_risk import (
+    PostFillDisposition,
+    PostFillRiskStatus,
+)
 from src.trading_kernel.domain.ticket import EntryOrderType, TicketStatus, TradeTicket
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
@@ -1753,6 +1757,22 @@ def _aggregate_values(
         "entry_lane_held": aggregate.entry_lane_held,
         "position_qty": aggregate.position_qty,
         "average_fill_price": aggregate.average_fill_price,
+        "actual_stop_risk": aggregate.actual_stop_risk,
+        "actual_liquidation_price": aggregate.actual_liquidation_price,
+        "actual_liquidation_distance": aggregate.actual_liquidation_distance,
+        "actual_liquidation_distance_to_stop_distance_ratio": (
+            aggregate.actual_liquidation_distance_to_stop_distance_ratio
+        ),
+        "post_fill_risk_status": (
+            None
+            if aggregate.post_fill_risk_status is None
+            else aggregate.post_fill_risk_status.value
+        ),
+        "post_fill_disposition": (
+            None
+            if aggregate.post_fill_disposition is None
+            else aggregate.post_fill_disposition.value
+        ),
         "protected_qty": aggregate.protected_qty,
         "entry_exchange_order_id": aggregate.entry_exchange_order_id,
         "initial_stop_exchange_order_id": aggregate.initial_stop_exchange_order_id,
@@ -1793,6 +1813,36 @@ def _aggregate_from_row(
             None
             if row["average_fill_price"] is None
             else Decimal(row["average_fill_price"])
+        ),
+        actual_stop_risk=(
+            None
+            if row["actual_stop_risk"] is None
+            else Decimal(row["actual_stop_risk"])
+        ),
+        actual_liquidation_price=(
+            None
+            if row["actual_liquidation_price"] is None
+            else Decimal(row["actual_liquidation_price"])
+        ),
+        actual_liquidation_distance=(
+            None
+            if row["actual_liquidation_distance"] is None
+            else Decimal(row["actual_liquidation_distance"])
+        ),
+        actual_liquidation_distance_to_stop_distance_ratio=(
+            None
+            if row["actual_liquidation_distance_to_stop_distance_ratio"] is None
+            else Decimal(row["actual_liquidation_distance_to_stop_distance_ratio"])
+        ),
+        post_fill_risk_status=(
+            None
+            if row["post_fill_risk_status"] is None
+            else PostFillRiskStatus(str(row["post_fill_risk_status"]))
+        ),
+        post_fill_disposition=(
+            None
+            if row["post_fill_disposition"] is None
+            else PostFillDisposition(str(row["post_fill_disposition"]))
         ),
         protected_qty=Decimal(row["protected_qty"]),
         entry_exchange_order_id=(

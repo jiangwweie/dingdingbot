@@ -23,7 +23,10 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     SetLeverageCommandPayload,
 )
-from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
+from src.trading_kernel.infrastructure.venue_adapter import (
+    CcxtVenueAdapter,
+    _position_details,
+)
 from src.trading_kernel.domain.venue_truth import VenueLookupStatus
 from src.trading_kernel.domain.identities import NettingDomain
 
@@ -43,6 +46,34 @@ class FakeAsyncExchange:
 
 class InsufficientFunds(Exception):
     pass
+
+
+def test_position_details_requires_liquidation_evidence_for_every_open_row() -> None:
+    quantity, average_entry_price, liquidation_price = _position_details(
+        [
+            {
+                "symbol": "BTC/USDT:USDT",
+                "contracts": "0.01",
+                "entryPrice": "59000",
+                "side": "long",
+                "liquidationPrice": "57000",
+                "info": {"positionSide": "LONG"},
+            },
+            {
+                "symbol": "BTC/USDT:USDT",
+                "contracts": "0.01",
+                "entryPrice": "61000",
+                "side": "long",
+                "info": {"positionSide": "LONG"},
+            },
+        ],
+        expected_symbol="BTC/USDT:USDT",
+        position_side="long",
+    )
+
+    assert quantity == Decimal("0.02")
+    assert average_entry_price == Decimal("60000")
+    assert liquidation_price is None
 
 
 class RejectingExchange:
@@ -675,6 +706,7 @@ async def test_ccxt_adapter_builds_position_snapshot_for_exact_netting_domain() 
     assert snapshot.netting_domain == domain
     assert snapshot.quantity == Decimal("0.01")
     assert snapshot.average_entry_price == Decimal("59000")
+    assert snapshot.liquidation_price is None
     assert {order.exchange_order_id for order in snapshot.open_orders} == {
         "order-False-long",
         "order-True-long",

@@ -284,6 +284,12 @@ def test_aggregate_schema_conserves_authoritative_entry_order_identity() -> None
 
     assert "entry_exchange_order_id" in aggregates.c
     assert {
+        "actual_stop_risk",
+        "actual_liquidation_price",
+        "actual_liquidation_distance",
+        "actual_liquidation_distance_to_stop_distance_ratio",
+        "post_fill_risk_status",
+        "post_fill_disposition",
         "active_stop_exchange_order_id",
         "active_stop_price",
         "tp1_exchange_order_id",

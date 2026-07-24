@@ -22,9 +22,39 @@ from src.trading_kernel.domain.events import (
     TicketIssued,
 )
 from src.trading_kernel.domain.exit_policy import exit_policy_for
+from src.trading_kernel.domain.post_fill_risk import (
+    PostFillRiskRequest,
+    assess_post_fill_risk,
+)
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from tests.trading_kernel.unit.test_ticket import _ticket
+
+
+def _normal_post_fill_risk(ticket, average_fill_price: Decimal):
+    liquidation_distance = (
+        abs(average_fill_price - ticket.initial_stop_price)
+        * ticket.min_liquidation_distance_to_stop_distance_ratio
+    )
+    liquidation_price = (
+        ticket.initial_stop_price - liquidation_distance
+        if ticket.identity.netting_domain.position_side == "long"
+        else ticket.initial_stop_price + liquidation_distance
+    )
+    return assess_post_fill_risk(
+        PostFillRiskRequest(
+            position_side=ticket.identity.netting_domain.position_side,
+            filled_quantity=ticket.quantity,
+            average_fill_price=average_fill_price,
+            initial_stop_price=ticket.initial_stop_price,
+            planned_stop_risk_budget=ticket.planned_stop_risk_budget,
+            post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
+            current_liquidation_price=liquidation_price,
+            min_liquidation_distance_to_stop_distance_ratio=(
+                ticket.min_liquidation_distance_to_stop_distance_ratio
+            ),
+        )
+    )
 
 
 @pytest.mark.parametrize(
@@ -54,6 +84,7 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal("100"),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("100")),
         ),
     ).aggregate
 

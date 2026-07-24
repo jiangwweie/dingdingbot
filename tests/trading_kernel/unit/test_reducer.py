@@ -69,7 +69,37 @@ from src.trading_kernel.domain.events import (
     UnownedOrderDetected,
 )
 from src.trading_kernel.domain.reducer import InvalidLifecycleTransition, reduce_event
+from src.trading_kernel.domain.post_fill_risk import (
+    PostFillRiskRequest,
+    assess_post_fill_risk,
+)
 from tests.trading_kernel.unit.test_ticket import _ticket
+
+
+def _normal_post_fill_risk(ticket, average_fill_price: Decimal):
+    liquidation_distance = (
+        abs(average_fill_price - ticket.initial_stop_price)
+        * ticket.min_liquidation_distance_to_stop_distance_ratio
+    )
+    liquidation_price = (
+        ticket.initial_stop_price - liquidation_distance
+        if ticket.identity.netting_domain.position_side == "long"
+        else ticket.initial_stop_price + liquidation_distance
+    )
+    return assess_post_fill_risk(
+        PostFillRiskRequest(
+            position_side=ticket.identity.netting_domain.position_side,
+            filled_quantity=ticket.quantity,
+            average_fill_price=average_fill_price,
+            initial_stop_price=ticket.initial_stop_price,
+            planned_stop_risk_budget=ticket.planned_stop_risk_budget,
+            post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
+            current_liquidation_price=liquidation_price,
+            min_liquidation_distance_to_stop_distance_ratio=(
+                ticket.min_liquidation_distance_to_stop_distance_ratio
+            ),
+        )
+    )
 
 
 def test_ticket_issue_prepares_only_set_leverage_when_change_is_required() -> None:
@@ -212,6 +242,9 @@ def test_authoritative_entry_rejection_is_terminal_and_never_retries() -> None:
                 occurred_at_ms=1_200,
                 filled_qty=Decimal("0.001"),
                 average_fill_price=Decimal("60000"),
+                post_fill_risk=_normal_post_fill_risk(
+                    issued.ticket, Decimal("60000")
+                ),
             ),
         )
 
@@ -295,6 +328,7 @@ def test_full_entry_fill_requires_initial_stop_before_releasing_entry_lane() -> 
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal("60000"),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
         ),
     )
 
@@ -391,6 +425,7 @@ def test_initial_stop_rejection_opens_hard_incident_and_requests_flatten() -> No
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal("60000"),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
         ),
     ).aggregate
 
@@ -455,6 +490,7 @@ def test_unknown_initial_stop_outcome_waits_for_venue_truth_without_exit() -> No
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal("60000"),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
         ),
     ).aggregate
 
@@ -499,6 +535,7 @@ def test_reconciled_initial_stop_submission_protects_position_and_resolves_unkno
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal("60000"),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
         ),
     ).aggregate
     aggregate = reduce_event(
@@ -561,6 +598,7 @@ def test_reconciled_initial_stop_absence_enters_controlled_exit() -> None:
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal("60000"),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
         ),
     ).aggregate
     aggregate = reduce_event(
@@ -624,6 +662,7 @@ def test_external_flat_enters_reconciliation_and_cancels_owned_protection() -> N
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal("60000"),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
         ),
     ).aggregate
     aggregate = reduce_event(
@@ -1137,6 +1176,7 @@ def _position_protected_aggregate():
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal("60000"),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
         ),
     ).aggregate
     aggregate = reduce_event(
@@ -1645,6 +1685,9 @@ def _tp1_pending_aggregate():
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=ticket.entry_reference_price,
+            post_fill_risk=_normal_post_fill_risk(
+                ticket, ticket.entry_reference_price
+            ),
         ),
     ).aggregate
     return reduce_event(

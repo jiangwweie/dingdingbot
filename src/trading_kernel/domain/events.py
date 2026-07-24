@@ -7,6 +7,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from src.trading_kernel.domain.post_fill_risk import PostFillRiskDecision
 from src.trading_kernel.domain.ticket import TradeTicket
 
 
@@ -119,6 +120,7 @@ class EntryAbsenceConfirmed(_TicketEvent):
 class EntryFilled(_TicketEvent):
     filled_qty: Decimal
     average_fill_price: Decimal
+    post_fill_risk: PostFillRiskDecision
 
 
 class EntryPartiallyFilled(_TicketEvent):

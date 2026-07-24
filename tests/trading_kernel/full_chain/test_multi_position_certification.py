@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 from pathlib import Path
 import re
 import subprocess
@@ -51,6 +52,18 @@ ADMIN_DSN = os.getenv(
     "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
+
+
+def _safe_liquidation_price(ticket, average_fill_price: Decimal) -> Decimal:
+    liquidation_distance = (
+        abs(average_fill_price - ticket.initial_stop_price)
+        * ticket.min_liquidation_distance_to_stop_distance_ratio
+    )
+    return (
+        ticket.initial_stop_price - liquidation_distance
+        if ticket.identity.netting_domain.position_side == "long"
+        else ticket.initial_stop_price + liquidation_distance
+    )
 
 
 @pytest_asyncio.fixture
@@ -227,6 +240,9 @@ async def _protect(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, Decimal("60000")
+                    ),
                     observed_at_ms=fill_observed_at_ms,
                 ),
             ),
@@ -288,13 +304,20 @@ def _ticket_for_side(
         runtime=template.identity.runtime,
         netting_domain=domain,
     )
-    return template.model_copy(
-        update={
-            "identity": identity,
-            "runtime_scope_id": "scope-sor-btc-short",
-            "fact_digest": "sha256:" + "3" * 64,
-        }
-    )
+    terms = {
+        "identity": identity,
+        "runtime_scope_id": "scope-sor-btc-short",
+        "fact_digest": "sha256:" + "3" * 64,
+    }
+    if position_side == "short":
+        terms.update(
+            {
+                "initial_stop_price": Decimal("61000"),
+                "take_profit_prices": (Decimal("58000"),),
+                "projected_liquidation_price": Decimal("63000"),
+            }
+        )
+    return template.model_copy(update=terms)
 
 
 async def _seed_policy(engine: AsyncEngine) -> None:

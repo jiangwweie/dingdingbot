@@ -69,6 +69,18 @@ ADMIN_DSN = os.getenv(
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 
 
+def _safe_liquidation_price(ticket, average_fill_price: Decimal) -> Decimal:
+    liquidation_distance = (
+        abs(average_fill_price - ticket.initial_stop_price)
+        * ticket.min_liquidation_distance_to_stop_distance_ratio
+    )
+    return (
+        ticket.initial_stop_price - liquidation_distance
+        if ticket.identity.netting_domain.position_side == "long"
+        else ticket.initial_stop_price + liquidation_distance
+    )
+
+
 @pytest_asyncio.fixture
 async def dispatch_engine() -> AsyncEngine:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
@@ -393,6 +405,9 @@ async def test_prepared_command_is_superseded_before_venue_write_when_state_move
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, ticket.entry_reference_price
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -486,6 +501,9 @@ async def test_tp1_and_replacement_commands_reach_protected_runner(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, ticket.entry_reference_price
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -570,6 +588,9 @@ async def test_tp1_rejection_is_persisted_without_losing_initial_protection(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, ticket.entry_reference_price
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -614,6 +635,9 @@ async def test_replacement_rejection_preserves_the_prior_active_stop(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, ticket.entry_reference_price
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -905,6 +929,9 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, Decimal("60000")
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -969,6 +996,9 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, Decimal("60000")
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -1035,6 +1065,9 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, Decimal("60000")
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -1359,6 +1392,9 @@ async def _reach_cancel_pending(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, Decimal("60000")
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),

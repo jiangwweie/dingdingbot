@@ -27,6 +27,10 @@ from src.trading_kernel.domain.events import (
     UnownedOrderDetected,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.post_fill_risk import (
+    PostFillRiskRequest,
+    assess_post_fill_risk,
+)
 from src.trading_kernel.domain.reducer import reduce_event
 
 
@@ -105,6 +109,24 @@ async def reconcile_ticket(
                 occurred_at_ms=snapshot.observed_at_ms,
                 filled_qty=snapshot.quantity,
                 average_fill_price=_required_average_entry_price(snapshot),
+                post_fill_risk=assess_post_fill_risk(
+                    PostFillRiskRequest(
+                        position_side=aggregate.identity.netting_domain.position_side,
+                        filled_quantity=snapshot.quantity,
+                        average_fill_price=_required_average_entry_price(snapshot),
+                        initial_stop_price=aggregate.ticket.initial_stop_price,
+                        planned_stop_risk_budget=(
+                            aggregate.ticket.planned_stop_risk_budget
+                        ),
+                        post_fill_stop_risk_limit=(
+                            aggregate.ticket.post_fill_stop_risk_limit
+                        ),
+                        current_liquidation_price=snapshot.liquidation_price,
+                        min_liquidation_distance_to_stop_distance_ratio=(
+                            aggregate.ticket.min_liquidation_distance_to_stop_distance_ratio
+                        ),
+                    )
+                ),
             )
             status = ReconcileTicketStatus.ENTRY_FILL_RECORDED
         elif 0 < snapshot.quantity < aggregate.ticket.quantity:

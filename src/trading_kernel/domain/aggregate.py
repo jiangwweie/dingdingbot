@@ -8,6 +8,10 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict
 
 from src.trading_kernel.domain.identities import TicketIdentity
+from src.trading_kernel.domain.post_fill_risk import (
+    PostFillDisposition,
+    PostFillRiskStatus,
+)
 from src.trading_kernel.domain.ticket import TradeTicket
 
 
@@ -66,6 +70,12 @@ class TradeAggregate(BaseModel):
     entry_lane_held: bool = True
     position_qty: Decimal = Decimal("0")
     average_fill_price: Decimal | None = None
+    actual_stop_risk: Decimal | None = None
+    actual_liquidation_price: Decimal | None = None
+    actual_liquidation_distance: Decimal | None = None
+    actual_liquidation_distance_to_stop_distance_ratio: Decimal | None = None
+    post_fill_risk_status: PostFillRiskStatus | None = None
+    post_fill_disposition: PostFillDisposition | None = None
     protected_qty: Decimal = Decimal("0")
     entry_exchange_order_id: str | None = None
     initial_stop_exchange_order_id: str | None = None

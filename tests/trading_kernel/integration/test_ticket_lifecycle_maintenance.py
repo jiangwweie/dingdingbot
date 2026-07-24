@@ -41,6 +41,18 @@ from tests.trading_kernel.unit.test_ticket import _ticket
 lifecycle_engine = dispatch_fixture.dispatch_engine
 
 
+def _safe_liquidation_price(ticket, average_fill_price: Decimal) -> Decimal:
+    liquidation_distance = (
+        abs(average_fill_price - ticket.initial_stop_price)
+        * ticket.min_liquidation_distance_to_stop_distance_ratio
+    )
+    return (
+        ticket.initial_stop_price - liquidation_distance
+        if ticket.identity.netting_domain.position_side == "long"
+        else ticket.initial_stop_price + liquidation_distance
+    )
+
+
 @pytest.mark.asyncio
 async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protection(
     lifecycle_engine,
@@ -305,6 +317,143 @@ async def test_flat_cleanup_cancels_tp1_then_active_stop_before_settlement(
     assert reservation is not None and reservation.status == "released"
 
 
+@pytest.mark.asyncio
+async def test_hard_post_fill_risk_protects_then_flattens_without_tp1(
+    lifecycle_engine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(lifecycle_engine)
+    await _issue(lifecycle_engine, ticket)
+    venue = KindAwareAcceptingVenue()
+    await _dispatch(lifecycle_engine, venue, ticket.identity.ticket_id, now_ms=1_100)
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        result = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price=Decimal("64000"),
+                    liquidation_price=Decimal("48000"),
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    assert result.status.value == "entry_fill_recorded"
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.PROTECTION_PENDING
+    assert aggregate.actual_stop_risk == Decimal("5")
+    assert aggregate.post_fill_risk_status is not None
+    assert aggregate.post_fill_risk_status.value == "hard_overrun"
+    assert incident is not None and incident.incident_kind == "hard_overrun"
+    assert {command.kind for command in commands} == {
+        ExchangeCommandKind.ENTRY,
+        ExchangeCommandKind.INITIAL_STOP,
+    }
+
+    await _dispatch(lifecycle_engine, venue, ticket.identity.ticket_id, now_ms=2_200)
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.CONTROLLED_FLATTEN_PENDING
+    assert {command.kind for command in commands} == {
+        ExchangeCommandKind.ENTRY,
+        ExchangeCommandKind.INITIAL_STOP,
+        ExchangeCommandKind.CONTROLLED_FLATTEN,
+    }
+
+
+@pytest.mark.asyncio
+async def test_missing_liquidation_evidence_protects_then_flattens_without_tp1(
+    lifecycle_engine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(lifecycle_engine)
+    await _issue(lifecycle_engine, ticket)
+    venue = KindAwareAcceptingVenue()
+    await _dispatch(lifecycle_engine, venue, ticket.identity.ticket_id, now_ms=1_100)
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    liquidation_price=None,
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    await _dispatch(lifecycle_engine, venue, ticket.identity.ticket_id, now_ms=2_200)
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.post_fill_risk_status is not None
+    assert aggregate.post_fill_risk_status.value == "liquidation_safety_degraded"
+    assert aggregate.actual_liquidation_price is None
+    assert aggregate.status is AggregateStatus.CONTROLLED_FLATTEN_PENDING
+    assert ExchangeCommandKind.TAKE_PROFIT not in {
+        command.kind for command in commands
+    }
+
+
+@pytest.mark.asyncio
+async def test_invalid_stop_direction_flattens_immediately_without_stop_or_tp1(
+    lifecycle_engine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(lifecycle_engine)
+    await _issue(lifecycle_engine, ticket)
+    venue = KindAwareAcceptingVenue()
+    await _dispatch(lifecycle_engine, venue, ticket.identity.ticket_id, now_ms=1_100)
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price=Decimal("58000"),
+                    liquidation_price=Decimal("50000"),
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.CONTROLLED_FLATTEN_PENDING
+    assert aggregate.post_fill_risk_status is not None
+    assert aggregate.post_fill_risk_status.value == "protection_direction_invalid"
+    assert [command.kind for command in commands] == [
+        ExchangeCommandKind.ENTRY,
+        ExchangeCommandKind.CONTROLLED_FLATTEN,
+    ]
+
+
 async def _reach_position_protected(engine, ticket) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
@@ -321,6 +470,9 @@ async def _reach_position_protected(engine, ticket) -> None:
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
+                    liquidation_price=_safe_liquidation_price(
+                        ticket, ticket.entry_reference_price
+                    ),
                     observed_at_ms=2_100,
                 ),
             ),

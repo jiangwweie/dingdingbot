@@ -44,15 +44,13 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
     run_reconciliation_worker_once,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
-from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.identities import NettingDomain
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_signal_to_ticket import (
     _seed_runtime_authority,
     _signal,
 )
-from src.trading_kernel.domain.events import TicketIssued
-from src.trading_kernel.domain.reducer import reduce_event
 from tests.trading_kernel.unit.test_ticket import _ticket
 
 
@@ -147,9 +145,16 @@ class RecordingAcceptingVenue:
 
 
 class FakePositionSnapshotSource:
-    def __init__(self, *, quantity: Decimal, average_entry_price: Decimal | None) -> None:
+    def __init__(
+        self,
+        *,
+        quantity: Decimal,
+        average_entry_price: Decimal | None,
+        liquidation_price: Decimal | None = None,
+    ) -> None:
         self.quantity = quantity
         self.average_entry_price = average_entry_price
+        self.liquidation_price = liquidation_price
         self.requests: list[PositionSnapshotRequest] = []
 
     async def read_position_snapshot(
@@ -161,6 +166,7 @@ class FakePositionSnapshotSource:
             netting_domain=request.netting_domain,
             quantity=self.quantity,
             average_entry_price=self.average_entry_price,
+            liquidation_price=self.liquidation_price,
             observed_at_ms=request.observed_at_ms,
         )
 
@@ -212,22 +218,29 @@ async def test_runtime_selector_reschedules_no_change_ticket_without_starving_ne
     )
     second_ticket = _ticket(identity=second_identity)
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
-        for index, ticket in enumerate((first_ticket, second_ticket), start=1):
-            event = TicketIssued(
-                event_id=f"event:selector:{index}",
-                sequence=1,
-                occurred_at_ms=1_000 + index,
-                ticket=ticket,
-            )
-            await uow.commit_reduction(
-                event=event,
-                reduction=reduce_event(None, event),
-                expected_version=0,
+        for ticket in (first_ticket, second_ticket):
+            await uow.tickets.add(ticket)
+            await uow.aggregates.add(
+                TradeAggregate(
+                    identity=ticket.identity,
+                    ticket=ticket,
+                    status=AggregateStatus.POSITION_PROTECTED,
+                    version=1,
+                    last_event_sequence=1,
+                    entry_lane_held=False,
+                    position_qty=ticket.quantity,
+                    average_fill_price=ticket.entry_reference_price,
+                    protected_qty=ticket.quantity,
+                    initial_stop_exchange_order_id="stop:selector",
+                    active_stop_exchange_order_id="stop:selector",
+                    active_stop_price=ticket.initial_stop_price,
+                ),
+                updated_at_ms=1_000,
             )
 
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         first = await uow.aggregates.get_next_for_statuses(
-            (AggregateStatus.ENTRY_PENDING,),
+            (AggregateStatus.POSITION_PROTECTED,),
             work_kind="lifecycle",
             now_ms=1_100,
         )
@@ -239,7 +252,7 @@ async def test_runtime_selector_reschedules_no_change_ticket_without_starving_ne
         )
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         second = await uow.aggregates.get_next_for_statuses(
-            (AggregateStatus.ENTRY_PENDING,),
+            (AggregateStatus.POSITION_PROTECTED,),
             work_kind="lifecycle",
             now_ms=1_100,
         )
@@ -343,6 +356,13 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
     snapshots = FakePositionSnapshotSource(
         quantity=ticket.quantity,
         average_entry_price=Decimal("10000"),
+        liquidation_price=(
+            ticket.initial_stop_price
+            - (
+                abs(Decimal("10000") - ticket.initial_stop_price)
+                * ticket.min_liquidation_distance_to_stop_distance_ratio
+            )
+        ),
     )
     reconciled = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
@@ -408,6 +428,13 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         FakePositionSnapshotSource(
             quantity=ticket.quantity,
             average_entry_price=ticket.entry_reference_price,
+            liquidation_price=(
+                ticket.initial_stop_price
+                - (
+                    abs(ticket.entry_reference_price - ticket.initial_stop_price)
+                    * ticket.min_liquidation_distance_to_stop_distance_ratio
+                )
+            ),
         ),
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-1",
