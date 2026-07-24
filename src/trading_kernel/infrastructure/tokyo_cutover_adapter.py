@@ -39,8 +39,6 @@ PROTECTED_CONTAINERS = (
 ENTRY_WORKER = "brc-trading-kernel-entry-worker.service"
 OBSERVATION_WORKERS = (
     "brc-trading-kernel-observation-worker.service",
-    "brc-trading-kernel-lifecycle-worker.service",
-    "brc-trading-kernel-reconciliation-worker.service",
 )
 WRITE_FENCE = PurePosixPath("/etc/brc/trading-kernel.write-fenced")
 RUNTIME_ENV = PurePosixPath("/etc/brc/trading-kernel.env")

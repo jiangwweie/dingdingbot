@@ -25,14 +25,20 @@ async def runtime_writer_is_certified(
 
     async with uow_factory() as uow:
         capability = await uow.signals.get_runtime_capability("exchange_commands")
-        certified = bool(
+        identity_matches = bool(
             capability
-            and capability.enabled
             and capability.certified_commit == runtime_commit
             and capability.schema_revision == schema_revision
         )
-        if certified:
+        if identity_matches and capability.enabled:
             return True
+        if identity_matches:
+            # Staged readonly operation is an intentional command fence, not drift.
+            await uow.incidents.resolve(
+                _RUNTIME_FENCE_INCIDENT_ID,
+                resolved_at_ms=observed_at_ms,
+            )
+            return False
         await uow.incidents.add(
             RuntimeIncidentRecord(
                 incident_id=_RUNTIME_FENCE_INCIDENT_ID,

@@ -34,6 +34,14 @@ def test_cutover_targets_only_exact_brc_allowlist() -> None:
     assert "owner_ai_cpa" not in adapter.mutable_containers
 
 
+def test_observation_only_cutover_starts_no_command_workers() -> None:
+    module = _production_adapter_module()
+
+    assert module.OBSERVATION_WORKERS == (
+        "brc-trading-kernel-observation-worker.service",
+    )
+
+
 @pytest.mark.asyncio
 async def test_non_quant_baseline_drift_blocks_every_mutating_phase() -> None:
     module = _production_adapter_module()

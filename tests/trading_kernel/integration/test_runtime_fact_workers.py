@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from src.trading_kernel.application.ingest_signal import IngestSignalRequest, ingest_signal
+from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
 from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
@@ -26,6 +27,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.pg_models import (
     owner_policy_current,
     runtime_capabilities_current,
+    runtime_incidents,
 )
 import sqlalchemy as sa
 from src.trading_kernel.interfaces.entry_worker import (
@@ -200,6 +202,51 @@ async def _enable_exchange_commands(engine) -> None:
                 updated_at_ms=1_000,
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_expected_readonly_command_fence_resolves_prior_identity_incident(
+    runtime_fact_worker_engine,
+) -> None:
+    await _seed_runtime_authority(runtime_fact_worker_engine)
+    async with runtime_fact_worker_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(runtime_capabilities_current).values(
+                capability_key="exchange_commands",
+                enabled=False,
+                certified_commit="kernel-test-head",
+                schema_revision="0001_initial",
+                certification={},
+                updated_at_ms=1_000,
+            )
+        )
+
+    mismatched = await runtime_writer_is_certified(
+        lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
+        worker_id="lifecycle-worker-1",
+        runtime_commit="wrong-commit",
+        schema_revision="0001_initial",
+        observed_at_ms=1_001,
+    )
+    readonly = await runtime_writer_is_certified(
+        lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
+        worker_id="lifecycle-worker-1",
+        runtime_commit="kernel-test-head",
+        schema_revision="0001_initial",
+        observed_at_ms=1_002,
+    )
+
+    assert mismatched is False
+    assert readonly is False
+    async with runtime_fact_worker_engine.connect() as connection:
+        incident_status = (
+            await connection.execute(
+                sa.select(runtime_incidents.c.status).where(
+                    runtime_incidents.c.incident_id == "incident:runtime-fence"
+                )
+            )
+        ).scalar_one()
+    assert incident_status == "resolved"
 
 
 @pytest.mark.asyncio
