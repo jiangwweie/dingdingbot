@@ -52,8 +52,8 @@ PRODUCTION_STATE_DOCUMENTS = (
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
 )
 
-CURRENT_PRODUCTION_COMMIT = "44c3d7a0"
-CURRENT_LOCAL_CERTIFICATION = "401 passed"
+CURRENT_PRODUCTION_COMMIT = "4749174c"
+CURRENT_LOCAL_CERTIFICATION = "407 passed"
 CURRENT_ACCEPTANCE_STAGE = "Acceptance-armed"
 RETIRED_ACCEPTANCE_TICKET = "ticket:c1ebc24a178a3ae4d87978e2fa1204ae"
 RESIDENT_WORKER_NAMES = (
@@ -167,7 +167,7 @@ def test_production_state_documents_match_the_deployed_kernel() -> None:
         if CURRENT_PRODUCTION_COMMIT not in source:
             violations.append(f"{relative_path}: missing production commit")
         if CURRENT_LOCAL_CERTIFICATION not in source:
-            violations.append(f"{relative_path}: missing 401-test certification")
+            violations.append(f"{relative_path}: missing current test certification")
         if CURRENT_ACCEPTANCE_STAGE not in source:
             violations.append(f"{relative_path}: missing acceptance-stage marker")
         for worker_name in RESIDENT_WORKER_NAMES:

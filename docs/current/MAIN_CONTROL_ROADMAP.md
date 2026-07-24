@@ -30,9 +30,9 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Branch | `codex/trading-kernel-rebuild-20260722` |
-| Production commit | `44c3d7a00e2250689295d597ba8e05a675c16fc5` |
-| Local certification | `401 passed`; production file-I/O and current-document authority audits pass |
-| Runtime ownership | **Acceptance-armed**: Observation, Lifecycle, and Reconciliation are active; Entry is intentionally disabled pending leverage-mutation diagnosis |
+| Production commit | `4749174c64a6b369930ed91f09d7b9eba1fa0e7a` |
+| Local certification | `407 passed`; focused Ruff and Mypy checks pass |
+| Runtime ownership | **Acceptance-armed**: Observation, Entry, Lifecycle, and Reconciliation are enabled and active |
 | Scheduling model | Long-running systemd services; timer-based Python cold starts are retired and must not return |
 | PostgreSQL | BRC data was deleted without backup by explicit Owner decision, then rebuilt from the single 33-table `0001_initial` baseline |
 | Strategy capability | Six registered Events, deterministic detectors, closed-candle Observation, Live/Replay parity, and real StrategySignal production |
@@ -41,21 +41,20 @@ different Netting Domains progress concurrently.
 | Entry authority | `new_entry_submit_enabled` applies only before ENTRY; existing exposure retains frozen safety authority |
 | Runtime fence | Commit/schema drift records an Incident; an exact but disabled command capability is a controlled readonly fence, not an Incident |
 | Acceptance Ticket | `ticket:e5c125d947e36f906b03f76dbea35b56` safely reached `leverage_rejected`; no ENTRY, order, or position was created |
-| Hourly supervision | Observation, Lifecycle, and Reconciliation active; Entry disabled |
+| Hourly supervision | All four persistent workers active; Entry globally serialized |
 | Full capability | `promote-full` not yet completed |
 
 ## Remaining Critical Path
 
 | Order | Work | Exit condition |
 | ---: | --- | --- |
-| 1 | Leverage mutation diagnosis | Preserve and classify the authoritative Binance rejection before re-enabling Entry |
-| 2 | Protected lifecycle | A new natural acceptance Ticket reaches terminal state through the official Lifecycle worker |
-| 3 | External truth closure | Exchange is flat and has no residual ENTRY, protection, TP, EXIT, or cancel order |
-| 4 | Internal truth closure | Ticket terminal, budget released, Netting Domain released, Reconciliation matched |
-| 5 | Economics closure | Settlement and Review persist exact realized economics, including explicit funding availability |
-| 6 | Incident audit | Zero open runtime incident and zero unknown command outcome |
-| 7 | Full policy promotion | Run and certify `promote-full` only after steps 1-6 pass |
-| 8 | Final requirement audit | Re-run local and Tokyo evidence and close every acceptance item |
+| 1 | Protected lifecycle | A new natural acceptance Ticket reaches terminal state through the official Lifecycle worker |
+| 2 | External truth closure | Exchange is flat and has no residual ENTRY, protection, TP, EXIT, or cancel order |
+| 3 | Internal truth closure | Ticket terminal, budget released, Netting Domain released, Reconciliation matched |
+| 4 | Economics closure | Settlement and Review persist exact realized economics, including explicit funding availability |
+| 5 | Incident audit | Zero open runtime incident and zero unknown command outcome |
+| 6 | Full policy promotion | Run and certify `promote-full` only after steps 1-5 pass |
+| 7 | Final requirement audit | Re-run local and Tokyo evidence and close every acceptance item |
 
 ## Current Stop Conditions
 

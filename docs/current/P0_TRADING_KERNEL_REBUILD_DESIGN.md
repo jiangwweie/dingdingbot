@@ -155,12 +155,12 @@ not rollback authorities.
 
 | Evidence | Current value |
 | --- | --- |
-| Tokyo commit | `44c3d7a00e2250689295d597ba8e05a675c16fc5` |
-| Local certification | `401 passed`; current-document and file-I/O audits pass |
-| Runtime services | **Acceptance-armed**: Observation, Lifecycle, and Reconciliation active; Entry disabled pending leverage-mutation diagnosis |
+| Tokyo commit | `4749174c64a6b369930ed91f09d7b9eba1fa0e7a` |
+| Local certification | `407 passed`; focused Ruff and Mypy checks pass |
+| Runtime services | **Acceptance-armed**: all four persistent workers enabled and active |
 | Natural acceptance flow | Natural `SOR-001 / ETHUSDT / long` reached the durable leverage safety branch |
 | Ticket | `ticket:e5c125d947e36f906b03f76dbea35b56` |
-| Verified lifecycle state | Terminal `leverage_rejected`; exchange flat with no order; Incident resolved |
+| Verified lifecycle state | Prior Ticket terminal; six instruments at `5x`; exchange flat with no order or Incident |
 | Full runtime promotion | `promote-full` pending |
 
 ## Acceptance

@@ -56,8 +56,8 @@ settle, and review concurrently.
 | Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |
 | Reconciliation, Settlement, Review | Complete | Exact Ticket identities and explicit funding availability semantics |
 | Runtime ownership | Complete | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
-| Local certification | Complete | `401 passed`; production file-I/O and current-document authority audits pass |
-| Tokyo controlled cutover | Complete | Commit `44c3d7a00e2250689295d597ba8e05a675c16fc5` runs from the clean 33-table baseline |
+| Local certification | Complete | `407 passed`; focused Ruff and Mypy checks pass |
+| Tokyo controlled cutover | Complete | Commit `4749174c64a6b369930ed91f09d7b9eba1fa0e7a` runs from the clean 33-table baseline |
 
 ## Deployment Implementation
 
@@ -71,13 +71,11 @@ deploy/systemd/brc-trading-kernel-reconciliation-worker.service
 deploy/systemd/brc-trading-kernel.slice
 ```
 
-All four workers are deployable persistent long-running processes. During the
-current **Acceptance-armed** stage, Observation, Lifecycle, and Reconciliation
-are enabled. Entry remains disabled after a safely terminal leverage rejection
-until its Binance mutation reason is diagnosed. Timer deployment is forbidden.
-The service slice and bounded polling
-protect the 2c4g host from the retired high-frequency Python cold-start failure
-mode.
+All four workers are persistent long-running processes and are enabled during
+the current **Acceptance-armed** stage. New Tickets freeze the exchange's `5x`
+configuration and no longer produce `SET_LEVERAGE`. Timer deployment is
+forbidden. The service slice and bounded polling protect the 2c4g host from the
+retired high-frequency Python cold-start failure mode.
 
 Regular releases use one command:
 
@@ -117,18 +115,18 @@ the production anchor `tokyo-runtime-2026.07.23.1`.
 
 | Field | Value |
 | --- | --- |
-| Stage | **Acceptance-armed**; Entry held disabled |
-| Runtime commit | `44c3d7a00e2250689295d597ba8e05a675c16fc5` |
+| Stage | **Acceptance-armed**; all four workers active |
+| Runtime commit | `4749174c64a6b369930ed91f09d7b9eba1fa0e7a` |
 | Schema and seed | `0001_initial`; `sha256:93539bd8c13f2b9c381caa50b921339fbc3c924c6fde3081c06ec96f47b148fe` |
 | Terminal safety Ticket | `ticket:e5c125d947e36f906b03f76dbea35b56`; `leverage_rejected` |
-| Exchange command capability | Enabled, but Entry service disabled |
-| Verified runtime state | Zero position, order, active Ticket, unresolved command, and open Incident |
+| Exchange command capability | Enabled; Entry service active |
+| Verified runtime state | Six instruments at `5x`; zero position, order, active Ticket, unresolved command, and open Incident |
 
 ## Remaining Execution Stages
 
 ### Stage 1: Controlled Natural Acceptance
 
-- [ ] Preserve and classify the authoritative Binance leverage-mutation rejection.
+- [x] Preserve the prior rejection and retire new production leverage mutation.
 - [ ] Let the official chain create one natural real-funds Ticket and install
   Initial Stop protection.
 - [ ] Let the official Lifecycle worker reach the accepted exit policy.
