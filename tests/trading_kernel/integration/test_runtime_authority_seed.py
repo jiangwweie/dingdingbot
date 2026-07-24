@@ -274,6 +274,37 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
 
 
 @pytest.mark.asyncio
+async def test_recovery_identity_refuses_a_runtime_without_one_unknown_leverage_ticket(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    request = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, request)
+
+    with pytest.raises(
+        runtime_seed.RuntimeAuthorityTransitionRefused,
+        match="recovery identity requires exactly one active Ticket",
+    ):
+        async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+            await runtime_seed.deploy_recovery_identity(
+                uow,
+                request.model_copy(
+                    update={
+                        "runtime_commit": "b" * 40,
+                        "seeded_at_ms": 1_800_000_000_100,
+                    }
+                ),
+                recovery_ticket_id="ticket:recovery",
+            )
+
+
+@pytest.mark.asyncio
 async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     runtime_seed_engine: AsyncEngine,
 ) -> None:

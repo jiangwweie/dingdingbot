@@ -28,6 +28,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (  # noqa: 
     RuntimeDeploymentIdentityResult,
     RuntimePolicyState,
     arm_acceptance_policy,
+    deploy_recovery_identity,
     deploy_runtime_identity,
     promote_full_policy,
     seed_runtime_authority,
@@ -76,6 +77,25 @@ def _parser() -> argparse.ArgumentParser:
     )
     deploy.add_argument("--now-ms", type=int)
 
+    recovery = subparsers.add_parser(
+        "deploy-recovery-identity",
+        help="rotate identity only to reconcile one zero-exposure leverage unknown",
+    )
+    recovery.add_argument("--recovery-ticket-id", required=True)
+    recovery.add_argument(
+        "--account-id",
+        default=os.getenv("TRADING_KERNEL_ACCOUNT_ID", ""),
+    )
+    recovery.add_argument(
+        "--runtime-commit",
+        default=os.getenv("TRADING_KERNEL_RUNTIME_COMMIT", ""),
+    )
+    recovery.add_argument(
+        "--schema-revision",
+        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+    )
+    recovery.add_argument("--now-ms", type=int)
+
     arm = subparsers.add_parser(
         "arm-acceptance",
         help="enable new ENTRY under the approved dynamic budget policy",
@@ -123,6 +143,17 @@ async def _run(args: argparse.Namespace) -> int:
                         schema_revision=args.schema_revision,
                         seeded_at_ms=now_ms,
                     ),
+                )
+            elif args.action == "deploy-recovery-identity":
+                result = await deploy_recovery_identity(
+                    uow,
+                    RuntimeAuthoritySeedRequest(
+                        account_id=args.account_id,
+                        runtime_commit=args.runtime_commit,
+                        schema_revision=args.schema_revision,
+                        seeded_at_ms=now_ms,
+                    ),
+                    recovery_ticket_id=args.recovery_ticket_id,
                 )
             elif args.action == "arm-acceptance":
                 result = await arm_acceptance_policy(

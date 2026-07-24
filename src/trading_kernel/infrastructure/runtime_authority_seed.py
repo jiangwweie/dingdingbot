@@ -29,6 +29,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_profiles,
     runtime_scopes_current,
     schema_metadata,
+    positions_current,
+    trade_aggregates,
     trade_reviews,
     trade_tickets,
 )
@@ -409,6 +411,35 @@ async def deploy_runtime_identity(
 ) -> RuntimeDeploymentIdentityResult:
     """Install fresh authority or rotate only deployment identity while flat."""
 
+    return await _deploy_runtime_identity(uow, request)
+
+
+async def deploy_recovery_identity(
+    uow: PostgresKernelUnitOfWork,
+    request: RuntimeAuthoritySeedRequest,
+    *,
+    recovery_ticket_id: str,
+) -> RuntimeDeploymentIdentityResult:
+    """Rotate identity only to reconcile one zero-exposure leverage unknown."""
+
+    normalized_ticket_id = recovery_ticket_id.strip()
+    if not normalized_ticket_id:
+        raise ValueError("recovery Ticket identity must be non-blank")
+    return await _deploy_runtime_identity(
+        uow,
+        request,
+        recovery_ticket_id=normalized_ticket_id,
+    )
+
+
+async def _deploy_runtime_identity(
+    uow: PostgresKernelUnitOfWork,
+    request: RuntimeAuthoritySeedRequest,
+    *,
+    recovery_ticket_id: str | None = None,
+) -> RuntimeDeploymentIdentityResult:
+    """Install the exact identity after a flat or narrowly safe recovery gate."""
+
     connection = uow._require_connection()
     metadata_count = int(
         await connection.scalar(
@@ -417,6 +448,10 @@ async def deploy_runtime_identity(
         or 0
     )
     if metadata_count == 0:
+        if recovery_ticket_id is not None:
+            raise RuntimeAuthorityTransitionRefused(
+                "recovery identity requires an existing runtime authority"
+            )
         seeded = await seed_runtime_authority(uow, request)
         return RuntimeDeploymentIdentityResult(
             runtime_commit=request.runtime_commit,
@@ -425,7 +460,13 @@ async def deploy_runtime_identity(
             refreshed_existing_authority=False,
         )
 
-    await _require_zero_runtime_activity(connection)
+    if recovery_ticket_id is None:
+        await _require_zero_runtime_activity(connection)
+    else:
+        await _require_recovery_identity_activity(
+            connection,
+            recovery_ticket_id=recovery_ticket_id,
+        )
     expected_registry_hash = build_registry_semantic_hash(
         registered_strategy_contracts()
     )
@@ -897,6 +938,119 @@ async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
     if int(unresolved_commands or 0) != 0:
         raise RuntimeAuthorityTransitionRefused(
             "runtime transition requires zero unresolved Exchange Commands"
+        )
+
+
+async def _require_recovery_identity_activity(
+    connection: AsyncConnection,
+    *,
+    recovery_ticket_id: str,
+) -> None:
+    active_ticket_count = await connection.scalar(
+        sa.select(sa.func.count()).select_from(trade_tickets).where(
+            trade_tickets.c.terminal_at_ms.is_(None)
+        )
+    )
+    if int(active_ticket_count or 0) != 1:
+        raise RuntimeAuthorityTransitionRefused(
+            "recovery identity requires exactly one active Ticket"
+        )
+
+    ticket = (
+        await connection.execute(
+            sa.select(trade_tickets)
+            .where(
+                trade_tickets.c.ticket_id == recovery_ticket_id,
+                trade_tickets.c.terminal_at_ms.is_(None),
+            )
+            .with_for_update(of=trade_tickets)
+        )
+    ).mappings().one_or_none()
+    if ticket is None:
+        raise RuntimeAuthorityTransitionRefused(
+            "recovery identity Ticket is not the active Ticket"
+        )
+
+    aggregate = (
+        await connection.execute(
+            sa.select(trade_aggregates)
+            .where(trade_aggregates.c.ticket_id == recovery_ticket_id)
+            .with_for_update(of=trade_aggregates)
+        )
+    ).mappings().one_or_none()
+    if aggregate is None or any(
+        (
+            aggregate["status"] != "leverage_outcome_unknown",
+            Decimal(str(aggregate["position_qty"])) != 0,
+            Decimal(str(aggregate["protected_qty"])) != 0,
+            aggregate["entry_exchange_order_id"] is not None,
+            aggregate["initial_stop_exchange_order_id"] is not None,
+            aggregate["active_stop_exchange_order_id"] is not None,
+            aggregate["tp1_exchange_order_id"] is not None,
+            aggregate["exit_exchange_order_id"] is not None,
+        )
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "recovery identity requires a zero-exposure leverage unknown"
+        )
+
+    commands = (
+        await connection.execute(
+            sa.select(exchange_commands)
+            .where(exchange_commands.c.ticket_id == recovery_ticket_id)
+            .with_for_update(of=exchange_commands)
+        )
+    ).mappings().all()
+    if len(commands) != 1 or any(
+        (
+            commands[0]["command_kind"] != "set_leverage",
+            commands[0]["status"] != "outcome_unknown",
+            commands[0]["venue_client_order_id"] is not None,
+        )
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "recovery identity requires one unknown SET_LEVERAGE command"
+        )
+
+    unresolved_command_count = await connection.scalar(
+        sa.select(sa.func.count()).select_from(exchange_commands).where(
+            exchange_commands.c.status.in_(
+                ("prepared", "claimed", "dispatch_started", "outcome_unknown")
+            )
+        )
+    )
+    if int(unresolved_command_count or 0) != 1:
+        raise RuntimeAuthorityTransitionRefused(
+            "recovery identity permits no other unresolved Exchange Command"
+        )
+
+    incidents = (
+        await connection.execute(
+            sa.select(runtime_incidents)
+            .where(runtime_incidents.c.status != "resolved")
+            .with_for_update(of=runtime_incidents)
+        )
+    ).mappings().all()
+    if len(incidents) != 1 or any(
+        (
+            incidents[0]["ticket_id"] != recovery_ticket_id,
+            incidents[0]["incident_kind"] != "leverage_outcome_unknown",
+            incidents[0]["entry_block_scope"] != "leverage_domain",
+        )
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "recovery identity requires one leverage-outcome Incident"
+        )
+
+    projected_position_count = await connection.scalar(
+        sa.select(sa.func.count()).select_from(positions_current).where(
+            positions_current.c.ticket_id == recovery_ticket_id,
+            positions_current.c.quantity != 0,
+        )
+    )
+    if int(projected_position_count or 0) != 0:
+        raise RuntimeAuthorityTransitionRefused(
+            "recovery identity requires zero projected position quantity"
         )
 
 
