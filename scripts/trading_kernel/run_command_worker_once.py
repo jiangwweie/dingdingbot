@@ -71,7 +71,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--now-ms", type=int)
     parser.add_argument("--lease-ms", type=int, default=30_000)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
-    parser.add_argument("--admission-snapshot-validity-ms", type=int, default=5_000)
+    parser.add_argument(
+        "--admission-snapshot-validity-ms",
+        "--action-fact-validity-ms",
+        dest="admission_snapshot_validity_ms",
+        type=int,
+        default=5_000,
+    )
     parser.add_argument("--idle-poll-interval-ms", type=int, default=2_000)
     parser.add_argument("--run-forever", action="store_true")
     parser.add_argument("--poll-interval-ms", type=int, default=2_000)

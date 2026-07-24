@@ -171,6 +171,23 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
     )
 
 
+def test_entry_service_action_fact_validity_alias_sets_admission_snapshot_window() -> None:
+    args = command_cli._parser().parse_args(
+        [
+            "--venue-factory",
+            "example:factory",
+            "--worker-role",
+            "entry",
+            "--worker-id",
+            "entry-test",
+            "--action-fact-validity-ms",
+            "30000",
+        ]
+    )
+
+    assert args.admission_snapshot_validity_ms == 30_000
+
+
 def _set_valid_runtime_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     values = {
         "TRADING_KERNEL_ENVIRONMENT": "live",
