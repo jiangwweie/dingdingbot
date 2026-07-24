@@ -1,7 +1,7 @@
 ---
 title: TOKYO_RUNTIME_DEPLOYMENT_CONTRACT
 status: DEPLOYED_ACCEPTANCE_ACTIVE
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 ---
 
 # Tokyo Runtime Deployment Contract
@@ -10,12 +10,11 @@ last_verified: 2026-07-23
 
 | Identity | Current value |
 | --- | --- |
-| Git commit | `f9fda21c91482b050e2a630e163f3213386ae6d7` |
-| Production tag | `tokyo-runtime-2026.07.23.1`, fixed to `f9fda21c` |
-| Local certification | `331 passed`; Ruff clean; Mypy clean; file-I/O audit clean |
+| Git commit | `44c3d7a00e2250689295d597ba8e05a675c16fc5` |
+| Local certification | `401 passed`; current-document and file-I/O audits pass |
 | Schema | Single 33-table `0001_initial` baseline |
-| Runtime services | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
-| Hourly supervision | Active read-only automation |
+| Runtime services | **Acceptance-armed**: Observation, Lifecycle, and Reconciliation active; Entry disabled pending leverage-mutation diagnosis |
+| Hourly supervision | Active Observation service plus Lifecycle and Reconciliation safety workers |
 | Full policy state | `promote-full` pending |
 
 ## Deployment Model
@@ -69,26 +68,25 @@ Incident and fences that writer while readonly checks remain allowed.
 | Lifecycle | Install/maintain protection and execute Ticket exits | Concurrent by Ticket, bounded idle poll |
 | Reconciliation | Resolve exchange truth, unknown outcomes, terminal closure, Settlement, Review | Bounded current-state queries |
 
-Exactly one deployed service owns each role. Restoring periodic process creation
+Exactly one deployed service owns each role. During the current
+**Acceptance-armed** hold, Entry is disabled only because the first natural
+Ticket safely terminated at an unclassified leverage mutation; the remaining
+workers preserve observation and recovery. Restoring periodic process creation
 is a production regression.
 
-## Active Controlled Acceptance
+## Current Controlled Acceptance Baseline
 
-The current natural acceptance flow is:
+Tokyo is **Acceptance-armed** with exact runtime commit `44c3d7a0` and command
+capability certified. Natural Ticket `ticket:e5c125d947e36f906b03f76dbea35b56`
+terminated as `leverage_rejected` after a zero-exposure `set_leverage` unknown
+was reconciled against the exchange's actual `5x` setting. Exchange position,
+orders, active Ticket, unresolved command, and open Incident are zero. Entry
+remains disabled until the mutation rejection is classified; constructed signals
+and direct exchange writes remain forbidden.
 
-```text
-SOR-001 / SOR-SHORT / SOLUSDT
--> ticket:c1ebc24a178a3ae4d87978e2fa1204ae
--> 0.25 SOL short at 77.51
--> Initial Stop 78.50 accepted
--> TP1 76.52 accepted
--> position_protected
-```
-
-This proves natural Observation through protected position, not terminal system
-acceptance. Do not call `promote-full` while the Ticket is nonterminal or any
-residual order, budget, Incident, unknown outcome, Settlement, or Review item is
-unresolved.
+Do not call `promote-full` until that new Ticket is terminal, flat, reconciled,
+settled, reviewed, and leaves no residual order, budget, Incident, or unknown
+outcome.
 
 ## Full-Promotion Gates
 

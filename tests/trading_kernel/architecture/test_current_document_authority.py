@@ -52,8 +52,10 @@ PRODUCTION_STATE_DOCUMENTS = (
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
 )
 
-CURRENT_PRODUCTION_COMMIT = "f9fda21c"
-CURRENT_LOCAL_CERTIFICATION = "331 passed"
+CURRENT_PRODUCTION_COMMIT = "44c3d7a0"
+CURRENT_LOCAL_CERTIFICATION = "401 passed"
+CURRENT_ACCEPTANCE_STAGE = "Acceptance-armed"
+RETIRED_ACCEPTANCE_TICKET = "ticket:c1ebc24a178a3ae4d87978e2fa1204ae"
 RESIDENT_WORKER_NAMES = (
     "Observation",
     "Entry",
@@ -165,7 +167,9 @@ def test_production_state_documents_match_the_deployed_kernel() -> None:
         if CURRENT_PRODUCTION_COMMIT not in source:
             violations.append(f"{relative_path}: missing production commit")
         if CURRENT_LOCAL_CERTIFICATION not in source:
-            violations.append(f"{relative_path}: missing 331-test certification")
+            violations.append(f"{relative_path}: missing 401-test certification")
+        if CURRENT_ACCEPTANCE_STAGE not in source:
+            violations.append(f"{relative_path}: missing acceptance-stage marker")
         for worker_name in RESIDENT_WORKER_NAMES:
             if worker_name not in source:
                 violations.append(f"{relative_path}: missing {worker_name} worker")
@@ -173,6 +177,8 @@ def test_production_state_documents_match_the_deployed_kernel() -> None:
             violations.append(f"{relative_path}: stale 303-test certification")
         if "no Tokyo mutation claimed" in source:
             violations.append(f"{relative_path}: stale pre-cutover Tokyo status")
+        if RETIRED_ACCEPTANCE_TICKET in source:
+            violations.append(f"{relative_path}: retired acceptance Ticket is current")
 
     assert not violations, "production-state drift remains:\n" + "\n".join(
         sorted(violations)

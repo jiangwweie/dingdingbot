@@ -2,7 +2,7 @@
 title: P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN
 status: ACCEPTANCE_ACTIVE
 program_id: P0-TKR
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 ---
 
 # P0 Trading Kernel Rebuild Implementation Plan
@@ -56,8 +56,8 @@ settle, and review concurrently.
 | Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |
 | Reconciliation, Settlement, Review | Complete | Exact Ticket identities and explicit funding availability semantics |
 | Runtime ownership | Complete | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
-| Local certification | Complete | `331 passed`; Ruff clean; Mypy clean; production file-I/O audit clean |
-| Tokyo zero rebuild | Complete | Commit `f9fda21c91482b050e2a630e163f3213386ae6d7` deployed from an empty BRC database baseline |
+| Local certification | Complete | `401 passed`; production file-I/O and current-document authority audits pass |
+| Tokyo controlled cutover | Complete | Commit `44c3d7a00e2250689295d597ba8e05a675c16fc5` runs from the clean 33-table baseline |
 
 ## Deployment Implementation
 
@@ -71,9 +71,13 @@ deploy/systemd/brc-trading-kernel-reconciliation-worker.service
 deploy/systemd/brc-trading-kernel.slice
 ```
 
-All four workers are persistent long-running processes. Timer deployment is
-forbidden. The service slice and bounded polling protect the 2c4g host from the
-retired high-frequency Python cold-start failure mode.
+All four workers are deployable persistent long-running processes. During the
+current **Acceptance-armed** stage, Observation, Lifecycle, and Reconciliation
+are enabled. Entry remains disabled after a safely terminal leverage rejection
+until its Binance mutation reason is diagnosed. Timer deployment is forbidden.
+The service slice and bounded polling
+protect the 2c4g host from the retired high-frequency Python cold-start failure
+mode.
 
 ## Completed Destructive Cutover
 
@@ -84,8 +88,8 @@ Execution therefore:
 2. verified exchange and old-runtime preconditions;
 3. deleted BRC program services, containers, releases, and PostgreSQL data;
 4. rebuilt PostgreSQL from `0001_initial` and deterministic seeds;
-5. deployed exact commit `f9fda21c`;
-6. enabled the four persistent workers;
+5. deployed exact commit `93837ea9`;
+6. enabled only Observation while preserving the ENTRY write fence;
 7. preserved non-quantitative Nginx, PostgreSQL host, Docker, and unrelated
    services/data;
 8. activated hourly read-only runtime supervision.
@@ -93,27 +97,26 @@ Execution therefore:
 No retired BRC backup is a current rollback source. Fixes proceed forward from
 the production anchor `tokyo-runtime-2026.07.23.1`.
 
-## Active Acceptance Ticket
+## Current Acceptance Baseline
 
 | Field | Value |
 | --- | --- |
-| Ticket | `ticket:c1ebc24a178a3ae4d87978e2fa1204ae` |
-| Origin | Natural Observation, not constructed signal |
-| Event | `SOR-001 / SOR-SHORT / SOLUSDT` |
-| Exposure | 0.25 SOL short |
-| Entry | 77.51 |
-| Initial Stop | 78.50 |
-| TP1 | 76.52 |
-| Verified state | `position_protected` |
-| Accepted effects | ENTRY, Initial Stop, TP1 |
+| Stage | **Acceptance-armed**; Entry held disabled |
+| Runtime commit | `44c3d7a00e2250689295d597ba8e05a675c16fc5` |
+| Schema and seed | `0001_initial`; `sha256:93539bd8c13f2b9c381caa50b921339fbc3c924c6fde3081c06ec96f47b148fe` |
+| Terminal safety Ticket | `ticket:e5c125d947e36f906b03f76dbea35b56`; `leverage_rejected` |
+| Exchange command capability | Enabled, but Entry service disabled |
+| Verified runtime state | Zero position, order, active Ticket, unresolved command, and open Incident |
 
 ## Remaining Execution Stages
 
-### Stage 1: Terminal Lifecycle
+### Stage 1: Controlled Natural Acceptance
 
+- [ ] Preserve and classify the authoritative Binance leverage-mutation rejection.
+- [ ] Let the official chain create one natural real-funds Ticket and install
+  Initial Stop protection.
 - [ ] Let the official Lifecycle worker reach the accepted exit policy.
-- [ ] Confirm terminal Ticket and exchange-flat position.
-- [ ] Confirm no residual protection, TP, EXIT, cancel, or ENTRY order.
+- [ ] Confirm terminal Ticket and exchange-flat position with no residual order.
 
 ### Stage 2: Internal Closure
 

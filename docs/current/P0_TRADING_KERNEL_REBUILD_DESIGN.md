@@ -2,7 +2,7 @@
 title: P0_TRADING_KERNEL_REBUILD_DESIGN
 status: DEPLOYED_ACCEPTANCE_ACTIVE
 program_id: P0-TKR
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 ---
 
 # P0 Trading Kernel Rebuild Design
@@ -142,13 +142,12 @@ not rollback authorities.
 
 | Evidence | Current value |
 | --- | --- |
-| Tokyo commit | `f9fda21c91482b050e2a630e163f3213386ae6d7` |
-| Immutable production tag | `tokyo-runtime-2026.07.23.1` |
-| Local certification | `331 passed`; Ruff clean; Mypy clean; file-I/O audit clean |
-| Runtime services | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
-| Natural acceptance flow | `SOR-001 / SOR-SHORT / SOLUSDT` |
-| Ticket | `ticket:c1ebc24a178a3ae4d87978e2fa1204ae` |
-| Verified lifecycle state | `position_protected`; ENTRY, Initial Stop, and TP1 accepted |
+| Tokyo commit | `44c3d7a00e2250689295d597ba8e05a675c16fc5` |
+| Local certification | `401 passed`; current-document and file-I/O audits pass |
+| Runtime services | **Acceptance-armed**: Observation, Lifecycle, and Reconciliation active; Entry disabled pending leverage-mutation diagnosis |
+| Natural acceptance flow | Natural `SOR-001 / ETHUSDT / long` reached the durable leverage safety branch |
+| Ticket | `ticket:e5c125d947e36f906b03f76dbea35b56` |
+| Verified lifecycle state | Terminal `leverage_rejected`; exchange flat with no order; Incident resolved |
 | Full runtime promotion | `promote-full` pending |
 
 ## Acceptance
@@ -170,5 +169,6 @@ The rebuild is complete only when:
 9. `promote-full` passes its hard gates;
 10. the final requirement audit finds no unverified requirement or fallback.
 
-Items 1-6 are deployed and locally certified. Item 7 is currently active under
-the protected acceptance Ticket. Items 8-10 remain incomplete.
+Items 1-6 are deployed and locally certified. The first natural Ticket proved
+the unknown-leverage recovery path and terminated safely before ENTRY. A
+protected real-funds lifecycle remains required for Items 7-10.
