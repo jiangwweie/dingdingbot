@@ -18,10 +18,10 @@ from src.trading_kernel.domain.effects import (
     PrepareSetLeverageCommand,
     PrepareTakeProfitCommand,
     ReleaseBudget,
+    ReleaseCapitalAuthorities,
     ReleaseEntryLane,
     ResolveIncident,
     RequestControlledFlatten,
-    SettleBudget,
 )
 from src.trading_kernel.domain.events import (
     BudgetSettled,
@@ -1389,7 +1389,18 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
     )
     assert reconciled.aggregate.status is AggregateStatus.SETTLEMENT_PENDING
     assert reconciled.effects == (
-        SettleBudget(ticket_id=ticket.identity.ticket_id),
+        ReleaseCapitalAuthorities(
+            ticket_id=ticket.identity.ticket_id,
+            account_capacity_domain_key=(
+                f"{ticket.identity.netting_domain.venue_id}:"
+                f"{ticket.identity.netting_domain.account_id}"
+            ),
+            netting_domain_key=ticket.identity.netting_domain.key(),
+            notional=ticket.notional,
+            risk_at_stop=ticket.risk_at_stop,
+            reserved_margin=ticket.reserved_margin,
+            released_at_ms=2_200,
+        ),
     )
 
     settled = reduce_event(

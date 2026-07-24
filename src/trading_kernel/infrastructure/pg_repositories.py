@@ -213,6 +213,23 @@ class PostgresTicketRepository:
         if updated.rowcount != 1:
             raise AggregateVersionConflict("Ticket missing during terminalization")
 
+    async def release_active_netting_domain(
+        self,
+        ticket_id: str,
+        *,
+        netting_domain_key: str,
+    ) -> None:
+        updated = await self._connection.execute(
+            sa.update(trade_tickets)
+            .where(
+                trade_tickets.c.ticket_id == ticket_id,
+                trade_tickets.c.active_netting_domain_key == netting_domain_key,
+            )
+            .values(active_netting_domain_key=None)
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict("active Netting Domain is missing during release")
+
     async def has_other_instrument_ticket_in_window(
         self,
         *,

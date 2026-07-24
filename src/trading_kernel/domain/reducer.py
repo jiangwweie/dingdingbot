@@ -24,7 +24,7 @@ from src.trading_kernel.domain.effects import (
     ReleaseEntryLane,
     ResolveIncident,
     RequestControlledFlatten,
-    SettleBudget,
+    ReleaseCapitalAuthorities,
 )
 from src.trading_kernel.domain.events import (
     BudgetSettled,
@@ -1355,8 +1355,17 @@ def reduce_event(
             raise InvalidLifecycleTransition("protected quantity remains")
         if current.pending_cancel_exchange_order_id is not None:
             raise InvalidLifecycleTransition("cancel outcome remains unresolved")
+        domain = current.ticket.identity.netting_domain
         matched_effects: list[KernelEffect] = [
-            SettleBudget(ticket_id=current.identity.ticket_id)
+            ReleaseCapitalAuthorities(
+                ticket_id=current.identity.ticket_id,
+                account_capacity_domain_key=f"{domain.venue_id}:{domain.account_id}",
+                netting_domain_key=domain.key(),
+                notional=current.ticket.notional,
+                risk_at_stop=current.ticket.risk_at_stop,
+                reserved_margin=current.ticket.reserved_margin,
+                released_at_ms=event.occurred_at_ms,
+            )
         ]
         if event.resolved_incident_kind is not None:
             matched_effects.append(

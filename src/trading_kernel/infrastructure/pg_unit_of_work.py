@@ -54,7 +54,7 @@ from src.trading_kernel.domain.effects import (
     ReleaseEntryLane,
     ResolveIncident,
     RequestControlledFlatten,
-    SettleBudget,
+    ReleaseCapitalAuthorities,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionInstrumentFacts,
@@ -425,17 +425,21 @@ class PostgresKernelUnitOfWork:
                     resolved_at_ms=event.occurred_at_ms,
                 )
                 continue
-            if isinstance(effect, SettleBudget):
+            if isinstance(effect, ReleaseCapitalAuthorities):
                 await self.budgets.release(
                     effect.ticket_id,
-                    released_at_ms=event.occurred_at_ms,
+                    released_at_ms=effect.released_at_ms,
                 )
                 await self.entry_admission.release_account_exposure(
                     venue_id=aggregate.ticket.identity.netting_domain.venue_id,
                     account_id=aggregate.ticket.identity.netting_domain.account_id,
-                    notional=aggregate.ticket.notional,
-                    risk_at_stop=aggregate.ticket.risk_at_stop,
-                    updated_at_ms=event.occurred_at_ms,
+                    notional=effect.notional,
+                    risk_at_stop=effect.risk_at_stop,
+                    updated_at_ms=effect.released_at_ms,
+                )
+                await self.tickets.release_active_netting_domain(
+                    effect.ticket_id,
+                    netting_domain_key=effect.netting_domain_key,
                 )
                 continue
             raise UnsupportedKernelEffect(

@@ -287,6 +287,13 @@ class TicketRepository(Protocol):
         terminal_at_ms: int,
     ) -> None: ...
 
+    async def release_active_netting_domain(
+        self,
+        ticket_id: str,
+        *,
+        netting_domain_key: str,
+    ) -> None: ...
+
     async def has_other_instrument_ticket_in_window(
         self,
         *,

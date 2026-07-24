@@ -18,12 +18,16 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandStatus,
 )
-from src.trading_kernel.application.ports import RuntimeIncidentRecord
+from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.application.ports import (
+    BudgetReservationRecord,
+    RuntimeIncidentRecord,
+)
 from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
 )
-from src.trading_kernel.domain.events import TicketIssued
+from src.trading_kernel.domain.events import ReconciliationMatched, TicketIssued
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.ticket import build_ticket_id
@@ -98,6 +102,88 @@ async def test_reduction_commits_ticket_aggregate_event_and_command_atomically(
     assert commands[0].kind is ExchangeCommandKind.ENTRY
     assert commands[0].status is ExchangeCommandStatus.PREPARED
     assert commands[0].payload.quantity == ticket.quantity
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_match_releases_all_capital_authorities_before_settlement(
+    kernel_engine: AsyncEngine,
+) -> None:
+    ticket, claim = _claimed_ticket(_ticket(), now_ms=1_001)
+    issued = TicketIssued(
+        event_id="event-issued-for-release",
+        ticket=ticket,
+        sequence=1,
+        occurred_at_ms=1_001,
+    )
+    async with PostgresKernelUnitOfWork(kernel_engine) as uow:
+        await uow.capacity_claims.add(claim)
+        await uow.budgets.add(
+            BudgetReservationRecord(
+                budget_reservation_id=f"budget:{ticket.identity.ticket_id}",
+                ticket_id=ticket.identity.ticket_id,
+                owner_policy_id=ticket.owner_policy_id,
+                venue_id=ticket.identity.netting_domain.venue_id,
+                account_id=ticket.identity.netting_domain.account_id,
+                reserved_notional=ticket.notional,
+                reserved_risk=ticket.risk_at_stop,
+                reserved_margin=ticket.reserved_margin,
+                planned_stop_risk_budget=ticket.planned_stop_risk_budget,
+                risk_reservation_basis=ticket.risk_reservation_basis,
+                status="active",
+                created_at_ms=1_001,
+            )
+        )
+        await uow.entry_admission.reserve_account_exposure(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id=ticket.identity.netting_domain.account_id,
+            notional=ticket.notional,
+            risk_at_stop=ticket.risk_at_stop,
+            expected_version=None,
+            updated_at_ms=1_001,
+        )
+        await uow.commit_reduction(
+            event=issued,
+            reduction=reduce_event(None, issued),
+            expected_version=0,
+        )
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert aggregate is not None
+        pending = aggregate.model_copy(
+            update={
+                "status": AggregateStatus.RECONCILIATION_PENDING,
+                "version": 2,
+                "last_event_sequence": 2,
+                "entry_lane_held": False,
+            }
+        )
+        await uow.aggregates.save(pending, expected_version=1)
+
+        matched = ReconciliationMatched(
+            event_id="event-reconciliation-matched",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=3,
+            occurred_at_ms=2_000,
+        )
+        await uow.commit_reduction(
+            event=matched,
+            reduction=reduce_event(pending, matched),
+            expected_version=2,
+        )
+
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+        exposure = await uow.entry_admission.get_account_exposure(
+            ticket.identity.netting_domain.venue_id,
+            ticket.identity.netting_domain.account_id,
+        )
+        released_domain = not await uow.entry_admission.has_active_ticket_in_domain(
+            ticket.identity.netting_domain.key()
+        )
+        settled = await uow.aggregates.get(ticket.identity.ticket_id)
+
+    assert reservation is not None and reservation.status == "released"
+    assert exposure is not None and exposure.active_ticket_count == 0
+    assert released_domain
+    assert settled is not None and settled.status is AggregateStatus.SETTLEMENT_PENDING
 
 
 @pytest.mark.asyncio

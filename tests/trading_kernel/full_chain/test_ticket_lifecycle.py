@@ -290,10 +290,45 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
             ticket.identity.netting_domain.venue_id,
             ticket.identity.netting_domain.account_id
         )
+        netting_domain_active = (
+            await uow.entry_admission.has_active_ticket_in_domain(
+                ticket.identity.netting_domain.key()
+            )
+        )
     assert reservation_after_match is not None
     assert reservation_after_match.status == "released"
     assert exposure_after_match is not None
     assert exposure_after_match.active_ticket_count == 0
+    assert not netting_domain_active
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        repeated_match = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity="0",
+                    average_entry_price=None,
+                    open_orders=(),
+                    observed_at_ms=3_401,
+                ),
+            ),
+        )
+        events_after_repeat = await uow.events.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        exposure_after_repeat = await uow.entry_admission.get_account_exposure(
+            ticket.identity.netting_domain.venue_id,
+            ticket.identity.netting_domain.account_id,
+        )
+
+    assert repeated_match.status is ReconcileTicketStatus.NO_CHANGE
+    assert sum(
+        type(event).__name__ == "ReconciliationMatched" for event in events_after_repeat
+    ) == 1
+    assert exposure_after_repeat is not None
+    assert exposure_after_repeat.active_ticket_count == 0
 
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         settled = await settle_ticket(

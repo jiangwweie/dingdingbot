@@ -86,8 +86,14 @@ class ReleaseEntryLane(_Effect):
     ticket_id: str
 
 
-class SettleBudget(_Effect):
+class ReleaseCapitalAuthorities(_Effect):
     ticket_id: str
+    account_capacity_domain_key: str
+    netting_domain_key: str
+    notional: Decimal
+    risk_at_stop: Decimal
+    reserved_margin: Decimal
+    released_at_ms: int
 
 
 class ReleaseBudget(_Effect):
@@ -109,6 +115,6 @@ KernelEffect = (
     | OpenIncident
     | ResolveIncident
     | ReleaseEntryLane
-    | SettleBudget
+    | ReleaseCapitalAuthorities
     | ReleaseBudget
 )
