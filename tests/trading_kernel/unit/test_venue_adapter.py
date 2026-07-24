@@ -299,9 +299,15 @@ class OneWayActionFactsExchange(ActionFactsExchange):
 
 class AdmissionSnapshotExchange:
     def __init__(self) -> None:
+        self.markets_loaded = False
         self.position_calls: list[tuple[list[str], dict[str, object]]] = []
         self.position_risk_calls: list[dict[str, object]] = []
         self.order_calls: list[tuple[str | None, dict[str, object]]] = []
+
+    async def load_markets(self, reload):
+        assert reload is False
+        self.markets_loaded = True
+        return {}
 
     async def fetch_order_book(self, symbol, limit):
         assert symbol == "SOL/USDT:USDT"
@@ -321,6 +327,7 @@ class AdmissionSnapshotExchange:
         }
 
     async def fetch_position_mode(self, symbol, params):
+        assert self.markets_loaded is True
         assert symbol == "SOL/USDT:USDT"
         assert params == {}
         return {"hedged": True}

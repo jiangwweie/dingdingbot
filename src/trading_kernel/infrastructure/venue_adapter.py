@@ -182,6 +182,7 @@ class CcxtVenueAdapter:
             account_id=request.account_id,
             exchange_instrument_id=request.exchange_instrument_id,
         )
+        await _call_raw_exchange(exchange.load_markets, False)
         (
             order_book,
             balance,
