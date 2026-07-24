@@ -285,7 +285,13 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
-        await runtime_seed.seed_runtime_authority(uow, seed_request)
+        seeded = await runtime_seed.seed_runtime_authority(uow, seed_request)
+    before = runtime_seed.RuntimePolicyState(
+        **{
+            field: getattr(seeded, field)
+            for field in runtime_seed.RuntimePolicyState.model_fields
+        }
+    )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
         armed = await runtime_seed.arm_acceptance_policy(
             uow,
@@ -300,6 +306,9 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     assert armed.planned_stop_risk_fraction == Decimal("0.03")
     assert armed.max_initial_margin_utilization == Decimal("0.90")
     assert armed.max_leverage == 10
+    assert armed.model_dump(
+        exclude={"policy_version", "new_entry_submit_enabled"}
+    ) == before.model_dump(exclude={"policy_version", "new_entry_submit_enabled"})
 
     with pytest.raises(
         runtime_seed.RuntimeAuthorityTransitionRefused,

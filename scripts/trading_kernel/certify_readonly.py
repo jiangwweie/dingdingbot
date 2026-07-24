@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.trading_kernel.infrastructure.pg_models import metadata  # noqa: E402
+from src.trading_kernel.infrastructure.runtime_authority_seed import (  # noqa: E402
+    DYNAMIC_POLICY,
+    OWNER_POLICY_ID,
+)
 
 
 SCHEMA = "brc.trading_kernel.readonly_certification.v1"
@@ -30,6 +35,18 @@ LEGACY_EXECUTION_TABLES = (
     "brc_order_lifecycle_records",
     "brc_execution_intents",
 )
+_DECIMAL_POLICY_FIELDS = frozenset(
+    {
+        "planned_stop_risk_fraction",
+        "max_initial_margin_utilization",
+        "min_liquidation_distance_to_stop_distance_ratio",
+        "max_post_fill_stop_risk_overrun_fraction",
+    }
+)
+
+
+def _canonical_decimal(value: object) -> str:
+    return format(Decimal(str(value)).normalize(), "f")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -117,6 +134,26 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
                     )
                 ).mappings()
             }
+            owner_policy_row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT owner_policy_id,
+                               policy_version,
+                               enabled,
+                               new_entry_submit_enabled,
+                               max_concurrent_tickets,
+                               planned_stop_risk_fraction,
+                               max_initial_margin_utilization,
+                               max_leverage,
+                               supported_margin_mode,
+                               min_liquidation_distance_to_stop_distance_ratio,
+                               max_post_fill_stop_risk_overrun_fraction
+                          FROM brc_owner_policy_current
+                        """
+                    )
+                )
+            ).mappings().one_or_none()
             integrity_orphans = int(
                 (
                     await connection.execute(
@@ -200,6 +237,37 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
                     )
                 ).scalar_one()
             )
+            budget_reservations = int(
+                (
+                    await connection.execute(
+                        text("SELECT count(*) FROM brc_budget_reservations")
+                    )
+                ).scalar_one()
+            )
+            released_budget_reservations = int(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT count(*)
+                              FROM brc_budget_reservations
+                             WHERE status = 'released'
+                               AND released_at_ms IS NOT NULL
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+            active_budget_reservations = int(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT count(*) FROM brc_budget_reservations "
+                            "WHERE status = 'active'"
+                        )
+                    )
+                ).scalar_one()
+            )
             owner_projection_row = (
                 await connection.execute(
                     text(
@@ -242,15 +310,58 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         "positions": non_flat_positions,
         "incidents": open_incidents,
     }
+    release_counts = {
+        "budget_reservations": budget_reservations,
+        "released_budget_reservations": released_budget_reservations,
+        "active_budget_reservations": active_budget_reservations,
+    }
     owner_projection = (
         None
         if owner_projection_row is None
         else {key: owner_projection_row[key] for key in owner_projection_row}
     )
-    expected_capabilities = {
-        "exchange_commands": False,
-        "strategy_signal_ingest": True,
-    }
+    owner_policy = (
+        None
+        if owner_policy_row is None
+        else {
+            key: (
+                _canonical_decimal(value)
+                if key in _DECIMAL_POLICY_FIELDS
+                else value
+            )
+            for key, value in owner_policy_row.items()
+        }
+    )
+    policy_is_dynamic = owner_policy_row is not None and all(
+        (
+            owner_policy_row["owner_policy_id"] == OWNER_POLICY_ID,
+            int(owner_policy_row["policy_version"]) in {1, 2, 3},
+            owner_policy_row["enabled"] is True,
+            isinstance(owner_policy_row["new_entry_submit_enabled"], bool),
+            int(owner_policy_row["max_concurrent_tickets"])
+            == DYNAMIC_POLICY.max_concurrent_tickets,
+            Decimal(str(owner_policy_row["planned_stop_risk_fraction"]))
+            == DYNAMIC_POLICY.planned_stop_risk_fraction,
+            Decimal(str(owner_policy_row["max_initial_margin_utilization"]))
+            == DYNAMIC_POLICY.max_initial_margin_utilization,
+            int(owner_policy_row["max_leverage"]) == DYNAMIC_POLICY.max_leverage,
+            owner_policy_row["supported_margin_mode"]
+            == DYNAMIC_POLICY.supported_margin_mode,
+            Decimal(
+                str(owner_policy_row["min_liquidation_distance_to_stop_distance_ratio"])
+            )
+            == DYNAMIC_POLICY.min_liquidation_distance_to_stop_distance_ratio,
+            Decimal(
+                str(owner_policy_row["max_post_fill_stop_risk_overrun_fraction"])
+            )
+            == DYNAMIC_POLICY.max_post_fill_stop_risk_overrun_fraction,
+        )
+    )
+    capabilities_are_current = (
+        set(capabilities) == {"exchange_commands", "strategy_signal_ingest"}
+        and capabilities["strategy_signal_ingest"] is True
+        and isinstance(capabilities["exchange_commands"], bool)
+    )
     passed = (
         revision == EXPECTED_ALEMBIC_REVISION
         and runtime_identity.get("schema_revision") == EXPECTED_ALEMBIC_REVISION
@@ -261,7 +372,8 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         }
         and actual_tables == expected_tables
         and runtime_scope_count == 22
-        and capabilities == expected_capabilities
+        and capabilities_are_current
+        and policy_is_dynamic
         and integrity_orphans == 0
         and legacy_execution_tables == 0
         and unresolved_commands == 0
@@ -279,6 +391,8 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         "table_allowlist": table_allowlist,
         "runtime_scope_count": runtime_scope_count,
         "capabilities": capabilities,
+        "owner_policy": owner_policy,
+        "release_counts": release_counts,
         "active_counts": active_counts,
         "owner_projection": owner_projection,
         "require_flat": require_flat,

@@ -453,6 +453,24 @@ async def test_readonly_certification_reports_exact_runtime_authority(
         "exchange_commands": False,
         "strategy_signal_ingest": True,
     }
+    assert payload["owner_policy"] == {
+        "owner_policy_id": "policy-main",
+        "policy_version": 1,
+        "enabled": True,
+        "new_entry_submit_enabled": False,
+        "max_concurrent_tickets": 3,
+        "planned_stop_risk_fraction": "0.03",
+        "max_initial_margin_utilization": "0.9",
+        "max_leverage": 10,
+        "supported_margin_mode": "cross",
+        "min_liquidation_distance_to_stop_distance_ratio": "2",
+        "max_post_fill_stop_risk_overrun_fraction": "0.1",
+    }
+    assert payload["release_counts"] == {
+        "budget_reservations": 0,
+        "released_budget_reservations": 0,
+        "active_budget_reservations": 0,
+    }
     assert payload["active_counts"] == {
         "tickets": 0,
         "commands": 0,
@@ -460,6 +478,45 @@ async def test_readonly_certification_reports_exact_runtime_authority(
         "incidents": 0,
     }
     assert payload["owner_projection"] is None
+
+
+@pytest.mark.asyncio
+async def test_readonly_certification_accepts_enabled_exchange_commands_under_controlled_policy(
+    journal_database_url: str,
+) -> None:
+    await asyncio.to_thread(_run_alembic, journal_database_url, "upgrade", "head")
+    engine = create_async_engine(journal_database_url)
+    plan = _plan()
+    try:
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id=plan.account_id,
+                    runtime_commit=plan.target_commit,
+                    schema_revision=plan.target_schema_revision,
+                    seeded_at_ms=1_000,
+                ),
+            )
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.update(runtime_capabilities_current)
+                .where(
+                    runtime_capabilities_current.c.capability_key
+                    == "exchange_commands"
+                )
+                .values(enabled=True)
+            )
+        payload = await _certify(journal_database_url, require_flat=True)
+    finally:
+        await engine.dispose()
+
+    assert payload["status"] == "pass"
+    assert payload["capabilities"] == {
+        "exchange_commands": True,
+        "strategy_signal_ingest": True,
+    }
+    assert payload["owner_policy"]["new_entry_submit_enabled"] is False
 
 
 def test_readonly_certification_cli_loads_outside_repository(

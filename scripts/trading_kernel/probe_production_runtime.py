@@ -38,6 +38,7 @@ class InstrumentRuleProbe(BaseModel):
     price_tick: Decimal
     min_quantity: Decimal
     min_notional: Decimal
+    exchange_max_leverage: int
     valid_until_ms: int
 
 
@@ -48,6 +49,7 @@ class ProductionRuntimeProbe(BaseModel):
     venue_id: Literal["binance-usdm"]
     account_id: str
     account_position_mode: Literal["independent_sides"]
+    account_margin_mode: Literal["cross"]
     instrument_rule_count: int
     netting_domain_count: int
     non_flat_domain_count: int
@@ -98,6 +100,7 @@ async def probe_production_runtime(
                 price_tick=rules.price_tick,
                 min_quantity=rules.min_quantity,
                 min_notional=rules.min_notional,
+                exchange_max_leverage=rules.exchange_max_leverage,
                 valid_until_ms=rules.valid_until_ms,
             )
         )
@@ -131,6 +134,7 @@ async def probe_production_runtime(
         venue_id=settings.venue_id,
         account_id=settings.account_id,
         account_position_mode=admission_snapshot.position_mode,
+        account_margin_mode=admission_snapshot.margin_mode,
         instrument_rule_count=len(rule_rows),
         netting_domain_count=netting_domain_count,
         non_flat_domain_count=non_flat_domain_count,

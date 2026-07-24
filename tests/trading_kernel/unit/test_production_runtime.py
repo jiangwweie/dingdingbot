@@ -429,6 +429,8 @@ async def test_readonly_probe_reports_only_bounded_identity_and_counts(
     assert result.non_flat_domain_count == 0
     assert result.open_order_domain_count == 0
     assert result.account_position_mode == "independent_sides"
+    assert result.account_margin_mode == "cross"
+    assert {rule.exchange_max_leverage for rule in result.rules} == {10}
     rendered = result.model_dump_json()
     assert "api-key-sensitive" not in rendered
     assert "api-secret-sensitive" not in rendered
