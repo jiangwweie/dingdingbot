@@ -537,34 +537,22 @@ class SshTokyoSystem:
 
     async def create_target_database(self, plan: CutoverPlan) -> None:
         release = _release_path(plan)
-        compose = release / "deploy/docker/brc-trading-kernel-postgres.compose.yml"
         await self._runner.run(
             (
                 "sudo",
                 "docker",
-                "compose",
-                "--env-file",
-                str(RUNTIME_ENV),
-                "-f",
-                str(compose),
-                "down",
-                "-v",
-            )
-        )
-        await self._runner.run(
-            (
-                "sudo",
-                "docker",
-                "compose",
-                "--env-file",
-                str(RUNTIME_ENV),
-                "-f",
-                str(compose),
-                "up",
+                "exec",
+                TARGET_DATABASE_CONTAINER,
+                "psql",
+                "-U",
+                TARGET_DATABASE_USER,
                 "-d",
-                "--wait",
-                "--wait-timeout",
-                "60",
+                TARGET_DATABASE_NAME,
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                "DROP SCHEMA public CASCADE; "
+                "CREATE SCHEMA public AUTHORIZATION brc_kernel",
             )
         )
         await self._release_python(
