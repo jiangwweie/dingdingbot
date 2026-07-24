@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import shutil
 
 from alembic import command
 from alembic.config import Config
@@ -13,6 +14,14 @@ from alembic.config import Config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_CONFIG = REPO_ROOT / "migrations" / "trading_kernel" / "alembic.ini"
+ALEMBIC_CACHE = ALEMBIC_CONFIG.parent / "__pycache__"
+ALEMBIC_VERSIONS_CACHE = ALEMBIC_CONFIG.parent / "versions" / "__pycache__"
+
+
+def _clear_migration_bytecode() -> None:
+    """Prevent an extracted release from reusing a prior migration definition."""
+    for cache in (ALEMBIC_CACHE, ALEMBIC_VERSIONS_CACHE):
+        shutil.rmtree(cache, ignore_errors=True)
 
 
 def main() -> int:
@@ -28,6 +37,7 @@ def main() -> int:
         parser.error("database URL must use postgresql+asyncpg")
 
     os.environ["TRADING_KERNEL_DATABASE_URL"] = database_url
+    _clear_migration_bytecode()
     config = Config(str(ALEMBIC_CONFIG))
     command.upgrade(config, "head")
     print("trading kernel schema is at head")

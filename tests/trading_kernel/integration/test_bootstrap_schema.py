@@ -53,7 +53,26 @@ async def test_bootstrap_schema_creates_only_the_clean_kernel_baseline() -> None
                         __import__("sqlalchemy").inspect(sync_conn).get_table_names()
                     )
                 )
+                exposure_columns = await conn.run_sync(
+                    lambda sync_conn: {
+                        column["name"]
+                        for column in __import__("sqlalchemy")
+                        .inspect(sync_conn)
+                        .get_columns("brc_account_exposure_current")
+                    }
+                )
+                exposure_primary_key = await conn.run_sync(
+                    lambda sync_conn: set(
+                        __import__("sqlalchemy")
+                        .inspect(sync_conn)
+                        .get_pk_constraint("brc_account_exposure_current")[
+                            "constrained_columns"
+                        ]
+                    )
+                )
             assert tables == EXPECTED_TABLES | {"alembic_version"}
+            assert {"venue_id", "account_id"}.issubset(exposure_columns)
+            assert exposure_primary_key == {"venue_id", "account_id"}
         finally:
             await engine.dispose()
     finally:
