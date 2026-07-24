@@ -300,6 +300,7 @@ class OneWayActionFactsExchange(ActionFactsExchange):
 class AdmissionSnapshotExchange:
     def __init__(self) -> None:
         self.position_calls: list[tuple[list[str], dict[str, object]]] = []
+        self.position_risk_calls: list[dict[str, object]] = []
         self.order_calls: list[tuple[str | None, dict[str, object]]] = []
 
     async def fetch_order_book(self, symbol, limit):
@@ -350,6 +351,29 @@ class AdmissionSnapshotExchange:
                     "leverage": "3",
                     "markPrice": "60100",
                 },
+            },
+        ]
+
+    async def fapiPrivateV2GetPositionRisk(self, params):
+        self.position_risk_calls.append(dict(params))
+        assert params == {"symbol": "SOLUSDT"}
+        return [
+            {
+                "symbol": "SOLUSDT",
+                "positionAmt": "0.000",
+                "markPrice": "100",
+                "leverage": "4",
+                "marginType": "cross",
+                "positionSide": "LONG",
+            },
+            {
+                "symbol": "SOLUSDT",
+                "positionAmt": "-0.250",
+                "entryPrice": "101",
+                "markPrice": "100",
+                "leverage": "4",
+                "marginType": "cross",
+                "positionSide": "SHORT",
             },
         ]
 
@@ -638,6 +662,7 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
     assert snapshot.instrument_facts_for("SOLUSDT").mark_price == Decimal("100")
     assert snapshot.instrument_facts_for("SOLUSDT").configured_leverage == 4
     assert {(row.exchange_instrument_id, row.position_side) for row in snapshot.positions} == {
+        ("SOLUSDT", "long"),
         ("SOLUSDT", "short"),
         ("BTCUSDT", "long"),
     }
@@ -646,11 +671,70 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
         "conditional-btc-order",
     }
     assert exchange.position_calls == [([], {})]
+    assert exchange.position_risk_calls == [{"symbol": "SOLUSDT"}]
     assert exchange.order_calls == [
         (None, {"conditional": False}),
         (None, {"conditional": True}),
     ]
     assert snapshot.valid_until_ms == 7_000
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk() -> None:
+    exchange = AdmissionSnapshotExchange()
+
+    async def flat_target_position_risk(params):
+        exchange.position_risk_calls.append(dict(params))
+        assert params == {"symbol": "SOLUSDT"}
+        return [
+            {
+                "symbol": "SOLUSDT",
+                "positionAmt": "0.000",
+                "markPrice": "100",
+                "leverage": "4",
+                "marginType": "cross",
+                "positionSide": "LONG",
+            },
+            {
+                "symbol": "SOLUSDT",
+                "positionAmt": "0.000",
+                "markPrice": "100",
+                "leverage": "4",
+                "marginType": "cross",
+                "positionSide": "SHORT",
+            },
+        ]
+
+    exchange.fapiPrivateV2GetPositionRisk = flat_target_position_risk
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            ("binance-usdm", "SOLUSDT"): "SOL/USDT:USDT",
+            ("binance-usdm", "BTCUSDT"): "BTC/USDT:USDT",
+        },
+        settlement_assets={("binance-usdm", "SOLUSDT"): "USDT"},
+        clock_ms=lambda: 2_000,
+    )
+
+    snapshot = await adapter.read_entry_admission_snapshot(
+        EntryAdmissionSnapshotRequest(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="SOLUSDT",
+            observed_at_ms=2_000,
+            valid_for_ms=5_000,
+        )
+    )
+
+    assert snapshot.instrument_facts_for("SOLUSDT").configured_leverage == 4
+    assert {
+        (row.exchange_instrument_id, row.position_side, row.quantity)
+        for row in snapshot.positions
+    } == {
+        ("SOLUSDT", "long", Decimal("0")),
+        ("SOLUSDT", "short", Decimal("0")),
+        ("BTCUSDT", "long", Decimal("0.01")),
+    }
 
 
 @pytest.mark.asyncio

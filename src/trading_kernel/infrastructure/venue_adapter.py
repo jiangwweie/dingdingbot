@@ -96,6 +96,8 @@ class _CcxtExchange(Protocol):
         params: Mapping[str, object],
     ) -> object: ...
 
+    def fapiPrivateV2GetPositionRisk(self, params: Mapping[str, object]) -> object: ...
+
     def fetch_my_trades(
         self,
         symbol: str,
@@ -185,6 +187,7 @@ class CcxtVenueAdapter:
             balance,
             position_mode,
             positions,
+            target_positions,
             regular_orders,
             conditional_orders,
         ) = await asyncio.gather(
@@ -192,6 +195,10 @@ class CcxtVenueAdapter:
             _call_raw_exchange(exchange.fetch_balance, {"type": "future"}),
             _call_raw_exchange(exchange.fetch_position_mode, symbol, {}),
             _call_raw_exchange(exchange.fetch_positions, [], {}),
+            _read_binance_usdm_admission_target_positions(
+                exchange=exchange,
+                symbol=symbol,
+            ),
             _call_raw_exchange(
                 exchange.fetch_open_orders,
                 None,
@@ -214,6 +221,10 @@ class CcxtVenueAdapter:
             name="admission position mode",
         )
         position_rows = _require_list(positions, name="admission positions")
+        target_position_rows = _require_list(
+            target_positions,
+            name="admission requested-instrument positions",
+        )
         regular_order_rows = _require_list(
             regular_orders,
             name="admission regular open orders",
@@ -222,18 +233,18 @@ class CcxtVenueAdapter:
             conditional_orders,
             name="admission conditional open orders",
         )
-        target_rows = tuple(
+        target_rows = tuple(target_position_rows)
+        non_target_position_rows = tuple(
             row
             for row in position_rows
-            if isinstance(row, Mapping) and str(row.get("symbol") or "") == symbol
+            if _venue_row_symbol(row, row_kind="position") != symbol
         )
-        if not target_rows:
-            raise RuntimeError("venue admission snapshot lacks requested instrument position")
+        snapshot_position_rows = (*non_target_position_rows, *target_rows)
         return EntryAdmissionSnapshot(
             venue_id=request.venue_id,
             account_id=request.account_id,
             position_mode=_account_position_mode(position_mode_mapping),
-            margin_mode=_admission_margin_mode(position_rows),
+            margin_mode=_admission_margin_mode(list(snapshot_position_rows)),
             total_wallet_balance=_admission_balance_decimal(
                 balance_mapping,
                 key="totalWalletBalance",
@@ -270,7 +281,7 @@ class CcxtVenueAdapter:
                         symbol=_venue_row_symbol(row, row_kind="position"),
                     ),
                 )
-                for row in position_rows
+                for row in snapshot_position_rows
             ),
             open_orders=tuple(
                 _admission_order(
@@ -1029,6 +1040,51 @@ def _admission_instrument_facts(
         mark_price=mark_price,
         configured_leverage=configured_leverage,
     )
+
+
+async def _read_binance_usdm_admission_target_positions(
+    *,
+    exchange: _CcxtExchange,
+    symbol: str,
+) -> list[object]:
+    """Read the requested Binance symbol, including its zero long/short sides."""
+
+    market_id = _binance_market_id(symbol)
+    rows = _require_list(
+        await _call_raw_exchange(
+            exchange.fapiPrivateV2GetPositionRisk,
+            {"symbol": market_id},
+        ),
+        name="admission requested-instrument position risk",
+    )
+    normalized_rows: list[object] = []
+    position_sides: set[str] = set()
+    for row in rows:
+        raw = _require_mapping(
+            row,
+            name="admission requested-instrument position risk row",
+        )
+        if str(raw.get("symbol") or "").strip() != market_id:
+            continue
+        position_side = str(raw.get("positionSide") or "").strip().upper()
+        if position_side not in {"LONG", "SHORT"}:
+            raise RuntimeError(
+                "venue admission requested-instrument position side is invalid"
+            )
+        position_sides.add(position_side)
+        normalized_rows.append(
+            {
+                "symbol": symbol,
+                "contracts": raw.get("positionAmt"),
+                "entryPrice": raw.get("entryPrice"),
+                "info": dict(raw),
+            }
+        )
+    if len(normalized_rows) != 2 or position_sides != {"LONG", "SHORT"}:
+        raise RuntimeError(
+            "venue admission snapshot lacks requested instrument position sides"
+        )
+    return normalized_rows
 
 
 def _venue_row_symbol(value: object, *, row_kind: str) -> str:
