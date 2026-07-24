@@ -1,7 +1,7 @@
 ---
 title: PROJECT_INFORMATION_ARCHITECTURE
 status: CURRENT
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 ---
 
 # Project Information Architecture
@@ -27,6 +27,26 @@ Owner explicit decision
 | Exchange Readonly Facts | External account, order, position, and fill truth | Internal policy |
 | Documents | Architecture, contracts, and operating rules | Runtime decisions |
 | Generated Output | Human display and bounded diagnostics | Any production authority |
+
+## Document Fact Ownership
+
+Documents are separated by subject and volatility. A fact has one canonical
+owner; other documents summarize stable meaning and link to that owner.
+
+| Information | Canonical owner | Volatility | Other documents |
+| --- | --- | --- | --- |
+| Product objective and experiment-capital premise | `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Low | Summarize without redefining |
+| Strategy right-tail evaluation | `STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md` | Medium | Link to the evaluation contract |
+| Target architecture and invariants | `P0_TRADING_KERNEL_REBUILD_DESIGN.md` | Low | Reuse the canonical chain only |
+| Implementation stages and acceptance checklist | `P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md` | Medium | Do not treat as runtime state |
+| Current commit, tag, certification, runtime state, and blockers | `MAIN_CONTROL_ROADMAP.md` | High | Link; never copy current values |
+| Deployment procedure and resource limits | `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` | Medium | Do not copy current runtime values |
+| Entry navigation | repository `README.md` and `docs/README.md` | Low | Stay short and point to owners |
+
+`MAIN_CONTROL_ROADMAP.md` is the only document that records volatile production
+identity and measured runtime snapshots. Stable documents must not embed a
+production SHA, dated production tag, exact test count, Ticket ID, or transient
+acceptance-stage name.
 
 ## Current Runtime Authority
 

@@ -1,6 +1,6 @@
 # CLAUDE.md - BRC Trading Kernel Worker Guide
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
 ## Role
 
@@ -39,25 +39,24 @@ Hard stops
 Do not widen scope or change strategy, capital, runtime profile, deployment, or
 real-funds authority.
 
-## Current Production Boundary
+## Production Work Boundary
 
-- Tokyo production identity is
-  `f9fda21c91482b050e2a630e163f3213386ae6d7` with immutable anchor
-  `tokyo-runtime-2026.07.23.1`.
-- The deployed baseline passed `331 passed` locally before cutover.
-- Observation, Entry, Lifecycle, and Reconciliation run as persistent services;
-  timer-based worker cold starts are retired.
-- A natural SOR-SHORT acceptance Ticket is in protected lifecycle. Worker tasks
-  must not deploy, restart, mutate PostgreSQL, or alter exchange state unless
-  the task card explicitly authorizes that exact production action.
-- `promote-full` is not complete and must not be inferred from deployment or
-  protected-position status.
-- The approved dynamic policy is three concurrent Tickets, `0.03` planned stop
-  risk, `0.90` maximum initial-margin utilization, maximum leverage `10`, and
-  `cross` margin. `new_entry_submit_enabled` gates only new ENTRY; it does not
-  revoke protection or recovery authority from existing exposure.
-- A runtime commit/schema mismatch is a Runtime Fence: do not mutate the
-  exchange from that worker, while preserving readonly diagnosis.
+Current production identity, certification, runtime state, and remaining gates
+belong only to `docs/current/MAIN_CONTROL_ROADMAP.md`. A worker must refresh
+that document and the exact task card before production work; it must still
+verify action-time tracked code, PostgreSQL, systemd, and exchange facts.
+
+Observation, Entry, Lifecycle, and Reconciliation are persistent service roles;
+timer-based worker cold starts are retired. Worker tasks must not deploy,
+restart, mutate PostgreSQL, or alter exchange state unless the task card
+explicitly authorizes that production action. A runtime commit/schema mismatch
+is a Runtime Fence: perform no exchange mutation from that worker while
+preserving readonly diagnosis.
+
+Capital, capacity, and leverage values belong to
+`docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md`.
+`new_entry_submit_enabled` gates only new ENTRY; it does not revoke protection
+or recovery authority from existing exposure.
 
 ## Implementation Rules
 

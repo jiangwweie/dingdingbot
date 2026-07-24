@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
 import subprocess
+from pathlib import Path
 
 import pytest
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CURRENT_DOCS_ROOT = REPO_ROOT / "docs" / "current"
@@ -45,14 +44,24 @@ RETIRED_AUTHORITY_MARKERS = (
     "src/application/runtime_execution",
 )
 
-PRODUCTION_STATE_DOCUMENTS = (
-    "docs/current/MAIN_CONTROL_ROADMAP.md",
+CURRENT_RUNTIME_STATE_DOCUMENT = "docs/current/MAIN_CONTROL_ROADMAP.md"
+VOLATILE_STATE_FREE_DOCUMENTS = (
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md",
+    "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md",
+    "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
+)
+RUNTIME_MODEL_DOCUMENTS = (
+    CURRENT_RUNTIME_STATE_DOCUMENT,
     "docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md",
     "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md",
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
 )
 
 CURRENT_PRODUCTION_COMMIT = "4749174c"
+CURRENT_PRODUCTION_TAG = "tokyo-runtime-2026.07.24.1"
 CURRENT_LOCAL_CERTIFICATION = "407 passed"
 CURRENT_ACCEPTANCE_STAGE = "Acceptance-armed"
 RETIRED_ACCEPTANCE_TICKET = "ticket:c1ebc24a178a3ae4d87978e2fa1204ae"
@@ -159,28 +168,45 @@ def test_retired_capacity_semantics_are_absent_from_current_execution(
     assert retired not in _current_authority_and_execution_text()
 
 
-def test_production_state_documents_match_the_deployed_kernel() -> None:
+def test_runtime_state_document_matches_the_deployed_kernel() -> None:
+    source = (REPO_ROOT / CURRENT_RUNTIME_STATE_DOCUMENT).read_text(encoding="utf-8")
+    required_markers = (
+        CURRENT_PRODUCTION_COMMIT,
+        CURRENT_PRODUCTION_TAG,
+        CURRENT_LOCAL_CERTIFICATION,
+        CURRENT_ACCEPTANCE_STAGE,
+        *RESIDENT_WORKER_NAMES,
+    )
+
+    missing = [marker for marker in required_markers if marker not in source]
+
+    assert not missing, (
+        f"{CURRENT_RUNTIME_STATE_DOCUMENT} is missing current runtime facts:\n"
+        + "\n".join(sorted(missing))
+    )
+    assert "303 passed" not in source
+    assert "no Tokyo mutation claimed" not in source
+    assert RETIRED_ACCEPTANCE_TICKET not in source
+
+
+def test_stable_documents_do_not_duplicate_volatile_runtime_facts() -> None:
+    volatile_patterns = (
+        re.compile(r"\b[0-9a-f]{40}\b"),
+        re.compile(r"`[0-9a-f]{7,40}`"),
+        re.compile(r"\b\d+ passed\b"),
+        re.compile(r"tokyo-runtime-\d{4}\.\d{2}\.\d{2}\.\d+"),
+        re.compile(r"ticket:[0-9a-f]{32}"),
+        re.compile(r"\bAcceptance-armed\b"),
+    )
     violations: list[str] = []
 
-    for relative_path in PRODUCTION_STATE_DOCUMENTS:
+    for relative_path in VOLATILE_STATE_FREE_DOCUMENTS:
         source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
-        if CURRENT_PRODUCTION_COMMIT not in source:
-            violations.append(f"{relative_path}: missing production commit")
-        if CURRENT_LOCAL_CERTIFICATION not in source:
-            violations.append(f"{relative_path}: missing current test certification")
-        if CURRENT_ACCEPTANCE_STAGE not in source:
-            violations.append(f"{relative_path}: missing acceptance-stage marker")
-        for worker_name in RESIDENT_WORKER_NAMES:
-            if worker_name not in source:
-                violations.append(f"{relative_path}: missing {worker_name} worker")
-        if "303 passed" in source:
-            violations.append(f"{relative_path}: stale 303-test certification")
-        if "no Tokyo mutation claimed" in source:
-            violations.append(f"{relative_path}: stale pre-cutover Tokyo status")
-        if RETIRED_ACCEPTANCE_TICKET in source:
-            violations.append(f"{relative_path}: retired acceptance Ticket is current")
+        for pattern in volatile_patterns:
+            for match in pattern.finditer(source):
+                violations.append(f"{relative_path}: {match.group(0)}")
 
-    assert not violations, "production-state drift remains:\n" + "\n".join(
+    assert not violations, "volatile runtime facts are duplicated:\n" + "\n".join(
         sorted(violations)
     )
 
@@ -193,7 +219,7 @@ def test_current_runtime_documents_do_not_deploy_timer_workers() -> None:
         re.compile(r"systemctl\s+start\s+[^\n]*\.timer", re.IGNORECASE),
     )
 
-    for relative_path in PRODUCTION_STATE_DOCUMENTS:
+    for relative_path in RUNTIME_MODEL_DOCUMENTS:
         source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         for pattern in timer_deployment_patterns:
             for match in pattern.finditer(source):

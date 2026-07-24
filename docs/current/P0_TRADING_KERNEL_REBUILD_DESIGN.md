@@ -1,6 +1,6 @@
 ---
 title: P0_TRADING_KERNEL_REBUILD_DESIGN
-status: DEPLOYED_ACCEPTANCE_ACTIVE
+status: CURRENT
 program_id: P0-TKR
 last_verified: 2026-07-24
 ---
@@ -80,27 +80,26 @@ The Entry worker revalidates the Claim and atomically commits the Ticket,
 budget reservation, Netting Domain hold, aggregate, first event, and durable
 ENTRY command. Two Signals may coexist, but their Tickets are issued serially.
 
-## Approved Dynamic Policy
+## Dynamic Policy Boundary
 
-The committed runtime seed defines one policy envelope: three concurrent
-Tickets, `0.03` planned stop-risk fraction, `0.90` maximum initial-margin
-utilization, maximum leverage `10`, and `cross` margin mode. Capacity is
-calculated from current account facts and Reservations, not from fixed per-Ticket
-notional amounts. `new_entry_submit_enabled` gates only new ENTRY; after venue
-exposure exists, the frozen Ticket retains protection, exit, reconciliation,
-Settlement, and Review authority.
+`RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` owns the approved capacity,
+stop-risk, margin-utilization, leverage, and margin-mode values. Capacity is
+calculated from current account facts and Reservations, not from fixed
+per-Ticket notional amounts. `new_entry_submit_enabled` gates only new ENTRY;
+after venue exposure exists, the frozen Ticket retains protection, exit,
+reconciliation, Settlement, and Review authority.
 
-The production account keeps all supported instruments configured at **5x**.
-The `10x` policy value is an absolute Owner and venue safety ceiling, not a
-per-Ticket leverage selector. Capacity freezes the exchange-configured `5x`
-fact, never emits a new leverage-mutation command, and ENTRY revalidates that
-same frozen fact immediately before dispatch. A regular deployment is blocked
-unless every supported instrument is still configured at `5x`.
+The production account uses one fixed exchange leverage configuration for every
+supported instrument. The Owner Policy leverage value is an absolute safety
+ceiling, not a per-Ticket leverage selector. Capacity freezes the
+exchange-configured fact, never emits a leverage-mutation command, and ENTRY
+revalidates that same fact immediately before dispatch. A regular deployment is
+blocked when any supported instrument differs from the approved profile.
 
 An eligible Ticket may use the current remaining executable margin needed to
 reach its stop-risk target. The system does not divide that margin by unused
 future Ticket slots. `max_concurrent_tickets` remains a concurrency ceiling;
-current Reservations, available margin, the `0.90` utilization limit, Initial
+current Reservations, available margin, the profile utilization limit, Initial
 Stop risk, venue minimums, and liquidation distance still bound every Ticket.
 
 ## Transaction And Exchange Model
@@ -132,8 +131,10 @@ Reconciliation Worker
 ```
 
 They are long-running processes with bounded polling and restart-on-failure.
-Timer-based cold starts are retired because idle Python import and initialization
-cost exceeded the 2c4g Tokyo budget.
+Timer-based cold starts are retired because repeated Python import and
+initialization cost exceeded the constrained Tokyo host budget. Exact resource
+limits and release-time performance checks belong to
+`TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
 
 Before any exchange mutation, the writer must match the certified runtime commit
 and schema. A mismatch creates a runtime-scoped Incident and fences that writer;
@@ -150,18 +151,6 @@ programs and their data were outside scope and had to remain unaffected.
 
 This was a forward-only replacement. The retired application and schema are
 not rollback authorities.
-
-## Current Deployment Evidence
-
-| Evidence | Current value |
-| --- | --- |
-| Tokyo commit | `4749174c64a6b369930ed91f09d7b9eba1fa0e7a` |
-| Local certification | `407 passed`; focused Ruff and Mypy checks pass |
-| Runtime services | **Acceptance-armed**: all four persistent workers enabled and active |
-| Natural acceptance flow | Natural `SOR-001 / ETHUSDT / long` reached the durable leverage safety branch |
-| Historical safety Tickets | Three terminal `leverage_rejected`; all commands `reconciled_absent` |
-| Verified lifecycle state | Six instruments at `5x`; exchange flat with no active Ticket, order, or Incident |
-| Full runtime promotion | `promote-full` pending |
 
 ## Acceptance
 
@@ -182,6 +171,5 @@ The rebuild is complete only when:
 9. `promote-full` passes its hard gates;
 10. the final requirement audit finds no unverified requirement or fallback.
 
-Items 1-6 are deployed and locally certified. The first natural Ticket proved
-the unknown-leverage recovery path and terminated safely before ENTRY. A
-protected real-funds lifecycle remains required for Items 7-10.
+Current completion evidence for these acceptance items belongs only to
+`MAIN_CONTROL_ROADMAP.md`.

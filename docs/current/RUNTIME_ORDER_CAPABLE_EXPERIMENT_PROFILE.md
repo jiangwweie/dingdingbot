@@ -1,16 +1,34 @@
 ---
 title: RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE
 status: CURRENT
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 ---
 
 # Runtime Order-Capable Experiment Profile
 
-## Current Boundary
+## Product Objective
 
-The Tokyo account is a live, small-capital experimental account. Allocated
-capital is loss-capable experiment capital. The system must not silently reduce
-approved size, leverage, or opportunity capture because a valid trade is risky.
+BRC is a single-Owner, small-capital, loss-capable experiment for asymmetric
+right-tail returns. It does not target stable yield, a smooth equity curve, or
+preservation of every unit of experiment principal. It limits individual
+stop-loss exposure, duplicate execution, unprotected exposure, unknown exchange
+outcomes, and unauditable state while preserving the path for a small number of
+large winners to cover a larger number of bounded small losses.
+
+The Tokyo subaccount contains capital the Owner has already classified as
+limited and loss-capable. Runtime controls therefore protect the approved
+experiment boundary and prevent runaway loss; they must not silently convert
+the system into a low-volatility asset-preservation product.
+
+## Economic Semantics
+
+- Stop-risk budget limits planned loss at invalidation.
+- Leverage controls initial-margin use and does not enlarge stop-risk authority.
+- A valid Runner may retain materially more upside than the initial loss budget.
+- Fees, funding, slippage, liquidation distance, and path risk remain part of
+  the downside envelope.
+- Success or failure is evaluated from distributions and exact realized
+  economics, not from one trade or a promised return.
 
 ## Required Profile Properties
 
@@ -30,15 +48,15 @@ finite `max_concurrent_tickets`, gross notional, risk, margin, or leverage cap.
 Those values are seeded from the current approved policy and must not be
 invented or expanded during cutover.
 
-The current approved seed is three concurrent Tickets, `0.03` planned stop-risk
+The approved profile seed is three concurrent Tickets, `0.03` planned stop-risk
 fraction, `0.90` maximum initial-margin utilization, maximum leverage `10`, and
-`cross` margin mode. The supported exchange instruments are configured at
-fixed `5x`; the kernel freezes and revalidates that account fact and does not
-submit leverage changes. Remaining executable margin is allocated by the
-current Ticket's validated demand, not divided equally across unused Ticket
-slots. The `new_entry_submit_enabled` setting controls only new ENTRY; it never
-removes protection, controlled flatten, reconciliation, Settlement, or Review
-authority from existing exchange exposure.
+`cross` margin mode. Supported exchange instruments use fixed `5x`; the kernel
+freezes and revalidates that account fact and does not submit leverage changes.
+Remaining executable margin is allocated by the current Ticket's validated
+demand, not divided equally across unused Ticket slots. The
+`new_entry_submit_enabled` setting controls only new ENTRY; it never removes
+protection, controlled flatten, reconciliation, Settlement, or Review authority
+from existing exchange exposure.
 
 ## Real-Order Permission
 

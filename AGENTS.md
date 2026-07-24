@@ -1,7 +1,7 @@
 # AGENTS.md - BRC Trading Kernel Operating Guide
 
-Last updated: 2026-07-23
-Current phase: Tokyo Controlled Real-Funds Acceptance
+Last updated: 2026-07-24
+Scope: Tokyo Trading Kernel engineering and operation
 
 ## Authority Order
 
@@ -29,8 +29,8 @@ docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
 
 ## Product Objective
 
-The target is a single-Owner, small-capital, controlled real-profit experiment
-system with one readable multi-position trading chain:
+The target is a single-Owner, small-capital, loss-capable experiment for
+asymmetric right-tail returns with one readable multi-position trading chain:
 
 ```text
 Observation
@@ -49,21 +49,21 @@ The Owner controls policy. The system performs normal operation. The Owner is
 not required to assemble facts, approve each in-scope order, or operate internal
 gates.
 
-## Current Production Baseline
+This is not a stable-yield or smooth-equity product. The experiment profile
+owns the exact capital and leverage boundary; the strategy evaluation contract
+defines the evidence required to support or reject the right-tail hypothesis.
 
-- Tokyo runs commit `f9fda21c91482b050e2a630e163f3213386ae6d7`.
-- Remote production anchor `tokyo-runtime-2026.07.23.1` points permanently to
-  that commit.
-- Local certification at the deployed commit is `331 passed`, Ruff clean,
-  Mypy clean, and production file-I/O audit clean.
-- Runtime cadence is owned by four persistent systemd services: Observation,
-  Entry, Lifecycle, and Reconciliation. Do not restore timer-based cold starts.
-- Natural `SOR-001 / SOR-SHORT / SOLUSDT` acceptance Ticket
-  `ticket:c1ebc24a178a3ae4d87978e2fa1204ae` is in protected lifecycle at the
-  verified production snapshot.
-- Full runtime policy promotion through `promote-full` remains blocked until
-  that Ticket is terminal, exchange-flat, reconciled, settled, reviewed, and
-  leaves zero incidents or residual orders.
+## Production State Authority
+
+`docs/current/MAIN_CONTROL_ROADMAP.md` is the only document that owns the
+current production commit, immutable tag, certification result, runtime
+snapshot, and remaining critical path. Do not copy those volatile facts into
+entry, architecture, implementation, or deployment documents.
+
+Runtime cadence is owned by four persistent systemd services: Observation,
+Entry, Lifecycle, and Reconciliation. Timer-based worker cold starts must not
+return. A production action must refresh current tracked code, PostgreSQL,
+systemd, and exchange facts rather than infer state from documentation.
 
 ## Final Business Semantics
 
@@ -79,9 +79,9 @@ gates.
 - Multi-position capability is architectural; a fixed two-position ceiling is
   not part of the model. Current budget policy may still impose a configured
   capacity.
-- The approved dynamic policy is three concurrent Tickets, `0.03` planned stop
-  risk, `0.90` maximum initial-margin utilization, maximum leverage `10`, and
-  `cross` margin mode; current account facts determine each Claim's size.
+- The experiment profile owns concurrent capacity, stop-risk, margin
+  utilization, leverage, and margin-mode values; current account facts
+  determine each Claim's size.
 - `new_entry_submit_enabled` governs only new ENTRY. Frozen authority continues
   protection, exit, reconciliation, Settlement, and Review after exposure.
 - A worker whose commit or schema differs from certified runtime identity must
@@ -144,7 +144,7 @@ create zero JSON/Markdown files.
 
 ## Standing Authorization
 
-The active rebuild goal authorizes:
+Standing Owner authorization for this program permits:
 
 - focused `codex/*` branches and local commits;
 - destructive local/disposable PostgreSQL operations;
@@ -185,7 +185,5 @@ restored.
 - Rebuild work remains on focused `codex/*` branches until reviewed.
 - Preserve unrelated user changes.
 - Do not commit generated runtime output.
-- Do not claim completion before the active acceptance Ticket is terminal and
-  flat, all residual orders are absent, budget is released, Reconciliation,
-  Settlement, and Review are complete, incident count is zero, `promote-full`
-  is certified, and the final requirement audit passes.
+- Do not claim completion before every current gate in
+  `docs/current/MAIN_CONTROL_ROADMAP.md` passes from direct evidence.

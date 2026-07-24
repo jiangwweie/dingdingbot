@@ -1,21 +1,16 @@
 ---
 title: TOKYO_RUNTIME_DEPLOYMENT_CONTRACT
-status: DEPLOYED_ACCEPTANCE_ACTIVE
+status: CURRENT
 last_verified: 2026-07-24
 ---
 
 # Tokyo Runtime Deployment Contract
 
-## Current Production Identity
+## Runtime State Authority
 
-| Identity | Current value |
-| --- | --- |
-| Git commit | `4749174c64a6b369930ed91f09d7b9eba1fa0e7a` |
-| Local certification | `407 passed`; focused Ruff and Mypy checks pass |
-| Schema | Single 33-table `0001_initial` baseline |
-| Runtime services | **Acceptance-armed**: Observation, Entry, Lifecycle, and Reconciliation enabled and active |
-| Hourly supervision | All four persistent workers active; Entry remains globally serialized |
-| Full policy state | `promote-full` pending |
+Exact production commit, immutable tag, certification, measured resource state,
+and remaining gates belong only to `MAIN_CONTROL_ROADMAP.md`. This contract owns
+the procedure and limits used to deploy and evaluate that state.
 
 ## Deployment Model
 
@@ -49,6 +44,19 @@ PostgreSQL host operation, and unrelated data remained outside deletion scope.
 The production tag is the rollback reference for code history only. Retired BRC
 program or database state is not a runtime rollback authority.
 
+## Version Contract
+
+Every successful production release receives one annotated immutable tag using:
+
+```text
+tokyo-runtime-YYYY.MM.DD.N
+```
+
+The tag points to the exact deployed code commit. Documentation-only commits
+after deployment are not retagged as production. A repeated release on the same
+date increments `N`; an existing production tag is never moved or deleted to
+represent newer code.
+
 ## Required Runtime Chain
 
 ```text
@@ -67,13 +75,13 @@ Observation
 No Tokyo command may bypass this chain or create an exchange mutation without a
 durable Exchange Command.
 
-The runtime seed uses the dynamic three-Ticket policy: `0.03` planned stop risk,
-`0.90` maximum initial-margin utilization, maximum leverage `10`, and `cross`
-margin. The exchange configuration is fixed at `5x`; the kernel freezes that
-fact and does not create a leverage-mutation command. `new_entry_submit_enabled`
-is a new-ENTRY gate only. Every mutating worker must match the certified commit
-and schema; a mismatch records a runtime Incident and fences that writer while
-readonly checks remain allowed.
+The experiment profile owns capacity, stop-risk, margin utilization, leverage,
+and margin-mode values. The exchange configuration is fixed rather than
+selected per Ticket; the kernel freezes that fact and does not create a
+leverage-mutation command. `new_entry_submit_enabled` is a new-ENTRY gate only.
+Every mutating worker must match the certified commit and schema; a mismatch
+records a runtime Incident and fences that writer while readonly checks remain
+allowed.
 
 ## Persistent Worker Contract
 
@@ -84,25 +92,48 @@ readonly checks remain allowed.
 | Lifecycle | Install/maintain protection and execute Ticket exits | Concurrent by Ticket, bounded idle poll |
 | Reconciliation | Resolve exchange truth, unknown outcomes, terminal closure, Settlement, Review | Bounded current-state queries |
 
-Exactly one deployed service owns each role. During the current
-**Acceptance-armed** stage, all four workers are active. The fixed-account
-leverage design removes new `SET_LEVERAGE` production commands, so the earlier
-leverage-mutation rejection remains audit history instead of a current Entry
-blocker. Restoring periodic process creation is a production regression.
+Exactly one deployed service owns each role. The fixed-account leverage design
+removes new `SET_LEVERAGE` production commands. Restoring periodic process
+creation is a production regression.
 
-## Current Controlled Acceptance Baseline
+## Resource Envelope
 
-Tokyo is **Acceptance-armed** with exact runtime commit `4749174c` and command
-capability certified. All six supported instruments are configured at `5x`.
-Three terminal `leverage_rejected` Tickets remain audit records for the retired
-leverage-mutation path; all three commands are `reconciled_absent`. The
-verified deployment snapshot has zero position, order, active Ticket,
-unresolved command, and open Incident. Entry is active for the next natural
-signal; constructed signals and direct exchange writes remain forbidden.
+| Resource | Contract | Purpose |
+| --- | --- | --- |
+| Shared CPU | `CPUQuota=100%` | Bound all four workers to one CPU of host time |
+| Shared memory | `MemoryMax=1G` | Contain BRC worker memory independently of PostgreSQL |
+| Shared tasks | `TasksMax=128` | Prevent unbounded process or thread growth |
+| Observation poll | 5 seconds | Closed-market-data and detector cadence |
+| Entry poll | 2 seconds | Bounded new-ENTRY admission latency |
+| Lifecycle poll | 2 seconds | Bounded protection and exit cadence |
+| Reconciliation poll | 5 seconds | Bounded external-truth convergence |
 
-Do not call `promote-full` until that new Ticket is terminal, flat, reconciled,
-settled, reviewed, and leaves no residual order, budget, Incident, or unknown
-outcome.
+PostgreSQL runs outside the worker slice and is measured separately. No worker
+may create periodic JSON or Markdown output during healthy idle cadence.
+
+## Operational Performance Review
+
+The regular release path does not add a performance wait before service switch
+or Entry startup. Readonly post-release supervision records the following
+warning boundaries:
+
+1. all required workers remain active and their restart counters do not
+   increase during the observation window;
+2. shared-slice idle memory remains below 80% of `MemoryMax`;
+3. shared-slice CPU remains below 10% of one CPU over a representative idle
+   sample;
+4. task count remains below 50% of `TasksMax`;
+5. host available memory remains at or above 1 GiB;
+6. filesystem usage remains below 80%;
+7. no timer worker, warning loop, generated runtime file, open Incident, or
+   unresolved command appears.
+
+A warning does not stop safety workers or add exchange calls to deployment.
+Sustained breach, restart growth, or resource exhaustion triggers readonly
+diagnosis and uses the existing official Entry fence when new exposure would be
+unsafe. Existing exposure keeps protection, controlled exit, and reconciliation
+authority. The current measured snapshot belongs only to
+`MAIN_CONTROL_ROADMAP.md`.
 
 ## Full-Promotion Gates
 
