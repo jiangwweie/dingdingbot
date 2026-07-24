@@ -9,6 +9,10 @@ import pytest
 
 from scripts.trading_kernel import run_command_worker_once as command_cli
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
+from src.trading_kernel.application.ports import (
+    LeverageTruthRequest,
+    LeverageTruthSnapshot,
+)
 from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
@@ -113,6 +117,7 @@ class FakeWorkerAdapter:
 class FakeProbeAdapter:
     def __init__(self, *, configured_leverage: int = 5) -> None:
         self.configured_leverage = configured_leverage
+        self.admission_requests: list[str] = []
 
     async def read_instrument_rules(
         self,
@@ -135,6 +140,9 @@ class FakeProbeAdapter:
         self,
         request: EntryAdmissionSnapshotRequest,
     ) -> EntryAdmissionSnapshot:
+        self.admission_requests.append(request.exchange_instrument_id)
+        if request.exchange_instrument_id != "binance-usdm:BTCUSDT:perpetual":
+            raise AssertionError("full account admission probe must use BTC only")
         return EntryAdmissionSnapshot(
             venue_id=request.venue_id,
             account_id=request.account_id,
@@ -158,6 +166,19 @@ class FakeProbeAdapter:
             open_orders=(),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_configured_leverage(
+        self,
+        request: LeverageTruthRequest,
+    ) -> LeverageTruthSnapshot:
+        return LeverageTruthSnapshot(
+            exchange_configured_leverage=self.configured_leverage,
+            long_position_quantity=Decimal("0"),
+            short_position_quantity=Decimal("0"),
+            regular_open_order_ids=(),
+            conditional_open_order_ids=(),
+            observed_at_ms=request.observed_at_ms,
         )
 
 
@@ -437,8 +458,9 @@ async def test_readonly_probe_reports_only_bounded_identity_and_counts(
         pytest.fail("readonly production runtime probe is missing")
     settings = production_runtime.ProductionRuntimeSettings.from_environment()
 
+    adapter = FakeProbeAdapter()
     result = await probe_module.probe_production_runtime(
-        FakeProbeAdapter(),
+        adapter,
         settings,
         now_ms=10_000,
         validity_ms=5_000,
@@ -452,6 +474,9 @@ async def test_readonly_probe_reports_only_bounded_identity_and_counts(
     assert result.account_margin_mode == "cross"
     assert {rule.exchange_max_leverage for rule in result.rules} == {10}
     assert {rule.configured_leverage for rule in result.rules} == {5}
+    assert adapter.admission_requests == [
+        "binance-usdm:BTCUSDT:perpetual"
+    ]
     rendered = result.model_dump_json()
     assert "api-key-sensitive" not in rendered
     assert "api-secret-sensitive" not in rendered

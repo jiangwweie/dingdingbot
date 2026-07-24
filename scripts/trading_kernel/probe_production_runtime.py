@@ -9,7 +9,7 @@ import sys
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17,6 +17,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.trading_kernel.application.ports import (  # noqa: E402
+    LeverageTruthRequest,
+    VenueTruthPort,
+)
 from src.trading_kernel.application.runtime_facts import (  # noqa: E402
     EntryAdmissionSnapshotRequest,
     EntryFactsSource,
@@ -27,6 +31,10 @@ from src.trading_kernel.infrastructure.production_runtime import (  # noqa: E402
     build_binance_usdm_venue_adapter,
     canonical_binance_usdm_instruments,
 )
+
+
+class ProductionProbeFactsSource(EntryFactsSource, VenueTruthPort, Protocol):
+    pass
 
 
 class InstrumentRuleProbe(BaseModel):
@@ -68,7 +76,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 async def probe_production_runtime(
-    adapter: EntryFactsSource,
+    adapter: ProductionProbeFactsSource,
     settings: ProductionRuntimeSettings,
     *,
     now_ms: int,
@@ -77,13 +85,26 @@ async def probe_production_runtime(
     if now_ms <= 0 or validity_ms <= 0:
         raise ValueError("probe time and validity must be positive")
 
-    rule_rows: list[InstrumentRuleProbe] = []
-    netting_domain_count = 0
-    non_flat_domain_count = 0
-    open_order_domain_count = 0
-    admission_snapshot = None
+    instruments = canonical_binance_usdm_instruments()
+    account_probe_instrument = next(
+        instrument for instrument in instruments if ":BTCUSDT:" in instrument
+    )
+    admission_snapshot = await adapter.read_entry_admission_snapshot(
+        EntryAdmissionSnapshotRequest(
+            venue_id=settings.venue_id,
+            account_id=settings.account_id,
+            exchange_instrument_id=account_probe_instrument,
+            observed_at_ms=now_ms,
+            valid_for_ms=validity_ms,
+        )
+    )
+    if admission_snapshot.position_mode != settings.account_position_mode:
+        raise RuntimeError("production account position mode differs from config")
+    if admission_snapshot.margin_mode != "cross":
+        raise RuntimeError("production account margin mode differs from config")
 
-    for exchange_instrument_id in canonical_binance_usdm_instruments():
+    rule_rows: list[InstrumentRuleProbe] = []
+    for exchange_instrument_id in instruments:
         rules = await adapter.read_instrument_rules(
             InstrumentRulesRequest(
                 venue_id=settings.venue_id,
@@ -93,22 +114,16 @@ async def probe_production_runtime(
                 valid_for_ms=validity_ms,
             )
         )
-        instrument_snapshot = await adapter.read_entry_admission_snapshot(
-            EntryAdmissionSnapshotRequest(
+        leverage_truth = await adapter.read_configured_leverage(
+            LeverageTruthRequest(
+                command_id=f"production-probe:{exchange_instrument_id}",
                 venue_id=settings.venue_id,
                 account_id=settings.account_id,
                 exchange_instrument_id=exchange_instrument_id,
+                desired_leverage=5,
                 observed_at_ms=now_ms,
-                valid_for_ms=validity_ms,
             )
         )
-        if instrument_snapshot.position_mode != settings.account_position_mode:
-            raise RuntimeError("production account position mode differs from config")
-        if instrument_snapshot.margin_mode != "cross":
-            raise RuntimeError("production account margin mode differs from config")
-        configured_leverage = instrument_snapshot.instrument_facts_for(
-            exchange_instrument_id
-        ).configured_leverage
         rule_rows.append(
             InstrumentRuleProbe(
                 exchange_instrument_id=rules.exchange_instrument_id,
@@ -117,16 +132,14 @@ async def probe_production_runtime(
                 min_quantity=rules.min_quantity,
                 min_notional=rules.min_notional,
                 exchange_max_leverage=rules.exchange_max_leverage,
-                configured_leverage=configured_leverage,
+                configured_leverage=(
+                    leverage_truth.exchange_configured_leverage
+                ),
                 valid_until_ms=rules.valid_until_ms,
             )
         )
 
-        if admission_snapshot is None:
-            admission_snapshot = instrument_snapshot
-    if admission_snapshot is None:
-        raise RuntimeError("production probe did not inspect any Netting Domain")
-    netting_domain_count = len(canonical_binance_usdm_instruments()) * 2
+    netting_domain_count = len(instruments) * 2
     non_flat_domain_count = sum(
         position.quantity > 0 for position in admission_snapshot.positions
     )
