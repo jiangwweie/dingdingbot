@@ -1407,8 +1407,6 @@ def _binance_maintenance_margin_brackets(
     for previous, current in zip(ordered, ordered[1:], strict=False):
         if previous.notional_cap != current.notional_floor:
             raise RuntimeError("venue maintenance-margin brackets are discontinuous")
-    if ordered[-1].notional_cap is not None:
-        raise RuntimeError("venue maintenance-margin brackets lack an open final tier")
     return ordered, max(max_leverages)
 
 

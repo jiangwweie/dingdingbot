@@ -25,6 +25,7 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.infrastructure.venue_adapter import (
     CcxtVenueAdapter,
+    _binance_maintenance_margin_brackets,
     _position_details,
 )
 from src.trading_kernel.domain.venue_truth import VenueLookupStatus
@@ -672,6 +673,39 @@ async def test_ccxt_adapter_reads_typed_leverage_and_maintenance_rules() -> None
     )
     assert facts.maintenance_margin_brackets[1].maintenance_amount == Decimal("50")
     assert facts.maintenance_margin_brackets_digest.startswith("sha256:")
+
+
+def test_binance_rules_accept_a_finite_final_maintenance_tier() -> None:
+    brackets, maximum_leverage = _binance_maintenance_margin_brackets(
+        [
+            {
+                "symbol": "BTCUSDT",
+                "brackets": [
+                    {
+                        "bracket": 1,
+                        "initialLeverage": 20,
+                        "notionalFloor": "0",
+                        "notionalCap": "50000",
+                        "maintMarginRatio": "0.004",
+                        "cum": "0",
+                    },
+                    {
+                        "bracket": 2,
+                        "initialLeverage": 10,
+                        "notionalFloor": "50000",
+                        "notionalCap": "250000",
+                        "maintMarginRatio": "0.005",
+                        "cum": "50",
+                    },
+                ],
+            }
+        ],
+        venue_id="binance-usdm",
+        market_id="BTCUSDT",
+    )
+
+    assert maximum_leverage == 20
+    assert brackets[-1].notional_cap == Decimal("250000")
 
 
 @pytest.mark.asyncio
