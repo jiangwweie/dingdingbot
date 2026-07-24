@@ -136,6 +136,7 @@ def build_binance_usdm_venue_adapter() -> CcxtVenueAdapter:
             "options": {
                 "defaultType": "future",
                 "adjustForTimeDifference": True,
+                "warnOnFetchOpenOrdersWithoutSymbol": False,
             },
         }
     )

@@ -287,6 +287,7 @@ async def test_authenticated_factory_builds_exact_mapping_rules_and_closes(
     assert created[0].config["apiKey"] == "api-key-sensitive"
     assert created[0].config["secret"] == "api-secret-sensitive"
     assert created[0].config["timeout"] == 7_500
+    assert created[0].config["options"]["warnOnFetchOpenOrdersWithoutSymbol"] is False
     assert rules.quantity_step == Decimal("0.001")
     assert rules.price_tick == Decimal("0.1")
     assert rules.min_notional == Decimal("5")
