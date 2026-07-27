@@ -371,8 +371,8 @@ SELECT
     deleted_rows,
     reset_at_ms,
     (
-        SELECT real_submit_enabled
+        SELECT new_entry_submit_enabled
           FROM brc_owner_policy_current
          WHERE owner_policy_id = 'policy-main'
-    ) AS real_submit_enabled_preserved
+    ) AS new_entry_submit_enabled_preserved
 FROM brc_flat_runtime_reset_input;
