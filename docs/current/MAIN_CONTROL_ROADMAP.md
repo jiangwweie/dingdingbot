@@ -30,9 +30,9 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Branch | `codex/trading-kernel-rebuild-20260722` |
-| Production commit | `4fd6f80860ceb32690920b0ec8b60f4933969052` |
-| Production tag | `tokyo-runtime-2026.07.27.1`; annotated, immutable, and verified on `origin` |
-| Production-commit certification | `412 passed`; changed-file Ruff checks and production file-I/O audit pass |
+| Production commit | `46a7fe9d815631e8f72b3047cc42b39283b97e89` |
+| Production tag | `tokyo-runtime-2026.07.27.2`; annotated, immutable, and verified on `origin` |
+| Production-commit certification | `417 passed`; changed-file Ruff checks and production file-I/O audit pass |
 | Runtime ownership | Observation, Entry, Lifecycle, and Reconciliation are enabled, active, and at zero restarts |
 | Scheduling model | Long-running systemd services; timer-based Python cold starts are retired and must not return |
 | PostgreSQL | BRC data was deleted without backup by explicit Owner decision, then rebuilt from the single 33-table `0001_initial` baseline |
@@ -42,10 +42,11 @@ different Netting Domains progress concurrently.
 | Entry authority | `new_entry_submit_enabled` applies only before ENTRY; existing exposure retains frozen safety authority |
 | Runtime fence | Commit/schema drift records an Incident; an exact but disabled command capability is a controlled readonly fence, not an Incident |
 | Historical safety Tickets | Three safely reached `leverage_rejected`; no ENTRY, order, or position was created |
-| Recovery closure | ETH and SOL external-flat Tickets are terminal; all six budget reservations are released; zero active Ticket, position, command, or Incident remains |
-| Recovery economics | Both external-flat Reviews explicitly record unavailable kernel-attributable exit economics and are excluded from strategy-economics evidence |
-| Exchange postflight | Twelve Netting Domains are flat; zero regular or conditional order remains; all six supported instruments are configured at `5x` |
-| Hourly supervision | All four persistent workers active; Entry globally serialized; current Entry result is `no_candidate` |
+| Recovery closure | ETH, SOL, and the July 27 external-flat recovery Ticket are terminal; all seven historical budget reservations are released; zero unresolved historical command or Incident remains |
+| Recovery economics | All three external-flat Reviews explicitly record unavailable kernel-attributable exit economics and are excluded from strategy-economics evidence |
+| Current live acceptance | Natural AVAXUSDT short Ticket `ticket:8ee27ce722d0e552135715a091f375b6` is `position_protected`; ENTRY, exact Initial Stop, and TP1 commands are accepted; protected quantity equals position quantity; zero Incident |
+| Exchange postflight | One AVAXUSDT short Netting Domain is non-flat with exact Stop and TP1 protection; the other eleven domains are flat; all six supported instruments are configured at `5x` |
+| Hourly supervision | All four persistent workers active at zero restarts; Entry remains globally serialized; current exposure is in protected lifecycle |
 | Full capability | `promote-full` not yet completed |
 
 ## Current Performance Snapshot
