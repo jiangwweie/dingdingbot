@@ -849,6 +849,9 @@ class CcxtVenueAdapter:
                 (*regular_orders, *conditional_orders),
                 exchange_order_id=request.payload.exchange_order_id,
             )
+            order_known_open = order_response is not None
+        else:
+            order_known_open = False
         order = (
             None
             if order_response is None
@@ -856,6 +859,7 @@ class CcxtVenueAdapter:
                 order_response,
                 request=request,
                 expected_symbol=symbol,
+                known_open=order_known_open,
             )
         )
         return VenueTruthSnapshot(
@@ -972,6 +976,7 @@ def _parse_order_truth(
     *,
     request: VenueTruthRequest,
     expected_symbol: str,
+    known_open: bool,
 ) -> VenueOrderTruth:
     if not isinstance(value, Mapping):
         raise RuntimeError("venue order truth response is not a mapping")
@@ -996,7 +1001,17 @@ def _parse_order_truth(
         order_side=order_side,
         quantity=Decimal(str(value.get("amount") or "0")),
         reduce_only=bool(value.get("reduceOnly", False)),
+        is_open=known_open or _unified_order_is_open(value),
     )
+
+
+def _unified_order_is_open(value: Mapping[object, object]) -> bool:
+    status = str(value.get("status") or "").strip().lower()
+    if status == "open":
+        return True
+    if status in {"closed", "canceled", "cancelled", "rejected", "expired"}:
+        return False
+    raise RuntimeError("venue order truth lacks a recognized unified status")
 
 
 def _admission_balance_decimal(

@@ -41,6 +41,7 @@ class VenueOrderTruth(BaseModel):
     order_side: Literal["buy", "sell"]
     quantity: Decimal
     reduce_only: bool
+    is_open: bool = True
 
     @field_validator(
         "exchange_order_id",
@@ -221,6 +222,12 @@ def _decide_cancel_recovery(
                     truth,
                     reason=reason,
                 )
+        if not order.is_open:
+            return _decision(
+                UnknownRecoveryStatus.RECONCILED_ABSENT,
+                truth,
+                reason="cancel_target_terminal",
+            )
         return _decision(
             UnknownRecoveryStatus.PENDING_VISIBILITY,
             truth,

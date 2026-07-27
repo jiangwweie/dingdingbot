@@ -51,6 +51,7 @@ from src.trading_kernel.domain.review import (
     ReviewEconomicsUnavailable,
     calculate_review_economics,
 )
+from src.trading_kernel.domain.venue_truth import UnknownRecoveryStatus
 
 
 _POSITION_RECONCILIATION_STATUSES = (
@@ -144,6 +145,7 @@ async def run_reconciliation_worker_once(
     *,
     review_economics_source: ReviewEconomicsSource | None = None,
 ) -> ReconciliationWorkerResult:
+    pending_unknown_result: ReconciliationWorkerResult | None = None
     async with uow_factory() as uow:
         unknown = await uow.exchange_commands.get_one_unknown()
     if unknown is not None:
@@ -161,12 +163,18 @@ async def run_reconciliation_worker_once(
                 timeout_seconds=request.timeout_seconds,
             ),
         )
-        return ReconciliationWorkerResult(
+        recovered_result = ReconciliationWorkerResult(
             status=ReconciliationWorkerStatus.UNKNOWN_RECOVERED,
             ticket_id=unknown.ticket_identity.ticket_id,
             command_id=unknown.command_id,
             detail=decision.status.value,
         )
+        if decision.status not in {
+            UnknownRecoveryStatus.PENDING_VISIBILITY,
+            UnknownRecoveryStatus.LOOKUP_FAILED,
+        }:
+            return recovered_result
+        pending_unknown_result = recovered_result
 
     async with uow_factory() as uow:
         aggregate = await uow.aggregates.get_next_for_statuses(
@@ -369,6 +377,8 @@ async def run_reconciliation_worker_once(
             ticket_id=review.identity.ticket_id,
         )
 
+    if pending_unknown_result is not None:
+        return pending_unknown_result
     return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.NO_WORK)
 
 

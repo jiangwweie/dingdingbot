@@ -186,6 +186,7 @@ class TruthExchange:
             "id": "venue-order-1",
             "clientOrderId": params["origClientOrderId"],
             "symbol": symbol,
+            "status": "open",
             "side": "buy",
             "amount": "0.001",
             "reduceOnly": False,
@@ -214,10 +215,17 @@ class TruthExchange:
 
 
 class CancelTruthExchange(TruthExchange):
-    def __init__(self, *, visible: bool, target_in_open: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        visible: bool,
+        target_in_open: bool = False,
+        terminal: bool = False,
+    ) -> None:
         super().__init__(visible=visible)
         self.order_lookup = None
         self.target_in_open = target_in_open
+        self.terminal = terminal
 
     async def fetch_order(self, order_id, symbol, params):
         self.calls.append("order")
@@ -228,6 +236,7 @@ class CancelTruthExchange(TruthExchange):
             "id": order_id,
             "clientOrderId": "brc-original-stop",
             "symbol": symbol,
+            "status": "canceled" if self.terminal else "open",
             "side": "sell",
             "amount": "0.001",
             "reduceOnly": True,
@@ -1264,6 +1273,19 @@ async def test_cancel_truth_does_not_claim_absence_when_target_is_still_open() -
     assert truth.lookup_status is VenueLookupStatus.VISIBLE
     assert truth.order is not None
     assert truth.order.exchange_order_id == "stop-order-1"
+
+
+@pytest.mark.asyncio
+async def test_cancel_truth_marks_historical_terminal_target_as_not_open() -> None:
+    exchange = CancelTruthExchange(visible=True, terminal=True)
+    adapter = _cancel_adapter(exchange)
+
+    truth = await adapter.lookup_command_truth(_cancel_truth_request())
+
+    assert truth.lookup_status is VenueLookupStatus.VISIBLE
+    assert truth.order is not None
+    assert truth.order.exchange_order_id == "stop-order-1"
+    assert truth.order.is_open is False
 
 
 def _request() -> VenueCommandRequest:

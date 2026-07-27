@@ -147,6 +147,33 @@ def test_visible_cancel_target_remains_pending_instead_of_claiming_cancel_succes
     assert result.reason == "cancel_target_still_visible"
 
 
+def test_terminal_cancel_target_reconciles_as_absent_from_open_orders() -> None:
+    command = _cancel_command()
+    result = decide_unknown_recovery(
+        command,
+        _truth(
+            lookup_status=VenueLookupStatus.VISIBLE,
+            order=VenueOrderTruth(
+                exchange_order_id=command.payload.exchange_order_id,
+                venue_client_order_id="brc-original-stop",
+                exchange_instrument_id=(
+                    command.ticket_identity.netting_domain.exchange_instrument_id
+                ),
+                position_side="long",
+                order_side="sell",
+                quantity=Decimal("0.001"),
+                reduce_only=True,
+                is_open=False,
+            ),
+            observed_at_ms=2_500,
+        ),
+        visibility_deadline_ms=2_000,
+    )
+
+    assert result.status is UnknownRecoveryStatus.RECONCILED_ABSENT
+    assert result.reason == "cancel_target_terminal"
+
+
 def test_cancel_target_absence_is_authoritative_even_while_position_exists() -> None:
     result = decide_unknown_recovery(
         _cancel_command(),

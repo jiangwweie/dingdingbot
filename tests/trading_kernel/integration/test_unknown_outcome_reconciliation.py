@@ -32,6 +32,7 @@ from src.trading_kernel.application.reconcile_ticket import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
+    CancelCommandPayload,
     ExchangeCommand,
     ExchangeCommandKind,
     ExchangeCommandStatus,
@@ -721,6 +722,57 @@ async def test_absent_unknown_cancel_confirms_target_removal_and_resolves_unknow
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.RECONCILIATION_PENDING
     assert aggregate.pending_cancel_exchange_order_id is None
+    assert persisted is not None
+    assert persisted.status is ExchangeCommandStatus.RECONCILED_ABSENT
+    assert incident is None
+
+
+@pytest.mark.asyncio
+async def test_terminal_unknown_cancel_confirms_target_removal_and_resolves_unknown(
+    dispatch_engine,
+) -> None:
+    ticket, command = await _make_unknown_cancel(dispatch_engine)
+    assert isinstance(command.payload, CancelCommandPayload)
+
+    result = await recover_unknown_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        StaticTruthPort(
+            VenueTruthSnapshot(
+                lookup_status=VenueLookupStatus.VISIBLE,
+                order=VenueOrderTruth(
+                    exchange_order_id=command.payload.exchange_order_id,
+                    venue_client_order_id="brc-original-stop",
+                    exchange_instrument_id=(
+                        ticket.identity.netting_domain.exchange_instrument_id
+                    ),
+                    position_side=ticket.identity.netting_domain.position_side,
+                    order_side="sell",
+                    quantity=ticket.quantity,
+                    reduce_only=True,
+                    is_open=False,
+                ),
+                position_quantity=Decimal("0"),
+                matching_fill_quantity=Decimal("0"),
+                regular_open_client_order_ids=(),
+                conditional_open_client_order_ids=(),
+                observed_at_ms=3_500,
+            )
+        ),
+        RecoverUnknownCommandRequest(
+            command_id=command.command_id,
+            now_ms=3_500,
+            visibility_deadline_ms=3_400,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.status is UnknownRecoveryStatus.RECONCILED_ABSENT
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        persisted = await uow.exchange_commands.get(command.command_id)
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.RECONCILIATION_PENDING
     assert persisted is not None
     assert persisted.status is ExchangeCommandStatus.RECONCILED_ABSENT
     assert incident is None
