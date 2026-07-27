@@ -9,6 +9,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
+_MIN_POSITIVE_PROJECTED_PRICE = Decimal("0.000000000000000001")
+
+
 class CapacitySizingStatus(StrEnum):
     SELECTED = "selected"
     COUNT_EXHAUSTED = "count_exhausted"
@@ -419,7 +422,9 @@ def _projected_liquidation_price(
             + quantity * request.mark_price
         )
         projected = numerator / denominator
-        return max(projected, Decimal("0"))
+        if not projected.is_finite():
+            return None
+        return max(projected, _MIN_POSITIVE_PROJECTED_PRICE)
     denominator = quantity * (Decimal("1") + bracket.maintenance_margin_rate)
     numerator = (
         request.total_margin_balance

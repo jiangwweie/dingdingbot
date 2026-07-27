@@ -89,6 +89,28 @@ def test_refuses_configured_leverage_above_owner_and_exchange_cap_while_flat() -
     assert decision.selected is None
 
 
+def test_floors_nonpositive_long_projection_to_storage_positive_price() -> None:
+    decision = select_capacity_candidate(
+        _request(
+            total_wallet_balance=Decimal("425"),
+            total_margin_balance=Decimal("425"),
+            available_margin=Decimal("425"),
+            configured_leverage=5,
+            entry_reference_price=Decimal("25"),
+            initial_stop_price=Decimal("24"),
+            mark_price=Decimal("25"),
+            quantity_step=Decimal("1"),
+            min_quantity=Decimal("1"),
+        )
+    )
+
+    assert decision.status is CapacitySizingStatus.SELECTED
+    assert decision.selected is not None
+    assert decision.selected.projected_liquidation_price == Decimal(
+        "0.000000000000000001"
+    )
+
+
 def test_capacity_refuses_when_all_capital_owning_slots_are_taken() -> None:
     decision = select_capacity_candidate(_request(active_ticket_count=3))
 
