@@ -828,8 +828,7 @@ async def test_still_open_unknown_cancel_is_marked_absent_and_becomes_retryable(
     )
     assert persisted is not None
     assert persisted.status is ExchangeCommandStatus.RECONCILED_ABSENT
-    assert incident is not None
-    assert incident.incident_kind == "cancel_order_still_open_after_unknown"
+    assert incident is None
 
 
 @pytest.mark.asyncio

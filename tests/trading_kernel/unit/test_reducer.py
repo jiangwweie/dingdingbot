@@ -1066,10 +1066,6 @@ def test_cancel_target_still_open_resolves_unknown_and_allows_exact_retry() -> N
             ticket_id=aggregate.identity.ticket_id,
             incident_kind="cancel_order_outcome_unknown",
         ),
-        OpenIncident(
-            ticket_id=aggregate.identity.ticket_id,
-            incident_kind="cancel_order_still_open_after_unknown",
-        ),
     )
 
 

@@ -1330,10 +1330,6 @@ def reduce_event(
                     ticket_id=current.identity.ticket_id,
                     incident_kind="cancel_order_outcome_unknown",
                 ),
-                OpenIncident(
-                    ticket_id=current.identity.ticket_id,
-                    incident_kind="cancel_order_still_open_after_unknown",
-                ),
             ),
         )
 
