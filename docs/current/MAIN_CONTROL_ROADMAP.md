@@ -43,9 +43,9 @@ different Netting Domains progress concurrently.
 | Runtime fence | Commit/schema drift records an Incident; an exact but disabled command capability is a controlled readonly fence, not an Incident |
 | Historical runtime/trade facts | Reset after verified exchange-flat state by explicit Owner authorization; no historical Ticket, command, Incident, Review, position, reservation, or observation fact remains as runtime authority |
 | Terminal-recovery repair | Exact cancel namespace/purpose, atomic Ticket-incident closure, and external-flat unavailable Review are deployed in the active Kernel |
-| Current live acceptance | No active Ticket; the next acceptance must be a natural signal through the official Kernel path |
-| Exchange postflight | All twelve Netting Domains are flat with no open order; all six supported instruments are configured at `5x` |
-| Hourly supervision | All four persistent workers active at zero restarts; Entry is enabled and remains globally serialized |
+| Current live acceptance | Three natural `SOR-001 / SOR-SHORT` Tickets for AVAXUSDT, SOLUSDT, and BTCUSDT are `position_protected`; each has accepted ENTRY, Initial Stop, and TP1 commands, with zero open Incident or unresolved command. One ETHUSDT short ENTRY was authoritatively rejected for `wallet_risk_drift` and created no position |
+| Exchange postflight | Three Netting Domains are non-flat with exact Stop and TP1 protection; the other nine domains are flat; all six supported instruments are configured at `5x` |
+| Hourly supervision | All four persistent workers active at zero restarts; Entry is enabled, globally serialized, and current capacity is occupied by the three protected Tickets |
 | Full capability | `promote-full` not yet completed |
 
 ## Current Performance Snapshot
