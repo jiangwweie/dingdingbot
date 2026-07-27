@@ -48,6 +48,10 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
+from src.trading_kernel.infrastructure.strategy_universe_seed import (
+    seed_strategy_universes,
+)
+from src.trading_kernel.domain.strategy_universe import universe_for_event_spec
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
     SAFE_DATABASE,
@@ -91,7 +95,7 @@ async def test_ingest_persists_signal_and_fact_lineage_without_ticket_terms(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 now_ms=1_001,
             ),
         )
@@ -161,7 +165,7 @@ async def test_signal_ingest_does_not_consume_action_time_capital_authority(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 now_ms=1_001,
             ),
         )
@@ -180,7 +184,7 @@ async def test_duplicate_strategy_signal_is_exactly_idempotent(
     request = IngestSignalRequest(
         signal=signal,
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         now_ms=1_001,
     )
 
@@ -272,7 +276,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit=runtime_commit,
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 now_ms=now_ms,
             ),
         )
@@ -295,7 +299,7 @@ async def test_expired_candidate_is_terminally_blocked(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 now_ms=1_001,
             ),
         )
@@ -309,7 +313,7 @@ async def test_expired_candidate_is_terminally_blocked(
                 admission_snapshot=_admission_snapshot(),
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 now_ms=signal.expires_at_ms,
             ),
         )
@@ -352,6 +356,7 @@ def _signal(
         else "event_spec:SOR-001:SOR-SHORT:v2"
     )
     facts = _signal_facts(position_side=position_side)
+    universe = universe_for_event_spec(event_spec_id)
     return StrategySignal(
         signal_event_id=signal_event_id,
         runtime_scope_id=runtime_scope_id,
@@ -362,6 +367,8 @@ def _signal(
         exchange_instrument_id=exchange_instrument_id,
         position_side=position_side,
         fact_digest=build_signal_fact_digest(facts),
+        universe_version_id=universe.universe_version_id,
+        universe_digest=universe.semantic_digest(),
         occurred_at_ms=occurred_at_ms,
         observed_at_ms=occurred_at_ms + 1,
         expires_at_ms=10_000,
@@ -384,6 +391,7 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
 async def _seed_runtime_authority(engine: AsyncEngine) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
+        await seed_strategy_universes(uow, seeded_at_ms=1_000)
 
     async with engine.begin() as connection:
         await connection.execute(
@@ -416,6 +424,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 priority_rank=1,
                 max_concurrent_tickets=8,
                 planned_stop_risk_fraction=Decimal("0.03"),
+                max_portfolio_stop_risk_fraction=Decimal("0.09"),
                 max_initial_margin_utilization=Decimal("0.90"),
                 max_leverage=10,
                 supported_margin_mode="cross",
@@ -447,6 +456,13 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
                 position_side="long",
                 enabled=True,
+                universe_version_id=universe_for_event_spec(
+                    "event_spec:SOR-001:SOR-LONG:v2"
+                ).universe_version_id,
+                observation_enabled=True,
+                entry_enabled=True,
+                scope_state="active",
+                warm_ready_at_ms=1_000,
                 scope_version=4,
                 updated_at_ms=1_000,
             )
@@ -461,7 +477,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 certification={},
                 updated_at_ms=1_000,
             )

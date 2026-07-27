@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -54,6 +54,11 @@ from src.trading_kernel.domain.venue_truth import (
     decide_unknown_recovery,
 )
 
+if TYPE_CHECKING:
+    from src.trading_kernel.application.reconcile_leverage_command import (
+        ReconcileLeverageCommandResult,
+    )
+
 
 class RecoverUnknownCommandRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -86,7 +91,7 @@ async def recover_unknown_command(
     uow_factory: UnitOfWorkFactory,
     venue_truth: VenueTruthPort,
     request: RecoverUnknownCommandRequest,
-) -> UnknownRecoveryDecision:
+) -> UnknownRecoveryDecision | ReconcileLeverageCommandResult:
     async with uow_factory() as uow:
         command = await uow.exchange_commands.get(request.command_id)
         if command is None:
@@ -110,6 +115,8 @@ async def recover_unknown_command(
             ),
         )
 
+    if command.venue_client_order_id is None:
+        raise RuntimeError("order command lacks venue client identity")
     truth_request = VenueTruthRequest(
         command_id=command.command_id,
         kind=command.kind,

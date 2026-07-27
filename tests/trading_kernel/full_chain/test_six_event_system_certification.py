@@ -50,6 +50,7 @@ from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     registered_strategy_contracts,
 )
+from src.trading_kernel.domain.strategy_universe import universe_for_event_spec
 from src.trading_kernel.infrastructure.pg_models import (
     instrument_rules_current,
     owner_policy_current,
@@ -60,6 +61,9 @@ from src.trading_kernel.infrastructure.pg_models import (
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
+)
+from src.trading_kernel.infrastructure.strategy_universe_seed import (
+    seed_strategy_universes,
 )
 from src.trading_kernel.interfaces.entry_worker import (
     EntryWorkerRequest,
@@ -88,13 +92,10 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _run_alembic,
 )
 from tests.trading_kernel.unit.detectors.fixtures import (
-    AVAX,
     BTC,
     ETH,
     NOW_MS,
-    OP,
     SOL,
-    SUI,
     brf2_short_snapshot,
     cpm_long_snapshot,
     flat_candles,
@@ -104,11 +105,17 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 
 
 SAFE_TEST_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
+BNB = "binance-usdm:BNBUSDT:perpetual"
+CRYPTO_CONTRACTS = tuple(
+    contract
+    for contract in registered_strategy_contracts()
+    if contract.strategy_group_id != "RSRVCB-001"
+)
 EVENT_INSTRUMENTS = {
     "CPM-LONG": ETH,
     "MPG-LONG": SOL,
     "MI-LONG": SOL,
-    "SOR-LONG": AVAX,
+    "SOR-LONG": BNB,
     "SOR-SHORT": BTC,
     "BRF2-SHORT": BTC,
 }
@@ -143,7 +150,7 @@ class CertifiedMarketSource:
         mpg = mpg_long_snapshot()
         brf2 = brf2_short_snapshot()
         sor_long = sor_snapshot(side="long").model_copy(
-            update={"exchange_instrument_id": AVAX}
+            update={"exchange_instrument_id": BNB}
         )
         sor_short = sor_snapshot(side="short").model_copy(
             update={"exchange_instrument_id": BTC}
@@ -154,14 +161,20 @@ class CertifiedMarketSource:
             (ETH, "4h"): cpm.candles_4h,
             (SOL, "1h"): mpg.candles_1h,
             (SOL, "4h"): mpg.candles_4h,
-            (OP, "1h"): peer_1h,
-            (AVAX, "1h"): peer_1h,
-            (SUI, "1h"): peer_1h,
             (BTC, "1h"): brf2.candles_1h,
             (BTC, "4h"): brf2.candles_4h,
-            (AVAX, "15m"): sor_long.candles_15m,
+            (BNB, "15m"): sor_long.candles_15m,
             (BTC, "15m"): sor_short.candles_15m,
         }
+        for event_spec_id in (
+            "event_spec:MPG-001:MPG-LONG:v2",
+            "event_spec:MI-001:MI-LONG:v2",
+        ):
+            for member in universe_for_event_spec(event_spec_id).candidate_members:
+                self.responses.setdefault(
+                    (member.exchange_instrument_id, "1h"),
+                    peer_1h,
+                )
 
     async def fetch_closed_candles(
         self,
@@ -377,7 +390,7 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
 
 @pytest.mark.parametrize(
     "contract",
-    registered_strategy_contracts(),
+    CRYPTO_CONTRACTS,
     ids=lambda contract: contract.event_id,
 )
 @pytest.mark.asyncio
@@ -404,7 +417,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         ObservationWorkerRequest(
             worker_id="observation-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0002_strategy_universe_us_equity",
             now_ms=NOW_MS,
             lease_until_ms=NOW_MS + 30_000,
             timeout_seconds=5,
@@ -439,7 +452,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         EntryWorkerRequest(
             worker_id="entry-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0002_strategy_universe_us_equity",
             now_ms=NOW_MS + 1_000,
             lease_until_ms=NOW_MS + 6_000,
             timeout_seconds=1,
@@ -460,7 +473,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         now_ms=NOW_MS + 2_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -477,7 +490,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     lifecycle_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         now_ms=NOW_MS + 3_000,
         lease_until_ms=NOW_MS + 8_000,
         timeout_seconds=1,
@@ -624,6 +637,8 @@ async def _seed_runtime(
 ) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
+        await seed_strategy_universes(uow, seeded_at_ms=NOW_MS - 1)
+    universe = universe_for_event_spec(contract.event_spec_id)
     async with engine.begin() as connection:
         await connection.execute(
             sa.insert(instrument_rules_current).values(
@@ -655,6 +670,7 @@ async def _seed_runtime(
                 priority_rank=1,
                 max_concurrent_tickets=3,
                 planned_stop_risk_fraction=Decimal("0.03"),
+                max_portfolio_stop_risk_fraction=Decimal("0.09"),
                 max_initial_margin_utilization=Decimal("0.90"),
                 max_leverage=10,
                 supported_margin_mode="cross",
@@ -686,6 +702,10 @@ async def _seed_runtime(
                 exchange_instrument_id=instrument_id,
                 position_side=contract.position_side,
                 enabled=True,
+                universe_version_id=universe.universe_version_id,
+                observation_enabled=True,
+                entry_enabled=True,
+                scope_state="active",
                 scope_version=1,
                 updated_at_ms=NOW_MS - 1,
             )
@@ -695,7 +715,7 @@ async def _seed_runtime(
                 capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 certification={},
                 updated_at_ms=NOW_MS - 1,
             )
@@ -705,7 +725,7 @@ async def _seed_runtime(
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 certification={},
                 updated_at_ms=NOW_MS - 1,
             )

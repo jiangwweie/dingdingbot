@@ -74,7 +74,7 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
     plan = _plan()
 
     assert plan.target_commit == "a" * 40
-    assert plan.target_schema_revision == "0001_initial"
+    assert plan.target_schema_revision == "0002_strategy_universe_us_equity"
     assert plan.target_seed_identity.startswith("sha256:")
     assert CUTOVER_PHASES == (
         CutoverPhase.PLAN_IDENTITIES,
@@ -445,10 +445,10 @@ async def test_readonly_certification_reports_exact_runtime_authority(
     }
     assert payload["table_allowlist"] == {
         "status": "pass",
-        "count": 33,
+        "count": 50,
         "tables": sorted(metadata.tables),
     }
-    assert payload["runtime_scope_count"] == 22
+    assert payload["runtime_scope_count"] == 49
     assert payload["capabilities"] == {
         "exchange_commands": False,
         "strategy_signal_ingest": True,
@@ -460,6 +460,7 @@ async def test_readonly_certification_reports_exact_runtime_authority(
         "new_entry_submit_enabled": False,
         "max_concurrent_tickets": 3,
         "planned_stop_risk_fraction": "0.03",
+        "max_portfolio_stop_risk_fraction": "0.09",
         "max_initial_margin_utilization": "0.9",
         "max_leverage": 10,
         "supported_margin_mode": "cross",
@@ -822,7 +823,7 @@ class LocalPostgresCutoverAdapter:
 
 def _plan(**changes: object) -> CutoverPlan:
     runtime_commit = "a" * 40
-    schema_revision = "0001_initial"
+    schema_revision = "0002_strategy_universe_us_equity"
     seed_identity = build_runtime_seed_identity(
         RuntimeAuthoritySeedRequest(
             account_id="subaccount-main",

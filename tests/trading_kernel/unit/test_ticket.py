@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from src.trading_kernel.domain.exit_policy import exit_policy_for
 from src.trading_kernel.domain.identities import (
     NettingDomain,
     RuntimeIdentity,
@@ -22,8 +23,8 @@ def _identity() -> TicketIdentity:
     runtime = RuntimeIdentity(
         runtime_profile_id="tiny-live-v1",
         strategy_group_id="SOR-001",
-        strategy_version_id="SOR-001:v3",
-        event_spec_id="sor-long-v2",
+        strategy_version_id="sgv:SOR-001:v2",
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
     )
     domain = NettingDomain(
         venue_id="binance-usdm",
@@ -52,6 +53,14 @@ def _ticket(**updates: object) -> TradeTicket:
         "runtime_scope_id": "scope-sor-btc-long",
         "runtime_scope_version": 4,
         "fact_digest": "sha256:" + "1" * 64,
+        "universe_version_id": "universe:event_spec:SOR-001:SOR-LONG:v2:v1",
+        "universe_digest": "sha256:" + "2" * 64,
+        "projection_run_id": None,
+        "armed_structure_id": None,
+        "product_policy_version_id": None,
+        "session_code": "CRYPTO_CONTINUOUS",
+        "session_multiplier": Decimal("1"),
+        "product_admission_digest": None,
         "capacity_claim_id": "claim:" + "2" * 32,
         "created_at_ms": 1_000,
         "expires_at_ms": 31_000,
@@ -77,6 +86,20 @@ def _ticket(**updates: object) -> TradeTicket:
         "status": TicketStatus.ISSUED,
     }
     payload.update(updates)
+    identity = payload["identity"]
+    assert isinstance(identity, TicketIdentity)
+    exit_policy = exit_policy_for(identity.runtime.event_spec_id)
+    payload.update(
+        {
+            "universe_version_id": (
+                f"universe:{identity.runtime.event_spec_id}:v1"
+            ),
+            "exit_policy_id": exit_policy.exit_policy_id,
+            "exit_policy_version": exit_policy.exit_policy_version,
+            "exit_policy_digest": exit_policy.semantic_hash(),
+            "exit_policy": exit_policy,
+        }
+    )
     return TradeTicket.model_validate(payload)
 
 

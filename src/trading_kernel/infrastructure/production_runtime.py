@@ -12,7 +12,7 @@ from typing import Literal
 import ccxt.async_support as ccxt_async  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
-from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.domain.strategy_universe import all_registered_instruments
 from src.trading_kernel.infrastructure.binance_public_market_source import (
     CcxtBinancePublicMarketSource,
 )
@@ -22,7 +22,7 @@ from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
 BINANCE_USDM_VENUE_ID: Literal["binance-usdm"] = "binance-usdm"
 BINANCE_USDM_POSITION_MODE: Literal["independent_sides"] = "independent_sides"
 LIVE_ENVIRONMENT: Literal["live"] = "live"
-_EXPECTED_UNIQUE_INSTRUMENTS = 6
+_EXPECTED_UNIQUE_INSTRUMENTS = 27
 
 
 class ProductionRuntimeSettings(BaseModel):
@@ -155,6 +155,8 @@ def build_binance_usdm_venue_adapter() -> CcxtVenueAdapter:
         taker_fee_rates={
             key: settings.exit_taker_fee_rate for key in instrument_keys
         },
+        default_settlement_asset="USDT",
+        default_taker_fee_rate=settings.exit_taker_fee_rate,
         clock_ms=lambda: int(time.time() * 1_000),
     )
 
@@ -189,18 +191,17 @@ def _read_exact_identity(
 
 def _canonical_venue_symbols() -> dict[str, str]:
     by_instrument: dict[str, str] = {}
-    for contract in registered_strategy_contracts():
-        for instrument in contract.candidate_instruments:
-            venue_symbol = instrument.venue_symbol
-            if not venue_symbol.endswith("USDT") or len(venue_symbol) <= 4:
-                raise RuntimeError("Registry contains a non-USDT production instrument")
-            ccxt_symbol = f"{venue_symbol[:-4]}/USDT:USDT"
-            existing = by_instrument.get(instrument.exchange_instrument_id)
-            if existing is not None and existing != ccxt_symbol:
-                raise RuntimeError("Registry contains contradictory venue symbol mapping")
-            by_instrument[instrument.exchange_instrument_id] = ccxt_symbol
+    for instrument in all_registered_instruments():
+        venue_symbol = instrument.venue_symbol
+        if not venue_symbol.endswith("USDT") or len(venue_symbol) <= 4:
+            raise RuntimeError("Universe contains a non-USDT production instrument")
+        ccxt_symbol = f"{venue_symbol[:-4]}/USDT:USDT"
+        existing = by_instrument.get(instrument.exchange_instrument_id)
+        if existing is not None and existing != ccxt_symbol:
+            raise RuntimeError("Universe contains contradictory venue symbol mapping")
+        by_instrument[instrument.exchange_instrument_id] = ccxt_symbol
     if len(by_instrument) != _EXPECTED_UNIQUE_INSTRUMENTS:
-        raise RuntimeError("production Registry must contain exactly six instruments")
+        raise RuntimeError("production Universe must contain exactly 27 instruments")
     return dict(sorted(by_instrument.items()))
 
 

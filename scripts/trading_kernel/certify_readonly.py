@@ -27,7 +27,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (  # noqa: 
 
 
 SCHEMA = "brc.trading_kernel.readonly_certification.v1"
-EXPECTED_ALEMBIC_REVISION = "0001_initial"
+EXPECTED_ALEMBIC_REVISION = "0002_strategy_universe_us_equity"
 LEGACY_EXECUTION_TABLES = (
     "brc_runtime_execution_tickets",
     "brc_runtime_execution_orders",
@@ -38,6 +38,7 @@ LEGACY_EXECUTION_TABLES = (
 _DECIMAL_POLICY_FIELDS = frozenset(
     {
         "planned_stop_risk_fraction",
+        "max_portfolio_stop_risk_fraction",
         "max_initial_margin_utilization",
         "min_liquidation_distance_to_stop_distance_ratio",
         "max_post_fill_stop_risk_overrun_fraction",
@@ -144,6 +145,7 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
                                new_entry_submit_enabled,
                                max_concurrent_tickets,
                                planned_stop_risk_fraction,
+                               max_portfolio_stop_risk_fraction,
                                max_initial_margin_utilization,
                                max_leverage,
                                supported_margin_mode,
@@ -342,6 +344,10 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
             == DYNAMIC_POLICY.max_concurrent_tickets,
             Decimal(str(owner_policy_row["planned_stop_risk_fraction"]))
             == DYNAMIC_POLICY.planned_stop_risk_fraction,
+            Decimal(
+                str(owner_policy_row["max_portfolio_stop_risk_fraction"])
+            )
+            == DYNAMIC_POLICY.max_portfolio_stop_risk_fraction,
             Decimal(str(owner_policy_row["max_initial_margin_utilization"]))
             == DYNAMIC_POLICY.max_initial_margin_utilization,
             int(owner_policy_row["max_leverage"]) == DYNAMIC_POLICY.max_leverage,
@@ -371,7 +377,7 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
             "seed_identity",
         }
         and actual_tables == expected_tables
-        and runtime_scope_count == 22
+        and runtime_scope_count == 49
         and capabilities_are_current
         and policy_is_dynamic
         and integrity_orphans == 0

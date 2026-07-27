@@ -568,6 +568,7 @@ def _review_exit_client_ids(
         if command.kind
         not in {ExchangeCommandKind.ENTRY, ExchangeCommandKind.CANCEL_ORDER}
         and command.status in accepted_statuses
+        and command.venue_client_order_id is not None
     )
     return tuple(dict.fromkeys(identities))
 

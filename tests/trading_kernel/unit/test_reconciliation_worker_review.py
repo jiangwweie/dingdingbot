@@ -85,7 +85,7 @@ class _SignalRepository:
             capability_key="exchange_commands",
             enabled=True,
             certified_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0002_strategy_universe_us_equity",
         )
 
 
@@ -277,7 +277,7 @@ def _request() -> ReconciliationWorkerRequest:
     return ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-test",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         now_ms=5_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,

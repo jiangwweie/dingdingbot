@@ -10,16 +10,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.exit_policy import ExitPolicy
 from src.trading_kernel.domain.identities import (
     NettingDomain,
     RuntimeIdentity,
     TicketIdentity,
 )
-
-
-class EntryOrderType(StrEnum):
-    MARKET = "market"
-    LIMIT = "limit"
+from src.trading_kernel.domain.order_types import EntryOrderType
 
 
 class TicketStatus(StrEnum):
@@ -42,6 +39,18 @@ class TradeTicket(BaseModel):
     runtime_scope_id: str
     runtime_scope_version: int
     fact_digest: str
+    universe_version_id: str | None
+    universe_digest: str | None
+    projection_run_id: str | None
+    armed_structure_id: str | None
+    product_policy_version_id: str | None
+    session_code: str
+    session_multiplier: Decimal
+    product_admission_digest: str | None
+    exit_policy_id: str
+    exit_policy_version: str
+    exit_policy_digest: str
+    exit_policy: ExitPolicy
     capacity_claim_id: str
     created_at_ms: int
     expires_at_ms: int
@@ -72,6 +81,9 @@ class TradeTicket(BaseModel):
         "fact_digest",
         "capacity_claim_id",
         "risk_reservation_basis",
+        "session_code",
+        "exit_policy_id",
+        "exit_policy_version",
         mode="before",
     )
     @classmethod
@@ -98,6 +110,7 @@ class TradeTicket(BaseModel):
         "min_liquidation_distance_to_stop_distance_ratio",
         "projected_liquidation_price",
         "projected_liquidation_distance_to_stop_distance_ratio",
+        "session_multiplier",
     )
     @classmethod
     def _require_positive_decimal(cls, value: Decimal) -> Decimal:
@@ -161,6 +174,28 @@ class TradeTicket(BaseModel):
             < self.min_liquidation_distance_to_stop_distance_ratio
         ):
             raise ValueError("Ticket liquidation proof is below the required ratio")
+        if (self.universe_version_id is None) != (self.universe_digest is None):
+            raise ValueError("Ticket Universe lineage must be frozen together")
+        if (self.projection_run_id is None) != (self.armed_structure_id is None):
+            raise ValueError("Ticket ranked lineage must be frozen together")
+        if not Decimal("0") < self.session_multiplier <= Decimal("1"):
+            raise ValueError("Ticket session multiplier must be in (0, 1]")
+        if (
+            self.exit_policy.exit_policy_id != self.exit_policy_id
+            or self.exit_policy.exit_policy_version != self.exit_policy_version
+            or self.exit_policy.semantic_hash() != self.exit_policy_digest
+        ):
+            raise ValueError("Ticket frozen exit-policy lineage is inconsistent")
+        for digest in (
+            self.fact_digest,
+            self.universe_digest,
+            self.product_admission_digest,
+            self.exit_policy_digest,
+        ):
+            if digest is not None and (
+                not digest.startswith("sha256:") or len(digest) != 71
+            ):
+                raise ValueError("Ticket digests must be canonical sha256 values")
         return self
 
     def decision_digest(self) -> str:

@@ -28,6 +28,10 @@ from src.trading_kernel.domain.instrument_entry_health import (
     InstrumentEntryHealth,
     InstrumentEntryHealthStatus,
 )
+from src.trading_kernel.domain.product_admission import (
+    ProductAdmissionContext,
+    evaluate_product_admission,
+)
 from src.trading_kernel.domain.signal import StrategySignal
 from src.trading_kernel.domain.ticket import EntryOrderType, build_ticket_id
 
@@ -48,6 +52,7 @@ def build_capacity_claim(
     entry_order_type: EntryOrderType,
     netting_domain_occupied: bool,
     now_ms: int,
+    product_admission_context: ProductAdmissionContext | None = None,
 ) -> CapacityClaimDecision:
     if now_ms < signal.observed_at_ms or now_ms >= signal.expires_at_ms:
         return _refused(CapacityClaimStatus.SIGNAL_INVALID_OR_STALE)
@@ -112,16 +117,34 @@ def build_capacity_claim(
     instrument_facts = admission_snapshot.instrument_facts_for(
         signal.exchange_instrument_id
     )
+    session_code = "CRYPTO_CONTINUOUS"
+    session_multiplier = Decimal("1")
+    if signal.strategy_group_id == "RSRVCB-001":
+        if product_admission_context is None:
+            return _refused(CapacityClaimStatus.ACTION_FACTS_INVALID_OR_STALE)
+        session = product_admission_context.classify(action_time_ms=now_ms)
+        session_code = session.session_code.value
+        session_multiplier = session.stop_risk_multiplier
+        if session_multiplier <= 0:
+            return _refused(CapacityClaimStatus.ACTION_FACTS_INVALID_OR_STALE)
+    effective_stop_risk_fraction = (
+        policy.planned_stop_risk_fraction * session_multiplier
+    )
+    effective_initial_margin = max(
+        admission_snapshot.total_initial_margin,
+        usage.reserved_margin,
+    )
+    exit_policy = exit_policy_for(signal.event_spec_id)
     sizing = select_capacity_candidate(
         CapacitySizingRequest(
             total_wallet_balance=admission_snapshot.total_wallet_balance,
             total_margin_balance=admission_snapshot.total_margin_balance,
-            total_initial_margin=admission_snapshot.total_initial_margin,
+            total_initial_margin=effective_initial_margin,
             total_maintenance_margin=admission_snapshot.total_maintenance_margin,
             available_margin=admission_snapshot.available_margin,
             active_ticket_count=usage.active_ticket_count,
             max_concurrent_tickets=policy.max_concurrent_tickets,
-            planned_stop_risk_fraction=policy.planned_stop_risk_fraction,
+            planned_stop_risk_fraction=effective_stop_risk_fraction,
             max_initial_margin_utilization=(
                 policy.max_initial_margin_utilization
             ),
@@ -139,7 +162,7 @@ def build_capacity_claim(
             quantity_step=instrument_rules.quantity_step,
             min_quantity=instrument_rules.min_quantity,
             min_notional=instrument_rules.min_notional,
-            tp1_quantity_fraction=exit_policy_for(signal.event_spec_id).tp1.quantity_fraction,
+            tp1_quantity_fraction=exit_policy.tp1.quantity_fraction,
             maintenance_margin_brackets=instrument_rules.maintenance_margin_brackets,
             position_side=signal.position_side,
             mark_price=instrument_facts.mark_price,
@@ -151,6 +174,35 @@ def build_capacity_claim(
     if sizing.status is not CapacitySizingStatus.SELECTED or sizing.selected is None:
         return _refused(_sizing_refusal(sizing.status))
     selected = sizing.selected
+    product_admission_digest: str | None = None
+    if product_admission_context is not None:
+        product_decision = evaluate_product_admission(
+            action_time_ms=now_ms,
+            order_notional=selected.notional,
+            profile=product_admission_context.profile,
+            market_facts=product_admission_context.market_facts,
+            calendar=product_admission_context.calendar,
+            corporate_event_admission=(
+                product_admission_context.corporate_event_admission
+            ),
+            policy=product_admission_context.policy,
+        )
+        if (
+            not product_decision.allowed
+            or product_decision.session_code != session_code
+            or product_decision.session_multiplier != session_multiplier
+            or instrument_facts.configured_leverage != 5
+        ):
+            return _refused(CapacityClaimStatus.ACTION_FACTS_INVALID_OR_STALE)
+        product_admission_digest = product_decision.product_admission_digest
+    portfolio_stop_risk_after = (
+        usage.gross_risk_at_stop + selected.planned_stop_risk
+    )
+    if portfolio_stop_risk_after > (
+        admission_snapshot.total_wallet_balance
+        * policy.max_portfolio_stop_risk_fraction
+    ):
+        return _refused(CapacityClaimStatus.BUDGET_EXHAUSTED)
     take_profit_price = _round_take_profit(
         entry_price,
         abs(entry_price - stop_price),
@@ -191,6 +243,19 @@ def build_capacity_claim(
         runtime_scope_id=signal.runtime_scope_id,
         runtime_scope_version=signal.runtime_scope_version,
         fact_digest=signal.fact_digest,
+        universe_version_id=signal.universe_version_id,
+        universe_digest=signal.universe_digest,
+        projection_run_id=signal.projection_run_id,
+        armed_structure_id=signal.armed_structure_id,
+        product_policy_version_id=(
+            None
+            if product_admission_context is None
+            else product_admission_context.policy.product_policy_version_id
+        ),
+        exit_policy_id=exit_policy.exit_policy_id,
+        exit_policy_version=exit_policy.exit_policy_version,
+        exit_policy_digest=exit_policy.semantic_hash(),
+        exit_policy=exit_policy,
         entry_admission_snapshot_digest=snapshot_digest,
         account_entry_health_digest=account_entry_health.decision_digest,
         instrument_entry_health_digest=instrument_entry_health.decision_digest,
@@ -201,7 +266,7 @@ def build_capacity_claim(
         ),
         total_wallet_balance_at_claim=admission_snapshot.total_wallet_balance,
         total_margin_balance_at_claim=admission_snapshot.total_margin_balance,
-        total_initial_margin_at_claim=admission_snapshot.total_initial_margin,
+        total_initial_margin_at_claim=effective_initial_margin,
         total_maintenance_margin_at_claim=(
             admission_snapshot.total_maintenance_margin
         ),
@@ -211,8 +276,13 @@ def build_capacity_claim(
         margin_mode_at_claim=admission_snapshot.margin_mode,
         active_ticket_count_at_claim=usage.active_ticket_count,
         remaining_slots_at_claim=selected.remaining_slots,
-        planned_stop_risk_fraction=policy.planned_stop_risk_fraction,
+        planned_stop_risk_fraction=effective_stop_risk_fraction,
         planned_stop_risk_budget=selected.planned_stop_risk_budget,
+        portfolio_stop_risk_before=usage.gross_risk_at_stop,
+        portfolio_stop_risk_after=portfolio_stop_risk_after,
+        session_code=session_code,
+        session_multiplier=session_multiplier,
+        product_admission_digest=product_admission_digest,
         max_post_fill_stop_risk_overrun_fraction=(
             policy.max_post_fill_stop_risk_overrun_fraction
         ),

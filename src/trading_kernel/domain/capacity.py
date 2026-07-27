@@ -7,10 +7,11 @@ from enum import StrEnum
 from hashlib import sha256
 import json
 import re
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.exit_policy import ExitPolicy
 from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
@@ -39,6 +40,7 @@ class CapacityPolicy(BaseModel):
     policy_version: int
     max_concurrent_tickets: int
     planned_stop_risk_fraction: Decimal
+    max_portfolio_stop_risk_fraction: Decimal
     max_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
@@ -62,6 +64,7 @@ class CapacityPolicy(BaseModel):
 
     @field_validator(
         "planned_stop_risk_fraction",
+        "max_portfolio_stop_risk_fraction",
         "max_initial_margin_utilization",
     )
     @classmethod
@@ -93,8 +96,9 @@ class CapacityUsage(BaseModel):
     gross_notional: Decimal
     gross_risk_at_stop: Decimal
     active_ticket_count: int
+    reserved_margin: Decimal = Decimal("0")
 
-    @field_validator("gross_notional", "gross_risk_at_stop")
+    @field_validator("gross_notional", "gross_risk_at_stop", "reserved_margin")
     @classmethod
     def _require_nonnegative_decimal(cls, value: Decimal) -> Decimal:
         if value < 0:
@@ -162,6 +166,15 @@ class CapacityClaim(BaseModel):
     runtime_scope_id: str
     runtime_scope_version: int
     fact_digest: str
+    universe_version_id: str | None
+    universe_digest: str | None
+    projection_run_id: str | None
+    armed_structure_id: str | None
+    product_policy_version_id: str | None
+    exit_policy_id: str
+    exit_policy_version: str
+    exit_policy_digest: str
+    exit_policy: ExitPolicy
     entry_admission_snapshot_digest: str
     account_entry_health_digest: str
     instrument_entry_health_digest: str
@@ -180,6 +193,11 @@ class CapacityClaim(BaseModel):
     remaining_slots_at_claim: int
     planned_stop_risk_fraction: Decimal
     planned_stop_risk_budget: Decimal
+    portfolio_stop_risk_before: Decimal
+    portfolio_stop_risk_after: Decimal
+    session_code: str
+    session_multiplier: Decimal
+    product_admission_digest: str | None
     max_post_fill_stop_risk_overrun_fraction: Decimal
     post_fill_stop_risk_limit: Decimal
     max_initial_margin_utilization: Decimal
@@ -212,6 +230,8 @@ class CapacityClaim(BaseModel):
         "capacity_claim_id",
         "owner_policy_id",
         "runtime_scope_id",
+        "exit_policy_id",
+        "exit_policy_version",
         mode="before",
     )
     @classmethod
@@ -226,12 +246,20 @@ class CapacityClaim(BaseModel):
         "entry_admission_snapshot_digest",
         "account_entry_health_digest",
         "instrument_entry_health_digest",
+        "exit_policy_digest",
         "decision_digest",
     )
     @classmethod
     def _require_digest(cls, value: str) -> str:
         if _SHA256_DIGEST.fullmatch(value) is None:
             raise ValueError("CapacityClaim digests must be canonical sha256 values")
+        return value
+
+    @field_validator("product_admission_digest")
+    @classmethod
+    def _require_optional_product_digest(cls, value: str | None) -> str | None:
+        if value is not None and _SHA256_DIGEST.fullmatch(value) is None:
+            raise ValueError("product admission digest must be canonical sha256")
         return value
 
     @field_validator(
@@ -245,6 +273,7 @@ class CapacityClaim(BaseModel):
         "mark_price_at_claim",
         "planned_stop_risk_fraction",
         "planned_stop_risk_budget",
+        "session_multiplier",
         "post_fill_stop_risk_limit",
         "max_initial_margin_utilization",
         "min_liquidation_distance_to_stop_distance_ratio",
@@ -263,6 +292,8 @@ class CapacityClaim(BaseModel):
     @field_validator(
         "total_initial_margin_at_claim",
         "total_maintenance_margin_at_claim",
+        "portfolio_stop_risk_before",
+        "portfolio_stop_risk_after",
     )
     @classmethod
     def _require_nonnegative_financial(cls, value: Decimal) -> Decimal:
@@ -309,6 +340,16 @@ class CapacityClaim(BaseModel):
             or self.expires_at_ms <= self.created_at_ms
         ):
             raise ValueError("CapacityClaim authority and time must be positive")
+        if (self.universe_version_id is None) != (self.universe_digest is None):
+            raise ValueError("CapacityClaim Universe lineage must be frozen together")
+        if (self.projection_run_id is None) != (self.armed_structure_id is None):
+            raise ValueError("CapacityClaim ranked lineage must be frozen together")
+        if (
+            self.exit_policy.exit_policy_id != self.exit_policy_id
+            or self.exit_policy.exit_policy_version != self.exit_policy_version
+            or self.exit_policy.semantic_hash() != self.exit_policy_digest
+        ):
+            raise ValueError("CapacityClaim frozen exit-policy lineage is inconsistent")
         if self.entry_order_type is EntryOrderType.MARKET:
             if self.entry_limit_price is not None:
                 raise ValueError("market CapacityClaim forbids a limit price")
@@ -326,6 +367,15 @@ class CapacityClaim(BaseModel):
             raise ValueError("CapacityClaim selected leverage exceeds exchange maximum")
         if self.risk_at_stop > self.planned_stop_risk_budget:
             raise ValueError("CapacityClaim stop risk exceeds its planned budget")
+        if (
+            self.portfolio_stop_risk_after
+            < self.portfolio_stop_risk_before
+            or self.portfolio_stop_risk_after
+            != self.portfolio_stop_risk_before + self.risk_at_stop
+        ):
+            raise ValueError("CapacityClaim portfolio stop-risk lineage is inconsistent")
+        if not self.session_code.strip() or not Decimal("0") < self.session_multiplier <= 1:
+            raise ValueError("CapacityClaim requires a valid action-time session")
         if self.post_fill_stop_risk_limit < self.planned_stop_risk_budget:
             raise ValueError("CapacityClaim post-fill limit undercuts planned risk")
         if (
@@ -348,6 +398,18 @@ class CapacityClaim(BaseModel):
             runtime_scope_id=self.runtime_scope_id,
             runtime_scope_version=self.runtime_scope_version,
             fact_digest=self.fact_digest,
+            universe_version_id=self.universe_version_id,
+            universe_digest=self.universe_digest,
+            projection_run_id=self.projection_run_id,
+            armed_structure_id=self.armed_structure_id,
+            product_policy_version_id=self.product_policy_version_id,
+            session_code=self.session_code,
+            session_multiplier=self.session_multiplier,
+            product_admission_digest=self.product_admission_digest,
+            exit_policy_id=self.exit_policy_id,
+            exit_policy_version=self.exit_policy_version,
+            exit_policy_digest=self.exit_policy_digest,
+            exit_policy=self.exit_policy,
             capacity_claim_id=self.capacity_claim_id,
             created_at_ms=self.created_at_ms,
             expires_at_ms=self.expires_at_ms,
@@ -360,7 +422,7 @@ class CapacityClaim(BaseModel):
             leverage_change_required=self.leverage_change_required,
             reserved_margin=self.reserved_margin,
             risk_reservation_basis="planned_stop_distance",
-            margin_mode=self.margin_mode_at_claim,
+            margin_mode=cast(Literal["cross"], self.margin_mode_at_claim),
             min_liquidation_distance_to_stop_distance_ratio=(
                 self.min_liquidation_distance_to_stop_distance_ratio
             ),
@@ -398,6 +460,15 @@ def freeze_capacity_claim(
     runtime_scope_id: str,
     runtime_scope_version: int,
     fact_digest: str,
+    universe_version_id: str | None,
+    universe_digest: str | None,
+    projection_run_id: str | None,
+    armed_structure_id: str | None,
+    product_policy_version_id: str | None,
+    exit_policy_id: str,
+    exit_policy_version: str,
+    exit_policy_digest: str,
+    exit_policy: ExitPolicy,
     entry_admission_snapshot_digest: str,
     account_entry_health_digest: str,
     instrument_entry_health_digest: str,
@@ -416,6 +487,11 @@ def freeze_capacity_claim(
     remaining_slots_at_claim: int,
     planned_stop_risk_fraction: Decimal,
     planned_stop_risk_budget: Decimal,
+    portfolio_stop_risk_before: Decimal,
+    portfolio_stop_risk_after: Decimal,
+    session_code: str,
+    session_multiplier: Decimal,
+    product_admission_digest: str | None,
     max_post_fill_stop_risk_overrun_fraction: Decimal,
     post_fill_stop_risk_limit: Decimal,
     max_initial_margin_utilization: Decimal,
@@ -451,6 +527,15 @@ def freeze_capacity_claim(
         "runtime_scope_id": runtime_scope_id,
         "runtime_scope_version": runtime_scope_version,
         "fact_digest": fact_digest,
+        "universe_version_id": universe_version_id,
+        "universe_digest": universe_digest,
+        "projection_run_id": projection_run_id,
+        "armed_structure_id": armed_structure_id,
+        "product_policy_version_id": product_policy_version_id,
+        "exit_policy_id": exit_policy_id,
+        "exit_policy_version": exit_policy_version,
+        "exit_policy_digest": exit_policy_digest,
+        "exit_policy": exit_policy,
         "entry_admission_snapshot_digest": entry_admission_snapshot_digest,
         "account_entry_health_digest": account_entry_health_digest,
         "instrument_entry_health_digest": instrument_entry_health_digest,
@@ -469,6 +554,11 @@ def freeze_capacity_claim(
         "remaining_slots_at_claim": remaining_slots_at_claim,
         "planned_stop_risk_fraction": planned_stop_risk_fraction,
         "planned_stop_risk_budget": planned_stop_risk_budget,
+        "portfolio_stop_risk_before": portfolio_stop_risk_before,
+        "portfolio_stop_risk_after": portfolio_stop_risk_after,
+        "session_code": session_code,
+        "session_multiplier": session_multiplier,
+        "product_admission_digest": product_admission_digest,
         "max_post_fill_stop_risk_overrun_fraction": (
             max_post_fill_stop_risk_overrun_fraction
         ),
@@ -571,6 +661,7 @@ def _normalize_claim_decimals_for_storage(
         "min_liquidation_distance_to_stop_distance_ratio",
         "max_post_fill_stop_risk_overrun_fraction",
         "planned_stop_risk_fraction",
+        "session_multiplier",
         "projected_liquidation_distance",
         "projected_liquidation_distance_to_stop_distance_ratio",
         "quantity",
@@ -583,6 +674,8 @@ def _normalize_claim_decimals_for_storage(
         "reserved_margin",
         "notional",
         "risk_at_stop",
+        "portfolio_stop_risk_before",
+        "portfolio_stop_risk_after",
     }
     for field_name in floor_fields:
         payload[field_name] = _quantize_storage_decimal(
@@ -634,5 +727,3 @@ def _quantize_storage_decimal(value: Decimal, *, rounding: str) -> Decimal:
     with localcontext() as context:
         context.prec = 60
         return value.quantize(_PERSISTED_DECIMAL_QUANTUM, rounding=rounding)
-    venue_id: str
-    exchange_instrument_id: str

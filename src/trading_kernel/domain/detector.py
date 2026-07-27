@@ -93,23 +93,9 @@ def detector_for(event_spec_id: str) -> StrategyDetector:
     except KeyError as exc:
         raise KeyError(f"unknown Event Spec: {event_spec_id}") from exc
 
-    from src.trading_kernel.domain.detectors.brf2 import BRF2ShortDetector
-    from src.trading_kernel.domain.detectors.cpm import CPMLongDetector
-    from src.trading_kernel.domain.detectors.mi import MILongDetector
-    from src.trading_kernel.domain.detectors.mpg import MPGLongDetector
-    from src.trading_kernel.domain.detectors.sor import SORDetector
+    from src.trading_kernel.domain.strategy_plugin import strategy_plugin_for
 
-    if contract.event_id == "CPM-LONG":
-        return CPMLongDetector(contract)
-    if contract.event_id == "MPG-LONG":
-        return MPGLongDetector(contract)
-    if contract.event_id == "MI-LONG":
-        return MILongDetector(contract)
-    if contract.event_id in {"SOR-LONG", "SOR-SHORT"}:
-        return SORDetector(contract)
-    if contract.event_id == "BRF2-SHORT":
-        return BRF2ShortDetector(contract)
-    raise KeyError(f"registered Event has no detector: {event_spec_id}")
+    return strategy_plugin_for(event_spec_id).detector(contract)
 
 
 def invalid_result(
@@ -200,11 +186,6 @@ def validate_snapshot_scope(
     contract: RegisteredStrategyContract,
     snapshot: MarketSnapshot,
 ) -> str | None:
-    supported = {
-        item.exchange_instrument_id for item in contract.candidate_instruments
-    }
-    if snapshot.exchange_instrument_id not in supported:
-        return "detector_invalid_unsupported_instrument"
     primary = snapshot.candles(contract.timeframe)
     if primary and primary[-1].close_time_ms != snapshot.trigger_candle_close_time_ms:
         return "detector_invalid_trigger_time_mismatch"

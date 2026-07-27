@@ -8,7 +8,7 @@ import inspect
 import re
 from collections.abc import Callable, Mapping
 from decimal import Decimal
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from pydantic import JsonValue
 
@@ -28,10 +28,12 @@ from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
     InstrumentRulesRequest,
+    ProductMarketFactsRequest,
     LifecycleFactsRequest,
     PositionSnapshotRequest,
     ReviewEconomicsRequest,
 )
+from src.trading_kernel.domain.product_admission import ProductMarketFacts
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
@@ -156,12 +158,25 @@ class CcxtVenueAdapter:
         venue_symbols: Mapping[tuple[str, str], str],
         settlement_assets: Mapping[tuple[str, str], str] | None = None,
         taker_fee_rates: Mapping[tuple[str, str], Decimal] | None = None,
+        default_settlement_asset: str | None = None,
+        default_taker_fee_rate: Decimal | None = None,
         clock_ms: Callable[[], int],
     ) -> None:
         self._exchanges = dict(exchanges)
         self._venue_symbols = dict(venue_symbols)
         self._settlement_assets = dict(settlement_assets or {})
         self._taker_fee_rates = dict(taker_fee_rates or {})
+        self._default_settlement_asset = (
+            None
+            if default_settlement_asset is None
+            else default_settlement_asset.strip().upper()
+        )
+        self._default_taker_fee_rate = default_taker_fee_rate
+        if (
+            self._default_taker_fee_rate is not None
+            and self._default_taker_fee_rate < 0
+        ):
+            raise ValueError("default taker fee rate must be nonnegative")
         self._clock_ms = clock_ms
 
     async def close(self) -> None:
@@ -357,6 +372,44 @@ class CcxtVenueAdapter:
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
 
+    async def read_product_market_facts(
+        self,
+        request: ProductMarketFactsRequest,
+    ) -> ProductMarketFacts:
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+        )
+        premium_operation = getattr(exchange, "fapiPublicGetPremiumIndex", None)
+        if not callable(premium_operation):
+            raise RuntimeError("venue does not expose mark/index/funding facts")
+        order_book, premium = await asyncio.gather(
+            _call_raw_exchange(exchange.fetch_order_book, symbol, 5),
+            _call_raw_exchange(
+                premium_operation,
+                {"symbol": _binance_market_id(symbol)},
+            ),
+        )
+        book = _require_mapping(order_book, name="product order book")
+        premium_row = _require_mapping(premium, name="product premium index")
+        return ProductMarketFacts(
+            exchange_instrument_id=request.exchange_instrument_id,
+            best_bid=_top_of_book_price(book, "bids"),
+            best_ask=_top_of_book_price(book, "asks"),
+            mark_price=Decimal(str(premium_row.get("markPrice") or "0")),
+            index_price=Decimal(str(premium_row.get("indexPrice") or "0")),
+            top5_bid_depth=_top5_notional_depth(book, "bids"),
+            top5_ask_depth=_top5_notional_depth(book, "asks"),
+            funding_rate=Decimal(
+                str(premium_row.get("lastFundingRate") or "0")
+            ),
+            funding_observed_at_ms=int(
+                str(premium_row.get("time") or request.observed_at_ms)
+            ),
+            observed_at_ms=request.observed_at_ms,
+        )
+
     async def read_position_snapshot(
         self,
         request: PositionSnapshotRequest,
@@ -424,9 +477,14 @@ class CcxtVenueAdapter:
             account_id=domain.account_id,
             exchange_instrument_id=domain.exchange_instrument_id,
         )
-        key = (domain.venue_id, domain.exchange_instrument_id)
-        settlement_asset = self._settlement_assets.get(key)
-        taker_fee_rate = self._taker_fee_rates.get(key)
+        settlement_asset = self._settlement_asset_for(
+            venue_id=domain.venue_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+        )
+        taker_fee_rate = self._taker_fee_rate_for(
+            venue_id=domain.venue_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+        )
         if not settlement_asset:
             raise RuntimeError("canonical instrument has no settlement asset mapping")
         if taker_fee_rate is None:
@@ -526,8 +584,9 @@ class CcxtVenueAdapter:
             account_id=domain.account_id,
             exchange_instrument_id=domain.exchange_instrument_id,
         )
-        settlement_asset = self._settlement_assets.get(
-            (domain.venue_id, domain.exchange_instrument_id)
+        settlement_asset = self._settlement_asset_for(
+            venue_id=domain.venue_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
         )
         if not settlement_asset:
             raise RuntimeError("canonical instrument has no settlement asset mapping")
@@ -609,14 +668,11 @@ class CcxtVenueAdapter:
         )
 
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
-        exchange_key = (request.venue_id, request.account_id)
-        exchange = self._exchanges.get(exchange_key)
-        if exchange is None:
-            raise RuntimeError("venue/account adapter is not configured")
-        symbol_key = (request.venue_id, request.exchange_instrument_id)
-        symbol = self._venue_symbols.get(symbol_key)
-        if not symbol:
-            raise RuntimeError("canonical instrument has no venue symbol mapping")
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+        )
 
         params: dict[str, object] = {"positionSide": request.position_side.upper()}
 
@@ -912,8 +968,47 @@ class CcxtVenueAdapter:
             raise RuntimeError("venue/account adapter is not configured")
         symbol = self._venue_symbols.get((venue_id, exchange_instrument_id))
         if not symbol:
-            raise RuntimeError("canonical instrument has no venue symbol mapping")
+            symbol = _canonical_binance_usdm_symbol(
+                venue_id=venue_id,
+                exchange_instrument_id=exchange_instrument_id,
+            )
         return exchange, symbol
+
+    def _settlement_asset_for(
+        self,
+        *,
+        venue_id: str,
+        exchange_instrument_id: str,
+    ) -> str | None:
+        configured = self._settlement_assets.get(
+            (venue_id, exchange_instrument_id)
+        )
+        if configured:
+            return configured
+        if self._default_settlement_asset and _is_canonical_binance_usdm(
+            venue_id=venue_id,
+            exchange_instrument_id=exchange_instrument_id,
+        ):
+            return self._default_settlement_asset
+        return None
+
+    def _taker_fee_rate_for(
+        self,
+        *,
+        venue_id: str,
+        exchange_instrument_id: str,
+    ) -> Decimal | None:
+        configured = self._taker_fee_rates.get(
+            (venue_id, exchange_instrument_id)
+        )
+        if configured is not None:
+            return configured
+        if self._default_taker_fee_rate is not None and _is_canonical_binance_usdm(
+            venue_id=venue_id,
+            exchange_instrument_id=exchange_instrument_id,
+        ):
+            return self._default_taker_fee_rate
+        return None
 
     def _instrument_id_for_symbol(
         self,
@@ -927,6 +1022,40 @@ class CcxtVenueAdapter:
             if configured_venue_id == venue_id and venue_symbol == symbol:
                 return exchange_instrument_id
         return f"unmapped:{symbol}"
+
+
+def _is_canonical_binance_usdm(
+    *,
+    venue_id: str,
+    exchange_instrument_id: str,
+) -> bool:
+    try:
+        _canonical_binance_usdm_symbol(
+            venue_id=venue_id,
+            exchange_instrument_id=exchange_instrument_id,
+        )
+    except RuntimeError:
+        return False
+    return True
+
+
+def _canonical_binance_usdm_symbol(
+    *,
+    venue_id: str,
+    exchange_instrument_id: str,
+) -> str:
+    prefix = "binance-usdm:"
+    suffix = ":perpetual"
+    if (
+        venue_id != "binance-usdm"
+        or not exchange_instrument_id.startswith(prefix)
+        or not exchange_instrument_id.endswith(suffix)
+    ):
+        raise RuntimeError("canonical instrument has no venue symbol mapping")
+    venue_symbol = exchange_instrument_id[len(prefix) : -len(suffix)]
+    if not venue_symbol.endswith("USDT") or len(venue_symbol) <= 4:
+        raise RuntimeError("canonical instrument has no venue symbol mapping")
+    return f"{venue_symbol[:-4]}/USDT:USDT"
 
 
 async def _call_exchange(
@@ -1048,7 +1177,7 @@ def _admission_balance_decimal(
 
 
 def _admission_margin_mode(rows: list[object]) -> Literal["cross", "isolated"]:
-    modes: set[str] = set()
+    modes: set[Literal["cross", "isolated"]] = set()
     for row in rows:
         mapping = _require_mapping(row, name="admission position row")
         raw = _mapping_value(mapping.get("info"), "marginType")
@@ -1057,10 +1186,10 @@ def _admission_margin_mode(rows: list[object]) -> Literal["cross", "isolated"]:
         normalized = str(raw or "").strip().lower()
         if normalized not in {"cross", "isolated"}:
             raise RuntimeError("venue admission position lacks valid margin mode")
-        modes.add(normalized)
+        modes.add(cast(Literal["cross", "isolated"], normalized))
     if len(modes) != 1:
         raise RuntimeError("venue admission margin mode is absent or contradictory")
-    return next(iter(modes))  # type: ignore[return-value]
+    return next(iter(modes))
 
 
 def _admission_instrument_facts(
@@ -1383,6 +1512,25 @@ def _top_of_book_price(
     if result <= 0:
         raise RuntimeError(f"venue order book {side} price is non-positive")
     return result
+
+
+def _top5_notional_depth(
+    value: Mapping[object, object],
+    side: Literal["bids", "asks"],
+) -> Decimal:
+    rows = value.get(side)
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError(f"venue order book {side} is missing")
+    total = Decimal("0")
+    for row in rows[:5]:
+        if not isinstance(row, (list, tuple)) or len(row) < 2:
+            raise RuntimeError(f"venue order book {side} level is invalid")
+        price = Decimal(str(row[0] or "0"))
+        quantity = Decimal(str(row[1] or "0"))
+        if price <= 0 or quantity < 0:
+            raise RuntimeError(f"venue order book {side} depth is invalid")
+        total += price * quantity
+    return total
 
 
 def _balance_decimal(
@@ -1769,7 +1917,7 @@ def _lifecycle_market_facts(
 
 def _account_position_mode(
     value: Mapping[object, object],
-) -> str:
+) -> Literal["independent_sides", "one_way"]:
     hedged = value.get("hedged")
     if not isinstance(hedged, bool):
         raise RuntimeError("venue position mode response lacks hedged boolean")

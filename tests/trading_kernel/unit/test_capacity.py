@@ -99,6 +99,7 @@ def _policy() -> CapacityPolicy:
         policy_version=7,
         max_concurrent_tickets=3,
         planned_stop_risk_fraction=Decimal("0.03"),
+        max_portfolio_stop_risk_fraction=Decimal("0.09"),
         max_initial_margin_utilization=Decimal("0.90"),
         max_leverage=10,
         supported_margin_mode="cross",

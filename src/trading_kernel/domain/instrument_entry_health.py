@@ -180,6 +180,11 @@ def _health(
         "entry_admission_snapshot_digest": snapshot_digest,
     }
     return InstrumentEntryHealth(
-        **payload,
+        status=status,
+        configured_leverage=configured_leverage,
+        leverage_change_allowed=leverage_change_allowed,
+        entry_block_scope=scope,
+        entry_block_key=block_key,
+        entry_admission_snapshot_digest=snapshot_digest,
         decision_digest=canonical_digest(payload),
     )

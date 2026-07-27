@@ -45,3 +45,48 @@ class PublicMarketSource(Protocol):
         self,
         request: ClosedCandleRequest,
     ) -> tuple[ClosedCandle, ...]: ...
+
+    async def fetch_closed_candle_page(
+        self,
+        request: "ClosedCandlePageRequest",
+    ) -> "ClosedCandlePage": ...
+
+
+class ClosedCandlePageRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_instrument_id: str
+    timeframe: Timeframe
+    page_limit: int
+    before_close_time_ms: int
+
+    @field_validator("exchange_instrument_id", mode="before")
+    @classmethod
+    def _require_page_instrument(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("candle page instrument must be non-blank")
+        return normalized
+
+    @field_validator("page_limit")
+    @classmethod
+    def _require_page_limit(cls, value: int) -> int:
+        if value <= 0 or value > 500:
+            raise ValueError("candle page limit must be between 1 and 500")
+        return value
+
+    @field_validator("before_close_time_ms")
+    @classmethod
+    def _require_page_boundary(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("candle page boundary must be positive")
+        return value
+
+
+class ClosedCandlePage(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_instrument_id: str
+    timeframe: Timeframe
+    candles: tuple[ClosedCandle, ...]
+    next_before_close_time_ms: int | None

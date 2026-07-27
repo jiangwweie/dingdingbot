@@ -7,6 +7,7 @@ from src.trading_kernel.application.produce_strategy_signal import (
 )
 from src.trading_kernel.domain.market import MarketSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.domain.strategy_universe import universe_for_event_spec
 from tests.trading_kernel.unit.detectors.fixtures import cpm_long_snapshot
 
 
@@ -36,6 +37,7 @@ def test_signal_identity_is_stable_for_the_same_scope_event_and_fact_bundle() ->
     )
     snapshot = cpm_long_snapshot()
     result = evaluate_strategy_snapshot(contract, snapshot)
+    universe = universe_for_event_spec(contract.event_spec_id)
     scope = RuntimeScopeSnapshot(
         runtime_scope_id="scope-cpm-eth-long",
         strategy_group_id=contract.strategy_group_id,
@@ -46,20 +48,26 @@ def test_signal_identity_is_stable_for_the_same_scope_event_and_fact_bundle() ->
         exchange_instrument_id=snapshot.exchange_instrument_id,
         position_side="long",
         enabled=True,
+        universe_version_id=universe.universe_version_id,
+        universe_digest=universe.semantic_digest(),
         scope_version=1,
     )
 
     first = produce_strategy_signal(
         contract=contract,
         scope=scope,
+        snapshot=snapshot,
         detector_result=result,
         persisted_facts=result.facts,
+        universe=universe,
     )
     second = produce_strategy_signal(
         contract=contract,
         scope=scope,
+        snapshot=snapshot,
         detector_result=result,
         persisted_facts=result.facts,
+        universe=universe,
     )
 
     assert first == second

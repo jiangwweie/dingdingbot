@@ -41,8 +41,10 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_scopes_current,
     signal_events,
     signal_fact_snapshots,
-    strategy_candidate_scopes,
     strategy_groups,
+    strategy_universe_current,
+    strategy_universe_members,
+    strategy_universe_versions,
     strategy_versions,
     trade_tickets,
     owner_policy_current,
@@ -78,6 +80,37 @@ class PostgresSignalRepository:
             return None
         facts = await self.get_fact_snapshots(signal_event_id)
         return _signal_from_row(row, facts)
+
+    async def get_latest_for_event_instrument(
+        self,
+        *,
+        event_spec_id: str,
+        exchange_instrument_id: str,
+        since_ms: int,
+    ) -> StrategySignal | None:
+        row = (
+            await self._connection.execute(
+                sa.select(signal_events)
+                .where(
+                    signal_events.c.event_spec_id == event_spec_id,
+                    signal_events.c.exchange_instrument_id
+                    == exchange_instrument_id,
+                    signal_events.c.occurred_at_ms >= since_ms,
+                )
+                .order_by(
+                    signal_events.c.occurred_at_ms.desc(),
+                    signal_events.c.signal_event_id.desc(),
+                )
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        signal_event_id = str(row["signal_event_id"])
+        return _signal_from_row(
+            row,
+            await self.get_fact_snapshots(signal_event_id),
+        )
 
     async def get_fact_snapshots(
         self,
@@ -181,7 +214,7 @@ class PostgresSignalRepository:
             sa.select(
                 signal_events,
                 owner_policy_current.c.priority_rank.label("owner_priority"),
-                strategy_candidate_scopes.c.priority_rank.label("scope_priority"),
+                strategy_universe_members.c.priority_rank.label("scope_priority"),
             )
             .join(
                 readiness_current,
@@ -199,28 +232,37 @@ class PostgresSignalRepository:
                 == runtime_scopes_current.c.owner_policy_id,
             )
             .join(
-                strategy_candidate_scopes,
+                strategy_universe_members,
                 sa.and_(
-                    strategy_candidate_scopes.c.event_spec_id
-                    == signal_events.c.event_spec_id,
-                    strategy_candidate_scopes.c.exchange_instrument_id
+                    strategy_universe_members.c.universe_version_id
+                    == runtime_scopes_current.c.universe_version_id,
+                    strategy_universe_members.c.exchange_instrument_id
                     == signal_events.c.exchange_instrument_id,
-                    strategy_candidate_scopes.c.position_side
-                    == signal_events.c.position_side,
+                    strategy_universe_members.c.member_role == "candidate",
+                ),
+            )
+            .join(
+                strategy_universe_current,
+                sa.and_(
+                    strategy_universe_current.c.event_spec_id
+                    == signal_events.c.event_spec_id,
+                    strategy_universe_current.c.universe_version_id
+                    == runtime_scopes_current.c.universe_version_id,
                 ),
             )
             .where(
                 readiness_current.c.readiness_state == "candidate_ready",
                 signal_events.c.expires_at_ms > now_ms,
                 runtime_scopes_current.c.enabled.is_(True),
+                runtime_scopes_current.c.entry_enabled.is_(True),
+                runtime_scopes_current.c.scope_state == "active",
                 owner_policy_current.c.enabled.is_(True),
                 owner_policy_current.c.new_entry_submit_enabled.is_(True),
-                strategy_candidate_scopes.c.status == "active",
                 ~already_ticketed,
             )
             .order_by(
                 owner_policy_current.c.priority_rank,
-                strategy_candidate_scopes.c.priority_rank,
+                strategy_universe_members.c.priority_rank,
                 signal_events.c.occurred_at_ms,
                 signal_events.c.observed_at_ms,
                 signal_events.c.signal_event_id,
@@ -262,8 +304,19 @@ class PostgresSignalRepository:
                 event_specs.c.event_spec_id
                 == runtime_scopes_current.c.event_spec_id,
             )
+            .join(
+                strategy_universe_members,
+                sa.and_(
+                    strategy_universe_members.c.universe_version_id
+                    == runtime_scopes_current.c.universe_version_id,
+                    strategy_universe_members.c.exchange_instrument_id
+                    == runtime_scopes_current.c.exchange_instrument_id,
+                    strategy_universe_members.c.member_role == "candidate",
+                ),
+            )
             .where(
                 runtime_scopes_current.c.enabled.is_(True),
+                runtime_scopes_current.c.observation_enabled.is_(True),
                 event_specs.c.status == "active",
                 sa.or_(
                     runtime_scopes_current.c.observation_due_at_ms.is_(None),
@@ -472,8 +525,29 @@ class PostgresSignalRepository:
         *,
         for_update: bool = False,
     ) -> RuntimeScopeSnapshot | None:
-        statement = sa.select(runtime_scopes_current).where(
-            runtime_scopes_current.c.runtime_scope_id == runtime_scope_id
+        statement = (
+            sa.select(
+                runtime_scopes_current,
+                strategy_universe_versions.c.semantic_digest.label(
+                    "universe_digest"
+                ),
+            )
+            .outerjoin(
+                strategy_universe_versions,
+                strategy_universe_versions.c.universe_version_id
+                == runtime_scopes_current.c.universe_version_id,
+            )
+            .outerjoin(
+                strategy_universe_members,
+                sa.and_(
+                    strategy_universe_members.c.universe_version_id
+                    == runtime_scopes_current.c.universe_version_id,
+                    strategy_universe_members.c.exchange_instrument_id
+                    == runtime_scopes_current.c.exchange_instrument_id,
+                    strategy_universe_members.c.member_role == "candidate",
+                ),
+            )
+            .where(runtime_scopes_current.c.runtime_scope_id == runtime_scope_id)
         )
         if for_update:
             statement = statement.with_for_update(of=runtime_scopes_current)
@@ -676,6 +750,13 @@ def _signal_values(signal: StrategySignal) -> dict[str, object]:
         "exchange_instrument_id": signal.exchange_instrument_id,
         "position_side": signal.position_side,
         "fact_digest": signal.fact_digest,
+        "universe_version_id": signal.universe_version_id,
+        "universe_digest": signal.universe_digest,
+        "projection_run_id": signal.projection_run_id,
+        "armed_structure_id": signal.armed_structure_id,
+        "session_code": signal.session_code,
+        "session_multiplier": signal.session_multiplier,
+        "product_policy_version_id": signal.product_policy_version_id,
         "occurred_at_ms": signal.occurred_at_ms,
         "observed_at_ms": signal.observed_at_ms,
         "expires_at_ms": signal.expires_at_ms,
@@ -712,6 +793,35 @@ def _signal_from_row(
         exchange_instrument_id=str(row["exchange_instrument_id"]),
         position_side=cast(Literal["long", "short"], str(row["position_side"])),
         fact_digest=str(row["fact_digest"]),
+        universe_version_id=(
+            None
+            if row["universe_version_id"] is None
+            else str(row["universe_version_id"])
+        ),
+        universe_digest=(
+            None if row["universe_digest"] is None else str(row["universe_digest"])
+        ),
+        projection_run_id=(
+            None if row["projection_run_id"] is None else str(row["projection_run_id"])
+        ),
+        armed_structure_id=(
+            None
+            if row["armed_structure_id"] is None
+            else str(row["armed_structure_id"])
+        ),
+        session_code=(
+            None if row["session_code"] is None else str(row["session_code"])
+        ),
+        session_multiplier=(
+            None
+            if row["session_multiplier"] is None
+            else Decimal(str(row["session_multiplier"]))
+        ),
+        product_policy_version_id=(
+            None
+            if row["product_policy_version_id"] is None
+            else str(row["product_policy_version_id"])
+        ),
         occurred_at_ms=int(row["occurred_at_ms"]),
         observed_at_ms=int(row["observed_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),

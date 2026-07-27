@@ -21,6 +21,9 @@ from src.trading_kernel.application.ports import (
     RuntimeScopeSnapshot,
     UnitOfWorkFactory,
 )
+from src.trading_kernel.application.observe_ranked_strategy_scope import (
+    prepare_ranked_strategy_snapshot,
+)
 from src.trading_kernel.application.produce_strategy_signal import (
     evaluate_strategy_snapshot,
     produce_strategy_signal,
@@ -37,6 +40,7 @@ from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     registered_strategy_contracts,
 )
+from src.trading_kernel.domain.strategy_universe import StrategyUniverseVersion
 
 
 class ObservationStatus(StrEnum):
@@ -93,7 +97,13 @@ async def observe_strategy_scope(
 ) -> ObservationResult:
     async with uow_factory() as uow:
         scope = await uow.signals.get_runtime_scope(request.runtime_scope_id)
-        if scope is None or not scope.enabled:
+        if (
+            scope is None
+            or not scope.enabled
+            or not scope.observation_enabled
+            or scope.universe_version_id is None
+            or scope.universe_digest is None
+        ):
             return _invalid_observation(
                 request,
                 event_spec_id=None if scope is None else scope.event_spec_id,
@@ -113,13 +123,43 @@ async def observe_strategy_scope(
                 event_spec_id=scope.event_spec_id,
                 reason="registry_scope_mismatch",
             )
+        stored_universe = await uow.strategy_universes.get(
+            scope.universe_version_id
+        )
+        if stored_universe is None:
+            return _invalid_observation(
+                request,
+                event_spec_id=scope.event_spec_id,
+                reason="universe_authority_missing",
+            )
+        universe, _ = stored_universe
+        if (
+            universe.event_spec_id != scope.event_spec_id
+            or not universe.contains_candidate(scope.exchange_instrument_id)
+            or universe.semantic_digest() != scope.universe_digest
+        ):
+            return _invalid_observation(
+                request,
+                event_spec_id=scope.event_spec_id,
+                reason="universe_authority_mismatch",
+            )
 
     try:
-        snapshot = await _load_market_snapshot(
-            market_source,
-            contract,
-            scope,
-            request.trigger_candle_close_time_ms,
+        snapshot = (
+            await prepare_ranked_strategy_snapshot(
+                uow_factory,
+                market_source,
+                scope=scope,
+                trigger_close_time_ms=request.trigger_candle_close_time_ms,
+            )
+            if contract.event_id == "RSRVCB-LONG-15M"
+            else await _load_market_snapshot(
+                market_source,
+                contract,
+                scope,
+                universe,
+                request.trigger_candle_close_time_ms,
+            )
         )
     except (RuntimeError, TimeoutError, ValueError):
         async with uow_factory() as uow:
@@ -135,6 +175,25 @@ async def observe_strategy_scope(
             request,
             event_spec_id=contract.event_spec_id,
             reason="market_snapshot_unavailable",
+        )
+
+    if snapshot is None:
+        async with uow_factory() as uow:
+            await uow.signals.save_readiness(
+                runtime_scope_id=scope.runtime_scope_id,
+                readiness_state="signal_absent",
+                first_blocker="signal_absent",
+                signal_event_id=None,
+                fact_summary={"detector_reason": "rsr_vcb_trigger_absent"},
+                updated_at_ms=request.trigger_candle_close_time_ms,
+            )
+        return ObservationResult(
+            status=ObservationStatus.NO_SIGNAL,
+            runtime_scope_id=scope.runtime_scope_id,
+            event_spec_id=contract.event_spec_id,
+            detector_reason="rsr_vcb_trigger_absent",
+            signal_event_id=None,
+            current_fact_count=0,
         )
 
     detector_result = evaluate_strategy_snapshot(contract, snapshot)
@@ -185,9 +244,40 @@ async def observe_strategy_scope(
         signal = produce_strategy_signal(
             contract=contract,
             scope=scope,
+            snapshot=snapshot,
             detector_result=detector_result,
             persisted_facts=persisted_facts,
+            universe=universe,
         )
+        if contract.event_id == "RSRVCB-LONG-15M":
+            latest = await uow.signals.get_latest_for_event_instrument(
+                event_spec_id=contract.event_spec_id,
+                exchange_instrument_id=scope.exchange_instrument_id,
+                since_ms=request.trigger_candle_close_time_ms - 86_400_000,
+            )
+            if (
+                latest is not None
+                and latest.signal_event_id != signal.signal_event_id
+            ):
+                await uow.signals.save_readiness(
+                    runtime_scope_id=scope.runtime_scope_id,
+                    readiness_state="signal_absent",
+                    first_blocker="rsr_vcb_cooldown",
+                    signal_event_id=None,
+                    fact_summary={
+                        "detector_reason": "rsr_vcb_cooldown",
+                        "prior_signal_event_id": latest.signal_event_id,
+                    },
+                    updated_at_ms=request.trigger_candle_close_time_ms,
+                )
+                return ObservationResult(
+                    status=ObservationStatus.NO_SIGNAL,
+                    runtime_scope_id=scope.runtime_scope_id,
+                    event_spec_id=contract.event_spec_id,
+                    detector_reason="rsr_vcb_cooldown",
+                    signal_event_id=None,
+                    current_fact_count=len(persisted_facts),
+                )
         ingest_result = await ingest_signal(
             uow,
             IngestSignalRequest(
@@ -233,11 +323,6 @@ def _contract_for_scope(
             and contract.strategy_group_id == scope.strategy_group_id
             and contract.strategy_version_id == scope.strategy_version_id
             and contract.position_side == scope.position_side
-            and scope.exchange_instrument_id
-            in {
-                item.exchange_instrument_id
-                for item in contract.candidate_instruments
-            }
         ):
             return contract
     return None
@@ -247,6 +332,7 @@ async def _load_market_snapshot(
     market_source: PublicMarketSource,
     contract: RegisteredStrategyContract,
     scope: RuntimeScopeSnapshot,
+    universe: StrategyUniverseVersion,
     trigger_ms: int,
 ) -> MarketSnapshot:
     if contract.event_id in {"SOR-LONG", "SOR-SHORT"}:
@@ -288,6 +374,7 @@ async def _load_market_snapshot(
         market_source,
         contract,
         scope,
+        universe,
         trigger_ms,
         candidate_candles=windows.get("1h", ()),
     )
@@ -304,6 +391,7 @@ async def _build_comparative_strength(
     market_source: PublicMarketSource,
     contract: RegisteredStrategyContract,
     scope: RuntimeScopeSnapshot,
+    universe: StrategyUniverseVersion,
     trigger_ms: int,
     *,
     candidate_candles: tuple[ClosedCandle, ...],
@@ -336,10 +424,17 @@ async def _build_comparative_strength(
         ) * Decimal("100")
         return instrument_id, return_pct
 
+    if (
+        universe.event_spec_id != contract.event_spec_id
+        or not universe.contains_candidate(scope.exchange_instrument_id)
+        or scope.universe_version_id != universe.universe_version_id
+        or scope.universe_digest != universe.semantic_digest()
+    ):
+        raise ValueError("runtime scope Universe lineage differs from loaded semantics")
     raw_members = await asyncio.gather(
         *(
             load_member(item.exchange_instrument_id)
-            for item in contract.candidate_instruments
+            for item in universe.candidate_members
         )
     )
     if any(item is None for item in raw_members):

@@ -37,6 +37,10 @@ from src.trading_kernel.domain.instrument_entry_health import (
     InstrumentEntryHealth,
     InstrumentEntryHealthStatus,
 )
+from src.trading_kernel.domain.product_admission import (
+    ProductAdmissionContext,
+    evaluate_product_admission,
+)
 from src.trading_kernel.domain.ticket import TradeTicket
 
 
@@ -57,6 +61,8 @@ class EntryDispatchPreflightStatus(StrEnum):
     QUOTE_RISK = "quote_risk"
     LIQUIDATION_FAILED = "liquidation_failed"
     LEVERAGE_MISMATCH = "leverage_mismatch"
+    PRODUCT_ADMISSION_DRIFT = "product_admission_drift"
+    SESSION_DRIFT = "session_drift"
     SET_LEVERAGE_INSTRUMENT_NOT_FLAT = "set_leverage_instrument_not_flat"
 
 
@@ -80,6 +86,7 @@ class EntryDispatchPreflightRequest(BaseModel):
     instrument_rules: InstrumentRulesFacts
     account_entry_health: AccountEntryHealth
     instrument_entry_health: InstrumentEntryHealth
+    product_admission_context: ProductAdmissionContext | None = None
     now_ms: int
 
     @field_validator("runtime_commit", "schema_revision", mode="before")
@@ -145,6 +152,9 @@ def revalidate_entry_dispatch(
         return _refused(EntryDispatchPreflightStatus.RUNTIME_FENCED)
     if not _snapshot_and_rules_are_current(request):
         return _refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
+    product_status = _revalidate_product_admission(request)
+    if product_status is not None:
+        return _refused(product_status)
     if (
         snapshot.venue_id != domain.venue_id
         or snapshot.account_id != domain.account_id
@@ -216,6 +226,48 @@ def revalidate_entry_dispatch(
     if facts.configured_leverage != ticket.selected_leverage:
         return _refused(EntryDispatchPreflightStatus.LEVERAGE_MISMATCH)
     return _allowed()
+
+
+def _revalidate_product_admission(
+    request: EntryDispatchPreflightRequest,
+) -> EntryDispatchPreflightStatus | None:
+    ticket = request.ticket
+    claim = request.capacity_claim
+    context = request.product_admission_context
+    if ticket.product_policy_version_id is None:
+        if (
+            context is not None
+            or ticket.product_admission_digest is not None
+            or claim.product_admission_digest is not None
+        ):
+            return EntryDispatchPreflightStatus.PRODUCT_ADMISSION_DRIFT
+        return None
+    if (
+        context is None
+        or context.policy.product_policy_version_id
+        != ticket.product_policy_version_id
+    ):
+        return EntryDispatchPreflightStatus.PRODUCT_ADMISSION_DRIFT
+    decision = evaluate_product_admission(
+        action_time_ms=request.now_ms,
+        order_notional=ticket.notional,
+        profile=context.profile,
+        market_facts=context.market_facts,
+        calendar=context.calendar,
+        corporate_event_admission=context.corporate_event_admission,
+        policy=context.policy,
+    )
+    if (
+        not decision.allowed
+        or ticket.product_admission_digest != claim.product_admission_digest
+    ):
+        return EntryDispatchPreflightStatus.PRODUCT_ADMISSION_DRIFT
+    if (
+        decision.session_code != ticket.session_code
+        or decision.session_multiplier != ticket.session_multiplier
+    ):
+        return EntryDispatchPreflightStatus.SESSION_DRIFT
+    return None
 
 
 def _command_matches_ticket_and_claim(

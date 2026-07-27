@@ -654,6 +654,31 @@ async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> N
 
 
 @pytest.mark.asyncio
+async def test_ccxt_adapter_resolves_new_universe_instrument_without_restart() -> None:
+    exchange = FakeAsyncExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={},
+        default_settlement_asset="USDT",
+        default_taker_fee_rate=Decimal("0.0005"),
+        clock_ms=lambda: 2_000,
+    )
+    request = _request().model_copy(
+        update={
+            "exchange_instrument_id": (
+                "binance-usdm:MSTRUSDT:perpetual"
+            )
+        }
+    )
+
+    result = await adapter.execute(request)
+
+    assert result.status is ExchangeCommandStatus.ACCEPTED
+    assert exchange.call is not None
+    assert exchange.call[0] == "MSTR/USDT:USDT"
+
+
+@pytest.mark.asyncio
 async def test_ccxt_adapter_sets_leverage_then_reads_back_without_creating_order() -> None:
     exchange = LeverageMutationExchange()
     adapter = CcxtVenueAdapter(

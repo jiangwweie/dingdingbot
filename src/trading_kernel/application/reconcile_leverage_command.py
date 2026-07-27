@@ -135,15 +135,11 @@ async def reconcile_leverage_command(
         )
         if aggregate is None:
             raise RuntimeError("leverage command has no Ticket aggregate")
-        common = {
-            "event_id": (
-                f"event:{aggregate.identity.ticket_id}:"
-                f"{aggregate.last_event_sequence + 1}"
-            ),
-            "ticket_id": aggregate.identity.ticket_id,
-            "sequence": aggregate.last_event_sequence + 1,
-            "occurred_at_ms": truth.observed_at_ms,
-        }
+        event_id = (
+            f"event:{aggregate.identity.ticket_id}:"
+            f"{aggregate.last_event_sequence + 1}"
+        )
+        sequence = aggregate.last_event_sequence + 1
         if truth.exchange_configured_leverage == current_command.payload.desired_leverage:
             result = SetLeverageCommandResult(
                 exchange_configured_leverage=truth.exchange_configured_leverage,
@@ -157,8 +153,11 @@ async def reconcile_leverage_command(
                     }
                 ),
             )
-            event = LeverageConfirmed(
-                **common,
+            confirmed_event = LeverageConfirmed(
+                event_id=event_id,
+                ticket_id=aggregate.identity.ticket_id,
+                sequence=sequence,
+                occurred_at_ms=truth.observed_at_ms,
                 exchange_configured_leverage=result.exchange_configured_leverage,
                 leverage_verified_at_ms=result.leverage_verified_at_ms,
                 leverage_verification_digest=result.leverage_verification_digest,
@@ -168,8 +167,8 @@ async def reconcile_leverage_command(
                 result=result,
             )
             await uow.commit_reduction(
-                event=event,
-                reduction=reduce_event(aggregate, event),
+                event=confirmed_event,
+                reduction=reduce_event(aggregate, confirmed_event),
                 expected_version=aggregate.version,
             )
             return ReconcileLeverageCommandResult(
@@ -177,8 +176,11 @@ async def reconcile_leverage_command(
                 command_id=current_command.command_id,
             )
 
-        event = LeverageRejected(
-            **common,
+        rejected_event = LeverageRejected(
+            event_id=event_id,
+            ticket_id=aggregate.identity.ticket_id,
+            sequence=sequence,
+            occurred_at_ms=truth.observed_at_ms,
             reason="configured_leverage_mismatch",
         )
         await uow.exchange_commands.reconcile_unknown_absent(
@@ -187,8 +189,8 @@ async def reconcile_leverage_command(
             reason="configured_leverage_mismatch",
         )
         await uow.commit_reduction(
-            event=event,
-            reduction=reduce_event(aggregate, event),
+            event=rejected_event,
+            reduction=reduce_event(aggregate, rejected_event),
             expected_version=aggregate.version,
         )
         return ReconcileLeverageCommandResult(

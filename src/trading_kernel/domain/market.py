@@ -21,6 +21,7 @@ class ClosedCandle(BaseModel):
     low: Decimal
     close: Decimal
     volume: Decimal
+    quote_volume: Decimal | None = None
 
     @model_validator(mode="after")
     def _validate_closed_candle(self) -> "ClosedCandle":
@@ -30,6 +31,8 @@ class ClosedCandle(BaseModel):
             raise ValueError("OHLC values must be positive")
         if self.volume < Decimal("0"):
             raise ValueError("candle volume must be nonnegative")
+        if self.quote_volume is not None and self.quote_volume < Decimal("0"):
+            raise ValueError("candle quote volume must be nonnegative")
         if self.high < max(self.open, self.close) or self.low > min(
             self.open,
             self.close,
@@ -106,6 +109,60 @@ class ComparativeStrengthSnapshot(BaseModel):
         raise KeyError(exchange_instrument_id)
 
 
+class RSRVCBContext(BaseModel):
+    """Immutable ranked/armed/trigger lineage attached to one market snapshot."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    universe_version_id: str
+    universe_digest: str
+    projection_run_id: str
+    armed_structure_id: str
+    rsr_rank: int
+    relative_strength_24h: Decimal
+    relative_strength_72h: Decimal
+    rsr_volume_ratio_24h: Decimal
+    regime_eligible: bool
+    compression_ratio: Decimal
+    breakout_boundary: Decimal
+    armed_at_ms: int
+    trigger_volume_ratio: Decimal
+    initial_stop_reference: Decimal
+
+    @field_validator(
+        "universe_version_id",
+        "universe_digest",
+        "projection_run_id",
+        "armed_structure_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_context_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("RSR/VCB context identity must be non-blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_context(self) -> "RSRVCBContext":
+        if self.rsr_rank not in {1, 2}:
+            raise ValueError("RSR/VCB context rank must be one or two")
+        if (
+            self.armed_at_ms <= 0
+            or self.relative_strength_24h <= 0
+            or self.relative_strength_72h <= 0
+            or self.rsr_volume_ratio_24h < Decimal("1")
+            or self.compression_ratio < 0
+            or self.breakout_boundary <= 0
+            or self.trigger_volume_ratio < Decimal("1.8")
+            or self.initial_stop_reference <= 0
+        ):
+            raise ValueError("RSR/VCB context contains invalid trigger values")
+        if not self.regime_eligible:
+            raise ValueError("RSR/VCB context requires an eligible regime")
+        return self
+
+
 class MarketSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -115,6 +172,7 @@ class MarketSnapshot(BaseModel):
     candles_1h: tuple[ClosedCandle, ...] = ()
     candles_4h: tuple[ClosedCandle, ...] = ()
     comparative_strength: ComparativeStrengthSnapshot | None = None
+    rsr_vcb: RSRVCBContext | None = None
 
     @field_validator("exchange_instrument_id", mode="before")
     @classmethod

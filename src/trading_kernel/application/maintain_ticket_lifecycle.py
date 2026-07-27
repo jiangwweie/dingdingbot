@@ -21,6 +21,7 @@ from src.trading_kernel.domain.exit_policy import (
     LifecycleMarketFacts,
     calculate_cost_adjusted_break_even,
     evaluate_exit_policy,
+    evaluate_pre_tp1_exit_policy,
 )
 from src.trading_kernel.domain.reducer import reduce_event
 
@@ -119,17 +120,38 @@ async def maintain_ticket_lifecycle(
     aggregate = await uow.aggregates.get(request.ticket_id)
     if aggregate is None:
         raise ValueError("lifecycle Ticket does not exist")
-    policy = await uow.strategy_registry.get_exit_policy(
-        aggregate.ticket.identity.runtime.event_spec_id
-    )
-    if policy is None:
-        raise ValueError("Ticket Event has no active exit policy")
+    policy = aggregate.ticket.exit_policy
     if policy.position_side != aggregate.identity.netting_domain.position_side:
         raise ValueError("exit-policy side differs from Ticket Netting Domain")
 
     if aggregate.status is AggregateStatus.POSITION_PROTECTED:
         target = aggregate.tp1_target_qty
         if request.facts.tp1_filled_quantity == 0:
+            if (
+                request.facts.market_facts is not None
+                and (
+                    policy.breakout_failure is not None
+                    or policy.phase_time_stop is not None
+                )
+            ):
+                decision = evaluate_pre_tp1_exit_policy(
+                    policy=policy,
+                    market_facts=request.facts.market_facts,
+                )
+                if decision.kind is ExitDecisionKind.EXIT:
+                    exit_event = ExitRequested(
+                        **_event_fields(aggregate, request.now_ms),
+                        reason=decision.reason,
+                    )
+                    await uow.commit_reduction(
+                        event=exit_event,
+                        reduction=reduce_event(aggregate, exit_event),
+                        expected_version=aggregate.version,
+                    )
+                    return LifecycleMaintenanceResult(
+                        status=LifecycleMaintenanceStatus.EXIT_REQUESTED,
+                        event_id=exit_event.event_id,
+                    )
             return LifecycleMaintenanceResult(
                 status=LifecycleMaintenanceStatus.NO_CHANGE
             )

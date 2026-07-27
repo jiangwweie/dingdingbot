@@ -779,7 +779,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-profile-id", required=True)
     parser.add_argument("--application-schema", default="public")
     parser.add_argument("--target-commit", required=True)
-    parser.add_argument("--target-schema-revision", default="0001_initial")
+    parser.add_argument("--target-schema-revision", default="0002_strategy_universe_us_equity")
     parser.add_argument("--target-seed-identity", required=True)
     parser.add_argument("--target-release-id", required=True)
     parser.add_argument("--now-ms", type=int)

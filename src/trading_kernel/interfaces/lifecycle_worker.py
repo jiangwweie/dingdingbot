@@ -134,9 +134,7 @@ async def run_lifecycle_worker_once(
         )
         if aggregate is None:
             return LifecycleWorkerResult(status=LifecycleWorkerStatus.NO_WORK)
-        policy = await uow.strategy_registry.get_exit_policy(
-            aggregate.identity.runtime.event_spec_id
-        )
+        policy = aggregate.ticket.exit_policy
         rules = await uow.signals.get_instrument_rules(
             aggregate.identity.netting_domain.venue_id,
             aggregate.identity.netting_domain.exchange_instrument_id
@@ -145,7 +143,7 @@ async def run_lifecycle_worker_once(
             aggregate.identity.ticket_id
         )
         events = await uow.events.list_for_ticket(aggregate.identity.ticket_id)
-    if policy is None or rules is None:
+    if rules is None:
         async with uow_factory() as uow:
             await uow.aggregates.schedule_next_check(
                 aggregate.identity.ticket_id,
@@ -155,7 +153,7 @@ async def run_lifecycle_worker_once(
         return LifecycleWorkerResult(
             status=LifecycleWorkerStatus.FACTS_UNAVAILABLE,
             ticket_id=aggregate.identity.ticket_id,
-            detail="exit_policy_or_instrument_rules_missing",
+            detail="instrument_rules_missing",
         )
     entry_command = next(
         (
@@ -177,7 +175,11 @@ async def run_lifecycle_worker_once(
         (event for event in events if isinstance(event, EntryFilled)),
         None,
     )
-    if entry_command is None or entry_fill is None:
+    if (
+        entry_command is None
+        or entry_fill is None
+        or entry_command.venue_client_order_id is None
+    ):
         async with uow_factory() as uow:
             await uow.aggregates.schedule_next_check(
                 aggregate.identity.ticket_id,

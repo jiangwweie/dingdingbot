@@ -133,6 +133,19 @@ async def issue_ticket(
             status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
             ticket_id=None,
         )
+    current_exit_policy = await uow.strategy_registry.get_exit_policy(
+        ticket.identity.runtime.event_spec_id
+    )
+    if (
+        current_exit_policy is None
+        or current_exit_policy.exit_policy_id != ticket.exit_policy_id
+        or current_exit_policy.exit_policy_version != ticket.exit_policy_version
+        or current_exit_policy.semantic_hash() != ticket.exit_policy_digest
+    ):
+        return IssueTicketResult(
+            status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
+            ticket_id=None,
+        )
 
     ownership = await uow.entry_admission.read_admission_ownership(
         venue_id=ticket.identity.netting_domain.venue_id,
@@ -161,12 +174,22 @@ async def issue_ticket(
         )
 
     current_tickets = exposure.active_ticket_count if exposure is not None else 0
+    active_reserved_margin = await uow.budgets.get_active_reserved_margin(
+        ticket.identity.netting_domain.venue_id,
+        ticket.identity.netting_domain.account_id,
+        for_update=True,
+    )
+    margin_limit = (
+        claim.total_margin_balance_at_claim
+        * policy.max_initial_margin_utilization
+    )
     if (
         current_tickets >= policy.max_concurrent_tickets
         or ticket.selected_leverage > policy.max_leverage
         or ticket.margin_mode != policy.supported_margin_mode
         or ticket.risk_at_stop > ticket.planned_stop_risk_budget
         or ticket.post_fill_stop_risk_limit < ticket.planned_stop_risk_budget
+        or active_reserved_margin + ticket.reserved_margin > margin_limit
     ):
         return IssueTicketResult(
             status=IssueTicketStatus.BUDGET_EXHAUSTED,
@@ -232,7 +255,12 @@ def _scope_matches_ticket(
 ) -> bool:
     """Require the locked current Scope to match the frozen Claim/Ticket authority."""
 
-    if scope is None or not scope.enabled:
+    if (
+        scope is None
+        or not scope.enabled
+        or not scope.entry_enabled
+        or scope.scope_state != "active"
+    ):
         return False
     identity = ticket.identity
     return (

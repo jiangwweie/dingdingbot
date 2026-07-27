@@ -97,6 +97,9 @@ def _health(
         "entry_admission_snapshot_digest": snapshot_digest,
     }
     return AccountEntryHealth(
-        **payload,
+        status=status,
+        entry_block_scope=scope,
+        entry_block_key=block_key,
+        entry_admission_snapshot_digest=snapshot_digest,
         decision_digest=canonical_digest(payload),
     )

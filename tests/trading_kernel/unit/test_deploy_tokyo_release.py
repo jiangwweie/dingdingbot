@@ -42,13 +42,13 @@ def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
             "deploy_identity",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0001_initial",
+            "0002_strategy_universe_us_equity",
         ),
         (
             "activate_release",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0001_initial",
+            "0002_strategy_universe_us_equity",
             SEED_IDENTITY,
         ),
         ("start_services", SAFETY_SERVICES),
@@ -89,7 +89,7 @@ def _plan(*, enable_entry: bool) -> DeploymentPlan:
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         expected_configured_leverage=5,
         enable_entry=enable_entry,
     )
@@ -119,7 +119,7 @@ class FakeDeploymentBackend:
             "status": "pass",
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
-                "schema_revision": "0001_initial",
+                "schema_revision": "0002_strategy_universe_us_equity",
                 "seed_identity": SEED_IDENTITY,
             },
             "active_counts": {
@@ -152,7 +152,7 @@ class FakeDeploymentBackend:
         if marker == ".brc-runtime-commit":
             return TARGET_COMMIT if release == TARGET_RELEASE else CURRENT_COMMIT
         if marker == ".brc-schema-revision":
-            return "0001_initial"
+            return "0002_strategy_universe_us_equity"
         if marker == ".brc-seed-identity":
             return SEED_IDENTITY
         raise AssertionError(f"unexpected marker: {marker}")

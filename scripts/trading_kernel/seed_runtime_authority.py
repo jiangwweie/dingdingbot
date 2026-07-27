@@ -55,7 +55,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     seed.add_argument(
         "--schema-revision",
-        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0002_strategy_universe_us_equity"),
     )
     seed.add_argument("--now-ms", type=int)
 
@@ -73,7 +73,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     deploy.add_argument(
         "--schema-revision",
-        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0002_strategy_universe_us_equity"),
     )
     deploy.add_argument("--now-ms", type=int)
 
@@ -92,7 +92,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     recovery.add_argument(
         "--schema-revision",
-        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0002_strategy_universe_us_equity"),
     )
     recovery.add_argument("--now-ms", type=int)
 

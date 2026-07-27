@@ -9,7 +9,7 @@
 --
 --   psql "$TRADING_KERNEL_DATABASE_URL" \
 --     -v expected_database=brc_trading_kernel \
---     -v expected_schema_revision=0001_initial \
+--     -v expected_schema_revision=0002_strategy_universe_us_equity \
 --     -v expected_runtime_commit=<deployed-git-commit> \
 --     -v expected_ticket_id=<ticket-id-that-must-exist> \
 --     -v expected_ticket_count=<exact-current-ticket-count> \

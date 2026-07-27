@@ -542,7 +542,7 @@ def _plan() -> CutoverPlan:
         runtime_profile_id="tiny-live-v1",
         application_schema="public",
         target_commit="a" * 40,
-        target_schema_revision="0001_initial",
+        target_schema_revision="0002_strategy_universe_us_equity",
         target_seed_identity="sha256:" + "b" * 64,
         target_release_id="brc-trading-kernel-aaaaaaaaaaaa",
     )

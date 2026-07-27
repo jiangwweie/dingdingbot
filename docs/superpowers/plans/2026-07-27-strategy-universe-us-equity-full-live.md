@@ -8,6 +8,10 @@
 
 **Tech Stack:** Python 3.14、Pydantic frozen models、`decimal.Decimal`、SQLAlchemy 2 async、asyncpg、Alembic、PostgreSQL、pytest、Ruff、Mypy、ccxt/Binance USDⓈ-M adapters。
 
+**执行状态：** `IMPLEMENTED_AND_LOCALLY_ACCEPTED / DEPLOYMENT_BLOCKED`
+
+**跟踪权威：** 本文件保留批准时的测试优先执行配方与原始 checkbox，不把事后结果伪装成逐步 RED 证据；实际完成状态、精确命令和 fresh 结果由 `docs/superpowers/specs/2026-07-27-strategy-universe-us-equity-acceptance-matrix.md` 记录。
+
 ## Global Constraints
 
 1. **Owner 决策优先：** 完整实盘能力；每个策略独立标的池；移除 AVAX；相关性完全不实现；固定 5x；加密与美股共享 Capacity。
@@ -195,7 +199,7 @@ git commit -m "feat: separate strategy semantics from versioned universes"
 - Create: `src/trading_kernel/application/install_strategy_universe.py`
 - Create: `src/trading_kernel/application/activate_strategy_universe.py`
 - Test: `tests/trading_kernel/integration/test_schema_migration_postgres.py`
-- Create: `tests/trading_kernel/integration/test_strategy_universe_repository.py`
+- Create: `tests/trading_kernel/integration/test_strategy_universe_activation.py`
 - Create: `tests/trading_kernel/integration/test_strategy_universe_activation.py`
 - Modify: `tests/trading_kernel/integration/test_schema_baseline.py`
 
@@ -243,7 +247,6 @@ python3 -m pytest \
 ```bash
 python3 -m pytest \
   tests/trading_kernel/integration/test_schema_migration_postgres.py \
-  tests/trading_kernel/integration/test_strategy_universe_repository.py \
   tests/trading_kernel/integration/test_strategy_universe_activation.py -q
 python3 -m ruff check migrations/trading_kernel src/trading_kernel/infrastructure \
   src/trading_kernel/application
@@ -523,7 +526,7 @@ git commit -m "feat: add us equity product and session admission"
 - Modify: `tests/trading_kernel/unit/test_capacity.py`
 - Modify: `tests/trading_kernel/unit/test_capacity_sizing.py`
 - Modify: `tests/trading_kernel/integration/test_capacity_claim_to_ticket.py`
-- Create: `tests/trading_kernel/integration/test_cross_asset_capacity.py`
+- Create: `tests/trading_kernel/unit/test_cross_asset_capacity.py`
 - Modify: `tests/trading_kernel/unit/test_entry_dispatch_preflight.py`
 
 - [ ] **Step 1: RED — 全局共享风险矩阵**
@@ -556,7 +559,7 @@ python3 -m pytest \
   tests/trading_kernel/unit/test_capacity.py \
   tests/trading_kernel/unit/test_capacity_sizing.py \
   tests/trading_kernel/integration/test_capacity_claim_to_ticket.py \
-  tests/trading_kernel/integration/test_cross_asset_capacity.py \
+  tests/trading_kernel/unit/test_cross_asset_capacity.py \
   tests/trading_kernel/unit/test_entry_dispatch_preflight.py -q
 ```
 

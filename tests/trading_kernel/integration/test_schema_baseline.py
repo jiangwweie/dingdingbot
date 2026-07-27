@@ -17,9 +17,13 @@ EXPECTED_TABLES = {
     "brc_fact_definitions",
     "brc_facts_current",
     "brc_instrument_rules_current",
+    "brc_instrument_product_current",
+    "brc_instrument_product_profiles",
     "brc_instruments",
     "brc_monitor_current",
     "brc_monitor_events",
+    "brc_market_calendar_sessions",
+    "brc_market_calendar_versions",
     "brc_owner_policy_current",
     "brc_owner_policy_events",
     "brc_positions_current",
@@ -29,12 +33,25 @@ EXPECTED_TABLES = {
     "brc_runtime_incidents",
     "brc_runtime_profiles",
     "brc_runtime_scopes_current",
+    "brc_scope_warm_readiness",
     "brc_schema_metadata",
     "brc_signal_events",
     "brc_signal_fact_snapshots",
+    "brc_armed_structures",
+    "brc_corporate_event_coverage",
+    "brc_corporate_event_versions",
+    "brc_product_admission_policies",
+    "brc_strategy_universe_activations",
+    "brc_strategy_universe_cutovers",
+    "brc_strategy_universe_current",
+    "brc_strategy_universe_members",
+    "brc_strategy_universe_versions",
     "brc_strategy_groups",
     "brc_strategy_candidate_scopes",
     "brc_strategy_versions",
+    "brc_universe_projection_members",
+    "brc_universe_projection_leases",
+    "brc_universe_projection_runs",
     "brc_trade_aggregates",
     "brc_trade_events",
     "brc_trade_reviews",
@@ -169,6 +186,7 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
     assert {
         "new_entry_submit_enabled",
         "planned_stop_risk_fraction",
+        "max_portfolio_stop_risk_fraction",
         "max_initial_margin_utilization",
         "max_leverage",
         "supported_margin_mode",
@@ -188,6 +206,10 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
         "planned_stop_risk_fraction > 0 AND planned_stop_risk_fraction < 1"
         in check_sql
     )
+    assert (
+        "max_portfolio_stop_risk_fraction > 0 "
+        "AND max_portfolio_stop_risk_fraction < 1"
+    ) in check_sql
     assert (
         "max_initial_margin_utilization > 0 "
         "AND max_initial_margin_utilization <= 1"
@@ -238,6 +260,98 @@ def test_ticket_schema_freezes_runtime_scope_identity_and_version() -> None:
     assert "runtime_scope_id" in tickets.c
     assert "runtime_scope_version" in tickets.c
     assert "take_profit_quantities" in tickets.c
+
+
+def test_strategy_universe_schema_separates_membership_and_activation() -> None:
+    versions = metadata.tables["brc_strategy_universe_versions"]
+    members = metadata.tables["brc_strategy_universe_members"]
+    current = metadata.tables["brc_strategy_universe_current"]
+    activations = metadata.tables["brc_strategy_universe_activations"]
+    scopes = metadata.tables["brc_runtime_scopes_current"]
+
+    assert {
+        "universe_version_id",
+        "universe_version",
+        "event_spec_id",
+        "asset_class",
+        "semantic_digest",
+        "lifecycle_state",
+    }.issubset(versions.c.keys())
+    assert tuple(column.name for column in members.primary_key.columns) == (
+        "universe_version_id",
+        "exchange_instrument_id",
+    )
+    assert {"member_role", "priority_rank"}.issubset(members.c.keys())
+    assert tuple(column.name for column in current.primary_key.columns) == (
+        "event_spec_id",
+    )
+    assert "activation_id" in activations.c
+    assert {
+        "universe_version_id",
+        "observation_enabled",
+        "entry_enabled",
+        "scope_state",
+        "warm_ready_at_ms",
+        "reprofile_required_at_ms",
+    }.issubset(scopes.c.keys())
+
+
+def test_us_equity_product_calendar_and_event_schema_is_versioned() -> None:
+    profiles = metadata.tables["brc_instrument_product_profiles"]
+    product_current = metadata.tables["brc_instrument_product_current"]
+    calendar_versions = metadata.tables["brc_market_calendar_versions"]
+    calendar_sessions = metadata.tables["brc_market_calendar_sessions"]
+    events = metadata.tables["brc_corporate_event_versions"]
+    coverage = metadata.tables["brc_corporate_event_coverage"]
+    policies = metadata.tables["brc_product_admission_policies"]
+
+    assert {
+        "contract_type",
+        "underlying_type",
+        "margin_asset",
+        "configured_leverage",
+        "margin_mode",
+        "semantic_digest",
+    }.issubset(profiles.c.keys())
+    assert tuple(column.name for column in product_current.primary_key.columns) == (
+        "exchange_instrument_id",
+    )
+    assert {"timezone_name", "horizon_start_date", "horizon_end_date"}.issubset(
+        calendar_versions.c.keys()
+    )
+    assert {
+        "session_date",
+        "regular_open_at_ms",
+        "regular_close_at_ms",
+        "holiday",
+    }.issubset(calendar_sessions.c.keys())
+    assert {"event_kind", "certainty", "effective_at_ms"}.issubset(events.c.keys())
+    assert {"coverage_start_ms", "coverage_end_ms", "coverage_status"}.issubset(
+        coverage.c.keys()
+    )
+    assert {"session_thresholds", "earnings_policy"}.issubset(policies.c.keys())
+
+
+def test_signal_and_claim_freeze_universe_session_and_product_lineage() -> None:
+    signals = metadata.tables["brc_signal_events"]
+    claims = metadata.tables["brc_capacity_claims"]
+
+    assert {
+        "universe_version_id",
+        "universe_digest",
+        "projection_run_id",
+        "armed_structure_id",
+        "session_code",
+        "session_multiplier",
+        "product_policy_version_id",
+    }.issubset(signals.c.keys())
+    assert {
+        "portfolio_stop_risk_before",
+        "portfolio_stop_risk_after",
+        "session_code",
+        "session_multiplier",
+        "product_admission_digest",
+    }.issubset(claims.c.keys())
 
 
 def test_dynamic_claim_and_incident_storage_enforce_typed_safety_boundaries() -> None:

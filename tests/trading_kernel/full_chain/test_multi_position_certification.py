@@ -31,6 +31,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
 )
+from src.trading_kernel.domain.exit_policy import exit_policy_for
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.ticket import build_ticket_id
@@ -463,6 +464,16 @@ def _ticket_for_domain(
         "runtime_scope_id": runtime_scope_id,
         "fact_digest": "sha256:" + "3" * 64,
     }
+    exit_policy = exit_policy_for(runtime.event_spec_id)
+    terms.update(
+        {
+            "universe_version_id": f"universe:{runtime.event_spec_id}:v1",
+            "exit_policy_id": exit_policy.exit_policy_id,
+            "exit_policy_version": exit_policy.exit_policy_version,
+            "exit_policy_digest": exit_policy.semantic_hash(),
+            "exit_policy": exit_policy,
+        }
+    )
     if position_side == "short":
         terms.update(
             {
@@ -485,6 +496,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 priority_rank=1,
                 max_concurrent_tickets=3,
                 planned_stop_risk_fraction="0.03",
+                max_portfolio_stop_risk_fraction="0.09",
                 max_initial_margin_utilization="0.90",
                 max_leverage=10,
                 supported_margin_mode="cross",

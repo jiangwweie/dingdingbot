@@ -22,7 +22,7 @@ from src.trading_kernel.infrastructure.pg_models import metadata  # noqa: E402
 
 
 SCHEMA = "brc.trading_kernel.schema_verification.v1"
-EXPECTED_ALEMBIC_REVISION = "0001_initial"
+EXPECTED_ALEMBIC_REVISION = "0002_strategy_universe_us_equity"
 
 
 def _parser() -> argparse.ArgumentParser:

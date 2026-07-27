@@ -1,0 +1,9 @@
+target-version = "py313"
+line-length = 88
+
+[lint]
+# Keep the repository-wide mandatory gate focused on syntax, undefined names,
+# duplicate definitions, and other Pyflakes correctness failures. Additional
+# style families require an explicit baseline migration instead of changing
+# silently when the unpinned Ruff minor version adds new defaults.
+select = ["E4", "E7", "E9", "F"]

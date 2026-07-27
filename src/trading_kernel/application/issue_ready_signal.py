@@ -33,6 +33,7 @@ from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
 )
+from src.trading_kernel.domain.product_admission import ProductAdmissionContext
 from src.trading_kernel.domain.ticket import EntryOrderType
 
 
@@ -45,6 +46,7 @@ class IssueReadySignalRequest(BaseModel):
     runtime_commit: str
     schema_revision: str
     now_ms: int
+    product_admission_context: ProductAdmissionContext | None = None
 
     @field_validator(
         "signal_event_id",
@@ -123,7 +125,12 @@ async def issue_ready_signal(
         )
 
     scope = await uow.signals.get_runtime_scope(signal.runtime_scope_id)
-    if scope is None or not scope.enabled:
+    if (
+        scope is None
+        or not scope.enabled
+        or not scope.entry_enabled
+        or scope.scope_state != "active"
+    ):
         return await _refuse(
             uow,
             signal,
@@ -185,6 +192,10 @@ async def issue_ready_signal(
         profile.venue_id,
         profile.account_id,
     )
+    active_reserved_margin = await uow.budgets.get_active_reserved_margin(
+        profile.venue_id,
+        profile.account_id,
+    )
     usage = CapacityUsage(
         gross_notional=(
             exposure.gross_notional if exposure else Decimal("0")
@@ -193,6 +204,7 @@ async def issue_ready_signal(
             exposure.gross_risk_at_stop if exposure else Decimal("0")
         ),
         active_ticket_count=(exposure.active_ticket_count if exposure else 0),
+        reserved_margin=active_reserved_margin,
     )
     domain = NettingDomain(
         venue_id=profile.venue_id,
@@ -211,6 +223,9 @@ async def issue_ready_signal(
             policy_version=policy.policy_version,
             max_concurrent_tickets=policy.max_concurrent_tickets,
             planned_stop_risk_fraction=policy.planned_stop_risk_fraction,
+            max_portfolio_stop_risk_fraction=(
+                policy.max_portfolio_stop_risk_fraction
+            ),
             max_initial_margin_utilization=(
                 policy.max_initial_margin_utilization
             ),
@@ -248,6 +263,7 @@ async def issue_ready_signal(
             await uow.entry_admission.has_active_ticket_in_domain(domain.key())
         ),
         now_ms=request.now_ms,
+        product_admission_context=request.product_admission_context,
     )
     if decision.status is not CapacityClaimStatus.CLAIMED or decision.claim is None:
         issue_status = _issue_status(decision.status)

@@ -36,6 +36,7 @@ from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
     entry_lane_current,
     event_specs,
+    exit_policies,
     owner_policy_current,
     runtime_incidents,
     runtime_scopes_current,
@@ -492,6 +493,7 @@ async def _seed_policy(
                 priority_rank=1,
                 max_concurrent_tickets=max_concurrent_tickets,
                 planned_stop_risk_fraction="0.03",
+                max_portfolio_stop_risk_fraction="0.09",
                 max_initial_margin_utilization="0.90",
                 max_leverage=10,
                 supported_margin_mode="cross",
@@ -520,6 +522,9 @@ async def _seed_policy(
                 ),
                 position_side="long",
                 enabled=True,
+                observation_enabled=True,
+                entry_enabled=True,
+                scope_state="active",
                 scope_version=4,
                 updated_at_ms=1_000,
             )
@@ -529,7 +534,7 @@ async def _seed_policy(
                 runtime_scope_id="scope-short",
                 strategy_group_id=identity.runtime.strategy_group_id,
                 strategy_version_id=identity.runtime.strategy_version_id,
-                event_spec_id="sor-short-v2",
+                event_spec_id="event_spec:SOR-001:SOR-SHORT:v2",
                 runtime_profile_id=identity.runtime.runtime_profile_id,
                 owner_policy_id="policy-main",
                 exchange_instrument_id=(
@@ -537,6 +542,9 @@ async def _seed_policy(
                 ),
                 position_side="short",
                 enabled=True,
+                observation_enabled=True,
+                entry_enabled=True,
+                scope_state="active",
                 scope_version=4,
                 updated_at_ms=1_000,
             )
@@ -574,7 +582,9 @@ def _ticket_for_signal(
     runtime = (
         original.runtime
         if position_side == "long"
-        else original.runtime.model_copy(update={"event_spec_id": "sor-short-v2"})
+        else original.runtime.model_copy(
+            update={"event_spec_id": "event_spec:SOR-001:SOR-SHORT:v2"}
+        )
     )
     domain = NettingDomain(
         venue_id=original.netting_domain.venue_id,
@@ -624,6 +634,15 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
             runtime_scope_id=ticket.runtime_scope_id,
             runtime_scope_version=ticket.runtime_scope_version,
             fact_digest=ticket.fact_digest,
+            universe_version_id=ticket.universe_version_id,
+            universe_digest=ticket.universe_digest,
+            projection_run_id=ticket.projection_run_id,
+            armed_structure_id=ticket.armed_structure_id,
+            product_policy_version_id=ticket.product_policy_version_id,
+            exit_policy_id=ticket.exit_policy_id,
+            exit_policy_version=ticket.exit_policy_version,
+            exit_policy_digest=ticket.exit_policy_digest,
+            exit_policy=ticket.exit_policy,
             entry_admission_snapshot_digest="sha256:" + "2" * 64,
             account_entry_health_digest="sha256:" + "3" * 64,
             instrument_entry_health_digest="sha256:" + "4" * 64,
@@ -649,6 +668,11 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
             remaining_slots_at_claim=3,
             planned_stop_risk_fraction=Decimal("0.03"),
             planned_stop_risk_budget=ticket.planned_stop_risk_budget,
+            portfolio_stop_risk_before=Decimal("0"),
+            portfolio_stop_risk_after=ticket.risk_at_stop,
+            session_code="CRYPTO_CONTINUOUS",
+            session_multiplier=Decimal("1"),
+            product_admission_digest=None,
             max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
             post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
             max_initial_margin_utilization=Decimal("0.90"),
@@ -732,6 +756,9 @@ async def _seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:
         "exchange_instrument_id": identity.netting_domain.exchange_instrument_id,
         "position_side": identity.netting_domain.position_side,
         "enabled": True,
+        "observation_enabled": True,
+        "entry_enabled": True,
+        "scope_state": "active",
         "scope_version": ticket.runtime_scope_version,
         "updated_at_ms": ticket.created_at_ms,
     }
@@ -798,7 +825,7 @@ async def _seed_ticket_registry(connection, ticket) -> None:
             event_time_authority="close_time",
             entry_order_type=ticket.entry_order_type.value,
             protection_reference_fact_definition_id="fact:protection",
-            exit_policy_id=f"exit:{runtime.event_spec_id}",
+            exit_policy_id=ticket.exit_policy_id,
             execution_semantics={},
             status="active",
             created_at_ms=ticket.created_at_ms,
@@ -809,6 +836,27 @@ async def _seed_ticket_registry(connection, ticket) -> None:
                 "strategy_version_id": runtime.strategy_version_id,
                 "position_side": identity.netting_domain.position_side,
                 "entry_order_type": ticket.entry_order_type.value,
+                "status": "active",
+            },
+        )
+    )
+    await connection.execute(
+        pg_insert(exit_policies)
+        .values(
+            exit_policy_id=ticket.exit_policy_id,
+            exit_policy_version=ticket.exit_policy_version,
+            event_spec_id=runtime.event_spec_id,
+            position_side=identity.netting_domain.position_side,
+            policy=ticket.exit_policy.model_dump(mode="json"),
+            semantic_hash=ticket.exit_policy_digest,
+            status="active",
+            created_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_update(
+            index_elements=[exit_policies.c.exit_policy_id],
+            set_={
+                "policy": ticket.exit_policy.model_dump(mode="json"),
+                "semantic_hash": ticket.exit_policy_digest,
                 "status": "active",
             },
         )

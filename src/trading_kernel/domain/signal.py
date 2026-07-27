@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from decimal import Decimal
 from hashlib import sha256
 import json
 import re
@@ -73,6 +74,13 @@ class StrategySignal(BaseModel):
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
     fact_digest: str
+    universe_version_id: str | None = None
+    universe_digest: str | None = None
+    projection_run_id: str | None = None
+    armed_structure_id: str | None = None
+    session_code: str | None = None
+    session_multiplier: Decimal | None = None
+    product_policy_version_id: str | None = None
     occurred_at_ms: int
     observed_at_ms: int
     expires_at_ms: int
@@ -92,6 +100,24 @@ class StrategySignal(BaseModel):
         normalized = str(value or "").strip()
         if not normalized:
             raise ValueError("signal identity values must be non-blank")
+        return normalized
+
+    @field_validator(
+        "universe_version_id",
+        "universe_digest",
+        "projection_run_id",
+        "armed_structure_id",
+        "session_code",
+        "product_policy_version_id",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_identity(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("optional signal identities must be non-blank")
         return normalized
 
     @field_validator("fact_digest", mode="before")
@@ -151,4 +177,20 @@ class StrategySignal(BaseModel):
             raise ValueError("signal facts must cover the complete occurrence window")
         if build_signal_fact_digest(self.facts) != self.fact_digest:
             raise ValueError("signal fact digest differs from the immutable fact bundle")
+        if (self.universe_version_id is None) != (self.universe_digest is None):
+            raise ValueError("signal Universe version and digest must be frozen together")
+        if self.universe_digest is not None and (
+            _SHA256_DIGEST.fullmatch(self.universe_digest) is None
+        ):
+            raise ValueError("signal Universe digest must be an exact sha256 identity")
+        if (self.projection_run_id is None) != (self.armed_structure_id is None):
+            raise ValueError("projection and armed lineage must be frozen together")
+        if self.strategy_group_id == "RSRVCB-001" and (
+            self.universe_version_id is None
+            or self.projection_run_id is None
+            or self.armed_structure_id is None
+        ):
+            raise ValueError("RSRVCB signal requires Universe/projection/armed lineage")
+        if self.session_multiplier is not None and self.session_multiplier < 0:
+            raise ValueError("signal session multiplier cannot be negative")
         return self

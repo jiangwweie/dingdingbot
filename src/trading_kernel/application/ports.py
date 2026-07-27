@@ -15,6 +15,7 @@ from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
+from src.trading_kernel.domain.detectors.rsr_vcb import VCBArmedStructure
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
@@ -27,13 +28,30 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.exit_policy import ExitPolicy
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.product_admission import (
+    ProductAdmissionAuthority,
+    ProductAdmissionPolicy,
+    ProductProfile,
+)
+from src.trading_kernel.domain.corporate_events import (
+    CorporateEvent,
+    CorporateEventCoverage,
+)
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.signal import SignalFactSnapshot, StrategySignal
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     RegistrySeedResult,
 )
+from src.trading_kernel.domain.strategy_universe import (
+    StrategyUniverseVersion,
+    UniverseActivationRecord,
+    UniverseInstallCounts,
+    UniverseLifecycle,
+)
 from src.trading_kernel.domain.ticket import TradeTicket
+from src.trading_kernel.domain.universe_projection import RSRUniverseProjection
+from src.trading_kernel.domain.us_equity_session import USMarketCalendar
 from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
 
 
@@ -137,6 +155,7 @@ class OwnerPolicySnapshot(BaseModel):
     priority_rank: int
     max_concurrent_tickets: int
     planned_stop_risk_fraction: Decimal
+    max_portfolio_stop_risk_fraction: Decimal
     max_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
@@ -207,6 +226,13 @@ class RuntimeScopeSnapshot(BaseModel):
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
     enabled: bool
+    universe_version_id: str | None = None
+    universe_digest: str | None = None
+    observation_enabled: bool = True
+    entry_enabled: bool = True
+    scope_state: str = "active"
+    warm_ready_at_ms: int | None = None
+    reprofile_required_at_ms: int | None = None
     scope_version: int
 
 
@@ -451,6 +477,14 @@ class ExchangeCommandRepository(Protocol):
 class BudgetRepository(Protocol):
     async def add(self, reservation: BudgetReservationRecord) -> None: ...
 
+    async def get_active_reserved_margin(
+        self,
+        venue_id: str,
+        account_id: str,
+        *,
+        for_update: bool = False,
+    ) -> Decimal: ...
+
     async def get_for_ticket(
         self,
         ticket_id: str,
@@ -589,6 +623,14 @@ class SignalRepository(Protocol):
     async def add(self, signal: StrategySignal) -> bool: ...
 
     async def get(self, signal_event_id: str) -> StrategySignal | None: ...
+
+    async def get_latest_for_event_instrument(
+        self,
+        *,
+        event_spec_id: str,
+        exchange_instrument_id: str,
+        since_ms: int,
+    ) -> StrategySignal | None: ...
 
     async def get_fact_snapshots(
         self,
@@ -734,6 +776,163 @@ class StrategyRegistryRepository(Protocol):
     async def get_exit_policy(self, event_spec_id: str) -> ExitPolicy | None: ...
 
 
+class StrategyUniverseRepository(Protocol):
+    async def install_exact(
+        self,
+        universe: StrategyUniverseVersion,
+        *,
+        position_side: Literal["long", "short"],
+        initial_lifecycle: UniverseLifecycle,
+        installed_at_ms: int,
+    ) -> UniverseInstallCounts: ...
+
+    async def get(
+        self,
+        universe_version_id: str,
+        *,
+        for_update: bool = False,
+    ) -> tuple[StrategyUniverseVersion, UniverseLifecycle] | None: ...
+
+    async def mark_scope_warm_ready(
+        self,
+        *,
+        runtime_scope_id: str,
+        universe_version_id: str,
+        observation_fact_digest: str,
+        product_profile_id: str | None,
+        product_profile_digest: str | None,
+        projection_run_id: str | None,
+        instrument_rules_projection_version: int | None,
+        readiness_digest: str,
+        ready_at_ms: int,
+    ) -> None: ...
+
+    async def freeze_for_corporate_action(
+        self,
+        *,
+        exchange_instrument_id: str,
+        required_at_ms: int,
+    ) -> tuple[str, ...]: ...
+
+    async def reactivate_reprofiled_scope(
+        self,
+        *,
+        runtime_scope_id: str,
+        universe_version_id: str,
+        reactivated_at_ms: int,
+    ) -> None: ...
+
+    async def activate(
+        self,
+        *,
+        event_spec_id: str,
+        universe_version_id: str,
+        expected_current_universe_version_id: str | None,
+        activated_at_ms: int,
+    ) -> UniverseActivationRecord: ...
+
+    async def save_projection(
+        self,
+        projection: RSRUniverseProjection,
+        *,
+        persisted_at_ms: int,
+    ) -> bool: ...
+
+    async def claim_projection(
+        self,
+        *,
+        event_spec_id: str,
+        universe_version_id: str,
+        as_of_close_time_ms: int,
+        claim_owner: str,
+        now_ms: int,
+        lease_until_ms: int,
+    ) -> Literal["claimed", "completed", "busy"]: ...
+
+    async def complete_projection_claim(
+        self,
+        *,
+        event_spec_id: str,
+        universe_version_id: str,
+        as_of_close_time_ms: int,
+        claim_owner: str,
+        completed_at_ms: int,
+    ) -> None: ...
+
+    async def fail_projection_claim(
+        self,
+        *,
+        event_spec_id: str,
+        universe_version_id: str,
+        as_of_close_time_ms: int,
+        claim_owner: str,
+        failure_reason: str,
+        failed_at_ms: int,
+    ) -> None: ...
+
+    async def get_latest_projection(
+        self,
+        *,
+        event_spec_id: str,
+        universe_version_id: str,
+        at_or_before_close_time_ms: int,
+    ) -> RSRUniverseProjection | None: ...
+
+    async def save_armed_structure(
+        self,
+        armed: VCBArmedStructure,
+    ) -> bool: ...
+
+    async def get_active_armed_structure(
+        self,
+        *,
+        event_spec_id: str,
+        universe_version_id: str,
+        projection_run_id: str,
+        exchange_instrument_id: str,
+        now_ms: int,
+    ) -> VCBArmedStructure | None: ...
+
+
+class ProductAdmissionRepository(Protocol):
+    async def seed_calendar(
+        self,
+        calendar: USMarketCalendar,
+        *,
+        source_name: str,
+        created_at_ms: int,
+    ) -> bool: ...
+
+    async def seed_policy(
+        self,
+        policy: ProductAdmissionPolicy,
+        *,
+        created_at_ms: int,
+    ) -> bool: ...
+
+    async def upsert_product_profile(
+        self,
+        profile: ProductProfile,
+        *,
+        source_payload: dict[str, JsonValue],
+        updated_at_ms: int,
+    ) -> bool: ...
+
+    async def replace_corporate_event_authority(
+        self,
+        *,
+        coverage: CorporateEventCoverage,
+        events: tuple[CorporateEvent, ...],
+        source_name: str,
+        observed_at_ms: int,
+    ) -> None: ...
+
+    async def load_current_authority(
+        self,
+        exchange_instrument_id: str,
+    ) -> ProductAdmissionAuthority | None: ...
+
+
 class VenueCommandRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -872,6 +1071,8 @@ class KernelUnitOfWork(Protocol):
     entry_admission: EntryAdmissionRepository
     signals: SignalRepository
     strategy_registry: StrategyRegistryRepository
+    strategy_universes: StrategyUniverseRepository
+    product_admission: ProductAdmissionRepository
 
     async def __aenter__(self) -> Self: ...
 

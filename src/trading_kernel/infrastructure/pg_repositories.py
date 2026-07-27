@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, cast
 
 import sqlalchemy as sa
 from pydantic import TypeAdapter
@@ -34,6 +34,7 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
+from src.trading_kernel.domain.exit_policy import ExitPolicy
 from src.trading_kernel.domain.events import (
     BudgetSettled,
     CancelOrderAbsenceConfirmed,
@@ -178,6 +179,10 @@ _EVENT_MODELS = {
         ReviewRecorded,
     )
 }
+
+
+def _optional_str(value: object) -> str | None:
+    return None if value is None else str(value)
 _COMMAND_PAYLOAD_ADAPTER: TypeAdapter[CommandPayload] = TypeAdapter(CommandPayload)
 
 
@@ -844,6 +849,30 @@ class PostgresBudgetRepository:
             sa.insert(budget_reservations).values(**reservation.model_dump())
         )
 
+    async def get_active_reserved_margin(
+        self,
+        venue_id: str,
+        account_id: str,
+        *,
+        for_update: bool = False,
+    ) -> Decimal:
+        statement = (
+            sa.select(budget_reservations.c.reserved_margin)
+            .where(
+                budget_reservations.c.venue_id == venue_id,
+                budget_reservations.c.account_id == account_id,
+                budget_reservations.c.status == "active",
+            )
+            .order_by(budget_reservations.c.budget_reservation_id)
+        )
+        if for_update:
+            statement = statement.with_for_update(of=budget_reservations)
+        result = await self._connection.execute(statement)
+        return sum(
+            (Decimal(str(value)) for value in result.scalars()),
+            Decimal("0"),
+        )
+
     async def get_for_ticket(
         self,
         ticket_id: str,
@@ -1180,11 +1209,17 @@ class PostgresEntryAdmissionRepository:
             priority_rank=int(row["priority_rank"]),
             max_concurrent_tickets=int(row["max_concurrent_tickets"]),
             planned_stop_risk_fraction=Decimal(row["planned_stop_risk_fraction"]),
+            max_portfolio_stop_risk_fraction=Decimal(
+                row["max_portfolio_stop_risk_fraction"]
+            ),
             max_initial_margin_utilization=Decimal(
                 row["max_initial_margin_utilization"]
             ),
             max_leverage=int(row["max_leverage"]),
-            supported_margin_mode=str(row["supported_margin_mode"]),
+            supported_margin_mode=cast(
+                Literal["cross"],
+                str(row["supported_margin_mode"]),
+            ),
             min_liquidation_distance_to_stop_distance_ratio=Decimal(
                 row["min_liquidation_distance_to_stop_distance_ratio"]
             ),
@@ -1507,6 +1542,18 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
         "position_side": identity.netting_domain.position_side,
         "netting_domain_key": identity.netting_domain.key(),
         "active_netting_domain_key": identity.netting_domain.key(),
+        "universe_version_id": ticket.universe_version_id,
+        "universe_digest": ticket.universe_digest,
+        "projection_run_id": ticket.projection_run_id,
+        "armed_structure_id": ticket.armed_structure_id,
+        "product_policy_version_id": ticket.product_policy_version_id,
+        "session_code": ticket.session_code,
+        "session_multiplier": ticket.session_multiplier,
+        "product_admission_digest": ticket.product_admission_digest,
+        "exit_policy_id": ticket.exit_policy_id,
+        "exit_policy_version": ticket.exit_policy_version,
+        "exit_policy_digest": ticket.exit_policy_digest,
+        "exit_policy_payload": ticket.exit_policy.model_dump(mode="json"),
         "entry_reference_price": ticket.entry_reference_price,
         "quantity": ticket.quantity,
         "notional": ticket.notional,
@@ -1569,6 +1616,18 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         runtime_scope_id=str(row["runtime_scope_id"]),
         runtime_scope_version=int(row["runtime_scope_version"]),
         fact_digest=str(row["fact_digest"]),
+        universe_version_id=_optional_str(row["universe_version_id"]),
+        universe_digest=_optional_str(row["universe_digest"]),
+        projection_run_id=_optional_str(row["projection_run_id"]),
+        armed_structure_id=_optional_str(row["armed_structure_id"]),
+        product_policy_version_id=_optional_str(row["product_policy_version_id"]),
+        session_code=str(row["session_code"]),
+        session_multiplier=Decimal(row["session_multiplier"]),
+        product_admission_digest=_optional_str(row["product_admission_digest"]),
+        exit_policy_id=str(row["exit_policy_id"]),
+        exit_policy_version=str(row["exit_policy_version"]),
+        exit_policy_digest=str(row["exit_policy_digest"]),
+        exit_policy=ExitPolicy.model_validate(row["exit_policy_payload"]),
         capacity_claim_id=str(row["capacity_claim_id"]),
         created_at_ms=int(row["created_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),
@@ -1581,7 +1640,7 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         leverage_change_required=bool(row["leverage_change_required"]),
         reserved_margin=Decimal(row["reserved_margin"]),
         risk_reservation_basis=str(row["risk_reservation_basis"]),
-        margin_mode=str(row["margin_mode"]),
+        margin_mode=cast(Literal["cross"], str(row["margin_mode"])),
         min_liquidation_distance_to_stop_distance_ratio=Decimal(
             row["min_liquidation_distance_to_stop_distance_ratio"]
         ),
@@ -1628,6 +1687,15 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "position_side": identity.netting_domain.position_side,
         "netting_domain_key": identity.netting_domain.key(),
         "fact_digest": claim.fact_digest,
+        "universe_version_id": claim.universe_version_id,
+        "universe_digest": claim.universe_digest,
+        "projection_run_id": claim.projection_run_id,
+        "armed_structure_id": claim.armed_structure_id,
+        "product_policy_version_id": claim.product_policy_version_id,
+        "exit_policy_id": claim.exit_policy_id,
+        "exit_policy_version": claim.exit_policy_version,
+        "exit_policy_digest": claim.exit_policy_digest,
+        "exit_policy_payload": claim.exit_policy.model_dump(mode="json"),
         "entry_admission_snapshot_digest": claim.entry_admission_snapshot_digest,
         "account_entry_health_digest": claim.account_entry_health_digest,
         "instrument_entry_health_digest": claim.instrument_entry_health_digest,
@@ -1648,6 +1716,11 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "remaining_slots_at_claim": claim.remaining_slots_at_claim,
         "planned_stop_risk_fraction": claim.planned_stop_risk_fraction,
         "planned_stop_risk_budget": claim.planned_stop_risk_budget,
+        "portfolio_stop_risk_before": claim.portfolio_stop_risk_before,
+        "portfolio_stop_risk_after": claim.portfolio_stop_risk_after,
+        "session_code": claim.session_code,
+        "session_multiplier": claim.session_multiplier,
+        "product_admission_digest": claim.product_admission_digest,
         "max_post_fill_stop_risk_overrun_fraction": (
             claim.max_post_fill_stop_risk_overrun_fraction
         ),
@@ -1713,6 +1786,15 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         runtime_scope_id=str(row["runtime_scope_id"]),
         runtime_scope_version=int(row["runtime_scope_version"]),
         fact_digest=str(row["fact_digest"]),
+        universe_version_id=_optional_str(row["universe_version_id"]),
+        universe_digest=_optional_str(row["universe_digest"]),
+        projection_run_id=_optional_str(row["projection_run_id"]),
+        armed_structure_id=_optional_str(row["armed_structure_id"]),
+        product_policy_version_id=_optional_str(row["product_policy_version_id"]),
+        exit_policy_id=str(row["exit_policy_id"]),
+        exit_policy_version=str(row["exit_policy_version"]),
+        exit_policy_digest=str(row["exit_policy_digest"]),
+        exit_policy=ExitPolicy.model_validate(row["exit_policy_payload"]),
         entry_admission_snapshot_digest=str(row["entry_admission_snapshot_digest"]),
         account_entry_health_digest=str(row["account_entry_health_digest"]),
         instrument_entry_health_digest=str(row["instrument_entry_health_digest"]),
@@ -1729,12 +1811,27 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         ),
         available_margin_at_claim=Decimal(row["available_margin_at_claim"]),
         mark_price_at_claim=Decimal(row["mark_price_at_claim"]),
-        position_mode_at_claim=str(row["position_mode_at_claim"]),
-        margin_mode_at_claim=str(row["margin_mode_at_claim"]),
+        position_mode_at_claim=cast(
+            Literal["independent_sides", "one_way"],
+            str(row["position_mode_at_claim"]),
+        ),
+        margin_mode_at_claim=cast(
+            Literal["cross", "isolated"],
+            str(row["margin_mode_at_claim"]),
+        ),
         active_ticket_count_at_claim=int(row["active_ticket_count_at_claim"]),
         remaining_slots_at_claim=int(row["remaining_slots_at_claim"]),
         planned_stop_risk_fraction=Decimal(row["planned_stop_risk_fraction"]),
         planned_stop_risk_budget=Decimal(row["planned_stop_risk_budget"]),
+        portfolio_stop_risk_before=Decimal(row["portfolio_stop_risk_before"]),
+        portfolio_stop_risk_after=Decimal(row["portfolio_stop_risk_after"]),
+        session_code=str(row["session_code"]),
+        session_multiplier=Decimal(row["session_multiplier"]),
+        product_admission_digest=(
+            None
+            if row["product_admission_digest"] is None
+            else str(row["product_admission_digest"])
+        ),
         max_post_fill_stop_risk_overrun_fraction=Decimal(
             row["max_post_fill_stop_risk_overrun_fraction"]
         ),

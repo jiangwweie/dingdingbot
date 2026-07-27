@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from hashlib import sha256
 import json
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator
 import sqlalchemy as sa
@@ -17,6 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
     registered_strategy_contracts,
+)
+from src.trading_kernel.domain.strategy_universe import (
+    UniverseLifecycle,
+    universe_for_event_spec,
 )
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
@@ -37,6 +41,9 @@ from src.trading_kernel.infrastructure.pg_models import (
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
+)
+from src.trading_kernel.infrastructure.strategy_universe_seed import (
+    seed_strategy_universes,
 )
 
 
@@ -60,7 +67,7 @@ class RuntimeAuthoritySeedRequest(BaseModel):
 
     account_id: str
     runtime_commit: str
-    schema_revision: Literal["0001_initial"]
+    schema_revision: Literal["0002_strategy_universe_us_equity"]
     seeded_at_ms: int
 
     @field_validator("account_id", "runtime_commit", mode="before")
@@ -122,6 +129,7 @@ class RuntimePolicyState(BaseModel):
     new_entry_submit_enabled: bool
     max_concurrent_tickets: int
     planned_stop_risk_fraction: Decimal
+    max_portfolio_stop_risk_fraction: Decimal
     max_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
@@ -134,18 +142,23 @@ class RuntimeAuthoritySeedResult(RuntimePolicyState):
     runtime_seed_semantic_hash: str
     runtime_scope_count: int
     registry_inserted_count: int
+    universe_inserted_count: int
     runtime_inserted_count: int
 
     @property
     def total_inserted_count(self) -> int:
-        return self.registry_inserted_count + self.runtime_inserted_count
+        return (
+            self.registry_inserted_count
+            + self.universe_inserted_count
+            + self.runtime_inserted_count
+        )
 
 
 class RuntimeDeploymentIdentityResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     runtime_commit: str
-    schema_revision: Literal["0001_initial"]
+    schema_revision: Literal["0002_strategy_universe_us_equity"]
     runtime_seed_semantic_hash: str
     refreshed_existing_authority: bool
 
@@ -154,6 +167,7 @@ class RuntimeDeploymentIdentityResult(BaseModel):
 class _DynamicPolicy:
     max_concurrent_tickets: int
     planned_stop_risk_fraction: Decimal
+    max_portfolio_stop_risk_fraction: Decimal
     max_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
@@ -172,6 +186,7 @@ class _ExactRow:
 DYNAMIC_POLICY = _DynamicPolicy(
     max_concurrent_tickets=3,
     planned_stop_risk_fraction=Decimal("0.03"),
+    max_portfolio_stop_risk_fraction=Decimal("0.09"),
     max_initial_margin_utilization=Decimal("0.90"),
     max_leverage=10,
     supported_margin_mode="cross",
@@ -185,6 +200,7 @@ _POLICY_COMPARE_KEYS = (
     "priority_rank",
     "max_concurrent_tickets",
     "planned_stop_risk_fraction",
+    "max_portfolio_stop_risk_fraction",
     "max_initial_margin_utilization",
     "max_leverage",
     "supported_margin_mode",
@@ -198,7 +214,7 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
     """Compute the exact seed identity before touching PostgreSQL."""
 
     contracts = registered_strategy_contracts()
-    scope_ids = _scope_ids(_runtime_scope_rows(request.seeded_at_ms))
+    scope_ids = _scope_ids(runtime_scope_seed_rows(request.seeded_at_ms))
     return _seed_identity(
         account_id=request.account_id,
         schema_revision=request.schema_revision,
@@ -214,8 +230,12 @@ async def seed_runtime_authority(
     """Install the exact observation-only authority in one transaction."""
 
     registry = await seed_strategy_registry(uow, seeded_at_ms=request.seeded_at_ms)
+    universe_seed = await seed_strategy_universes(
+        uow,
+        seeded_at_ms=request.seeded_at_ms,
+    )
     connection = uow._require_connection()
-    scope_rows = _runtime_scope_rows(request.seeded_at_ms)
+    scope_rows = runtime_scope_seed_rows(request.seeded_at_ms)
     scope_ids = _scope_ids(scope_rows)
     seed_identity = _seed_identity(
         account_id=request.account_id,
@@ -223,7 +243,7 @@ async def seed_runtime_authority(
         registry_semantic_hash=registry.registry_semantic_hash,
         scope_ids=scope_ids,
     )
-    policy = _policy_values(
+    policy = runtime_policy_values(
         version=1,
         new_entry_submit_enabled=False,
         scope_ids=scope_ids,
@@ -253,7 +273,7 @@ async def seed_runtime_authority(
         _ExactRow(
             owner_policy_events,
             "owner_policy_event_id",
-            _policy_event(
+            runtime_policy_event(
                 version=1,
                 operation="seed_observation_only",
                 policy=policy,
@@ -325,6 +345,10 @@ async def seed_runtime_authority(
                 "exchange_instrument_id",
                 "position_side",
                 "enabled",
+                "universe_version_id",
+                "observation_enabled",
+                "entry_enabled",
+                "scope_state",
                 "scope_version",
             ),
         )
@@ -401,6 +425,7 @@ async def seed_runtime_authority(
         runtime_seed_semantic_hash=seed_identity,
         runtime_scope_count=len(scope_rows),
         registry_inserted_count=registry.total_inserted_count,
+        universe_inserted_count=universe_seed.total_inserted_count,
         runtime_inserted_count=inserted,
     )
 
@@ -512,7 +537,9 @@ async def _deploy_runtime_identity(
             "runtime profile differs from deployment identity"
         )
 
-    expected_scope_ids = set(_scope_ids(_runtime_scope_rows(request.seeded_at_ms)))
+    expected_scope_ids = set(
+        _scope_ids(runtime_scope_seed_rows(request.seeded_at_ms))
+    )
     await _assert_exact_identity_set(
         connection,
         runtime_scopes_current,
@@ -644,7 +671,7 @@ async def _transition_policy(
         )
     await _require_zero_runtime_activity(connection)
 
-    target = _policy_values(
+    target = runtime_policy_values(
         version=target_version,
         new_entry_submit_enabled=True,
         scope_ids=scope_ids,
@@ -655,7 +682,7 @@ async def _transition_policy(
         _ExactRow(
             owner_policy_events,
             "owner_policy_event_id",
-            _policy_event(
+            runtime_policy_event(
                 version=target_version,
                 operation=operation,
                 policy=target,
@@ -684,7 +711,7 @@ async def _transition_policy(
     return _policy_state(target)
 
 
-def _runtime_scope_rows(seeded_at_ms: int) -> list[dict[str, object]]:
+def runtime_scope_seed_rows(seeded_at_ms: int) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = [
         {
             "runtime_scope_id": (
@@ -699,6 +726,26 @@ def _runtime_scope_rows(seeded_at_ms: int) -> list[dict[str, object]]:
             "exchange_instrument_id": instrument.exchange_instrument_id,
             "position_side": contract.position_side,
             "enabled": True,
+            "universe_version_id": universe_for_event_spec(
+                contract.event_spec_id
+            ).universe_version_id,
+            "observation_enabled": True,
+            "entry_enabled": (
+                universe_for_event_spec(contract.event_spec_id).asset_class
+                == "crypto"
+            ),
+            "scope_state": (
+                UniverseLifecycle.ACTIVE.value
+                if universe_for_event_spec(contract.event_spec_id).asset_class
+                == "crypto"
+                else UniverseLifecycle.WARMING.value
+            ),
+            "warm_ready_at_ms": (
+                seeded_at_ms
+                if universe_for_event_spec(contract.event_spec_id).asset_class
+                == "crypto"
+                else None
+            ),
             "scope_version": 1,
             "observation_due_at_ms": seeded_at_ms,
             "observation_lease_until_ms": None,
@@ -706,11 +753,13 @@ def _runtime_scope_rows(seeded_at_ms: int) -> list[dict[str, object]]:
             "updated_at_ms": seeded_at_ms,
         }
         for contract in registered_strategy_contracts()
-        for instrument in contract.candidate_instruments
+        for instrument in universe_for_event_spec(
+            contract.event_spec_id
+        ).candidate_members
     ]
     rows.sort(key=lambda row: str(row["runtime_scope_id"]))
-    if len(rows) != 22:
-        raise RuntimeAuthoritySeedConflict("runtime authority requires 22 scopes")
+    if len(rows) != 49:
+        raise RuntimeAuthoritySeedConflict("runtime authority requires 49 scopes")
     return rows
 
 
@@ -728,14 +777,14 @@ async def _load_scope_ids(connection: AsyncConnection) -> tuple[str, ...]:
             )
         )
     ).mappings().all()
-    if len(rows) != 22:
+    if len(rows) != 49:
         raise RuntimeAuthorityTransitionRefused(
-            "runtime policy transition requires all 22 enabled scopes"
+            "runtime policy transition requires all 49 enabled scopes"
         )
     return tuple(sorted(str(row["runtime_scope_id"]) for row in rows))
 
 
-def _policy_values(
+def runtime_policy_values(
     *,
     version: int,
     new_entry_submit_enabled: bool,
@@ -750,6 +799,9 @@ def _policy_values(
         "priority_rank": 1,
         "max_concurrent_tickets": DYNAMIC_POLICY.max_concurrent_tickets,
         "planned_stop_risk_fraction": DYNAMIC_POLICY.planned_stop_risk_fraction,
+        "max_portfolio_stop_risk_fraction": (
+            DYNAMIC_POLICY.max_portfolio_stop_risk_fraction
+        ),
         "max_initial_margin_utilization": (
             DYNAMIC_POLICY.max_initial_margin_utilization
         ),
@@ -769,7 +821,7 @@ def _policy_values(
     }
 
 
-def _policy_event(
+def runtime_policy_event(
     *,
     version: int,
     operation: str,
@@ -797,7 +849,7 @@ def _seed_identity(
     registry_semantic_hash: str,
     scope_ids: tuple[str, ...],
 ) -> str:
-    semantics = _policy_values(
+    semantics = runtime_policy_values(
         version=1,
         new_entry_submit_enabled=False,
         scope_ids=scope_ids,
@@ -828,7 +880,7 @@ def _policy_matches(
     new_entry_submit_enabled: bool,
     scope_ids: tuple[str, ...],
 ) -> bool:
-    expected = _policy_values(
+    expected = runtime_policy_values(
         version=version,
         new_entry_submit_enabled=new_entry_submit_enabled,
         scope_ids=scope_ids,
@@ -846,11 +898,17 @@ def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
         planned_stop_risk_fraction=Decimal(
             str(values["planned_stop_risk_fraction"])
         ),
+        max_portfolio_stop_risk_fraction=Decimal(
+            str(values["max_portfolio_stop_risk_fraction"])
+        ),
         max_initial_margin_utilization=Decimal(
             str(values["max_initial_margin_utilization"])
         ),
         max_leverage=int(str(values["max_leverage"])),
-        supported_margin_mode=str(values["supported_margin_mode"]),
+        supported_margin_mode=cast(
+            Literal["cross"],
+            str(values["supported_margin_mode"]),
+        ),
         min_liquidation_distance_to_stop_distance_ratio=Decimal(
             str(values["min_liquidation_distance_to_stop_distance_ratio"])
         ),

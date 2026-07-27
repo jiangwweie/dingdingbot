@@ -122,14 +122,14 @@ def reduce_event(
             raise InvalidLifecycleTransition("leverage confirmation time must be positive")
         if not str(event.leverage_verification_digest or "").startswith("sha256:"):
             raise InvalidLifecycleTransition("leverage confirmation requires a digest")
-        effects: list[KernelEffect] = [
+        leverage_confirmed_effects: list[KernelEffect] = [
             PrepareEntryCommand(
                 ticket=current.ticket,
                 leverage_verification_digest=event.leverage_verification_digest,
             ),
         ]
         if current.status is AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN:
-            effects.insert(
+            leverage_confirmed_effects.insert(
                 0,
                 ResolveIncident(
                     ticket_id=current.identity.ticket_id,
@@ -140,7 +140,7 @@ def reduce_event(
             current,
             event,
             status=AggregateStatus.LEVERAGE_CONFIRMED,
-            effects=tuple(effects),
+            effects=tuple(leverage_confirmed_effects),
         )
 
     if isinstance(event, LeverageRejected):
@@ -153,15 +153,15 @@ def reduce_event(
         )
         if not str(event.reason or "").strip():
             raise InvalidLifecycleTransition("leverage rejection requires reason")
-        effects: list[KernelEffect] = []
+        leverage_rejected_effects: list[KernelEffect] = []
         if current.status is AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN:
-            effects.append(
+            leverage_rejected_effects.append(
                 ResolveIncident(
                     ticket_id=current.identity.ticket_id,
                     incident_kind="leverage_outcome_unknown",
                 )
             )
-        effects.extend(
+        leverage_rejected_effects.extend(
             (
                 ReleaseBudget(ticket_id=current.identity.ticket_id),
                 ReleaseEntryLane(ticket_id=current.identity.ticket_id),
@@ -172,7 +172,7 @@ def reduce_event(
             event,
             status=AggregateStatus.LEVERAGE_REJECTED,
             updates={"entry_lane_held": False},
-            effects=tuple(effects),
+            effects=tuple(leverage_rejected_effects),
         )
 
     if isinstance(event, LeverageOutcomeUnknown):
@@ -306,7 +306,7 @@ def reduce_event(
                     ),
                 ),
             )
-        effects: list[KernelEffect] = [
+        entry_filled_effects: list[KernelEffect] = [
             PrepareInitialStopCommand(
                 ticket_id=current.identity.ticket_id,
                 quantity=event.filled_qty,
@@ -314,7 +314,7 @@ def reduce_event(
             )
         ]
         if assessment.disposition is PostFillDisposition.FLATTEN_AFTER_PROTECTION:
-            effects.insert(
+            entry_filled_effects.insert(
                 0,
                 OpenIncident(
                     ticket_id=current.identity.ticket_id,
@@ -326,7 +326,7 @@ def reduce_event(
             event,
             status=AggregateStatus.PROTECTION_PENDING,
             updates=_post_fill_updates(event),
-            effects=tuple(effects),
+            effects=tuple(entry_filled_effects),
         )
 
     if isinstance(event, EntryPartiallyFilled):

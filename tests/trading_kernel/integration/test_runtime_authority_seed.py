@@ -108,7 +108,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         seeded_at_ms=1_800_000_000_000,
     )
 
@@ -120,11 +120,12 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
             request.model_copy(update={"seeded_at_ms": 1_800_000_000_001}),
         )
 
-    assert first.runtime_scope_count == 22
+    assert first.runtime_scope_count == 49
     assert first.new_entry_submit_enabled is False
     assert first.policy_version == 1
     assert first.max_concurrent_tickets == 3
     assert first.planned_stop_risk_fraction == Decimal("0.03")
+    assert first.max_portfolio_stop_risk_fraction == Decimal("0.09")
     assert first.max_initial_margin_utilization == Decimal("0.90")
     assert first.max_leverage == 10
     assert first.supported_margin_mode == "cross"
@@ -146,6 +147,9 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         assert policy["new_entry_submit_enabled"] is False
         assert policy["max_concurrent_tickets"] == 3
         assert Decimal(policy["planned_stop_risk_fraction"]) == Decimal("0.03")
+        assert Decimal(
+            policy["max_portfolio_stop_risk_fraction"]
+        ) == Decimal("0.09")
         assert Decimal(policy["max_initial_margin_utilization"]) == Decimal("0.90")
         assert policy["max_leverage"] == 10
         assert policy["supported_margin_mode"] == "cross"
@@ -161,12 +165,22 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         ) == 1
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(runtime_scopes_current)
-        ) == 22
+        ) == 49
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(runtime_scopes_current).where(
                 runtime_scopes_current.c.enabled.is_(True)
             )
-        ) == 22
+        ) == 49
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(runtime_scopes_current).where(
+                runtime_scopes_current.c.observation_enabled.is_(True)
+            )
+        ) == 49
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(runtime_scopes_current).where(
+                runtime_scopes_current.c.entry_enabled.is_(True)
+            )
+        ) == 36
 
         lane = (
             await connection.execute(sa.select(entry_lane_current))
@@ -202,7 +216,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
             ).mappings()
         }
         assert metadata_rows["runtime_commit"] == "commit-acceptance"
-        assert metadata_rows["schema_revision"] == "0001_initial"
+        assert metadata_rows["schema_revision"] == "0002_strategy_universe_us_equity"
         assert metadata_rows["registry_semantic_hash"].startswith("sha256:")
         assert metadata_rows["seed_identity"].startswith("sha256:")
 
@@ -215,7 +229,7 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -281,7 +295,7 @@ async def test_recovery_identity_refuses_a_runtime_without_one_unknown_leverage_
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -312,7 +326,7 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     seed_request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -335,6 +349,7 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     assert armed.new_entry_submit_enabled is True
     assert armed.max_concurrent_tickets == 3
     assert armed.planned_stop_risk_fraction == Decimal("0.03")
+    assert armed.max_portfolio_stop_risk_fraction == Decimal("0.09")
     assert armed.max_initial_margin_utilization == Decimal("0.90")
     assert armed.max_leverage == 10
     assert armed.model_dump(
@@ -369,6 +384,7 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     assert promoted.new_entry_submit_enabled is True
     assert promoted.max_concurrent_tickets == 3
     assert promoted.planned_stop_risk_fraction == Decimal("0.03")
+    assert promoted.max_portfolio_stop_risk_fraction == Decimal("0.09")
     assert promoted.max_initial_margin_utilization == Decimal("0.90")
     assert promoted.max_leverage == 10
     assert promoted.supported_margin_mode == "cross"

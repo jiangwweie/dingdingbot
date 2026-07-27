@@ -11,6 +11,7 @@ from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.product_admission import ProductMarketFacts
 from src.trading_kernel.domain.review import ReviewEconomicsFacts
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
@@ -150,9 +151,46 @@ class InstrumentRulesSource(Protocol):
     ) -> InstrumentRulesFacts: ...
 
 
+class ProductMarketFactsRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    observed_at_ms: int
+
+    @field_validator(
+        "venue_id",
+        "account_id",
+        "exchange_instrument_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_product_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("product market facts identity must be non-blank")
+        return normalized
+
+    @field_validator("observed_at_ms")
+    @classmethod
+    def _require_product_time(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("product market facts time must be positive")
+        return value
+
+
+class ProductMarketFactsSource(Protocol):
+    async def read_product_market_facts(
+        self,
+        request: ProductMarketFactsRequest,
+    ) -> ProductMarketFacts: ...
+
+
 class EntryFactsSource(
     EntryAdmissionFactsSource,
     InstrumentRulesSource,
+    ProductMarketFactsSource,
     Protocol,
 ):
     pass

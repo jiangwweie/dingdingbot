@@ -100,8 +100,8 @@ class CutoverPlan(BaseModel):
     @classmethod
     def _require_schema_revision(cls, value: object) -> str:
         normalized = str(value or "").strip()
-        if normalized != "0001_initial":
-            raise ValueError("target schema revision must be 0001_initial")
+        if normalized != "0002_strategy_universe_us_equity":
+            raise ValueError("target schema revision must be 0002_strategy_universe_us_equity")
         return normalized
 
     @field_validator("target_seed_identity", mode="before")
@@ -263,7 +263,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-profile-id", required=True)
     parser.add_argument("--application-schema", default="public")
     parser.add_argument("--target-commit", required=True)
-    parser.add_argument("--target-schema-revision", default="0001_initial")
+    parser.add_argument("--target-schema-revision", default="0002_strategy_universe_us_equity")
     parser.add_argument("--target-seed-identity", required=True)
     parser.add_argument("--target-release-id", required=True)
     parser.add_argument("--require-writer-fence", action="store_true")

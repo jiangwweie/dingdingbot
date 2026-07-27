@@ -55,14 +55,14 @@ Observation -> StrategySignal -> Readiness/Authority
 | 候选替换 | 新范围先预热，原子切换；既有 Ticket 不被改写 | 是 |
 | 部署 | 完成代码、集成测试、验收和提交后等待 Owner 确认 | 硬停止 |
 
-### 1.3 当前代码事实与设计判断
+### 1.3 实施前代码事实与设计判断
 
 #### 已知客观事实
 
-1. 当前 Registry 把候选标的直接写在 `RegisteredStrategyContract` 中，候选变化会改变语义哈希；来源：`src/trading_kernel/domain/strategy_registry.py`。
-2. 当前 runtime authority 固定播种 **22 个 scope**；来源：`src/trading_kernel/infrastructure/runtime_authority_seed.py`。
-3. 当前 detector 通过 Event ID 条件分派，且比较强度候选来自静态 contract；来源：`src/trading_kernel/domain/detector.py`、`src/trading_kernel/application/observe_strategy_scope.py`。
-4. 当前执行链已具备全局 ENTRY 串行、Netting Domain、CapacityClaim、Ticket、持久化 Exchange Command 与四类常驻 worker；来源：`docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md`、`src/trading_kernel/**`。
+1. 实施前 Registry 把候选标的直接写在 `RegisteredStrategyContract` 中，候选变化会改变语义哈希；来源：基线 commit `49b87b5f9c3e4c74d5bfb6baa34448146a2ea961` 的 `src/trading_kernel/domain/strategy_registry.py`。
+2. 实施前 runtime authority 固定播种 **22 个 scope**；来源：同一基线的 `src/trading_kernel/infrastructure/runtime_authority_seed.py`。
+3. 实施前 detector 通过 Event ID 条件分派，且比较强度候选来自静态 contract；来源：同一基线的 `src/trading_kernel/domain/detector.py`、`src/trading_kernel/application/observe_strategy_scope.py`。
+4. 实施前执行链已具备全局 ENTRY 串行、Netting Domain、CapacityClaim、Ticket、持久化 Exchange Command 与四类常驻 worker；来源：`docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md` 与基线 `src/trading_kernel/**`。
 5. Binance USDⓈ-M 官方 `exchangeInfo` 当前把目标产品标识为 `TRADIFI_PERPETUAL`、`EQUITY`、`USDT`，官方说明产品支持 24/7 交易并可提供最高 10x 杠杆；来源：[Binance Futures exchangeInfo](https://fapi.binance.com/fapi/v1/exchangeInfo)、[Binance Academy TradFi Perpetuals](https://academy.binance.com/ur-PK/articles/tradfi-assets-you-can-trade-on-binance-futures)。
 6. 美股核心交易时段与休市/提前收市日历由交易所发布；来源：[NYSE Hours & Calendars](https://www.nyse.com/trade/hours-calendars)、[Nasdaq Trader Calendar](https://www.nasdaqtrader.com/Trader.aspx?id=calendar)。
 
@@ -71,6 +71,20 @@ Observation -> StrategySignal -> Readiness/Authority
 **最佳改造点不是让策略代码读取任意币种列表，而是把“策略语义”和“候选成员资格”拆开。** 语义仍由代码和不可变版本定义；候选池由 PostgreSQL 中的版本化 Universe 定义。这样能够实现配置级替换，同时不让运行时执行任意代码，也不破坏既有 Ticket 的身份。
 
 本次属于**中等规模纵向扩展**：执行和订单主干不重写，Registry、Observation、市场事实、准入快照、Capacity、ExitPolicy、PostgreSQL schema 与运行时装配需要协同扩展。
+
+### 1.4 本地实施结论
+
+本设计已经在独立工作区完成实现与本地验收。当前代码具备：
+
+1. **七个静态 Strategy Plugin** 与成员解耦的版本化 Universe；
+2. **36 个加密 scope + 13 个美股候选 scope**，AVAX 为零，QQQ/SPY 仅为 reference；
+3. **RSR Projection → VCB Armed → 第一根闭合 15m Trigger** 的完整语义与持久化 lineage；
+4. **产品、Session、日历、Earnings、Corporate Action** 的行动时 fail-closed 准入；
+5. **共享 3 Ticket、9% stop-risk、90% initial margin** 与美股固定 5x；
+6. **无重启候选替换**、旧 Ticket 生命周期不变、split reprofile/rewarm；
+7. `0002_strategy_universe_us_equity` migration、前向 DML、运维脚本、full-chain mock 与故障恢复测试。
+
+本地实现状态不等于生产状态。Tokyo 仍以 `docs/current/MAIN_CONTROL_ROADMAP.md` 的行动时事实为准，本分支保持 **DEPLOYMENT_BLOCKED**。
 
 ## 2. 设计原则与非目标
 
@@ -470,6 +484,13 @@ Session 在 Signal 时记录，在 Capacity Claim 的行动时重新计算并冻
 4. 重新预热所需窗口；
 5. 通过新的 profile/version 后恢复。
 
+实现中，scope 冻结会写入 `reprofile_required_at_ms`、清空旧 warm readiness/current facts，并使当前 armed structure 失效。恢复必须同时证明：
+
+- `ProductProfile.profile_version` 已递增且在调整生效后观测；
+- instrument rules projection version 已刷新；
+- 所需市场窗口为调整生效后的闭合数据；
+- 当前 Universe 身份仍然精确匹配。
+
 既有 Ticket 的 Lifecycle 始终继续，不因 Session 或企业事件被自动改仓。
 
 ## 7. 共享资金、杠杆与 Capacity
@@ -521,6 +542,15 @@ effective_ticket_stop_risk =
 9. 按 instrument rules 量化；
 10. 检查 5x 下初始保证金与 90% 全局边界；
 11. 构造不可变 CapacityClaim。
+
+为避免交易所账户快照尚未反映刚签发但未成交的内部预留，检查使用：
+
+```text
+effective_initial_margin_before =
+    max(exchange_total_initial_margin, active_internal_reserved_margin)
+```
+
+`issue_ticket` 在同一事务内锁定目标账户的预算行并再次校验 90% 上限，从而使并发 Claim 不能各自基于同一份旧余额通过。
 
 不允许通过提高杠杆、放宽 stop、忽略企业事件或跳过深度事实来挽救本应被拒绝的 Claim。
 

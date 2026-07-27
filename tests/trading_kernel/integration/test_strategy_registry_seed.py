@@ -93,20 +93,21 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         second = await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)
         event_ids = await uow.strategy_registry.list_current_event_ids()
 
-    assert first.inserted_strategy_group_count == 5
-    assert first.inserted_strategy_version_count == 5
-    assert first.inserted_event_count == 6
-    assert first.inserted_exit_policy_count == 6
-    assert first.inserted_fact_definition_count == 18
-    assert first.inserted_event_fact_count == 19
-    assert first.inserted_instrument_count == 6
-    assert first.inserted_candidate_scope_count == 22
+    assert first.inserted_strategy_group_count == 6
+    assert first.inserted_strategy_version_count == 6
+    assert first.inserted_event_count == 7
+    assert first.inserted_exit_policy_count == 7
+    assert first.inserted_fact_definition_count == 23
+    assert first.inserted_event_fact_count == 24
+    assert first.inserted_instrument_count == 0
+    assert first.inserted_candidate_scope_count == 0
     assert second.total_inserted_count == 0
     assert event_ids == (
         "BRF2-SHORT",
         "CPM-LONG",
         "MI-LONG",
         "MPG-LONG",
+        "RSRVCB-LONG-15M",
         "SOR-LONG",
         "SOR-SHORT",
     )
@@ -115,8 +116,8 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         assert await connection.scalar(sa.select(sa.func.count()).select_from(runtime_profiles)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(runtime_scopes_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(owner_policy_current)) == 0
-        assert await connection.scalar(sa.select(sa.func.count()).select_from(strategy_candidate_scopes)) == 22
-        assert await connection.scalar(sa.select(sa.func.count()).select_from(exit_policies)) == 6
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(strategy_candidate_scopes)) == 0
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(exit_policies)) == 7
 
 
 @pytest.mark.asyncio

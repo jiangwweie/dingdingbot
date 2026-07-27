@@ -1,4 +1,4 @@
-"""Idempotent PostgreSQL seed for the six registered strategy Events."""
+"""Idempotent PostgreSQL seed for registered strategy code semantics."""
 
 from __future__ import annotations
 
@@ -24,8 +24,6 @@ from src.trading_kernel.infrastructure.pg_models import (
     event_specs,
     exit_policies,
     fact_definitions,
-    instruments,
-    strategy_candidate_scopes,
     strategy_groups,
     strategy_versions,
 )
@@ -102,7 +100,7 @@ class PostgresStrategyRegistryRepository:
                 {
                     "strategy_version_id": active_version_id,
                     "strategy_group_id": strategy_group_id,
-                    "version": 2,
+                    "version": group_contracts[0].strategy_version,
                     "semantics": {
                         "event_spec_ids": sorted(
                             item.event_spec_id for item in group_contracts
@@ -148,32 +146,6 @@ class PostgresStrategyRegistryRepository:
                     "value_type",
                     "freshness_ms",
                     "validation",
-                ),
-            )
-
-        instruments_by_id = {
-            item.exchange_instrument_id: item
-            for contract in contracts
-            for item in contract.candidate_instruments
-        }
-        for exchange_instrument_id, instrument in sorted(instruments_by_id.items()):
-            counters["inserted_instrument_count"] += await self._insert_exact(
-                instruments,
-                "exchange_instrument_id",
-                {
-                    "exchange_instrument_id": exchange_instrument_id,
-                    "venue_id": "binance-usdm",
-                    "asset_class": "crypto",
-                    "venue_symbol": instrument.venue_symbol,
-                    "contract_kind": "perpetual",
-                    "status": "active",
-                },
-                compare_keys=(
-                    "venue_id",
-                    "asset_class",
-                    "venue_symbol",
-                    "contract_kind",
-                    "status",
                 ),
             )
 
@@ -260,34 +232,6 @@ class PostgresStrategyRegistryRepository:
                         "required": True,
                     },
                     compare_keys=("role", "required"),
-                )
-
-            for instrument in contract.candidate_instruments:
-                candidate_scope_id = (
-                    f"candidate:{contract.event_spec_id}:"
-                    f"{instrument.exchange_instrument_id}"
-                )
-                counters["inserted_candidate_scope_count"] += await self._insert_exact(
-                    strategy_candidate_scopes,
-                    "candidate_scope_id",
-                    {
-                        "candidate_scope_id": candidate_scope_id,
-                        "strategy_group_id": contract.strategy_group_id,
-                        "event_spec_id": contract.event_spec_id,
-                        "exchange_instrument_id": instrument.exchange_instrument_id,
-                        "position_side": contract.position_side,
-                        "priority_rank": instrument.priority_rank,
-                        "status": "active",
-                        "created_at_ms": seeded_at_ms,
-                    },
-                    compare_keys=(
-                        "strategy_group_id",
-                        "event_spec_id",
-                        "exchange_instrument_id",
-                        "position_side",
-                        "priority_rank",
-                        "status",
-                    ),
                 )
 
         return RegistrySeedResult(
@@ -385,4 +329,5 @@ def _display_name(strategy_group_id: str) -> str:
         "MI-001": "MI relative strength impulse",
         "SOR-001": "SOR opening range breakout and breakdown",
         "BRF2-001": "BRF2 bear rally failure",
+        "RSRVCB-001": "US equity relative-strength volatility breakout",
     }[strategy_group_id]

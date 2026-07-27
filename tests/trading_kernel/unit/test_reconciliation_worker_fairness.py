@@ -122,7 +122,7 @@ async def test_pending_unknown_does_not_starve_position_reconciliation(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-test",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0002_strategy_universe_us_equity",
             now_ms=5_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,

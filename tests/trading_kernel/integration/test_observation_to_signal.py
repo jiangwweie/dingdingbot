@@ -16,6 +16,7 @@ from src.trading_kernel.application.observe_strategy_scope import (
     observe_strategy_scope,
 )
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.strategy_universe import universe_for_event_spec
 from src.trading_kernel.infrastructure.pg_models import (
     facts_current,
     readiness_current,
@@ -27,6 +28,9 @@ from src.trading_kernel.infrastructure.pg_models import (
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
+)
+from src.trading_kernel.infrastructure.strategy_universe_seed import (
+    seed_strategy_universes,
 )
 from src.trading_kernel.interfaces.observation_worker import (
     ObservationWorkerRequest,
@@ -40,19 +44,18 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _run_alembic,
 )
 from tests.trading_kernel.unit.detectors.fixtures import (
-    AVAX,
     BTC,
     ETH,
     NOW_MS,
-    OP,
     SOL,
-    SUI,
     brf2_short_snapshot,
     cpm_long_snapshot,
     flat_candles,
     mpg_long_snapshot,
     sor_snapshot,
 )
+
+BNB = "binance-usdm:BNBUSDT:perpetual"
 
 
 class FakeMarketSource:
@@ -99,7 +102,7 @@ async def test_observation_worker_claims_one_due_scope_and_waits_for_next_close(
     request = ObservationWorkerRequest(
         worker_id="observation-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         now_ms=NOW_MS,
         lease_until_ms=NOW_MS + 30_000,
         timeout_seconds=1,
@@ -189,7 +192,7 @@ async def test_observer_ignores_open_tail_and_appends_no_signal_history(
         ObservationRequest(
             runtime_scope_id="scope-sor-eth-long",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0002_strategy_universe_us_equity",
             trigger_candle_close_time_ms=NOW_MS,
         ),
     )
@@ -233,7 +236,7 @@ async def test_triggered_observation_persists_one_stable_strategy_signal(
     request = ObservationRequest(
         runtime_scope_id="scope-sor-eth-long",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0002_strategy_universe_us_equity",
         trigger_candle_close_time_ms=NOW_MS,
     )
 
@@ -282,7 +285,7 @@ async def test_market_timeout_fails_closed_as_observation_unavailable(
         ObservationRequest(
             runtime_scope_id="scope-sor-eth-long",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0002_strategy_universe_us_equity",
             trigger_candle_close_time_ms=NOW_MS,
         ),
     )
@@ -309,32 +312,34 @@ async def test_all_six_registered_events_produce_signals_through_observation(
     mpg = mpg_long_snapshot()
     brf2 = brf2_short_snapshot()
     sor_long = sor_snapshot(side="long").model_copy(
-        update={"exchange_instrument_id": AVAX}
+        update={"exchange_instrument_id": BNB}
     )
     sor_short = sor_snapshot(side="short").model_copy(
         update={"exchange_instrument_id": BTC}
     )
     peer_1h = flat_candles(13, 3_600_000)
-    source = FakeMarketSource(
-        {
+    responses = {
             (ETH, "1h"): cpm.candles_1h,
             (ETH, "4h"): cpm.candles_4h,
             (SOL, "1h"): mpg.candles_1h,
             (SOL, "4h"): mpg.candles_4h,
-            (OP, "1h"): peer_1h,
-            (AVAX, "1h"): peer_1h,
-            (SUI, "1h"): peer_1h,
             (BTC, "1h"): brf2.candles_1h,
             (BTC, "4h"): brf2.candles_4h,
-            (AVAX, "15m"): sor_long.candles_15m,
+            (BNB, "15m"): sor_long.candles_15m,
             (BTC, "15m"): sor_short.candles_15m,
-        }
-    )
+    }
+    for event_spec_id in (
+        "event_spec:MPG-001:MPG-LONG:v2",
+        "event_spec:MI-001:MI-LONG:v2",
+    ):
+        for member in universe_for_event_spec(event_spec_id).candidate_members:
+            responses.setdefault((member.exchange_instrument_id, "1h"), peer_1h)
+    source = FakeMarketSource(responses)
     scope_ids = (
         "scope-cpm-eth-long",
         "scope-mpg-sol-long",
         "scope-mi-sol-long",
-        "scope-sor-avax-long",
+        "scope-sor-bnb-long",
         "scope-sor-btc-short",
         "scope-brf2-btc-short",
     )
@@ -348,7 +353,7 @@ async def test_all_six_registered_events_produce_signals_through_observation(
                 ObservationRequest(
                     runtime_scope_id=scope_id,
                     runtime_commit="kernel-test-head",
-                    schema_revision="0001_initial",
+                    schema_revision="0002_strategy_universe_us_equity",
                     trigger_candle_close_time_ms=NOW_MS,
                 ),
             )
@@ -373,6 +378,8 @@ async def test_all_six_registered_events_produce_signals_through_observation(
 async def _seed_sor_scope(engine: AsyncEngine) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
+        await seed_strategy_universes(uow, seeded_at_ms=NOW_MS - 1)
+    universe = universe_for_event_spec("event_spec:SOR-001:SOR-LONG:v2")
     async with engine.begin() as connection:
         await connection.execute(
             sa.insert(runtime_scopes_current).values(
@@ -385,6 +392,10 @@ async def _seed_sor_scope(engine: AsyncEngine) -> None:
                 exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
                 position_side="long",
                 enabled=True,
+                universe_version_id=universe.universe_version_id,
+                observation_enabled=True,
+                entry_enabled=True,
+                scope_state="active",
                 scope_version=1,
                 updated_at_ms=NOW_MS - 1,
             )
@@ -394,7 +405,7 @@ async def _seed_sor_scope(engine: AsyncEngine) -> None:
                 capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 certification={},
                 updated_at_ms=NOW_MS - 1,
             )
@@ -404,6 +415,7 @@ async def _seed_sor_scope(engine: AsyncEngine) -> None:
 async def _seed_six_scopes(engine: AsyncEngine) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
+        await seed_strategy_universes(uow, seeded_at_ms=NOW_MS - 1)
     rows = (
         (
             "scope-cpm-eth-long",
@@ -430,11 +442,11 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
             "long",
         ),
         (
-            "scope-sor-avax-long",
+            "scope-sor-bnb-long",
             "SOR-001",
             "sgv:SOR-001:v2",
             "event_spec:SOR-001:SOR-LONG:v2",
-            AVAX,
+            BNB,
             "long",
         ),
         (
@@ -463,6 +475,7 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
             exchange_instrument_id,
             position_side,
         ) in rows:
+            universe = universe_for_event_spec(event_spec_id)
             await connection.execute(
                 sa.insert(runtime_scopes_current).values(
                     runtime_scope_id=runtime_scope_id,
@@ -474,6 +487,10 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
                     exchange_instrument_id=exchange_instrument_id,
                     position_side=position_side,
                     enabled=True,
+                    universe_version_id=universe.universe_version_id,
+                    observation_enabled=True,
+                    entry_enabled=True,
+                    scope_state="active",
                     scope_version=1,
                     updated_at_ms=NOW_MS - 1,
                 )
@@ -483,7 +500,7 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
                 capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 certification={},
                 updated_at_ms=NOW_MS - 1,
             )

@@ -130,17 +130,378 @@ strategy_candidate_scopes = sa.Table(
     _id("candidate_scope_id", primary_key=True),
     _id("strategy_group_id"),
     _id("event_spec_id"),
+    _id("universe_version_id", nullable=True),
     _id("exchange_instrument_id"),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("priority_rank", sa.Integer, nullable=False),
     sa.Column("status", SHORT_TEXT, nullable=False),
     _time("created_at_ms"),
-    sa.UniqueConstraint("event_spec_id", "exchange_instrument_id"),
+    sa.UniqueConstraint(
+        "universe_version_id",
+        "event_spec_id",
+        "exchange_instrument_id",
+    ),
     sa.CheckConstraint(
         "position_side IN ('long', 'short')",
         name="position_side_valid",
     ),
     sa.CheckConstraint("priority_rank > 0", name="priority_positive"),
+)
+
+strategy_universe_versions = sa.Table(
+    "brc_strategy_universe_versions",
+    metadata,
+    _id("universe_version_id", primary_key=True),
+    sa.Column("universe_version", sa.Integer, nullable=False),
+    _id("strategy_group_id"),
+    _id("event_spec_id"),
+    sa.Column("asset_class", SHORT_TEXT, nullable=False),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False, unique=True),
+    sa.Column("lifecycle_state", SHORT_TEXT, nullable=False),
+    _time("installed_at_ms"),
+    _time("activated_at_ms", nullable=True),
+    sa.UniqueConstraint("event_spec_id", "universe_version"),
+    sa.CheckConstraint(
+        "universe_version > 0",
+        name="universe_version_positive",
+    ),
+    sa.CheckConstraint(
+        "asset_class IN ('crypto', 'us_equity')",
+        name="asset_class_valid",
+    ),
+    sa.CheckConstraint(
+        "lifecycle_state IN "
+        "('draft', 'installed', 'warming', 'active', 'retiring', 'retired')",
+        name="lifecycle_state_valid",
+    ),
+    sa.CheckConstraint(
+        "semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="semantic_digest_valid",
+    ),
+)
+
+strategy_universe_members = sa.Table(
+    "brc_strategy_universe_members",
+    metadata,
+    _id("universe_version_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("venue_symbol", SHORT_TEXT, nullable=False),
+    sa.Column("member_role", SHORT_TEXT, nullable=False),
+    sa.Column("priority_rank", sa.Integer, nullable=False),
+    sa.PrimaryKeyConstraint("universe_version_id", "exchange_instrument_id"),
+    sa.UniqueConstraint("universe_version_id", "member_role", "priority_rank"),
+    sa.CheckConstraint(
+        "member_role IN ('candidate', 'reference')",
+        name="member_role_valid",
+    ),
+    sa.CheckConstraint("priority_rank > 0", name="priority_positive"),
+)
+
+strategy_universe_current = sa.Table(
+    "brc_strategy_universe_current",
+    metadata,
+    _id("event_spec_id", primary_key=True),
+    _id("universe_version_id"),
+    sa.Column("activation_generation", sa.BigInteger, nullable=False),
+    _time("activated_at_ms"),
+    sa.UniqueConstraint("universe_version_id"),
+    sa.CheckConstraint(
+        "activation_generation > 0",
+        name="activation_generation_positive",
+    ),
+)
+
+strategy_universe_activations = sa.Table(
+    "brc_strategy_universe_activations",
+    metadata,
+    _id("activation_id", primary_key=True),
+    _id("event_spec_id"),
+    _id("old_universe_version_id", nullable=True),
+    _id("new_universe_version_id"),
+    sa.Column("activation_generation", sa.BigInteger, nullable=False),
+    sa.Column("operation", SHORT_TEXT, nullable=False),
+    sa.Column("activation_digest", LONG_TEXT, nullable=False, unique=True),
+    _time("activated_at_ms"),
+    sa.UniqueConstraint("event_spec_id", "activation_generation"),
+    sa.CheckConstraint(
+        "activation_generation > 0",
+        name="activation_generation_positive",
+    ),
+)
+
+universe_projection_runs = sa.Table(
+    "brc_universe_projection_runs",
+    metadata,
+    _id("projection_run_id", primary_key=True),
+    _id("event_spec_id"),
+    _id("universe_version_id"),
+    sa.Column("universe_digest", LONG_TEXT, nullable=False),
+    _time("as_of_close_time_ms"),
+    sa.Column("input_digest", LONG_TEXT, nullable=False),
+    sa.Column("reference_digest", LONG_TEXT, nullable=False),
+    sa.Column("regime_eligible", sa.Boolean, nullable=False),
+    sa.Column("projection_status", SHORT_TEXT, nullable=False),
+    sa.Column("failure_reason", LONG_TEXT, nullable=True),
+    _time("created_at_ms"),
+    _time("completed_at_ms", nullable=True),
+    sa.UniqueConstraint(
+        "event_spec_id",
+        "universe_version_id",
+        "as_of_close_time_ms",
+        "input_digest",
+    ),
+)
+
+universe_projection_leases = sa.Table(
+    "brc_universe_projection_leases",
+    metadata,
+    _id("projection_claim_id", primary_key=True),
+    _id("event_spec_id"),
+    _id("universe_version_id"),
+    _time("as_of_close_time_ms"),
+    sa.Column("claim_status", SHORT_TEXT, nullable=False),
+    _id("claim_owner", nullable=True),
+    _time("lease_until_ms", nullable=True),
+    sa.Column("failure_reason", LONG_TEXT, nullable=True),
+    _time("updated_at_ms"),
+    sa.UniqueConstraint(
+        "event_spec_id",
+        "universe_version_id",
+        "as_of_close_time_ms",
+    ),
+    sa.CheckConstraint(
+        "claim_status IN ('running', 'completed', 'failed')",
+        name="claim_status_valid",
+    ),
+)
+
+scope_warm_readiness = sa.Table(
+    "brc_scope_warm_readiness",
+    metadata,
+    _id("runtime_scope_id", primary_key=True),
+    _id("universe_version_id"),
+    sa.Column("observation_fact_digest", LONG_TEXT, nullable=False),
+    _id("product_profile_id", nullable=True),
+    sa.Column("product_profile_digest", LONG_TEXT, nullable=True),
+    _id("projection_run_id", nullable=True),
+    sa.Column(
+        "instrument_rules_projection_version",
+        sa.BigInteger,
+        nullable=True,
+    ),
+    sa.Column("readiness_digest", LONG_TEXT, nullable=False),
+    _time("ready_at_ms"),
+    sa.UniqueConstraint("universe_version_id", "runtime_scope_id"),
+)
+
+strategy_universe_cutovers = sa.Table(
+    "brc_strategy_universe_cutovers",
+    metadata,
+    _id("cutover_id", primary_key=True),
+    sa.Column("target_runtime_commit", SHORT_TEXT, nullable=False),
+    sa.Column("target_schema_revision", SHORT_TEXT, nullable=False),
+    sa.Column("target_seed_identity", LONG_TEXT, nullable=False),
+    sa.Column("external_flat_verification_digest", LONG_TEXT, nullable=False),
+    _json("terminal_ticket_ids"),
+    _json("resolved_incident_ids"),
+    _json("before_counts"),
+    _json("after_counts"),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("applied_at_ms"),
+    sa.CheckConstraint(
+        "status = 'applied'",
+        name="strategy_universe_cutover_status_applied",
+    ),
+)
+
+universe_projection_members = sa.Table(
+    "brc_universe_projection_members",
+    metadata,
+    _id("projection_run_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("eligible", sa.Boolean, nullable=False),
+    sa.Column("rank", sa.Integer, nullable=True),
+    sa.Column("return_24h", MONEY, nullable=False),
+    sa.Column("return_72h", MONEY, nullable=False),
+    sa.Column("relative_strength_24h", MONEY, nullable=False),
+    sa.Column("relative_strength_72h", MONEY, nullable=False),
+    sa.Column("volume_ratio_24h", MONEY, nullable=False),
+    sa.Column("trend_eligible", sa.Boolean, nullable=False),
+    sa.Column("metrics_digest", LONG_TEXT, nullable=False),
+    sa.PrimaryKeyConstraint("projection_run_id", "exchange_instrument_id"),
+    sa.CheckConstraint("rank IS NULL OR rank > 0", name="rank_positive"),
+)
+
+armed_structures = sa.Table(
+    "brc_armed_structures",
+    metadata,
+    _id("armed_structure_id", primary_key=True),
+    _id("event_spec_id"),
+    _id("universe_version_id"),
+    _id("projection_run_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("armed_generation", sa.BigInteger, nullable=False),
+    sa.Column("breakout_boundary", MONEY, nullable=False),
+    sa.Column("compression_ratio", MONEY, nullable=False),
+    sa.Column("input_digest", LONG_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("armed_at_ms"),
+    _time("expires_at_ms"),
+    sa.UniqueConstraint(
+        "event_spec_id",
+        "exchange_instrument_id",
+        "armed_generation",
+    ),
+    sa.CheckConstraint(
+        "armed_generation > 0",
+        name="armed_generation_positive",
+    ),
+    sa.CheckConstraint(
+        "breakout_boundary > 0 AND compression_ratio >= 0",
+        name="values_valid",
+    ),
+    sa.CheckConstraint("expires_at_ms > armed_at_ms", name="time_window_valid"),
+)
+
+instrument_product_profiles = sa.Table(
+    "brc_instrument_product_profiles",
+    metadata,
+    _id("product_profile_id", primary_key=True),
+    _id("exchange_instrument_id"),
+    sa.Column("profile_version", sa.Integer, nullable=False),
+    sa.Column("venue_id", SHORT_TEXT, nullable=False),
+    sa.Column("contract_type", SHORT_TEXT, nullable=False),
+    sa.Column("underlying_type", SHORT_TEXT, nullable=False),
+    sa.Column("margin_asset", SHORT_TEXT, nullable=False),
+    sa.Column("product_status", SHORT_TEXT, nullable=False),
+    sa.Column("configured_leverage", sa.Integer, nullable=False),
+    sa.Column("margin_mode", SHORT_TEXT, nullable=False),
+    _json("source_payload"),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False, unique=True),
+    _time("observed_at_ms"),
+    _time("valid_until_ms"),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("exchange_instrument_id", "profile_version"),
+    sa.CheckConstraint("profile_version > 0", name="profile_version_positive"),
+    sa.CheckConstraint(
+        "configured_leverage = 5",
+        name="configured_leverage_fixed_five",
+    ),
+    sa.CheckConstraint("margin_mode = 'cross'", name="margin_mode_cross"),
+    sa.CheckConstraint(
+        "valid_until_ms > observed_at_ms",
+        name="time_window_valid",
+    ),
+)
+
+instrument_product_current = sa.Table(
+    "brc_instrument_product_current",
+    metadata,
+    _id("exchange_instrument_id", primary_key=True),
+    _id("product_profile_id"),
+    _time("updated_at_ms"),
+    sa.UniqueConstraint("product_profile_id"),
+)
+
+market_calendar_versions = sa.Table(
+    "brc_market_calendar_versions",
+    metadata,
+    _id("calendar_version_id", primary_key=True),
+    sa.Column("calendar_version", sa.Integer, nullable=False),
+    sa.Column("source_name", LONG_TEXT, nullable=False),
+    sa.Column("timezone_name", SHORT_TEXT, nullable=False),
+    sa.Column("horizon_start_date", sa.Date, nullable=False),
+    sa.Column("horizon_end_date", sa.Date, nullable=False),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False, unique=True),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.CheckConstraint("calendar_version > 0", name="calendar_version_positive"),
+    sa.CheckConstraint(
+        "horizon_end_date >= horizon_start_date",
+        name="horizon_valid",
+    ),
+)
+
+market_calendar_sessions = sa.Table(
+    "brc_market_calendar_sessions",
+    metadata,
+    _id("calendar_version_id"),
+    sa.Column("session_date", sa.Date, nullable=False),
+    _time("regular_open_at_ms", nullable=True),
+    _time("regular_close_at_ms", nullable=True),
+    sa.Column("holiday", sa.Boolean, nullable=False),
+    sa.Column("early_close", sa.Boolean, nullable=False),
+    sa.Column("source_ref", LONG_TEXT, nullable=False),
+    sa.PrimaryKeyConstraint("calendar_version_id", "session_date"),
+    sa.CheckConstraint(
+        "(holiday AND regular_open_at_ms IS NULL AND regular_close_at_ms IS NULL) "
+        "OR (NOT holiday AND regular_open_at_ms IS NOT NULL "
+        "AND regular_close_at_ms > regular_open_at_ms)",
+        name="session_shape_valid",
+    ),
+)
+
+corporate_event_versions = sa.Table(
+    "brc_corporate_event_versions",
+    metadata,
+    _id("corporate_event_version_id", primary_key=True),
+    _id("exchange_instrument_id"),
+    sa.Column("source_event_id", LONG_TEXT, nullable=False),
+    sa.Column("event_kind", SHORT_TEXT, nullable=False),
+    sa.Column("certainty", SHORT_TEXT, nullable=False),
+    sa.Column("event_date", sa.Date, nullable=False),
+    _time("effective_at_ms", nullable=True),
+    sa.Column("payload_digest", LONG_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("observed_at_ms"),
+    _time("valid_until_ms"),
+    sa.UniqueConstraint("exchange_instrument_id", "source_event_id"),
+    sa.CheckConstraint(
+        "event_kind IN ('earnings', 'split', 'contract_adjustment')",
+        name="event_kind_valid",
+    ),
+    sa.CheckConstraint(
+        "certainty IN ('exact_time', 'date_only')",
+        name="certainty_valid",
+    ),
+)
+
+corporate_event_coverage = sa.Table(
+    "brc_corporate_event_coverage",
+    metadata,
+    _id("coverage_id", primary_key=True),
+    _id("exchange_instrument_id"),
+    sa.Column("source_name", LONG_TEXT, nullable=False),
+    _time("coverage_start_ms"),
+    _time("coverage_end_ms"),
+    sa.Column("coverage_status", SHORT_TEXT, nullable=False),
+    sa.Column("coverage_digest", LONG_TEXT, nullable=False, unique=True),
+    _time("observed_at_ms"),
+    _time("valid_until_ms"),
+    sa.CheckConstraint(
+        "coverage_end_ms > coverage_start_ms",
+        name="coverage_window_valid",
+    ),
+)
+
+product_admission_policies = sa.Table(
+    "brc_product_admission_policies",
+    metadata,
+    _id("product_policy_version_id", primary_key=True),
+    sa.Column("policy_version", sa.Integer, nullable=False),
+    sa.Column("asset_class", SHORT_TEXT, nullable=False),
+    _json("session_thresholds"),
+    _json("earnings_policy"),
+    sa.Column("configured_leverage", sa.Integer, nullable=False),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False, unique=True),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("asset_class", "policy_version"),
+    sa.CheckConstraint("policy_version > 0", name="policy_version_positive"),
+    sa.CheckConstraint(
+        "configured_leverage = 5",
+        name="configured_leverage_fixed_five",
+    ),
 )
 
 instrument_rules_current = sa.Table(
@@ -196,6 +557,12 @@ owner_policy_current = sa.Table(
     ),
     sa.Column("max_concurrent_tickets", sa.Integer, nullable=False),
     sa.Column("planned_stop_risk_fraction", MONEY, nullable=False),
+    sa.Column(
+        "max_portfolio_stop_risk_fraction",
+        MONEY,
+        nullable=False,
+        server_default=sa.text("0.09"),
+    ),
     sa.Column("max_initial_margin_utilization", MONEY, nullable=False),
     sa.Column("max_leverage", sa.Integer, nullable=False),
     sa.Column("supported_margin_mode", SHORT_TEXT, nullable=False),
@@ -215,6 +582,11 @@ owner_policy_current = sa.Table(
     sa.CheckConstraint(
         "planned_stop_risk_fraction > 0 AND planned_stop_risk_fraction < 1",
         name="planned_stop_risk_fraction_valid",
+    ),
+    sa.CheckConstraint(
+        "max_portfolio_stop_risk_fraction > 0 "
+        "AND max_portfolio_stop_risk_fraction < 1",
+        name="max_portfolio_stop_risk_fraction_valid",
     ),
     sa.CheckConstraint(
         "max_initial_margin_utilization > 0 AND max_initial_margin_utilization <= 1",
@@ -263,6 +635,27 @@ runtime_scopes_current = sa.Table(
     _id("exchange_instrument_id"),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("enabled", sa.Boolean, nullable=False),
+    _id("universe_version_id", nullable=True),
+    sa.Column(
+        "observation_enabled",
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.false(),
+    ),
+    sa.Column(
+        "entry_enabled",
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.false(),
+    ),
+    sa.Column(
+        "scope_state",
+        SHORT_TEXT,
+        nullable=False,
+        server_default=sa.text("'legacy'"),
+    ),
+    _time("warm_ready_at_ms", nullable=True),
+    _time("reprofile_required_at_ms", nullable=True),
     sa.Column("scope_version", sa.Integer, nullable=False),
     _time("observation_due_at_ms", nullable=True),
     _time("observation_lease_until_ms", nullable=True),
@@ -272,6 +665,7 @@ runtime_scopes_current = sa.Table(
         "strategy_group_id",
         "event_spec_id",
         "runtime_profile_id",
+        "universe_version_id",
         "exchange_instrument_id",
         "position_side",
     ),
@@ -310,6 +704,13 @@ signal_events = sa.Table(
     _id("exchange_instrument_id"),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("fact_digest", LONG_TEXT, nullable=False),
+    _id("universe_version_id", nullable=True),
+    sa.Column("universe_digest", LONG_TEXT, nullable=True),
+    _id("projection_run_id", nullable=True),
+    _id("armed_structure_id", nullable=True),
+    sa.Column("session_code", SHORT_TEXT, nullable=True),
+    sa.Column("session_multiplier", MONEY, nullable=True),
+    _id("product_policy_version_id", nullable=True),
     _time("occurred_at_ms"),
     _time("observed_at_ms"),
     _time("expires_at_ms"),
@@ -381,6 +782,12 @@ sa.Index(
     signal_events.c.observed_at_ms,
     signal_events.c.signal_event_id,
 )
+sa.Index(
+    "ix_brc_signal_events_event_instrument_occurred",
+    signal_events.c.event_spec_id,
+    signal_events.c.exchange_instrument_id,
+    signal_events.c.occurred_at_ms,
+)
 
 entry_lane_current = sa.Table(
     "brc_entry_lane_current",
@@ -427,6 +834,15 @@ capacity_claims = sa.Table(
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
     sa.Column("fact_digest", LONG_TEXT, nullable=False),
+    _id("universe_version_id", nullable=True),
+    sa.Column("universe_digest", LONG_TEXT, nullable=True),
+    _id("projection_run_id", nullable=True),
+    _id("armed_structure_id", nullable=True),
+    _id("product_policy_version_id", nullable=True),
+    _id("exit_policy_id", nullable=True),
+    sa.Column("exit_policy_version", SHORT_TEXT, nullable=True),
+    sa.Column("exit_policy_digest", LONG_TEXT, nullable=True),
+    _json("exit_policy_payload", nullable=True),
     sa.Column("entry_admission_snapshot_digest", LONG_TEXT, nullable=False),
     sa.Column("account_entry_health_digest", LONG_TEXT, nullable=False),
     sa.Column("instrument_entry_health_digest", LONG_TEXT, nullable=False),
@@ -464,6 +880,11 @@ capacity_claims = sa.Table(
     sa.Column("quantity", MONEY, nullable=False),
     sa.Column("notional", MONEY, nullable=False),
     sa.Column("risk_at_stop", MONEY, nullable=False),
+    sa.Column("portfolio_stop_risk_before", MONEY, nullable=True),
+    sa.Column("portfolio_stop_risk_after", MONEY, nullable=True),
+    sa.Column("session_code", SHORT_TEXT, nullable=True),
+    sa.Column("session_multiplier", MONEY, nullable=True),
+    sa.Column("product_admission_digest", LONG_TEXT, nullable=True),
     sa.Column("entry_order_type", SHORT_TEXT, nullable=False),
     sa.Column("entry_limit_price", MONEY, nullable=True),
     sa.Column("initial_stop_price", MONEY, nullable=False),
@@ -514,6 +935,18 @@ trade_tickets = sa.Table(
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
     sa.Column("active_netting_domain_key", LONG_TEXT, nullable=True),
+    _id("universe_version_id", nullable=True),
+    sa.Column("universe_digest", LONG_TEXT, nullable=True),
+    _id("projection_run_id", nullable=True),
+    _id("armed_structure_id", nullable=True),
+    _id("product_policy_version_id", nullable=True),
+    sa.Column("session_code", SHORT_TEXT, nullable=True),
+    sa.Column("session_multiplier", MONEY, nullable=True),
+    sa.Column("product_admission_digest", LONG_TEXT, nullable=True),
+    _id("exit_policy_id", nullable=True),
+    sa.Column("exit_policy_version", SHORT_TEXT, nullable=True),
+    sa.Column("exit_policy_digest", LONG_TEXT, nullable=True),
+    _json("exit_policy_payload", nullable=True),
     sa.Column("entry_reference_price", MONEY, nullable=False),
     sa.Column("quantity", MONEY, nullable=False),
     sa.Column("notional", MONEY, nullable=False),

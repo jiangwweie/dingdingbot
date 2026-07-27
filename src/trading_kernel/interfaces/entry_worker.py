@@ -16,12 +16,16 @@ from src.trading_kernel.application.issue_ready_signal import (
     IssueReadySignalRequest,
     issue_ready_signal,
 )
+from src.trading_kernel.application.build_product_admission_snapshot import (
+    build_product_admission_context,
+)
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus
 from src.trading_kernel.application.ports import UnitOfWorkFactory, VenuePort
 from src.trading_kernel.application.runtime_facts import (
     EntryFactsSource,
     EntryAdmissionSnapshotRequest,
     InstrumentRulesRequest,
+    ProductMarketFactsRequest,
 )
 from src.trading_kernel.application.select_entry_candidate import (
     SelectEntryCandidateRequest,
@@ -153,13 +157,41 @@ async def run_entry_worker_once(
         valid_for_ms=request.admission_snapshot_validity_ms,
     )
     try:
-        admission_snapshot, instrument_rules = await asyncio.wait_for(
-            asyncio.gather(
-                facts_source.read_entry_admission_snapshot(snapshot_request),
-                facts_source.read_instrument_rules(rules_request),
-            ),
-            timeout=request.timeout_seconds,
-        )
+        if signal.strategy_group_id == "RSRVCB-001":
+            (
+                admission_snapshot,
+                instrument_rules,
+                product_market_facts,
+            ) = await asyncio.wait_for(
+                asyncio.gather(
+                    facts_source.read_entry_admission_snapshot(
+                        snapshot_request
+                    ),
+                    facts_source.read_instrument_rules(rules_request),
+                    facts_source.read_product_market_facts(
+                        ProductMarketFactsRequest(
+                            venue_id=profile.venue_id,
+                            account_id=profile.account_id,
+                            exchange_instrument_id=(
+                                signal.exchange_instrument_id
+                            ),
+                            observed_at_ms=request.now_ms,
+                        )
+                    ),
+                ),
+                timeout=request.timeout_seconds,
+            )
+        else:
+            admission_snapshot, instrument_rules = await asyncio.wait_for(
+                asyncio.gather(
+                    facts_source.read_entry_admission_snapshot(
+                        snapshot_request
+                    ),
+                    facts_source.read_instrument_rules(rules_request),
+                ),
+                timeout=request.timeout_seconds,
+            )
+            product_market_facts = None
     except Exception as exc:
         async with uow_factory() as uow:
             await uow.signals.save_readiness(
@@ -188,6 +220,15 @@ async def run_entry_worker_once(
             observed_at_ms=instrument_rules.observed_at_ms,
             valid_until_ms=instrument_rules.valid_until_ms,
         )
+        product_context = (
+            None
+            if product_market_facts is None
+            else await build_product_admission_context(
+                uow,
+                market_facts=product_market_facts,
+                action_time_ms=request.now_ms,
+            )
+        )
         issued = await issue_ready_signal(
             uow,
             IssueReadySignalRequest(
@@ -197,6 +238,7 @@ async def run_entry_worker_once(
                 runtime_commit=request.runtime_commit,
                 schema_revision=request.schema_revision,
                 now_ms=request.now_ms,
+                product_admission_context=product_context,
             ),
         )
     if issued.status is not IssueTicketStatus.ISSUED or issued.ticket_id is None:

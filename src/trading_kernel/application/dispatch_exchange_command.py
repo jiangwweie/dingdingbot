@@ -25,6 +25,10 @@ from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     EntryFactsSource,
     InstrumentRulesRequest,
+    ProductMarketFactsRequest,
+)
+from src.trading_kernel.application.build_product_admission_snapshot import (
+    build_product_admission_context,
 )
 from src.trading_kernel.domain.account_entry_health import classify_account_entry_health
 from src.trading_kernel.domain.aggregate import AggregateStatus
@@ -164,7 +168,7 @@ async def dispatch_one_command(
             command_kinds=request.command_kinds,
         )
         if expired is not None:
-            result = ExchangeCommandResult(
+            expired_result = ExchangeCommandResult(
                 status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
                 observed_at_ms=request.now_ms,
                 reason="stale_claim_after_restart",
@@ -175,11 +179,11 @@ async def dispatch_one_command(
             event = _command_result_event(
                 command=expired,
                 aggregate=aggregate,
-                result=result,
+                result=expired_result,
             )
             await uow.exchange_commands.record_expired_claim_unknown(
                 command_id=expired.command_id,
-                result=result,
+                result=expired_result,
             )
             await uow.commit_reduction(
                 event=event,
@@ -389,13 +393,37 @@ async def _preflight_new_entry_mutation(
         valid_for_ms=request.admission_snapshot_validity_ms,
     )
     try:
-        snapshot, rules = await asyncio.wait_for(
-            asyncio.gather(
-                entry_facts_source.read_entry_admission_snapshot(snapshot_request),
-                entry_facts_source.read_instrument_rules(rules_request),
-            ),
-            timeout=request.timeout_seconds,
-        )
+        if command.ticket_identity.runtime.strategy_group_id == "RSRVCB-001":
+            snapshot, rules, product_market_facts = await asyncio.wait_for(
+                asyncio.gather(
+                    entry_facts_source.read_entry_admission_snapshot(
+                        snapshot_request
+                    ),
+                    entry_facts_source.read_instrument_rules(rules_request),
+                    entry_facts_source.read_product_market_facts(
+                        ProductMarketFactsRequest(
+                            venue_id=domain.venue_id,
+                            account_id=domain.account_id,
+                            exchange_instrument_id=(
+                                domain.exchange_instrument_id
+                            ),
+                            observed_at_ms=request.now_ms,
+                        )
+                    ),
+                ),
+                timeout=request.timeout_seconds,
+            )
+        else:
+            snapshot, rules = await asyncio.wait_for(
+                asyncio.gather(
+                    entry_facts_source.read_entry_admission_snapshot(
+                        snapshot_request
+                    ),
+                    entry_facts_source.read_instrument_rules(rules_request),
+                ),
+                timeout=request.timeout_seconds,
+            )
+            product_market_facts = None
     except Exception:
         return EntryDispatchPreflightStatus.STALE_SNAPSHOT
     async with uow_factory() as uow:
@@ -425,6 +453,15 @@ async def _preflight_new_entry_mutation(
             account_id=domain.account_id,
             exchange_instrument_id=domain.exchange_instrument_id,
         )
+        product_context = (
+            None
+            if product_market_facts is None
+            else await build_product_admission_context(
+                uow,
+                market_facts=product_market_facts,
+                action_time_ms=request.now_ms,
+            )
+        )
     decision = revalidate_entry_dispatch(
         EntryDispatchPreflightRequest(
             command=current_command,
@@ -447,6 +484,7 @@ async def _preflight_new_entry_mutation(
                 exchange_instrument_id=domain.exchange_instrument_id,
                 requested_position_side=domain.position_side,
             ),
+            product_admission_context=product_context,
             now_ms=request.now_ms,
         )
     )

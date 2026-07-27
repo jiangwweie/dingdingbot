@@ -361,7 +361,7 @@ async def test_command_worker_closes_factory_resource(
             worker_role="entry",
             worker_id="entry-1",
             runtime_commit="commit-1",
-            schema_revision="0001_initial",
+            schema_revision="0002_strategy_universe_us_equity",
             now_ms=1_000,
             lease_ms=30_000,
             timeout_seconds=10.0,
@@ -425,7 +425,7 @@ async def test_command_worker_long_running_mode_reuses_factory_resource(
             worker_role="entry",
             worker_id="entry-1",
             runtime_commit="commit-1",
-            schema_revision="0001_initial",
+            schema_revision="0002_strategy_universe_us_equity",
             now_ms=None,
             lease_ms=30_000,
             timeout_seconds=10.0,
@@ -466,8 +466,8 @@ async def test_readonly_probe_reports_only_bounded_identity_and_counts(
         validity_ms=5_000,
     )
 
-    assert result.instrument_rule_count == 6
-    assert result.netting_domain_count == 12
+    assert result.instrument_rule_count == 27
+    assert result.netting_domain_count == 54
     assert result.non_flat_domain_count == 0
     assert result.open_order_domain_count == 0
     assert result.account_position_mode == "independent_sides"

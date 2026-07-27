@@ -216,7 +216,7 @@ async def test_readonly_certification_prints_json_without_report_files(
             RuntimeAuthoritySeedRequest(
                 account_id="subaccount-main",
                 runtime_commit="a" * 40,
-                schema_revision="0001_initial",
+                schema_revision="0002_strategy_universe_us_equity",
                 seeded_at_ms=1_000,
             ),
         )
@@ -241,7 +241,7 @@ async def test_readonly_certification_prints_json_without_report_files(
     payload = json.loads(result.stdout)
     assert payload["schema"] == "brc.trading_kernel.readonly_certification.v1"
     assert payload["status"] == "pass"
-    assert payload["alembic_revision"] == "0001_initial"
+    assert payload["alembic_revision"] == "0002_strategy_universe_us_equity"
     assert payload["checks"]["integrity_orphans"] == 0
     assert payload["checks"]["legacy_execution_tables"] == 0
     assert sorted(path.name for path in tmp_path.iterdir()) == before
@@ -271,7 +271,7 @@ async def test_schema_verifier_accepts_only_clean_baseline(
     payload = json.loads(result.stdout)
     assert payload["schema"] == "brc.trading_kernel.schema_verification.v1"
     assert payload["status"] == "pass"
-    assert payload["alembic_revision"] == "0001_initial"
+    assert payload["alembic_revision"] == "0002_strategy_universe_us_equity"
     assert payload["missing_tables"] == []
     assert payload["unexpected_tables"] == []
 

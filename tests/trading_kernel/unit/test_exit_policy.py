@@ -12,6 +12,7 @@ from src.trading_kernel.domain.exit_policy import (
     calculate_structural_runner_stop,
     exit_policy_for,
     evaluate_exit_policy,
+    evaluate_pre_tp1_exit_policy,
     split_tp1_quantity,
 )
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
@@ -26,6 +27,7 @@ from src.trading_kernel.domain.strategy_registry import registered_strategy_cont
         "SOR-LONG",
         "SOR-SHORT",
         "BRF2-SHORT",
+        "RSRVCB-LONG-15M",
     ],
 )
 def test_each_registered_event_has_one_current_exit_policy(event_id: str) -> None:
@@ -226,3 +228,101 @@ def test_runner_ignores_open_or_duplicate_candle_and_requires_two_tick_improveme
     assert open_candle.kind is ExitDecisionKind.NO_CHANGE
     assert duplicate.kind is ExitDecisionKind.NO_CHANGE
     assert too_small.kind is ExitDecisionKind.NO_CHANGE
+
+
+def test_rsr_vcb_breakout_failure_and_phase_time_stops_are_closed_bar_rules() -> None:
+    contract = next(
+        item
+        for item in registered_strategy_contracts()
+        if item.event_id == "RSRVCB-LONG-15M"
+    )
+    policy = exit_policy_for(contract.event_spec_id)
+    assert policy.breakout_failure is not None
+    assert policy.phase_time_stop is not None
+    assert policy.phase_time_stop.pre_tp1_max_holding_bars == 96
+    assert policy.phase_time_stop.absolute_max_holding_bars == 288
+
+    open_bar = evaluate_pre_tp1_exit_policy(
+        policy=policy,
+        market_facts=LifecycleMarketFacts(
+            watermark_ms=2_000,
+            is_final_closed_candle=False,
+            structure_reference=Decimal("99"),
+            atr=Decimal("1"),
+            holding_bars=10,
+            closed_candle_close=Decimal("98"),
+            breakout_boundary=Decimal("99"),
+        ),
+    )
+    failed = evaluate_pre_tp1_exit_policy(
+        policy=policy,
+        market_facts=LifecycleMarketFacts(
+            watermark_ms=2_000,
+            is_final_closed_candle=True,
+            structure_reference=Decimal("99"),
+            atr=Decimal("1"),
+            holding_bars=10,
+            closed_candle_close=Decimal("98"),
+            breakout_boundary=Decimal("99"),
+        ),
+    )
+    timed = evaluate_pre_tp1_exit_policy(
+        policy=policy,
+        market_facts=LifecycleMarketFacts(
+            watermark_ms=3_000,
+            is_final_closed_candle=True,
+            structure_reference=Decimal("101"),
+            atr=Decimal("1"),
+            holding_bars=96,
+            closed_candle_close=Decimal("101"),
+            breakout_boundary=Decimal("99"),
+        ),
+    )
+
+    assert open_bar.kind is ExitDecisionKind.NO_CHANGE
+    assert failed.reason == "breakout_failure_closed_below_boundary"
+    assert timed.reason == "pre_tp1_time_stop_hit"
+
+
+def test_rsr_vcb_runner_ignores_breakout_failure_but_exits_at_72_hours() -> None:
+    contract = next(
+        item
+        for item in registered_strategy_contracts()
+        if item.event_id == "RSRVCB-LONG-15M"
+    )
+    policy = exit_policy_for(contract.event_spec_id)
+    before_limit = evaluate_exit_policy(
+        policy=policy,
+        current_stop=Decimal("100"),
+        break_even_floor=Decimal("100"),
+        price_tick=Decimal("0.1"),
+        last_runner_watermark_ms=1_000,
+        market_facts=LifecycleMarketFacts(
+            watermark_ms=2_000,
+            is_final_closed_candle=True,
+            structure_reference=Decimal("102"),
+            atr=Decimal("2"),
+            holding_bars=287,
+            closed_candle_close=Decimal("98"),
+            breakout_boundary=Decimal("99"),
+        ),
+    )
+    at_limit = evaluate_exit_policy(
+        policy=policy,
+        current_stop=Decimal("100"),
+        break_even_floor=Decimal("100"),
+        price_tick=Decimal("0.1"),
+        last_runner_watermark_ms=2_000,
+        market_facts=LifecycleMarketFacts(
+            watermark_ms=3_000,
+            is_final_closed_candle=True,
+            structure_reference=Decimal("102"),
+            atr=Decimal("2"),
+            holding_bars=288,
+            closed_candle_close=Decimal("98"),
+            breakout_boundary=Decimal("99"),
+        ),
+    )
+
+    assert before_limit.kind is ExitDecisionKind.MOVE_STOP
+    assert at_limit.reason == "time_stop_hit"

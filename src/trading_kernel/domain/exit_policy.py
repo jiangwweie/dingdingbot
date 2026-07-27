@@ -1,4 +1,4 @@
-"""Versioned pure exit-policy contracts for the six registered Events."""
+"""Versioned pure exit-policy contracts for registered Events."""
 
 from __future__ import annotations
 
@@ -37,6 +37,8 @@ class LifecycleMarketFacts(BaseModel):
     structure_reference: Decimal
     atr: Decimal
     holding_bars: int
+    closed_candle_close: Decimal | None = None
+    breakout_boundary: Decimal | None = None
 
     @model_validator(mode="after")
     def _validate_facts(self) -> "LifecycleMarketFacts":
@@ -44,6 +46,10 @@ class LifecycleMarketFacts(BaseModel):
             raise ValueError("lifecycle market watermark and holding bars are invalid")
         if self.structure_reference <= 0 or self.atr <= 0:
             raise ValueError("lifecycle structure and ATR facts must be positive")
+        if self.closed_candle_close is not None and self.closed_candle_close <= 0:
+            raise ValueError("lifecycle closed candle must be positive")
+        if self.breakout_boundary is not None and self.breakout_boundary <= 0:
+            raise ValueError("lifecycle breakout boundary must be positive")
         return self
 
 
@@ -144,6 +150,31 @@ class TimeStopRule(BaseModel):
         return value
 
 
+class BreakoutFailureRule(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    timeframe: Literal["15m"] = "15m"
+    only_before_tp1: Literal[True] = True
+    comparison: Literal["close_below_boundary"] = "close_below_boundary"
+
+
+class PhaseTimeStopRule(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    pre_tp1_max_holding_bars: int
+    absolute_max_holding_bars: int
+
+    @model_validator(mode="after")
+    def _validate_phase_windows(self) -> "PhaseTimeStopRule":
+        if (
+            self.pre_tp1_max_holding_bars <= 0
+            or self.absolute_max_holding_bars
+            <= self.pre_tp1_max_holding_bars
+        ):
+            raise ValueError("phase time stops must be positive and increasing")
+        return self
+
+
 class ExitPolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -156,6 +187,8 @@ class ExitPolicy(BaseModel):
     break_even_floor: BreakEvenFloorRule
     runner: StructuralAtrRunnerRule
     time_stop: TimeStopRule | None = None
+    breakout_failure: BreakoutFailureRule | None = None
+    phase_time_stop: PhaseTimeStopRule | None = None
 
     @field_validator(
         "exit_policy_id",
@@ -327,9 +360,18 @@ def evaluate_exit_policy(
             "closed_candle_required",
             market_facts.watermark_ms,
         )
+    maximum_holding_bars = (
+        policy.phase_time_stop.absolute_max_holding_bars
+        if policy.phase_time_stop is not None
+        else (
+            None
+            if policy.time_stop is None
+            else policy.time_stop.max_holding_bars
+        )
+    )
     if (
-        policy.time_stop is not None
-        and market_facts.holding_bars >= policy.time_stop.max_holding_bars
+        maximum_holding_bars is not None
+        and market_facts.holding_bars >= maximum_holding_bars
     ):
         return _exit_decision(
             ExitDecisionKind.EXIT,
@@ -370,6 +412,50 @@ def evaluate_exit_policy(
     )
 
 
+def evaluate_pre_tp1_exit_policy(
+    *,
+    policy: ExitPolicy,
+    market_facts: LifecycleMarketFacts,
+) -> ExitDecision:
+    if not market_facts.is_final_closed_candle:
+        return _exit_decision(
+            ExitDecisionKind.NO_CHANGE,
+            "closed_candle_required",
+            market_facts.watermark_ms,
+        )
+    if (
+        policy.phase_time_stop is not None
+        and market_facts.holding_bars
+        >= policy.phase_time_stop.pre_tp1_max_holding_bars
+    ):
+        return _exit_decision(
+            ExitDecisionKind.EXIT,
+            "pre_tp1_time_stop_hit",
+            market_facts.watermark_ms,
+        )
+    if policy.breakout_failure is not None:
+        if (
+            market_facts.closed_candle_close is None
+            or market_facts.breakout_boundary is None
+        ):
+            return _exit_decision(
+                ExitDecisionKind.NO_CHANGE,
+                "breakout_failure_facts_missing",
+                market_facts.watermark_ms,
+            )
+        if market_facts.closed_candle_close < market_facts.breakout_boundary:
+            return _exit_decision(
+                ExitDecisionKind.EXIT,
+                "breakout_failure_closed_below_boundary",
+                market_facts.watermark_ms,
+            )
+    return _exit_decision(
+        ExitDecisionKind.NO_CHANGE,
+        "pre_tp1_exit_not_triggered",
+        market_facts.watermark_ms,
+    )
+
+
 def _policy_for_contract(contract: RegisteredStrategyContract) -> ExitPolicy:
     return ExitPolicy(
         exit_policy_id=contract.exit_policy_id,
@@ -401,6 +487,19 @@ def _policy_for_contract(contract: RegisteredStrategyContract) -> ExitPolicy:
         time_stop=(
             TimeStopRule(max_holding_bars=96)
             if contract.event_id == "SOR-LONG"
+            else None
+        ),
+        breakout_failure=(
+            BreakoutFailureRule()
+            if contract.event_id == "RSRVCB-LONG-15M"
+            else None
+        ),
+        phase_time_stop=(
+            PhaseTimeStopRule(
+                pre_tp1_max_holding_bars=96,
+                absolute_max_holding_bars=288,
+            )
+            if contract.event_id == "RSRVCB-LONG-15M"
             else None
         ),
     )
