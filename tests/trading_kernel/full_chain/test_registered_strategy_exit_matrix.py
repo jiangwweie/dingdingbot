@@ -177,6 +177,8 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
         CancelProtectionOrders(
             ticket_id=ticket.identity.ticket_id,
             exchange_order_id="stop-initial-1",
+            order_namespace="conditional",
+            purpose="runner_old_stop",
         ),
     )
     runner = reduce_event(

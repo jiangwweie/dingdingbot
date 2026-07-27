@@ -5,6 +5,9 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from src.trading_kernel.application.dispatch_exchange_command import (
+    _command_result_event,
+)
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     CommandGenerationError,
@@ -20,6 +23,7 @@ from src.trading_kernel.domain.commands import (
     require_next_generation_allowed,
 )
 from tests.trading_kernel.unit.test_ticket import _identity
+from tests.trading_kernel.unit.test_reducer import _reconciliation_pending_aggregate
 
 
 def _payload(*, reduce_only: bool = False) -> OrderCommandPayload:
@@ -125,13 +129,19 @@ def test_cancel_command_requires_exact_exchange_order_identity() -> None:
         generation=1,
         idempotency_key="cancel-stop-1",
         venue_client_order_id="brc-cancel-stop-1",
-        payload=CancelCommandPayload(exchange_order_id="stop-order-1"),
+        payload=CancelCommandPayload(
+            exchange_order_id="stop-order-1",
+            order_namespace="conditional",
+            purpose="runner_old_stop",
+        ),
         status=ExchangeCommandStatus.PREPARED,
         created_at_ms=2_000,
         deadline_at_ms=12_000,
     )
 
     assert command.payload.exchange_order_id == "stop-order-1"
+    assert command.payload.order_namespace == "conditional"
+    assert command.payload.purpose == "runner_old_stop"
 
     with pytest.raises(ValidationError):
         ExchangeCommand(
@@ -145,9 +155,46 @@ def test_cancel_command_requires_exact_exchange_order_identity() -> None:
         CancelCommandPayload(exchange_order_id=" ")
 
     with pytest.raises(ValidationError):
+        CancelCommandPayload(
+            exchange_order_id="stop-order-1",
+            order_namespace="conditional",
+        )
+
+    with pytest.raises(ValidationError):
         ExchangeCommandResult(
             status=ExchangeCommandStatus.REJECTED,
             observed_at_ms=2_000,
+        )
+
+
+def test_cancel_result_refuses_a_frozen_purpose_that_contradicts_state() -> None:
+    aggregate = _reconciliation_pending_aggregate()
+    command = ExchangeCommand(
+        command_id="command:cancel-runner-stop",
+        ticket_identity=aggregate.identity,
+        kind=ExchangeCommandKind.CANCEL_ORDER,
+        generation=1,
+        idempotency_key="cancel-runner-stop",
+        venue_client_order_id="brc-cancel-runner-stop",
+        payload=CancelCommandPayload(
+            exchange_order_id="stop-order-1",
+            order_namespace="conditional",
+            purpose="runner_old_stop",
+        ),
+        status=ExchangeCommandStatus.CLAIMED,
+        created_at_ms=2_000,
+        deadline_at_ms=12_000,
+    )
+
+    with pytest.raises(RuntimeError, match="cancel purpose is incompatible"):
+        _command_result_event(
+            command=command,
+            aggregate=aggregate,
+            result=ExchangeCommandResult(
+                status=ExchangeCommandStatus.ACCEPTED,
+                observed_at_ms=2_100,
+                exchange_order_id="stop-order-1",
+            ),
         )
 
 

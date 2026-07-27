@@ -42,6 +42,7 @@ class VenueOrderTruth(BaseModel):
     order_side: Literal["buy", "sell"]
     quantity: Decimal
     reduce_only: bool
+    order_namespace: Literal["regular", "conditional"] = "regular"
     is_open: bool = True
 
     @field_validator(
@@ -215,6 +216,10 @@ def _decide_cancel_recovery(
                 "instrument_mismatch",
             ),
             (order.position_side == domain.position_side, "position_side_mismatch"),
+            (
+                order.order_namespace == command.payload.order_namespace,
+                "cancel_target_order_namespace_mismatch",
+            ),
         )
         for matches, reason in comparisons:
             if not matches:

@@ -48,6 +48,8 @@ from src.trading_kernel.domain.events import (
     TradeEvent,
 )
 from src.trading_kernel.domain.review import (
+    ExternalExitUnavailableReview,
+    ReviewEconomicsCompleteness,
     ReviewEconomicsUnavailable,
     calculate_review_economics,
 )
@@ -106,6 +108,7 @@ class ReconciliationWorkerRequest(BaseModel):
     timeout_seconds: float
     unknown_visibility_grace_ms: int
     idle_poll_interval_ms: int
+    review_economics_visibility_grace_ms: int = 300_000
 
     @field_validator("worker_id", "runtime_commit", "schema_revision", mode="before")
     @classmethod
@@ -122,6 +125,7 @@ class ReconciliationWorkerRequest(BaseModel):
             or self.timeout_seconds <= 0
             or self.unknown_visibility_grace_ms <= 0
             or self.idle_poll_interval_ms <= 0
+            or self.review_economics_visibility_grace_ms <= 0
         ):
             raise ValueError("reconciliation worker windows must be positive")
         return self
@@ -146,6 +150,7 @@ async def run_reconciliation_worker_once(
     review_economics_source: ReviewEconomicsSource | None = None,
 ) -> ReconciliationWorkerResult:
     pending_unknown_result: ReconciliationWorkerResult | None = None
+    external_fallback_without_exit = False
     async with uow_factory() as uow:
         unknown = await uow.exchange_commands.get_one_unknown()
     if unknown is not None:
@@ -258,7 +263,7 @@ async def run_reconciliation_worker_once(
             events = await uow.events.list_for_ticket(review.identity.ticket_id)
             review_window = _review_window(events)
             exit_client_ids = _review_exit_client_ids(commands)
-            if review_window is None or not exit_client_ids:
+            if review_window is None:
                 await uow.aggregates.schedule_next_check(
                     review.identity.ticket_id,
                     work_kind="reconciliation",
@@ -269,7 +274,9 @@ async def run_reconciliation_worker_once(
                     ticket_id=review.identity.ticket_id,
                     detail="review_lineage:incomplete",
                 )
-            entry_time_ms, exit_time_ms, executed_entry_quantity = review_window
+            entry_time_ms = review_window.entry_time_ms
+            exit_time_ms = review_window.exit_time_ms
+            executed_entry_quantity = review_window.executed_entry_quantity
             overlapping_exposure = (
                 await uow.tickets.has_other_instrument_ticket_in_window(
                     ticket_id=review.identity.ticket_id,
@@ -294,9 +301,33 @@ async def run_reconciliation_worker_once(
                     ticket_id=review.identity.ticket_id,
                     detail="review_entry_command:missing",
                 )
+            if not exit_client_ids:
+                if _external_review_fallback_due(review_window, request):
+                    external_fallback_without_exit = True
+                else:
+                    await uow.aggregates.schedule_next_check(
+                        review.identity.ticket_id,
+                        work_kind="reconciliation",
+                        due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                    )
+                    return ReconciliationWorkerResult(
+                        status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+                        ticket_id=review.identity.ticket_id,
+                        detail="review_lineage:incomplete",
+                    )
 
     if review is not None:
         assert entry_client_id is not None
+        assert review_window is not None
+        if external_fallback_without_exit:
+            return await _record_external_exit_unavailable_review(
+                uow_factory,
+                review=review,
+                review_window=review_window,
+                recorded_at_ms=request.now_ms,
+                executed_entry_quantity=executed_entry_quantity,
+                visibility_grace_ms=request.review_economics_visibility_grace_ms,
+            )
         if review_economics_source is None:
             await _schedule_review_retry(
                 uow_factory,
@@ -337,6 +368,17 @@ async def run_reconciliation_worker_once(
                 actual_risk_at_stop=review.actual_stop_risk,
             )
         except Exception as exc:
+            if _external_review_fallback_due(review_window, request):
+                return await _record_external_exit_unavailable_review(
+                    uow_factory,
+                    review=review,
+                    review_window=review_window,
+                    recorded_at_ms=request.now_ms,
+                    executed_entry_quantity=executed_entry_quantity,
+                    visibility_grace_ms=(
+                        request.review_economics_visibility_grace_ms
+                    ),
+                )
             await _schedule_review_retry(
                 uow_factory,
                 ticket_id=review.identity.ticket_id,
@@ -403,9 +445,16 @@ def _runtime_fenced_result(*, ticket_id: str | None = None) -> ReconciliationWor
     )
 
 
-def _review_window(
-    events: list[TradeEvent],
-) -> tuple[int, int, Decimal] | None:
+class _ReviewWindow(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    entry_time_ms: int
+    exit_time_ms: int
+    executed_entry_quantity: Decimal
+    external_flat: bool
+
+
+def _review_window(events: list[TradeEvent]) -> _ReviewWindow | None:
     entry_events = [
         event
         for event in events
@@ -426,7 +475,68 @@ def _review_window(
     )
     if exit_event is None:
         return None
-    return entry.occurred_at_ms, exit_event.occurred_at_ms, entry.filled_qty
+    return _ReviewWindow(
+        entry_time_ms=entry.occurred_at_ms,
+        exit_time_ms=exit_event.occurred_at_ms,
+        executed_entry_quantity=entry.filled_qty,
+        external_flat=isinstance(exit_event, ExternalFlatDetected),
+    )
+
+
+def _external_review_fallback_due(
+    review_window: _ReviewWindow,
+    request: ReconciliationWorkerRequest,
+) -> bool:
+    return (
+        review_window.external_flat
+        and request.now_ms
+        >= review_window.exit_time_ms + request.review_economics_visibility_grace_ms
+    )
+
+
+async def _record_external_exit_unavailable_review(
+    uow_factory: UnitOfWorkFactory,
+    *,
+    review,
+    review_window: _ReviewWindow,
+    recorded_at_ms: int,
+    executed_entry_quantity: Decimal,
+    visibility_grace_ms: int,
+) -> ReconciliationWorkerResult:
+    unavailable = ExternalExitUnavailableReview(
+        economics_completeness=ReviewEconomicsCompleteness.EXTERNAL_EXIT_UNAVAILABLE,
+        unavailable_reason="external_flat_exit_fills_unavailable",
+        entry_quantity=executed_entry_quantity,
+        entry_time_ms=review_window.entry_time_ms,
+        external_flat_detected_at_ms=review_window.exit_time_ms,
+        visibility_grace_ms=visibility_grace_ms,
+    )
+    metrics = {
+        "signal_event_id": review.identity.signal_event_id,
+        "event_spec_id": review.identity.runtime.event_spec_id,
+        "ticket_quantity": str(review.ticket.quantity),
+        "executed_entry_quantity": str(executed_entry_quantity),
+        **unavailable.model_dump(mode="json"),
+    }
+    async with uow_factory() as uow:
+        await record_trade_review(
+            uow,
+            RecordTradeReviewRequest(
+                ticket_id=review.identity.ticket_id,
+                review_id=f"review:{review.identity.ticket_id}",
+                outcome="terminal_flat",
+                metrics=metrics,
+                decision_impact={
+                    "status": "recorded_with_external_exit_unavailable",
+                    "economics_completeness": unavailable.economics_completeness.value,
+                },
+                recorded_at_ms=recorded_at_ms,
+            ),
+        )
+    return ReconciliationWorkerResult(
+        status=ReconciliationWorkerStatus.REVIEWED,
+        ticket_id=review.identity.ticket_id,
+    )
 
 
 def _entry_client_id(commands: list[ExchangeCommand]) -> str | None:

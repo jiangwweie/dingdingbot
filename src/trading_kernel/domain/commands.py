@@ -112,6 +112,12 @@ class CancelCommandPayload(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     exchange_order_id: str
+    order_namespace: Literal["regular", "conditional"]
+    purpose: Literal[
+        "entry_remainder",
+        "reconciliation_cleanup",
+        "runner_old_stop",
+    ]
 
     @field_validator("exchange_order_id", mode="before")
     @classmethod

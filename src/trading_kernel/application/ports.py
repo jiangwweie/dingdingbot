@@ -485,6 +485,14 @@ class IncidentRepository(Protocol):
 
     async def resolve(self, incident_id: str, *, resolved_at_ms: int) -> None: ...
 
+    async def resolve_all_open_for_ticket(
+        self,
+        ticket_id: str,
+        *,
+        resolved_at_ms: int,
+        resolved_by_event_id: str,
+    ) -> None: ...
+
 
 class PositionRepository(Protocol):
     async def upsert(

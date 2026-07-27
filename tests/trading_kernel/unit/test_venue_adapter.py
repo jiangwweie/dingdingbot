@@ -1195,25 +1195,22 @@ async def test_ccxt_adapter_cancels_exact_exchange_order_without_creating_order(
     assert exchange.cancel_call == (
         "stop-order-1",
         "BTC/USDT:USDT",
-        {"positionSide": "LONG"},
+        {"positionSide": "LONG", "conditional": False},
     )
 
 
 @pytest.mark.asyncio
-async def test_ccxt_adapter_retries_exact_cancel_in_conditional_namespace() -> None:
+async def test_ccxt_adapter_cancels_conditional_order_in_its_exact_namespace() -> None:
     exchange = ConditionalCancelExchange()
     adapter = _cancel_adapter(exchange)
 
-    result = await adapter.execute(_cancel_request())
+    result = await adapter.execute(
+        _cancel_request(order_namespace="conditional", purpose="runner_old_stop")
+    )
 
     assert result.status is ExchangeCommandStatus.ACCEPTED
     assert result.exchange_order_id == "stop-order-1"
     assert exchange.cancel_calls == [
-        (
-            "stop-order-1",
-            "BTC/USDT:USDT",
-            {"positionSide": "LONG"},
-        ),
         (
             "stop-order-1",
             "BTC/USDT:USDT",
@@ -1297,7 +1294,7 @@ async def test_cancel_truth_looks_up_exact_target_order_not_cancel_command_ident
     assert exchange.order_lookup == (
         "stop-order-1",
         "BTC/USDT:USDT",
-        {"positionSide": "LONG"},
+        {"positionSide": "LONG", "conditional": False},
     )
 
 
@@ -1306,7 +1303,12 @@ async def test_cancel_truth_does_not_claim_absence_when_target_is_still_open() -
     exchange = CancelTruthExchange(visible=False, target_in_open=True)
     adapter = _cancel_adapter(exchange)
 
-    truth = await adapter.lookup_command_truth(_cancel_truth_request())
+    truth = await adapter.lookup_command_truth(
+        _cancel_truth_request(
+            order_namespace="conditional",
+            purpose="runner_old_stop",
+        )
+    )
 
     assert truth.lookup_status is VenueLookupStatus.VISIBLE
     assert truth.order is not None
@@ -1358,7 +1360,11 @@ def _cancel_adapter(exchange) -> CcxtVenueAdapter:
     )
 
 
-def _cancel_request() -> VenueCommandRequest:
+def _cancel_request(
+    *,
+    order_namespace: str = "regular",
+    purpose: str = "reconciliation_cleanup",
+) -> VenueCommandRequest:
     return VenueCommandRequest(
         command_id="command:cancel-stop-1",
         kind=ExchangeCommandKind.CANCEL_ORDER,
@@ -1367,7 +1373,11 @@ def _cancel_request() -> VenueCommandRequest:
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side="long",
         venue_client_order_id="brc-cancel-stop-1",
-        payload=CancelCommandPayload(exchange_order_id="stop-order-1"),
+        payload=CancelCommandPayload(
+            exchange_order_id="stop-order-1",
+            order_namespace=order_namespace,
+            purpose=purpose,
+        ),
         deadline_at_ms=10_000,
     )
 
@@ -1387,8 +1397,15 @@ def _truth_request() -> VenueTruthRequest:
     )
 
 
-def _cancel_truth_request() -> VenueTruthRequest:
-    request = _cancel_request()
+def _cancel_truth_request(
+    *,
+    order_namespace: str = "regular",
+    purpose: str = "reconciliation_cleanup",
+) -> VenueTruthRequest:
+    request = _cancel_request(
+        order_namespace=order_namespace,
+        purpose=purpose,
+    )
     return VenueTruthRequest(
         command_id=request.command_id,
         kind=request.kind,

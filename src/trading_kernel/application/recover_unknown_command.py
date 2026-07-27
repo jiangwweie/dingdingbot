@@ -297,6 +297,10 @@ def _recovery_event(
     ):
         if not isinstance(command.payload, CancelCommandPayload):
             raise RuntimeError("cancel recovery payload is invalid")
+        if command.payload.purpose != "reconciliation_cleanup":
+            raise RuntimeError(
+                "cancel purpose cannot enter generic still-open recovery"
+            )
         return CancelOrderStillOpenConfirmed(
             **common,
             exchange_order_id=command.payload.exchange_order_id,
@@ -338,25 +342,31 @@ def _recovery_event(
         if not isinstance(command.payload, CancelCommandPayload):
             raise RuntimeError("cancel recovery payload is invalid")
         target_order_id = command.payload.exchange_order_id
-        if aggregate.status is AggregateStatus.PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN:
+        if command.payload.purpose == "entry_remainder":
+            if aggregate.status is not AggregateStatus.PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN:
+                raise RuntimeError("cancel purpose is incompatible with aggregate state")
             return EntryRemainderCancelConfirmed(
                 **common,
                 exchange_order_id=target_order_id,
             )
-        if aggregate.status is AggregateStatus.CANCEL_OUTCOME_UNKNOWN:
+        if command.payload.purpose == "reconciliation_cleanup":
+            if aggregate.status is not AggregateStatus.CANCEL_OUTCOME_UNKNOWN:
+                raise RuntimeError("cancel purpose is incompatible with aggregate state")
             return CancelOrderAbsenceConfirmed(
                 **common,
                 exchange_order_id=target_order_id,
             )
-        if (
-            aggregate.status
-            is AggregateStatus.RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN
-        ):
+        if command.payload.purpose == "runner_old_stop":
+            if (
+                aggregate.status
+                is not AggregateStatus.RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN
+            ):
+                raise RuntimeError("cancel purpose is incompatible with aggregate state")
             return ProtectionCancelAbsenceConfirmed(
                 **common,
                 exchange_order_id=target_order_id,
             )
-        raise RuntimeError("cancel recovery aggregate state is not supported")
+        raise RuntimeError("cancel recovery purpose is not supported")
     raise RuntimeError(f"absence recovery is not mapped for {command.kind.value}")
 
 

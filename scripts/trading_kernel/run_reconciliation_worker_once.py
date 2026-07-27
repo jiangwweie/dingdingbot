@@ -57,6 +57,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--now-ms", type=int)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
     parser.add_argument("--unknown-visibility-grace-ms", type=int, default=30_000)
+    parser.add_argument(
+        "--review-economics-visibility-grace-ms",
+        type=int,
+        default=300_000,
+    )
     parser.add_argument("--idle-poll-interval-ms", type=int, default=2_000)
     parser.add_argument("--run-forever", action="store_true")
     parser.add_argument("--poll-interval-ms", type=int, default=5_000)
@@ -107,6 +112,9 @@ async def _run(args: argparse.Namespace) -> int:
                     timeout_seconds=args.timeout_seconds,
                     unknown_visibility_grace_ms=(
                         args.unknown_visibility_grace_ms
+                    ),
+                    review_economics_visibility_grace_ms=(
+                        args.review_economics_visibility_grace_ms
                     ),
                     idle_poll_interval_ms=args.idle_poll_interval_ms,
                 ),

@@ -53,6 +53,7 @@ from src.trading_kernel.domain.effects import (
     ReleaseBudget,
     ReleaseEntryLane,
     ResolveIncident,
+    ResolveTicketIncidentsAtClosure,
     RequestControlledFlatten,
     ReleaseCapitalAuthorities,
 )
@@ -267,6 +268,8 @@ class PostgresKernelUnitOfWork:
                         CancelProtectionOrders(
                             ticket_id=effect.ticket_id,
                             exchange_order_id=aggregate.entry_exchange_order_id,
+                            order_namespace="regular",
+                            purpose="entry_remainder",
                         ),
                         generation=generation,
                         occurred_at_ms=event.occurred_at_ms,
@@ -423,6 +426,13 @@ class PostgresKernelUnitOfWork:
                 await self.incidents.resolve(
                     incident.incident_id,
                     resolved_at_ms=event.occurred_at_ms,
+                )
+                continue
+            if isinstance(effect, ResolveTicketIncidentsAtClosure):
+                await self.incidents.resolve_all_open_for_ticket(
+                    effect.ticket_id,
+                    resolved_at_ms=event.occurred_at_ms,
+                    resolved_by_event_id=event.event_id,
                 )
                 continue
             if isinstance(effect, ReleaseCapitalAuthorities):
@@ -751,7 +761,11 @@ def _cancel_protection_command(
         generation=generation,
         idempotency_key=command_id,
         venue_client_order_id=build_venue_client_order_id(command_id),
-        payload=CancelCommandPayload(exchange_order_id=effect.exchange_order_id),
+        payload=CancelCommandPayload(
+            exchange_order_id=effect.exchange_order_id,
+            order_namespace=effect.order_namespace,
+            purpose=effect.purpose,
+        ),
         status=ExchangeCommandStatus.PREPARED,
         created_at_ms=occurred_at_ms,
         deadline_at_ms=occurred_at_ms + 30_000,

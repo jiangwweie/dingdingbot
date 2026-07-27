@@ -25,6 +25,7 @@ from src.trading_kernel.domain.effects import (
     ReleaseEntryLane,
     RequestControlledFlatten,
     ResolveIncident,
+    ResolveTicketIncidentsAtClosure,
 )
 from src.trading_kernel.domain.events import (
     BudgetSettled,
@@ -767,6 +768,8 @@ def reduce_event(
             CancelProtectionOrders(
                 ticket_id=current.identity.ticket_id,
                 exchange_order_id=event.replaces_exchange_order_id,
+                order_namespace="conditional",
+                purpose="runner_old_stop",
             )
         )
         return _transition(
@@ -1069,6 +1072,8 @@ def reduce_event(
                 CancelProtectionOrders(
                     ticket_id=current.identity.ticket_id,
                     exchange_order_id=cleanup_order_id,
+                    order_namespace="conditional",
+                    purpose="reconciliation_cleanup",
                 )
             )
         if current.entry_lane_held:
@@ -1120,6 +1125,8 @@ def reduce_event(
                 CancelProtectionOrders(
                     ticket_id=current.identity.ticket_id,
                     exchange_order_id=cleanup_order_id,
+                    order_namespace="conditional",
+                    purpose="reconciliation_cleanup",
                 ),
             ),
         )
@@ -1141,6 +1148,8 @@ def reduce_event(
                 CancelProtectionOrders(
                     ticket_id=current.identity.ticket_id,
                     exchange_order_id=exchange_order_id,
+                    order_namespace=event.order_namespace,
+                    purpose="reconciliation_cleanup",
                 ),
             ),
         )
@@ -1374,6 +1383,9 @@ def reduce_event(
             raise InvalidLifecycleTransition("cancel outcome remains unresolved")
         domain = current.ticket.identity.netting_domain
         matched_effects: list[KernelEffect] = [
+            ResolveTicketIncidentsAtClosure(
+                ticket_id=current.identity.ticket_id,
+            ),
             ReleaseCapitalAuthorities(
                 ticket_id=current.identity.ticket_id,
                 account_capacity_domain_key=f"{domain.venue_id}:{domain.account_id}",
@@ -1384,13 +1396,6 @@ def reduce_event(
                 released_at_ms=event.occurred_at_ms,
             )
         ]
-        if event.resolved_incident_kind is not None:
-            matched_effects.append(
-                ResolveIncident(
-                    ticket_id=current.identity.ticket_id,
-                    incident_kind=event.resolved_incident_kind,
-                )
-            )
         return _transition(
             current,
             event,

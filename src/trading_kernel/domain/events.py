@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -254,6 +255,7 @@ class ExternalFlatDetected(_TicketEvent):
 
 class OwnedOrphanOrderDetected(_TicketEvent):
     exchange_order_id: str
+    order_namespace: Literal["regular", "conditional"]
 
 
 class OwnedOrderAbsenceConfirmed(_TicketEvent):

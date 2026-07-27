@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 import inspect
 import re
 from collections.abc import Callable, Mapping
@@ -394,15 +395,15 @@ class CcxtVenueAdapter:
             position_side=domain.position_side,
         )
         open_orders = _position_open_orders(
-            (
-                *_require_list(regular_orders, name="regular open orders"),
-                *_require_list(
-                    conditional_orders,
-                    name="conditional open orders",
-                ),
-            ),
+            _require_list(regular_orders, name="regular open orders"),
             expected_symbol=symbol,
             position_side=domain.position_side,
+            order_namespace="regular",
+        ) + _position_open_orders(
+            _require_list(conditional_orders, name="conditional open orders"),
+            expected_symbol=symbol,
+            position_side=domain.position_side,
+            order_namespace="conditional",
         )
         return PositionSnapshot(
             netting_domain=domain,
@@ -620,27 +621,16 @@ class CcxtVenueAdapter:
         params: dict[str, object] = {"positionSide": request.position_side.upper()}
 
         if isinstance(request.payload, CancelCommandPayload):
-            try:
-                response = await _call_exchange(
-                    exchange.cancel_order,
-                    request.payload.exchange_order_id,
-                    symbol,
-                    params,
-                    clock_ms=self._clock_ms,
-                )
-            except Exception as exc:
-                if (
-                    request.venue_id != "binance-usdm"
-                    or type(exc).__name__ not in _ORDER_NOT_FOUND_TYPES
-                ):
-                    raise
-                response = await _call_exchange(
-                    exchange.cancel_order,
-                    request.payload.exchange_order_id,
-                    symbol,
-                    {**params, "conditional": True},
-                    clock_ms=self._clock_ms,
-                )
+            response = await _call_exchange(
+                exchange.cancel_order,
+                request.payload.exchange_order_id,
+                symbol,
+                {
+                    **params,
+                    "conditional": request.payload.order_namespace == "conditional",
+                },
+                clock_ms=self._clock_ms,
+            )
             if isinstance(response, ExchangeCommandResult):
                 return response
             if not isinstance(response, Mapping):
@@ -800,7 +790,8 @@ class CcxtVenueAdapter:
         if isinstance(request.payload, CancelCommandPayload):
             lookup_order_id: object = request.payload.exchange_order_id
             lookup_params: Mapping[str, object] = {
-                "positionSide": request.position_side.upper()
+                "positionSide": request.position_side.upper(),
+                "conditional": request.payload.order_namespace == "conditional",
             }
         else:
             lookup_order_id = None
@@ -859,8 +850,13 @@ class CcxtVenueAdapter:
             request.payload,
             CancelCommandPayload,
         ):
+            namespace_orders = (
+                conditional_orders
+                if request.payload.order_namespace == "conditional"
+                else regular_orders
+            )
             order_response = _find_order_by_exchange_id(
-                (*regular_orders, *conditional_orders),
+                namespace_orders,
                 exchange_order_id=request.payload.exchange_order_id,
             )
             order_known_open = order_response is not None
@@ -874,6 +870,11 @@ class CcxtVenueAdapter:
                 request=request,
                 expected_symbol=symbol,
                 known_open=order_known_open,
+                order_namespace=(
+                    request.payload.order_namespace
+                    if isinstance(request.payload, CancelCommandPayload)
+                    else "regular"
+                ),
             )
         )
         return VenueTruthSnapshot(
@@ -991,6 +992,7 @@ def _parse_order_truth(
     request: VenueTruthRequest,
     expected_symbol: str,
     known_open: bool,
+    order_namespace: Literal["regular", "conditional"],
 ) -> VenueOrderTruth:
     if not isinstance(value, Mapping):
         raise RuntimeError("venue order truth response is not a mapping")
@@ -1015,6 +1017,7 @@ def _parse_order_truth(
         order_side=order_side,
         quantity=Decimal(str(value.get("amount") or "0")),
         reduce_only=bool(value.get("reduceOnly", False)),
+        order_namespace=order_namespace,
         is_open=known_open or _unified_order_is_open(value),
     )
 
@@ -1312,10 +1315,11 @@ def _position_details(
 
 
 def _position_open_orders(
-    rows: tuple[object, ...],
+    rows: Sequence[object],
     *,
     expected_symbol: str,
     position_side: Literal["long", "short"],
+    order_namespace: Literal["regular", "conditional"],
 ) -> tuple[VenueOrderSnapshot, ...]:
     orders: list[VenueOrderSnapshot] = []
     for value in rows:
@@ -1335,6 +1339,7 @@ def _position_open_orders(
                 ),
                 position_side=position_side,
                 reduce_only=_boolean_field(value, "reduceOnly"),
+                order_namespace=order_namespace,
             )
         )
     return tuple(sorted(orders, key=lambda item: item.exchange_order_id))
@@ -1852,7 +1857,7 @@ def _open_exchange_order_ids(rows: list[object]) -> tuple[str, ...]:
 
 
 def _find_order_by_exchange_id(
-    rows: tuple[object, ...],
+    rows: Sequence[object],
     *,
     exchange_order_id: str,
 ) -> object | None:

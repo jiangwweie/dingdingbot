@@ -20,6 +20,7 @@ from src.trading_kernel.domain.effects import (
     ReleaseBudget,
     ReleaseCapitalAuthorities,
     ReleaseEntryLane,
+    ResolveTicketIncidentsAtClosure,
     RequestControlledFlatten,
     ResolveIncident,
 )
@@ -699,6 +700,8 @@ def test_external_flat_enters_reconciliation_and_cancels_owned_protection() -> N
         CancelProtectionOrders(
             ticket_id=ticket.identity.ticket_id,
             exchange_order_id="stop-1",
+            order_namespace="conditional",
+            purpose="reconciliation_cleanup",
         ),
     )
 
@@ -912,17 +915,37 @@ def test_owned_orphan_order_requests_exact_durable_cancel() -> None:
             sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_200,
             exchange_order_id="owned-orphan-1",
+            order_namespace="conditional",
         ),
     )
-
     assert detected.aggregate.status is AggregateStatus.RECONCILIATION_PENDING
     assert detected.effects == (
         CancelProtectionOrders(
             ticket_id=aggregate.identity.ticket_id,
             exchange_order_id="owned-orphan-1",
+            order_namespace="conditional",
+            purpose="reconciliation_cleanup",
         ),
     )
 
+
+def test_reconciliation_match_closes_every_open_ticket_incident_before_release() -> None:
+    aggregate = _reconciliation_pending_aggregate()
+
+    matched = reduce_event(
+        aggregate,
+        ReconciliationMatched(
+            event_id="event:reconciliation-matched",
+            ticket_id=aggregate.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_500,
+        ),
+    )
+
+    assert matched.effects[0] == ResolveTicketIncidentsAtClosure(
+        ticket_id=aggregate.identity.ticket_id,
+    )
+    assert isinstance(matched.effects[1], ReleaseCapitalAuthorities)
 
 def test_cancel_rejection_is_persisted_as_blocking_recovery_state() -> None:
     aggregate = _cancel_pending_aggregate()
@@ -1374,6 +1397,8 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
         CancelProtectionOrders(
             ticket_id=ticket.identity.ticket_id,
             exchange_order_id="tp-1",
+            order_namespace="conditional",
+            purpose="reconciliation_cleanup",
         ),
     )
 
@@ -1397,6 +1422,7 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
             sequence=tp_cancelled.aggregate.last_event_sequence + 1,
             occurred_at_ms=2_175,
             exchange_order_id="stop-1",
+            order_namespace="conditional",
         ),
     )
 
@@ -1425,6 +1451,9 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
     )
     assert reconciled.aggregate.status is AggregateStatus.SETTLEMENT_PENDING
     assert reconciled.effects == (
+        ResolveTicketIncidentsAtClosure(
+            ticket_id=ticket.identity.ticket_id,
+        ),
         ReleaseCapitalAuthorities(
             ticket_id=ticket.identity.ticket_id,
             account_capacity_domain_key=(
@@ -1506,6 +1535,7 @@ def _reconciliation_pending_aggregate():
             sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_175,
             exchange_order_id="stop-1",
+            order_namespace="conditional",
         ),
     ).aggregate
     return reduce_event(

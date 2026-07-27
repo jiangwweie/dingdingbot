@@ -319,7 +319,11 @@ def _cancel_command() -> ExchangeCommand:
         generation=1,
         idempotency_key=command_id,
         venue_client_order_id=build_venue_client_order_id(command_id),
-        payload=CancelCommandPayload(exchange_order_id="venue-stop-1"),
+        payload=CancelCommandPayload(
+            exchange_order_id="venue-stop-1",
+            order_namespace="regular",
+            purpose="runner_old_stop",
+        ),
         status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
         created_at_ms=1_001,
         deadline_at_ms=31_000,

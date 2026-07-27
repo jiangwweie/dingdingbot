@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+import src.trading_kernel.interfaces.reconciliation_worker as worker_module
 from src.trading_kernel.application.runtime_facts import ReviewEconomicsRequest
 from src.trading_kernel.application.ports import RuntimeCapabilitySnapshot
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
@@ -113,7 +114,7 @@ class _FakeUnitOfWork:
 
 
 class _WorkerState:
-    def __init__(self, *, overlap: bool) -> None:
+    def __init__(self, *, overlap: bool, include_exit: bool = True) -> None:
         ticket = _ticket()
         self.aggregate = TradeAggregate(
             identity=ticket.identity,
@@ -126,12 +127,10 @@ class _WorkerState:
             average_fill_price=Decimal("60000"),
         )
         self.aggregates = _AggregateRepository(self.aggregate)
-        self.commands = _CommandRepository(
-            [
-                _command(ticket, ExchangeCommandKind.ENTRY, reduce_only=False),
-                _command(ticket, ExchangeCommandKind.EXIT, reduce_only=True),
-            ]
-        )
+        commands = [_command(ticket, ExchangeCommandKind.ENTRY, reduce_only=False)]
+        if include_exit:
+            commands.append(_command(ticket, ExchangeCommandKind.EXIT, reduce_only=True))
+        self.commands = _CommandRepository(commands)
         self.events = _EventRepository(
             [
                 TicketIssued(
@@ -220,6 +219,58 @@ async def test_review_worker_disables_funding_attribution_when_ticket_windows_ov
     )
 
     assert source.requests[0].funding_attribution_exact is False
+
+
+@pytest.mark.asyncio
+async def test_external_flat_review_records_explicit_unavailable_economics_after_grace(
+    monkeypatch,
+) -> None:
+    state = _WorkerState(overlap=False)
+    source = _FailingEconomicsSource()
+    recorded = []
+
+    async def record_review(_uow, request):
+        recorded.append(request)
+
+    monkeypatch.setattr(worker_module, "record_trade_review", record_review)
+    result = await run_reconciliation_worker_once(
+        state.factory,
+        object(),
+        object(),
+        _request().model_copy(update={"now_ms": 303_000}),
+        review_economics_source=source,
+    )
+
+    assert result.status is ReconciliationWorkerStatus.REVIEWED
+    assert len(recorded) == 1
+    assert recorded[0].metrics["economics_completeness"] == (
+        "external_exit_unavailable"
+    )
+    assert recorded[0].metrics["unavailable_reason"] == (
+        "external_flat_exit_fills_unavailable"
+    )
+
+
+@pytest.mark.asyncio
+async def test_external_flat_review_does_not_require_exit_command_after_grace(
+    monkeypatch,
+) -> None:
+    state = _WorkerState(overlap=False, include_exit=False)
+    recorded = []
+
+    async def record_review(_uow, request):
+        recorded.append(request)
+
+    monkeypatch.setattr(worker_module, "record_trade_review", record_review)
+    result = await run_reconciliation_worker_once(
+        state.factory,
+        object(),
+        object(),
+        _request().model_copy(update={"now_ms": 303_000}),
+    )
+
+    assert result.status is ReconciliationWorkerStatus.REVIEWED
+    assert len(recorded) == 1
 
 
 def _request() -> ReconciliationWorkerRequest:

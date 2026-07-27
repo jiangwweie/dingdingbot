@@ -11,6 +11,7 @@ from uuid import uuid4
 import asyncpg
 import pytest
 import pytest_asyncio
+import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -35,6 +36,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
     AggregateVersionConflict,
     PostgresKernelUnitOfWork,
 )
+from src.trading_kernel.infrastructure.pg_models import runtime_incidents
 from tests.trading_kernel.unit.test_ticket import _identity, _ticket
 from tests.trading_kernel.integration.test_issue_ticket import _issue_request
 
@@ -157,6 +159,23 @@ async def test_reconciliation_match_releases_all_capital_authorities_before_sett
             }
         )
         await uow.aggregates.save(pending, expected_version=1)
+        for incident_kind in ("external_flat", "venue_identity_contradiction"):
+            await uow.incidents.add(
+                RuntimeIncidentRecord(
+                    incident_id=f"incident:{ticket.identity.ticket_id}:{incident_kind}",
+                    ticket_id=ticket.identity.ticket_id,
+                    incident_kind=incident_kind,
+                    status="open",
+                    first_blocker=incident_kind,
+                    entry_block_scope=EntryBlockScope.ACCOUNT_CAPACITY,
+                    entry_block_key=(
+                        f"{ticket.identity.netting_domain.venue_id}:"
+                        f"{ticket.identity.netting_domain.account_id}"
+                    ),
+                    details={},
+                    opened_at_ms=1_500,
+                )
+            )
 
         matched = ReconciliationMatched(
             event_id="event-reconciliation-matched",
@@ -184,6 +203,16 @@ async def test_reconciliation_match_releases_all_capital_authorities_before_sett
     assert exposure is not None and exposure.active_ticket_count == 0
     assert released_domain
     assert settled is not None and settled.status is AggregateStatus.SETTLEMENT_PENDING
+    async with kernel_engine.connect() as connection:
+        open_incident_count = await connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(runtime_incidents)
+            .where(
+                runtime_incidents.c.ticket_id == ticket.identity.ticket_id,
+                runtime_incidents.c.status == "open",
+            )
+        )
+    assert open_incident_count == 0
 
 
 @pytest.mark.asyncio

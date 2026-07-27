@@ -17,6 +17,7 @@ class VenueOrderSnapshot(BaseModel):
     venue_client_order_id: str | None
     position_side: Literal["long", "short"]
     reduce_only: bool
+    order_namespace: Literal["regular", "conditional"] = "conditional"
 
     @field_validator("exchange_order_id", mode="before")
     @classmethod

@@ -960,6 +960,23 @@ class PostgresIncidentRepository:
             .values(status="resolved", resolved_at_ms=resolved_at_ms)
         )
 
+    async def resolve_all_open_for_ticket(
+        self,
+        ticket_id: str,
+        *,
+        resolved_at_ms: int,
+        resolved_by_event_id: str,
+    ) -> None:
+        del resolved_by_event_id
+        await self._connection.execute(
+            sa.update(runtime_incidents)
+            .where(
+                runtime_incidents.c.ticket_id == ticket_id,
+                runtime_incidents.c.status == "open",
+            )
+            .values(status="resolved", resolved_at_ms=resolved_at_ms)
+        )
+
 
 class PostgresPositionRepository:
     def __init__(self, connection: AsyncConnection) -> None:

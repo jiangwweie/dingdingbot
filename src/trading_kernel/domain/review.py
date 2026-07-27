@@ -16,6 +16,7 @@ class ReviewEconomicsUnavailable(ValueError):
 class ReviewEconomicsCompleteness(StrEnum):
     COMPLETE = "complete"
     FUNDING_UNAVAILABLE = "funding_unavailable"
+    EXTERNAL_EXIT_UNAVAILABLE = "external_exit_unavailable"
 
 
 class ReviewFill(BaseModel):
@@ -120,6 +121,39 @@ class ReviewEconomics(BaseModel):
     actual_r_multiple: Decimal | None
     economics_completeness: ReviewEconomicsCompleteness
     funding_unavailable_reason: str | None
+
+
+class ExternalExitUnavailableReview(BaseModel):
+    """Explicitly records an externally closed position without invented PnL."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    economics_completeness: Literal[
+        ReviewEconomicsCompleteness.EXTERNAL_EXIT_UNAVAILABLE
+    ]
+    unavailable_reason: Literal["external_flat_exit_fills_unavailable"]
+    entry_quantity: Decimal
+    entry_time_ms: int
+    external_flat_detected_at_ms: int
+    visibility_grace_ms: int
+
+    @field_validator("entry_quantity")
+    @classmethod
+    def _require_positive_entry_quantity(cls, value: Decimal) -> Decimal:
+        if value <= 0:
+            raise ValueError("external review entry quantity must be positive")
+        return value
+
+    @field_validator(
+        "entry_time_ms",
+        "external_flat_detected_at_ms",
+        "visibility_grace_ms",
+    )
+    @classmethod
+    def _require_positive_window(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("external review window values must be positive")
+        return value
 
 
 def calculate_review_economics(

@@ -239,6 +239,7 @@ async def reconcile_ticket(
                         sequence=aggregate.last_event_sequence + 1,
                         occurred_at_ms=snapshot.observed_at_ms,
                         exchange_order_id=known_order_id,
+                        order_namespace="conditional",
                     )
                     status = ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
             elif snapshot.open_orders:
@@ -254,22 +255,15 @@ async def reconcile_ticket(
                     sequence=aggregate.last_event_sequence + 1,
                     occurred_at_ms=snapshot.observed_at_ms,
                     exchange_order_id=owned_order.exchange_order_id,
+                    order_namespace=owned_order.order_namespace,
                 )
                 status = ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
             elif snapshot.quantity == 0:
-                open_incident = await uow.incidents.get_open_for_ticket(
-                    request.ticket_id
-                )
                 event = ReconciliationMatched(
                     event_id=_event_id(aggregate),
                     ticket_id=request.ticket_id,
                     sequence=aggregate.last_event_sequence + 1,
                     occurred_at_ms=snapshot.observed_at_ms,
-                    resolved_incident_kind=(
-                        None
-                        if open_incident is None
-                        else open_incident.incident_kind
-                    ),
                 )
                 status = ReconcileTicketStatus.MATCHED
     elif aggregate.status in {
@@ -279,11 +273,15 @@ async def reconcile_ticket(
         target_order_id = aggregate.pending_cancel_exchange_order_id
         if target_order_id is None:
             raise RuntimeError("cancel recovery state has no exact order identity")
-        target_still_open = any(
-            order.exchange_order_id == target_order_id
-            for order in snapshot.open_orders
+        target_order = next(
+            (
+                order
+                for order in snapshot.open_orders
+                if order.exchange_order_id == target_order_id
+            ),
+            None,
         )
-        if target_still_open:
+        if target_order is not None:
             if aggregate.status is AggregateStatus.CANCEL_OUTCOME_UNKNOWN:
                 return ReconcileTicketResult(
                     status=ReconcileTicketStatus.PROTECTION_RESIDUE
@@ -294,6 +292,7 @@ async def reconcile_ticket(
                 sequence=aggregate.last_event_sequence + 1,
                 occurred_at_ms=snapshot.observed_at_ms,
                 exchange_order_id=target_order_id,
+                order_namespace=target_order.order_namespace,
             )
             status = ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
         else:

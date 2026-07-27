@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -65,6 +66,12 @@ class PrepareControlledFlattenCommand(_Effect):
 class CancelProtectionOrders(_Effect):
     ticket_id: str
     exchange_order_id: str
+    order_namespace: Literal["regular", "conditional"]
+    purpose: Literal[
+        "entry_remainder",
+        "reconciliation_cleanup",
+        "runner_old_stop",
+    ]
 
 
 class MarkCancelCommandReconciledAbsent(_Effect):
@@ -80,6 +87,10 @@ class OpenIncident(_Effect):
 class ResolveIncident(_Effect):
     ticket_id: str
     incident_kind: str
+
+
+class ResolveTicketIncidentsAtClosure(_Effect):
+    ticket_id: str
 
 
 class ReleaseEntryLane(_Effect):
@@ -114,6 +125,7 @@ KernelEffect = (
     | MarkCancelCommandReconciledAbsent
     | OpenIncident
     | ResolveIncident
+    | ResolveTicketIncidentsAtClosure
     | ReleaseEntryLane
     | ReleaseCapitalAuthorities
     | ReleaseBudget
