@@ -30,23 +30,22 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Branch | `codex/trading-kernel-rebuild-20260722` |
-| Production commit | `46a7fe9d815631e8f72b3047cc42b39283b97e89` |
-| Production tag | `tokyo-runtime-2026.07.27.2`; annotated, immutable, and verified on `origin` |
-| Production-commit certification | `417 passed`; changed-file Ruff checks and production file-I/O audit pass |
+| Production commit | `6e7bb2d13cec9bd9f060a1b5742be82f40cce3e2` |
+| Production tag | `tokyo-runtime-2026.07.27.3`; annotated, immutable, and verified on `origin` |
+| Production-commit certification | `421 passed`; architecture checks and production file-I/O audit pass |
 | Runtime ownership | Observation, Entry, Lifecycle, and Reconciliation are enabled, active, and at zero restarts |
 | Scheduling model | Long-running systemd services; timer-based Python cold starts are retired and must not return |
-| PostgreSQL | BRC data was deleted without backup by explicit Owner decision, then rebuilt from the single 33-table `0001_initial` baseline |
+| PostgreSQL | The guarded flat-runtime reset removed all prior runtime/trade facts after exchange-flat verification; Registry, Policy, Capability, schema metadata, and the 33-table `0001_initial` baseline remain authoritative |
 | Strategy capability | Six registered Events, deterministic detectors, closed-candle Observation, Live/Replay parity, and real StrategySignal production |
 | Ticket capability | CapacityClaim, immutable Ticket, budget reservation, Netting Domain hold, event, aggregate, and durable ENTRY command commit atomically |
 | Dynamic policy | Three concurrent Tickets; `0.03` planned stop risk; demand-based remaining margin; fixed exchange `5x`; max `10x` safety ceiling; `cross` margin |
 | Entry authority | `new_entry_submit_enabled` applies only before ENTRY; existing exposure retains frozen safety authority |
 | Runtime fence | Commit/schema drift records an Incident; an exact but disabled command capability is a controlled readonly fence, not an Incident |
-| Historical safety Tickets | Three safely reached `leverage_rejected`; no ENTRY, order, or position was created |
-| Recovery closure | ETH, SOL, and the July 27 external-flat recovery Ticket are terminal; all seven historical budget reservations are released; zero unresolved historical command or Incident remains |
-| Recovery economics | All three external-flat Reviews explicitly record unavailable kernel-attributable exit economics and are excluded from strategy-economics evidence |
-| Current live acceptance | Natural AVAXUSDT short Ticket `ticket:8ee27ce722d0e552135715a091f375b6` is `position_protected`; ENTRY, exact Initial Stop, and TP1 commands are accepted; protected quantity equals position quantity; zero Incident |
-| Exchange postflight | One AVAXUSDT short Netting Domain is non-flat with exact Stop and TP1 protection; the other eleven domains are flat; all six supported instruments are configured at `5x` |
-| Hourly supervision | All four persistent workers active at zero restarts; Entry remains globally serialized; current exposure is in protected lifecycle |
+| Historical runtime/trade facts | Reset after verified exchange-flat state by explicit Owner authorization; no historical Ticket, command, Incident, Review, position, reservation, or observation fact remains as runtime authority |
+| Terminal-recovery repair | Exact cancel namespace/purpose, atomic Ticket-incident closure, and external-flat unavailable Review are deployed in the active Kernel |
+| Current live acceptance | No active Ticket; the next acceptance must be a natural signal through the official Kernel path |
+| Exchange postflight | All twelve Netting Domains are flat with no open order; all six supported instruments are configured at `5x` |
+| Hourly supervision | All four persistent workers active at zero restarts; Entry is enabled and remains globally serialized |
 | Full capability | `promote-full` not yet completed |
 
 ## Current Performance Snapshot
