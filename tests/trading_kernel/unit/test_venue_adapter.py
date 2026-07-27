@@ -25,13 +25,13 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     SetLeverageCommandPayload,
 )
+from src.trading_kernel.domain.identities import NettingDomain
+from src.trading_kernel.domain.venue_truth import VenueLookupStatus
 from src.trading_kernel.infrastructure.venue_adapter import (
     CcxtVenueAdapter,
     _binance_maintenance_margin_brackets,
     _position_details,
 )
-from src.trading_kernel.domain.venue_truth import VenueLookupStatus
-from src.trading_kernel.domain.identities import NettingDomain
 
 
 class FakeAsyncExchange:
@@ -102,6 +102,21 @@ class CancelExchange:
 
     async def cancel_order(self, order_id, symbol, params):
         self.cancel_call = (order_id, symbol, params)
+        return {
+            "id": order_id,
+            "status": "canceled",
+            "clientOrderId": "brc-stop-1",
+        }
+
+
+class ConditionalCancelExchange:
+    def __init__(self) -> None:
+        self.cancel_calls: list[tuple[object, object, object]] = []
+
+    async def cancel_order(self, order_id, symbol, params):
+        self.cancel_calls.append((order_id, symbol, params))
+        if not params.get("conditional"):
+            raise OrderNotFound("regular order namespace has no target")
         return {
             "id": order_id,
             "status": "canceled",
@@ -1182,6 +1197,29 @@ async def test_ccxt_adapter_cancels_exact_exchange_order_without_creating_order(
         "BTC/USDT:USDT",
         {"positionSide": "LONG"},
     )
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_retries_exact_cancel_in_conditional_namespace() -> None:
+    exchange = ConditionalCancelExchange()
+    adapter = _cancel_adapter(exchange)
+
+    result = await adapter.execute(_cancel_request())
+
+    assert result.status is ExchangeCommandStatus.ACCEPTED
+    assert result.exchange_order_id == "stop-order-1"
+    assert exchange.cancel_calls == [
+        (
+            "stop-order-1",
+            "BTC/USDT:USDT",
+            {"positionSide": "LONG"},
+        ),
+        (
+            "stop-order-1",
+            "BTC/USDT:USDT",
+            {"positionSide": "LONG", "conditional": True},
+        ),
+    ]
 
 
 @pytest.mark.asyncio

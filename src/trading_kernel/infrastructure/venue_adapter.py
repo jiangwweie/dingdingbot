@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
-from decimal import Decimal
 import inspect
 import re
+from collections.abc import Callable, Mapping
+from decimal import Decimal
 from typing import Literal, Protocol
 
 from pydantic import JsonValue
 
+from src.trading_kernel.application.maintain_ticket_lifecycle import (
+    TicketLifecycleFacts,
+)
 from src.trading_kernel.application.ports import (
     LeverageTruthRequest,
     LeverageTruthSnapshot,
@@ -28,17 +31,7 @@ from src.trading_kernel.application.runtime_facts import (
     PositionSnapshotRequest,
     ReviewEconomicsRequest,
 )
-from src.trading_kernel.application.maintain_ticket_lifecycle import (
-    TicketLifecycleFacts,
-)
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
-from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
-    AdmissionOrder,
-    AdmissionPosition,
-    EntryAdmissionSnapshot,
-    canonical_digest,
-)
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandResult,
@@ -46,14 +39,21 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     SetLeverageCommandResult,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    AdmissionOrder,
+    AdmissionPosition,
+    EntryAdmissionSnapshot,
+    canonical_digest,
+)
+from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
+from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+from src.trading_kernel.domain.review import ReviewEconomicsFacts, ReviewFill
 from src.trading_kernel.domain.venue_truth import (
     VenueLookupStatus,
     VenueOrderTruth,
     VenueTruthSnapshot,
 )
-from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
-from src.trading_kernel.domain.review import ReviewEconomicsFacts, ReviewFill
-from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
 
 
 class _CcxtExchange(Protocol):
@@ -620,13 +620,27 @@ class CcxtVenueAdapter:
         params: dict[str, object] = {"positionSide": request.position_side.upper()}
 
         if isinstance(request.payload, CancelCommandPayload):
-            response = await _call_exchange(
-                exchange.cancel_order,
-                request.payload.exchange_order_id,
-                symbol,
-                params,
-                clock_ms=self._clock_ms,
-            )
+            try:
+                response = await _call_exchange(
+                    exchange.cancel_order,
+                    request.payload.exchange_order_id,
+                    symbol,
+                    params,
+                    clock_ms=self._clock_ms,
+                )
+            except Exception as exc:
+                if (
+                    request.venue_id != "binance-usdm"
+                    or type(exc).__name__ not in _ORDER_NOT_FOUND_TYPES
+                ):
+                    raise
+                response = await _call_exchange(
+                    exchange.cancel_order,
+                    request.payload.exchange_order_id,
+                    symbol,
+                    {**params, "conditional": True},
+                    clock_ms=self._clock_ms,
+                )
             if isinstance(response, ExchangeCommandResult):
                 return response
             if not isinstance(response, Mapping):
