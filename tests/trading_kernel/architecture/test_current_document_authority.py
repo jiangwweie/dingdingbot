@@ -60,10 +60,10 @@ RUNTIME_MODEL_DOCUMENTS = (
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
 )
 
-CURRENT_PRODUCTION_COMMIT = "4749174c"
-CURRENT_PRODUCTION_TAG = "tokyo-runtime-2026.07.24.1"
-CURRENT_LOCAL_CERTIFICATION = "407 passed"
-CURRENT_ACCEPTANCE_STAGE = "Acceptance-armed"
+CURRENT_PRODUCTION_COMMIT = "4fd6f808"
+CURRENT_PRODUCTION_TAG = "tokyo-runtime-2026.07.27.1"
+CURRENT_LOCAL_CERTIFICATION = "412 passed"
+CURRENT_ACCEPTANCE_STAGE = "Recovery closure"
 RETIRED_ACCEPTANCE_TICKET = "ticket:c1ebc24a178a3ae4d87978e2fa1204ae"
 RESIDENT_WORKER_NAMES = (
     "Observation",
@@ -185,6 +185,7 @@ def test_runtime_state_document_matches_the_deployed_kernel() -> None:
         + "\n".join(sorted(missing))
     )
     assert "303 passed" not in source
+    assert "407 passed" not in source
     assert "no Tokyo mutation claimed" not in source
     assert RETIRED_ACCEPTANCE_TICKET not in source
 

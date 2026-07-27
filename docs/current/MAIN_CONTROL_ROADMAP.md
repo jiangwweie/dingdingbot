@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-07-24
+last_verified: 2026-07-27
 ---
 
 # Main Control Roadmap
@@ -30,10 +30,10 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Branch | `codex/trading-kernel-rebuild-20260722` |
-| Production commit | `4749174c64a6b369930ed91f09d7b9eba1fa0e7a` |
-| Production tag | `tokyo-runtime-2026.07.24.1`; annotated, immutable, and verified on `origin` |
-| Production-commit certification | `407 passed`; focused Ruff and Mypy checks pass |
-| Runtime ownership | **Acceptance-armed**: Observation, Entry, Lifecycle, and Reconciliation are enabled and active |
+| Production commit | `4fd6f80860ceb32690920b0ec8b60f4933969052` |
+| Production tag | `tokyo-runtime-2026.07.27.1`; annotated, immutable, and verified on `origin` |
+| Production-commit certification | `412 passed`; changed-file Ruff checks and production file-I/O audit pass |
+| Runtime ownership | Observation, Entry, Lifecycle, and Reconciliation are enabled, active, and at zero restarts |
 | Scheduling model | Long-running systemd services; timer-based Python cold starts are retired and must not return |
 | PostgreSQL | BRC data was deleted without backup by explicit Owner decision, then rebuilt from the single 33-table `0001_initial` baseline |
 | Strategy capability | Six registered Events, deterministic detectors, closed-candle Observation, Live/Replay parity, and real StrategySignal production |
@@ -42,7 +42,10 @@ different Netting Domains progress concurrently.
 | Entry authority | `new_entry_submit_enabled` applies only before ENTRY; existing exposure retains frozen safety authority |
 | Runtime fence | Commit/schema drift records an Incident; an exact but disabled command capability is a controlled readonly fence, not an Incident |
 | Historical safety Tickets | Three safely reached `leverage_rejected`; no ENTRY, order, or position was created |
-| Hourly supervision | All four persistent workers active; Entry globally serialized |
+| Recovery closure | ETH and SOL external-flat Tickets are terminal; all six budget reservations are released; zero active Ticket, position, command, or Incident remains |
+| Recovery economics | Both external-flat Reviews explicitly record unavailable kernel-attributable exit economics and are excluded from strategy-economics evidence |
+| Exchange postflight | Twelve Netting Domains are flat; zero regular or conditional order remains; all six supported instruments are configured at `5x` |
+| Hourly supervision | All four persistent workers active; Entry globally serialized; current Entry result is `no_candidate` |
 | Full capability | `promote-full` not yet completed |
 
 ## Current Performance Snapshot
