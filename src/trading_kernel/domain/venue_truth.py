@@ -27,6 +27,7 @@ class UnknownRecoveryStatus(StrEnum):
     PENDING_VISIBILITY = "pending_visibility"
     RECONCILED_SUBMITTED = "reconciled_submitted"
     RECONCILED_ABSENT = "reconciled_absent"
+    CANCEL_TARGET_STILL_OPEN = "cancel_target_still_open"
     IDENTITY_CONTRADICTION = "identity_contradiction"
     LOOKUP_FAILED = "lookup_failed"
 
@@ -227,6 +228,12 @@ def _decide_cancel_recovery(
                 UnknownRecoveryStatus.RECONCILED_ABSENT,
                 truth,
                 reason="cancel_target_terminal",
+            )
+        if truth.observed_at_ms >= visibility_deadline_ms:
+            return _decision(
+                UnknownRecoveryStatus.CANCEL_TARGET_STILL_OPEN,
+                truth,
+                reason="cancel_target_still_open_after_visibility_window",
             )
         return _decision(
             UnknownRecoveryStatus.PENDING_VISIBILITY,

@@ -20,14 +20,15 @@ from src.trading_kernel.domain.effects import (
     ReleaseBudget,
     ReleaseCapitalAuthorities,
     ReleaseEntryLane,
-    ResolveIncident,
     RequestControlledFlatten,
+    ResolveIncident,
 )
 from src.trading_kernel.domain.events import (
     BudgetSettled,
     CancelOrderAbsenceConfirmed,
     CancelOrderOutcomeUnknown,
     CancelOrderRejected,
+    CancelOrderStillOpenConfirmed,
     ControlledFlattenAbsenceConfirmed,
     ControlledFlattenAccepted,
     ControlledFlattenOutcomeUnknown,
@@ -35,22 +36,22 @@ from src.trading_kernel.domain.events import (
     EntryFilled,
     EntryOutcomeUnknown,
     EntryPartiallyFilled,
+    EntryRejected,
     EntryRemainderCancelConfirmed,
     EntryRemainderCancelOutcomeUnknown,
-    EntryRejected,
-    LeverageConfirmed,
-    LeverageOutcomeUnknown,
-    LeverageRejected,
-    ExternalFlatDetected,
-    ExitAccepted,
     ExitAbsenceConfirmed,
+    ExitAccepted,
     ExitOutcomeUnknown,
     ExitRejected,
     ExitRequested,
-    InitialStopConfirmed,
+    ExternalFlatDetected,
     InitialStopAbsenceConfirmed,
+    InitialStopConfirmed,
     InitialStopOutcomeUnknown,
     InitialStopRejected,
+    LeverageConfirmed,
+    LeverageOutcomeUnknown,
+    LeverageRejected,
     OwnedOrphanOrderDetected,
     PositionFlatConfirmed,
     ProtectionCancelAbsenceConfirmed,
@@ -61,18 +62,18 @@ from src.trading_kernel.domain.events import (
     ProtectionReplacementOutcomeUnknown,
     ReconciliationMatched,
     ReviewRecorded,
-    TicketIssued,
     TakeProfitAbsenceConfirmed,
     TakeProfitConfirmed,
     TakeProfitFilled,
     TakeProfitOutcomeUnknown,
+    TicketIssued,
     UnownedOrderDetected,
 )
-from src.trading_kernel.domain.reducer import InvalidLifecycleTransition, reduce_event
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillRiskRequest,
     assess_post_fill_risk,
 )
+from src.trading_kernel.domain.reducer import InvalidLifecycleTransition, reduce_event
 from tests.trading_kernel.unit.test_ticket import _ticket
 
 
@@ -1029,6 +1030,45 @@ def test_reconciled_cancel_absence_resolves_only_cancel_unknown_incident() -> No
         ResolveIncident(
             ticket_id=aggregate.identity.ticket_id,
             incident_kind="cancel_order_outcome_unknown",
+        ),
+    )
+
+
+def test_cancel_target_still_open_resolves_unknown_and_allows_exact_retry() -> None:
+    aggregate = _cancel_pending_aggregate()
+    aggregate = reduce_event(
+        aggregate,
+        CancelOrderOutcomeUnknown(
+            event_id="event-6",
+            ticket_id=aggregate.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_150,
+            exchange_order_id="tp-1",
+            reason="venue_timeout",
+        ),
+    ).aggregate
+
+    recovered = reduce_event(
+        aggregate,
+        CancelOrderStillOpenConfirmed(
+            event_id="event-7",
+            ticket_id=aggregate.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_200,
+            exchange_order_id="tp-1",
+        ),
+    )
+
+    assert recovered.aggregate.status is AggregateStatus.CANCEL_REJECTED
+    assert recovered.aggregate.pending_cancel_exchange_order_id == "tp-1"
+    assert recovered.effects == (
+        ResolveIncident(
+            ticket_id=aggregate.identity.ticket_id,
+            incident_kind="cancel_order_outcome_unknown",
+        ),
+        OpenIncident(
+            ticket_id=aggregate.identity.ticket_id,
+            incident_kind="cancel_order_still_open_after_unknown",
         ),
     )
 

@@ -15,18 +15,17 @@ from src.trading_kernel.application.ports import (
     VenuePort,
     VenueSetLeverageRequest,
 )
-from src.trading_kernel.application.runtime_facts import (
-    EntryAdmissionSnapshotRequest,
-    EntryFactsSource,
-    InstrumentRulesRequest,
-)
 from src.trading_kernel.application.revalidate_entry_dispatch import (
     EntryDispatchPreflightRequest,
     EntryDispatchPreflightStatus,
     revalidate_entry_dispatch,
 )
+from src.trading_kernel.application.runtime_facts import (
+    EntryAdmissionSnapshotRequest,
+    EntryFactsSource,
+    InstrumentRulesRequest,
+)
 from src.trading_kernel.domain.account_entry_health import classify_account_entry_health
-from src.trading_kernel.domain.instrument_entry_health import classify_instrument_entry_health
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
@@ -35,8 +34,8 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
     OrderCommandPayload,
-    SetLeverageCommandResult,
     SetLeverageCommandPayload,
+    SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.events import (
     CancelOrderOutcomeUnknown,
@@ -47,9 +46,6 @@ from src.trading_kernel.domain.events import (
     EntryAccepted,
     EntryOutcomeUnknown,
     EntryRejected,
-    LeverageConfirmed,
-    LeverageOutcomeUnknown,
-    LeverageRejected,
     EntryRemainderCancelConfirmed,
     EntryRemainderCancelOutcomeUnknown,
     EntryRemainderCancelRejected,
@@ -59,6 +55,9 @@ from src.trading_kernel.domain.events import (
     InitialStopConfirmed,
     InitialStopOutcomeUnknown,
     InitialStopRejected,
+    LeverageConfirmed,
+    LeverageOutcomeUnknown,
+    LeverageRejected,
     OwnedOrphanCancelConfirmed,
     ProtectionCancelConfirmed,
     ProtectionCancelOutcomeUnknown,
@@ -69,6 +68,9 @@ from src.trading_kernel.domain.events import (
     TakeProfitConfirmed,
     TakeProfitOutcomeUnknown,
     TakeProfitRejected,
+)
+from src.trading_kernel.domain.instrument_entry_health import (
+    classify_instrument_entry_health,
 )
 from src.trading_kernel.domain.reducer import reduce_event
 
@@ -682,6 +684,11 @@ def _command_result_event(
         if not isinstance(command.payload, CancelCommandPayload):
             raise RuntimeError("cancel command payload is invalid")
         cancel_payload = command.payload
+        if aggregate.status is AggregateStatus.RECONCILIATION_PENDING:
+            return OwnedOrphanCancelConfirmed(
+                **common,
+                exchange_order_id=cancel_payload.exchange_order_id,
+            )
         known_order_ids = {
             aggregate.initial_stop_exchange_order_id,
             aggregate.active_stop_exchange_order_id,

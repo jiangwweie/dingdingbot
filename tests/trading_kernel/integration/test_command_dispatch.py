@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from decimal import Decimal
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -25,18 +25,19 @@ from src.trading_kernel.application.ports import (
     VenueCommandRequest,
     VenueMutationFailure,
 )
-from src.trading_kernel.application.runtime_facts import (
-    EntryAdmissionSnapshotRequest,
-    InstrumentRulesFacts,
-    InstrumentRulesRequest,
-)
 from src.trading_kernel.application.reconcile_ticket import (
     ExitTicketRequest,
     ReconcileTicketRequest,
     reconcile_ticket,
     request_exit,
 )
+from src.trading_kernel.application.runtime_facts import (
+    EntryAdmissionSnapshotRequest,
+    InstrumentRulesFacts,
+    InstrumentRulesRequest,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandKind,
@@ -45,7 +46,13 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     SetLeverageCommandResult,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionInstrumentFacts,
+    EntryAdmissionSnapshot,
+    canonical_digest,
+)
 from src.trading_kernel.domain.events import TakeProfitFilled
+from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
@@ -54,19 +61,11 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
-from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
-    EntryAdmissionSnapshot,
-    canonical_digest,
-)
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
-from tests.trading_kernel.unit.test_ticket import _ticket
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
 )
-
+from tests.trading_kernel.unit.test_ticket import _ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -1328,6 +1327,24 @@ async def test_cancel_rejection_is_persisted_and_blocks_settlement(
         ExchangeCommandStatus.REJECTED,
         ExchangeCommandStatus.PREPARED,
     ]
+
+    accepted = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        accepting,
+        DispatchCommandRequest(
+            worker_id="retry-cancel-dispatcher",
+            now_ms=3_500,
+            lease_until_ms=8_500,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert accepted.status is DispatchCommandStatus.ACCEPTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.RECONCILIATION_PENDING
+    assert aggregate.pending_cancel_exchange_order_id is None
 
 
 @pytest.mark.asyncio

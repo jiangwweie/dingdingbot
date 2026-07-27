@@ -14,6 +14,7 @@ from src.trading_kernel.application.ports import (
     VenueTruthPort,
     VenueTruthRequest,
 )
+from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommand,
@@ -21,9 +22,9 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandStatus,
     OrderCommandPayload,
 )
-from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.events import (
     CancelOrderAbsenceConfirmed,
+    CancelOrderStillOpenConfirmed,
     ControlledFlattenAbsenceConfirmed,
     ControlledFlattenAccepted,
     EntryAbsenceConfirmed,
@@ -208,7 +209,10 @@ async def recover_unknown_command(
                 exchange_order_id=str(decision.exchange_order_id),
                 observed_at_ms=decision.observed_at_ms,
             )
-        elif current_command.kind is not ExchangeCommandKind.CANCEL_ORDER:
+        elif (
+            current_command.kind is not ExchangeCommandKind.CANCEL_ORDER
+            or decision.status is UnknownRecoveryStatus.CANCEL_TARGET_STILL_OPEN
+        ):
             await uow.exchange_commands.reconcile_unknown_absent(
                 command_id=current_command.command_id,
                 observed_at_ms=decision.observed_at_ms,
@@ -285,6 +289,17 @@ def _recovery_event(
             )
         raise RuntimeError(
             f"submitted recovery is not mapped for {command.kind.value}"
+        )
+
+    if (
+        decision.status is UnknownRecoveryStatus.CANCEL_TARGET_STILL_OPEN
+        and command.kind is ExchangeCommandKind.CANCEL_ORDER
+    ):
+        if not isinstance(command.payload, CancelCommandPayload):
+            raise RuntimeError("cancel recovery payload is invalid")
+        return CancelOrderStillOpenConfirmed(
+            **common,
+            exchange_order_id=command.payload.exchange_order_id,
         )
 
     if decision.status is not UnknownRecoveryStatus.RECONCILED_ABSENT:

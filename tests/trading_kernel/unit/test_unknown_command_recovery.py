@@ -121,7 +121,33 @@ def test_lookup_failure_remains_unknown() -> None:
     assert result.reason == "venue_timeout"
 
 
-def test_visible_cancel_target_remains_pending_instead_of_claiming_cancel_success() -> None:
+def test_visible_cancel_target_waits_until_visibility_deadline() -> None:
+    command = _cancel_command()
+    result = decide_unknown_recovery(
+        command,
+        _truth(
+            lookup_status=VenueLookupStatus.VISIBLE,
+            order=VenueOrderTruth(
+                exchange_order_id=command.payload.exchange_order_id,
+                venue_client_order_id="brc-original-stop",
+                exchange_instrument_id=(
+                    command.ticket_identity.netting_domain.exchange_instrument_id
+                ),
+                position_side="long",
+                order_side="sell",
+                quantity=Decimal("0.001"),
+                reduce_only=True,
+            ),
+            observed_at_ms=1_500,
+        ),
+        visibility_deadline_ms=2_000,
+    )
+
+    assert result.status is UnknownRecoveryStatus.PENDING_VISIBILITY
+    assert result.reason == "cancel_target_still_visible"
+
+
+def test_visible_cancel_target_after_deadline_proves_cancel_was_not_effective() -> None:
     command = _cancel_command()
     result = decide_unknown_recovery(
         command,
@@ -143,8 +169,8 @@ def test_visible_cancel_target_remains_pending_instead_of_claiming_cancel_succes
         visibility_deadline_ms=2_000,
     )
 
-    assert result.status is UnknownRecoveryStatus.PENDING_VISIBILITY
-    assert result.reason == "cancel_target_still_visible"
+    assert result.status is UnknownRecoveryStatus.CANCEL_TARGET_STILL_OPEN
+    assert result.reason == "cancel_target_still_open_after_visibility_window"
 
 
 def test_terminal_cancel_target_reconciles_as_absent_from_open_orders() -> None:

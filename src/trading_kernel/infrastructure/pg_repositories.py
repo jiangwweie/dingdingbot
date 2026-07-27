@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.sql.elements import ColumnElement
 
 from src.trading_kernel.application.ports import (
-    AggregateVersionConflict,
     AccountExposureSnapshot,
+    AggregateVersionConflict,
     BudgetReservationRecord,
     EntryLaneSnapshot,
     MonitorStateRecord,
@@ -22,33 +22,30 @@ from src.trading_kernel.application.ports import (
     RuntimeIncidentRecord,
     TradeReviewRecord,
 )
-from src.trading_kernel.domain.capacity import CapacityClaim
-from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
-from src.trading_kernel.domain.incident_blocking import (
-    EntryBlockScope,
-    canonical_entry_block_key,
-)
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
+from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.commands import (
     CommandPayload,
     ExchangeCommand,
     ExchangeCommandKind,
     ExchangeCommandResult,
     ExchangeCommandStatus,
-    SetLeverageCommandResult,
     OrderCommandPayload,
+    SetLeverageCommandResult,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.events import (
     BudgetSettled,
     CancelOrderAbsenceConfirmed,
     CancelOrderOutcomeUnknown,
     CancelOrderRejected,
+    CancelOrderStillOpenConfirmed,
     ControlledFlattenAbsenceConfirmed,
     ControlledFlattenAccepted,
     ControlledFlattenOutcomeUnknown,
     ControlledFlattenRejected,
-    EntryAccepted,
     EntryAbsenceConfirmed,
+    EntryAccepted,
     EntryFilled,
     EntryOutcomeUnknown,
     EntryPartiallyFilled,
@@ -56,25 +53,25 @@ from src.trading_kernel.domain.events import (
     EntryRemainderCancelConfirmed,
     EntryRemainderCancelOutcomeUnknown,
     EntryRemainderCancelRejected,
-    ExternalFlatDetected,
-    ExitAccepted,
     ExitAbsenceConfirmed,
+    ExitAccepted,
     ExitOutcomeUnknown,
     ExitRejected,
     ExitRequested,
-    InitialStopConfirmed,
+    ExternalFlatDetected,
     InitialStopAbsenceConfirmed,
+    InitialStopConfirmed,
     InitialStopOutcomeUnknown,
     InitialStopRejected,
     LeverageConfirmed,
     LeverageOutcomeUnknown,
     LeverageRejected,
-    OwnedOrphanOrderDetected,
     OwnedOrderAbsenceConfirmed,
     OwnedOrphanCancelConfirmed,
+    OwnedOrphanOrderDetected,
     PositionFlatConfirmed,
-    ProtectionCancelConfirmed,
     ProtectionCancelAbsenceConfirmed,
+    ProtectionCancelConfirmed,
     ProtectionCancelOutcomeUnknown,
     ProtectionCancelRejected,
     ProtectionReplacementAbsenceConfirmed,
@@ -83,12 +80,12 @@ from src.trading_kernel.domain.events import (
     ProtectionReplacementRejected,
     ReconciliationMatched,
     ReviewRecorded,
-    TicketIssued,
     TakeProfitAbsenceConfirmed,
     TakeProfitConfirmed,
     TakeProfitFilled,
     TakeProfitOutcomeUnknown,
     TakeProfitRejected,
+    TicketIssued,
     TradeEvent,
     UnownedOrderDetected,
 )
@@ -96,6 +93,10 @@ from src.trading_kernel.domain.identities import (
     NettingDomain,
     RuntimeIdentity,
     TicketIdentity,
+)
+from src.trading_kernel.domain.incident_blocking import (
+    EntryBlockScope,
+    canonical_entry_block_key,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.post_fill_risk import (
@@ -119,7 +120,6 @@ from src.trading_kernel.infrastructure.pg_models import (
     trade_reviews,
     trade_tickets,
 )
-
 
 _EVENT_MODELS = {
     event_type.__name__: event_type
@@ -174,6 +174,7 @@ _EVENT_MODELS = {
         CancelOrderAbsenceConfirmed,
         CancelOrderRejected,
         CancelOrderOutcomeUnknown,
+        CancelOrderStillOpenConfirmed,
         ReviewRecorded,
     )
 }

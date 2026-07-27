@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 import re
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -300,6 +300,10 @@ class CancelOrderAbsenceConfirmed(_TicketEvent):
     exchange_order_id: str
 
 
+class CancelOrderStillOpenConfirmed(_TicketEvent):
+    exchange_order_id: str
+
+
 class ReconciliationMatched(_TicketEvent):
     resolved_incident_kind: str | None = None
 
@@ -362,6 +366,7 @@ TradeEvent = (
     | CancelOrderRejected
     | CancelOrderOutcomeUnknown
     | CancelOrderAbsenceConfirmed
+    | CancelOrderStillOpenConfirmed
     | ReconciliationMatched
     | BudgetSettled
     | ReviewRecorded

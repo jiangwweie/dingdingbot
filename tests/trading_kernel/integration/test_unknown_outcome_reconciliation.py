@@ -4,15 +4,10 @@ from decimal import Decimal
 
 import pytest
 
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandRequest,
     DispatchCommandStatus,
     dispatch_one_command,
-)
-from src.trading_kernel.application.recover_unknown_command import (
-    RecoverUnknownCommandRequest,
-    recover_unknown_command,
 )
 from src.trading_kernel.application.ports import (
     LeverageTruthRequest,
@@ -30,6 +25,10 @@ from src.trading_kernel.application.reconcile_ticket import (
     reconcile_ticket,
     request_exit,
 )
+from src.trading_kernel.application.recover_unknown_command import (
+    RecoverUnknownCommandRequest,
+    recover_unknown_command,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
@@ -38,13 +37,13 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandStatus,
     OrderCommandPayload,
 )
-from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.events import (
     ControlledFlattenAbsenceConfirmed,
     ExitAbsenceConfirmed,
     InitialStopAbsenceConfirmed,
     TakeProfitFilled,
 )
+from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.venue_truth import (
     UnknownRecoveryStatus,
@@ -53,6 +52,7 @@ from src.trading_kernel.domain.venue_truth import (
     VenueTruthSnapshot,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import (
     AcceptingVenue,
     SlowVenue,
@@ -62,7 +62,6 @@ from tests.trading_kernel.integration.test_command_dispatch import (
 )
 from tests.trading_kernel.integration.test_issue_ticket import _ticket_for_signal
 from tests.trading_kernel.unit.test_ticket import _ticket
-
 
 dispatch_engine = dispatch_fixture.dispatch_engine
 
@@ -776,6 +775,61 @@ async def test_terminal_unknown_cancel_confirms_target_removal_and_resolves_unkn
     assert persisted is not None
     assert persisted.status is ExchangeCommandStatus.RECONCILED_ABSENT
     assert incident is None
+
+
+@pytest.mark.asyncio
+async def test_still_open_unknown_cancel_is_marked_absent_and_becomes_retryable(
+    dispatch_engine,
+) -> None:
+    ticket, command = await _make_unknown_cancel(dispatch_engine)
+    assert isinstance(command.payload, CancelCommandPayload)
+
+    result = await recover_unknown_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        StaticTruthPort(
+            VenueTruthSnapshot(
+                lookup_status=VenueLookupStatus.VISIBLE,
+                order=VenueOrderTruth(
+                    exchange_order_id=command.payload.exchange_order_id,
+                    venue_client_order_id="brc-original-stop",
+                    exchange_instrument_id=(
+                        ticket.identity.netting_domain.exchange_instrument_id
+                    ),
+                    position_side=ticket.identity.netting_domain.position_side,
+                    order_side="sell",
+                    quantity=ticket.quantity,
+                    reduce_only=True,
+                ),
+                position_quantity=Decimal("0"),
+                matching_fill_quantity=Decimal("0"),
+                regular_open_client_order_ids=(),
+                conditional_open_client_order_ids=(),
+                observed_at_ms=3_500,
+            )
+        ),
+        RecoverUnknownCommandRequest(
+            command_id=command.command_id,
+            now_ms=3_500,
+            visibility_deadline_ms=3_400,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.status is UnknownRecoveryStatus.CANCEL_TARGET_STILL_OPEN
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        persisted = await uow.exchange_commands.get(command.command_id)
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.CANCEL_REJECTED
+    assert (
+        aggregate.pending_cancel_exchange_order_id
+        == command.payload.exchange_order_id
+    )
+    assert persisted is not None
+    assert persisted.status is ExchangeCommandStatus.RECONCILED_ABSENT
+    assert incident is not None
+    assert incident.incident_kind == "cancel_order_still_open_after_unknown"
 
 
 @pytest.mark.asyncio
