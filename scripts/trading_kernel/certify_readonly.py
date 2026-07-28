@@ -284,7 +284,13 @@ async def _certify(
                                FROM brc_strategy_universe_members),
                             (SELECT count(*)
                                FROM brc_runtime_scopes_current),
-                            (SELECT count(*) FROM violations)
+                            (SELECT count(*) FROM violations),
+                            (SELECT count(*) FROM brc_runtime_scopes_current
+                              WHERE lifecycle_state = 'active'),
+                            (SELECT count(*) FROM brc_runtime_scopes_current
+                              WHERE lifecycle_state = 'warming'),
+                            (SELECT count(*) FROM brc_runtime_scopes_current
+                              WHERE lifecycle_state = 'retired')
                         """
                     )
                 )
@@ -592,6 +598,11 @@ async def _certify(
         "member_count": int(universe_counts[2]),
         "scope_count": int(universe_counts[3]),
         "integrity_violation_count": int(universe_counts[4]),
+        "scope_lifecycle_counts": {
+            "active": int(universe_counts[5]),
+            "warming": int(universe_counts[6]),
+            "retired": int(universe_counts[7]),
+        },
     }
     protected_tickets = (
         []
