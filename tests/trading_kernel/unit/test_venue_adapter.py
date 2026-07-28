@@ -510,6 +510,9 @@ class InstrumentRulesWithoutMarketLeverageExchange(InstrumentRulesExchange):
         return market
 
 class LifecycleFactsExchange:
+    def __init__(self) -> None:
+        self.tp1_order_calls: list[tuple[object, str, dict[str, object]]] = []
+
     async def fetch_positions(self, symbols, params):
         return [
             {
@@ -534,12 +537,28 @@ class LifecycleFactsExchange:
             ]
         return [
             {
-                "clientOrderId": client_id,
+                # Binance user-trade payloads do not reliably carry the parent
+                # order client id. TP1 lifecycle truth must use the exact order.
+                "clientOrderId": None,
                 "amount": "0.005",
                 "price": "61000",
                 "fee": {"cost": "0.15", "currency": "USDT"},
             }
         ]
+
+    async def fetch_order(self, order_id, symbol, params):
+        self.tp1_order_calls.append((order_id, symbol, dict(params)))
+        return {
+            "id": order_id,
+            "symbol": symbol,
+            "status": "closed",
+            "filled": "0.005",
+            "average": "61000",
+            "info": {
+                "executedQty": "0.005",
+                "avgPrice": "61000",
+            },
+        }
 
     async def fetch_ohlcv(self, symbol, timeframe, since, limit):
         del symbol, timeframe, since
@@ -1023,7 +1042,7 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
         entry_quantity=Decimal("0.01"),
         expected_position_quantity=Decimal("0.005"),
         entry_venue_client_order_id="brc-entry-1",
-        tp1_venue_client_order_id="brc-tp1-1",
+        tp1_exchange_order_id="venue-tp1-1",
         entered_at_ms=1_000,
         price_tick=Decimal("0.1"),
         structure_window_bars=4,
@@ -1037,6 +1056,11 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
     assert facts.position_quantity == Decimal("0.005")
     assert facts.tp1_filled_quantity == Decimal("0.005")
     assert facts.tp1_average_fill_price == Decimal("61000")
+    exchange = adapter._exchanges[("binance-usdm", "experiment-1")]
+    assert isinstance(exchange, LifecycleFactsExchange)
+    assert exchange.tp1_order_calls == [
+        ("venue-tp1-1", "BTC/USDT:USDT", {})
+    ]
     assert facts.allocated_entry_fee_quote == Decimal("0.20")
     assert facts.exit_taker_fee_rate == Decimal("0.0005")
     assert facts.price_tick == Decimal("0.1")

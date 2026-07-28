@@ -165,14 +165,6 @@ async def run_lifecycle_worker_once(
         ),
         None,
     )
-    tp1_command = next(
-        (
-            command
-            for command in reversed(commands)
-            if command.kind is ExchangeCommandKind.TAKE_PROFIT
-        ),
-        None,
-    )
     entry_fill = next(
         (event for event in events if isinstance(event, EntryFilled)),
         None,
@@ -197,9 +189,7 @@ async def run_lifecycle_worker_once(
         entry_quantity=aggregate.ticket.quantity,
         expected_position_quantity=aggregate.position_qty,
         entry_venue_client_order_id=entry_command.venue_client_order_id,
-        tp1_venue_client_order_id=(
-            None if tp1_command is None else tp1_command.venue_client_order_id
-        ),
+        tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
         entered_at_ms=entry_fill.occurred_at_ms,
         price_tick=rules.price_tick,
         structure_window_bars=policy.runner.structure_window_bars,

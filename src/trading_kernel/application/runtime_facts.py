@@ -198,7 +198,7 @@ class LifecycleFactsRequest(BaseModel):
     entry_quantity: Decimal
     expected_position_quantity: Decimal
     entry_venue_client_order_id: str
-    tp1_venue_client_order_id: str | None
+    tp1_exchange_order_id: str | None
     entered_at_ms: int
     price_tick: Decimal
     structure_window_bars: int
@@ -219,7 +219,7 @@ class LifecycleFactsRequest(BaseModel):
             raise ValueError("lifecycle fact request identities must be non-blank")
         return normalized
 
-    @field_validator("tp1_venue_client_order_id", mode="before")
+    @field_validator("tp1_exchange_order_id", mode="before")
     @classmethod
     def _normalize_optional_identity(cls, value: object) -> str | None:
         if value is None:

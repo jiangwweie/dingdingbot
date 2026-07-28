@@ -432,7 +432,7 @@ class CcxtVenueAdapter:
         if taker_fee_rate is None:
             raise RuntimeError("canonical instrument has no taker fee rate")
 
-        tp1_client_id = request.tp1_venue_client_order_id
+        tp1_exchange_order_id = request.tp1_exchange_order_id
         candle_limit = max(request.atr_period + 1, request.structure_window_bars)
         positions_call = _call_raw_exchange(
             exchange.fetch_positions,
@@ -446,16 +446,15 @@ class CcxtVenueAdapter:
             100,
             {"clientOrderId": request.entry_venue_client_order_id},
         )
-        tp1_fills_call = (
+        tp1_order_call = (
             _call_raw_exchange(
-                exchange.fetch_my_trades,
+                exchange.fetch_order,
+                tp1_exchange_order_id,
                 symbol,
-                None,
-                100,
-                {"clientOrderId": tp1_client_id},
+                {},
             )
-            if tp1_client_id is not None
-            else _empty_rows()
+            if tp1_exchange_order_id is not None
+            else _empty_value()
         )
         candles_call = (
             _call_raw_exchange(
@@ -468,10 +467,10 @@ class CcxtVenueAdapter:
             if request.runner_market_required
             else _empty_rows()
         )
-        positions, entry_fills, tp1_fills, candle_rows = await asyncio.gather(
+        positions, entry_fills, tp1_order, candle_rows = await asyncio.gather(
             positions_call,
             entry_fills_call,
-            tp1_fills_call,
+            tp1_order_call,
             candles_call,
         )
         position_quantity, _, _ = _position_details(
@@ -484,11 +483,7 @@ class CcxtVenueAdapter:
             venue_client_order_id=request.entry_venue_client_order_id,
             settlement_asset=settlement_asset,
         )
-        tp1_quantity, tp1_average_price, _ = _fill_metrics(
-            _require_list(tp1_fills, name="TP1 fills"),
-            venue_client_order_id=tp1_client_id,
-            settlement_asset=settlement_asset,
-        )
+        tp1_quantity, tp1_average_price = _order_fill_metrics(tp1_order)
         allocated_entry_fee = (
             entry_fee_quote * position_quantity / request.entry_quantity
         )
@@ -1549,6 +1544,31 @@ def _positive_rule_value(
 
 async def _empty_rows() -> list[object]:
     return []
+
+
+async def _empty_value() -> None:
+    return None
+
+
+def _order_fill_metrics(value: object | None) -> tuple[Decimal, Decimal | None]:
+    if value is None:
+        return Decimal("0"), None
+    mapping = _require_mapping(value, name="TP1 order")
+    info = mapping.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    quantity = abs(
+        Decimal(
+            str(mapping.get("filled") or raw_info.get("executedQty") or "0")
+        )
+    )
+    if quantity == 0:
+        return Decimal("0"), None
+    average_price = Decimal(
+        str(mapping.get("average") or raw_info.get("avgPrice") or "0")
+    )
+    if average_price <= 0:
+        raise RuntimeError("TP1 filled order lacks positive average price")
+    return quantity, average_price
 
 
 def _fill_metrics(
