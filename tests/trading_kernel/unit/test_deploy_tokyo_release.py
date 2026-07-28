@@ -160,6 +160,69 @@ def test_protected_release_forbids_enabling_entry() -> None:
         )
 
 
+def test_closure_only_release_requires_one_exact_ticket_and_keeps_entry_fenced() -> None:
+    plan = _plan(
+        enable_entry=False,
+        closure_ticket_id="ticket:btc-settlement",
+    )
+
+    assert plan.closure_ticket_id == "ticket:btc-settlement"
+    with pytest.raises(ValueError, match="closure-only"):
+        _plan(
+            enable_entry=True,
+            closure_ticket_id="ticket:btc-settlement",
+        )
+
+
+def test_closure_only_release_recovers_only_the_exact_pending_ticket() -> None:
+    ticket_id = "ticket:btc-settlement"
+    backend = FakeDeploymentBackend(closure_ticket_id=ticket_id)
+
+    result = deploy_tokyo_release(
+        backend,
+        _plan(enable_entry=False, closure_ticket_id=ticket_id),
+    )
+
+    assert result.status == "pass"
+    assert result.entry_enabled is False
+    assert backend.calls == [
+        ("read_current_release",),
+        ("install_release", TARGET_COMMIT, TARGET_RELEASE),
+        ("certify_closure", TARGET_RELEASE, ticket_id),
+        ("probe_exchange", TARGET_RELEASE),
+        ("read_release_marker", CURRENT_RELEASE, ".brc-runtime-commit"),
+        ("read_release_marker", CURRENT_RELEASE, ".brc-schema-revision"),
+        ("stop_services", ALL_SERVICES),
+        ("fence_entry",),
+        ("services_active", ALL_SERVICES),
+        ("certify_closure", TARGET_RELEASE, ticket_id),
+        ("probe_exchange", TARGET_RELEASE),
+        (
+            "deploy_closure_identity",
+            TARGET_RELEASE,
+            TARGET_COMMIT,
+            "0001_initial",
+            ticket_id,
+        ),
+        (
+            "activate_release",
+            TARGET_RELEASE,
+            TARGET_COMMIT,
+            "0001_initial",
+            SEED_IDENTITY,
+        ),
+        ("certify_closure", TARGET_RELEASE, ticket_id),
+        ("probe_exchange", TARGET_RELEASE),
+        ("read_current_release",),
+        ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
+        ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
+        ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
+        ("start_services", SAFETY_SERVICES),
+        ("entry_is_inactive_disabled_and_fenced",),
+        ("services_active", ALL_SERVICES),
+    ]
+
+
 def test_protected_release_refuses_count_only_exchange_evidence() -> None:
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
     backend = FakeDeploymentBackend(
@@ -203,6 +266,7 @@ def _plan(
     *,
     enable_entry: bool,
     protected_ticket_ids: tuple[str, ...] = (),
+    closure_ticket_id: str | None = None,
 ) -> DeploymentPlan:
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
@@ -211,6 +275,7 @@ def _plan(
         expected_configured_leverage=5,
         enable_entry=enable_entry,
         protected_ticket_ids=protected_ticket_ids,
+        closure_ticket_id=closure_ticket_id,
     )
 
 
@@ -221,12 +286,14 @@ class FakeDeploymentBackend:
         configured_leverage: int = 5,
         active_ticket_count: int = 0,
         protected_ticket_ids: tuple[str, ...] = (),
+        closure_ticket_id: str | None = None,
         open_order_domain_count: int | None = None,
         include_exact_protected_facts: bool = True,
         fail_at: str | None = None,
     ) -> None:
         self.configured_leverage = configured_leverage
         self.protected_ticket_ids = protected_ticket_ids
+        self.closure_ticket_id = closure_ticket_id
         self.active_ticket_count = (
             len(protected_ticket_ids)
             if protected_ticket_ids
@@ -291,6 +358,40 @@ class FakeDeploymentBackend:
         if self.include_exact_protected_facts:
             payload["protected_tickets"] = self._protected_ticket_facts()
         return payload
+
+    def certify_closure(
+        self,
+        release: str,
+        ticket_id: str,
+    ) -> Mapping[str, object]:
+        self.calls.append(("certify_closure", release, ticket_id))
+        return {
+            "status": "pass",
+            "runtime_identity": {
+                "runtime_commit": self.runtime_commit,
+                "schema_revision": "0001_initial",
+                "seed_identity": SEED_IDENTITY,
+            },
+            "active_counts": {
+                "tickets": 0,
+                "commands": 0,
+                "positions": 0,
+                "incidents": 0,
+            },
+            "closure_ticket": {
+                "ticket_id": ticket_id,
+                "aggregate_status": "settlement_pending",
+                "position_quantity": "0",
+                "protected_quantity": "0",
+                "owned_order_residue_count": 0,
+                "unresolved_command_count": 0,
+                "open_incident_count": 0,
+                "budget_reservation_status": "released",
+                "account_capacity_released": True,
+                "netting_domain_released": True,
+                "review_presence": False,
+            },
+        }
 
     def probe_exchange(self, release: str) -> Mapping[str, object]:
         self.calls.append(("probe_exchange", release))
@@ -419,6 +520,30 @@ class FakeDeploymentBackend:
             "refreshed_existing_authority": True,
         }
 
+    def deploy_closure_identity(
+        self,
+        release: str,
+        commit: str,
+        schema_revision: str,
+        ticket_id: str,
+    ) -> Mapping[str, object]:
+        self.calls.append(
+            (
+                "deploy_closure_identity",
+                release,
+                commit,
+                schema_revision,
+                ticket_id,
+            )
+        )
+        self.runtime_commit = commit
+        return {
+            "runtime_commit": commit,
+            "schema_revision": schema_revision,
+            "runtime_seed_semantic_hash": SEED_IDENTITY,
+            "refreshed_existing_authority": True,
+        }
+
     def activate_release(
         self,
         release: str,
@@ -446,3 +571,7 @@ class FakeDeploymentBackend:
     def fence_entry(self) -> None:
         self.calls.append(("fence_entry",))
         self.active_services.discard(ENTRY_SERVICE)
+
+    def entry_is_inactive_disabled_and_fenced(self) -> bool:
+        self.calls.append(("entry_is_inactive_disabled_and_fenced",))
+        return ENTRY_SERVICE not in self.active_services

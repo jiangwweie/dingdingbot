@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import json
 import os
 import re
@@ -59,6 +60,7 @@ class DeploymentPlan:
     expected_configured_leverage: int
     enable_entry: bool
     protected_ticket_ids: tuple[str, ...] = ()
+    closure_ticket_id: str | None = None
 
     def __post_init__(self) -> None:
         if not _COMMIT.fullmatch(self.target_commit):
@@ -78,6 +80,12 @@ class DeploymentPlan:
             raise ValueError("protected Ticket identities must be distinct")
         if self.protected_ticket_ids and self.enable_entry:
             raise ValueError("protected handover must keep ENTRY fenced")
+        if self.closure_ticket_id is not None and not self.closure_ticket_id.strip():
+            raise ValueError("closure-only Ticket identity must be non-blank")
+        if self.closure_ticket_id is not None and self.protected_ticket_ids:
+            raise ValueError("closure-only and protected handover are mutually exclusive")
+        if self.closure_ticket_id is not None and self.enable_entry:
+            raise ValueError("closure-only handover must keep ENTRY fenced")
 
 
 @dataclass(frozen=True)
@@ -96,6 +104,12 @@ class TokyoReleaseBackend(Protocol):
     def certify_flat(self, release: str) -> Mapping[str, object]: ...
 
     def certify_protected(self, release: str) -> Mapping[str, object]: ...
+
+    def certify_closure(
+        self,
+        release: str,
+        ticket_id: str,
+    ) -> Mapping[str, object]: ...
 
     def probe_exchange(self, release: str) -> Mapping[str, object]: ...
 
@@ -128,6 +142,14 @@ class TokyoReleaseBackend(Protocol):
         ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]: ...
 
+    def deploy_closure_identity(
+        self,
+        release: str,
+        commit: str,
+        schema_revision: str,
+        ticket_id: str,
+    ) -> Mapping[str, object]: ...
+
     def activate_release(
         self,
         release: str,
@@ -140,6 +162,8 @@ class TokyoReleaseBackend(Protocol):
 
     def fence_entry(self) -> None: ...
 
+    def entry_is_inactive_disabled_and_fenced(self) -> bool: ...
+
 
 def deploy_tokyo_release(
     backend: TokyoReleaseBackend,
@@ -149,32 +173,9 @@ def deploy_tokyo_release(
     if current_release == plan.target_release:
         raise DeploymentBlocked("target release is already current")
     backend.install_release(plan.target_commit, plan.target_release)
-    current_certification = (
-        backend.certify_protected(plan.target_release)
-        if plan.protected_ticket_ids
-        else backend.certify_flat(plan.target_release)
-    )
-    current_probe = (
-        backend.probe_protected_exchange(
-            plan.target_release,
-            _require_protected_ticket_rows(current_certification),
-        )
-        if plan.protected_ticket_ids
-        else backend.probe_exchange(plan.target_release)
-    )
-    current_identity = (
-            _require_protected_release_facts(
-                current_certification,
-                current_probe,
-                expected_leverage=plan.expected_configured_leverage,
-                protected_ticket_ids=plan.protected_ticket_ids,
-        )
-        if plan.protected_ticket_ids
-        else _require_release_facts(
-            current_certification,
-            current_probe,
-            expected_leverage=plan.expected_configured_leverage,
-        )
+    _, _, current_identity = _read_release_facts(
+        backend,
+        plan,
     )
     _require_marker(
         backend,
@@ -201,8 +202,18 @@ def deploy_tokyo_release(
                 + ",".join(sorted(active_after_stop))
             )
 
+        if plan.closure_ticket_id is not None:
+            _read_release_facts(backend, plan)
+
         deployment_identity = (
-            backend.deploy_protected_identity(
+            backend.deploy_closure_identity(
+                plan.target_release,
+                plan.target_commit,
+                plan.schema_revision,
+                plan.closure_ticket_id,
+            )
+            if plan.closure_ticket_id is not None
+            else backend.deploy_protected_identity(
                 plan.target_release,
                 plan.target_commit,
                 plan.schema_revision,
@@ -225,33 +236,7 @@ def deploy_tokyo_release(
             plan.schema_revision,
             seed_identity,
         )
-        target_certification = (
-            backend.certify_protected(plan.target_release)
-            if plan.protected_ticket_ids
-            else backend.certify_flat(plan.target_release)
-        )
-        target_probe = (
-            backend.probe_protected_exchange(
-                plan.target_release,
-                _require_protected_ticket_rows(target_certification),
-            )
-            if plan.protected_ticket_ids
-            else backend.probe_exchange(plan.target_release)
-        )
-        target_identity = (
-            _require_protected_release_facts(
-                target_certification,
-                target_probe,
-                expected_leverage=plan.expected_configured_leverage,
-                protected_ticket_ids=plan.protected_ticket_ids,
-            )
-            if plan.protected_ticket_ids
-            else _require_release_facts(
-                target_certification,
-                target_probe,
-                expected_leverage=plan.expected_configured_leverage,
-            )
-        )
+        _, _, target_identity = _read_release_facts(backend, plan)
         if target_identity != {
             "runtime_commit": plan.target_commit,
             "schema_revision": plan.schema_revision,
@@ -270,6 +255,11 @@ def deploy_tokyo_release(
         backend.start_services(SAFETY_SERVICES)
         if plan.enable_entry:
             backend.start_services((ENTRY_SERVICE,))
+        if (
+            plan.closure_ticket_id is not None
+            and not backend.entry_is_inactive_disabled_and_fenced()
+        ):
+            raise DeploymentBlocked("closure-only handover did not retain the ENTRY fence")
         expected_services = ALL_SERVICES if plan.enable_entry else SAFETY_SERVICES
         active_services = backend.services_active(ALL_SERVICES)
         if active_services != frozenset(expected_services):
@@ -290,6 +280,55 @@ def deploy_tokyo_release(
         schema_revision=plan.schema_revision,
         configured_leverage=plan.expected_configured_leverage,
         entry_enabled=plan.enable_entry,
+    )
+
+
+def _read_release_facts(
+    backend: TokyoReleaseBackend,
+    plan: DeploymentPlan,
+) -> tuple[Mapping[str, object], Mapping[str, object], dict[str, str]]:
+    if plan.closure_ticket_id is not None:
+        certification = backend.certify_closure(
+            plan.target_release,
+            plan.closure_ticket_id,
+        )
+        probe = backend.probe_exchange(plan.target_release)
+        return (
+            certification,
+            probe,
+            _require_closure_release_facts(
+                certification,
+                probe,
+                expected_leverage=plan.expected_configured_leverage,
+                closure_ticket_id=plan.closure_ticket_id,
+            ),
+        )
+    if plan.protected_ticket_ids:
+        certification = backend.certify_protected(plan.target_release)
+        probe = backend.probe_protected_exchange(
+            plan.target_release,
+            _require_protected_ticket_rows(certification),
+        )
+        return (
+            certification,
+            probe,
+            _require_protected_release_facts(
+                certification,
+                probe,
+                expected_leverage=plan.expected_configured_leverage,
+                protected_ticket_ids=plan.protected_ticket_ids,
+            ),
+        )
+    certification = backend.certify_flat(plan.target_release)
+    probe = backend.probe_exchange(plan.target_release)
+    return (
+        certification,
+        probe,
+        _require_release_facts(
+            certification,
+            probe,
+            expected_leverage=plan.expected_configured_leverage,
+        ),
     )
 
 
@@ -344,6 +383,106 @@ def _require_release_facts(
             "production configured leverage differs from fixed 5x policy"
         )
     return identity
+
+
+def _require_closure_release_facts(
+    certification: Mapping[str, object],
+    probe: Mapping[str, object],
+    *,
+    expected_leverage: int,
+    closure_ticket_id: str,
+) -> dict[str, str]:
+    if certification.get("status") != "pass":
+        raise DeploymentBlocked("database closure certification failed")
+    active_counts = certification.get("active_counts")
+    if not isinstance(active_counts, Mapping) or any(
+        int(str(active_counts.get(key, -1))) != expected
+        for key, expected in (
+            ("tickets", 0),
+            ("commands", 0),
+            ("positions", 0),
+            ("incidents", 0),
+        )
+    ):
+        raise DeploymentBlocked("database closure runtime activity differs")
+    runtime_identity = certification.get("runtime_identity")
+    if not isinstance(runtime_identity, Mapping):
+        raise DeploymentBlocked("database runtime identity is missing")
+    identity = {
+        key: str(runtime_identity.get(key, ""))
+        for key in ("runtime_commit", "schema_revision", "seed_identity")
+    }
+    if (
+        not _COMMIT.fullmatch(identity["runtime_commit"])
+        or identity["schema_revision"] != SCHEMA_REVISION
+        or not _SEED_IDENTITY.fullmatch(identity["seed_identity"])
+    ):
+        raise DeploymentBlocked("database runtime identity is invalid")
+    closure_ticket = certification.get("closure_ticket")
+    if not isinstance(closure_ticket, Mapping):
+        raise DeploymentBlocked("exact closure Ticket facts are missing")
+    if str(closure_ticket.get("ticket_id", "")) != closure_ticket_id:
+        raise DeploymentBlocked("exact closure Ticket identity differs")
+    if str(closure_ticket.get("aggregate_status", "")) not in {
+        "settlement_pending",
+        "review_pending",
+    }:
+        raise DeploymentBlocked("closure Ticket is not pending Settlement or Review")
+    try:
+        quantities_are_flat = all(
+            Decimal(str(closure_ticket.get(key, "-1"))) == 0
+            for key in ("position_quantity", "protected_quantity")
+        )
+    except (InvalidOperation, ValueError):
+        quantities_are_flat = False
+    if not quantities_are_flat:
+        raise DeploymentBlocked("closure Ticket still has position or protection")
+    if any(
+        int(str(closure_ticket.get(key, -1))) != 0
+        for key in (
+            "owned_order_residue_count",
+            "unresolved_command_count",
+            "open_incident_count",
+        )
+    ):
+        raise DeploymentBlocked("closure Ticket has unresolved runtime residue")
+    if (
+        closure_ticket.get("budget_reservation_status") != "released"
+        or closure_ticket.get("account_capacity_released") is not True
+        or closure_ticket.get("netting_domain_released") is not True
+    ):
+        raise DeploymentBlocked("closure Ticket authority has not been released")
+    _require_flat_exchange_facts(probe, expected_leverage=expected_leverage)
+    return identity
+
+
+def _require_flat_exchange_facts(
+    probe: Mapping[str, object],
+    *,
+    expected_leverage: int,
+) -> None:
+    if probe.get("venue_id") != "binance-usdm":
+        raise DeploymentBlocked("production venue identity differs from policy")
+    if probe.get("account_position_mode") != "independent_sides":
+        raise DeploymentBlocked("production account position mode is invalid")
+    if probe.get("account_margin_mode") != "cross":
+        raise DeploymentBlocked("production account margin mode is invalid")
+    if int(str(probe.get("non_flat_domain_count", -1))) != 0:
+        raise DeploymentBlocked("exchange position is not flat")
+    if int(str(probe.get("open_order_domain_count", -1))) != 0:
+        raise DeploymentBlocked("exchange open orders are present")
+    rules = probe.get("rules")
+    if not isinstance(rules, list) or len(rules) != 6:
+        raise DeploymentBlocked("production instrument rule set is incomplete")
+    configured = {
+        int(str(rule.get("configured_leverage", -1)))
+        for rule in rules
+        if isinstance(rule, Mapping)
+    }
+    if configured != {expected_leverage}:
+        raise DeploymentBlocked(
+            "production configured leverage differs from fixed 5x policy"
+        )
 
 
 def _require_protected_release_facts(
@@ -535,6 +674,18 @@ class SshTokyoReleaseBackend:
             "scripts/trading_kernel/certify_readonly.py",
         )
 
+    def certify_closure(
+        self,
+        release: str,
+        ticket_id: str,
+    ) -> Mapping[str, object]:
+        return self._release_json(
+            release,
+            "scripts/trading_kernel/certify_readonly.py",
+            "--closure-ticket-id",
+            ticket_id,
+        )
+
     def probe_exchange(self, release: str) -> Mapping[str, object]:
         return self._release_json(
             release,
@@ -648,6 +799,25 @@ class SshTokyoReleaseBackend:
             ),
         )
 
+    def deploy_closure_identity(
+        self,
+        release: str,
+        commit: str,
+        schema_revision: str,
+        ticket_id: str,
+    ) -> Mapping[str, object]:
+        return self._release_json(
+            release,
+            "scripts/trading_kernel/seed_runtime_authority.py",
+            "deploy-closure-identity",
+            "--runtime-commit",
+            commit,
+            "--schema-revision",
+            schema_revision,
+            "--closure-ticket-id",
+            ticket_id,
+        )
+
     def activate_release(
         self,
         release: str,
@@ -731,6 +901,22 @@ class SshTokyoReleaseBackend:
         self._remote(
             ("sudo", "systemctl", "disable", "--now", ENTRY_SERVICE),
             check=False,
+        )
+
+    def entry_is_inactive_disabled_and_fenced(self) -> bool:
+        return (
+            self._remote(("sudo", "test", "-f", WRITE_FENCE), check=False).returncode
+            == 0
+            and self._remote(
+                ("sudo", "systemctl", "is-active", "--quiet", ENTRY_SERVICE),
+                check=False,
+            ).returncode
+            != 0
+            and self._remote(
+                ("sudo", "systemctl", "is-enabled", "--quiet", ENTRY_SERVICE),
+                check=False,
+            ).returncode
+            != 0
         )
 
     def _release_json(
@@ -849,6 +1035,10 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--closure-ticket-id",
+        help="Exact zero-exposure pending Ticket allowed across one closure-only handover.",
+    )
+    parser.add_argument(
         "--timeout-seconds",
         type=float,
         default=60.0,
@@ -880,6 +1070,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_configured_leverage=EXPECTED_CONFIGURED_LEVERAGE,
         enable_entry=args.enable_entry,
         protected_ticket_ids=tuple(args.protected_ticket_id),
+        closure_ticket_id=args.closure_ticket_id,
     )
     backend = SshTokyoReleaseBackend(
         target=args.target,

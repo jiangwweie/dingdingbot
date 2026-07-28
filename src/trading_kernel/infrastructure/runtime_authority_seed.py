@@ -455,16 +455,42 @@ async def deploy_protected_identity(
     )
 
 
+async def deploy_closure_identity(
+    uow: PostgresKernelUnitOfWork,
+    request: RuntimeAuthoritySeedRequest,
+    *,
+    closure_ticket_id: str,
+) -> RuntimeDeploymentIdentityResult:
+    """Rotate identity only for one exact zero-exposure pending closure Ticket."""
+
+    normalized_ticket_id = closure_ticket_id.strip()
+    if not normalized_ticket_id:
+        raise ValueError("closure Ticket identity must be non-blank")
+    return await _deploy_runtime_identity(
+        uow,
+        request,
+        closure_ticket_id=normalized_ticket_id,
+    )
+
+
 async def _deploy_runtime_identity(
     uow: PostgresKernelUnitOfWork,
     request: RuntimeAuthoritySeedRequest,
     *,
     recovery_ticket_id: str | None = None,
     protected_ticket_ids: frozenset[str] | None = None,
+    closure_ticket_id: str | None = None,
 ) -> RuntimeDeploymentIdentityResult:
     """Install the exact identity after a flat or narrowly safe recovery gate."""
 
-    if recovery_ticket_id is not None and protected_ticket_ids is not None:
+    if sum(
+        value is not None
+        for value in (
+            recovery_ticket_id,
+            protected_ticket_ids,
+            closure_ticket_id,
+        )
+    ) > 1:
         raise ValueError("runtime identity transition mode is ambiguous")
     connection = uow._require_connection()
     metadata_count = int(
@@ -474,7 +500,11 @@ async def _deploy_runtime_identity(
         or 0
     )
     if metadata_count == 0:
-        if recovery_ticket_id is not None or protected_ticket_ids is not None:
+        if (
+            recovery_ticket_id is not None
+            or protected_ticket_ids is not None
+            or closure_ticket_id is not None
+        ):
             raise RuntimeAuthorityTransitionRefused(
                 "guarded identity requires an existing runtime authority"
             )
@@ -490,6 +520,12 @@ async def _deploy_runtime_identity(
         await _require_protected_identity_activity(
             connection,
             protected_ticket_ids=protected_ticket_ids,
+            account_id=request.account_id,
+        )
+    elif closure_ticket_id is not None:
+        await _require_closure_identity_activity(
+            connection,
+            closure_ticket_id=closure_ticket_id,
             account_id=request.account_id,
         )
     elif recovery_ticket_id is None:
@@ -970,6 +1006,147 @@ async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
     if int(unresolved_commands or 0) != 0:
         raise RuntimeAuthorityTransitionRefused(
             "runtime transition requires zero unresolved Exchange Commands"
+        )
+
+
+async def _require_closure_identity_activity(
+    connection: AsyncConnection,
+    *,
+    closure_ticket_id: str,
+    account_id: str,
+) -> None:
+    active_tickets = (
+        await connection.execute(
+            sa.select(trade_tickets)
+            .where(trade_tickets.c.terminal_at_ms.is_(None))
+            .with_for_update(of=trade_tickets)
+        )
+    ).mappings().all()
+    if {str(row["ticket_id"]) for row in active_tickets} != {closure_ticket_id}:
+        raise RuntimeAuthorityTransitionRefused(
+            "closure identity requires exactly one exact pending Ticket"
+        )
+    ticket = active_tickets[0]
+    if ticket["active_netting_domain_key"] is not None:
+        raise RuntimeAuthorityTransitionRefused(
+            "closure identity requires a released Netting Domain"
+        )
+
+    aggregate = (
+        await connection.execute(
+            sa.select(trade_aggregates)
+            .where(trade_aggregates.c.ticket_id == closure_ticket_id)
+            .with_for_update(of=trade_aggregates)
+        )
+    ).mappings().one_or_none()
+    if aggregate is None or any(
+        (
+            aggregate["status"] not in {"settlement_pending", "review_pending"},
+            Decimal(str(aggregate["position_qty"])) != 0,
+            Decimal(str(aggregate["protected_qty"])) != 0,
+            aggregate["initial_stop_exchange_order_id"] is not None,
+            aggregate["active_stop_exchange_order_id"] is not None,
+            aggregate["tp1_exchange_order_id"] is not None,
+            aggregate["pending_replaced_stop_exchange_order_id"] is not None,
+            aggregate["pending_cancel_exchange_order_id"] is not None,
+            aggregate["review_id"] is not None,
+        )
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "closure identity requires a zero-exposure pending aggregate"
+        )
+
+    non_flat_positions = await connection.scalar(
+        sa.select(sa.func.count()).select_from(positions_current).where(
+            positions_current.c.quantity != 0
+        )
+    )
+    if int(non_flat_positions or 0) != 0:
+        raise RuntimeAuthorityTransitionRefused(
+            "closure identity requires zero projected positions"
+        )
+
+    reservations = (
+        await connection.execute(
+            sa.select(budget_reservations)
+            .where(budget_reservations.c.ticket_id == closure_ticket_id)
+            .with_for_update(of=budget_reservations)
+        )
+    ).mappings().all()
+    if len(reservations) != 1 or any(
+        (
+            reservations[0]["status"] != "released",
+            reservations[0]["released_at_ms"] is None,
+        )
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "closure identity requires a released Budget Reservation"
+        )
+    active_reservation_count = await connection.scalar(
+        sa.select(sa.func.count()).select_from(budget_reservations).where(
+            budget_reservations.c.status == "active"
+        )
+    )
+    if int(active_reservation_count or 0) != 0:
+        raise RuntimeAuthorityTransitionRefused(
+            "closure identity requires zero active Budget Reservations"
+        )
+
+    exposures = (
+        await connection.execute(
+            sa.select(account_exposure_current).with_for_update(
+                of=account_exposure_current
+            )
+        )
+    ).mappings().all()
+    if (
+        len(exposures) != 1
+        or exposures[0]["venue_id"] != VENUE_ID
+        or exposures[0]["account_id"] != account_id
+        or Decimal(str(exposures[0]["gross_notional"])) != 0
+        or Decimal(str(exposures[0]["gross_risk_at_stop"])) != 0
+        or int(str(exposures[0]["active_ticket_count"])) != 0
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "closure identity requires released account capacity"
+        )
+
+    lane = (
+        await connection.execute(
+            sa.select(entry_lane_current)
+            .where(entry_lane_current.c.lane_id == GLOBAL_ENTRY_LANE_ID)
+            .with_for_update(of=entry_lane_current)
+        )
+    ).mappings().one_or_none()
+    if (
+        lane is None
+        or lane["status"] != "idle"
+        or lane["ticket_id"] is not None
+        or lane["signal_event_id"] is not None
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "closure identity requires an idle global ENTRY lane"
+        )
+
+    unresolved_commands = await connection.scalar(
+        sa.select(sa.func.count()).select_from(exchange_commands).where(
+            exchange_commands.c.status.in_(
+                ("prepared", "claimed", "dispatch_started", "outcome_unknown")
+            )
+        )
+    )
+    if int(unresolved_commands or 0) != 0:
+        raise RuntimeAuthorityTransitionRefused(
+            "closure identity requires zero unresolved Exchange Commands"
+        )
+    open_incidents = await connection.scalar(
+        sa.select(sa.func.count()).select_from(runtime_incidents).where(
+            runtime_incidents.c.status != "resolved"
+        )
+    )
+    if int(open_incidents or 0) != 0:
+        raise RuntimeAuthorityTransitionRefused(
+            "closure identity requires zero open Incidents"
         )
 
 

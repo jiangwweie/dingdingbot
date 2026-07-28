@@ -78,6 +78,7 @@ def test_runtime_authority_seed_cli_is_runnable_outside_repo(
 
     assert result.returncode == 0, result.stderr
     assert "deploy-identity" in result.stdout
+    assert "deploy-closure-identity" in result.stdout
     assert "deploy-protected-identity" in result.stdout
     assert "arm-acceptance" in result.stdout
     assert "promote-full" in result.stdout
@@ -351,6 +352,76 @@ async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
             )
         )
     assert runtime_commit == "b" * 40
+
+
+@pytest.mark.asyncio
+async def test_closure_identity_rotates_only_one_exact_released_pending_ticket(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    await _insert_released_pending_closure_ticket(runtime_seed_engine)
+
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        result = await runtime_seed.deploy_closure_identity(
+            uow,
+            initial.model_copy(
+                update={
+                    "runtime_commit": "b" * 40,
+                    "seeded_at_ms": 1_800_000_000_100,
+                }
+            ),
+            closure_ticket_id="ticket:closure",
+        )
+
+    assert result.runtime_commit == "b" * 40
+
+
+@pytest.mark.asyncio
+async def test_readonly_certification_emits_exact_pending_closure_manifest(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    request = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, request)
+    await _insert_released_pending_closure_ticket(runtime_seed_engine)
+
+    payload = await _certify(
+        runtime_seed_engine.url.render_as_string(hide_password=False),
+        require_flat=False,
+        closure_ticket_id="ticket:closure",
+    )
+
+    assert payload["status"] == "pass"
+    assert payload["closure_ticket"] == {
+        "ticket_id": "ticket:closure",
+        "aggregate_status": "settlement_pending",
+        "aggregate_version": 7,
+        "last_event_sequence": 7,
+        "netting_domain_key": "closure-domain",
+        "position_quantity": "0",
+        "protected_quantity": "0",
+        "owned_order_residue_count": 0,
+        "unresolved_command_count": 0,
+        "open_incident_count": 0,
+        "budget_reservation_status": "released",
+        "account_capacity_released": True,
+        "netting_domain_released": True,
+        "review_presence": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -808,6 +879,118 @@ async def _insert_terminal_reviewed_ticket(engine: AsyncEngine) -> None:
                 metrics={"net_pnl_quote": "0"},
                 decision_impact={"policy_transition": "acceptance_complete"},
                 created_at_ms=1_800_000_000_260,
+            )
+        )
+
+
+async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
+    async with engine.begin() as connection:
+        scope = (
+            await connection.execute(
+                sa.select(runtime_scopes_current).order_by(
+                    runtime_scopes_current.c.runtime_scope_id
+                )
+            )
+        ).mappings().first()
+        assert scope is not None
+        await connection.execute(
+            sa.insert(trade_tickets).values(
+                ticket_id="ticket:closure",
+                exposure_episode_id="exposure:closure",
+                signal_event_id="signal:closure",
+                strategy_group_id=scope["strategy_group_id"],
+                strategy_version_id=scope["strategy_version_id"],
+                event_spec_id=scope["event_spec_id"],
+                runtime_profile_id=scope["runtime_profile_id"],
+                owner_policy_id=scope["owner_policy_id"],
+                owner_policy_version=2,
+                runtime_scope_id=scope["runtime_scope_id"],
+                runtime_scope_version=scope["scope_version"],
+                account_id="subaccount-main",
+                venue_id="binance-usdm",
+                exchange_instrument_id=scope["exchange_instrument_id"],
+                position_side=scope["position_side"],
+                netting_domain_key="closure-domain",
+                active_netting_domain_key=None,
+                entry_reference_price=Decimal("100"),
+                quantity=Decimal("0.1"),
+                notional=Decimal("10"),
+                capacity_claim_id="claim:closure",
+                planned_stop_risk_budget=Decimal("1"),
+                post_fill_stop_risk_limit=Decimal("1.1"),
+                selected_leverage=5,
+                leverage_change_required=False,
+                reserved_margin=Decimal("2"),
+                risk_reservation_basis="planned_stop_distance",
+                margin_mode="cross",
+                min_liquidation_distance_to_stop_distance_ratio=Decimal("2"),
+                projected_liquidation_price=Decimal("80"),
+                projected_liquidation_distance_to_stop_distance_ratio=Decimal("2.5"),
+                risk_at_stop=Decimal("1"),
+                entry_order_type="market",
+                entry_limit_price=None,
+                initial_stop_price=Decimal("90"),
+                take_profit_prices=[],
+                take_profit_quantities=[],
+                fact_digest="sha256:" + "1" * 64,
+                decision_digest="sha256:" + "2" * 64,
+                status="settlement_pending",
+                created_at_ms=1_800_000_000_010,
+                expires_at_ms=1_800_000_001_010,
+                terminal_at_ms=None,
+            )
+        )
+        await connection.execute(
+            sa.insert(trade_aggregates).values(
+                ticket_id="ticket:closure",
+                status="settlement_pending",
+                version=7,
+                last_event_sequence=7,
+                entry_lane_held=False,
+                position_qty=Decimal("0"),
+                average_fill_price=Decimal("100"),
+                actual_stop_risk=Decimal("1"),
+                actual_liquidation_price=Decimal("80"),
+                actual_liquidation_distance=Decimal("20"),
+                actual_liquidation_distance_to_stop_distance_ratio=Decimal("2"),
+                post_fill_risk_status="within_limit",
+                post_fill_disposition="closed",
+                protected_qty=Decimal("0"),
+                entry_exchange_order_id="entry:closure",
+                initial_stop_exchange_order_id=None,
+                active_stop_exchange_order_id=None,
+                active_stop_price=None,
+                tp1_exchange_order_id=None,
+                tp1_target_qty=Decimal("0"),
+                tp1_filled_qty=Decimal("0"),
+                break_even_floor_price=None,
+                pending_replaced_stop_exchange_order_id=None,
+                pending_stop_price=None,
+                pending_stop_watermark_ms=None,
+                runner_stop_watermark_ms=None,
+                pending_cancel_exchange_order_id=None,
+                exit_exchange_order_id="exit:closure",
+                review_id=None,
+                lifecycle_due_at_ms=None,
+                reconciliation_due_at_ms=1_800_000_000_010,
+                updated_at_ms=1_800_000_000_010,
+            )
+        )
+        await connection.execute(
+            sa.insert(budget_reservations).values(
+                budget_reservation_id="reservation:closure",
+                ticket_id="ticket:closure",
+                owner_policy_id="policy-main",
+                venue_id="binance-usdm",
+                account_id="subaccount-main",
+                reserved_notional=Decimal("10"),
+                reserved_risk=Decimal("1"),
+                reserved_margin=Decimal("2"),
+                planned_stop_risk_budget=Decimal("1"),
+                risk_reservation_basis="planned_stop_distance",
+                status="released",
+                created_at_ms=1_800_000_000_010,
+                released_at_ms=1_800_000_000_020,
             )
         )
 

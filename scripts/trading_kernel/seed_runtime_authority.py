@@ -29,6 +29,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (  # noqa: 
     RuntimePolicyState,
     arm_acceptance_policy,
     deploy_protected_identity,
+    deploy_closure_identity,
     deploy_recovery_identity,
     deploy_runtime_identity,
     promote_full_policy,
@@ -120,6 +121,25 @@ def _parser() -> argparse.ArgumentParser:
     )
     protected.add_argument("--now-ms", type=int)
 
+    closure = subparsers.add_parser(
+        "deploy-closure-identity",
+        help="rotate identity only for one exact zero-exposure pending closure Ticket",
+    )
+    closure.add_argument("--closure-ticket-id", required=True)
+    closure.add_argument(
+        "--account-id",
+        default=os.getenv("TRADING_KERNEL_ACCOUNT_ID", ""),
+    )
+    closure.add_argument(
+        "--runtime-commit",
+        default=os.getenv("TRADING_KERNEL_RUNTIME_COMMIT", ""),
+    )
+    closure.add_argument(
+        "--schema-revision",
+        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+    )
+    closure.add_argument("--now-ms", type=int)
+
     arm = subparsers.add_parser(
         "arm-acceptance",
         help="enable new ENTRY under the approved dynamic budget policy",
@@ -189,6 +209,17 @@ async def _run(args: argparse.Namespace) -> int:
                         seeded_at_ms=now_ms,
                     ),
                     protected_ticket_ids=tuple(args.protected_ticket_id),
+                )
+            elif args.action == "deploy-closure-identity":
+                result = await deploy_closure_identity(
+                    uow,
+                    RuntimeAuthoritySeedRequest(
+                        account_id=args.account_id,
+                        runtime_commit=args.runtime_commit,
+                        schema_revision=args.schema_revision,
+                        seeded_at_ms=now_ms,
+                    ),
+                    closure_ticket_id=args.closure_ticket_id,
                 )
             elif args.action == "arm-acceptance":
                 result = await arm_acceptance_policy(

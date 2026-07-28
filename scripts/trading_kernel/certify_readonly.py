@@ -96,6 +96,43 @@ def _protected_handover_tickets(
     return tickets
 
 
+def _closure_ticket_manifest(
+    row: dict[str, object] | None,
+) -> dict[str, object] | None:
+    if row is None:
+        return None
+    order_residue_count = sum(
+        row[key] is not None
+        for key in (
+            "initial_stop_exchange_order_id",
+            "active_stop_exchange_order_id",
+            "tp1_exchange_order_id",
+            "pending_replaced_stop_exchange_order_id",
+            "pending_cancel_exchange_order_id",
+        )
+    )
+    return {
+        "ticket_id": str(row["ticket_id"]),
+        "aggregate_status": str(row["aggregate_status"]),
+        "aggregate_version": int(str(row["aggregate_version"])),
+        "last_event_sequence": int(str(row["last_event_sequence"])),
+        "netting_domain_key": str(row["netting_domain_key"]),
+        "position_quantity": _canonical_decimal(row["position_qty"]),
+        "protected_quantity": _canonical_decimal(row["protected_qty"]),
+        "owned_order_residue_count": order_residue_count,
+        "unresolved_command_count": int(str(row["unresolved_command_count"])),
+        "open_incident_count": int(str(row["open_incident_count"])),
+        "budget_reservation_status": (
+            None
+            if row["budget_reservation_status"] is None
+            else str(row["budget_reservation_status"])
+        ),
+        "account_capacity_released": bool(row["account_capacity_released"]),
+        "netting_domain_released": row["active_netting_domain_key"] is None,
+        "review_presence": bool(row["review_presence"]),
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -108,12 +145,28 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also require zero position quantity and zero active Ticket domains.",
     )
+    parser.add_argument(
+        "--closure-ticket-id",
+        help="Exact zero-exposure Settlement/Review pending Ticket for closure-only certification.",
+    )
     return parser
 
 
-async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object]:
+async def _certify(
+    database_url: str,
+    *,
+    require_flat: bool,
+    closure_ticket_id: str | None = None,
+) -> dict[str, object]:
     if not database_url.startswith("postgresql+asyncpg://"):
         raise ValueError("database URL must use postgresql+asyncpg")
+    normalized_closure_ticket_id = (
+        None if closure_ticket_id is None else closure_ticket_id.strip()
+    )
+    if closure_ticket_id is not None and not normalized_closure_ticket_id:
+        raise ValueError("closure Ticket identity must be non-blank")
+    if require_flat and normalized_closure_ticket_id is not None:
+        raise ValueError("flat and closure-only certification are mutually exclusive")
     engine = create_async_engine(database_url)
     try:
         async with engine.connect() as connection:
@@ -269,7 +322,8 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
                         text(
                             "SELECT count(*) FROM brc_exchange_commands "
                             "WHERE status IN "
-                            "('prepared', 'claimed', 'outcome_unknown')"
+                            "('prepared', 'claimed', 'dispatch_started', "
+                            "'outcome_unknown')"
                         )
                     )
                 ).scalar_one()
@@ -360,6 +414,76 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
                     )
                 )
             ).mappings().all()
+            closure_ticket_row = None
+            closure_active_ticket_count = 0
+            if normalized_closure_ticket_id is not None:
+                closure_active_ticket_count = int(
+                    (
+                        await connection.execute(
+                            text(
+                                "SELECT count(*) FROM brc_trade_tickets "
+                                "WHERE terminal_at_ms IS NULL"
+                            )
+                        )
+                    ).scalar_one()
+                )
+                closure_ticket_row = (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT ticket.ticket_id,
+                                   ticket.netting_domain_key,
+                                   ticket.active_netting_domain_key,
+                                   aggregate_current.status AS aggregate_status,
+                                   aggregate_current.version AS aggregate_version,
+                                   aggregate_current.last_event_sequence,
+                                   aggregate_current.position_qty,
+                                   aggregate_current.protected_qty,
+                                   aggregate_current.initial_stop_exchange_order_id,
+                                   aggregate_current.active_stop_exchange_order_id,
+                                   aggregate_current.tp1_exchange_order_id,
+                                   aggregate_current.pending_replaced_stop_exchange_order_id,
+                                   aggregate_current.pending_cancel_exchange_order_id,
+                                   aggregate_current.review_id,
+                                   reservation.status AS budget_reservation_status,
+                                   reservation.released_at_ms AS budget_released_at_ms,
+                                   EXISTS(
+                                       SELECT 1
+                                         FROM brc_account_exposure_current exposure
+                                        WHERE exposure.venue_id = ticket.venue_id
+                                          AND exposure.account_id = ticket.account_id
+                                          AND exposure.gross_notional = 0
+                                          AND exposure.gross_risk_at_stop = 0
+                                          AND exposure.active_ticket_count = 0
+                                   ) AS account_capacity_released,
+                                   (SELECT count(*)
+                                      FROM brc_exchange_commands command
+                                     WHERE command.ticket_id = ticket.ticket_id
+                                       AND command.status IN (
+                                           'prepared', 'claimed',
+                                           'dispatch_started', 'outcome_unknown'
+                                       )) AS unresolved_command_count,
+                                   (SELECT count(*)
+                                      FROM brc_runtime_incidents incident
+                                     WHERE incident.ticket_id = ticket.ticket_id
+                                       AND incident.status <> 'resolved'
+                                   ) AS open_incident_count,
+                                   EXISTS(
+                                       SELECT 1 FROM brc_trade_reviews review
+                                        WHERE review.ticket_id = ticket.ticket_id
+                                   ) AS review_presence
+                              FROM brc_trade_tickets ticket
+                              JOIN brc_trade_aggregates aggregate_current
+                                ON aggregate_current.ticket_id = ticket.ticket_id
+                              LEFT JOIN brc_budget_reservations reservation
+                                ON reservation.ticket_id = ticket.ticket_id
+                             WHERE ticket.ticket_id = :ticket_id
+                               AND ticket.terminal_at_ms IS NULL
+                            """
+                        ),
+                        {"ticket_id": normalized_closure_ticket_id},
+                    )
+                ).mappings().one_or_none()
             await connection.rollback()
     finally:
         await engine.dispose()
@@ -393,8 +517,12 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         if owner_projection_row is None
         else {key: owner_projection_row[key] for key in owner_projection_row}
     )
-    protected_tickets = _protected_handover_tickets(
-        [dict(row) for row in protected_ticket_rows]
+    protected_tickets = (
+        []
+        if normalized_closure_ticket_id is not None
+        else _protected_handover_tickets(
+            [dict(row) for row in protected_ticket_rows]
+        )
     )
     owner_policy = (
         None
@@ -407,6 +535,9 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
             )
             for key, value in owner_policy_row.items()
         }
+    )
+    closure_ticket = _closure_ticket_manifest(
+        None if closure_ticket_row is None else dict(closure_ticket_row),
     )
     policy_is_dynamic = owner_policy_row is not None and all(
         (
@@ -438,6 +569,24 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         and capabilities["strategy_signal_ingest"] is True
         and isinstance(capabilities["exchange_commands"], bool)
     )
+    closure_is_valid = (
+        normalized_closure_ticket_id is None
+        or (
+            closure_active_ticket_count == 1
+            and closure_ticket is not None
+            and closure_ticket["ticket_id"] == normalized_closure_ticket_id
+            and closure_ticket["aggregate_status"]
+            in {"settlement_pending", "review_pending"}
+            and closure_ticket["position_quantity"] == "0"
+            and closure_ticket["protected_quantity"] == "0"
+            and closure_ticket["owned_order_residue_count"] == 0
+            and closure_ticket["unresolved_command_count"] == 0
+            and closure_ticket["open_incident_count"] == 0
+            and closure_ticket["budget_reservation_status"] == "released"
+            and closure_ticket["account_capacity_released"] is True
+            and closure_ticket["netting_domain_released"] is True
+        )
+    )
     passed = (
         revision == EXPECTED_ALEMBIC_REVISION
         and runtime_identity.get("schema_revision") == EXPECTED_ALEMBIC_REVISION
@@ -454,6 +603,7 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         and legacy_execution_tables == 0
         and unresolved_commands == 0
         and open_incidents == 0
+        and closure_is_valid
         and (
             not require_flat
             or (non_flat_positions == 0 and active_ticket_domains == 0)
@@ -472,7 +622,9 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         "active_counts": active_counts,
         "owner_projection": owner_projection,
         "protected_tickets": protected_tickets,
+        "closure_ticket": closure_ticket,
         "require_flat": require_flat,
+        "closure_ticket_id": normalized_closure_ticket_id,
         "checks": checks,
     }
 
@@ -480,7 +632,11 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     payload = asyncio.run(
-        _certify(str(args.database_url or "").strip(), require_flat=args.require_flat)
+        _certify(
+            str(args.database_url or "").strip(),
+            require_flat=args.require_flat,
+            closure_ticket_id=args.closure_ticket_id,
+        )
     )
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0 if payload["status"] == "pass" else 1
