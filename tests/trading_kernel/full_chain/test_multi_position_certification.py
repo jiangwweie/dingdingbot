@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import os
-from decimal import Decimal
-from pathlib import Path
 import re
 import subprocess
 import sys
+from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -37,14 +37,15 @@ from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
     owner_policy_current,
     positions_current,
+    runtime_capabilities_current,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.integration.test_command_dispatch import PreflightFacts
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
 )
-
+from tests.trading_kernel.unit.test_ticket import _ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -381,7 +382,13 @@ async def _protect(
     fill_observed_at_ms: int,
     stop_now_ms: int,
 ) -> None:
-    entry = await _dispatch(engine, venue, ticket.identity.ticket_id, entry_now_ms)
+    entry = await _dispatch(
+        engine,
+        venue,
+        ticket.identity.ticket_id,
+        entry_now_ms,
+        entry=True,
+    )
     assert entry.status is DispatchCommandStatus.ACCEPTED
     async with PostgresKernelUnitOfWork(engine) as uow:
         fill = await reconcile_ticket(
@@ -416,6 +423,8 @@ async def _dispatch(
     venue: MultiPositionVenue,
     ticket_id: str,
     now_ms: int,
+    *,
+    entry: bool = False,
 ):
     return await dispatch_one_command(
         lambda: PostgresKernelUnitOfWork(engine),
@@ -426,7 +435,11 @@ async def _dispatch(
             now_ms=now_ms,
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head" if entry else None,
+            schema_revision="0002_crypto_strategy_universe" if entry else None,
+            admission_snapshot_validity_ms=1_000 if entry else None,
         ),
+        entry_facts_source=PreflightFacts() if entry else None,
     )
 
 
@@ -463,6 +476,15 @@ def _ticket_for_domain(
         "runtime_scope_id": runtime_scope_id,
         "fact_digest": "sha256:" + "3" * 64,
     }
+    if runtime.event_spec_id != template.identity.runtime.event_spec_id:
+        terms.update(
+            {
+                "universe_version_id": (
+                    f"universe:test:{runtime.event_spec_id}"
+                ),
+                "universe_semantic_digest": "sha256:" + "b" * 64,
+            }
+        )
     if position_side == "short":
         terms.update(
             {
@@ -491,6 +513,16 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 min_liquidation_distance_to_stop_distance_ratio="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
                 scope={},
+                updated_at_ms=1_000,
+            )
+        )
+        await connection.execute(
+            sa.insert(runtime_capabilities_current).values(
+                capability_key="exchange_commands",
+                enabled=True,
+                certified_commit="kernel-test-head",
+                schema_revision="0002_crypto_strategy_universe",
+                certification={},
                 updated_at_ms=1_000,
             )
         )

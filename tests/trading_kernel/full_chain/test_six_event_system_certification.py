@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import re
+from decimal import Decimal
 from uuid import uuid4
 
 import asyncpg
@@ -10,6 +10,10 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.trading_kernel.application.install_strategy_universe import (
+    UniverseConfigurationRequest,
+    configure_strategy_universe,
+)
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
@@ -33,6 +37,11 @@ from src.trading_kernel.application.runtime_facts import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.commands import (
+    CancelCommandPayload,
+    ExchangeCommandResult,
+    ExchangeCommandStatus,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionInstrumentFacts,
     EntryAdmissionSnapshot,
@@ -43,11 +52,6 @@ from src.trading_kernel.domain.fee_valuation import (
     NativeFee,
     value_native_fee,
 )
-from src.trading_kernel.domain.commands import (
-    CancelCommandPayload,
-    ExchangeCommandResult,
-    ExchangeCommandStatus,
-)
 from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.review import ReviewEconomicsFacts, ReviewFill
@@ -55,16 +59,15 @@ from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     registered_strategy_contracts,
 )
-from src.trading_kernel.infrastructure.pg_models import (
-    instrument_rules_current,
-    owner_policy_current,
-    runtime_capabilities_current,
-    runtime_profiles,
-    runtime_scopes_current,
-)
+from src.trading_kernel.infrastructure.pg_models import runtime_scopes_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from src.trading_kernel.infrastructure.strategy_registry_seed import (
-    seed_strategy_registry,
+from src.trading_kernel.infrastructure.runtime_authority_seed import (
+    OWNER_POLICY_ID,
+    RUNTIME_PROFILE_ID,
+    ArmAcceptancePolicyRequest,
+    RuntimeAuthoritySeedRequest,
+    arm_acceptance_policy,
+    seed_runtime_authority,
 )
 from src.trading_kernel.interfaces.entry_worker import (
     EntryWorkerRequest,
@@ -92,6 +95,9 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _database_url,
     _run_alembic,
 )
+from tests.trading_kernel.integration.universe_certification_support import (
+    RecordingReadonlyCertificationSource,
+)
 from tests.trading_kernel.unit.detectors.fixtures import (
     AVAX,
     BTC,
@@ -106,7 +112,6 @@ from tests.trading_kernel.unit.detectors.fixtures import (
     mpg_long_snapshot,
     sor_snapshot,
 )
-
 
 SAFE_TEST_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 EVENT_INSTRUMENTS = {
@@ -167,6 +172,22 @@ class CertifiedMarketSource:
             (AVAX, "15m"): sor_long.candles_15m,
             (BTC, "15m"): sor_short.candles_15m,
         }
+
+    def shifted(self, delta_ms: int) -> CertifiedMarketSource:
+        shifted = CertifiedMarketSource()
+        shifted.responses = {
+            key: tuple(
+                candle.model_copy(
+                    update={
+                        "open_time_ms": candle.open_time_ms + delta_ms,
+                        "close_time_ms": candle.close_time_ms + delta_ms,
+                    }
+                )
+                for candle in candles
+            )
+            for key, candles in self.responses.items()
+        }
+        return shifted
 
     async def fetch_closed_candles(
         self,
@@ -419,11 +440,9 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     contract: RegisteredStrategyContract,
 ) -> None:
     instrument_id = EVENT_INSTRUMENTS[contract.event_id]
-    runtime_scope_id = f"scope-certification-{contract.event_id.lower()}"
-    await _seed_runtime(
+    runtime_scope_id = await _seed_runtime(
         six_event_engine,
         contract=contract,
-        runtime_scope_id=runtime_scope_id,
         instrument_id=instrument_id,
     )
     def uow_factory() -> PostgresKernelUnitOfWork:
@@ -437,7 +456,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         ObservationWorkerRequest(
             worker_id="observation-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0002_crypto_strategy_universe",
             now_ms=NOW_MS,
             lease_until_ms=NOW_MS + 30_000,
             timeout_seconds=5,
@@ -472,7 +491,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         EntryWorkerRequest(
             worker_id="entry-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0002_crypto_strategy_universe",
             now_ms=NOW_MS + 1_000,
             lease_until_ms=NOW_MS + 6_000,
             timeout_seconds=1,
@@ -493,7 +512,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         now_ms=NOW_MS + 2_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -510,7 +529,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     lifecycle_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         now_ms=NOW_MS + 3_000,
         lease_until_ms=NOW_MS + 8_000,
         timeout_seconds=1,
@@ -615,7 +634,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
             uow,
             OwnerProjectionRequest(
                 monitor_key=f"certification:{runtime_scope_id}",
-                owner_policy_id="policy-certification",
+                owner_policy_id=OWNER_POLICY_ID,
                 runtime_scope_id=runtime_scope_id,
                 ticket_id=ticket.identity.ticket_id,
                 updated_at_ms=NOW_MS + 12_000,
@@ -652,94 +671,82 @@ async def _seed_runtime(
     engine: AsyncEngine,
     *,
     contract: RegisteredStrategyContract,
-    runtime_scope_id: str,
     instrument_id: str,
-) -> None:
+) -> str:
+    warm_interval_ms = 900_000 if contract.timeframe == "15m" else 3_600_000
+    warm_now_ms = NOW_MS - warm_interval_ms
     async with PostgresKernelUnitOfWork(engine) as uow:
-        await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
-    async with engine.begin() as connection:
-        await connection.execute(
-            sa.insert(instrument_rules_current).values(
-                venue_id="binance-usdm",
-                exchange_instrument_id=instrument_id,
-                quantity_step=Decimal("0.001"),
-                price_tick=Decimal("0.1"),
-                min_quantity=Decimal("0.001"),
-                min_notional=Decimal("5"),
-                exchange_max_leverage=10,
-                maintenance_margin_brackets=[
-                    item.model_dump(mode="json") for item in _maintenance_brackets()
-                ],
-                maintenance_margin_brackets_digest=canonical_digest(
-                    _maintenance_brackets()
-                ),
-                session_and_settlement={},
-                observed_at_ms=NOW_MS - 1,
-                valid_until_ms=NOW_MS + 86_400_000,
-                projection_version=1,
-            )
-        )
-        await connection.execute(
-            sa.insert(owner_policy_current).values(
-                owner_policy_id="policy-certification",
-                policy_version=1,
-                enabled=True,
-                new_entry_submit_enabled=True,
-                priority_rank=1,
-                max_concurrent_tickets=3,
-                planned_stop_risk_fraction=Decimal("0.03"),
-                max_initial_margin_utilization=Decimal("0.90"),
-                max_leverage=10,
-                supported_margin_mode="cross",
-                min_liquidation_distance_to_stop_distance_ratio=Decimal("2"),
-                max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
-                scope={},
-                updated_at_ms=NOW_MS - 1,
-            )
-        )
-        await connection.execute(
-            sa.insert(runtime_profiles).values(
-                runtime_profile_id="profile-certification",
-                venue_id="binance-usdm",
+        await seed_runtime_authority(
+            uow,
+            RuntimeAuthoritySeedRequest(
                 account_id="account-certification",
-                environment="test",
-                position_mode="independent_sides",
-                status="active",
-                updated_at_ms=NOW_MS - 1,
+                runtime_commit="kernel-test-head",
+                schema_revision="0002_crypto_strategy_universe",
+                seeded_at_ms=warm_now_ms - 10_000,
+            ),
+        )
+        configured = await configure_strategy_universe(
+            uow,
+            UniverseConfigurationRequest(
+                runtime_profile_id=RUNTIME_PROFILE_ID,
+                event_id=contract.event_id,
+                exchange_instrument_ids=(instrument_id,),
+                installed_at_ms=warm_now_ms - 1_000,
+            ),
+        )
+        await arm_acceptance_policy(
+            uow,
+            ArmAcceptancePolicyRequest(armed_at_ms=warm_now_ms - 500),
+        )
+    assert configured.universe is not None
+
+    certification = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(engine),
+        object(),
+        object(),
+        ReconciliationWorkerRequest(
+            worker_id="reconciliation-worker-universe-certification",
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            now_ms=warm_now_ms,
+            timeout_seconds=1,
+            unknown_visibility_grace_ms=30_000,
+            idle_poll_interval_ms=1_000,
+            certification_lease_ms=60_000,
+            certification_valid_for_ms=60_000,
+            certification_eligible_check_interval_ms=60_000,
+            certification_owner_action_check_interval_ms=300_000,
+            certification_transient_retry_interval_ms=30_000,
+        ),
+        instrument_certification_source=RecordingReadonlyCertificationSource(engine),
+    )
+    assert certification.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+
+    warm_source = CertifiedMarketSource().shifted(-warm_interval_ms)
+    warmed = await run_observation_worker_once(
+        lambda: PostgresKernelUnitOfWork(engine),
+        warm_source,
+        ObservationWorkerRequest(
+            worker_id="observation-worker-universe-warming",
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            now_ms=warm_now_ms,
+            lease_until_ms=warm_now_ms + 30_000,
+            timeout_seconds=5,
+            retry_interval_ms=1_000,
+        ),
+    )
+    assert warmed.status is ObservationWorkerStatus.OBSERVED
+    assert warmed.observation_status is ObservationStatus.WARMED
+
+    async with engine.connect() as connection:
+        runtime_scope_id = await connection.scalar(
+            sa.select(runtime_scopes_current.c.runtime_scope_id).where(
+                runtime_scopes_current.c.universe_version_id
+                == configured.universe.universe_version_id,
+                runtime_scopes_current.c.exchange_instrument_id == instrument_id,
+                runtime_scopes_current.c.lifecycle_state == "active",
             )
         )
-        await connection.execute(
-            sa.insert(runtime_scopes_current).values(
-                runtime_scope_id=runtime_scope_id,
-                strategy_group_id=contract.strategy_group_id,
-                strategy_version_id=contract.strategy_version_id,
-                event_spec_id=contract.event_spec_id,
-                runtime_profile_id="profile-certification",
-                owner_policy_id="policy-certification",
-                exchange_instrument_id=instrument_id,
-                position_side=contract.position_side,
-                enabled=True,
-                scope_version=1,
-                updated_at_ms=NOW_MS - 1,
-            )
-        )
-        await connection.execute(
-            sa.insert(runtime_capabilities_current).values(
-                capability_key="strategy_signal_ingest",
-                enabled=True,
-                certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                certification={},
-                updated_at_ms=NOW_MS - 1,
-            )
-        )
-        await connection.execute(
-            sa.insert(runtime_capabilities_current).values(
-                capability_key="exchange_commands",
-                enabled=True,
-                certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                certification={},
-                updated_at_ms=NOW_MS - 1,
-            )
-        )
+    assert runtime_scope_id is not None
+    return str(runtime_scope_id)
