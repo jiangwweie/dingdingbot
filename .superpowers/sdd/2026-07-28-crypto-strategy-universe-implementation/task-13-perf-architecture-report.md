@@ -18,13 +18,20 @@ The query-bound acceptance creates the actual maximum steady-state shape:
 = 70 scopes
 ```
 
-It proves one Observation cadence claims exactly one scope, and validates the
-due-selector's PostgreSQL index reachability with `EXPLAIN (FORMAT JSON)` and
-`enable_seqscan = off`. The latter is deliberately an index-availability proof,
-not a timing benchmark; at the intended 70-row ceiling PostgreSQL may validly
-prefer a sequential scan. It also instruments activation's real SQL and proves
-all member/scope read selectors use the `MAX_UNIVERSE_MEMBERS + 1` (11-row)
-cardinality guard.
+It proves the exact production lifecycle rather than manufacturing rows: six
+registered Events each go through `configure -> readonly certification ->
+Observation warm-up -> advance`, then one Event receives a separately configured
+ten-member warming replacement. The resulting shape has 60 active, warmed scopes
+and 10 warming scopes, across six active Universe versions.
+
+It then claims one scope through the real
+`claim_next_observation_scope` repository call, captures that emitted SQL and
+its real binds, and validates its PostgreSQL index reachability with that exact
+statement under `EXPLAIN (FORMAT JSON)` and `enable_seqscan = off`. This is an
+index-availability proof, not a timing benchmark; at the intended 70-row ceiling
+PostgreSQL may validly prefer a sequential scan. It also instruments activation's
+real SQL and proves every member/scope SELECT it emits uses the
+`MAX_UNIVERSE_MEMBERS + 1` (11-row) cardinality guard.
 
 The architecture audit proves:
 
@@ -32,8 +39,13 @@ The architecture audit proves:
   candidate-scope table.
 - Runtime has no Universe priority, US-equity, correlation/clustering, or
   dynamic-downsize surface.
-- Install/advance/comparative application modules cannot import Ticket dispatch
-  or venue-adapter paths and cannot invoke order or exchange-setting APIs.
+- Install, advance, certify, comparative-projection, and read-status application
+  modules cannot import Ticket dispatch or venue-adapter paths and cannot invoke
+  order or exchange-setting APIs.
+- The precise Universe authority surface (application, Registry, PostgreSQL
+  persistence/seed, and configure/read-status scripts) contains no legacy,
+  compatibility, fallback, or dual-read/write path. The audit intentionally does
+  not scan venue parsing, where non-authority parsing fallbacks are legitimate.
 - The venue adapter imports no PostgreSQL layer; domain imports no infrastructure
   or operating-system client layer.
 - Systemd remains the exact four Worker services plus its shared slice, and
@@ -43,10 +55,15 @@ The architecture audit proves:
 
 This is a final acceptance expansion over behaviors already implemented by
 Tasks 8--10. The first executions of the new tests were GREEN, so this report
-does not misrepresent them as a new behavioral RED. No production source was
-changed by this work. The original behavior RED evidence remains in the Task
-8--10 reports and their committed tests; the new tests expose regression gates
-for the final Task 13 suite.
+does not misrepresent them as a new production-behavior RED. No production
+source was changed by this work.
+
+During the review repair, the real lifecycle test first exposed an incorrect
+test assumption: asyncpg returns the captured `EXPLAIN (FORMAT JSON)` result as
+a one-element Python list, while the test treated it as a JSON string. The test
+was corrected to consume the actual result shape while retaining the exact
+production selector statement and binds. This is a test-harness RED/GREEN, not
+a Kernel behavior change.
 
 ## Verification
 
@@ -56,7 +73,7 @@ Focused new acceptance:
 python3 -m pytest -q \
   tests/trading_kernel/integration/test_strategy_universe_query_bounds.py \
   tests/trading_kernel/architecture/test_strategy_universe_architecture.py
-8 passed in 1.98s
+9 passed in 5.25s
 ```
 
 Related performance, activation, fault, and architecture acceptance:
@@ -92,14 +109,19 @@ git diff --check
 passed
 ```
 
-Mypy was not green at repository scope. Running it with the repository dev
-requirements found 23 pre-existing errors in 8 imported existing files,
-including `capacity.py`, `reducer.py`, `reconcile_leverage_command.py`,
-`runtime_fence.py`, `pg_repositories.py`, `recover_unknown_command.py`,
-`runtime_authority_seed.py`, and the shared universe test support. The two new
-test files contributed no remaining Mypy diagnostics after their fixture and
-literal annotations were tightened. This Task does not hide or suppress that
-baseline type debt.
+Mypy is not green at repository scope. There are two distinct results:
+
+- The focused two-file invocation imports existing dependencies and reports
+  **23 baseline errors in 8 existing files**. After the raw-connection guard and
+  fixture/literal annotations, the two Task 13 test files add no diagnostics of
+  their own.
+- `uvx --with-requirements requirements-dev.txt --from 'mypy>=1.16.0' mypy
+  src/trading_kernel` reports **32 baseline errors in 11 source files** (85
+  files checked). This includes existing `instrument_entry_health.py`,
+  `account_entry_health.py`, `capacity.py`, `reducer.py`, runtime/recovery,
+  PostgreSQL, and venue-adapter typing debt.
+
+This Task does not hide, suppress, or misstate either baseline.
 
 ## Boundary confirmation
 

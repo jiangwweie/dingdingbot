@@ -15,41 +15,56 @@ from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationRequest,
     advance_strategy_universe,
 )
-from src.trading_kernel.application.install_strategy_universe import (
-    UniverseInstallRequest,
-    install_strategy_universe,
+from src.trading_kernel.application.certify_universe_instrument import (
+    CertifyUniverseInstrumentRequest,
+    certify_universe_instrument,
 )
+from src.trading_kernel.application.install_strategy_universe import (
+    UniverseConfigurationRequest,
+    configure_strategy_universe,
+)
+from src.trading_kernel.application.market_ports import ClosedCandleRequest
+from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     registered_strategy_contracts,
 )
 from src.trading_kernel.infrastructure.pg_models import (
     runtime_scopes_current,
-    strategy_universe_current,
     strategy_universe_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
-    OWNER_POLICY_ID,
     RUNTIME_PROFILE_ID,
+    ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
+    arm_acceptance_policy,
     seed_runtime_authority,
+)
+from src.trading_kernel.interfaces.observation_worker import (
+    ObservationWorkerRequest,
+    ObservationWorkerStatus,
+    run_observation_worker_once,
 )
 from tests.trading_kernel.integration.universe_certification_support import (
     ADMIN_DSN,
     SAFE_DATABASE,
+    RecordingReadonlyCertificationSource,
     _database_url,
     _run_alembic,
+)
+from tests.trading_kernel.unit.detectors.fixtures import (
+    NOW_MS,
+    cpm_long_snapshot,
+    sor_snapshot,
 )
 
 RUNTIME_COMMIT = "task-13-query-bounds"
 SCHEMA_REVISION: Literal["0002_crypto_strategy_universe"] = (
     "0002_crypto_strategy_universe"
 )
-NOW_MS = 1_800_002_000_000
-READINESS_DIGEST = "sha256:" + "a" * 64
 ACTIVE_MEMBERS = tuple(
     f"binance-usdm:{symbol}USDT:perpetual"
     for symbol in (
@@ -103,6 +118,10 @@ async def query_bounds_engine() -> AsyncGenerator[AsyncEngine, None]:
                     seeded_at_ms=NOW_MS - 10_000_000,
                 ),
             )
+            await arm_acceptance_policy(
+                uow,
+                ArmAcceptancePolicyRequest(armed_at_ms=NOW_MS - 9_999_999),
+            )
         yield engine
     finally:
         if engine is not None:
@@ -117,39 +136,74 @@ async def query_bounds_engine() -> AsyncGenerator[AsyncEngine, None]:
 
 
 @pytest.mark.asyncio
-async def test_observation_selector_claims_one_index_backed_scope_from_70_current_rows(
+async def test_observation_selector_claims_one_from_real_70_scope_lifecycle(
     query_bounds_engine: AsyncEngine,
 ) -> None:
-    """The 60-active plus 10-warming ceiling must not widen one cadence claim."""
+    """Official configure/certify/warm/activate creates the bounded shape."""
 
     contracts = registered_strategy_contracts()
     assert len(contracts) == 6
     for contract in contracts:
-        await _install_active_universe(query_bounds_engine, contract)
-    await _install_warming_replacement(
+        await _configure_certify_warm_and_activate(
+            query_bounds_engine,
+            contract=contract,
+        )
+    await _configure(
         query_bounds_engine,
         contract=contracts[0],
+        members=WARMING_MEMBERS,
     )
 
     async with query_bounds_engine.connect() as connection:
-        scope_count = int(
-            (
+        states = {
+            str(lifecycle_state): int(count)
+            for lifecycle_state, count in (
                 await connection.execute(
-                    sa.select(sa.func.count()).select_from(
-                        runtime_scopes_current
-                    )
+                    sa.select(
+                        runtime_scopes_current.c.lifecycle_state,
+                        sa.func.count(),
+                    ).group_by(runtime_scopes_current.c.lifecycle_state)
                 )
-            ).scalar_one()
+            ).all()
+        }
+        active_not_warm = int(
+            await connection.scalar(
+                sa.select(sa.func.count())
+                .select_from(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.lifecycle_state == "active",
+                    runtime_scopes_current.c.warm_ready_at_ms.is_(None),
+                )
+            )
+            or 0
         )
-    assert scope_count == 70
+        current_active_versions = int(
+            await connection.scalar(
+                sa.select(sa.func.count())
+                .select_from(strategy_universe_versions)
+                .where(
+                    strategy_universe_versions.c.lifecycle_state == "active"
+                )
+            )
+            or 0
+        )
+    assert states == {"active": 60, "warming": 10}
+    assert active_not_warm == 0
+    assert current_active_versions == 6
 
-    async with PostgresKernelUnitOfWork(query_bounds_engine) as uow:
-        claim = await uow.signals.claim_next_observation_scope(
-            worker_id="query-bounds-observation",
-            now_ms=NOW_MS,
-            lease_until_ms=NOW_MS + 60_000,
-        )
+    captured = _capture_claim_statement(query_bounds_engine)
+    try:
+        async with PostgresKernelUnitOfWork(query_bounds_engine) as uow:
+            claim = await uow.signals.claim_next_observation_scope(
+                worker_id="query-bounds-observation",
+                now_ms=NOW_MS,
+                lease_until_ms=NOW_MS + 60_000,
+            )
+    finally:
+        captured.detach()
     assert claim is not None
+    assert captured.statement is not None
+    assert captured.parameters is not None
 
     async with query_bounds_engine.connect() as connection:
         leased_count = int(
@@ -164,7 +218,11 @@ async def test_observation_selector_claims_one_index_backed_scope_from_70_curren
                 )
             ).scalar_one()
         )
-        plan = await _observation_selector_plan(connection)
+        plan = await _captured_claim_plan(
+            connection,
+            statement=captured.statement,
+            parameters=captured.parameters,
+        )
     assert leased_count == 1
     assert "ix_brc_runtime_scopes_current_observation_due" in _plan_indexes(
         plan
@@ -172,15 +230,16 @@ async def test_observation_selector_claims_one_index_backed_scope_from_70_curren
 
 
 @pytest.mark.asyncio
-async def test_activation_reads_exact_ten_member_and_scope_rows(
+async def test_activation_member_and_scope_selects_are_all_limited_to_eleven(
     query_bounds_engine: AsyncEngine,
 ) -> None:
-    """Activation must retain its exact-member ceiling even at the hard limit."""
+    """No activation member or scope read may widen beyond the hard cap."""
 
     contract = registered_strategy_contracts()[0]
-    universe_version_id = await _install_warming_replacement(
+    universe_version_id = await _configure(
         query_bounds_engine,
         contract=contract,
+        members=WARMING_MEMBERS,
     )
     statements: list[tuple[str, object]] = []
 
@@ -217,138 +276,199 @@ async def test_activation_reads_exact_ten_member_and_scope_rows(
         )
 
     assert result.reason_code == "CERTIFICATION_MISSING"
-    bounded_member_or_scope_selects = [
-        parameters
+    member_or_scope_selects = [
+        (statement, parameters)
         for statement, parameters in statements
         if (
             "brc_strategy_universe_members" in statement
             or "brc_runtime_scopes_current" in statement
         )
-        and "LIMIT" in statement.upper()
     ]
-    assert bounded_member_or_scope_selects
+    assert member_or_scope_selects
     assert all(
-        _contains_limit_eleven(parameters)
-        for parameters in bounded_member_or_scope_selects
+        "LIMIT" in statement.upper() and _contains_limit_eleven(parameters)
+        for statement, parameters in member_or_scope_selects
     )
 
 
-async def _install_active_universe(
-    engine: AsyncEngine,
-    contract: RegisteredStrategyContract,
-) -> str:
-    async with PostgresKernelUnitOfWork(engine) as uow:
-        installed = await install_strategy_universe(
-            uow,
-            UniverseInstallRequest(
-                event_spec_id=contract.event_spec_id,
-                runtime_profile_id=RUNTIME_PROFILE_ID,
-                owner_policy_id=OWNER_POLICY_ID,
-                exchange_instrument_ids=ACTIVE_MEMBERS,
-                installed_at_ms=NOW_MS - 1_000_000,
-            ),
-        )
-    assert installed.universe is not None
-    universe_version_id = installed.universe.universe_version_id
-    async with engine.begin() as connection:
-        await connection.execute(
-            sa.update(runtime_scopes_current)
-            .where(
-                runtime_scopes_current.c.universe_version_id
-                == universe_version_id
-            )
-            .values(
-                lifecycle_state="active",
-                observation_enabled=True,
-                entry_enabled=True,
-                scope_version=2,
-                warm_ready_at_ms=NOW_MS - 10_000,
-                warm_readiness_digest=READINESS_DIGEST,
-                warm_valid_until_ms=NOW_MS + 3_600_000,
-                next_observation_due_at_ms=NOW_MS,
-                updated_at_ms=NOW_MS - 10_000,
-            )
-        )
-        await connection.execute(
-            sa.update(strategy_universe_versions)
-            .where(
-                strategy_universe_versions.c.universe_version_id
-                == universe_version_id
-            )
-            .values(
-                lifecycle_state="active",
-                activated_at_ms=NOW_MS - 10_000,
-            )
-        )
-        await connection.execute(
-            sa.insert(strategy_universe_current).values(
-                event_spec_id=contract.event_spec_id,
-                universe_version_id=universe_version_id,
-                semantic_digest=installed.universe.semantic_digest,
-                lifecycle_state="active",
-                activation_generation=1,
-                activated_at_ms=NOW_MS - 10_000,
-            )
-        )
-    return universe_version_id
-
-
-async def _install_warming_replacement(
+async def _configure_certify_warm_and_activate(
     engine: AsyncEngine,
     *,
     contract: RegisteredStrategyContract,
+) -> None:
+    universe_version_id = await _configure(
+        engine,
+        contract=contract,
+        members=ACTIVE_MEMBERS,
+    )
+    async with engine.connect() as connection:
+        warming_scope_count = int(
+            await connection.scalar(
+                sa.select(sa.func.count())
+                .select_from(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.universe_version_id
+                    == universe_version_id,
+                    runtime_scopes_current.c.lifecycle_state == "warming",
+                )
+            )
+            or 0
+        )
+    assert warming_scope_count == len(ACTIVE_MEMBERS)
+    certification_source = RecordingReadonlyCertificationSource(engine)
+    for _ in ACTIVE_MEMBERS:
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            target = await uow.strategy_universes.claim_due_instrument_certification(
+                worker_id="query-bounds-certification-worker",
+                now_ms=NOW_MS,
+                lease_until_ms=NOW_MS + 60_000,
+            )
+        if target is None:
+            break
+        certified = await certify_universe_instrument(
+            lambda: PostgresKernelUnitOfWork(engine),
+            certification_source,
+            CertifyUniverseInstrumentRequest(
+                target=target,
+                now_ms=NOW_MS,
+                timeout_seconds=1,
+                required_leverage=5,
+                required_margin_mode="cross",
+                valid_for_ms=60_000,
+                eligible_check_interval_ms=60_000,
+                owner_action_check_interval_ms=300_000,
+                transient_retry_interval_ms=30_000,
+            ),
+        )
+        assert certified.certification.status == "eligible"
+
+    source = _WorkflowMarketSource(contract=contract)
+    for _ in ACTIVE_MEMBERS:
+        observed = await run_observation_worker_once(
+            lambda: PostgresKernelUnitOfWork(engine),
+            source,
+            ObservationWorkerRequest(
+                worker_id="query-bounds-observation-worker",
+                runtime_commit=RUNTIME_COMMIT,
+                schema_revision=SCHEMA_REVISION,
+                now_ms=NOW_MS,
+                lease_until_ms=NOW_MS + 60_000,
+                timeout_seconds=1,
+                retry_interval_ms=10_000,
+            ),
+        )
+        assert observed.status is ObservationWorkerStatus.OBSERVED
+    async with engine.connect() as connection:
+        state = await connection.scalar(
+            sa.select(strategy_universe_versions.c.lifecycle_state).where(
+                strategy_universe_versions.c.universe_version_id
+                == universe_version_id
+            )
+        )
+    assert state == "active"
+    assert certification_source.mutation_calls == []
+
+
+async def _configure(
+    engine: AsyncEngine,
+    *,
+    contract: RegisteredStrategyContract,
+    members: tuple[str, ...],
 ) -> str:
     async with PostgresKernelUnitOfWork(engine) as uow:
-        installed = await install_strategy_universe(
+        configured = await configure_strategy_universe(
             uow,
-            UniverseInstallRequest(
-                event_spec_id=contract.event_spec_id,
+            UniverseConfigurationRequest(
                 runtime_profile_id=RUNTIME_PROFILE_ID,
-                owner_policy_id=OWNER_POLICY_ID,
-                exchange_instrument_ids=WARMING_MEMBERS,
+                event_id=contract.event_id,
+                exchange_instrument_ids=members,
                 installed_at_ms=NOW_MS - 1_000,
             ),
         )
-    assert installed.universe is not None
-    return installed.universe.universe_version_id
+    assert configured.universe is not None
+    return configured.universe.universe_version_id
 
 
-async def _observation_selector_plan(
+class _WorkflowMarketSource:
+    def __init__(
+        self,
+        *,
+        contract: RegisteredStrategyContract,
+    ) -> None:
+        self._cpm = cpm_long_snapshot()
+        self._sor = sor_snapshot(
+            side="short" if contract.event_id == "SOR-SHORT" else "long"
+        )
+
+    async def fetch_closed_candles(
+        self,
+        request: ClosedCandleRequest,
+    ) -> tuple[ClosedCandle, ...]:
+        if request.timeframe == "15m":
+            return self._sor.candles_15m[-request.limit :]
+        if request.timeframe == "1h":
+            return self._cpm.candles_1h[-request.limit :]
+        if request.timeframe == "4h":
+            return self._cpm.candles_4h[-request.limit :]
+        raise AssertionError(f"unexpected timeframe: {request.timeframe}")
+
+
+class _CapturedClaimStatement:
+    statement: str | None = None
+    parameters: object | None = None
+
+    def __init__(self, engine: AsyncEngine) -> None:
+        self._engine = engine
+        event.listen(engine.sync_engine, "before_cursor_execute", self._capture)
+
+    def detach(self) -> None:
+        event.remove(
+            self._engine.sync_engine,
+            "before_cursor_execute",
+            self._capture,
+        )
+
+    def _capture(
+        self,
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        parameters: object,
+        _context: object,
+        _executemany: object,
+    ) -> None:
+        normalized = statement.upper()
+        if (
+            "BRC_RUNTIME_SCOPES_CURRENT" not in normalized
+            or "FOR UPDATE" not in normalized
+            or "SKIP LOCKED" not in normalized
+        ):
+            return
+        self.statement = statement
+        self.parameters = parameters
+
+
+def _capture_claim_statement(engine: AsyncEngine) -> _CapturedClaimStatement:
+    return _CapturedClaimStatement(engine)
+
+
+async def _captured_claim_plan(
     connection: AsyncConnection,
+    *,
+    statement: str,
+    parameters: object,
 ) -> dict[str, object]:
-    await connection.execute(sa.text("SET LOCAL enable_seqscan = off"))
-    result = await connection.execute(
-        sa.text(
-            """
-            EXPLAIN (FORMAT JSON)
-            SELECT scope.runtime_scope_id
-            FROM brc_runtime_scopes_current AS scope
-            JOIN brc_event_specs AS event
-              ON event.event_spec_id = scope.event_spec_id
-            WHERE scope.observation_enabled
-              AND scope.lifecycle_state IN ('warming', 'active')
-              AND event.status = 'active'
-              AND (
-                scope.next_observation_due_at_ms IS NULL
-                OR scope.next_observation_due_at_ms <= :now_ms
-              )
-              AND (
-                scope.lease_expires_at_ms IS NULL
-                OR scope.lease_expires_at_ms <= :now_ms
-              )
-            ORDER BY COALESCE(scope.next_observation_due_at_ms, 0),
-                     scope.runtime_scope_id
-            LIMIT 1
-            FOR UPDATE OF scope SKIP LOCKED
-            """
-        ),
-        {"now_ms": NOW_MS},
+    assert isinstance(parameters, tuple)
+    raw_connection = await connection.get_raw_connection()
+    driver_connection = raw_connection.driver_connection
+    assert driver_connection is not None
+    await driver_connection.execute("SET LOCAL enable_seqscan = off")
+    payload = await driver_connection.fetchval(
+        "EXPLAIN (FORMAT JSON) " + statement,
+        *parameters,
     )
-    raw = result.scalar_one()
-    assert isinstance(raw, list) and len(raw) == 1
-    payload = raw[0]
-    assert isinstance(payload, dict)
-    plan = payload.get("Plan")
+    assert isinstance(payload, list) and len(payload) == 1
+    plan = payload[0].get("Plan")
     assert isinstance(plan, dict)
     return plan
 
