@@ -71,6 +71,19 @@ def upgrade() -> None:
             "universe_version",
             name="uq_brc_strategy_universe_versions_event_version",
         ),
+        sa.UniqueConstraint(
+            "universe_version_id",
+            "event_spec_id",
+            "semantic_digest",
+            name="uq_brc_universe_versions_identity_digest",
+        ),
+        sa.UniqueConstraint(
+            "universe_version_id",
+            "event_spec_id",
+            "semantic_digest",
+            "lifecycle_state",
+            name="uq_brc_universe_versions_identity_lifecycle",
+        ),
         sa.CheckConstraint(
             "universe_version > 0",
             name="ck_brc_strategy_universe_versions_version_positive",
@@ -139,12 +152,30 @@ def upgrade() -> None:
         _id("event_spec_id", primary_key=True),
         _id("universe_version_id"),
         sa.Column("semantic_digest", LONG_TEXT, nullable=False),
+        sa.Column(
+            "lifecycle_state",
+            SHORT_TEXT,
+            nullable=False,
+            server_default=sa.text("'active'"),
+        ),
         sa.Column("activation_generation", sa.BigInteger, nullable=False),
         _time("activated_at_ms"),
         sa.ForeignKeyConstraint(
-            ["universe_version_id"],
-            ["brc_strategy_universe_versions.universe_version_id"],
-            name="fk_brc_universe_current_universe_version",
+            [
+                "universe_version_id",
+                "event_spec_id",
+                "semantic_digest",
+                "lifecycle_state",
+            ],
+            [
+                "brc_strategy_universe_versions.universe_version_id",
+                "brc_strategy_universe_versions.event_spec_id",
+                "brc_strategy_universe_versions.semantic_digest",
+                "brc_strategy_universe_versions.lifecycle_state",
+            ],
+            name="fk_brc_universe_current_active_identity",
+            deferrable=True,
+            initially="DEFERRED",
         ),
         sa.UniqueConstraint(
             "universe_version_id",
@@ -157,6 +188,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "activation_generation > 0",
             name="ck_brc_strategy_universe_current_generation_positive",
+        ),
+        sa.CheckConstraint(
+            "lifecycle_state = 'active'",
+            name="ck_brc_strategy_universe_current_active_only",
         ),
     )
 
@@ -279,7 +314,7 @@ def downgrade() -> None:
 
 
 def _assert_flat_runtime_before_ddl() -> None:
-    populated_tables = (
+    populated_tables = tuple(sorted((
         "brc_strategy_candidate_scopes",
         "brc_instrument_rules_current",
         "brc_owner_policy_events",
@@ -306,6 +341,12 @@ def _assert_flat_runtime_before_ddl() -> None:
         "brc_monitor_events",
         "brc_retention_runs",
         "brc_schema_metadata",
+    )))
+    locked_tables = ", ".join(f'"{table_name}"' for table_name in populated_tables)
+    op.execute(
+        sa.text(
+            f"LOCK TABLE {locked_tables} IN ACCESS EXCLUSIVE MODE"
+        )
     )
     predicates = " OR ".join(
         f'EXISTS (SELECT 1 FROM "{table_name}" LIMIT 1)'
@@ -337,7 +378,34 @@ def _create_member_cardinality_guard() -> None:
             RETURNS trigger
             LANGUAGE plpgsql
             AS $$
+            DECLARE
+                instrument_exists boolean;
+                instrument_is_crypto_usdt_perpetual boolean;
             BEGIN
+                SELECT
+                    true,
+                    venue_id = 'binance-usdm'
+                    AND asset_class = 'crypto'
+                    AND venue_symbol ~ '^[A-Z0-9]+USDT$'
+                    AND contract_kind = 'perpetual'
+                    AND exchange_instrument_id =
+                        'binance-usdm' || chr(58) || venue_symbol
+                        || chr(58) || 'perpetual'
+                INTO
+                    instrument_exists,
+                    instrument_is_crypto_usdt_perpetual
+                FROM brc_instruments
+                WHERE exchange_instrument_id = NEW.exchange_instrument_id;
+
+                IF instrument_exists
+                   AND NOT instrument_is_crypto_usdt_perpetual THEN
+                    RAISE EXCEPTION
+                        'strategy universe member must be a canonical '
+                        'Binance USD-M USDT perpetual'
+                        USING ERRCODE = '23514',
+                              CONSTRAINT = 'ck_brc_universe_member_crypto';
+                END IF;
+
                 PERFORM 1
                 FROM brc_strategy_universe_versions
                 WHERE universe_version_id = NEW.universe_version_id
@@ -369,6 +437,66 @@ def _create_member_cardinality_guard() -> None:
             """
         )
     )
+    op.execute(
+        sa.text(
+            """
+            CREATE FUNCTION brc_reject_universe_member_mutation()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RAISE EXCEPTION
+                    'strategy universe members are immutable'
+                    USING ERRCODE = '23514',
+                          CONSTRAINT = 'ck_brc_universe_member_immutable';
+            END
+            $$;
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            CREATE TRIGGER trg_brc_universe_member_immutable
+            BEFORE UPDATE OR DELETE ON brc_strategy_universe_members
+            FOR EACH ROW
+            EXECUTE FUNCTION brc_reject_universe_member_mutation();
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            CREATE FUNCTION brc_reject_instrument_identity_mutation()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RAISE EXCEPTION
+                    'instrument identity fields are immutable'
+                    USING ERRCODE = '23514',
+                          CONSTRAINT = 'ck_brc_instrument_identity_immutable';
+            END
+            $$;
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            CREATE TRIGGER trg_brc_instrument_identity_immutable
+            BEFORE UPDATE OF
+                exchange_instrument_id,
+                venue_id,
+                asset_class,
+                venue_symbol,
+                contract_kind
+            ON brc_instruments
+            FOR EACH ROW
+            EXECUTE FUNCTION brc_reject_instrument_identity_mutation();
+            """
+        )
+    )
 
 
 def _replace_runtime_scope_authority() -> None:
@@ -385,6 +513,10 @@ def _replace_runtime_scope_authority() -> None:
     op.add_column(
         "brc_runtime_scopes_current",
         _id("universe_version_id"),
+    )
+    op.add_column(
+        "brc_runtime_scopes_current",
+        sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
     )
     op.add_column(
         "brc_runtime_scopes_current",
@@ -439,6 +571,25 @@ def _replace_runtime_scope_authority() -> None:
         ["universe_version_id", "exchange_instrument_id"],
         ["universe_version_id", "exchange_instrument_id"],
     )
+    op.create_foreign_key(
+        "fk_brc_runtime_scope_universe_lifecycle",
+        "brc_runtime_scopes_current",
+        "brc_strategy_universe_versions",
+        [
+            "universe_version_id",
+            "event_spec_id",
+            "universe_semantic_digest",
+            "lifecycle_state",
+        ],
+        [
+            "universe_version_id",
+            "event_spec_id",
+            "semantic_digest",
+            "lifecycle_state",
+        ],
+        deferrable=True,
+        initially="DEFERRED",
+    )
     op.create_check_constraint(
         "ck_brc_runtime_scope_lifecycle_permissions",
         "brc_runtime_scopes_current",
@@ -469,6 +620,11 @@ def _replace_runtime_scope_authority() -> None:
         "warm_readiness_digest IS NULL "
         "OR warm_readiness_digest ~ '^sha256:[0-9a-f]{64}$'",
     )
+    op.create_check_constraint(
+        "ck_brc_runtime_scope_universe_digest_valid",
+        "brc_runtime_scopes_current",
+        "universe_semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+    )
     op.create_index(
         "ix_brc_runtime_scopes_current_observation_due",
         "brc_runtime_scopes_current",
@@ -492,11 +648,19 @@ def _add_trade_chain_universe_lineage() -> None:
             sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
         )
         op.create_foreign_key(
-            f"fk_{table_name}_universe_version",
+            f"fk_{table_name}_universe_identity",
             table_name,
             "brc_strategy_universe_versions",
-            ["universe_version_id"],
-            ["universe_version_id"],
+            [
+                "universe_version_id",
+                "event_spec_id",
+                "universe_semantic_digest",
+            ],
+            [
+                "universe_version_id",
+                "event_spec_id",
+                "semantic_digest",
+            ],
         )
         op.create_check_constraint(
             f"ck_{table_name}_universe_digest_valid",

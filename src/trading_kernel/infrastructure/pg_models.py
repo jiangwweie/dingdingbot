@@ -141,6 +141,17 @@ strategy_universe_versions = sa.Table(
     _time("activated_at_ms", nullable=True),
     _time("retired_at_ms", nullable=True),
     sa.UniqueConstraint("event_spec_id", "universe_version"),
+    sa.UniqueConstraint(
+        "universe_version_id",
+        "event_spec_id",
+        "semantic_digest",
+    ),
+    sa.UniqueConstraint(
+        "universe_version_id",
+        "event_spec_id",
+        "semantic_digest",
+        "lifecycle_state",
+    ),
     sa.CheckConstraint("universe_version > 0", name="version_positive"),
     sa.CheckConstraint(
         "semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
@@ -201,11 +212,29 @@ strategy_universe_current = sa.Table(
     _id("event_spec_id", primary_key=True),
     _id("universe_version_id"),
     sa.Column("semantic_digest", LONG_TEXT, nullable=False),
+    sa.Column(
+        "lifecycle_state",
+        SHORT_TEXT,
+        nullable=False,
+        server_default=sa.text("'active'"),
+    ),
     sa.Column("activation_generation", sa.BigInteger, nullable=False),
     _time("activated_at_ms"),
     sa.ForeignKeyConstraint(
-        ["universe_version_id"],
-        ["brc_strategy_universe_versions.universe_version_id"],
+        [
+            "universe_version_id",
+            "event_spec_id",
+            "semantic_digest",
+            "lifecycle_state",
+        ],
+        [
+            "brc_strategy_universe_versions.universe_version_id",
+            "brc_strategy_universe_versions.event_spec_id",
+            "brc_strategy_universe_versions.semantic_digest",
+            "brc_strategy_universe_versions.lifecycle_state",
+        ],
+        deferrable=True,
+        initially="DEFERRED",
     ),
     sa.UniqueConstraint("universe_version_id"),
     sa.CheckConstraint(
@@ -215,6 +244,10 @@ strategy_universe_current = sa.Table(
     sa.CheckConstraint(
         "activation_generation > 0",
         name="activation_generation_positive",
+    ),
+    sa.CheckConstraint(
+        "lifecycle_state = 'active'",
+        name="active_only",
     ),
 )
 
@@ -443,6 +476,7 @@ runtime_scopes_current = sa.Table(
     _id("exchange_instrument_id"),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     _id("universe_version_id"),
+    sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
     sa.Column("lifecycle_state", SHORT_TEXT, nullable=False),
     sa.Column("observation_enabled", sa.Boolean, nullable=False),
     sa.Column("entry_enabled", sa.Boolean, nullable=False),
@@ -466,6 +500,22 @@ runtime_scopes_current = sa.Table(
             "brc_strategy_universe_members.universe_version_id",
             "brc_strategy_universe_members.exchange_instrument_id",
         ],
+    ),
+    sa.ForeignKeyConstraint(
+        [
+            "universe_version_id",
+            "event_spec_id",
+            "universe_semantic_digest",
+            "lifecycle_state",
+        ],
+        [
+            "brc_strategy_universe_versions.universe_version_id",
+            "brc_strategy_universe_versions.event_spec_id",
+            "brc_strategy_universe_versions.semantic_digest",
+            "brc_strategy_universe_versions.lifecycle_state",
+        ],
+        deferrable=True,
+        initially="DEFERRED",
     ),
     sa.CheckConstraint(
         "(lifecycle_state = 'warming' "
@@ -492,6 +542,10 @@ runtime_scopes_current = sa.Table(
         "warm_readiness_digest IS NULL "
         "OR warm_readiness_digest ~ '^sha256:[0-9a-f]{64}$'",
         name="warm_readiness_digest_valid",
+    ),
+    sa.CheckConstraint(
+        "universe_semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="universe_semantic_digest_valid",
     ),
 )
 
@@ -554,8 +608,16 @@ signal_events = sa.Table(
         name="universe_semantic_digest_valid",
     ),
     sa.ForeignKeyConstraint(
-        ["universe_version_id"],
-        ["brc_strategy_universe_versions.universe_version_id"],
+        [
+            "universe_version_id",
+            "event_spec_id",
+            "universe_semantic_digest",
+        ],
+        [
+            "brc_strategy_universe_versions.universe_version_id",
+            "brc_strategy_universe_versions.event_spec_id",
+            "brc_strategy_universe_versions.semantic_digest",
+        ],
     ),
 )
 
@@ -727,8 +789,16 @@ capacity_claims = sa.Table(
         name="universe_semantic_digest_valid",
     ),
     sa.ForeignKeyConstraint(
-        ["universe_version_id"],
-        ["brc_strategy_universe_versions.universe_version_id"],
+        [
+            "universe_version_id",
+            "event_spec_id",
+            "universe_semantic_digest",
+        ],
+        [
+            "brc_strategy_universe_versions.universe_version_id",
+            "brc_strategy_universe_versions.event_spec_id",
+            "brc_strategy_universe_versions.semantic_digest",
+        ],
     ),
 )
 
@@ -791,8 +861,16 @@ trade_tickets = sa.Table(
         name="universe_semantic_digest_valid",
     ),
     sa.ForeignKeyConstraint(
-        ["universe_version_id"],
-        ["brc_strategy_universe_versions.universe_version_id"],
+        [
+            "universe_version_id",
+            "event_spec_id",
+            "universe_semantic_digest",
+        ],
+        [
+            "brc_strategy_universe_versions.universe_version_id",
+            "brc_strategy_universe_versions.event_spec_id",
+            "brc_strategy_universe_versions.semantic_digest",
+        ],
     ),
 )
 sa.Index(

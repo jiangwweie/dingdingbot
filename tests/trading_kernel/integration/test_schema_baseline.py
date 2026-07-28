@@ -61,6 +61,17 @@ def test_strategy_universe_metadata_has_forward_only_authority_shape() -> None:
 
     assert "brc_strategy_candidate_scopes" not in metadata.tables
     assert ("event_spec_id", "universe_version") in _unique_column_sets(versions)
+    assert (
+        "universe_version_id",
+        "event_spec_id",
+        "semantic_digest",
+    ) in _unique_column_sets(versions)
+    assert (
+        "universe_version_id",
+        "event_spec_id",
+        "semantic_digest",
+        "lifecycle_state",
+    ) in _unique_column_sets(versions)
     assert tuple(column.name for column in members.primary_key.columns) == (
         "universe_version_id",
         "exchange_instrument_id",
@@ -68,6 +79,13 @@ def test_strategy_universe_metadata_has_forward_only_authority_shape() -> None:
     assert tuple(column.name for column in current.primary_key.columns) == (
         "event_spec_id",
     )
+    assert current.c.lifecycle_state.server_default is not None
+    assert (
+        "universe_version_id",
+        "event_spec_id",
+        "semantic_digest",
+        "lifecycle_state",
+    ) in _foreign_key_column_sets(current)
     assert tuple(column.name for column in certifications.primary_key.columns) == (
         "runtime_profile_id",
         "exchange_instrument_id",
@@ -85,10 +103,17 @@ def test_strategy_universe_metadata_has_forward_only_authority_shape() -> None:
         "observation_enabled",
         "entry_enabled",
         "universe_version_id",
+        "universe_semantic_digest",
         "warm_ready_at_ms",
         "warm_readiness_digest",
         "warm_valid_until_ms",
     }.issubset(scopes.c.keys())
+    assert (
+        "universe_version_id",
+        "event_spec_id",
+        "universe_semantic_digest",
+        "lifecycle_state",
+    ) in _foreign_key_column_sets(scopes)
     assert "enabled" not in scopes.c
     assert (
         "observation_enabled",
@@ -116,6 +141,11 @@ def test_universe_lineage_is_required_on_signal_claim_and_ticket_metadata() -> N
         table = metadata.tables[table_name]
         assert table.c.universe_version_id.nullable is False
         assert table.c.universe_semantic_digest.nullable is False
+        assert (
+            "universe_version_id",
+            "event_spec_id",
+            "universe_semantic_digest",
+        ) in _foreign_key_column_sets(table)
 
 
 def test_kernel_schema_has_core_uniqueness_constraints() -> None:
@@ -399,6 +429,14 @@ def _index_column_sets(table: sa.Table) -> set[tuple[str, ...]]:
     return {
         tuple(column.name for column in index.columns)
         for index in table.indexes
+    }
+
+
+def _foreign_key_column_sets(table: sa.Table) -> set[tuple[str, ...]]:
+    return {
+        tuple(column.name for column in constraint.columns)
+        for constraint in table.constraints
+        if isinstance(constraint, sa.ForeignKeyConstraint)
     }
 
 
