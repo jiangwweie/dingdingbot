@@ -207,3 +207,63 @@ atomic Ticket admission, and a clean forward-only schema upgrade:
 The changed migration, repository, and integration test passed Ruff core
 correctness (`E4`, `E7`, `E9`, `F`); the changed integration test also passed
 import ordering (`I`). `git diff --check` passed.
+
+## Review Fix Round 2/5
+
+### PostgreSQL migration-trigger state matrix
+
+The previous suite proved only that an ENTRY command claimed during preflight
+blocked a current-Universe pointer mutation. It did not explicitly cover every
+unresolved mutation state or the accepted boundary.
+
+A real PostgreSQL parameterized matrix now persists and verifies:
+
+| Durable command | Status | Pointer result |
+|---|---|---|
+| `SET_LEVERAGE` | `prepared` | rejected, SQLSTATE `55000` |
+| `SET_LEVERAGE` | `claimed` | rejected, SQLSTATE `55000` |
+| `SET_LEVERAGE` | `outcome_unknown` | rejected, SQLSTATE `55000` |
+| `ENTRY` | `prepared` | rejected, SQLSTATE `55000` |
+| `ENTRY` | `claimed` | rejected, SQLSTATE `55000` |
+| `ENTRY` | `outcome_unknown` | rejected, SQLSTATE `55000` |
+| `ENTRY` | `accepted` | allowed |
+
+Every rejected transaction also proves the current pointer remains on the
+original Universe; the accepted transaction proves it advances to the seeded
+replacement Universe. No production behavior changed in Round 2.
+
+### Lane ownership during protection creation
+
+The accepted-switch lifecycle test now seeds a second otherwise-valid short
+Ticket before dispatching the original dynamic OP Ticket. Immediately after
+the old Universe/Scope is retired, and before fill reconciliation creates the
+Initial Stop, the test proves:
+
+- the global Entry lane remains `claimed`;
+- the lane still names the original Ticket;
+- issuing the second Ticket returns `ENTRY_LANE_OCCUPIED`.
+
+The lifecycle then continues through official fill reconciliation, durable
+Initial Stop generation and dispatch, TP1, Exit, and flat readonly
+reconciliation.
+
+### Round 2 RED / GREEN and final verification
+
+The coverage RED found that the suite had only one ENTRY/claimed fence case and
+no explicit accepted boundary or second-Ticket proof. The first enhanced
+lifecycle run then exposed a duplicate BTC Instrument insertion in the test
+fixture. Removing that redundant test-data insert produced:
+
+```text
+8 passed in 7.09s
+```
+
+The final focused Task 6, schema, lifecycle, and routing command returned:
+
+```text
+72 passed in 12.88s
+```
+
+Both changed integration files passed Ruff `E4`, `E7`, `E9`, `F`, and `I`.
+`git diff --check` passed, and the Round 2 diff contains no production-code
+change.

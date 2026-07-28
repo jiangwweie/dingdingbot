@@ -65,6 +65,7 @@ from tests.trading_kernel.integration.test_command_dispatch import (
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
+    _ticket_for_signal,
 )
 from tests.trading_kernel.unit.test_ticket import _ticket
 
@@ -344,7 +345,13 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
     dispatch_engine: AsyncEngine,
 ) -> None:
     ticket = _dynamic_ticket()
+    second_ticket = _ticket_for_signal(
+        "signal-second-during-protection",
+        "episode-second-during-protection",
+        position_side="short",
+    )
     await _seed_policy(dispatch_engine)
+    await _seed_ticket_runtime_scope(dispatch_engine, second_ticket)
     await _issue(dispatch_engine, ticket)
     exchange = RecordingBinanceExchange()
     venue = CcxtVenueAdapter(
@@ -369,16 +376,6 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
     )
 
     async with dispatch_engine.begin() as connection:
-        await connection.execute(
-            sa.insert(instruments).values(
-                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                venue_id="binance-usdm",
-                asset_class="crypto",
-                venue_symbol="BTCUSDT",
-                contract_kind="perpetual",
-                status="active",
-            )
-        )
         await connection.execute(
             sa.insert(strategy_universe_versions).values(
                 universe_version_id="universe:sor-long:replacement",
@@ -430,6 +427,22 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
                 entry_enabled=False,
             )
         )
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        lane_before_protection = await uow.entry_admission.get_global_lane()
+        second_issue = await issue_ticket(
+            uow,
+            _issue_request(
+                ticket=second_ticket,
+                now_ms=2_051,
+                claim_owner="issuer-second-during-protection",
+            ),
+        )
+
+    assert lane_before_protection is not None
+    assert lane_before_protection.status == "claimed"
+    assert lane_before_protection.ticket_id == ticket.identity.ticket_id
+    assert second_issue.status is IssueTicketStatus.ENTRY_LANE_OCCUPIED
 
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await reconcile_ticket(

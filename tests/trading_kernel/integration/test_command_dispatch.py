@@ -569,6 +569,114 @@ async def test_universe_pointer_switch_after_preflight_is_fenced_by_claimed_entr
     assert current_version_id == ticket.universe_version_id
 
 
+@pytest.mark.parametrize(
+    ("command_kind", "command_status", "switch_allowed"),
+    [
+        pytest.param(
+            ExchangeCommandKind.SET_LEVERAGE,
+            ExchangeCommandStatus.PREPARED,
+            False,
+            id="set-leverage-prepared-blocks",
+        ),
+        pytest.param(
+            ExchangeCommandKind.SET_LEVERAGE,
+            ExchangeCommandStatus.CLAIMED,
+            False,
+            id="set-leverage-claimed-blocks",
+        ),
+        pytest.param(
+            ExchangeCommandKind.SET_LEVERAGE,
+            ExchangeCommandStatus.OUTCOME_UNKNOWN,
+            False,
+            id="set-leverage-outcome-unknown-blocks",
+        ),
+        pytest.param(
+            ExchangeCommandKind.ENTRY,
+            ExchangeCommandStatus.PREPARED,
+            False,
+            id="entry-prepared-blocks",
+        ),
+        pytest.param(
+            ExchangeCommandKind.ENTRY,
+            ExchangeCommandStatus.CLAIMED,
+            False,
+            id="entry-claimed-blocks",
+        ),
+        pytest.param(
+            ExchangeCommandKind.ENTRY,
+            ExchangeCommandStatus.OUTCOME_UNKNOWN,
+            False,
+            id="entry-outcome-unknown-blocks",
+        ),
+        pytest.param(
+            ExchangeCommandKind.ENTRY,
+            ExchangeCommandStatus.ACCEPTED,
+            True,
+            id="entry-accepted-allows",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_universe_pointer_fence_uses_entry_mutation_state_matrix(
+    dispatch_engine: AsyncEngine,
+    command_kind: ExchangeCommandKind,
+    command_status: ExchangeCommandStatus,
+    switch_allowed: bool,
+) -> None:
+    ticket = _ticket(
+        leverage_change_required=command_kind is ExchangeCommandKind.SET_LEVERAGE
+    )
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    await _seed_replacement_universe(dispatch_engine, ticket)
+    async with dispatch_engine.begin() as connection:
+        update_result = await connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.ticket_id == ticket.identity.ticket_id,
+                exchange_commands.c.command_kind == command_kind.value,
+            )
+            .values(status=command_status.value)
+        )
+    assert update_result.rowcount == 1
+
+    pointer_update = (
+        sa.update(strategy_universe_current)
+        .where(
+            strategy_universe_current.c.event_spec_id
+            == ticket.identity.runtime.event_spec_id
+        )
+        .values(
+            universe_version_id="universe:sor-long:replacement",
+            semantic_digest="sha256:" + "b" * 64,
+            activation_generation=2,
+            activated_at_ms=1_101,
+        )
+    )
+    if switch_allowed:
+        async with dispatch_engine.begin() as connection:
+            await connection.execute(pointer_update)
+    else:
+        with pytest.raises(DBAPIError) as error:
+            async with dispatch_engine.begin() as connection:
+                await connection.execute(pointer_update)
+        assert getattr(error.value.orig, "sqlstate", None) == "55000"
+
+    async with dispatch_engine.connect() as connection:
+        current_version_id = await connection.scalar(
+            sa.select(strategy_universe_current.c.universe_version_id).where(
+                strategy_universe_current.c.event_spec_id
+                == ticket.identity.runtime.event_spec_id
+            )
+        )
+    expected_version_id = (
+        "universe:sor-long:replacement"
+        if switch_allowed
+        else ticket.universe_version_id
+    )
+    assert current_version_id == expected_version_id
+
+
 @pytest.mark.asyncio
 async def test_confirmed_leverage_creates_first_entry_command_in_later_transaction(
     dispatch_engine: AsyncEngine,
