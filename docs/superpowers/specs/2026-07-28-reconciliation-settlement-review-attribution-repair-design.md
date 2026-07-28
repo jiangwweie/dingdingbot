@@ -1,9 +1,9 @@
 ---
 title: Reconciliation Settlement Fairness and Binance Order Attribution Repair Design
-status: OWNER_REVIEW_REQUIRED
+status: IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-28
-revision: 1
+revision: 2
 ---
 
 # Reconciliation Settlement Fairness and Binance Order Attribution Repair Design
@@ -13,9 +13,10 @@ revision: 1
 本文档描述 **Reconciliation 调度公平性、Binance 订单成交归因和未终态
 Ticket 闭环接管** 的完整修复设计。
 
-当前只授权编写和审查文档。本文档不授权修改生产代码、测试代码、
-PostgreSQL、Tokyo systemd 服务或交易所状态。只有 Owner 明确确认本设计、
-实施计划和测试用例后，才允许从 RED 测试开始编码。
+Owner 已授权从 RED 测试开始修改本地生产代码、测试代码和 disposable
+PostgreSQL 验收。该授权不包含 Tokyo PostgreSQL、Tokyo systemd 服务、真实
+交易所状态或 BNB 转入；closure-only 发布仍需独立 Owner 确认与 action-time
+认证。
 
 当前代码、当前 PostgreSQL 与交易所只读事实、`docs/current/*` 仍是运行
 权威。本文档记录的 Tokyo 状态来自 Owner 在 **2026-07-28** 提供的现场
@@ -886,7 +887,8 @@ fail closed，另行设计 append-only Review correction/revision 语义。
 
 `DeploymentPlan` 约束：
 
-1. `closure_ticket_ids` 必须非空、唯一、精确。
+1. `closure_ticket_id` 必须非空、精确；本次模式只允许一个 Ticket，不能使用
+   通配符、状态选择器或集合扩展。
 2. closure、protected、regular flat 三种模式互斥。
 3. closure mode 与 `--enable-entry` 互斥。
 4. closure mode 不允许 schema revision 变化。

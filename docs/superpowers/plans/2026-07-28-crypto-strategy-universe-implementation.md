@@ -3,8 +3,8 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:test-driven-development` for every task and
 > `superpowers:verification-before-completion` before any completion claim.
-> This plan is **OWNER_REVIEW_REQUIRED** and must not be executed before explicit
-> Owner confirmation.
+> Owner 已明确授权本地实现与 disposable PostgreSQL 验收；Tokyo 迁移、播种、
+> 激活与 Entry 仍受独立全平门禁约束。
 
 **Goal:** Make each existing crypto Strategy Event use an independently
 versioned, unordered, PostgreSQL-authoritative candidate universe that can be
@@ -28,10 +28,10 @@ persistent systemd workers.
 
 | 工作 | 当前状态 | 权限边界 |
 | --- | --- | --- |
-| 详细设计 | 待 Owner 审查 | 仅文档 |
-| 测试用例规格 | 待 Owner 审查 | 仅文档 |
-| 自动化测试代码 | 未开始 | Owner 确认后先写 RED |
-| 生产代码 | 未开始 | 对应 RED 失败后才能写 |
+| 详细设计 | 已确认 | 本地工程权威，非运行时权威 |
+| 测试用例规格 | 已确认 | 先写 RED |
+| 自动化测试代码 | 实施中 | disposable PostgreSQL 与 recording fake |
+| 生产代码 | 实施中 | 对应 RED 失败后才能写 |
 | 最终标的清单 | 未固定 | 生产播种前单独确认 |
 | Tokyo 迁移/部署 | 未授权 | 本计划不执行 |
 
@@ -61,17 +61,17 @@ persistent systemd workers.
 8. **事务边界**：所有网络 I/O 在 PostgreSQL 事务外；激活是 DB-only 原子
    事务。
 9. **人工设置**：不新增 leverage、margin 或 position mode 交易所写命令。
-10. **无旧包袱**：新字段在 flat-only migration 后为非空，不添加 legacy
+10. **无旧包袱**：新字段在前向 migration 后为非空，不添加 legacy
     decoder 或 nullable compatibility。
 11. **不接美股**：代码、seed、runtime profile 和测试默认值都不得启用
     US-equity instrument。
 12. **不做生产播种**：测试 fixture 可以使用 8 个示例 symbol，但不得把它们
     声明为最终生产池。
-13. **P1 前置**：先合并并验收 Settlement fairness、exact Binance order
-    attribution、BNB fee valuation 和 closure-only handover；Universe 不
-    复制或绕过这些能力。
-14. **发布隔离**：P1 保持 schema `0001` 独立发布并闭合 pending Ticket，
-    Universe `0002` 只能在最终 flat 后另行发布。
+13. **P1 前置**：Universe 不能复制或绕过 Settlement fairness、exact Binance
+    order attribution、BNB fee valuation 和 closure-only handover；P1 与
+    Universe 均可在本地并行实现，但 Tokyo 切换时 P1 必须先独立验收。
+14. **发布隔离**：P1 保持 schema `0001` 独立发布并闭合 pending Ticket；
+    Universe `0002` 的 **Tokyo** 发布只能在最终 flat 后另行进行。
 
 ## 文件结构
 
@@ -85,7 +85,7 @@ persistent systemd workers.
 | `src/trading_kernel/application/project_comparative_universe.py` | 新增 | MPG/MI O(N) 共享投影 |
 | `src/trading_kernel/infrastructure/pg_universe_repository.py` | 新增 | Universe/current/certification persistence |
 | `scripts/trading_kernel/configure_strategy_universe.py` | 新增 | 唯一配置提交 CLI |
-| `migrations/trading_kernel/versions/0002_crypto_strategy_universe.py` | 新增 | flat-only 前向 schema |
+| `migrations/trading_kernel/versions/0002_crypto_strategy_universe.py` | 新增 | 本地可验收、Tokyo flat-only 的前向 schema |
 | `src/trading_kernel/domain/strategy_registry.py` | 修改 | 删除候选成员职责 |
 | `src/trading_kernel/domain/arbitration.py` | 修改 | 删除 candidate scope priority |
 | `src/trading_kernel/application/observe_strategy_scope.py` | 修改 | Warming 与 Active 明确分流 |
@@ -98,7 +98,7 @@ persistent systemd workers.
 | `src/trading_kernel/infrastructure/venue_adapter.py` | 修改 | 使用严格 InstrumentCodec |
 | Observation/Reconciliation worker 入口 | 修改 | 每 cadence 最多推进一个有界维护工作 |
 
-## Task 0：完成 P1 闭环前置门
+## Task 0：分离本地工程门与 Tokyo 切换门
 
 **Required design and plan:**
 
@@ -106,18 +106,20 @@ persistent systemd workers.
 - `docs/superpowers/plans/2026-07-28-reconciliation-settlement-review-attribution-repair.md`
 - `docs/superpowers/specs/2026-07-28-reconciliation-settlement-review-attribution-repair-test-cases.md`
 
-- [ ] P1 实现已通过 Owner 确认后按 RED/GREEN 完成。
-- [ ] 多 Ticket Settlement/Review fairness、regular/algo actualOrderId
-  attribution、USDT/BNB fee 和 STOP_MARKET/GTX 测试全部通过。
-- [ ] P1 未改变 Alembic head，未夹带 Universe schema。
-- [ ] BTC-like pending Ticket 已经正常 `BudgetSettled -> ReviewRecorded ->
-  terminal`，未使用 DML。
-- [ ] 所有生产 Ticket、position、order、Incident、Settlement 和 Review
-  已完成 flat certification。
-- [ ] 只有上述证据全部存在后，才开始本计划 Task 1。
+- [ ] **本地工程门**允许 Task 1--14 的 RED/GREEN、disposable PostgreSQL
+  `0001 -> 0002` upgrade、full-chain 和 architecture 验收；不读取或修改
+  Tokyo 状态。
+- [ ] 本地 P1 与 Universe 都必须完整通过各自测试，且 Universe 不复制或绕过
+  P1 的 fairness、actual-order-id、fee 和 closure-only 语义。
+- [ ] **Tokyo 切换门**要求 P1 先以 schema `0001`、Entry fenced 的独立发布
+  正常闭合 pending Ticket；随后所有生产 Ticket、position、order、Incident、
+  Settlement 和 Review 都完成 flat certification。
+- [ ] 只有 Tokyo 切换门满足，才允许生产 `0002` migration、最终 Universe
+  seed、activation 和 `--enable-entry`。
 
 **Stop gate:** 任一 pending closure、incomplete Review 或 exchange residue
-存在时，不创建 Universe migration，不执行生产播种。
+存在时，禁止 **Tokyo** Universe migration、生产播种、预热/激活和
+`--enable-entry`；不得禁止本地 migration/test 开发。
 
 ## Task 1：建立无序 Universe 与 InstrumentCodec 领域边界
 
@@ -245,7 +247,8 @@ to Signal, Claim, Ticket
 - [ ] 用 SQLAlchemy metadata 与真实 PostgreSQL information schema 双重断言。
 - [ ] 验证超过 10 成员、重复成员、两个 warming 版本、两个 active pointer
   均被数据库约束拒绝。
-- [ ] 验证迁移只能在 runtime/trade tables flat 时执行；非平状态 fail closed。
+- [ ] 验证 disposable PostgreSQL 的 clean upgrade 可执行；生产部署认证在
+  runtime/trade tables 非平时 fail closed，且不产生部分 DDL/DML。
 
 **Commit:** `feat(kernel): add crypto universe authority schema`
 
@@ -622,9 +625,10 @@ read_strategy_universe_status.py
 Owner 明确固定每个 Event 的最终成员
 and P1 fairness/order attribution 已独立发布并验收
 and BTC pending closure 已正常 terminal
-and 所有 Ticket/position/order/Settlement/Review 完整 flat
+and 所有 Ticket/position/order/Incident/Settlement/Review 完整 flat
 and 本地实现和验收已由 Owner 确认
-and Tokyo action-time facts 已刷新
+and Tokyo PostgreSQL、exchange、systemd、schema、commit/runtime identity
+    action-time certification 全部通过
 ```
 
 生产动作只能使用正式 CLI 和现行部署脚本。不得手工导入 SQL、恢复研究文件、

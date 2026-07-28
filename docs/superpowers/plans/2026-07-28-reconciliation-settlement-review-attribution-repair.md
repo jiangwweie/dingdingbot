@@ -3,8 +3,8 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:test-driven-development` for every task and
 > `superpowers:verification-before-completion` before any completion claim.
-> This plan is **OWNER_REVIEW_REQUIRED** and must not be executed before explicit
-> Owner confirmation.
+> Owner 已授权本地 RED/GREEN、recording fake 与 disposable PostgreSQL 验收；
+> Tokyo closure-only 发布、系统服务变更与交易所写入仍需独立确认。
 
 **Goal:** Remove cross-Ticket Settlement/Review starvation, attribute Binance
 regular and conditional fills by exact `orderId`, close the pending BTC Ticket
@@ -29,11 +29,11 @@ Mypy, CCXT-compatible Binance USD-M adapter, four persistent systemd workers.
 
 | 工作 | 当前状态 | 权限边界 |
 | --- | --- | --- |
-| 详细设计 | 待 Owner 审查 | 仅文档 |
-| 实施计划 | 待 Owner 审查 | 仅文档 |
-| 测试用例规格 | 待 Owner 审查 | 仅文档 |
-| 自动化测试代码 | 未开始 | 确认后先写 RED |
-| 生产代码 | 未开始 | 对应 RED 后才能写 |
+| 详细设计 | 已确认 | 本地工程权威，非运行时权威 |
+| 实施计划 | 已确认 | 本地实施顺序 |
+| 测试用例规格 | 已确认 | 先写 RED |
+| 自动化测试代码 | 实施中 | recording fake 与 disposable PostgreSQL |
+| 生产代码 | 实施中 | 对应 RED 后才能写 |
 | Tokyo closure 部署 | 未授权 | 本计划不执行 |
 | BNB 人工转入 | 未执行 | 仅 Owner 在新版本部署后操作 |
 

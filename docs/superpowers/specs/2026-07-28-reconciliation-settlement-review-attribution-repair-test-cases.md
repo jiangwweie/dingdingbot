@@ -1,8 +1,9 @@
 ---
 title: Reconciliation Settlement, Order Attribution and BNB Fee Repair Test Cases
-status: OWNER_REVIEW_REQUIRED
+status: IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-28
+revision: 2
 design: 2026-07-28-reconciliation-settlement-review-attribution-repair-design.md
 plan: ../plans/2026-07-28-reconciliation-settlement-review-attribution-repair.md
 ---
@@ -11,12 +12,9 @@ plan: ../plans/2026-07-28-reconciliation-settlement-review-attribution-repair.md
 
 ## 当前状态
 
-本文档只定义 **待实现测试规格**。当前没有创建或修改任何
-`tests/**/*.py`，下列用例均未运行、未通过。
-
-Owner 确认设计、实施计划和本测试规格后，实施必须先让相应用例因缺失行为
-产生预期 RED，再修改生产代码。不能先写实现，再补一个只覆盖 happy path 的
-测试。
+本文档定义本地实施测试规格。Owner 已授权先让相应用例因缺失行为产生预期
+RED，再修改生产代码；不能先写实现，再补一个只覆盖 happy path 的测试。
+测试仅使用 disposable PostgreSQL 与 recording fake，不写 Tokyo 或真实交易所。
 
 ## 测试目标
 

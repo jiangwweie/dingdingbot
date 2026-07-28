@@ -1,9 +1,9 @@
 ---
 title: Crypto Strategy Universe General Capability Test Cases
-status: OWNER_REVIEW_REQUIRED
+status: IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-28
-revision: 2
+revision: 3
 design: 2026-07-28-crypto-strategy-universe-design.md
 plan: ../plans/2026-07-28-crypto-strategy-universe-implementation.md
 ---
@@ -12,11 +12,16 @@ plan: ../plans/2026-07-28-crypto-strategy-universe-implementation.md
 
 ## 当前状态
 
-本文档只定义 **待实现测试规格**。当前没有创建或修改任何
-`tests/**/*.py`，也没有把下列用例标记为通过。
+本文档定义本地实施测试规格。Owner 已授权先让相应用例因缺失行为产生预期
+RED，再修改生产代码；所有 PostgreSQL 行为均在 disposable local instance
+中验证。该授权不包含 Tokyo 或真实交易所写入。
 
-Owner 确认设计、实施计划和本测试规格后，实施必须先让相应用例因缺失行为
-产生预期 RED，再修改生产代码。
+### 两层验收边界
+
+| 验收层 | 当前状态 | 自动化证据 | 不授予的权限 |
+| --- | --- | --- | --- |
+| **Local engineering** | **可执行** | unit、disposable PostgreSQL、recording fake full-chain、静态和性能测试 | Tokyo migration、生产 seed/activation、Entry |
+| **Tokyo cutover** | **等待全平** | action-time PostgreSQL/exchange/systemd/identity certification | 用本地 test green 替代现场 flat truth |
 
 ## 测试目标
 
@@ -137,7 +142,8 @@ Owner 确认设计、实施计划和本测试规格后，实施必须先让相�
 | ID | 场景 / 动作 | 必须断言 | 禁止副作用 |
 | --- | --- | --- | --- |
 | DB-001 | 空数据库升级 `0001 -> 0002` | 五个新对象、字段、FK、索引完整 | 不创建 legacy 表 |
-| DB-002 | 非 flat runtime 尝试迁移 | precondition fail closed | 不做部分 DDL/DML |
+| DB-002 | 生产 deployment certification 在非 flat runtime 尝试迁移 | precondition fail closed | 不做部分 DDL/DML |
+| DB-002A | disposable local PostgreSQL 从 `0001` 升级到 `0002` | migration 成功且完整 schema 可验证 | 不访问 Tokyo 或 exchange |
 | DB-003 | 插入重复 event/version | unique violation | 不覆盖原版本 |
 | DB-004 | 当前 active/warming 同 event+digest 重复 | 部分唯一索引拒绝 | 不产生两个同义 current |
 | DB-005 | 原版本 retired 后相同 digest 新版本 | 允许新版本身份 | 不重新激活 retired 行 |
@@ -365,8 +371,8 @@ Owner 确认设计、实施计划和本测试规格后，实施必须先让相�
 | DEP-001 | Owner 固定每个 Event 最终清单 | 明确 1..10 个 canonical ids | 不播种 |
 | DEP-002 | P1 fairness/order attribution 独立验收 | P1 全链、静态、性能证据 | 不创建 0002 |
 | DEP-003 | BTC pending closure 正常 terminal | BudgetSettled、ReviewRecorded、完整 Review | 不迁移 |
-| DEP-004 | 所有 Ticket/position/order/Settlement/Review flat | PostgreSQL + exchange exact truth | 不迁移 |
-| DEP-005 | schema/runtime identity 一致 | immutable commit/tag/revision | 不启动 writer |
+| DEP-004 | 所有 Ticket/position/order/Incident/Settlement/Review flat | PostgreSQL + exchange exact truth，unresolved Incident = 0 | 不迁移 |
+| DEP-005 | action-time certification 通过 | PostgreSQL、exchange、systemd、schema、commit/runtime identity 全部通过 | 不启动 writer |
 | DEP-006 | 每成员 Cross/5x/hedge/trading | 只读 certification | Monitor/人工处理 |
 | DEP-007 | Safety Workers postflight 正常 | Observation/Lifecycle/Reconciliation active | Entry 不启动 |
 | DEP-008 | current Universe 与 Scope 一致 | pointer/digest/member/readiness | Entry 不启用 |
@@ -416,6 +422,6 @@ green、SQLite、手工 SQL 截图或生成报告替代。
 
 本测试规格只有在所有适用用例均有自动化实现、完整 suite 通过、失败注入
 恢复可重复、查询与调用上界被执行性断言覆盖时，才可从
-`OWNER_REVIEW_REQUIRED` 进入本地已验收状态。
+`IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY` 的实施中状态进入本地已验收状态。
 
 生产播种和 Tokyo 部署仍需独立 Owner 确认，不能由本地测试通过自动授权。

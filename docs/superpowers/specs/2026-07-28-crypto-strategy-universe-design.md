@@ -1,9 +1,9 @@
 ---
 title: Crypto Strategy Universe General Capability Design
-status: OWNER_REVIEW_REQUIRED
+status: IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-28
-revision: 2
+revision: 3
 ---
 
 # Crypto Strategy Universe General Capability Design
@@ -11,12 +11,10 @@ revision: 2
 ## 决策门
 
 本文档描述 **加密合约 StrategyUniverse 通用能力** 的完整目标设计。
-当前仅允许编写和审查文档，不授权修改生产代码、测试代码、PostgreSQL、
-Tokyo 服务或交易所状态。
-
-只有 Owner 明确确认本文档、实施计划和测试用例后，才允许按测试优先顺序
-开始编码。最终生产标的清单不属于当前设计输入；每个策略组的最终清单将在
-生产播种前由 Owner 固定。
+Owner 已授权按测试优先顺序实现本地代码、自动化测试，以及 disposable
+PostgreSQL 的 `0001 -> 0002` 升级验证。该授权不包含 Tokyo 服务、Tokyo
+PostgreSQL、生产播种、交易所写入或 Entry 启用。最终生产标的清单不属于当前
+设计输入；每个策略组的最终清单将在生产播种前由 Owner 固定。
 
 当前代码、PostgreSQL、交易所只读事实和 `docs/current/*` 仍是唯一运行权威。
 
@@ -102,6 +100,16 @@ Registry 不得创建 Signal、Ticket、命令、订单或持仓。
 本文档获批并完成实现后，需要同步修订该当前合同：候选资格将由 PostgreSQL
 StrategyUniverse 拥有，Registry 不再拥有成员清单。
 
+### 两层部署门禁
+
+本设计将工程完成与生产切换明确分离，不能用生产持仓阻塞本地缺陷修复，也不能
+把本地 green 误当作生产授权。
+
+| 门禁 | 现在是否开放 | 允许动作 | 明确禁止 |
+| --- | --- | --- | --- |
+| **本地工程门** | **开放** | source/test 改动、disposable PostgreSQL `0001 -> 0002` migration、recording fake 全链与故障验收 | Tokyo、真实交易所写、生产 seed/activation/Entry |
+| **Tokyo 切换门** | **关闭，直到全平闭环** | action-time readonly certification 后的前向迁移、最终 seed、预热、激活和显式 Entry 启用 | 带有任一 live Ticket、position、order、Incident、Settlement 或 Review 残留时的 migration、seed、warm、activation 或 Entry |
+
 ### 当前部署边界
 
 Owner 已明确当前工程验证阶段采用 **全平后部署**：
@@ -120,9 +128,10 @@ P1 Settlement fairness / exact order attribution 修复先独立验收
 ```
 
 因此本次设计不承担旧运行 Ticket、旧 Signal、旧候选池或旧表结构的运行时
-兼容责任。Universe `0002` 不得与 P1 closure-only 发布合并；部署前必须
-满足现行 flat-release 和 exchange-flat 门，并证明不存在
-`SETTLEMENT_PENDING`、`REVIEW_PENDING` 或不完整 Review。
+兼容责任。Universe `0002` 不得与 P1 closure-only 发布合并；**Tokyo** 部署前
+必须满足现行 flat-release 和 exchange-flat 门，并证明不存在
+`SETTLEMENT_PENDING`、`REVIEW_PENDING` 或不完整 Review。该条件不限制本地
+source/test 开发和 disposable PostgreSQL migration 验收。
 （衔接设计：
 [`2026-07-28-reconciliation-settlement-review-attribution-repair-design.md`](2026-07-28-reconciliation-settlement-review-attribution-repair-design.md)）
 
@@ -780,13 +789,16 @@ Universe 激活时间和版本状态足以说明当时的资格，不建设“�
 
 1. P1 fairness/order attribution 版本已完成验收；
 2. BTC-like pending closure 已通过正常 Event/Reducer/UoW 达到 terminal；
-3. 所有 Ticket、仓位、订单、Settlement 和 Review 已闭环；
+3. 所有 Ticket、仓位、订单、Incident、Settlement 和 Review 已闭环，且
+   unresolved Incident = 0；
 4. Owner 固定每个 Event 的最终 1 至 10 个成员，目标为 8；
 5. 代理提交配置；
 6. 自动认证和预热完成；
 7. 只读证据证明每个成员为 Binance USD-M USDT perpetual、Cross、5x；
-8. schema、runtime identity、Policy、Universe current 一致；
-9. Safety Workers 先启动，Entry 最后启用。
+8. PostgreSQL、exchange、systemd、schema、commit/runtime identity 的
+   action-time certification 全部通过；
+9. schema、runtime identity、Policy、Universe current 一致；
+10. Safety Workers 先启动，Entry 最后显式启用。
 
 ## 编码前 Owner 确认清单
 
@@ -806,5 +818,5 @@ Universe 激活时间和版本状态足以说明当时的资格，不建设“�
    追溯；
 8. **当前阶段只实现加密 USDT 永续通用能力**，最终成员清单延后至生产播种。
 
-Owner 确认本文档、配套实施计划和测试用例后，编码仍必须从 RED 测试开始，
-不得先写生产实现。
+本地实现已获 Owner 授权；每个新行为仍必须从 RED 测试开始，不得先写生产
+实现。Tokyo 动作继续受上述独立门禁约束。
