@@ -1016,25 +1016,7 @@ async def _require_protected_identity_activity(
     ).mappings().all()
     aggregates_by_ticket = {str(row["ticket_id"]): row for row in aggregates}
     if set(aggregates_by_ticket) != protected_ticket_ids or any(
-        any(
-            (
-                row["status"] != "position_protected",
-                Decimal(str(row["position_qty"])) <= 0,
-                Decimal(str(row["protected_qty"]))
-                != Decimal(str(row["position_qty"])),
-                row["entry_exchange_order_id"] is None,
-                row["initial_stop_exchange_order_id"] is None,
-                row["active_stop_exchange_order_id"] is None,
-                row["active_stop_price"] is None,
-                row["tp1_exchange_order_id"] is None,
-                row["pending_replaced_stop_exchange_order_id"] is not None,
-                row["pending_stop_price"] is not None,
-                row["pending_cancel_exchange_order_id"] is not None,
-                row["exit_exchange_order_id"] is not None,
-                row["review_id"] is not None,
-            )
-        )
-        for row in aggregates
+        not _aggregate_has_complete_protection(row) for row in aggregates
     ):
         raise RuntimeAuthorityTransitionRefused(
             "protected identity requires complete active protection"
@@ -1136,6 +1118,34 @@ async def _require_protected_identity_activity(
         raise RuntimeAuthorityTransitionRefused(
             "protected identity requires zero open Incidents"
         )
+
+
+def _aggregate_has_complete_protection(row: Mapping[str, object]) -> bool:
+    status = str(row["status"])
+    position_quantity = Decimal(str(row["position_qty"]))
+    if (
+        status not in {"position_protected", "runner_protected"}
+        or position_quantity <= 0
+        or Decimal(str(row["protected_qty"])) != position_quantity
+        or row["entry_exchange_order_id"] is None
+        or row["initial_stop_exchange_order_id"] is None
+        or row["active_stop_exchange_order_id"] is None
+        or row["active_stop_price"] is None
+        or row["pending_replaced_stop_exchange_order_id"] is not None
+        or row["pending_stop_price"] is not None
+        or row["pending_cancel_exchange_order_id"] is not None
+        or row["exit_exchange_order_id"] is not None
+        or row["review_id"] is not None
+    ):
+        return False
+    if status == "position_protected":
+        return row["tp1_exchange_order_id"] is not None
+    return (
+        row["tp1_exchange_order_id"] is None
+        and Decimal(str(row["tp1_filled_qty"]))
+        == Decimal(str(row["tp1_target_qty"]))
+        and row["break_even_floor_price"] is not None
+    )
 
 
 async def _require_recovery_identity_activity(

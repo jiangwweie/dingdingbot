@@ -462,6 +462,42 @@ async def test_protected_identity_refuses_extra_activity_and_open_incidents(
 
 
 @pytest.mark.asyncio
+async def test_protected_identity_rotates_a_complete_runner_ticket(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    runner_ticket_ids = ticket_ids[1:]
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    await _insert_protected_tickets(
+        runtime_seed_engine,
+        ticket_ids,
+        runner_ticket_ids=runner_ticket_ids,
+    )
+
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        result = await runtime_seed.deploy_protected_identity(
+            uow,
+            initial.model_copy(
+                update={
+                    "runtime_commit": "b" * 40,
+                    "seeded_at_ms": 1_800_000_000_100,
+                }
+            ),
+            protected_ticket_ids=ticket_ids,
+        )
+
+    assert result.runtime_commit == "b" * 40
+
+
+@pytest.mark.asyncio
 async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     runtime_seed_engine: AsyncEngine,
 ) -> None:
@@ -614,6 +650,7 @@ async def _insert_protected_tickets(
     ticket_ids: tuple[str, ...],
     *,
     tp1_replay_ticket_ids: tuple[str, ...] = (),
+    runner_ticket_ids: tuple[str, ...] = (),
 ) -> None:
     async with engine.begin() as connection:
         scope = (
@@ -628,6 +665,10 @@ async def _insert_protected_tickets(
         total_risk = Decimal("0")
         for index, ticket_id in enumerate(ticket_ids, start=1):
             quantity = Decimal(index)
+            is_runner = ticket_id in runner_ticket_ids
+            projected_quantity = (
+                quantity / Decimal("2") if is_runner else quantity
+            )
             notional = Decimal("100") * quantity
             risk = Decimal("3") * quantity
             netting_domain = f"binance-usdm:subaccount-main:{index}:short"
@@ -681,11 +722,11 @@ async def _insert_protected_tickets(
             await connection.execute(
                 sa.insert(trade_aggregates).values(
                     ticket_id=ticket_id,
-                    status="position_protected",
+                    status=("runner_protected" if is_runner else "position_protected"),
                     version=5,
                     last_event_sequence=5,
                     entry_lane_held=False,
-                    position_qty=quantity,
+                    position_qty=projected_quantity,
                     average_fill_price=Decimal("100"),
                     actual_stop_risk=risk,
                     actual_liquidation_price=Decimal("110"),
@@ -693,15 +734,17 @@ async def _insert_protected_tickets(
                     actual_liquidation_distance_to_stop_distance_ratio=Decimal("3"),
                     post_fill_risk_status="within_limit",
                     post_fill_disposition="protected",
-                    protected_qty=quantity,
+                    protected_qty=projected_quantity,
                     entry_exchange_order_id=f"entry:{index}",
                     initial_stop_exchange_order_id=f"initial-stop:{index}",
                     active_stop_exchange_order_id=f"stop:{index}",
                     active_stop_price=Decimal("103"),
-                    tp1_exchange_order_id=f"tp1:{index}",
+                    tp1_exchange_order_id=(None if is_runner else f"tp1:{index}"),
                     tp1_target_qty=quantity / Decimal("2"),
-                    tp1_filled_qty=Decimal("0"),
-                    break_even_floor_price=None,
+                    tp1_filled_qty=(
+                        quantity / Decimal("2") if is_runner else Decimal("0")
+                    ),
+                    break_even_floor_price=(Decimal("99") if is_runner else None),
                     pending_replaced_stop_exchange_order_id=None,
                     pending_stop_price=None,
                     pending_stop_watermark_ms=None,
@@ -725,7 +768,7 @@ async def _insert_protected_tickets(
                     quantity=(
                         quantity / Decimal("2")
                         if ticket_id in tp1_replay_ticket_ids
-                        else quantity
+                        else projected_quantity
                     ),
                     average_entry_price=Decimal("100"),
                     observed_at_ms=1_800_000_000_020 + index,
