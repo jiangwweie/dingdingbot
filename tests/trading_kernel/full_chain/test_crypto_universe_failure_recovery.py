@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from decimal import Decimal
 
 import pytest
@@ -9,14 +8,14 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from scripts.trading_kernel.certify_readonly import _certify
+from src.trading_kernel.application.advance_strategy_universe import (
+    UniverseActivationRequest,
+    UniverseActivationStatus,
+    advance_strategy_universe,
+)
 from src.trading_kernel.application.certify_universe_instrument import (
     CertifyUniverseInstrumentRequest,
     certify_universe_instrument,
-)
-from src.trading_kernel.application.dispatch_exchange_command import (
-    DispatchCommandRequest,
-    DispatchCommandStatus,
-    dispatch_one_command,
 )
 from src.trading_kernel.application.project_owner_state import (
     instrument_certification_monitor_key,
@@ -32,11 +31,25 @@ from src.trading_kernel.application.settle_ticket import (
     record_trade_review,
     settle_ticket,
 )
+from src.trading_kernel.application.strategy_authority import (
+    strategy_authority_matches_ticket,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.position import PositionSnapshot
-from src.trading_kernel.infrastructure.pg_models import strategy_universe_current
+from src.trading_kernel.domain.ticket import build_ticket_id
+from src.trading_kernel.infrastructure.pg_models import (
+    instrument_certification_current,
+    owner_policy_current,
+    runtime_profiles,
+    runtime_scopes_current,
+    strategy_universe_versions,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
+)
+from src.trading_kernel.infrastructure.runtime_authority_seed import (
+    ArmAcceptancePolicyRequest,
+    arm_acceptance_policy,
 )
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerStatus,
@@ -46,20 +59,23 @@ from tests.trading_kernel.full_chain.lifecycle_support import (
     dispatch_lifecycle_command,
     reach_runner_protected,
 )
-from tests.trading_kernel.integration import test_command_dispatch as _dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import (
-    CountingVenue,
     KindAwareAcceptingVenue,
-    PreflightExitBarrierFactory,
-    PreflightFacts,
     _issue,
-    _seed_policy,
-)
-from tests.trading_kernel.integration.test_issue_ticket import (
-    _seed_replacement_universe,
 )
 from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
     _registered_sor_long_ticket,
+)
+from tests.trading_kernel.integration.universe_activation_support import (
+    NOW_MS as ACTIVATION_NOW_MS,
+)
+from tests.trading_kernel.integration.universe_activation_support import (
+    activation_engine as _activation_engine,
+)
+from tests.trading_kernel.integration.universe_activation_support import (
+    activation_snapshot,
+    make_warming_ready,
+    prepare_active_and_warming,
 )
 from tests.trading_kernel.integration.universe_certification_support import (
     NOW_MS,
@@ -69,9 +85,6 @@ from tests.trading_kernel.integration.universe_certification_support import (
 from tests.trading_kernel.integration.universe_certification_support import (
     certification_engine as _certification_engine,  # noqa: F401
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
-
-dispatch_engine = _dispatch_fixture.dispatch_engine
 
 
 @pytest.mark.asyncio
@@ -102,6 +115,89 @@ async def test_network_timeout_is_retryable_and_readonly_visible(
     assert payload["strategy_universe"][
         "temporarily_unavailable_certification_count"
     ] == 1
+
+
+@pytest.mark.asyncio
+async def test_readonly_timeout_count_excludes_retired_and_other_profile_facts(
+    _certification_engine: AsyncEngine,  # noqa: F811
+) -> None:
+    """Catches a global certification scan being reported as runtime readiness."""
+
+    source = RecordingReadonlyCertificationSource(
+        _certification_engine,
+        error=TimeoutError("authenticated read timeout"),
+    )
+    await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(_certification_engine),
+        object(),
+        object(),
+        worker_request(NOW_MS),
+        instrument_certification_source=source,
+    )
+    async with _certification_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(runtime_profiles).values(
+                runtime_profile_id="foreign-runtime-profile",
+                venue_id="binance-usdm",
+                account_id="foreign-account",
+                environment="production",
+                position_mode="independent_sides",
+                status="active",
+                updated_at_ms=NOW_MS,
+            )
+        )
+        await connection.execute(
+            sa.insert(instrument_certification_current).values(
+                runtime_profile_id="foreign-runtime-profile",
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                status="temporarily_unavailable",
+                blocker_code="readonly_facts_unavailable",
+                facts_digest="sha256:" + ("f" * 64),
+                product_rules_digest=None,
+                configured_leverage=None,
+                margin_mode=None,
+                position_mode=None,
+                observed_at_ms=NOW_MS,
+                valid_until_ms=NOW_MS + 30_000,
+                next_check_at_ms=NOW_MS + 30_000,
+                lease_owner=None,
+                lease_expires_at_ms=None,
+                projection_version=1,
+            )
+        )
+
+    current = await _certify(
+        _certification_engine.url.render_as_string(hide_password=False),
+        require_flat=True,
+    )
+    assert current["strategy_universe"][
+        "temporarily_unavailable_certification_count"
+    ] == 1
+
+    async with _certification_engine.begin() as connection:
+        await connection.execute(
+            sa.update(strategy_universe_versions)
+            .values(
+                lifecycle_state="retired",
+                activated_at_ms=NOW_MS,
+                retired_at_ms=NOW_MS + 1,
+            )
+        )
+        await connection.execute(
+            sa.update(runtime_scopes_current).values(
+                lifecycle_state="retired",
+                observation_enabled=False,
+                entry_enabled=False,
+                updated_at_ms=NOW_MS + 1,
+            )
+        )
+    retired = await _certify(
+        _certification_engine.url.render_as_string(hide_password=False),
+        require_flat=True,
+    )
+    assert retired["strategy_universe"][
+        "temporarily_unavailable_certification_count"
+    ] == 0
 
 
 @pytest.mark.asyncio
@@ -287,32 +383,42 @@ def _certification_request(
 
 
 @pytest.mark.asyncio
-async def test_replaced_universe_keeps_old_runner_ticket_to_terminal_review(
-    dispatch_engine: AsyncEngine,
+async def test_official_replacement_keeps_old_runner_ticket_to_terminal_review(
+    _activation_engine: AsyncEngine,  # noqa: F811
 ) -> None:
     """Catches lifecycle or review reading the new Universe instead of the Ticket."""
 
-    ticket = _registered_sor_long_ticket()
-    await _seed_policy(dispatch_engine)
-    await reach_runner_protected(dispatch_engine, ticket, seed_policy=False)
-    await _seed_replacement_universe(dispatch_engine, ticket)
-    async with dispatch_engine.begin() as connection:
-        await connection.execute(
-            sa.update(strategy_universe_current)
-            .where(
-                strategy_universe_current.c.event_spec_id
-                == ticket.identity.runtime.event_spec_id
-            )
-            .values(
-                universe_version_id="universe:sor-long:replacement",
-                semantic_digest="sha256:" + ("b" * 64),
-                activation_generation=2,
-                activated_at_ms=3_000,
-            )
+    old_version_id, new_version_id = await prepare_active_and_warming(
+        _activation_engine
+    )
+    await make_warming_ready(
+        _activation_engine,
+        universe_version_id=old_version_id,
+    )
+    await _arm_entry(_activation_engine)
+    ticket = await _ticket_for_active_universe(
+        _activation_engine,
+        old_version_id=old_version_id,
+    )
+    await _assert_ticket_authority(_activation_engine, ticket)
+    await reach_runner_protected(_activation_engine, ticket, seed_policy=False)
+    await make_warming_ready(
+        _activation_engine,
+        universe_version_id=new_version_id,
+    )
+    async with PostgresKernelUnitOfWork(_activation_engine) as uow:
+        activated = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=new_version_id,
+                attempted_at_ms=ACTIVATION_NOW_MS,
+            ),
         )
+    assert activated.status is UniverseActivationStatus.ACTIVATED
+    assert activated.previous_universe_version_id == old_version_id
 
     venue = KindAwareAcceptingVenue()
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+    async with PostgresKernelUnitOfWork(_activation_engine) as uow:
         external_flat = await reconcile_ticket(
             uow,
             ReconcileTicketRequest(
@@ -329,13 +435,13 @@ async def test_replaced_universe_keeps_old_runner_ticket_to_terminal_review(
     assert external_flat.status.value == "external_flat_incident"
     assert (
         await dispatch_lifecycle_command(
-            dispatch_engine,
+            _activation_engine,
             venue,
             ticket.identity.ticket_id,
             now_ms=3_200,
         )
     ).status.value == "accepted"
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+    async with PostgresKernelUnitOfWork(_activation_engine) as uow:
         matched = await reconcile_ticket(
             uow,
             ReconcileTicketRequest(
@@ -381,61 +487,148 @@ async def test_replaced_universe_keeps_old_runner_ticket_to_terminal_review(
 
 
 @pytest.mark.asyncio
-async def test_activation_cannot_cross_claimed_entry_dispatch_lane(
-    dispatch_engine: AsyncEngine,
+async def test_official_activation_rolls_back_while_entry_lane_is_claimed(
+    _activation_engine: AsyncEngine,  # noqa: F811
 ) -> None:
-    """Catches a pointer switch that races an ENTRY venue write."""
+    """Catches official activation splitting projections under claimed ENTRY."""
 
-    ticket = _ticket()
-    await _seed_policy(dispatch_engine)
-    await _issue(dispatch_engine, ticket)
-    await _seed_replacement_universe(dispatch_engine, ticket)
-    venue = CountingVenue()
-    barrier_factory = PreflightExitBarrierFactory(dispatch_engine)
-    dispatch_task = asyncio.create_task(
-        dispatch_one_command(
-            barrier_factory,
-            venue,
-            DispatchCommandRequest(
-                worker_id="entry-dispatcher-failure-recovery",
-                now_ms=1_100,
-                lease_until_ms=6_100,
-                timeout_seconds=1,
-                runtime_commit="kernel-test-head",
-                schema_revision="0002_crypto_strategy_universe",
-                admission_snapshot_validity_ms=1_000,
-            ),
-            entry_facts_source=PreflightFacts(),
-        )
+    old_version_id, new_version_id = await prepare_active_and_warming(
+        _activation_engine
     )
-    await asyncio.wait_for(barrier_factory.preflight_closed.wait(), timeout=2)
+    await make_warming_ready(
+        _activation_engine,
+        universe_version_id=old_version_id,
+    )
+    await _arm_entry(_activation_engine)
+    ticket = await _ticket_for_active_universe(
+        _activation_engine,
+        old_version_id=old_version_id,
+    )
+    await _assert_ticket_authority(_activation_engine, ticket)
+    await _issue(_activation_engine, ticket)
+    await make_warming_ready(
+        _activation_engine,
+        universe_version_id=new_version_id,
+    )
+    before = await activation_snapshot(
+        _activation_engine,
+        event_spec_id=ticket.identity.runtime.event_spec_id,
+    )
 
     with pytest.raises(DBAPIError) as activation_error:
-        async with dispatch_engine.begin() as connection:
-            await connection.execute(
-                sa.update(strategy_universe_current)
-                .where(
-                    strategy_universe_current.c.event_spec_id
-                    == ticket.identity.runtime.event_spec_id
-                )
-                .values(
-                    universe_version_id="universe:sor-long:replacement",
-                    semantic_digest="sha256:" + ("b" * 64),
-                    activation_generation=2,
-                    activated_at_ms=1_101,
-                )
+        async with PostgresKernelUnitOfWork(_activation_engine) as uow:
+            await advance_strategy_universe(
+                uow,
+                UniverseActivationRequest(
+                    universe_version_id=new_version_id,
+                    attempted_at_ms=ACTIVATION_NOW_MS,
+                ),
             )
-    barrier_factory.release_dispatch.set()
-    dispatched = await dispatch_task
-
+    after = await activation_snapshot(
+        _activation_engine,
+        event_spec_id=ticket.identity.runtime.event_spec_id,
+    )
     assert getattr(activation_error.value.orig, "sqlstate", None) == "55000"
-    assert dispatched.status is DispatchCommandStatus.ACCEPTED
-    assert venue.calls == 1
-    async with dispatch_engine.connect() as connection:
-        current_version_id = await connection.scalar(
-            sa.select(strategy_universe_current.c.universe_version_id).where(
-                strategy_universe_current.c.event_spec_id
-                == ticket.identity.runtime.event_spec_id
+    assert after == before
+
+
+async def _arm_entry(engine: AsyncEngine) -> None:
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await arm_acceptance_policy(
+            uow,
+            ArmAcceptancePolicyRequest(armed_at_ms=1_000),
+        )
+
+
+async def _assert_ticket_authority(engine: AsyncEngine, ticket) -> None:
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        universe = await uow.signals.get_active_universe_member(
+            event_spec_id=ticket.identity.runtime.event_spec_id,
+            exchange_instrument_id=(
+                ticket.identity.netting_domain.exchange_instrument_id
+            ),
+            for_update=False,
+        )
+        scope = await uow.signals.get_runtime_scope(
+            ticket.runtime_scope_id,
+            for_update=False,
+        )
+        group = await uow.signals.get_strategy_group(
+            ticket.identity.runtime.strategy_group_id
+        )
+        version = await uow.signals.get_strategy_version(
+            ticket.identity.runtime.strategy_version_id
+        )
+        event = await uow.signals.get_event_spec(ticket.identity.runtime.event_spec_id)
+    assert universe is not None
+    assert universe.universe_version_id == ticket.universe_version_id
+    assert universe.semantic_digest == ticket.universe_semantic_digest
+    assert scope is not None
+    assert scope.runtime_scope_id == ticket.runtime_scope_id
+    assert scope.scope_version == ticket.runtime_scope_version
+    assert scope.owner_policy_id == ticket.owner_policy_id
+    assert strategy_authority_matches_ticket(group, version, event, ticket)
+
+
+async def _ticket_for_active_universe(
+    engine: AsyncEngine,
+    *,
+    old_version_id: str,
+):
+    async with engine.connect() as connection:
+        scope = (
+            await connection.execute(
+                sa.select(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.universe_version_id == old_version_id,
+                    runtime_scopes_current.c.exchange_instrument_id
+                    == "binance-usdm:BTCUSDT:perpetual",
+                    runtime_scopes_current.c.position_side == "long",
+                )
+                .limit(1)
+            )
+        ).mappings().one()
+        account_id = str(
+            await connection.scalar(
+                sa.select(runtime_profiles.c.account_id).where(
+                    runtime_profiles.c.runtime_profile_id
+                    == scope["runtime_profile_id"]
+                )
             )
         )
-    assert current_version_id == ticket.universe_version_id
+        policy_version = int(
+            await connection.scalar(
+                sa.select(owner_policy_current.c.policy_version).where(
+                    owner_policy_current.c.owner_policy_id == scope["owner_policy_id"]
+                )
+            )
+        )
+
+    original = _registered_sor_long_ticket()
+    domain = original.identity.netting_domain.model_copy(
+        update={"account_id": account_id}
+    )
+    signal_event_id = "signal:active-universe-runner"
+    identity = original.identity.model_copy(
+        update={
+            "ticket_id": build_ticket_id(
+                signal_event_id=signal_event_id,
+                runtime=original.identity.runtime,
+                netting_domain=domain,
+            ),
+            "signal_event_id": signal_event_id,
+            "exposure_episode_id": "episode:active-universe-runner",
+            "netting_domain": domain,
+        }
+    )
+    return original.model_copy(
+        update={
+            "identity": identity,
+            "runtime_scope_id": str(scope["runtime_scope_id"]),
+            "runtime_scope_version": int(scope["scope_version"]),
+            "universe_version_id": old_version_id,
+            "universe_semantic_digest": str(scope["universe_semantic_digest"]),
+            "owner_policy_id": str(scope["owner_policy_id"]),
+            "owner_policy_version": policy_version,
+        }
+    )

@@ -202,6 +202,7 @@ async def test_readonly_certification_accepts_only_structurally_consistent_unive
             "warming": 2,
             "retired": 0,
         },
+        "temporarily_unavailable_certification_count": 0,
     }
     assert inconsistent["status"] == "fail"
     assert inconsistent["strategy_universe"]["integrity_violation_count"] == 1

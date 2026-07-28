@@ -222,7 +222,26 @@ async def _certify(
                 await connection.execute(
                     text(
                         """
-                        WITH violations AS (
+                        WITH certification_targets AS (
+                            SELECT DISTINCT
+                                   scope.runtime_profile_id,
+                                   scope.exchange_instrument_id
+                              FROM brc_runtime_scopes_current scope
+                              JOIN brc_strategy_universe_versions version
+                                ON version.universe_version_id =
+                                   scope.universe_version_id
+                              JOIN brc_strategy_universe_members member
+                                ON member.universe_version_id =
+                                   scope.universe_version_id
+                               AND member.exchange_instrument_id =
+                                   scope.exchange_instrument_id
+                             WHERE scope.lifecycle_state IN ('active', 'warming')
+                               AND version.lifecycle_state IN ('active', 'warming')
+                             ORDER BY scope.runtime_profile_id,
+                                      scope.exchange_instrument_id
+                             LIMIT 70
+                        ),
+                        violations AS (
                             SELECT member.universe_version_id,
                                    member.exchange_instrument_id
                               FROM brc_strategy_universe_members member
@@ -292,8 +311,14 @@ async def _certify(
                             (SELECT count(*) FROM brc_runtime_scopes_current
                               WHERE lifecycle_state = 'retired'),
                             (SELECT count(*)
-                               FROM brc_instrument_certification_current
-                              WHERE status = 'temporarily_unavailable')
+                               FROM certification_targets target
+                               JOIN brc_instrument_certification_current certification
+                                 ON certification.runtime_profile_id =
+                                    target.runtime_profile_id
+                                AND certification.exchange_instrument_id =
+                                    target.exchange_instrument_id
+                              WHERE certification.status =
+                                    'temporarily_unavailable')
                         """
                     )
                 )

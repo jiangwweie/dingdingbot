@@ -88,3 +88,35 @@ git diff --check
 ```
 
 The final two commands completed successfully.
+
+## Review correction
+
+Independent review rejected the first checkpoint because the old-runner test
+seeded a replacement version and wrote the current pointer directly. That only
+exercised the database fence, not the official activation transaction.
+
+The corrected tests now build **Active A + Warming B** through the Universe
+repository, make both member sets certification/warm ready, and invoke only
+`advance_strategy_universe()` for B activation. The old runner's Ticket is
+frozen to A; after A is retired and B becomes current, it still reaches the
+existing reconcile, cleanup, Settlement, Review, and terminal APIs.
+
+The claimed-lane case now first issues an official durable ENTRY, then invokes
+the official activation use case. PostgreSQL rejects that transaction with
+SQLSTATE `55000`, and the complete pointer/version/scope projection snapshot
+is unchanged after rollback.
+
+Readonly temporary-certification reporting was also narrowed from a global
+table count to a distinct, `LIMIT 70` target set built from canonical
+active/warming Scope + Version + Member identities. A foreign runtime-profile
+row and retired Scope are both excluded by a disposable-PostgreSQL regression.
+
+Corrected verification:
+
+```text
+python3 -m pytest -q \
+  tests/trading_kernel/full_chain/test_crypto_universe_failure_recovery.py \
+  tests/trading_kernel/integration/test_strategy_universe_activation.py \
+  tests/trading_kernel/integration/test_strategy_universe_scripts.py
+29 collected; completed successfully
+```
