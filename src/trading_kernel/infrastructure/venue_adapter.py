@@ -433,7 +433,8 @@ class CcxtVenueAdapter:
             raise RuntimeError("canonical instrument has no taker fee rate")
 
         tp1_exchange_order_id = request.tp1_exchange_order_id
-        candle_limit = max(request.atr_period + 1, request.structure_window_bars)
+        # The latest venue candle can still be open and is excluded below.
+        candle_limit = max(request.atr_period + 2, request.structure_window_bars + 1)
         positions_call = _call_raw_exchange(
             exchange.fetch_positions,
             [symbol],

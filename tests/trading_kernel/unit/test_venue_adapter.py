@@ -575,6 +575,28 @@ class LifecycleFactsExchange:
         ]
 
 
+class IncompleteLastLifecycleFactsExchange(LifecycleFactsExchange):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ohlcv_limit: int | None = None
+
+    async def fetch_ohlcv(self, symbol, timeframe, since, limit):
+        del symbol, timeframe, since
+        self.ohlcv_limit = limit
+        latest_open_time_ms = 20_000_000
+        return [
+            [
+                latest_open_time_ms - (limit - 1 - index) * 900_000,
+                "60000",
+                str(60010 + index),
+                str(59990 + index),
+                str(60000 + index),
+                "10",
+            ]
+            for index in range(limit)
+        ]
+
+
 class ReviewEconomicsExchange:
     def __init__(self, *, include_fee: bool = True) -> None:
         self.include_fee = include_fee
@@ -1066,8 +1088,62 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
     assert facts.price_tick == Decimal("0.1")
     assert facts.market_facts is not None
     assert facts.market_facts.is_final_closed_candle is True
-    assert facts.market_facts.structure_reference == Decimal("60001")
+    assert facts.market_facts.structure_reference == Decimal("60002")
     assert facts.market_facts.atr > 0
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_keeps_runner_window_after_dropping_open_candle() -> None:
+    exchange = IncompleteLastLifecycleFactsExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        taker_fee_rates={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): Decimal("0.0005")
+        },
+        clock_ms=lambda: 20_000_000,
+    )
+    request = LifecycleFactsRequest(
+        ticket_id="ticket-1",
+        netting_domain=NettingDomain(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            position_side="long",
+        ),
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+        timeframe="15m",
+        entry_quantity=Decimal("0.01"),
+        expected_position_quantity=Decimal("0.005"),
+        entry_venue_client_order_id="brc-entry-1",
+        tp1_exchange_order_id=None,
+        entered_at_ms=1_000,
+        price_tick=Decimal("0.1"),
+        structure_window_bars=4,
+        atr_period=14,
+        runner_market_required=True,
+        observed_at_ms=20_000_000,
+    )
+
+    facts = await adapter.read_lifecycle_facts(request)
+
+    assert exchange.ohlcv_limit == 16
+    assert facts.market_facts is not None
+    assert facts.market_facts.is_final_closed_candle is True
 
 
 @pytest.mark.asyncio
