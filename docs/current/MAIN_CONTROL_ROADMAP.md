@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 ---
 
 # Main Control Roadmap
@@ -30,10 +30,10 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Branch | `codex/trading-kernel-rebuild-20260722` |
-| Production commit | `6e7bb2d13cec9bd9f060a1b5742be82f40cce3e2` |
-| Production tag | `tokyo-runtime-2026.07.27.3`; annotated, immutable, and verified on `origin` |
-| Production-commit certification | `421 passed`; architecture checks and production file-I/O audit pass |
-| Runtime ownership | Observation, Entry, Lifecycle, and Reconciliation are enabled, active, and at zero restarts |
+| Production commit | `1365356797b350f00c345b9f6e66915a0ad53097` |
+| Production tag | `tokyo-runtime-2026.07.28.1`; annotated, immutable, and verified on `origin` |
+| Production-commit certification | `427 passed`; architecture checks and production file-I/O audit pass |
+| Runtime ownership | Observation, Lifecycle, and Reconciliation are active at zero restarts; Entry is intentionally fenced during runner-recovery observation |
 | Scheduling model | Long-running systemd services; timer-based Python cold starts are retired and must not return |
 | PostgreSQL | The guarded flat-runtime reset removed all prior runtime/trade facts after exchange-flat verification; Registry, Policy, Capability, schema metadata, and the 33-table `0001_initial` baseline remain authoritative |
 | Strategy capability | Six registered Events, deterministic detectors, closed-candle Observation, Live/Replay parity, and real StrategySignal production |
@@ -43,9 +43,9 @@ different Netting Domains progress concurrently.
 | Runtime fence | Commit/schema drift records an Incident; an exact but disabled command capability is a controlled readonly fence, not an Incident |
 | Historical runtime/trade facts | Reset after verified exchange-flat state by explicit Owner authorization; no historical Ticket, command, Incident, Review, position, reservation, or observation fact remains as runtime authority |
 | Terminal-recovery repair | Exact cancel namespace/purpose, atomic Ticket-incident closure, and external-flat unavailable Review are deployed in the active Kernel |
-| Current live acceptance | Three natural `SOR-001 / SOR-SHORT` Tickets for AVAXUSDT, SOLUSDT, and BTCUSDT are `position_protected`; each has accepted ENTRY, Initial Stop, and TP1 commands, with zero open Incident or unresolved command. One ETHUSDT short ENTRY was authoritatively rejected for `wallet_risk_drift` and created no position |
-| Exchange postflight | Three Netting Domains are non-flat with exact Stop and TP1 protection; the other nine domains are flat; all six supported instruments are configured at `5x` |
-| Hourly supervision | All four persistent workers active at zero restarts; Entry is enabled, globally serialized, and current capacity is occupied by the three protected Tickets |
+| Current live acceptance | AVAXUSDT `SOR-001 / SOR-SHORT` remains `position_protected`; BTCUSDT and SOLUSDT completed TP1 and are `runner_protected`. BTC runner Stop moved from `64624.6` to `63729.5`; SOL runner Stop moved from `75.47` to `74.17`. All three Tickets have zero open Incident and zero unresolved command. One ETHUSDT short ENTRY was authoritatively rejected for `wallet_risk_drift` and created no position |
+| Exchange postflight | Three Netting Domains are non-flat and protected: AVAX retains Stop plus TP1; BTC and SOL retain exact runner Stops after their original full-quantity Stops were cancelled. The other nine domains are flat; all six supported instruments are configured at `5x` |
+| Hourly supervision | Observation, Lifecycle, and Reconciliation are active at zero restarts; Entry is intentionally fenced while the recovered runners are observed, and current capacity remains occupied by the three protected Tickets |
 | Full capability | `promote-full` not yet completed |
 
 ## Current Performance Snapshot
