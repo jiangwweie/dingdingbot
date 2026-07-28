@@ -519,11 +519,17 @@ class PostgresSignalRepository:
                 strategy_universe_members.c.universe_version_id
                 == strategy_universe_current.c.universe_version_id,
             )
+            .join(
+                instruments,
+                instruments.c.exchange_instrument_id
+                == strategy_universe_members.c.exchange_instrument_id,
+            )
             .where(
                 strategy_universe_current.c.event_spec_id == event_spec_id,
                 strategy_universe_current.c.lifecycle_state == "active",
                 strategy_universe_members.c.exchange_instrument_id
                 == exchange_instrument_id,
+                instruments.c.status == "active",
             )
         )
         if for_update:
@@ -531,6 +537,7 @@ class PostgresSignalRepository:
                 of=(
                     strategy_universe_current,
                     strategy_universe_members,
+                    instruments,
                 )
             )
         result = await self._connection.execute(statement)

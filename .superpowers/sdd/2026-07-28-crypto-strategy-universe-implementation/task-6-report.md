@@ -111,8 +111,99 @@ unrelated files were not mechanically reformatted in Task 6.
 ## Remaining Boundary
 
 Task 6 does not implement the Task 7 certification worker or Task 9 activation
-state machine. The current no-write proof uses the accepted authority boundary:
-an uncertified instrument remains `pending_certification` with a warming,
-`entry_enabled = false` scope, so the official chain creates neither Ticket nor
-durable Exchange Command. Existing Ticket protection/exit/reconciliation
-continues independently of current Universe membership.
+state machine. The current no-write proof uses the existing formal
+certification-derived instrument status while deliberately keeping Universe,
+Scope, Policy, and Entry authority active. Task 7 will own refreshing that
+status from readonly venue facts, and Task 9 will own complete activation.
+Existing Ticket protection/exit/reconciliation continues independently of
+current Universe membership.
+
+## Review Fix Round 1/5
+
+### Important 1: protection after Universe replacement
+
+The original test protected the Ticket before retiring its Universe, so it did
+not prove the required safety boundary.
+
+The replacement RED now performs:
+
+```text
+durable ENTRY accepted
+-> replace current Universe and retire the Ticket's old Scope/Universe
+-> official reconciliation records the fill
+-> reducer prepares durable INITIAL_STOP
+-> dispatcher submits INITIAL_STOP through strict codec
+-> TP1
+-> EXIT
+-> flat readonly reconciliation
+```
+
+The first RED was blocked by
+`brc_fence_universe_pointer_during_entry()` because it treated every held ENTRY
+lane as an unresolved Entry mutation, even after the durable ENTRY command was
+already accepted.
+
+The fence now blocks activation only while the Ticket owns an unresolved
+`SET_LEVERAGE` or `ENTRY` command in `prepared`, `claimed`, or
+`outcome_unknown`. Once ENTRY is durably accepted, Universe replacement may
+proceed while the still-held global lane continues to prohibit every new
+Ticket until Initial Stop protection resolves.
+
+### Important 2: certification as the isolated Entry gate
+
+The original test simultaneously removed the current pointer, changed the
+Universe to warming, disabled Entry, and marked the instrument
+`pending_certification`; it therefore did not prove certification was
+load-bearing.
+
+The corrected RED keeps all other authority valid:
+
+- current Universe remains active and points to the Ticket's version;
+- Runtime Scope remains `active` with `entry_enabled = true`;
+- Owner Policy and runtime Entry authority remain enabled;
+- only `brc_instruments.status` changes to `pending_certification`.
+
+Before the fix, `issue_ticket()` returned `ISSUED`. The active-member selector
+now joins and locks the exact instrument row and returns membership only when
+`brc_instruments.status = 'active'`. The corrected chain returns
+`SCOPE_OR_POLICY_MISMATCH` and proves **zero Ticket, zero Exchange Command, and
+zero Venue calls**.
+
+This is the smallest Task 6 formal source: the accepted design already defines
+`pending_certification -> active` on `brc_instruments` as the current
+certification-derived eligibility projection. Task 7 still owns how readonly
+venue facts refresh that projection; Task 9 still owns the complete
+certification/readiness activation transaction.
+
+### Round 1 RED / GREEN
+
+The two corrected tests initially failed with:
+
+1. pending certification alone still returned `IssueTicketStatus.ISSUED`;
+2. post-acceptance Universe replacement raised
+   `ck_brc_universe_activation_entry_lane_idle`.
+
+After the two minimal production changes, the same focused command returned
+**2 passed**.
+
+### Report location
+
+The committed root report was moved with `git mv` to:
+
+```text
+.superpowers/sdd/2026-07-28-crypto-strategy-universe-implementation/task-6-report.md
+```
+
+### Round 1 final verification
+
+The final focused PostgreSQL/unit command covered the dynamic routing contracts,
+the claimed-ENTRY activation fence, active-instrument signal eligibility,
+atomic Ticket admission, and a clean forward-only schema upgrade:
+
+```text
+65 passed in 7.01s
+```
+
+The changed migration, repository, and integration test passed Ruff core
+correctness (`E4`, `E7`, `E9`, `F`); the changed integration test also passed
+import ordering (`I`). `git diff --check` passed.

@@ -511,6 +511,7 @@ def _create_universe_activation_entry_fence() -> None:
             DECLARE
                 lane_status text;
                 blocking_ticket_id text;
+                entry_mutation_unresolved boolean;
             BEGIN
                 INSERT INTO brc_entry_lane_current (
                     lane_id,
@@ -540,7 +541,16 @@ def _create_universe_activation_entry_fence() -> None:
                 WHERE lane_id = 'global-entry'
                 FOR UPDATE;
 
-                IF lane_status <> 'idle' THEN
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM brc_exchange_commands
+                    WHERE ticket_id = blocking_ticket_id
+                      AND command_kind IN ('set_leverage', 'entry')
+                      AND status IN ('prepared', 'claimed', 'outcome_unknown')
+                )
+                INTO entry_mutation_unresolved;
+
+                IF lane_status <> 'idle' AND entry_mutation_unresolved THEN
                     RAISE EXCEPTION
                         'strategy universe activation is fenced by '
                         'global ENTRY lane ticket %',

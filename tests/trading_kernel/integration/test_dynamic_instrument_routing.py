@@ -44,10 +44,13 @@ from src.trading_kernel.infrastructure.binance_public_market_source import (
     CcxtBinancePublicMarketSource,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    exchange_commands,
     instruments,
     runtime_scopes_current,
     strategy_universe_current,
+    strategy_universe_members,
     strategy_universe_versions,
+    trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
@@ -250,7 +253,7 @@ async def test_registry_independent_instrument_routes_market_and_existing_ticket
 
 
 @pytest.mark.asyncio
-async def test_uncertified_warming_instrument_creates_no_command_or_venue_write(
+async def test_pending_certification_alone_creates_no_ticket_command_or_venue_write(
     dispatch_engine: AsyncEngine,
 ) -> None:
     ticket = _ticket()
@@ -258,44 +261,36 @@ async def test_uncertified_warming_instrument_creates_no_command_or_venue_write(
     await _seed_ticket_runtime_scope(dispatch_engine, ticket)
     async with dispatch_engine.begin() as connection:
         await connection.execute(
-            sa.delete(strategy_universe_current).where(
-                strategy_universe_current.c.event_spec_id
-                == ticket.identity.runtime.event_spec_id
-            )
-        )
-        await connection.execute(
-            sa.update(strategy_universe_versions)
-            .where(
-                strategy_universe_versions.c.universe_version_id
-                == ticket.universe_version_id
-            )
-            .values(
-                lifecycle_state="warming",
-                activated_at_ms=None,
-            )
-        )
-        await connection.execute(
-            sa.update(runtime_scopes_current)
-            .where(
-                runtime_scopes_current.c.runtime_scope_id
-                == ticket.runtime_scope_id
-            )
-            .values(
-                lifecycle_state="warming",
-                observation_enabled=True,
-                entry_enabled=False,
-                warm_ready_at_ms=None,
-                warm_readiness_digest=None,
-                warm_valid_until_ms=None,
-            )
-        )
-        await connection.execute(
             sa.update(instruments)
             .where(
                 instruments.c.exchange_instrument_id
                 == ticket.identity.netting_domain.exchange_instrument_id
             )
             .values(status="pending_certification")
+        )
+    async with dispatch_engine.connect() as connection:
+        current_universe_id = await connection.scalar(
+            sa.select(strategy_universe_current.c.universe_version_id).where(
+                strategy_universe_current.c.event_spec_id
+                == ticket.identity.runtime.event_spec_id
+            )
+        )
+        scope_authority = (
+            await connection.execute(
+                sa.select(
+                    runtime_scopes_current.c.lifecycle_state,
+                    runtime_scopes_current.c.entry_enabled,
+                ).where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == ticket.runtime_scope_id
+                )
+            )
+        ).one()
+        instrument_status = await connection.scalar(
+            sa.select(instruments.c.status).where(
+                instruments.c.exchange_instrument_id
+                == ticket.identity.netting_domain.exchange_instrument_id
+            )
         )
 
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
@@ -318,9 +313,29 @@ async def test_uncertified_warming_instrument_creates_no_command_or_venue_write(
             timeout_seconds=1,
         ),
     )
+    async with dispatch_engine.connect() as connection:
+        ticket_count = int(
+            (
+                await connection.execute(
+                    sa.select(sa.func.count()).select_from(trade_tickets)
+                )
+            ).scalar_one()
+        )
+        command_count = int(
+            (
+                await connection.execute(
+                    sa.select(sa.func.count()).select_from(exchange_commands)
+                )
+            ).scalar_one()
+        )
 
     assert issue_result.status is IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH
     assert dispatch_result.status is DispatchCommandStatus.NO_COMMAND
+    assert current_universe_id == ticket.universe_version_id
+    assert scope_authority == ("active", True)
+    assert instrument_status == "pending_certification"
+    assert ticket_count == 0
+    assert command_count == 0
     assert venue.calls == 0
 
 
@@ -352,6 +367,70 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
         ),
         entry_facts_source=PreflightFacts(),
     )
+
+    async with dispatch_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(instruments).values(
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                venue_id="binance-usdm",
+                asset_class="crypto",
+                venue_symbol="BTCUSDT",
+                contract_kind="perpetual",
+                status="active",
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_versions).values(
+                universe_version_id="universe:sor-long:replacement",
+                strategy_group_id=ticket.identity.runtime.strategy_group_id,
+                event_spec_id=ticket.identity.runtime.event_spec_id,
+                universe_version=2,
+                semantic_digest="sha256:" + "b" * 64,
+                lifecycle_state="active",
+                installed_at_ms=2_050,
+                activated_at_ms=2_050,
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_members).values(
+                universe_version_id="universe:sor-long:replacement",
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            )
+        )
+        await connection.execute(
+            sa.update(strategy_universe_current)
+            .where(
+                strategy_universe_current.c.event_spec_id
+                == ticket.identity.runtime.event_spec_id
+            )
+            .values(
+                universe_version_id="universe:sor-long:replacement",
+                semantic_digest="sha256:" + "b" * 64,
+                activation_generation=2,
+                activated_at_ms=2_050,
+            )
+        )
+        await connection.execute(
+            sa.update(strategy_universe_versions)
+            .where(
+                strategy_universe_versions.c.universe_version_id
+                == ticket.universe_version_id
+            )
+            .values(lifecycle_state="retired", retired_at_ms=2_150)
+        )
+        await connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id
+                == ticket.runtime_scope_id
+            )
+            .values(
+                lifecycle_state="retired",
+                observation_enabled=False,
+                entry_enabled=False,
+            )
+        )
+
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await reconcile_ticket(
             uow,
@@ -366,6 +445,17 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
                 ),
             ),
         )
+        commands_after_switch = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+
+    initial_stop_command = next(
+        command
+        for command in commands_after_switch
+        if command.kind is ExchangeCommandKind.INITIAL_STOP
+    )
+    assert initial_stop_command.status is ExchangeCommandStatus.PREPARED
+    assert initial_stop_command.ticket_identity == ticket.identity
 
     initial_stop = await _dispatch_ticket_command(
         dispatch_engine,
@@ -379,34 +469,6 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
         ticket.identity.ticket_id,
         now_ms=2_300,
     )
-
-    async with dispatch_engine.begin() as connection:
-        await connection.execute(
-            sa.delete(strategy_universe_current).where(
-                strategy_universe_current.c.event_spec_id
-                == ticket.identity.runtime.event_spec_id
-            )
-        )
-        await connection.execute(
-            sa.update(runtime_scopes_current)
-            .where(
-                runtime_scopes_current.c.runtime_scope_id
-                == ticket.runtime_scope_id
-            )
-            .values(
-                lifecycle_state="retired",
-                observation_enabled=False,
-                entry_enabled=False,
-            )
-        )
-        await connection.execute(
-            sa.update(strategy_universe_versions)
-            .where(
-                strategy_universe_versions.c.universe_version_id
-                == ticket.universe_version_id
-            )
-            .values(lifecycle_state="retired", retired_at_ms=2_150)
-        )
 
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await request_exit(
