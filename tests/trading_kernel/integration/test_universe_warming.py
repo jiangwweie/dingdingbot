@@ -9,8 +9,15 @@ import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+import src.trading_kernel.interfaces.observation_worker as observation_worker_module
+from src.trading_kernel.application.advance_strategy_universe import (
+    UniverseActivationRequest,
+    UniverseActivationStatus,
+    advance_strategy_universe,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     install_strategy_universe,
@@ -380,6 +387,282 @@ async def test_last_warm_success_auto_activates_fully_certified_universe(
     assert len(active_scopes) == len(MEMBERS)
     assert all(scope["entry_enabled"] for scope in active_scopes)
     assert side_effect_counts == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_observation_and_reconciliation_activation_converge_without_deadlock(
+    warming_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches scope-lock then advisory-lock inversion across existing workers."""
+
+    _, market_source = (
+        await _prepare_certified_universe_with_one_warm_scope(
+            warming_engine
+        )
+    )
+    async with warming_engine.connect() as connection:
+        universe_version_id = str(
+            await connection.scalar(
+                sa.select(
+                    strategy_universe_versions.c.universe_version_id
+                )
+            )
+        )
+
+    original_advance = (
+        observation_worker_module.advance_strategy_universe
+    )
+    observation_reached_activation = asyncio.Event()
+    release_observation_activation = asyncio.Event()
+
+    async def pause_before_observation_activation(uow, request):
+        observation_reached_activation.set()
+        await release_observation_activation.wait()
+        return await original_advance(uow, request)
+
+    monkeypatch.setattr(
+        observation_worker_module,
+        "advance_strategy_universe",
+        pause_before_observation_activation,
+    )
+    observation_task = asyncio.create_task(
+        run_observation_worker_once(
+            lambda: PostgresKernelUnitOfWork(warming_engine),
+            market_source,
+            _worker_request(now_ms=NOW_MS),
+        )
+    )
+    await asyncio.wait_for(
+        observation_reached_activation.wait(),
+        timeout=5,
+    )
+
+    async def reconciliation_activation():
+        async with PostgresKernelUnitOfWork(warming_engine) as uow:
+            return await advance_strategy_universe(
+                uow,
+                UniverseActivationRequest(
+                    universe_version_id=universe_version_id,
+                    attempted_at_ms=NOW_MS,
+                ),
+            )
+
+    reconciliation_task = asyncio.create_task(
+        reconciliation_activation()
+    )
+    try:
+        await _wait_for_advisory_lock_or_activation(
+            warming_engine,
+        )
+    finally:
+        release_observation_activation.set()
+
+    observation_result, reconciliation_activation_result = (
+        await asyncio.wait_for(
+            asyncio.gather(observation_task, reconciliation_task),
+            timeout=5,
+        )
+    )
+    async with warming_engine.connect() as connection:
+        current_rows = (
+            await connection.execute(
+                sa.select(strategy_universe_current)
+            )
+        ).mappings().all()
+        version_state = (
+            await connection.execute(
+                sa.select(
+                    strategy_universe_versions.c.lifecycle_state
+                )
+            )
+        ).scalar_one()
+        scope_states = (
+            await connection.execute(
+                sa.select(
+                    runtime_scopes_current.c.lifecycle_state,
+                    runtime_scopes_current.c.observation_enabled,
+                    runtime_scopes_current.c.entry_enabled,
+                    runtime_scopes_current.c.lease_owner,
+                ).order_by(
+                    runtime_scopes_current.c.exchange_instrument_id
+                )
+            )
+        ).all()
+        side_effect_counts = (
+            int(
+                await connection.scalar(
+                    sa.select(sa.func.count()).select_from(signal_events)
+                )
+                or 0
+            ),
+            int(
+                await connection.scalar(
+                    sa.select(sa.func.count()).select_from(trade_tickets)
+                )
+                or 0
+            ),
+            int(
+                await connection.scalar(
+                    sa.select(sa.func.count()).select_from(
+                        exchange_commands
+                    )
+                )
+                or 0
+            ),
+        )
+
+    assert observation_result.status is ObservationWorkerStatus.OBSERVED
+    assert observation_result.observation_status is ObservationStatus.WARMED
+    assert reconciliation_activation_result.status in {
+        UniverseActivationStatus.ACTIVATED,
+        UniverseActivationStatus.ALREADY_ACTIVE,
+    }
+    assert len(current_rows) == 1
+    assert current_rows[0]["activation_generation"] == 1
+    assert version_state == "active"
+    assert scope_states == [
+        ("active", True, True, None),
+        ("active", True, True, None),
+    ]
+    assert side_effect_counts == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_observation_activation_failure_preserves_schedule_and_next_tick_recovers(
+    warming_engine: AsyncEngine,
+) -> None:
+    """Catches activation rollback also rolling back warm claim completion."""
+
+    certification_source, market_source = (
+        await _prepare_certified_universe_with_one_warm_scope(
+            warming_engine
+        )
+    )
+    async with warming_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                """
+                CREATE FUNCTION fail_task10_observation_activation()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION
+                        'task 10 observation activation failure';
+                END
+                $$
+                """
+            )
+        )
+        await connection.execute(
+            sa.text(
+                """
+                CREATE TRIGGER trg_task10_observation_activation
+                BEFORE INSERT ON brc_strategy_universe_current
+                FOR EACH ROW EXECUTE FUNCTION
+                    fail_task10_observation_activation()
+                """
+            )
+        )
+
+    with pytest.raises(
+        DBAPIError,
+        match="task 10 observation activation failure",
+    ):
+        await run_observation_worker_once(
+            lambda: PostgresKernelUnitOfWork(warming_engine),
+            market_source,
+            _worker_request(now_ms=NOW_MS),
+        )
+
+    async with warming_engine.connect() as connection:
+        warming_scopes = (
+            await connection.execute(
+                sa.select(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.lifecycle_state == "warming"
+                )
+                .order_by(
+                    runtime_scopes_current.c.exchange_instrument_id
+                )
+            )
+        ).mappings().all()
+        current_count = int(
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(
+                    strategy_universe_current
+                )
+            )
+            or 0
+        )
+    assert len(warming_scopes) == len(MEMBERS)
+    assert all(
+        scope["warm_ready_at_ms"] == NOW_MS
+        for scope in warming_scopes
+    )
+    assert all(scope["lease_owner"] is None for scope in warming_scopes)
+    assert all(
+        scope["next_observation_due_at_ms"] == NOW_MS + 900_000
+        for scope in warming_scopes
+    )
+    assert current_count == 0
+
+    async with warming_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "DROP TRIGGER trg_task10_observation_activation "
+                "ON brc_strategy_universe_current"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                "DROP FUNCTION fail_task10_observation_activation()"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_instrument_certification_current "
+                "SET next_check_at_ms = :next_tick "
+                "WHERE exchange_instrument_id = :instrument_id"
+            ),
+            {
+                "next_tick": NOW_MS + 1,
+                "instrument_id": MEMBERS[0],
+            },
+        )
+
+    recovered = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        object(),
+        object(),
+        certification_worker_request(NOW_MS + 1).model_copy(
+            update={"runtime_commit": RUNTIME_COMMIT}
+        ),
+        instrument_certification_source=certification_source,
+    )
+    async with warming_engine.connect() as connection:
+        current = (
+            await connection.execute(
+                sa.select(strategy_universe_current)
+            )
+        ).mappings().one()
+        scope_states = (
+            await connection.execute(
+                sa.select(
+                    runtime_scopes_current.c.lifecycle_state,
+                    runtime_scopes_current.c.entry_enabled,
+                    runtime_scopes_current.c.lease_owner,
+                ).order_by(
+                    runtime_scopes_current.c.exchange_instrument_id
+                )
+            )
+        ).all()
+
+    assert recovered.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+    assert current["activation_generation"] == 1
+    assert scope_states == [
+        ("active", True, None),
+        ("active", True, None),
+    ]
 
 
 @pytest.mark.asyncio
@@ -1199,6 +1482,70 @@ def _worker_request(*, now_ms: int) -> ObservationWorkerRequest:
         lease_until_ms=now_ms + 30_000,
         timeout_seconds=1,
         retry_interval_ms=30_000,
+    )
+
+
+async def _prepare_certified_universe_with_one_warm_scope(
+    engine: AsyncEngine,
+) -> tuple[RecordingReadonlyCertificationSource, TypedMarketFake]:
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_runtime_capabilities_current "
+                "SET enabled = true "
+                "WHERE capability_key = 'exchange_commands'"
+            )
+        )
+    certification_source = RecordingReadonlyCertificationSource(engine)
+    for _ in MEMBERS:
+        result = await run_reconciliation_worker_once(
+            lambda: PostgresKernelUnitOfWork(engine),
+            object(),
+            object(),
+            certification_worker_request(NOW_MS).model_copy(
+                update={"runtime_commit": RUNTIME_COMMIT}
+            ),
+            instrument_certification_source=certification_source,
+        )
+        assert result.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+    market_source = _triggering_source(engine, MEMBERS)
+    first = await run_observation_worker_once(
+        lambda: PostgresKernelUnitOfWork(engine),
+        market_source,
+        _worker_request(now_ms=NOW_MS),
+    )
+    assert first.status is ObservationWorkerStatus.OBSERVED
+    assert first.observation_status is ObservationStatus.WARMED
+    return certification_source, market_source
+
+
+async def _wait_for_advisory_lock_or_activation(
+    engine: AsyncEngine,
+) -> None:
+    for _ in range(500):
+        async with engine.connect() as connection:
+            advisory_locks = int(
+                await connection.scalar(
+                    sa.text(
+                        "SELECT count(*) FROM pg_locks "
+                        "WHERE locktype = 'advisory' AND granted"
+                    )
+                )
+                or 0
+            )
+            current_count = int(
+                await connection.scalar(
+                    sa.select(sa.func.count()).select_from(
+                        strategy_universe_current
+                    )
+                )
+                or 0
+            )
+        if advisory_locks > 0 or current_count > 0:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(
+        "concurrent activation did not reach advisory lock"
     )
 
 

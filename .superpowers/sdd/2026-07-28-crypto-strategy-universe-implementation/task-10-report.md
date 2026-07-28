@@ -102,12 +102,13 @@ No fifth Worker was added.
   I/O, persists certification/Monitor in a short transaction, and then opens a
   separate short DB-only activation Unit of Work.
 - Observation still claims one Scope, closes the claim transaction, performs
-  market I/O, persists warm facts, and then calls DB-only activation from the
-  existing scheduling Unit of Work.
+  market I/O, persists warm facts, commits claim scheduling in its own short
+  Unit of Work, and only then opens a separate DB-only activation Unit of Work.
 - Expected `not_ready` results commit the newly persisted prerequisite and
   wait for the remaining prerequisite.
-- Activation exceptions are not swallowed. The activation/scheduling
-  transaction rolls back and the old Active Universe remains authoritative.
+- Activation exceptions are not swallowed. Only the activation transaction
+  rolls back; committed warm readiness and claim scheduling remain retryable,
+  while the old Active Universe remains authoritative.
 
 Two integration RED cases proved that `certification -> warming` and
 `warming -> certification` both stopped without a current pointer. Both orders
@@ -124,6 +125,40 @@ incorrectly accepted.
 The fast path now executes the same bounded authority/readiness validation as a
 new activation. Damage returns `not_ready`, does not advance the generation,
 and does not mutate the corrupted snapshot.
+
+### Deterministic Deadlock Repair
+
+The second review identified a deterministic lock-order inversion:
+
+```text
+Observation scheduling transaction:
+Scope row lock -> activation advisory lock
+
+Concurrent DB-only activation:
+activation advisory lock -> Scope row lock
+```
+
+A disposable PostgreSQL concurrency RED paused Observation immediately before
+its activation call, let a concurrent activation acquire the advisory lock,
+and then released Observation. PostgreSQL reported
+`DeadlockDetectedError`: the Observation backend waited for the advisory lock
+while the activation backend waited for the Observation transaction.
+
+Observation now commits warm persistence and claim scheduling before opening
+the activation Unit of Work. Every activation caller therefore starts at the
+same global advisory lock and only then reaches version/current/Scope locks.
+The concurrency regression proves:
+
+- both attempts finish without deadlock;
+- exactly one current pointer and activation generation are committed;
+- all Scopes converge to complete active authority;
+- Signal, Ticket, and Exchange Command counts remain zero.
+
+A second PostgreSQL regression injects an activation trigger failure after the
+final warm success. It proves warm readiness, released lease, and next
+observation due time were already committed, the Universe remains wholly
+Warming with no current pointer, and the next Reconciliation cadence activates
+generation 1 after the injected fault is removed.
 
 ## RED And GREEN Evidence
 
@@ -169,6 +204,13 @@ bounds, Signal eligibility, and Reconciliation fairness/Review:
 
 ```text
 102 passed in 70.06s
+```
+
+P2 deadlock-repair proportional verification, including deterministic
+PostgreSQL lock contention and next-cadence fault recovery:
+
+```text
+104 passed in 70.08s
 ```
 
 Static gates:

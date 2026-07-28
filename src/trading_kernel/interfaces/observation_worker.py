@@ -126,6 +126,7 @@ async def run_observation_worker_once(
         if retry
         else claim.trigger_candle_close_time_ms + interval_ms
     )
+    activation_universe_version_id: str | None = None
     async with uow_factory() as uow:
         await uow.signals.schedule_observation_scope(
             runtime_scope_id=claim.runtime_scope_id,
@@ -141,10 +142,13 @@ async def run_observation_worker_once(
                 raise RuntimeError(
                     "warmed observation scope authority disappeared"
                 )
+            activation_universe_version_id = scope.universe_version_id
+    if activation_universe_version_id is not None:
+        async with uow_factory() as uow:
             await advance_strategy_universe(
                 uow,
                 UniverseActivationRequest(
-                    universe_version_id=scope.universe_version_id,
+                    universe_version_id=activation_universe_version_id,
                     attempted_at_ms=request.now_ms,
                 ),
             )
