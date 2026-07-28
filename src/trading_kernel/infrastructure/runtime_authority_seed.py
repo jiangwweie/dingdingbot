@@ -20,6 +20,7 @@ from src.trading_kernel.domain.strategy_registry import (
 )
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
+    budget_reservations,
     entry_lane_current,
     exchange_commands,
     owner_policy_current,
@@ -437,7 +438,6 @@ async def deploy_protected_identity(
     request: RuntimeAuthoritySeedRequest,
     *,
     protected_ticket_ids: Sequence[str],
-    tp1_replay_ticket_ids: Sequence[str] = (),
 ) -> RuntimeDeploymentIdentityResult:
     """Rotate identity only across an exact, fully protected Ticket set."""
 
@@ -448,24 +448,10 @@ async def deploy_protected_identity(
         raise ValueError("protected Ticket identities must be non-blank")
     if len(set(normalized_ticket_ids)) != len(normalized_ticket_ids):
         raise ValueError("protected Ticket identities must be distinct")
-    normalized_tp1_replay_ticket_ids = tuple(
-        ticket_id.strip() for ticket_id in tp1_replay_ticket_ids
-    )
-    if any(not item for item in normalized_tp1_replay_ticket_ids):
-        raise ValueError("TP1 replay Ticket identities must be non-blank")
-    if len(set(normalized_tp1_replay_ticket_ids)) != len(
-        normalized_tp1_replay_ticket_ids
-    ):
-        raise ValueError("TP1 replay Ticket identities must be distinct")
-    if not set(normalized_tp1_replay_ticket_ids).issubset(
-        normalized_ticket_ids
-    ):
-        raise ValueError("TP1 replay Tickets must be protected Tickets")
     return await _deploy_runtime_identity(
         uow,
         request,
         protected_ticket_ids=frozenset(normalized_ticket_ids),
-        tp1_replay_ticket_ids=frozenset(normalized_tp1_replay_ticket_ids),
     )
 
 
@@ -475,7 +461,6 @@ async def _deploy_runtime_identity(
     *,
     recovery_ticket_id: str | None = None,
     protected_ticket_ids: frozenset[str] | None = None,
-    tp1_replay_ticket_ids: frozenset[str] = frozenset(),
 ) -> RuntimeDeploymentIdentityResult:
     """Install the exact identity after a flat or narrowly safe recovery gate."""
 
@@ -505,7 +490,7 @@ async def _deploy_runtime_identity(
         await _require_protected_identity_activity(
             connection,
             protected_ticket_ids=protected_ticket_ids,
-            tp1_replay_ticket_ids=tp1_replay_ticket_ids,
+            account_id=request.account_id,
         )
     elif recovery_ticket_id is None:
         await _require_zero_runtime_activity(connection)
@@ -992,7 +977,7 @@ async def _require_protected_identity_activity(
     connection: AsyncConnection,
     *,
     protected_ticket_ids: frozenset[str],
-    tp1_replay_ticket_ids: frozenset[str],
+    account_id: str,
 ) -> None:
     active_tickets = (
         await connection.execute(
@@ -1043,17 +1028,6 @@ async def _require_protected_identity_activity(
     for ticket_id in protected_ticket_ids:
         aggregate = aggregates_by_ticket[ticket_id]
         expected_quantity = Decimal(str(aggregate["position_qty"]))
-        if ticket_id in tp1_replay_ticket_ids:
-            tp1_target_quantity = Decimal(str(aggregate["tp1_target_qty"]))
-            if (
-                Decimal(str(aggregate["tp1_filled_qty"])) != 0
-                or tp1_target_quantity <= 0
-                or tp1_target_quantity >= expected_quantity
-            ):
-                raise RuntimeAuthorityTransitionRefused(
-                    "TP1 replay identity requires an unrecorded full TP1 target"
-                )
-            expected_quantity -= tp1_target_quantity
         if (
             Decimal(str(projected_by_ticket[ticket_id]["quantity"]))
             != expected_quantity
@@ -1061,6 +1035,19 @@ async def _require_protected_identity_activity(
             raise RuntimeAuthorityTransitionRefused(
                 "protected identity requires matching projected positions"
             )
+
+    _require_exact_active_budget_reservations(
+        active_tickets,
+        (
+            await connection.execute(
+                sa.select(budget_reservations)
+                .where(
+                    budget_reservations.c.status == "active",
+                )
+                .with_for_update(of=budget_reservations)
+            )
+        ).mappings().all(),
+    )
 
     exposures = (
         await connection.execute(
@@ -1071,10 +1058,14 @@ async def _require_protected_identity_activity(
     ).mappings().all()
     if (
         len(exposures) != 1
+        or exposures[0]["venue_id"] != VENUE_ID
+        or exposures[0]["account_id"] != account_id
         or int(str(exposures[0]["active_ticket_count"]))
         != len(protected_ticket_ids)
-        or Decimal(str(exposures[0]["gross_notional"])) <= 0
-        or Decimal(str(exposures[0]["gross_risk_at_stop"])) < 0
+        or Decimal(str(exposures[0]["gross_notional"]))
+        != sum(Decimal(str(ticket["notional"])) for ticket in active_tickets)
+        or Decimal(str(exposures[0]["gross_risk_at_stop"]))
+        != sum(Decimal(str(ticket["risk_at_stop"])) for ticket in active_tickets)
     ):
         raise RuntimeAuthorityTransitionRefused(
             "protected identity requires matching account exposure"
@@ -1120,7 +1111,45 @@ async def _require_protected_identity_activity(
         )
 
 
-def _aggregate_has_complete_protection(row: Mapping[str, object]) -> bool:
+def _require_exact_active_budget_reservations(
+    active_tickets: Sequence[RowMapping],
+    reservations: Sequence[RowMapping],
+) -> None:
+    reservations_by_ticket = {
+        str(row["ticket_id"]): row for row in reservations
+    }
+    expected_ticket_ids = {str(ticket["ticket_id"]) for ticket in active_tickets}
+    if set(reservations_by_ticket) != expected_ticket_ids or len(reservations) != len(
+        expected_ticket_ids
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "protected identity requires exact active Budget Reservations"
+        )
+
+    for ticket in active_tickets:
+        reservation = reservations_by_ticket[str(ticket["ticket_id"])]
+        if (
+            reservation["owner_policy_id"] != ticket["owner_policy_id"]
+            or reservation["venue_id"] != ticket["venue_id"]
+            or reservation["account_id"] != ticket["account_id"]
+            or Decimal(str(reservation["reserved_notional"]))
+            != Decimal(str(ticket["notional"]))
+            or Decimal(str(reservation["reserved_risk"]))
+            != Decimal(str(ticket["planned_stop_risk_budget"]))
+            or Decimal(str(reservation["reserved_margin"]))
+            != Decimal(str(ticket["reserved_margin"]))
+            or Decimal(str(reservation["planned_stop_risk_budget"]))
+            != Decimal(str(ticket["planned_stop_risk_budget"]))
+            or reservation["risk_reservation_basis"]
+            != ticket["risk_reservation_basis"]
+            or reservation["released_at_ms"] is not None
+        ):
+            raise RuntimeAuthorityTransitionRefused(
+                "protected identity requires exact active Budget Reservations"
+            )
+
+
+def _aggregate_has_complete_protection(row: RowMapping) -> bool:
     status = str(row["status"])
     position_quantity = Decimal(str(row["position_qty"]))
     if (

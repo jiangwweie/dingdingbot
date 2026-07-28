@@ -33,10 +33,6 @@ SAFETY_SERVICES = (
     LIFECYCLE_SERVICE,
     "brc-trading-kernel-reconciliation-worker.service",
 )
-PROTECTED_HANDOVER_PRE_LIFECYCLE_SERVICES = (
-    "brc-trading-kernel-observation-worker.service",
-    "brc-trading-kernel-reconciliation-worker.service",
-)
 ALL_SERVICES = (
     "brc-trading-kernel-observation-worker.service",
     ENTRY_SERVICE,
@@ -63,7 +59,6 @@ class DeploymentPlan:
     expected_configured_leverage: int
     enable_entry: bool
     protected_ticket_ids: tuple[str, ...] = ()
-    tp1_replay_ticket_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _COMMIT.fullmatch(self.target_commit):
@@ -81,14 +76,8 @@ class DeploymentPlan:
             raise ValueError("protected Ticket identities must be non-blank")
         if len(set(self.protected_ticket_ids)) != len(self.protected_ticket_ids):
             raise ValueError("protected Ticket identities must be distinct")
-        if any(not ticket_id.strip() for ticket_id in self.tp1_replay_ticket_ids):
-            raise ValueError("TP1 replay Ticket identities must be non-blank")
-        if len(set(self.tp1_replay_ticket_ids)) != len(self.tp1_replay_ticket_ids):
-            raise ValueError("TP1 replay Ticket identities must be distinct")
-        if not set(self.tp1_replay_ticket_ids).issubset(
-            self.protected_ticket_ids
-        ):
-            raise ValueError("TP1 replay Tickets must be protected Tickets")
+        if self.protected_ticket_ids and self.enable_entry:
+            raise ValueError("protected handover must keep ENTRY fenced")
 
 
 @dataclass(frozen=True)
@@ -109,6 +98,12 @@ class TokyoReleaseBackend(Protocol):
     def certify_protected(self, release: str) -> Mapping[str, object]: ...
 
     def probe_exchange(self, release: str) -> Mapping[str, object]: ...
+
+    def probe_protected_exchange(
+        self,
+        release: str,
+        protected_tickets: list[object],
+    ) -> Mapping[str, object]: ...
 
     def read_release_marker(self, release: str, marker: str) -> str: ...
 
@@ -131,7 +126,6 @@ class TokyoReleaseBackend(Protocol):
         commit: str,
         schema_revision: str,
         ticket_ids: tuple[str, ...],
-        tp1_replay_ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]: ...
 
     def activate_release(
@@ -160,13 +154,20 @@ def deploy_tokyo_release(
         if plan.protected_ticket_ids
         else backend.certify_flat(plan.target_release)
     )
-    current_probe = backend.probe_exchange(plan.target_release)
+    current_probe = (
+        backend.probe_protected_exchange(
+            plan.target_release,
+            _require_protected_ticket_rows(current_certification),
+        )
+        if plan.protected_ticket_ids
+        else backend.probe_exchange(plan.target_release)
+    )
     current_identity = (
-        _require_protected_release_facts(
-            current_certification,
-            current_probe,
-            expected_leverage=plan.expected_configured_leverage,
-            protected_ticket_count=len(plan.protected_ticket_ids),
+            _require_protected_release_facts(
+                current_certification,
+                current_probe,
+                expected_leverage=plan.expected_configured_leverage,
+                protected_ticket_ids=plan.protected_ticket_ids,
         )
         if plan.protected_ticket_ids
         else _require_release_facts(
@@ -206,7 +207,6 @@ def deploy_tokyo_release(
                 plan.target_commit,
                 plan.schema_revision,
                 plan.protected_ticket_ids,
-                plan.tp1_replay_ticket_ids,
             )
             if plan.protected_ticket_ids
             else backend.deploy_identity(
@@ -225,25 +225,25 @@ def deploy_tokyo_release(
             plan.schema_revision,
             seed_identity,
         )
-        initial_safety_services = (
-            PROTECTED_HANDOVER_PRE_LIFECYCLE_SERVICES
-            if plan.protected_ticket_ids
-            else SAFETY_SERVICES
-        )
-        backend.start_services(initial_safety_services)
-
         target_certification = (
             backend.certify_protected(plan.target_release)
             if plan.protected_ticket_ids
             else backend.certify_flat(plan.target_release)
         )
-        target_probe = backend.probe_exchange(plan.target_release)
+        target_probe = (
+            backend.probe_protected_exchange(
+                plan.target_release,
+                _require_protected_ticket_rows(target_certification),
+            )
+            if plan.protected_ticket_ids
+            else backend.probe_exchange(plan.target_release)
+        )
         target_identity = (
             _require_protected_release_facts(
                 target_certification,
                 target_probe,
                 expected_leverage=plan.expected_configured_leverage,
-                protected_ticket_count=len(plan.protected_ticket_ids),
+                protected_ticket_ids=plan.protected_ticket_ids,
             )
             if plan.protected_ticket_ids
             else _require_release_facts(
@@ -267,8 +267,7 @@ def deploy_tokyo_release(
         ):
             _require_marker(backend, plan.target_release, marker, expected)
 
-        if plan.protected_ticket_ids:
-            backend.start_services((LIFECYCLE_SERVICE,))
+        backend.start_services(SAFETY_SERVICES)
         if plan.enable_entry:
             backend.start_services((ENTRY_SERVICE,))
         expected_services = ALL_SERVICES if plan.enable_entry else SAFETY_SERVICES
@@ -280,7 +279,8 @@ def deploy_tokyo_release(
     except Exception:
         if services_stopped:
             backend.fence_entry()
-            backend.start_services(SAFETY_SERVICES)
+            if not plan.protected_ticket_ids:
+                backend.start_services(SAFETY_SERVICES)
         raise
 
     return DeploymentResult(
@@ -351,8 +351,9 @@ def _require_protected_release_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
-    protected_ticket_count: int,
+    protected_ticket_ids: tuple[str, ...],
 ) -> dict[str, str]:
+    protected_ticket_count = len(protected_ticket_ids)
     if certification.get("status") != "pass":
         raise DeploymentBlocked("database protected certification failed")
     active_counts = certification.get("active_counts")
@@ -389,6 +390,11 @@ def _require_protected_release_facts(
         raise DeploymentBlocked("exchange protected position count differs")
     if int(str(probe.get("open_order_domain_count", -1))) != protected_ticket_count:
         raise DeploymentBlocked("exchange protected order count differs")
+    _require_exact_protected_exchange_facts(
+        certification,
+        probe,
+        protected_ticket_ids=protected_ticket_ids,
+    )
     rules = probe.get("rules")
     if not isinstance(rules, list) or len(rules) != 6:
         raise DeploymentBlocked("production instrument rule set is incomplete")
@@ -402,6 +408,64 @@ def _require_protected_release_facts(
             "production configured leverage differs from fixed 5x policy"
         )
     return identity
+
+
+def _require_exact_protected_exchange_facts(
+    certification: Mapping[str, object],
+    probe: Mapping[str, object],
+    *,
+    protected_ticket_ids: tuple[str, ...],
+) -> None:
+    certification_tickets = certification.get("protected_tickets")
+    probe_tickets = probe.get("protected_tickets")
+    if not isinstance(certification_tickets, list) or not isinstance(
+        probe_tickets,
+        list,
+    ):
+        raise DeploymentBlocked("exact protected exchange facts are missing")
+    expected_ids = set(protected_ticket_ids)
+    certification_by_ticket = _protected_ticket_facts_by_ticket(
+        certification_tickets,
+        expected_ids=expected_ids,
+    )
+    probe_by_ticket = _protected_ticket_facts_by_ticket(
+        probe_tickets,
+        expected_ids=expected_ids,
+    )
+    if certification_by_ticket != probe_by_ticket:
+        raise DeploymentBlocked("exact protected exchange facts differ")
+
+
+def _require_protected_ticket_rows(
+    certification: Mapping[str, object],
+) -> list[object]:
+    rows = certification.get("protected_tickets")
+    if not isinstance(rows, list):
+        raise DeploymentBlocked("exact protected exchange facts are missing")
+    return rows
+
+
+def _protected_ticket_facts_by_ticket(
+    rows: list[object],
+    *,
+    expected_ids: set[str],
+) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise DeploymentBlocked("exact protected exchange facts are invalid")
+        ticket_id = str(row.get("ticket_id", "")).strip()
+        if not ticket_id or ticket_id in normalized:
+            raise DeploymentBlocked("exact protected exchange facts are invalid")
+        normalized[ticket_id] = json.dumps(
+            row,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    if set(normalized) != expected_ids:
+        raise DeploymentBlocked("exact protected exchange facts differ")
+    return normalized
 
 
 def _require_deployment_identity(
@@ -477,6 +541,29 @@ class SshTokyoReleaseBackend:
             "scripts/trading_kernel/probe_production_runtime.py",
         )
 
+    def probe_protected_exchange(
+        self,
+        release: str,
+        protected_tickets: list[object],
+    ) -> Mapping[str, object]:
+        encoded_rows: list[str] = []
+        for row in protected_tickets:
+            if not isinstance(row, Mapping):
+                raise TypeError("protected certification row must be a mapping")
+            encoded_rows.append(
+                json.dumps(
+                    row,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+        return self._release_json(
+            release,
+            "scripts/trading_kernel/probe_production_runtime.py",
+            *(argument for row in encoded_rows for argument in ("--protected-ticket-json", row)),
+        )
+
     def read_release_marker(self, release: str, marker: str) -> str:
         return self._remote(("sudo", "cat", f"{release}/{marker}")).stdout
 
@@ -545,7 +632,6 @@ class SshTokyoReleaseBackend:
         commit: str,
         schema_revision: str,
         ticket_ids: tuple[str, ...],
-        tp1_replay_ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         return self._release_json(
             release,
@@ -559,11 +645,6 @@ class SshTokyoReleaseBackend:
                 argument
                 for ticket_id in ticket_ids
                 for argument in ("--protected-ticket-id", ticket_id)
-            ),
-            *(
-                argument
-                for ticket_id in tp1_replay_ticket_ids
-                for argument in ("--tp1-replay-ticket-id", ticket_id)
             ),
         )
 
@@ -768,15 +849,6 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--tp1-replay-ticket-id",
-        action="append",
-        default=[],
-        help=(
-            "Named protected Ticket whose projection is the remaining runner "
-            "after an unrecorded full TP1; repeat only for those Tickets."
-        ),
-    )
-    parser.add_argument(
         "--timeout-seconds",
         type=float,
         default=60.0,
@@ -808,7 +880,6 @@ def main(argv: list[str] | None = None) -> int:
         expected_configured_leverage=EXPECTED_CONFIGURED_LEVERAGE,
         enable_entry=args.enable_entry,
         protected_ticket_ids=tuple(args.protected_ticket_id),
-        tp1_replay_ticket_ids=tuple(args.tp1_replay_ticket_id),
     )
     backend = SshTokyoReleaseBackend(
         target=args.target,

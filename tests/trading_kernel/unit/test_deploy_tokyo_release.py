@@ -7,8 +7,6 @@ import pytest
 from scripts.trading_kernel.deploy_tokyo_release import (
     ALL_SERVICES,
     ENTRY_SERVICE,
-    LIFECYCLE_SERVICE,
-    PROTECTED_HANDOVER_PRE_LIFECYCLE_SERVICES,
     SAFETY_SERVICES,
     DeploymentBlocked,
     DeploymentPlan,
@@ -53,13 +51,13 @@ def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
             "0001_initial",
             SEED_IDENTITY,
         ),
-        ("start_services", SAFETY_SERVICES),
         ("certify_flat", TARGET_RELEASE),
         ("probe_exchange", TARGET_RELEASE),
         ("read_current_release",),
         ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
         ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
+        ("start_services", SAFETY_SERVICES),
         ("start_services", (ENTRY_SERVICE,)),
         ("services_active", ALL_SERVICES),
     ]
@@ -89,15 +87,13 @@ def test_post_stop_failure_fences_entry_and_restores_safety_workers() -> None:
 
 def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
-    tp1_replay_ticket_ids = ticket_ids[1:]
-    backend = FakeDeploymentBackend(active_ticket_count=len(ticket_ids))
+    backend = FakeDeploymentBackend(protected_ticket_ids=ticket_ids)
 
     result = deploy_tokyo_release(
         backend,
         _plan(
             enable_entry=False,
             protected_ticket_ids=ticket_ids,
-            tp1_replay_ticket_ids=tp1_replay_ticket_ids,
         ),
     )
 
@@ -106,7 +102,7 @@ def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
         ("read_current_release",),
         ("install_release", TARGET_COMMIT, TARGET_RELEASE),
         ("certify_protected", TARGET_RELEASE),
-        ("probe_exchange", TARGET_RELEASE),
+        ("probe_protected_exchange", TARGET_RELEASE, ticket_ids),
         ("read_release_marker", CURRENT_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", CURRENT_RELEASE, ".brc-schema-revision"),
         ("stop_services", ALL_SERVICES),
@@ -118,7 +114,6 @@ def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
             TARGET_COMMIT,
             "0001_initial",
             ticket_ids,
-            tp1_replay_ticket_ids,
         ),
         (
             "activate_release",
@@ -127,38 +122,87 @@ def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
             "0001_initial",
             SEED_IDENTITY,
         ),
-        ("start_services", PROTECTED_HANDOVER_PRE_LIFECYCLE_SERVICES),
         ("certify_protected", TARGET_RELEASE),
-        ("probe_exchange", TARGET_RELEASE),
+        ("probe_protected_exchange", TARGET_RELEASE, ticket_ids),
         ("read_current_release",),
         ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
         ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
-        ("start_services", (LIFECYCLE_SERVICE,)),
+        ("start_services", SAFETY_SERVICES),
         ("services_active", ALL_SERVICES),
     ]
 
 
 def test_protected_release_refuses_exchange_domains_outside_ticket_set() -> None:
-    backend = FakeDeploymentBackend(active_ticket_count=3, open_order_domain_count=2)
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    backend = FakeDeploymentBackend(
+        protected_ticket_ids=ticket_ids,
+        open_order_domain_count=2,
+    )
 
     with pytest.raises(DeploymentBlocked, match="protected order count"):
         deploy_tokyo_release(
             backend,
             _plan(
                 enable_entry=False,
-                protected_ticket_ids=("ticket:avax", "ticket:btc", "ticket:sol"),
+                protected_ticket_ids=ticket_ids,
             ),
         )
 
     assert not any(call[0] == "stop_services" for call in backend.calls)
 
 
+def test_protected_release_forbids_enabling_entry() -> None:
+    with pytest.raises(ValueError, match="ENTRY"):
+        _plan(
+            enable_entry=True,
+            protected_ticket_ids=("ticket:avax",),
+        )
+
+
+def test_protected_release_refuses_count_only_exchange_evidence() -> None:
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    backend = FakeDeploymentBackend(
+        protected_ticket_ids=ticket_ids,
+        include_exact_protected_facts=False,
+    )
+
+    with pytest.raises(DeploymentBlocked, match="exact protected exchange facts"):
+        deploy_tokyo_release(
+            backend,
+            _plan(
+                enable_entry=False,
+                protected_ticket_ids=ticket_ids,
+            ),
+        )
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+
+
+def test_failed_protected_postflight_starts_no_mutating_worker() -> None:
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    backend = FakeDeploymentBackend(
+        protected_ticket_ids=ticket_ids,
+        fail_at="target_protected_certification",
+    )
+
+    with pytest.raises(RuntimeError, match="simulated protected certification failure"):
+        deploy_tokyo_release(
+            backend,
+            _plan(
+                enable_entry=False,
+                protected_ticket_ids=ticket_ids,
+            ),
+        )
+
+    assert not any(call[0] == "start_services" for call in backend.calls)
+    assert ("fence_entry",) in backend.calls
+
+
 def _plan(
     *,
     enable_entry: bool,
     protected_ticket_ids: tuple[str, ...] = (),
-    tp1_replay_ticket_ids: tuple[str, ...] = (),
 ) -> DeploymentPlan:
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
@@ -167,7 +211,6 @@ def _plan(
         expected_configured_leverage=5,
         enable_entry=enable_entry,
         protected_ticket_ids=protected_ticket_ids,
-        tp1_replay_ticket_ids=tp1_replay_ticket_ids,
     )
 
 
@@ -177,17 +220,26 @@ class FakeDeploymentBackend:
         *,
         configured_leverage: int = 5,
         active_ticket_count: int = 0,
+        protected_ticket_ids: tuple[str, ...] = (),
         open_order_domain_count: int | None = None,
+        include_exact_protected_facts: bool = True,
         fail_at: str | None = None,
     ) -> None:
         self.configured_leverage = configured_leverage
-        self.active_ticket_count = active_ticket_count
+        self.protected_ticket_ids = protected_ticket_ids
+        self.active_ticket_count = (
+            len(protected_ticket_ids)
+            if protected_ticket_ids
+            else active_ticket_count
+        )
         self.open_order_domain_count = (
-            active_ticket_count
+            self.active_ticket_count
             if open_order_domain_count is None
             else open_order_domain_count
         )
+        self.include_exact_protected_facts = include_exact_protected_facts
         self.fail_at = fail_at
+        self.protected_certification_calls = 0
         self.calls: list[tuple[object, ...]] = []
         self.current_release = CURRENT_RELEASE
         self.runtime_commit = CURRENT_COMMIT
@@ -216,7 +268,13 @@ class FakeDeploymentBackend:
 
     def certify_protected(self, release: str) -> Mapping[str, object]:
         self.calls.append(("certify_protected", release))
-        return {
+        self.protected_certification_calls += 1
+        if (
+            self.fail_at == "target_protected_certification"
+            and self.protected_certification_calls == 2
+        ):
+            raise RuntimeError("simulated protected certification failure")
+        payload: dict[str, object] = {
             "status": "pass",
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
@@ -230,10 +288,16 @@ class FakeDeploymentBackend:
                 "incidents": 0,
             },
         }
+        if self.include_exact_protected_facts:
+            payload["protected_tickets"] = self._protected_ticket_facts()
+        return payload
 
     def probe_exchange(self, release: str) -> Mapping[str, object]:
         self.calls.append(("probe_exchange", release))
-        return {
+        return self._probe_payload()
+
+    def _probe_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
             "venue_id": "binance-usdm",
             "account_position_mode": "independent_sides",
             "account_margin_mode": "cross",
@@ -247,6 +311,51 @@ class FakeDeploymentBackend:
                 for index in range(6)
             ],
         }
+        if self.include_exact_protected_facts:
+            payload["protected_tickets"] = self._protected_ticket_facts()
+        return payload
+
+    def probe_protected_exchange(
+        self,
+        release: str,
+        protected_tickets: list[object],
+    ) -> Mapping[str, object]:
+        self.calls.append(
+            (
+                "probe_protected_exchange",
+                release,
+                tuple(
+                    str(row["ticket_id"])
+                    for row in protected_tickets
+                    if isinstance(row, Mapping)
+                ),
+            )
+        )
+        return self._probe_payload()
+
+    def _protected_ticket_facts(self) -> list[dict[str, object]]:
+        return [
+            {
+                "ticket_id": ticket_id,
+                "netting_domain_key": (
+                    f"binance-usdm:subaccount-main:instrument-{index}:short"
+                ),
+                "aggregate_status": "runner_protected",
+                "position_quantity": "1",
+                "protected_quantity": "1",
+                "active_stop_order": {
+                    "exchange_order_id": f"stop-{index}",
+                    "order_namespace": "conditional",
+                    "position_side": "short",
+                    "order_side": "buy",
+                    "quantity": "1",
+                    "reduce_only": True,
+                    "stop_price": "101",
+                },
+                "recorded_tp1_fill_quantity": "1",
+            }
+            for index, ticket_id in enumerate(self.protected_ticket_ids, start=1)
+        ]
 
     def read_release_marker(self, release: str, marker: str) -> str:
         self.calls.append(("read_release_marker", release, marker))
@@ -292,7 +401,6 @@ class FakeDeploymentBackend:
         commit: str,
         schema_revision: str,
         ticket_ids: tuple[str, ...],
-        tp1_replay_ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         self.calls.append(
             (
@@ -301,7 +409,6 @@ class FakeDeploymentBackend:
                 commit,
                 schema_revision,
                 ticket_ids,
-                tp1_replay_ticket_ids,
             )
         )
         self.runtime_commit = commit

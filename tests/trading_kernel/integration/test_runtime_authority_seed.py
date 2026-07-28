@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import importlib
-from pathlib import Path
 import subprocess
 import sys
+from decimal import Decimal
+from pathlib import Path
 from types import ModuleType
 from uuid import uuid4
 
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
+    budget_reservations,
     entry_lane_current,
     exchange_commands,
     owner_policy_current,
@@ -30,13 +31,13 @@ from src.trading_kernel.infrastructure.pg_models import (
     trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from scripts.trading_kernel.certify_readonly import _certify
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
     SAFE_DATABASE,
     _database_url,
     _run_alembic,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -321,13 +322,12 @@ async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
-    tp1_replay_ticket_ids = ticket_ids[1:]
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
         await runtime_seed.deploy_runtime_identity(uow, initial)
     await _insert_protected_tickets(
         runtime_seed_engine,
         ticket_ids,
-        tp1_replay_ticket_ids=tp1_replay_ticket_ids,
+        runner_ticket_ids=ticket_ids[1:],
     )
 
     target = initial.model_copy(
@@ -341,7 +341,6 @@ async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
             uow,
             target,
             protected_ticket_ids=ticket_ids,
-            tp1_replay_ticket_ids=tp1_replay_ticket_ids,
         )
 
     assert result.runtime_commit == "b" * 40
@@ -498,6 +497,174 @@ async def test_protected_identity_rotates_a_complete_runner_ticket(
 
 
 @pytest.mark.asyncio
+async def test_readonly_certification_emits_exact_protected_ticket_manifest(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    await _insert_protected_tickets(
+        runtime_seed_engine,
+        ticket_ids,
+        runner_ticket_ids=ticket_ids[1:],
+    )
+
+    payload = await _certify(
+        runtime_seed_engine.url.render_as_string(hide_password=False),
+        require_flat=False,
+    )
+
+    assert payload["status"] == "pass"
+    protected_tickets = payload["protected_tickets"]
+    assert isinstance(protected_tickets, list)
+    assert [ticket["ticket_id"] for ticket in protected_tickets] == list(ticket_ids)
+    assert protected_tickets[0]["active_tp1_order"]["exchange_order_id"] == "tp1:1"
+    assert protected_tickets[1]["recorded_tp1_fill_quantity"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_protected_identity_refuses_missing_active_budget_reservation(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    await _insert_protected_tickets(
+        runtime_seed_engine,
+        ticket_ids,
+        include_budget_reservations=False,
+    )
+
+    with pytest.raises(
+        runtime_seed.RuntimeAuthorityTransitionRefused,
+        match="active Budget Reservations",
+    ):
+        async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+            await runtime_seed.deploy_protected_identity(
+                uow,
+                initial.model_copy(
+                    update={
+                        "runtime_commit": "b" * 40,
+                        "seeded_at_ms": 1_800_000_000_100,
+                    }
+                ),
+                protected_ticket_ids=ticket_ids,
+            )
+
+
+@pytest.mark.asyncio
+async def test_protected_identity_refuses_unrelated_active_budget_reservation(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    await _insert_protected_tickets(runtime_seed_engine, ticket_ids)
+    async with runtime_seed_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(budget_reservations).values(
+                budget_reservation_id="reservation:unrelated",
+                ticket_id="ticket:unrelated",
+                owner_policy_id="policy-main",
+                venue_id="binance-usdm",
+                account_id="subaccount-main",
+                reserved_notional=Decimal("1"),
+                reserved_risk=Decimal("0"),
+                reserved_margin=Decimal("0.2"),
+                planned_stop_risk_budget=Decimal("0"),
+                risk_reservation_basis="planned_stop_distance",
+                status="active",
+                created_at_ms=1_800_000_000_099,
+                released_at_ms=None,
+            )
+        )
+
+    with pytest.raises(
+        runtime_seed.RuntimeAuthorityTransitionRefused,
+        match="exact active Budget Reservations",
+    ):
+        async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+            await runtime_seed.deploy_protected_identity(
+                uow,
+                initial.model_copy(
+                    update={
+                        "runtime_commit": "b" * 40,
+                        "seeded_at_ms": 1_800_000_000_100,
+                    }
+                ),
+                protected_ticket_ids=ticket_ids,
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("notional_delta", "risk_delta"),
+    (
+        (Decimal(1), Decimal(0)),
+        (Decimal(0), Decimal(1)),
+    ),
+)
+async def test_protected_identity_refuses_mismatched_account_exposure_totals(
+    runtime_seed_engine: AsyncEngine,
+    notional_delta: Decimal,
+    risk_delta: Decimal,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    await _insert_protected_tickets(
+        runtime_seed_engine,
+        ticket_ids,
+        exposure_notional_delta=notional_delta,
+        exposure_risk_delta=risk_delta,
+    )
+
+    with pytest.raises(
+        runtime_seed.RuntimeAuthorityTransitionRefused,
+        match="matching account exposure",
+    ):
+        async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+            await runtime_seed.deploy_protected_identity(
+                uow,
+                initial.model_copy(
+                    update={
+                        "runtime_commit": "b" * 40,
+                        "seeded_at_ms": 1_800_000_000_100,
+                    }
+                ),
+                protected_ticket_ids=ticket_ids,
+            )
+
+
+@pytest.mark.asyncio
 async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     runtime_seed_engine: AsyncEngine,
 ) -> None:
@@ -649,8 +816,10 @@ async def _insert_protected_tickets(
     engine: AsyncEngine,
     ticket_ids: tuple[str, ...],
     *,
-    tp1_replay_ticket_ids: tuple[str, ...] = (),
     runner_ticket_ids: tuple[str, ...] = (),
+    include_budget_reservations: bool = True,
+    exposure_notional_delta: Decimal = Decimal(0),
+    exposure_risk_delta: Decimal = Decimal(0),
 ) -> None:
     async with engine.begin() as connection:
         scope = (
@@ -768,15 +937,31 @@ async def _insert_protected_tickets(
                     exchange_instrument_id=f"instrument:{index}",
                     position_side="short",
                     quantity=(
-                        quantity / Decimal("2")
-                        if ticket_id in tp1_replay_ticket_ids
-                        else projected_quantity
+                        projected_quantity
                     ),
                     average_entry_price=Decimal("100"),
                     observed_at_ms=1_800_000_000_020 + index,
                     projection_version=5,
                 )
             )
+            if include_budget_reservations:
+                await connection.execute(
+                    sa.insert(budget_reservations).values(
+                        budget_reservation_id=f"reservation:{index}",
+                        ticket_id=ticket_id,
+                        owner_policy_id="policy-main",
+                        venue_id="binance-usdm",
+                        account_id="subaccount-main",
+                        reserved_notional=notional,
+                        reserved_risk=risk,
+                        reserved_margin=notional / Decimal(5),
+                        planned_stop_risk_budget=risk,
+                        risk_reservation_basis="planned_stop_distance",
+                        status="active",
+                        created_at_ms=1_800_000_000_010 + index,
+                        released_at_ms=None,
+                    )
+                )
             total_notional += notional
             total_risk += risk
         await connection.execute(
@@ -786,8 +971,8 @@ async def _insert_protected_tickets(
                 account_exposure_current.c.account_id == "subaccount-main",
             )
             .values(
-                gross_notional=total_notional,
-                gross_risk_at_stop=total_risk,
+                gross_notional=total_notional + exposure_notional_delta,
+                gross_risk_at_stop=total_risk + exposure_risk_delta,
                 active_ticket_count=len(ticket_ids),
                 projection_version=5,
                 updated_at_ms=1_800_000_000_030,

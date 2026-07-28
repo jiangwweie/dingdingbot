@@ -8,7 +8,7 @@ import inspect
 import re
 from collections.abc import Callable, Mapping
 from decimal import Decimal
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from pydantic import JsonValue
 
@@ -295,8 +295,20 @@ class CcxtVenueAdapter:
                         venue_id=request.venue_id,
                         symbol=_venue_row_symbol(row, row_kind="open-order"),
                     ),
+                    order_namespace="regular",
                 )
-                for row in (*regular_order_rows, *conditional_order_rows)
+                for row in regular_order_rows
+            )
+            + tuple(
+                _admission_order(
+                    row,
+                    exchange_instrument_id=self._instrument_id_for_symbol(
+                        venue_id=request.venue_id,
+                        symbol=_venue_row_symbol(row, row_kind="open-order"),
+                    ),
+                    order_namespace="conditional",
+                )
+                for row in conditional_order_rows
             ),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
@@ -1176,8 +1188,10 @@ def _admission_order(
     value: object,
     *,
     exchange_instrument_id: str,
+    order_namespace: Literal["regular", "conditional"],
 ) -> AdmissionOrder:
     mapping = _require_mapping(value, name="admission open-order row")
+    order_side = str(mapping.get("side") or "").strip().lower()
     return AdmissionOrder(
         exchange_order_id=str(mapping.get("id") or "").strip(),
         venue_client_order_id=(
@@ -1188,7 +1202,43 @@ def _admission_order(
         exchange_instrument_id=exchange_instrument_id,
         position_side=_row_position_side(mapping),
         reduce_only=_boolean_field(mapping, "reduceOnly"),
+        order_namespace=order_namespace,
+        order_side=cast(
+            Literal["buy", "sell"] | None,
+            order_side if order_side in {"buy", "sell"} else None,
+        ),
+        quantity=_admission_order_decimal(
+            mapping,
+            "amount",
+            "contracts",
+            "origQty",
+        ),
+        trigger_price=_admission_order_decimal(
+            mapping,
+            "triggerPrice",
+            "stopPrice",
+        ),
+        limit_price=_admission_order_decimal(mapping, "price"),
     )
+
+
+def _admission_order_decimal(
+    mapping: Mapping[object, object],
+    *keys: str,
+) -> Decimal | None:
+    sources = (mapping, _require_mapping(mapping.get("info") or {}, name="info"))
+    for source in sources:
+        for key in keys:
+            value = source.get(key)
+            if value is None or str(value).strip() == "":
+                continue
+            parsed = Decimal(str(value))
+            if parsed == 0:
+                continue
+            if not parsed.is_finite() or parsed <= 0:
+                raise RuntimeError("venue admission order numeric fact is invalid")
+            return parsed
+    return None
 
 
 def _position_quantity(

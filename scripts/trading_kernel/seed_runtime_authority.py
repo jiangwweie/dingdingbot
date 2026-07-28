@@ -107,12 +107,6 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
     )
     protected.add_argument(
-        "--tp1-replay-ticket-id",
-        action="append",
-        default=[],
-        help="Named protected Ticket whose projected quantity is after full TP1.",
-    )
-    protected.add_argument(
         "--account-id",
         default=os.getenv("TRADING_KERNEL_ACCOUNT_ID", ""),
     )
@@ -195,7 +189,6 @@ async def _run(args: argparse.Namespace) -> int:
                         seeded_at_ms=now_ms,
                     ),
                     protected_ticket_ids=tuple(args.protected_ticket_id),
-                    tp1_replay_ticket_ids=tuple(args.tp1_replay_ticket_id),
                 )
             elif args.action == "arm-acceptance":
                 result = await arm_acceptance_policy(

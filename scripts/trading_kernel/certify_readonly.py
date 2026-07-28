@@ -49,6 +49,53 @@ def _canonical_decimal(value: object) -> str:
     return format(Decimal(str(value)).normalize(), "f")
 
 
+def _protected_handover_tickets(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    tickets: list[dict[str, object]] = []
+    for row in rows:
+        position_side = str(row["position_side"])
+        order_side = "sell" if position_side == "long" else "buy"
+        status = str(row["aggregate_status"])
+        ticket: dict[str, object] = {
+            "ticket_id": str(row["ticket_id"]),
+            "netting_domain_key": str(row["netting_domain_key"]),
+            "exchange_instrument_id": str(row["exchange_instrument_id"]),
+            "position_side": position_side,
+            "aggregate_status": status,
+            "position_quantity": _canonical_decimal(row["position_qty"]),
+            "protected_quantity": _canonical_decimal(row["protected_qty"]),
+            "active_stop_order": {
+                "exchange_order_id": str(row["active_stop_exchange_order_id"]),
+                "order_namespace": "conditional",
+                "position_side": position_side,
+                "order_side": order_side,
+                "quantity": _canonical_decimal(row["protected_qty"]),
+                "reduce_only": True,
+                "stop_price": _canonical_decimal(row["active_stop_price"]),
+            },
+        }
+        if status == "position_protected":
+            take_profit_prices = row["take_profit_prices"]
+            if not isinstance(take_profit_prices, list) or not take_profit_prices:
+                raise ValueError("protected Ticket lacks canonical TP1 price")
+            ticket["active_tp1_order"] = {
+                "exchange_order_id": str(row["tp1_exchange_order_id"]),
+                "order_namespace": "conditional",
+                "position_side": position_side,
+                "order_side": order_side,
+                "quantity": _canonical_decimal(row["tp1_target_qty"]),
+                "reduce_only": True,
+                "limit_price": _canonical_decimal(take_profit_prices[0]),
+            }
+        else:
+            ticket["recorded_tp1_fill_quantity"] = _canonical_decimal(
+                row["tp1_filled_qty"]
+            )
+        tickets.append(ticket)
+    return tickets
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -287,6 +334,32 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
                     )
                 )
             ).mappings().one_or_none()
+            protected_ticket_rows = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT ticket.ticket_id,
+                               ticket.netting_domain_key,
+                               ticket.exchange_instrument_id,
+                               ticket.position_side,
+                               ticket.take_profit_prices,
+                               aggregate_current.status AS aggregate_status,
+                               aggregate_current.position_qty,
+                               aggregate_current.protected_qty,
+                               aggregate_current.active_stop_exchange_order_id,
+                               aggregate_current.active_stop_price,
+                               aggregate_current.tp1_exchange_order_id,
+                               aggregate_current.tp1_target_qty,
+                               aggregate_current.tp1_filled_qty
+                          FROM brc_trade_tickets ticket
+                          JOIN brc_trade_aggregates aggregate_current
+                            ON aggregate_current.ticket_id = ticket.ticket_id
+                         WHERE ticket.terminal_at_ms IS NULL
+                         ORDER BY ticket.ticket_id
+                        """
+                    )
+                )
+            ).mappings().all()
             await connection.rollback()
     finally:
         await engine.dispose()
@@ -319,6 +392,9 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         None
         if owner_projection_row is None
         else {key: owner_projection_row[key] for key in owner_projection_row}
+    )
+    protected_tickets = _protected_handover_tickets(
+        [dict(row) for row in protected_ticket_rows]
     )
     owner_policy = (
         None
@@ -395,6 +471,7 @@ async def _certify(database_url: str, *, require_flat: bool) -> dict[str, object
         "release_counts": release_counts,
         "active_counts": active_counts,
         "owner_projection": owner_projection,
+        "protected_tickets": protected_tickets,
         "require_flat": require_flat,
         "checks": checks,
     }

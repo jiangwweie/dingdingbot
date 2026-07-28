@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -373,3 +373,5 @@ TradeEvent = (
     | BudgetSettled
     | ReviewRecorded
 )
+
+PERSISTED_TRADE_EVENT_MODELS = get_args(TradeEvent)

@@ -3,9 +3,15 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+import sqlalchemy as sa
 
-from src.trading_kernel.application.ingest_signal import IngestSignalRequest, ingest_signal
-from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
+from src.trading_kernel.application.ingest_signal import (
+    IngestSignalRequest,
+    ingest_signal,
+)
+from src.trading_kernel.application.maintain_ticket_lifecycle import (
+    TicketLifecycleFacts,
+)
 from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
@@ -13,23 +19,29 @@ from src.trading_kernel.application.runtime_facts import (
     LifecycleFactsRequest,
     PositionSnapshotRequest,
 )
+from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
+from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.commands import (
+    ExchangeCommandResult,
+    ExchangeCommandStatus,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionInstrumentFacts,
     EntryAdmissionSnapshot,
     canonical_digest,
 )
-from src.trading_kernel.domain.commands import (
-    ExchangeCommandResult,
-    ExchangeCommandStatus,
-)
-from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.domain.events import RunnerStopRequested, TakeProfitFilled
+from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
+from src.trading_kernel.domain.identities import NettingDomain
+from src.trading_kernel.domain.incident_blocking import EntryBlockScope
+from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.infrastructure.pg_models import (
     owner_policy_current,
     runtime_capabilities_current,
     runtime_incidents,
 )
-import sqlalchemy as sa
+from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.interfaces.entry_worker import (
     EntryWorkerRequest,
     EntryWorkerStatus,
@@ -40,25 +52,17 @@ from src.trading_kernel.interfaces.lifecycle_worker import (
     LifecycleWorkerStatus,
     run_lifecycle_worker_once,
 )
-from src.trading_kernel.application.maintain_ticket_lifecycle import (
-    TicketLifecycleFacts,
-)
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
     ReconciliationWorkerStatus,
     run_reconciliation_worker_once,
 )
-from src.trading_kernel.domain.position import PositionSnapshot
-from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
-from src.trading_kernel.domain.incident_blocking import EntryBlockScope
-from src.trading_kernel.domain.identities import NettingDomain
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_signal_to_ticket import (
     _seed_runtime_authority,
     _signal,
 )
 from tests.trading_kernel.unit.test_ticket import _ticket
-
 
 runtime_fact_worker_engine = dispatch_fixture.dispatch_engine
 
@@ -639,3 +643,66 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         aggregate = await uow.aggregates.get(entry.ticket_id)
     assert aggregate is not None
     assert aggregate.status.value == "runner_old_stop_cancel_pending"
+
+    old_stop_cancel = await run_lifecycle_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
+        venue,
+        filled_facts,
+        worker_request.model_copy(
+            update={"now_ms": 3_012, "lease_until_ms": 8_012}
+        ),
+    )
+    assert old_stop_cancel.status is LifecycleWorkerStatus.DISPATCHED
+
+    async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
+        runner = await uow.aggregates.get(entry.ticket_id)
+    assert runner is not None
+    assert runner.status is AggregateStatus.RUNNER_PROTECTED
+    break_even_stop = runner.active_stop_price
+    assert break_even_stop is not None
+
+    runner_facts = FakeLifecycleFactsSource(
+        TicketLifecycleFacts(
+            position_quantity=runner_quantity,
+            tp1_filled_quantity=tp1_quantity,
+            tp1_average_fill_price=ticket.take_profit_prices[0],
+            allocated_entry_fee_quote=Decimal("0.02"),
+            exit_taker_fee_rate=Decimal("0.0005"),
+            price_tick=Decimal("0.1"),
+            market_facts=LifecycleMarketFacts(
+                watermark_ms=3_600_000,
+                is_final_closed_candle=True,
+                structure_reference=Decimal(60500),
+                atr=Decimal(100),
+                holding_bars=10,
+            ),
+            observed_at_ms=3_600_000,
+        )
+    )
+    runner_move = await run_lifecycle_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
+        venue,
+        runner_facts,
+        worker_request.model_copy(
+            update={"now_ms": 3_600_000, "lease_until_ms": 3_605_000}
+        ),
+    )
+
+    assert runner_move.status is LifecycleWorkerStatus.DISPATCHED
+    async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
+        moved = await uow.aggregates.get(entry.ticket_id)
+        events = await uow.events.list_for_ticket(entry.ticket_id)
+    assert moved is not None
+    assert moved.status is AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING
+    assert moved.active_stop_price is not None
+    assert moved.active_stop_price > break_even_stop
+    assert sum(isinstance(event, TakeProfitFilled) for event in events) == 1
+    assert sum(isinstance(event, RunnerStopRequested) for event in events) == 1
+    assert venue.command_kinds == [
+        "entry",
+        "initial_stop",
+        "take_profit",
+        "replace_protection",
+        "cancel_order",
+        "replace_protection",
+    ]

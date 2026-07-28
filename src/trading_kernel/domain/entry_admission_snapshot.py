@@ -138,6 +138,11 @@ class AdmissionOrder(BaseModel):
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
     reduce_only: bool
+    order_namespace: Literal["regular", "conditional"] = "regular"
+    order_side: Literal["buy", "sell"] | None = None
+    quantity: Decimal | None = None
+    trigger_price: Decimal | None = None
+    limit_price: Decimal | None = None
 
     @field_validator(
         "exchange_order_id",
@@ -153,6 +158,16 @@ class AdmissionOrder(BaseModel):
     def _normalize_optional_client_id(cls, value: object) -> str | None:
         normalized = str(value or "").strip()
         return normalized or None
+
+    @field_validator("quantity", "trigger_price", "limit_price")
+    @classmethod
+    def _require_optional_positive_decimal(
+        cls,
+        value: Decimal | None,
+    ) -> Decimal | None:
+        if value is not None and (not value.is_finite() or value <= 0):
+            raise ValueError("open-order numeric facts must be finite and positive")
+        return value
 
 
 class AdmissionOwnership(BaseModel):

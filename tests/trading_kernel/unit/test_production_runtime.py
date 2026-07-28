@@ -21,6 +21,8 @@ from src.trading_kernel.application.runtime_facts import (
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionInstrumentFacts,
+    AdmissionOrder,
+    AdmissionPosition,
     EntryAdmissionSnapshot,
     canonical_digest,
 )
@@ -115,8 +117,16 @@ class FakeWorkerAdapter:
 
 
 class FakeProbeAdapter:
-    def __init__(self, *, configured_leverage: int = 5) -> None:
+    def __init__(
+        self,
+        *,
+        configured_leverage: int = 5,
+        positions: tuple[AdmissionPosition, ...] = (),
+        open_orders: tuple[AdmissionOrder, ...] = (),
+    ) -> None:
         self.configured_leverage = configured_leverage
+        self.positions = positions
+        self.open_orders = open_orders
         self.admission_requests: list[str] = []
 
     async def read_instrument_rules(
@@ -162,8 +172,8 @@ class FakeProbeAdapter:
                     configured_leverage=self.configured_leverage,
                 ),
             ),
-            positions=(),
-            open_orders=(),
+            positions=self.positions,
+            open_orders=self.open_orders,
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -481,3 +491,154 @@ async def test_readonly_probe_reports_only_bounded_identity_and_counts(
     assert "api-key-sensitive" not in rendered
     assert "api-secret-sensitive" not in rendered
     assert "credential" not in rendered.lower()
+
+
+@pytest.mark.asyncio
+async def test_readonly_probe_verifies_each_protected_ticket_against_exact_exchange_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_valid_runtime_environment(monkeypatch)
+    production_runtime = _production_runtime()
+    probe_module = importlib.import_module(
+        "scripts.trading_kernel.probe_production_runtime"
+    )
+    instrument_id = "binance-usdm:BTCUSDT:perpetual"
+    adapter = FakeProbeAdapter(
+        positions=(
+            AdmissionPosition(
+                exchange_instrument_id=instrument_id,
+                position_side="long",
+                quantity=Decimal("1"),
+                average_entry_price=Decimal("100"),
+            ),
+        ),
+        open_orders=(
+            AdmissionOrder(
+                exchange_order_id="stop:btc",
+                venue_client_order_id="brc-stop-btc",
+                exchange_instrument_id=instrument_id,
+                position_side="long",
+                reduce_only=True,
+                order_namespace="conditional",
+                order_side="sell",
+                quantity=Decimal("1"),
+                trigger_price=Decimal("99"),
+            ),
+            AdmissionOrder(
+                exchange_order_id="tp1:btc",
+                venue_client_order_id="brc-tp1-btc",
+                exchange_instrument_id=instrument_id,
+                position_side="long",
+                reduce_only=True,
+                order_namespace="conditional",
+                order_side="sell",
+                quantity=Decimal("0.5"),
+            ),
+        ),
+    )
+    expected_ticket = probe_module.ProtectedHandoverTicketProbe.model_validate(
+        {
+            "ticket_id": "ticket:btc",
+            "netting_domain_key": f"binance-usdm:subaccount-main:{instrument_id}:long",
+            "exchange_instrument_id": instrument_id,
+            "position_side": "long",
+            "aggregate_status": "position_protected",
+            "position_quantity": "1",
+            "protected_quantity": "1",
+            "active_stop_order": {
+                "exchange_order_id": "stop:btc",
+                "order_namespace": "conditional",
+                "position_side": "long",
+                "order_side": "sell",
+                "quantity": "1",
+                "reduce_only": True,
+                "stop_price": "99",
+            },
+            "active_tp1_order": {
+                "exchange_order_id": "tp1:btc",
+                "order_namespace": "conditional",
+                "position_side": "long",
+                "order_side": "sell",
+                "quantity": "0.5",
+                "reduce_only": True,
+            },
+        }
+    )
+
+    result = await probe_module.probe_production_runtime(
+        adapter,
+        production_runtime.ProductionRuntimeSettings.from_environment(),
+        now_ms=10_000,
+        validity_ms=5_000,
+        expected_protected_tickets=(expected_ticket,),
+    )
+
+    assert result.protected_tickets == (expected_ticket,)
+
+
+@pytest.mark.asyncio
+async def test_readonly_probe_rejects_a_protected_stop_with_wrong_price(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_valid_runtime_environment(monkeypatch)
+    production_runtime = _production_runtime()
+    probe_module = importlib.import_module(
+        "scripts.trading_kernel.probe_production_runtime"
+    )
+    instrument_id = "binance-usdm:BTCUSDT:perpetual"
+    adapter = FakeProbeAdapter(
+        positions=(
+            AdmissionPosition(
+                exchange_instrument_id=instrument_id,
+                position_side="short",
+                quantity=Decimal("1"),
+                average_entry_price=Decimal("100"),
+            ),
+        ),
+        open_orders=(
+            AdmissionOrder(
+                exchange_order_id="stop:btc",
+                venue_client_order_id="brc-stop-btc",
+                exchange_instrument_id=instrument_id,
+                position_side="short",
+                reduce_only=True,
+                order_namespace="conditional",
+                order_side="buy",
+                quantity=Decimal("1"),
+                trigger_price=Decimal("102"),
+            ),
+        ),
+    )
+    expected_ticket = probe_module.ProtectedHandoverTicketProbe.model_validate(
+        {
+            "ticket_id": "ticket:btc",
+            "netting_domain_key": f"binance-usdm:subaccount-main:{instrument_id}:short",
+            "exchange_instrument_id": instrument_id,
+            "position_side": "short",
+            "aggregate_status": "runner_protected",
+            "position_quantity": "1",
+            "protected_quantity": "1",
+            "active_stop_order": {
+                "exchange_order_id": "stop:btc",
+                "order_namespace": "conditional",
+                "position_side": "short",
+                "order_side": "buy",
+                "quantity": "1",
+                "reduce_only": True,
+                "stop_price": "101",
+            },
+            "recorded_tp1_fill_quantity": "0.5",
+        }
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="protected Stop price differs",
+    ):
+        await probe_module.probe_production_runtime(
+            adapter,
+            production_runtime.ProductionRuntimeSettings.from_environment(),
+            now_ms=10_000,
+            validity_ms=5_000,
+            expected_protected_tickets=(expected_ticket,),
+        )
