@@ -58,11 +58,17 @@ src/trading_kernel/infrastructure PostgreSQL and venue adapters
 src/trading_kernel/interfaces     bounded runtime and readonly surfaces
 ```
 
-The only database baseline is
-`migrations/trading_kernel/versions/0001_initial.py`. PostgreSQL owns current
-runtime truth and append-only lifecycle facts. Exchange readonly facts own
-external truth. Repository documents and generated output never own production
-decisions.
+The tracked database head is `0002_crypto_strategy_universe`. PostgreSQL owns
+current runtime truth and append-only lifecycle facts. Exchange readonly facts
+own external truth. Repository documents and generated output never own
+production decisions.
+
+Strategy Registry owns only immutable Event semantics. PostgreSQL
+StrategyUniverse owns each Event's unordered **1..10** member set,
+certification, Warming/Active/Retired lifecycle and current pointer. Warming
+scopes read facts but emit no Signal; only exact Active members can emit a new
+Signal. Signal, Claim and Ticket freeze Universe version/digest; replacement
+never rewrites an existing protected Ticket.
 
 ## Signal, Capacity, And Ticket Boundary
 
@@ -146,7 +152,7 @@ durable safety work for already-exposed Tickets.
 For this cutover, the Owner explicitly authorized no backup of BRC program or
 database state. Old BRC services, containers, releases, and PostgreSQL data were
 deleted, including the application data volume, then rebuilt from committed
-code, `0001_initial`, and deterministic Registry/Policy seed. Non-quantitative
+code, the tracked schema head, and deterministic Registry/Policy seed. Non-quantitative
 programs and their data were outside scope and had to remain unaffected.
 
 This was a forward-only replacement. The retired application and schema are

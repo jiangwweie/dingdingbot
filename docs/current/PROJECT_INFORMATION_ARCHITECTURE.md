@@ -50,8 +50,15 @@ acceptance-stage name.
 
 ## Current Runtime Authority
 
-The only production execution package is `src/trading_kernel`. The only schema
-baseline is `migrations/trading_kernel/versions/0001_initial.py`.
+The only production execution package is `src/trading_kernel`. The tracked
+schema head is `0002_crypto_strategy_universe`; its forward migration extends
+the rebuilt Kernel with versioned Universe authority. The deployed schema
+identity remains a volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.
+
+Strategy semantics live in the Registry, while concrete instrument membership,
+certification, warming, current activation, and frozen Signal/Ticket lineage
+live in PostgreSQL StrategyUniverse projections. Repository Markdown and CLI
+output are never runtime authority.
 
 Production runtime must not depend on repository Markdown, generated JSON,
 report directories, local caches, or archived database rows. Current state is

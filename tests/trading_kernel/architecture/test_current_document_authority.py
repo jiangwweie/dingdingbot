@@ -62,7 +62,7 @@ RUNTIME_MODEL_DOCUMENTS = (
 
 CURRENT_PRODUCTION_COMMIT = "13653567"
 CURRENT_PRODUCTION_TAG = "tokyo-runtime-2026.07.28.1"
-CURRENT_LOCAL_CERTIFICATION = "427 passed"
+CURRENT_LOCAL_CERTIFICATION = "684 passed"
 CURRENT_ACCEPTANCE_STAGE = "Current live acceptance"
 RETIRED_ACCEPTANCE_TICKET = "ticket:c1ebc24a178a3ae4d87978e2fa1204ae"
 RESIDENT_WORKER_NAMES = (
@@ -159,6 +159,19 @@ def test_current_authority_does_not_reintroduce_retired_execution_semantics() ->
     assert not violations, "retired authority semantics remain:\n" + "\n".join(
         sorted(violations)
     )
+
+
+def test_current_documents_do_not_restore_retired_candidate_authority() -> None:
+    registry_contract = (
+        CURRENT_DOCS_ROOT
+        / "strategy-group-handoffs"
+        / "STRATEGYGROUP_REGISTRY_CONTRACT.md"
+    ).read_text(encoding="utf-8")
+
+    assert "| `candidate_instruments` |" not in registry_contract
+    assert "| `candidate_scope_priority` |" not in registry_contract
+    assert "StrategyUniverse" in registry_contract
+    assert "current pointer is the sole" in registry_contract
 
 
 @pytest.mark.parametrize("retired", RETIRED_CAPACITY_MARKERS)

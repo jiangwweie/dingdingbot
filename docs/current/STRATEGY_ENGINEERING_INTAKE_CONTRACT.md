@@ -15,7 +15,8 @@ validate without importing research files or strategy-specific execution code.
 
 - stable `strategy_group_id` and immutable strategy version;
 - versioned `event_spec_id`;
-- supported instrument and side scope;
+- supported side scope; concrete instrument membership is a separately
+  versioned StrategyUniverse submission;
 - typed fact definitions and freshness rules;
 - a typed live-signal producer contract;
 - entry, Initial Stop, take-profit, and invalidation semantics;
@@ -32,3 +33,12 @@ capacity, and Netting Domain before freezing a Ticket.
 Research Markdown, replay files, generated JSON, and handoff directories are
 not runtime inputs. Strategy-specific code must not dispatch venue commands or
 mutate Ticket lifecycle state.
+
+## Instrument Pool Intake
+
+For an already registered Event, the only member-pool write path is the
+`configure_strategy_universe.py` application boundary. It accepts **1..10**
+unique canonical USDT-perpetual members, installs a Warming Universe, and lets
+the existing Reconciliation and Observation workers certify, prewarm, and
+atomically activate it. The registry, Owner Policy, and configuration order do
+not provide a member or trading-priority fallback.

@@ -33,9 +33,11 @@ different Netting Domains progress concurrently.
 | Production commit | `1365356797b350f00c345b9f6e66915a0ad53097` |
 | Production tag | `tokyo-runtime-2026.07.28.1`; annotated, immutable, and verified on `origin` |
 | Production-commit certification | `427 passed`; architecture checks and production file-I/O audit pass |
+| Local release-candidate certification | `684 passed`; local unit, integration, full-chain, architecture, fresh-schema, fault, performance and static acceptance pass |
 | Runtime ownership | Observation, Lifecycle, and Reconciliation are active at zero restarts; Entry is intentionally fenced during runner-recovery observation |
 | Scheduling model | Long-running systemd services; timer-based Python cold starts are retired and must not return |
 | PostgreSQL | The guarded flat-runtime reset removed all prior runtime/trade facts after exchange-flat verification; Registry, Policy, Capability, schema metadata, and the 33-table `0001_initial` baseline remain authoritative |
+| Local StrategyUniverse release candidate | Local implementation and disposable-PostgreSQL acceptance are complete; it is not deployed, has not configured a production pool, and cannot alter the current production schema or Entry authority until the separate Owner deployment gate |
 | Strategy capability | Six registered Events, deterministic detectors, closed-candle Observation, Live/Replay parity, and real StrategySignal production |
 | Ticket capability | CapacityClaim, immutable Ticket, budget reservation, Netting Domain hold, event, aggregate, and durable ENTRY command commit atomically |
 | Dynamic policy | Three concurrent Tickets; `0.03` planned stop risk; demand-based remaining margin; fixed exchange `5x`; max `10x` safety ceiling; `cross` margin |
@@ -47,6 +49,20 @@ different Netting Domains progress concurrently.
 | Exchange postflight | Three Netting Domains are non-flat and protected: AVAX retains Stop plus TP1; BTC and SOL retain exact runner Stops after their original full-quantity Stops were cancelled. The other nine domains are flat; all six supported instruments are configured at `5x` |
 | Hourly supervision | Observation, Lifecycle, and Reconciliation are active at zero restarts; Entry is intentionally fenced while the recovered runners are observed, and current capacity remains occupied by the three protected Tickets |
 | Full capability | `promote-full` not yet completed |
+
+## Local Delivery Pending Owner Deployment Gate
+
+The tracked local release now contains `0002_crypto_strategy_universe`: versioned
+unordered member pools, readonly product/account certification, Warming with
+zero Signal, automatic atomic activation, frozen Signal/Claim/Ticket Universe
+lineage, bounded configuration/status CLI, and full local fault/performance
+acceptance. These are local code facts only. They do not supersede the deployed
+commit, schema, live Ticket state, or Entry fence recorded above.
+
+Production action remains blocked until the flat-release and action-time
+certification predicates in `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` are observed
+and the Owner explicitly confirms deployment. The final member list is not
+seeded by this repository change.
 
 ## Current Performance Snapshot
 

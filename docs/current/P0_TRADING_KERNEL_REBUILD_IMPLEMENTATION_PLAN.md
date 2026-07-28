@@ -47,7 +47,7 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| Clean PostgreSQL baseline | Complete | One 33-table `0001_initial`, clean rebuild and downgrade/upgrade certification |
+| Clean PostgreSQL schema head | Complete locally | `0002_crypto_strategy_universe`, clean rebuild and downgrade/upgrade certification |
 | Six Strategy Events | Complete | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, BRF2-SHORT |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, deterministic identity, Live/Replay parity |
 | Arbitration and CapacityClaim | Complete | Deterministic priority, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
@@ -56,6 +56,7 @@ settle, and review concurrently.
 | Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |
 | Reconciliation, Settlement, Review | Complete | Exact Ticket identities and explicit funding availability semantics |
 | Runtime ownership | Complete | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
+| StrategyUniverse local capability | Complete locally, not deployed | Versioned 1..10 member pools, readonly certification, Warming with zero Signal, automatic atomic activation, frozen Ticket lineage, bounded CLI and PostgreSQL evidence |
 
 Exact production identity, certification, runtime state, and remaining progress
 belong only to `MAIN_CONTROL_ROADMAP.md`.
@@ -102,7 +103,7 @@ Execution therefore:
 1. stopped and fenced every BRC writer;
 2. verified exchange and old-runtime preconditions;
 3. deleted BRC program services, containers, releases, and PostgreSQL data;
-4. rebuilt PostgreSQL from `0001_initial` and deterministic seeds;
+4. rebuilt PostgreSQL to the then-tracked schema head and deterministic seeds;
 5. deployed one exact committed release;
 6. enabled only Observation while preserving the ENTRY write fence;
 7. preserved non-quantitative Nginx, PostgreSQL host, Docker, and unrelated

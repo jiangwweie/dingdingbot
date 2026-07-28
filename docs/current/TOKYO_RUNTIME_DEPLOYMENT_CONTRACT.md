@@ -52,6 +52,24 @@ release. Entry starts last only when explicitly requested and every postflight
 gate passes. A failure after service stop writes the Entry fence and restores
 the three safety workers for fix-forward recovery.
 
+## StrategyUniverse Deployment Gate
+
+The versioned StrategyUniverse release is a **flat-only forward migration**.
+It is not activated by a local test pass or by all positions becoming flat
+without an Owner release confirmation. Before its `0002_crypto_strategy_universe`
+migration, configuration, or Entry enablement, all Ticket, position, order,
+Incident, Settlement and Review projections must be terminal and exchange
+truth must be flat.
+
+After the target code and schema pass readonly certification, the Owner fixes
+each Event's final **1..10** canonical USDT-perpetual members. The official
+configuration CLI installs Warming Universes only. Existing Reconciliation and
+Observation workers then certify, prewarm and atomically activate the current
+pointer. Entry remains fenced until those safety workers and the exact active
+Universe/current/profile/policy identities pass postflight. `--enable-entry`
+is still an explicit final deployment action; neither configuration nor
+activation can enable it.
+
 ## Destructive Rebuild Decision
 
 The completed cutover followed an explicit Owner decision to preserve no BRC
