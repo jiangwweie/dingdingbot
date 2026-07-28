@@ -42,8 +42,9 @@ class _FlatPositionSource:
 class _RunnerTradesExchange:
     """Official Binance-shaped review rows: only trade/order identity is usable."""
 
-    def __init__(self, *, fee_mode: str) -> None:
+    def __init__(self, *, fee_mode: str, review_fault: str | None = None) -> None:
         self.fee_mode = fee_mode
+        self.review_fault = review_fault
         self.references = ()
         self.trade_calls: list[dict[str, object]] = []
         self.index_calls: list[dict[str, object]] = []
@@ -63,16 +64,13 @@ class _RunnerTradesExchange:
         references = {item.submitted_exchange_order_id: item for item in self.references}
         if order_id == "venue-entry-1":
             rows = [self._fill("entry-trade", order_id, "0.001", "60000", 2_200)]
-            self.returned_trade_rows.extend(rows)
-            return rows
+            return self._review_rows(rows)
         if order_id == "venue-take_profit-1":
             rows = [self._fill("tp1-trade", order_id, "0.0005", "62000", 2_500)]
-            self.returned_trade_rows.extend(rows)
-            return rows
+            return self._review_rows(rows)
         if order_id == "1085699838084":
             rows = [self._fill("runner-trade", order_id, "0.0005", "63000", 3_000)]
-            self.returned_trade_rows.extend(rows)
-            return rows
+            return self._review_rows(rows)
         assert order_id not in references
         raise AssertionError(f"unexpected Binance orderId lookup: {order_id}")
 
@@ -82,17 +80,27 @@ class _RunnerTradesExchange:
         reference = next(
             item for item in self.references if item.submitted_exchange_order_id == submitted_id
         )
+        expectation = reference.conditional_expectation
+        assert expectation is not None
+        result = {
+            "algoId": submitted_id,
+            "clientAlgoId": reference.venue_client_order_id,
+            "symbol": expectation.exchange_instrument_id.split(":", 2)[1],
+            "side": expectation.side.upper(),
+            "positionSide": expectation.position_side.upper(),
+            "type": expectation.order_type.upper(),
+        }
         if reference.command_kind is ExchangeCommandKind.REPLACE_PROTECTION:
             return {
-                "algoId": submitted_id,
-                "clientAlgoId": reference.venue_client_order_id,
+                **result,
                 "actualOrderId": "1085699838084",
+                "actualQty": str(expectation.quantity),
                 "status": "FINISHED",
             }
         return {
-            "algoId": submitted_id,
-            "clientAlgoId": reference.venue_client_order_id,
+            **result,
             "actualOrderId": "",
+            "actualQty": "0",
             "status": "CANCELED",
         }
 
@@ -117,8 +125,32 @@ class _RunnerTradesExchange:
             "fee": {"cost": fee_amount, "currency": fee_asset},
             "timestamp": timestamp,
             "realizedPnl": "0",
-            "info": {"positionSide": "LONG"},
+            "info": {
+                "positionSide": "LONG",
+                "commission": fee_amount,
+                "commissionAsset": fee_asset,
+            },
         }
+
+    def _review_rows(self, rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        if self.review_fault == "missing_commission_asset":
+            for row in rows:
+                row["info"].pop("commissionAsset")
+        elif self.review_fault == "negative_commission":
+            for row in rows:
+                row["info"]["commission"] = "-0.010"
+        elif self.review_fault == "wrong_order_id":
+            rows.append(
+                self._fill(
+                    "wrong-order-trade",
+                    "manual-order",
+                    "0.0005",
+                    "63000",
+                    3_000,
+                )
+            )
+        self.returned_trade_rows.extend(rows)
+        return rows
 
 
 class _BoundAdapterReviewSource:
@@ -131,18 +163,9 @@ class _BoundAdapterReviewSource:
         return await self.adapter.read_review_economics(request)
 
 
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("fee_mode", ["usdt", "bnb", "mixed"])
-async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete_review(
-    dispatch_engine,
-    fee_mode: str,
-) -> None:
-    ticket = _registered_sor_long_ticket()
-    await reach_runner_protected(dispatch_engine, ticket)
-
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+async def _move_runner_to_review_pending(engine, ticket) -> None:
+    await reach_runner_protected(engine, ticket)
+    async with PostgresKernelUnitOfWork(engine) as uow:
         flat = await reconcile_ticket(
             uow,
             ReconcileTicketRequest(
@@ -157,13 +180,15 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
             ),
         )
     assert flat.status.value == "external_flat_incident"
-    assert (await dispatch_lifecycle_command(
-        dispatch_engine,
-        KindAwareAcceptingVenue(),
-        ticket.identity.ticket_id,
-        now_ms=3_550,
-    )).status.value == "accepted"
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+    assert (
+        await dispatch_lifecycle_command(
+            engine,
+            KindAwareAcceptingVenue(),
+            ticket.identity.ticket_id,
+            now_ms=3_550,
+        )
+    ).status.value == "accepted"
+    async with PostgresKernelUnitOfWork(engine) as uow:
         matched = await reconcile_ticket(
             uow,
             ReconcileTicketRequest(
@@ -179,10 +204,14 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
         )
     assert matched.status.value == "matched"
 
-    exchange = _RunnerTradesExchange(fee_mode=fee_mode)
+
+def _review_adapter(ticket, exchange: _RunnerTradesExchange) -> _BoundAdapterReviewSource:
     adapter = CcxtVenueAdapter(
         exchanges={
-            (ticket.identity.netting_domain.venue_id, ticket.identity.netting_domain.account_id): exchange
+            (
+                ticket.identity.netting_domain.venue_id,
+                ticket.identity.netting_domain.account_id,
+            ): exchange
         },
         settlement_assets={
             (
@@ -192,16 +221,34 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
         },
         clock_ms=lambda: 4_000,
     )
-    source = _BoundAdapterReviewSource(adapter, exchange)
-    request = ReconciliationWorkerRequest(
+    return _BoundAdapterReviewSource(adapter, exchange)
+
+
+def _review_worker_request(*, now_ms: int) -> ReconciliationWorkerRequest:
+    return ReconciliationWorkerRequest(
         worker_id="reconciliation-full-chain",
         runtime_commit="kernel-test-head",
         schema_revision="0002_crypto_strategy_universe",
-        now_ms=40_000,
+        now_ms=now_ms,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
         idle_poll_interval_ms=2_000,
     )
+
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fee_mode", ["usdt", "bnb", "mixed"])
+async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete_review(
+    dispatch_engine,
+    fee_mode: str,
+) -> None:
+    ticket = _registered_sor_long_ticket()
+    await _move_runner_to_review_pending(dispatch_engine, ticket)
+    exchange = _RunnerTradesExchange(fee_mode=fee_mode)
+    source = _review_adapter(ticket, exchange)
+    request = _review_worker_request(now_ms=40_000)
 
     settled = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
@@ -271,3 +318,50 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
         for row in review.metrics["order_attribution"]
     )
     assert exchange.index_calls == ([] if fee_mode == "usdt" else [{"symbol": "BNBUSDT"}])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "review_fault",
+    [
+        "wrong_order_id",
+        "missing_commission_asset",
+        "negative_commission",
+    ],
+)
+async def test_review_attribution_contradiction_keeps_ticket_pending(
+    dispatch_engine,
+    review_fault: str,
+) -> None:
+    ticket = _registered_sor_long_ticket()
+    await _move_runner_to_review_pending(dispatch_engine, ticket)
+    source = _review_adapter(
+        ticket,
+        _RunnerTradesExchange(fee_mode="usdt", review_fault=review_fault),
+    )
+
+    settled = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        object(),
+        _FlatPositionSource(),
+        _review_worker_request(now_ms=40_000),
+        review_economics_source=source,
+    )
+    assert settled.status is ReconciliationWorkerStatus.SETTLED
+    unavailable = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        object(),
+        _FlatPositionSource(),
+        _review_worker_request(now_ms=70_000),
+        review_economics_source=source,
+    )
+    assert unavailable.status is ReconciliationWorkerStatus.FACTS_UNAVAILABLE
+    assert unavailable.ticket_id == ticket.identity.ticket_id
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+        review = await uow.reviews.get_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.status is AggregateStatus.REVIEW_PENDING
+    assert [type(event).__name__ for event in events].count("ReviewRecorded") == 0
+    assert review is None

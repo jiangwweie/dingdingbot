@@ -886,6 +886,11 @@ class CcxtVenueAdapter:
                 name="review fills",
             )
             for row in rows:
+                row_order_id = _review_row_order_id(row)
+                if row_order_id != resolved.actual_order_id:
+                    raise RuntimeError(
+                        "review fill order id differs from requested actual order"
+                    )
                 fill = await _review_fill(
                     row,
                     resolved=resolved,
@@ -895,8 +900,6 @@ class CcxtVenueAdapter:
                     entry_time_ms=request.entry_time_ms,
                     exit_time_ms=request.exit_time_ms,
                 )
-                if fill is None:
-                    continue
                 existing = fills_by_trade_id.get(fill.exchange_trade_id)
                 if existing is not None and existing != fill:
                     raise RuntimeError(
@@ -2070,15 +2073,8 @@ def _review_fee_asset(
         raise RuntimeError("venue review fill row is not a mapping")
     info = value.get("info")
     raw_info = info if isinstance(info, Mapping) else {}
-    fee = value.get("fee")
-    fee_asset = str(
-        (fee.get("currency") if isinstance(fee, Mapping) else None)
-        or raw_info.get("commissionAsset")
-        or settlement_asset
-    ).strip().upper()
-    if fee_asset not in {"USDT", "BNB"}:
-        raise RuntimeError("review fill fee asset is unsupported")
-    return cast(Literal["USDT", "BNB"], fee_asset)
+    del settlement_asset
+    return _raw_review_native_fee(raw_info).asset
 
 
 def _exact_order_fill_notional(
@@ -2132,19 +2128,14 @@ async def _review_fill(
     position_side: Literal["long", "short"],
     entry_time_ms: int,
     exit_time_ms: int,
-) -> ReviewFill | None:
+) -> ReviewFill:
     if not isinstance(value, Mapping):
         raise RuntimeError("venue review fill row is not a mapping")
     info = value.get("info")
     raw_info = info if isinstance(info, Mapping) else {}
-    exchange_order_id = str(
-        value.get("order")
-        or value.get("orderId")
-        or raw_info.get("orderId")
-        or ""
-    ).strip()
+    exchange_order_id = _review_row_order_id(value)
     if exchange_order_id != resolved.actual_order_id:
-        return None
+        raise RuntimeError("review fill order id differs from requested actual order")
     raw_position_side = str(
         value.get("positionSide")
         or raw_info.get("positionSide")
@@ -2172,25 +2163,7 @@ async def _review_fill(
     price = Decimal(str(value.get("price") or raw_info.get("price") or "0"))
     if quantity <= 0 or price <= 0:
         raise RuntimeError("review fill quantity and price must be positive")
-    fee = value.get("fee")
-    raw_fee_amount = (
-        fee.get("cost")
-        if isinstance(fee, Mapping)
-        else raw_info.get("commission")
-    )
-    if raw_fee_amount is None:
-        raise RuntimeError("review fill fee is unavailable")
-    fee_asset = str(
-        (fee.get("currency") if isinstance(fee, Mapping) else None)
-        or raw_info.get("commissionAsset")
-        or settlement_asset
-    ).strip().upper()
-    if fee_asset not in {"USDT", "BNB"}:
-        raise RuntimeError("review fill fee asset is unsupported")
-    native_fee = NativeFee(
-        asset=cast(Literal["USDT", "BNB"], fee_asset),
-        amount=abs(Decimal(str(raw_fee_amount))),
-    )
+    native_fee = _raw_review_native_fee(raw_info)
     if native_fee.asset == "USDT" and settlement_asset.upper() != "USDT":
         raise RuntimeError("non-USDT settlement asset has no review fee valuation")
     valuation = await fee_valuation_context.valuation_for(native_fee)
@@ -2211,6 +2184,38 @@ async def _review_fill(
         fee=valued_fee,
         realized_pnl_quote=realized_pnl_quote,
         occurred_at_ms=occurred_at_ms,
+    )
+
+
+def _review_row_order_id(value: object) -> str:
+    if not isinstance(value, Mapping):
+        raise RuntimeError("venue review fill row is not a mapping")
+    info = value.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    return str(
+        value.get("order")
+        or value.get("orderId")
+        or raw_info.get("orderId")
+        or ""
+    ).strip()
+
+
+def _raw_review_native_fee(raw_info: Mapping[object, object]) -> NativeFee:
+    raw_asset = str(raw_info.get("commissionAsset") or "").strip().upper()
+    if raw_asset not in {"USDT", "BNB"}:
+        raise RuntimeError("review fill commissionAsset is unavailable or unsupported")
+    raw_amount = raw_info.get("commission")
+    if raw_amount is None:
+        raise RuntimeError("review fill commission is unavailable")
+    try:
+        amount = Decimal(str(raw_amount))
+    except Exception as exc:
+        raise RuntimeError("review fill commission is invalid") from exc
+    if not amount.is_finite() or amount < 0:
+        raise RuntimeError("review fill commission must be finite and non-negative")
+    return NativeFee(
+        asset=cast(Literal["USDT", "BNB"], raw_asset),
+        amount=amount,
     )
 
 

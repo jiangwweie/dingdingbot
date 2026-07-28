@@ -4,13 +4,19 @@ from decimal import Decimal
 
 import pytest
 
+from src.trading_kernel.application.maintain_ticket_lifecycle import (
+    LifecycleMaintenanceRequest,
+    LifecycleMaintenanceStatus,
+    TicketLifecycleFacts,
+    maintain_ticket_lifecycle,
+)
 from src.trading_kernel.application.reconcile_ticket import (
     ReconcileTicketRequest,
     reconcile_ticket,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.identities import NettingDomain
-from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
@@ -40,8 +46,9 @@ dispatch_engine = dispatch_fixture.dispatch_engine
 
 
 class _ActivePositionSource:
-    def __init__(self, tickets) -> None:
+    def __init__(self, tickets, *, open_orders_by_ticket) -> None:
         self.tickets = {ticket.identity.ticket_id: ticket for ticket in tickets}
+        self.open_orders_by_ticket = open_orders_by_ticket
         self.requests: list[str] = []
 
     async def read_position_snapshot(self, request):
@@ -52,7 +59,7 @@ class _ActivePositionSource:
             quantity=ticket.quantity,
             average_entry_price=ticket.entry_reference_price,
             liquidation_price=safe_liquidation_price(ticket),
-            open_orders=(),
+            open_orders=self.open_orders_by_ticket[ticket.identity.ticket_id],
             observed_at_ms=request.observed_at_ms,
         )
 
@@ -153,6 +160,94 @@ async def _settlement_pending_from_runner(engine, ticket) -> None:
     assert matched.status.value == "matched"
 
 
+async def _active_stop_truth(engine, tickets):
+    open_orders_by_ticket = {}
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        for ticket in tickets:
+            aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+            references = await uow.exchange_commands.list_order_references(
+                ticket.identity.ticket_id
+            )
+            assert aggregate is not None
+            assert aggregate.active_stop_exchange_order_id is not None
+            reference = next(
+                reference
+                for reference in references
+                if reference.submitted_exchange_order_id
+                == aggregate.active_stop_exchange_order_id
+            )
+            open_orders_by_ticket[ticket.identity.ticket_id] = (
+                VenueOrderSnapshot(
+                    exchange_order_id=aggregate.active_stop_exchange_order_id,
+                    venue_client_order_id=reference.venue_client_order_id,
+                    position_side=ticket.identity.netting_domain.position_side,
+                    reduce_only=True,
+                    order_namespace="conditional",
+                ),
+            )
+    return open_orders_by_ticket
+
+
+async def _assert_active_protection_is_unchanged(
+    engine,
+    ticket,
+    *,
+    status,
+    expected_stop: VenueOrderSnapshot,
+) -> None:
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is status
+    assert aggregate.position_qty == (
+        ticket.quantity
+        if status is AggregateStatus.POSITION_PROTECTED
+        else ticket.quantity - ticket.take_profit_quantities[0]
+    )
+    assert aggregate.active_stop_exchange_order_id == expected_stop.exchange_order_id
+    assert incident is None
+    active_command = next(
+        command
+        for command in commands
+        if command.venue_client_order_id == expected_stop.venue_client_order_id
+    )
+    assert active_command.payload.quantity == aggregate.position_qty
+    assert len(commands) == (3 if status is AggregateStatus.POSITION_PROTECTED else 5)
+
+
+async def _run_no_change_lifecycle(engine, ticket, *, runner: bool) -> None:
+    facts = TicketLifecycleFacts(
+        position_quantity=(
+            ticket.quantity - ticket.take_profit_quantities[0]
+            if runner
+            else ticket.quantity
+        ),
+        tp1_filled_quantity=(
+            ticket.take_profit_quantities[0] if runner else Decimal(0)
+        ),
+        tp1_average_fill_price=(ticket.take_profit_prices[0] if runner else None),
+        allocated_entry_fee_quote=Decimal("0.01"),
+        exit_taker_fee_rate=Decimal("0.001"),
+        price_tick=Decimal("0.1"),
+        market_facts=None,
+        observed_at_ms=33_700,
+    )
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        result = await maintain_ticket_lifecycle(
+            uow,
+            LifecycleMaintenanceRequest(
+                ticket_id=ticket.identity.ticket_id,
+                facts=facts,
+                now_ms=33_700,
+            ),
+        )
+    assert result.status is LifecycleMaintenanceStatus.NO_CHANGE
+
+
 @pytest.mark.asyncio
 async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
     dispatch_engine,
@@ -163,11 +258,18 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
     sol_ticket = _active_ticket(instrument="SOLUSDT", signal_event_id="signal-sol")
     avax_ticket = _active_ticket(instrument="AVAXUSDT", signal_event_id="signal-avax")
     await _reach_position_protected(dispatch_engine, sol_ticket)
-    await _reach_position_protected(dispatch_engine, avax_ticket)
+    await reach_runner_protected(dispatch_engine, avax_ticket, seed_policy=False)
 
     btc_ticket = _registered_sor_long_ticket()
     await _settlement_pending_from_runner(dispatch_engine, btc_ticket)
-    source = _ActivePositionSource((sol_ticket, avax_ticket))
+    open_orders_by_ticket = await _active_stop_truth(
+        dispatch_engine,
+        (sol_ticket, avax_ticket),
+    )
+    source = _ActivePositionSource(
+        (sol_ticket, avax_ticket),
+        open_orders_by_ticket=open_orders_by_ticket,
+    )
     request = ReconciliationWorkerRequest(
         worker_id="reconciliation-fairness-full-chain",
         runtime_commit="kernel-test-head",
@@ -196,7 +298,10 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
         request.model_copy(update={"now_ms": 33_601}),
     )
     assert protected.status is ReconciliationWorkerStatus.POSITION_RECONCILED
-    assert protected.ticket_id in {sol_ticket.identity.ticket_id, avax_ticket.identity.ticket_id}
+    assert protected.ticket_id in {
+        sol_ticket.identity.ticket_id,
+        avax_ticket.identity.ticket_id,
+    }
     other_protected = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         object(),
@@ -214,4 +319,18 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
         avax = await uow.aggregates.get(avax_ticket.identity.ticket_id)
     assert btc is not None and btc.status is AggregateStatus.REVIEW_PENDING
     assert sol is not None and sol.status is AggregateStatus.POSITION_PROTECTED
-    assert avax is not None and avax.status is AggregateStatus.POSITION_PROTECTED
+    assert avax is not None and avax.status is AggregateStatus.RUNNER_PROTECTED
+    await _run_no_change_lifecycle(dispatch_engine, sol_ticket, runner=False)
+    await _run_no_change_lifecycle(dispatch_engine, avax_ticket, runner=True)
+    await _assert_active_protection_is_unchanged(
+        dispatch_engine,
+        sol_ticket,
+        status=AggregateStatus.POSITION_PROTECTED,
+        expected_stop=open_orders_by_ticket[sol_ticket.identity.ticket_id][0],
+    )
+    await _assert_active_protection_is_unchanged(
+        dispatch_engine,
+        avax_ticket,
+        status=AggregateStatus.RUNNER_PROTECTED,
+        expected_stop=open_orders_by_ticket[avax_ticket.identity.ticket_id][0],
+    )

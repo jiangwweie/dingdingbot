@@ -717,7 +717,11 @@ class LifecycleFactsExchange:
                     "price": "60000",
                     "fee": {"cost": "0.4", "currency": "USDT"},
                     "timestamp": 1_100,
-                    "info": {"positionSide": "LONG"},
+                    "info": {
+                        "positionSide": "LONG",
+                        "commission": "0.4",
+                        "commissionAsset": "USDT",
+                    },
                 }
             ]
         return [
@@ -730,7 +734,11 @@ class LifecycleFactsExchange:
                 "price": "61000",
                 "fee": {"cost": "0.15", "currency": "USDT"},
                 "timestamp": 1_100,
-                "info": {"positionSide": "LONG"},
+                "info": {
+                    "positionSide": "LONG",
+                    "commission": "0.15",
+                    "commissionAsset": "USDT",
+                },
             }
         ]
 
@@ -790,6 +798,8 @@ class BnbLifecycleFactsExchange(LifecycleFactsExchange):
         rows = await super().fetch_my_trades(symbol, since, limit, params)
         for row in rows:
             row["fee"] = {"cost": "0.01", "currency": "BNB"}
+            row["info"]["commission"] = "0.01"
+            row["info"]["commissionAsset"] = "BNB"
         return rows
 
 class ReviewEconomicsExchange:
@@ -812,7 +822,11 @@ class ReviewEconomicsExchange:
                 "price": "100",
                 "fee": fee if self.include_fee else None,
                 "timestamp": 1_100,
-                "info": {"positionSide": "LONG"},
+                "info": {
+                    "positionSide": "LONG",
+                    "commission": "0.1",
+                    "commissionAsset": "USDT",
+                },
             },
             {
                 "id": "trade-tp1",
@@ -821,7 +835,11 @@ class ReviewEconomicsExchange:
                 "price": "110",
                 "fee": {"cost": "0.05", "currency": "USDT"},
                 "timestamp": 2_000,
-                "info": {"positionSide": "LONG"},
+                "info": {
+                    "positionSide": "LONG",
+                    "commission": "0.05",
+                    "commissionAsset": "USDT",
+                },
             },
             {
                 "id": "trade-runner",
@@ -830,7 +848,11 @@ class ReviewEconomicsExchange:
                 "price": "120",
                 "fee": {"cost": "0.05", "currency": "USDT"},
                 "timestamp": 3_000,
-                "info": {"positionSide": "LONG"},
+                "info": {
+                    "positionSide": "LONG",
+                    "commission": "0.05",
+                    "commissionAsset": "USDT",
+                },
             },
             {
                 "id": "unrelated-trade",
@@ -839,9 +861,17 @@ class ReviewEconomicsExchange:
                 "price": "1",
                 "fee": {"cost": "1", "currency": "USDT"},
                 "timestamp": 2_500,
-                "info": {"positionSide": "LONG"},
+                "info": {
+                    "positionSide": "LONG",
+                    "commission": "1",
+                    "commissionAsset": "USDT",
+                },
             },
         ]
+        if not self.include_fee:
+            for row in rows:
+                row["info"].pop("commission", None)
+                row["info"].pop("commissionAsset", None)
         order_id = str(params.get("orderId") or "")
         return [row for row in rows if row["orderId"] == order_id]
 
@@ -851,6 +881,11 @@ class ReviewEconomicsExchange:
             "algoId": "venue-runner-algo-1",
             "clientAlgoId": "brc-runner-1",
             "actualOrderId": "venue-runner-actual-1",
+            "symbol": "BTCUSDT",
+            "side": "SELL",
+            "positionSide": "LONG",
+            "type": "STOP_MARKET",
+            "actualQty": "0.5",
             "status": "FINISHED",
         }
 
@@ -877,11 +912,48 @@ class BnbReviewEconomicsExchange(ReviewEconomicsExchange):
         rows = await super().fetch_my_trades(symbol, since, limit, params)
         for row in rows:
             row["fee"] = {"cost": "0.01", "currency": "BNB"}
+            row["info"]["commission"] = "0.01"
+            row["info"]["commissionAsset"] = "BNB"
         return rows
 
     async def fapiPublicGetPremiumIndex(self, params):
         self.index_snapshot_calls.append(dict(params))
         return {"symbol": "BNBUSDT", "indexPrice": "600", "time": 4_000}
+
+
+class WrongOrderReviewEconomicsExchange(ReviewEconomicsExchange):
+    async def fetch_my_trades(self, symbol, since, limit, params):
+        rows = await super().fetch_my_trades(symbol, since, limit, params)
+        return [
+            *rows,
+            {
+                "id": "wrong-order-trade",
+                "orderId": "manual-order",
+                "amount": "0.5",
+                "price": "120",
+                "fee": {"cost": "0.05", "currency": "USDT"},
+                "timestamp": 3_000,
+                "info": {"positionSide": "LONG"},
+            },
+        ]
+
+
+class InvalidRawFeeReviewEconomicsExchange(ReviewEconomicsExchange):
+    def __init__(self, *, fee: object) -> None:
+        super().__init__()
+        self._fee = fee
+
+    async def fetch_my_trades(self, symbol, since, limit, params):
+        rows = await super().fetch_my_trades(symbol, since, limit, params)
+        for row in rows:
+            row["fee"] = self._fee
+            if isinstance(self._fee, dict):
+                row["info"]["commission"] = self._fee.get("cost")
+                if "currency" in self._fee:
+                    row["info"]["commissionAsset"] = self._fee["currency"]
+                else:
+                    row["info"].pop("commissionAsset", None)
+        return rows
 
 
 class FeeDiscountCapabilityExchange:
@@ -1805,7 +1877,51 @@ async def test_ccxt_adapter_rejects_review_fill_without_exact_fee() -> None:
         clock_ms=lambda: 4_000,
     )
 
-    with pytest.raises(RuntimeError, match="review fill fee is unavailable"):
+    with pytest.raises(RuntimeError, match="commission"):
+        await adapter.read_review_economics(_review_request())
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_rejects_any_trade_row_that_differs_from_requested_order_id() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): WrongOrderReviewEconomicsExchange()
+        },
+        settlement_assets={
+            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "USDT"
+        },
+        clock_ms=lambda: 4_000,
+    )
+
+    with pytest.raises(RuntimeError, match="order id"):
+        await adapter.read_review_economics(_review_request())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fee",
+    [
+        {"cost": "0.01"},
+        {"cost": "-0.01", "currency": "USDT"},
+        {"cost": "-0.00001", "currency": "BNB"},
+    ],
+)
+async def test_ccxt_adapter_rejects_missing_or_negative_raw_fee_asset_and_amount(
+    fee: object,
+) -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): InvalidRawFeeReviewEconomicsExchange(
+                fee=fee
+            )
+        },
+        settlement_assets={
+            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "USDT"
+        },
+        clock_ms=lambda: 4_000,
+    )
+
+    with pytest.raises(RuntimeError, match="commission"):
         await adapter.read_review_economics(_review_request())
 
 
@@ -2091,6 +2207,13 @@ def _review_request() -> ReviewEconomicsRequest:
                 namespace=OrderNamespace.CONDITIONAL,
                 venue_client_order_id="brc-runner-1",
                 submitted_exchange_order_id="venue-runner-algo-1",
+                conditional_expectation={
+                    "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
+                    "position_side": "long",
+                    "side": "sell",
+                    "order_type": "stop_market",
+                    "quantity": Decimal("0.5"),
+                },
             ),
         ),
         entry_time_ms=1_000,

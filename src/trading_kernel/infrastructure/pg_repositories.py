@@ -55,12 +55,13 @@ from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
 )
-from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.order_attribution import (
+    ConditionalOrderExpectation,
     OrderNamespace,
     OrderRole,
     TicketOrderReference,
 )
+from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
     PostFillRiskStatus,
@@ -461,6 +462,15 @@ class PostgresExchangeCommandRepository:
         self,
         ticket_id: str,
     ) -> tuple[TicketOrderReference, ...]:
+        ticket_result = await self._connection.execute(
+            sa.select(
+                trade_tickets.c.exchange_instrument_id,
+                trade_tickets.c.position_side,
+            ).where(trade_tickets.c.ticket_id == ticket_id)
+        )
+        ticket_row = ticket_result.mappings().one_or_none()
+        if ticket_row is None:
+            raise RuntimeError("order attribution Ticket does not exist")
         result = await self._connection.execute(
             sa.select(exchange_commands).where(
                 exchange_commands.c.ticket_id == ticket_id,
@@ -491,6 +501,17 @@ class PostgresExchangeCommandRepository:
                 if payload.order_type in {"stop_market", "take_profit_market"}
                 else OrderNamespace.REGULAR
             )
+            conditional_expectation = (
+                ConditionalOrderExpectation(
+                    exchange_instrument_id=str(ticket_row["exchange_instrument_id"]),
+                    position_side=str(ticket_row["position_side"]),
+                    side=payload.side,
+                    order_type=payload.order_type,
+                    quantity=payload.quantity,
+                )
+                if namespace is OrderNamespace.CONDITIONAL
+                else None
+            )
             references.append(
                 TicketOrderReference(
                     command_id=str(row["command_id"]),
@@ -503,6 +524,7 @@ class PostgresExchangeCommandRepository:
                     namespace=namespace,
                     venue_client_order_id=str(row["venue_client_order_id"] or ""),
                     submitted_exchange_order_id=_accepted_exchange_order_id(row),
+                    conditional_expectation=conditional_expectation,
                 )
             )
         return tuple(references)
