@@ -211,6 +211,7 @@ async def test_runner_maintenance_requests_monotonic_structural_atr_stop(
         commands = await uow.exchange_commands.list_for_ticket(
             ticket.identity.ticket_id
         )
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.RUNNER_REPLACEMENT_PENDING
     assert aggregate.pending_stop_price == Decimal("60450")
@@ -220,6 +221,7 @@ async def test_runner_maintenance_requests_monotonic_structural_atr_stop(
         if item.kind is ExchangeCommandKind.REPLACE_PROTECTION
     ]
     assert [item.generation for item in replacements] == [1, 2]
+    assert type(events[-1]).__name__ == "RunnerStopRequested"
 
 
 @pytest.mark.asyncio
