@@ -290,7 +290,10 @@ async def _certify(
                             (SELECT count(*) FROM brc_runtime_scopes_current
                               WHERE lifecycle_state = 'warming'),
                             (SELECT count(*) FROM brc_runtime_scopes_current
-                              WHERE lifecycle_state = 'retired')
+                              WHERE lifecycle_state = 'retired'),
+                            (SELECT count(*)
+                               FROM brc_instrument_certification_current
+                              WHERE status = 'temporarily_unavailable')
                         """
                     )
                 )
@@ -603,6 +606,7 @@ async def _certify(
             "warming": int(universe_counts[6]),
             "retired": int(universe_counts[7]),
         },
+        "temporarily_unavailable_certification_count": int(universe_counts[8]),
     }
     protected_tickets = (
         []
