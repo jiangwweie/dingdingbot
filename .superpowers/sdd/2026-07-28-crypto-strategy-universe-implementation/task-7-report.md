@@ -245,6 +245,50 @@ All checks were scoped to Task 7 and its directly affected ownership boundary;
 no broad suite, Tokyo access, production mutation, activation, or exchange
 write was performed.
 
+## Review Fix Round 2/5
+
+### Canonical raw rule authority
+
+Certification now reads order eligibility only from the canonical Binance raw
+filters:
+
+- `LOT_SIZE.stepSize` and `LOT_SIZE.minQty`;
+- `PRICE_FILTER.tickSize`;
+- `MIN_NOTIONAL` or `NOTIONAL` notional value.
+
+The certification path no longer fills absent raw facts from CCXT-normalized
+`market.precision` or `market.limits`. Missing, empty, nonnumeric,
+non-finite, or nonpositive raw values remain `None`, prevent typed
+`InstrumentRulesFacts` construction, and classify as
+`owner_action_required/missing_order_rule`.
+
+The standalone strict instrument-rules reader was not changed in this review
+round; the authority correction is scoped to the raw certification snapshot.
+
+### RED / GREEN evidence
+
+The RED matrix removed each required raw filter while deliberately retaining
+valid normalized `precision` and `limits` values:
+
+```text
+LOT_SIZE absent       -> expected step_size/min_qty None, received fallback
+PRICE_FILTER absent   -> expected tick_size None, received fallback
+MIN_NOTIONAL absent   -> expected min_notional None, received fallback
+Result: 3 failed
+```
+
+After removing normalized fallback from `_raw_instrument_rules`:
+
+| Focused boundary | Result |
+|---|---:|
+| Raw filter absence matrix | **3 passed** |
+| Adapter certification review paths | **9 passed** |
+| Pure classifier and certification use case | **17 passed** |
+| PostgreSQL Task 7 worker/lease/Monitor | **4 passed** |
+
+Every matrix case asserted raw `None`, no typed rules, no eligible decision,
+`owner_action_required/missing_order_rule`, and zero exchange mutations.
+
 ## Remaining Boundary
 
 Task 7 deliberately stops after updating readonly certification, canonical

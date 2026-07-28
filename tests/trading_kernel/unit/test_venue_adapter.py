@@ -658,6 +658,33 @@ class InvalidOrderRuleCertificationExchange(InstrumentCertificationExchange):
         return market
 
 
+class MissingCanonicalFilterWithNormalizedFallbackExchange(
+    InstrumentCertificationExchange
+):
+    def __init__(self, *, missing_filter_type: str) -> None:
+        super().__init__()
+        self.missing_filter_type = missing_filter_type
+
+    def market(self, symbol):
+        market = super().market(symbol)
+        market["precision"] = {
+            "amount": "0.001",
+            "price": "0.1",
+        }
+        market["limits"].update(
+            {
+                "amount": {"min": "0.001"},
+                "cost": {"min": "5"},
+            }
+        )
+        market["info"]["filters"] = [
+            row
+            for row in market["info"]["filters"]
+            if row["filterType"] != self.missing_filter_type
+        ]
+        return market
+
+
 class TransientCertificationExchange(InstrumentCertificationExchange):
     async def fetch_position_mode(self, symbol, params):
         del symbol, params
@@ -1333,6 +1360,47 @@ async def test_ccxt_adapter_certification_preserves_missing_order_rule_as_raw_fa
     )
 
     assert snapshot.facts.min_notional is None
+    assert snapshot.instrument_rules is None
+    assert decision.status == "owner_action_required"
+    assert decision.blocker_code == "missing_order_rule"
+    assert exchange.mutations == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("missing_filter_type", "missing_fact_names"),
+    (
+        ("LOT_SIZE", ("step_size", "min_qty")),
+        ("PRICE_FILTER", ("tick_size",)),
+        ("MIN_NOTIONAL", ("min_notional",)),
+    ),
+)
+async def test_ccxt_adapter_certification_never_falls_back_from_missing_raw_filter(
+    missing_filter_type,
+    missing_fact_names,
+) -> None:
+    exchange = MissingCanonicalFilterWithNormalizedFallbackExchange(
+        missing_filter_type=missing_filter_type
+    )
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        clock_ms=lambda: 2_000,
+    )
+
+    snapshot = await adapter.read_instrument_certification(
+        _certification_read_request(owned_quantity=Decimal("0.01"))
+    )
+    decision = classify_instrument_certification(
+        snapshot.facts,
+        required_leverage=5,
+        required_margin_mode="cross",
+        valid_for_ms=60_000,
+    )
+
+    assert all(
+        getattr(snapshot.facts, fact_name) is None
+        for fact_name in missing_fact_names
+    )
     assert snapshot.instrument_rules is None
     assert decision.status == "owner_action_required"
     assert decision.blocker_code == "missing_order_rule"

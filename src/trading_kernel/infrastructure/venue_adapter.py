@@ -1892,22 +1892,12 @@ def _raw_instrument_rules(
     price_filter = by_type.get("PRICE_FILTER", {})
     notional_filter = by_type.get("MIN_NOTIONAL") or by_type.get("NOTIONAL") or {}
     return (
-        _optional_positive_rule_value(
-            lot.get("stepSize"),
-            fallback=_nested_market_value(market, "precision", "amount"),
-        ),
-        _optional_positive_rule_value(
-            price_filter.get("tickSize"),
-            fallback=_nested_market_value(market, "precision", "price"),
-        ),
-        _optional_positive_rule_value(
-            lot.get("minQty"),
-            fallback=_nested_market_value(market, "limits", "amount", "min"),
-        ),
+        _optional_positive_rule_value(lot.get("stepSize")),
+        _optional_positive_rule_value(price_filter.get("tickSize")),
+        _optional_positive_rule_value(lot.get("minQty")),
         _optional_positive_rule_value(
             notional_filter.get("notional")
             or notional_filter.get("minNotional"),
-            fallback=_nested_market_value(market, "limits", "cost", "min"),
         ),
     )
 
@@ -2030,20 +2020,11 @@ def _positive_rule_value(
 
 def _optional_positive_rule_value(
     value: object,
-    *,
-    fallback: object,
 ) -> Decimal | None:
-    raw_value = (
-        fallback
-        if value is None or (isinstance(value, str) and not value.strip())
-        else value
-    )
-    if raw_value is None or (
-        isinstance(raw_value, str) and not raw_value.strip()
-    ):
+    if value is None or (isinstance(value, str) and not value.strip()):
         return None
     try:
-        parsed = Decimal(str(raw_value))
+        parsed = Decimal(str(value))
     except (ArithmeticError, ValueError):
         return None
     if not parsed.is_finite() or parsed <= 0:
