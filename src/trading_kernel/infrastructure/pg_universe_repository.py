@@ -9,9 +9,11 @@ from typing import Literal, cast
 import sqlalchemy as sa
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
+from pydantic import ValidationError
 
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseCurrent,
+    UniverseInstallPolicyScope,
     UniverseInstallRequest,
     UniverseInstallResult,
     UniverseInstallStatus,
@@ -224,28 +226,66 @@ class PostgresStrategyUniverseRepository:
         self,
         request: UniverseInstallRequest,
     ) -> _InstallAuthority:
-        event_row = (
+        resolved_identity = (
             await self._connection.execute(
                 sa.select(
                     event_specs.c.strategy_version_id,
-                    event_specs.c.position_side,
-                    event_specs.c.status.label("event_status"),
                     strategy_versions.c.strategy_group_id,
-                    strategy_versions.c.status.label("version_status"),
-                    strategy_groups.c.active_version_id,
-                    strategy_groups.c.status.label("group_status"),
                 )
                 .join(
                     strategy_versions,
                     strategy_versions.c.strategy_version_id
                     == event_specs.c.strategy_version_id,
                 )
-                .join(
-                    strategy_groups,
-                    strategy_groups.c.strategy_group_id
-                    == strategy_versions.c.strategy_group_id,
+                .where(event_specs.c.event_spec_id == request.event_spec_id)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if resolved_identity is None:
+            raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
+
+        strategy_version_id = str(resolved_identity["strategy_version_id"])
+        strategy_group_id = str(resolved_identity["strategy_group_id"])
+
+        # Every install acquires mutable authority rows in this global order.
+        # FOR UPDATE is required because status/scope changes are non-key updates
+        # and therefore are not blocked by FOR KEY SHARE.
+        group_row = (
+            await self._connection.execute(
+                sa.select(
+                    strategy_groups.c.active_version_id,
+                    strategy_groups.c.status,
+                )
+                .where(
+                    strategy_groups.c.strategy_group_id == strategy_group_id
+                )
+                .with_for_update(of=strategy_groups)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        version_row = (
+            await self._connection.execute(
+                sa.select(
+                    strategy_versions.c.strategy_group_id,
+                    strategy_versions.c.status,
+                )
+                .where(
+                    strategy_versions.c.strategy_version_id
+                    == strategy_version_id
+                )
+                .with_for_update(of=strategy_versions)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        event_row = (
+            await self._connection.execute(
+                sa.select(
+                    event_specs.c.strategy_version_id,
+                    event_specs.c.position_side,
+                    event_specs.c.status,
                 )
                 .where(event_specs.c.event_spec_id == request.event_spec_id)
+                .with_for_update(of=event_specs)
                 .limit(1)
             )
         ).mappings().one_or_none()
@@ -259,6 +299,7 @@ class PostgresStrategyUniverseRepository:
                     runtime_profiles.c.runtime_profile_id
                     == request.runtime_profile_id
                 )
+                .with_for_update(of=runtime_profiles)
                 .limit(1)
             )
         ).mappings().one_or_none()
@@ -272,15 +313,20 @@ class PostgresStrategyUniverseRepository:
                     owner_policy_current.c.owner_policy_id
                     == request.owner_policy_id
                 )
+                .with_for_update(of=owner_policy_current)
                 .limit(1)
             )
         ).mappings().one_or_none()
         if (
-            event_row is None
-            or event_row["event_status"] != "active"
-            or event_row["version_status"] != "active"
-            or event_row["group_status"] != "active"
-            or event_row["active_version_id"] != event_row["strategy_version_id"]
+            group_row is None
+            or group_row["status"] != "active"
+            or group_row["active_version_id"] != strategy_version_id
+            or version_row is None
+            or version_row["status"] != "active"
+            or version_row["strategy_group_id"] != strategy_group_id
+            or event_row is None
+            or event_row["status"] != "active"
+            or event_row["strategy_version_id"] != strategy_version_id
         ):
             raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
         if (
@@ -291,19 +337,23 @@ class PostgresStrategyUniverseRepository:
             raise UniverseInstallConflict("RUNTIME_PROFILE_AUTHORITY_CONFLICT")
         if policy_row is None or not policy_row["enabled"]:
             raise UniverseInstallConflict("OWNER_POLICY_AUTHORITY_CONFLICT")
-        scope = policy_row["scope"]
+        try:
+            scope = UniverseInstallPolicyScope.model_validate(policy_row["scope"])
+        except ValidationError as exc:
+            raise UniverseInstallConflict(
+                "OWNER_POLICY_AUTHORITY_CONFLICT"
+            ) from exc
         if (
-            not isinstance(scope, dict)
-            or scope.get("runtime_profile_id") != request.runtime_profile_id
-            or request.event_spec_id not in scope.get("allowed_event_spec_ids", ())
+            scope.runtime_profile_id != request.runtime_profile_id
+            or request.event_spec_id not in scope.allowed_event_spec_ids
         ):
             raise UniverseInstallConflict("OWNER_POLICY_AUTHORITY_CONFLICT")
         position_side = str(event_row["position_side"])
         if position_side not in {"long", "short"}:
             raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
         return _InstallAuthority(
-            strategy_group_id=str(event_row["strategy_group_id"]),
-            strategy_version_id=str(event_row["strategy_version_id"]),
+            strategy_group_id=strategy_group_id,
+            strategy_version_id=strategy_version_id,
             position_side=cast(Literal["long", "short"], position_side),
         )
 

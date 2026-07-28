@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 import re
@@ -23,6 +24,9 @@ from src.trading_kernel.application.install_strategy_universe import (
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
+)
+from src.trading_kernel.infrastructure.pg_universe_repository import (
+    PostgresStrategyUniverseRepository,
 )
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     OWNER_POLICY_ID,
@@ -420,6 +424,146 @@ async def test_conflicting_canonical_instrument_identity_rejects_atomically(
     assert universe_count == 0
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "malformed_scope",
+    (
+        {
+            "runtime_profile_id": RUNTIME_PROFILE_ID,
+            "allowed_event_spec_ids": CONTRACT.event_spec_id,
+        },
+        {
+            "runtime_profile_id": RUNTIME_PROFILE_ID,
+            "allowed_event_spec_ids": [CONTRACT.event_spec_id],
+            "runtime_scope_ids": ["legacy-scope"],
+        },
+        {
+            "runtime_profile_id": RUNTIME_PROFILE_ID,
+            "allowed_event_spec_ids": [
+                CONTRACT.event_spec_id,
+                CONTRACT.event_spec_id,
+            ],
+        },
+        {
+            "runtime_profile_id": RUNTIME_PROFILE_ID,
+            "allowed_event_spec_ids": [
+                registered_strategy_contracts()[1].event_spec_id,
+                CONTRACT.event_spec_id,
+            ],
+        },
+    ),
+)
+async def test_malformed_or_legacy_policy_scope_rejects_install_without_rows(
+    universe_engine: AsyncEngine,
+    malformed_scope: dict[str, object],
+) -> None:
+    """Catches substring authorization, legacy keys, duplicates, and order drift."""
+
+    async with universe_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                """
+                UPDATE brc_owner_policy_current
+                SET scope = CAST(:scope AS jsonb)
+                WHERE owner_policy_id = :owner_policy_id
+                """
+            ),
+            {
+                "owner_policy_id": OWNER_POLICY_ID,
+                "scope": json.dumps(malformed_scope, sort_keys=True),
+            },
+        )
+
+    with pytest.raises(RuntimeError, match="OWNER_POLICY_AUTHORITY_CONFLICT"):
+        async with PostgresKernelUnitOfWork(universe_engine) as uow:
+            await install_strategy_universe(uow, _request(MEMBERS))
+
+    async with universe_engine.connect() as connection:
+        counts = tuple(
+            int(value)
+            for value in (
+                await connection.execute(
+                    sa.text(
+                        "SELECT "
+                        "(SELECT count(*) FROM brc_strategy_universe_versions), "
+                        "(SELECT count(*) FROM brc_strategy_universe_members), "
+                        "(SELECT count(*) FROM brc_runtime_scopes_current)"
+                    )
+                )
+            ).one()
+        )
+    assert counts == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_authority_mutation_waits_for_install_snapshot_locks(
+    universe_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a Policy update committing after validation but before install."""
+
+    authority_loaded = asyncio.Event()
+    allow_install_to_continue = asyncio.Event()
+    original_lookup = (
+        PostgresStrategyUniverseRepository._get_current_semantic_version
+    )
+
+    async def _barrier_after_authority(
+        repository: PostgresStrategyUniverseRepository,
+        *,
+        event_spec_id: str,
+        semantic_digest: str,
+    ):
+        authority_loaded.set()
+        await allow_install_to_continue.wait()
+        return await original_lookup(
+            repository,
+            event_spec_id=event_spec_id,
+            semantic_digest=semantic_digest,
+        )
+
+    monkeypatch.setattr(
+        PostgresStrategyUniverseRepository,
+        "_get_current_semantic_version",
+        _barrier_after_authority,
+    )
+    install_task = asyncio.create_task(
+        _install_in_new_uow(universe_engine, _request(MEMBERS))
+    )
+    await asyncio.wait_for(authority_loaded.wait(), timeout=2)
+
+    mutation_task = asyncio.create_task(
+        _disable_owner_policy(universe_engine)
+    )
+    try:
+        mutation_waited = await _mutation_waited_on_row_lock(
+            universe_engine,
+            mutation_task,
+        )
+    finally:
+        allow_install_to_continue.set()
+    install_result = await asyncio.wait_for(install_task, timeout=2)
+    await asyncio.wait_for(mutation_task, timeout=2)
+
+    assert mutation_waited is True
+    assert install_result.status is UniverseInstallStatus.INSTALLED
+    async with universe_engine.connect() as connection:
+        persisted = (
+            await connection.execute(
+                sa.text(
+                    "SELECT "
+                    "(SELECT enabled FROM brc_owner_policy_current "
+                    " WHERE owner_policy_id = :owner_policy_id), "
+                    "(SELECT count(*) FROM brc_strategy_universe_versions), "
+                    "(SELECT count(*) FROM brc_strategy_universe_members), "
+                    "(SELECT count(*) FROM brc_runtime_scopes_current)"
+                ),
+                {"owner_policy_id": OWNER_POLICY_ID},
+            )
+        ).one()
+    assert tuple(persisted) == (False, 1, 2, 2)
+
+
 def _request(
     members: tuple[str, ...],
     *,
@@ -440,6 +584,55 @@ async def _install_in_new_uow(
 ):
     async with PostgresKernelUnitOfWork(engine) as uow:
         return await install_strategy_universe(uow, request)
+
+
+async def _disable_owner_policy(engine: AsyncEngine) -> None:
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                """
+                UPDATE /* task5-authority-mutation */
+                    brc_owner_policy_current
+                SET enabled = false
+                WHERE owner_policy_id = :owner_policy_id
+                """
+            ),
+            {"owner_policy_id": OWNER_POLICY_ID},
+        )
+
+
+async def _mutation_waited_on_row_lock(
+    engine: AsyncEngine,
+    mutation_task: asyncio.Task[None],
+) -> bool:
+    for _ in range(200):
+        if mutation_task.done():
+            await mutation_task
+            return False
+        async with engine.connect() as connection:
+            waiting = bool(
+                (
+                    await connection.execute(
+                        sa.text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_stat_activity
+                                WHERE datname = current_database()
+                                  AND state = 'active'
+                                  AND wait_event_type = 'Lock'
+                                  AND query LIKE
+                                      '%UPDATE /* task5-authority-mutation */%'
+                            )
+                            """
+                        )
+                    )
+                ).scalar_one()
+            )
+        if waiting:
+            return True
+        await asyncio.sleep(0.01)
+    raise AssertionError("authority mutation neither committed nor waited on a lock")
 
 
 async def _make_active(
