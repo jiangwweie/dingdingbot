@@ -58,6 +58,9 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
     run_reconciliation_worker_once,
 )
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
+from tests.trading_kernel.integration.test_issue_ticket import (
+    _seed_ticket_runtime_scope,
+)
 from tests.trading_kernel.integration.test_signal_to_ticket import (
     _seed_runtime_authority,
     _signal,
@@ -272,6 +275,8 @@ async def test_runtime_selector_reschedules_no_change_ticket_without_starving_ne
         }
     )
     second_ticket = _ticket(identity=second_identity)
+    for ticket in (first_ticket, second_ticket):
+        await _seed_ticket_runtime_scope(runtime_fact_worker_engine, ticket)
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         for ticket in (first_ticket, second_ticket):
             await uow.tickets.add(ticket)
@@ -335,6 +340,8 @@ async def test_reconciliation_selector_prioritizes_overdue_closure_over_due_posi
         }
     )
     closure_ticket = _ticket(identity=closure_identity)
+    for ticket in (position_ticket, closure_ticket):
+        await _seed_ticket_runtime_scope(runtime_fact_worker_engine, ticket)
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         await uow.tickets.add(position_ticket)
         await uow.tickets.add(closure_ticket)

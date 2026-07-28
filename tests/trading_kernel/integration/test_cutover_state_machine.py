@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
-from pathlib import Path
 import subprocess
 import sys
+from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from scripts.trading_kernel.certify_readonly import _certify
 from scripts.trading_kernel.cutover_tokyo import (
     CUTOVER_PHASES,
     CutoverBlocked,
@@ -23,7 +24,6 @@ from scripts.trading_kernel.cutover_tokyo import (
     plan_cutover,
     run_cutover,
 )
-from scripts.trading_kernel.certify_readonly import _certify
 from scripts.trading_kernel.verify_flat_cutover import (
     CutoverBlocker,
     CutoverFacts,
@@ -47,7 +47,6 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _database_url,
     _run_alembic,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -74,7 +73,7 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
     plan = _plan()
 
     assert plan.target_commit == "a" * 40
-    assert plan.target_schema_revision == "0001_initial"
+    assert plan.target_schema_revision == "0002_crypto_strategy_universe"
     assert plan.target_seed_identity.startswith("sha256:")
     assert CUTOVER_PHASES == (
         CutoverPhase.PLAN_IDENTITIES,
@@ -445,10 +444,10 @@ async def test_readonly_certification_reports_exact_runtime_authority(
     }
     assert payload["table_allowlist"] == {
         "status": "pass",
-        "count": 33,
+        "count": len(metadata.tables),
         "tables": sorted(metadata.tables),
     }
-    assert payload["runtime_scope_count"] == 22
+    assert payload["runtime_scope_count"] == 0
     assert payload["capabilities"] == {
         "exchange_commands": False,
         "strategy_signal_ingest": True,
@@ -822,7 +821,7 @@ class LocalPostgresCutoverAdapter:
 
 def _plan(**changes: object) -> CutoverPlan:
     runtime_commit = "a" * 40
-    schema_revision = "0001_initial"
+    schema_revision = "0002_crypto_strategy_universe"
     seed_identity = build_runtime_seed_identity(
         RuntimeAuthoritySeedRequest(
             account_id="subaccount-main",

@@ -14,8 +14,10 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.order_attribution import OrderNamespace, OrderRole
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
+from tests.trading_kernel.integration.test_issue_ticket import (
+    _seed_ticket_runtime_scope,
+)
 from tests.trading_kernel.unit.test_ticket import _ticket
-
 
 order_attribution_engine = dispatch_fixture.dispatch_engine
 
@@ -51,6 +53,7 @@ async def test_repository_builds_exact_regular_and_conditional_order_references(
         ),
     )
 
+    await _seed_ticket_runtime_scope(order_attribution_engine, ticket)
     async with PostgresKernelUnitOfWork(order_attribution_engine) as uow:
         await uow.tickets.add(ticket)
         for command, exchange_order_id in ((entry, "1001"), (stop, "9001")):

@@ -5,17 +5,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from enum import StrEnum
 import importlib
 import inspect
 import json
-from pathlib import Path
 import re
 import sys
+from enum import StrEnum
+from pathlib import Path
 from typing import Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -100,8 +99,10 @@ class CutoverPlan(BaseModel):
     @classmethod
     def _require_schema_revision(cls, value: object) -> str:
         normalized = str(value or "").strip()
-        if normalized != "0001_initial":
-            raise ValueError("target schema revision must be 0001_initial")
+        if normalized != "0002_crypto_strategy_universe":
+            raise ValueError(
+                "target schema revision must be 0002_crypto_strategy_universe"
+            )
         return normalized
 
     @field_validator("target_seed_identity", mode="before")

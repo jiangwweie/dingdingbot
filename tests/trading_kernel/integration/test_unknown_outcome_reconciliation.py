@@ -55,6 +55,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import (
     AcceptingVenue,
+    PreflightFacts,
     SlowVenue,
     _issue,
     _reach_cancel_pending,
@@ -125,7 +126,11 @@ async def _unknown_leverage_command(dispatch_engine, ticket):
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=0.001,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(configured_leverage=4),
     )
     assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
     assert result.command_id is not None
@@ -1002,7 +1007,11 @@ async def _make_unknown_entry(engine):
             now_ms=1_100,
             lease_until_ms=1_200,
             timeout_seconds=0.01,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
     assert dispatched.status is DispatchCommandStatus.OUTCOME_UNKNOWN
     async with PostgresKernelUnitOfWork(engine) as uow:
@@ -1017,7 +1026,13 @@ async def _make_unknown_initial_stop(engine):
     await _seed_policy(engine)
     await _issue(engine, ticket)
     accepting = AcceptingVenue(engine)
-    await _dispatch(engine, accepting, worker_id="entry-dispatcher", now_ms=1_100)
+    await _dispatch(
+        engine,
+        accepting,
+        worker_id="entry-dispatcher",
+        now_ms=1_100,
+        entry=True,
+    )
     async with PostgresKernelUnitOfWork(engine) as uow:
         await reconcile_ticket(
             uow,
@@ -1059,7 +1074,13 @@ async def _make_unknown_tp1(
         await _seed_policy(engine)
     await _issue(engine, ticket)
     accepting = AcceptingVenue(engine)
-    await _dispatch(engine, accepting, worker_id="entry-dispatcher", now_ms=1_100)
+    await _dispatch(
+        engine,
+        accepting,
+        worker_id="entry-dispatcher",
+        now_ms=1_100,
+        entry=True,
+    )
     async with PostgresKernelUnitOfWork(engine) as uow:
         await reconcile_ticket(
             uow,
@@ -1106,7 +1127,13 @@ async def _make_unknown_replacement(
         await _seed_policy(engine)
     await _issue(engine, ticket)
     accepting = AcceptingVenue(engine)
-    await _dispatch(engine, accepting, worker_id="entry-dispatcher", now_ms=1_100)
+    await _dispatch(
+        engine,
+        accepting,
+        worker_id="entry-dispatcher",
+        now_ms=1_100,
+        entry=True,
+    )
     async with PostgresKernelUnitOfWork(engine) as uow:
         await reconcile_ticket(
             uow,
@@ -1199,7 +1226,13 @@ async def _make_unknown_controlled_flatten(engine):
     await _seed_policy(engine)
     await _issue(engine, ticket)
     accepting = AcceptingVenue(engine)
-    await _dispatch(engine, accepting, worker_id="entry-dispatcher", now_ms=1_100)
+    await _dispatch(
+        engine,
+        accepting,
+        worker_id="entry-dispatcher",
+        now_ms=1_100,
+        entry=True,
+    )
     async with PostgresKernelUnitOfWork(engine) as uow:
         await reconcile_ticket(
             uow,
@@ -1249,6 +1282,7 @@ async def _dispatch(
     worker_id: str,
     now_ms: int,
     timeout_seconds: float = 1,
+    entry: bool = False,
 ) -> None:
     result = await dispatch_one_command(
         lambda: PostgresKernelUnitOfWork(engine),
@@ -1258,7 +1292,11 @@ async def _dispatch(
             now_ms=now_ms,
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=timeout_seconds,
+            runtime_commit="kernel-test-head" if entry else None,
+            schema_revision="0002_crypto_strategy_universe" if entry else None,
+            admission_snapshot_validity_ms=1_000 if entry else None,
         ),
+        entry_facts_source=PreflightFacts() if entry else None,
     )
     assert result.status is not DispatchCommandStatus.NO_COMMAND
 
