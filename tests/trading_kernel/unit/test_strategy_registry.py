@@ -30,7 +30,7 @@ def test_registry_contains_only_the_six_owner_accepted_events() -> None:
     assert len(contracts) == 6
 
 
-def test_registry_preserves_exact_v2_fact_and_candidate_scope() -> None:
+def test_registry_preserves_exact_v2_semantic_contracts_without_membership() -> None:
     contracts = {item.event_id: item for item in registered_strategy_contracts()}
 
     assert contracts["CPM-LONG"].timeframe == "1h"
@@ -39,23 +39,11 @@ def test_registry_preserves_exact_v2_fact_and_candidate_scope() -> None:
         "reclaim_confirmed",
         "pullback_low_reference",
     )
-    assert contracts["CPM-LONG"].venue_symbols == (
-        "ETHUSDT",
-        "SOLUSDT",
-        "AVAXUSDT",
-        "SUIUSDT",
-    )
 
     assert contracts["MPG-LONG"].required_fact_names == (
         "momentum_persistence_confirmed",
         "leader_strength_confirmed",
         "momentum_floor_reference",
-    )
-    assert contracts["MPG-LONG"].venue_symbols == (
-        "OPUSDT",
-        "SOLUSDT",
-        "AVAXUSDT",
-        "SUIUSDT",
     )
 
     assert contracts["MI-LONG"].required_fact_names == (
@@ -63,20 +51,9 @@ def test_registry_preserves_exact_v2_fact_and_candidate_scope() -> None:
         "relative_strength_confirmed",
         "impulse_invalidation_reference",
     )
-    assert contracts["MI-LONG"].venue_symbols == (
-        "AVAXUSDT",
-        "ETHUSDT",
-        "SOLUSDT",
-    )
 
     for event_id in ("SOR-LONG", "SOR-SHORT"):
         assert contracts[event_id].timeframe == "15m"
-        assert contracts[event_id].venue_symbols == (
-            "ETHUSDT",
-            "SOLUSDT",
-            "AVAXUSDT",
-            "BTCUSDT",
-        )
 
     assert contracts["SOR-LONG"].required_fact_names == (
         "opening_range_defined",
@@ -97,28 +74,24 @@ def test_registry_preserves_exact_v2_fact_and_candidate_scope() -> None:
     assert contracts["BRF2-SHORT"].disable_fact_names == (
         "strong_uptrend_disable",
     )
-    assert contracts["BRF2-SHORT"].venue_symbols == (
-        "BTCUSDT",
-        "AVAXUSDT",
-        "ETHUSDT",
+    forbidden_membership_fields = {
+        "candidate_instruments",
+        "exchange_instrument_id",
+        "venue_symbol",
+        "priority_rank",
+    }
+    assert not (
+        set(RegisteredStrategyContract.model_fields) & forbidden_membership_fields
     )
 
 
-def test_registry_uses_exact_versioned_identities_and_priority_order() -> None:
+def test_registry_uses_exact_versioned_semantic_identities() -> None:
     for contract in registered_strategy_contracts():
         assert contract.strategy_version_id == (
             f"sgv:{contract.strategy_group_id}:v2"
         )
         assert contract.event_spec_id == (
             f"event_spec:{contract.strategy_group_id}:{contract.event_id}:v2"
-        )
-        assert [item.priority_rank for item in contract.candidate_instruments] == list(
-            range(1, len(contract.candidate_instruments) + 1)
-        )
-        assert all(
-            item.exchange_instrument_id
-            == f"binance-usdm:{item.venue_symbol}:perpetual"
-            for item in contract.candidate_instruments
         )
 
 
@@ -128,6 +101,12 @@ def test_registry_semantic_hash_is_deterministic_and_order_independent() -> None
     assert build_registry_semantic_hash(contracts).startswith("sha256:")
     assert build_registry_semantic_hash(contracts) == build_registry_semantic_hash(
         tuple(reversed(contracts))
+    )
+    assert all(
+        "instrument" not in serialized and "symbol" not in serialized
+        for serialized in (
+            contract.model_dump_json() for contract in contracts
+        )
     )
 
 

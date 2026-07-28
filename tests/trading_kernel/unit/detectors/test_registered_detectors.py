@@ -27,6 +27,16 @@ def test_every_registered_event_has_one_deterministic_detector() -> None:
     assert detector.evaluate(snapshot) == detector.evaluate(snapshot)
 
 
+def test_detector_accepts_a_canonical_instrument_not_hard_coded_in_registry() -> None:
+    snapshot = cpm_long_snapshot().model_copy(
+        update={"exchange_instrument_id": "binance-usdm:DOGEUSDT:perpetual"}
+    )
+
+    result = detector_for("event_spec:CPM-RO-001:CPM-LONG:v2").evaluate(snapshot)
+
+    assert result.status is DetectorStatus.TRIGGERED
+
+
 @pytest.mark.parametrize(
     ("event_spec_id", "snapshot_factory", "protection_fact"),
     [

@@ -31,8 +31,6 @@ class RegistrySeedResult(BaseModel):
     inserted_exit_policy_count: int = 0
     inserted_fact_definition_count: int = 0
     inserted_event_fact_count: int = 0
-    inserted_instrument_count: int = 0
-    inserted_candidate_scope_count: int = 0
 
     @property
     def total_inserted_count(self) -> int:
@@ -43,8 +41,6 @@ class RegistrySeedResult(BaseModel):
             + self.inserted_exit_policy_count
             + self.inserted_fact_definition_count
             + self.inserted_event_fact_count
-            + self.inserted_instrument_count
-            + self.inserted_candidate_scope_count
         )
 
 
@@ -81,29 +77,6 @@ class RegisteredFactRequirement(BaseModel):
         return self
 
 
-class InstrumentPriority(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    exchange_instrument_id: str
-    venue_symbol: str
-    priority_rank: int
-
-    @field_validator("exchange_instrument_id", "venue_symbol", mode="before")
-    @classmethod
-    def _require_identity(cls, value: object) -> str:
-        normalized = str(value or "").strip()
-        if not normalized:
-            raise ValueError("instrument priority identity must be non-blank")
-        return normalized
-
-    @field_validator("priority_rank")
-    @classmethod
-    def _require_positive_priority(cls, value: int) -> int:
-        if value <= 0:
-            raise ValueError("instrument priority rank must be positive")
-        return value
-
-
 class RegisteredStrategyContract(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -119,7 +92,6 @@ class RegisteredStrategyContract(BaseModel):
     protection_reference_fact: str
     required_facts: tuple[RegisteredFactRequirement, ...]
     disable_facts: tuple[RegisteredFactRequirement, ...] = ()
-    candidate_instruments: tuple[InstrumentPriority, ...]
     exit_policy_id: str
 
     @field_validator(
@@ -182,19 +154,6 @@ class RegisteredStrategyContract(BaseModel):
         ):
             raise ValueError("registered facts must use the Event freshness window")
 
-        if not self.candidate_instruments:
-            raise ValueError("registered Event requires candidate instruments")
-        instrument_ids = [
-            item.exchange_instrument_id for item in self.candidate_instruments
-        ]
-        venue_symbols = [item.venue_symbol for item in self.candidate_instruments]
-        priorities = [item.priority_rank for item in self.candidate_instruments]
-        if len(instrument_ids) != len(set(instrument_ids)):
-            raise ValueError("candidate instrument identities must be unique")
-        if len(venue_symbols) != len(set(venue_symbols)):
-            raise ValueError("candidate venue symbols must be unique")
-        if priorities != list(range(1, len(priorities) + 1)):
-            raise ValueError("candidate priorities must be contiguous from one")
         return self
 
     @property
@@ -204,11 +163,6 @@ class RegisteredStrategyContract(BaseModel):
     @property
     def disable_fact_names(self) -> tuple[str, ...]:
         return tuple(item.fact_name for item in self.disable_facts)
-
-    @property
-    def venue_symbols(self) -> tuple[str, ...]:
-        return tuple(item.venue_symbol for item in self.candidate_instruments)
-
 
 def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
     """Return the exact six Event contracts recovered from committed runtime code."""
@@ -225,7 +179,6 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
                 ("pullback_low_reference", "protection_reference"),
             ),
             protection_reference_fact="pullback_low_reference",
-            venue_symbols=("ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"),
         ),
         _contract(
             strategy_group_id="MPG-001",
@@ -238,7 +191,6 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
                 ("momentum_floor_reference", "protection_reference"),
             ),
             protection_reference_fact="momentum_floor_reference",
-            venue_symbols=("OPUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT"),
         ),
         _contract(
             strategy_group_id="MI-001",
@@ -251,7 +203,6 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
                 ("impulse_invalidation_reference", "protection_reference"),
             ),
             protection_reference_fact="impulse_invalidation_reference",
-            venue_symbols=("AVAXUSDT", "ETHUSDT", "SOLUSDT"),
         ),
         _contract(
             strategy_group_id="SOR-001",
@@ -264,7 +215,6 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
                 ("opening_range_low_reference", "protection_reference"),
             ),
             protection_reference_fact="opening_range_low_reference",
-            venue_symbols=("ETHUSDT", "SOLUSDT", "AVAXUSDT", "BTCUSDT"),
         ),
         _contract(
             strategy_group_id="SOR-001",
@@ -277,7 +227,6 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
                 ("opening_range_high_reference", "protection_reference"),
             ),
             protection_reference_fact="opening_range_high_reference",
-            venue_symbols=("ETHUSDT", "SOLUSDT", "AVAXUSDT", "BTCUSDT"),
         ),
         _contract(
             strategy_group_id="BRF2-001",
@@ -290,7 +239,6 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
                 ("rally_high_reference", "protection_reference"),
             ),
             protection_reference_fact="rally_high_reference",
-            venue_symbols=("BTCUSDT", "AVAXUSDT", "ETHUSDT"),
             disable_fact_names=("strong_uptrend_disable",),
         ),
     )
@@ -324,7 +272,6 @@ def _contract(
     timeframe: Timeframe,
     facts: tuple[tuple[str, Literal["condition", "protection_reference"]], ...],
     protection_reference_fact: str,
-    venue_symbols: tuple[str, ...],
     disable_fact_names: tuple[str, ...] = (),
 ) -> RegisteredStrategyContract:
     freshness_window_ms = 900_000 if timeframe == "15m" else 3_600_000
@@ -346,14 +293,6 @@ def _contract(
         disable_facts=tuple(
             _fact(fact_name, "disable", freshness_window_ms)
             for fact_name in disable_fact_names
-        ),
-        candidate_instruments=tuple(
-            InstrumentPriority(
-                exchange_instrument_id=f"binance-usdm:{venue_symbol}:perpetual",
-                venue_symbol=venue_symbol,
-                priority_rank=rank,
-            )
-            for rank, venue_symbol in enumerate(venue_symbols, start=1)
         ),
         exit_policy_id=(
             f"exit-policy:{strategy_group_id}:{event_id}:right-tail-v1"

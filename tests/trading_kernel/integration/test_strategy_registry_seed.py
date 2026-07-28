@@ -14,10 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from src.trading_kernel.infrastructure.pg_models import (
     event_specs,
     exit_policies,
+    instruments,
     owner_policy_current,
     runtime_profiles,
     runtime_scopes_current,
-    strategy_candidate_scopes,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
@@ -99,8 +99,8 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
     assert first.inserted_exit_policy_count == 6
     assert first.inserted_fact_definition_count == 18
     assert first.inserted_event_fact_count == 19
-    assert first.inserted_instrument_count == 6
-    assert first.inserted_candidate_scope_count == 22
+    assert "inserted_instrument_count" not in first.model_fields
+    assert "inserted_candidate_scope_count" not in first.model_fields
     assert second.total_inserted_count == 0
     assert event_ids == (
         "BRF2-SHORT",
@@ -115,7 +115,7 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         assert await connection.scalar(sa.select(sa.func.count()).select_from(runtime_profiles)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(runtime_scopes_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(owner_policy_current)) == 0
-        assert await connection.scalar(sa.select(sa.func.count()).select_from(strategy_candidate_scopes)) == 22
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(instruments)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(exit_policies)) == 6
 
 

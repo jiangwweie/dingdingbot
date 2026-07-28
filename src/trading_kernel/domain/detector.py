@@ -200,11 +200,6 @@ def validate_snapshot_scope(
     contract: RegisteredStrategyContract,
     snapshot: MarketSnapshot,
 ) -> str | None:
-    supported = {
-        item.exchange_instrument_id for item in contract.candidate_instruments
-    }
-    if snapshot.exchange_instrument_id not in supported:
-        return "detector_invalid_unsupported_instrument"
     primary = snapshot.candles(contract.timeframe)
     if primary and primary[-1].close_time_ms != snapshot.trigger_candle_close_time_ms:
         return "detector_invalid_trigger_time_mismatch"
