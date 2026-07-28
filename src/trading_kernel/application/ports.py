@@ -18,6 +18,10 @@ from pydantic import (
     model_validator,
 )
 
+from src.trading_kernel.application.advance_strategy_universe import (
+    UniverseActivationRequest,
+    UniverseActivationResult,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseCurrent,
     UniverseInstallRequest,
@@ -971,6 +975,11 @@ class StrategyUniverseRepository(Protocol):
         self,
         universe_version_id: str,
     ) -> tuple[str, ...]: ...
+
+    async def try_activate(
+        self,
+        request: UniverseActivationRequest,
+    ) -> UniverseActivationResult: ...
 
     async def get_comparative_projection(
         self,

@@ -12,6 +12,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from src.trading_kernel.application.advance_strategy_universe import (
+    UniverseActivationReadiness,
+    UniverseActivationRequest,
+    UniverseActivationResult,
+    UniverseActivationStatus,
+    activation_readiness_blocker,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseCurrent,
     UniverseInstallPolicyScope,
@@ -24,6 +31,7 @@ from src.trading_kernel.application.project_comparative_universe import (
     ComparativeProjectionFailure,
     ComparativeProjectionOutcome,
     ComparativeUniverseProjection,
+    comparative_member_set_digest,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
@@ -224,6 +232,505 @@ class PostgresStrategyUniverseRepository:
         if len(rows) > MAX_UNIVERSE_MEMBERS:
             raise UniverseInstallConflict("UNIVERSE_MEMBER_CARDINALITY_CONFLICT")
         return tuple(str(row[0]) for row in rows)
+
+    async def try_activate(
+        self,
+        request: UniverseActivationRequest,
+    ) -> UniverseActivationResult:
+        target = (
+            await self._connection.execute(
+                sa.select(strategy_universe_versions)
+                .where(
+                    strategy_universe_versions.c.universe_version_id
+                    == request.universe_version_id
+                )
+                .with_for_update(of=strategy_universe_versions)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if target is None:
+            raise UniverseInstallConflict("UNIVERSE_ACTIVATION_TARGET_NOT_FOUND")
+
+        event_spec_id = str(target["event_spec_id"])
+        current = (
+            await self._connection.execute(
+                sa.select(strategy_universe_current)
+                .where(
+                    strategy_universe_current.c.event_spec_id
+                    == event_spec_id
+                )
+                .with_for_update(of=strategy_universe_current)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if target["lifecycle_state"] == "active":
+            if (
+                current is None
+                or current["universe_version_id"]
+                != request.universe_version_id
+                or current["semantic_digest"] != target["semantic_digest"]
+            ):
+                raise UniverseInstallConflict(
+                    "CURRENT_UNIVERSE_IDENTITY_CONFLICT"
+                )
+            return UniverseActivationResult(
+                status=UniverseActivationStatus.ALREADY_ACTIVE,
+                reason_code=None,
+                event_spec_id=event_spec_id,
+                universe_version_id=request.universe_version_id,
+                previous_universe_version_id=None,
+                activation_generation=int(
+                    current["activation_generation"]
+                ),
+                activated_at_ms=int(current["activated_at_ms"]),
+            )
+        current_is_complete = (
+            current is None
+            or await self._current_universe_identity_is_complete(current)
+        )
+        event = (
+            await self._connection.execute(
+                sa.select(
+                    event_specs.c.event_id,
+                    event_specs.c.timeframe,
+                    event_specs.c.status,
+                )
+                .where(
+                    event_specs.c.event_spec_id == event_spec_id
+                )
+                .with_for_update(of=event_specs)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        event_is_active = not (
+            event is None
+            or event["status"] != "active"
+            or event["timeframe"] not in {"15m", "1h"}
+        )
+        readiness = await self._activation_readiness(
+            target=target,
+            attempted_at_ms=request.attempted_at_ms,
+            current_is_complete=current_is_complete,
+            event_is_active=event_is_active,
+            comparative_event=(
+                event is not None
+                and event["event_id"] in {"MPG-LONG", "MI-LONG"}
+            ),
+        )
+        readiness_blocker = activation_readiness_blocker(readiness)
+        if readiness_blocker is not None:
+            return _not_ready_activation(
+                target=target,
+                current=current,
+                reason_code=readiness_blocker,
+            )
+        if event is None:
+            raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
+
+        previous_universe_version_id = (
+            None
+            if current is None
+            else str(current["universe_version_id"])
+        )
+        interval_ms = (
+            900_000 if event["timeframe"] == "15m" else 3_600_000
+        )
+        next_observation_due_at_ms = (
+            request.attempted_at_ms
+            - (request.attempted_at_ms % interval_ms)
+            + interval_ms
+        )
+        if previous_universe_version_id is not None:
+            await self._connection.execute(
+                sa.update(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.universe_version_id
+                    == previous_universe_version_id
+                )
+                .values(
+                    lifecycle_state="retired",
+                    observation_enabled=False,
+                    entry_enabled=False,
+                    scope_version=runtime_scopes_current.c.scope_version + 1,
+                    next_observation_due_at_ms=None,
+                    lease_owner=None,
+                    lease_expires_at_ms=None,
+                    observation_generation=(
+                        runtime_scopes_current.c.observation_generation + 1
+                    ),
+                    updated_at_ms=request.attempted_at_ms,
+                )
+            )
+        await self._connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.universe_version_id
+                == request.universe_version_id
+            )
+            .values(
+                lifecycle_state="active",
+                observation_enabled=True,
+                entry_enabled=True,
+                scope_version=runtime_scopes_current.c.scope_version + 1,
+                next_observation_due_at_ms=next_observation_due_at_ms,
+                lease_owner=None,
+                lease_expires_at_ms=None,
+                observation_generation=(
+                    runtime_scopes_current.c.observation_generation + 1
+                ),
+                updated_at_ms=request.attempted_at_ms,
+            )
+        )
+        if previous_universe_version_id is not None:
+            await self._connection.execute(
+                sa.update(strategy_universe_versions)
+                .where(
+                    strategy_universe_versions.c.universe_version_id
+                    == previous_universe_version_id
+                )
+                .values(
+                    lifecycle_state="retired",
+                    retired_at_ms=request.attempted_at_ms,
+                )
+            )
+        await self._connection.execute(
+            sa.update(strategy_universe_versions)
+            .where(
+                strategy_universe_versions.c.universe_version_id
+                == request.universe_version_id
+            )
+            .values(
+                lifecycle_state="active",
+                activated_at_ms=request.attempted_at_ms,
+            )
+        )
+        if current is None:
+            generation = 1
+            await self._connection.execute(
+                sa.insert(strategy_universe_current).values(
+                    event_spec_id=event_spec_id,
+                    universe_version_id=request.universe_version_id,
+                    semantic_digest=target["semantic_digest"],
+                    lifecycle_state="active",
+                    activation_generation=generation,
+                    activated_at_ms=request.attempted_at_ms,
+                )
+            )
+        else:
+            generation = int(current["activation_generation"]) + 1
+            pointer = await self._connection.execute(
+                sa.update(strategy_universe_current)
+                .where(
+                    strategy_universe_current.c.event_spec_id
+                    == event_spec_id,
+                    strategy_universe_current.c.universe_version_id
+                    == previous_universe_version_id,
+                    strategy_universe_current.c.activation_generation
+                    == current["activation_generation"],
+                )
+                .values(
+                    universe_version_id=request.universe_version_id,
+                    semantic_digest=target["semantic_digest"],
+                    activation_generation=generation,
+                    activated_at_ms=request.attempted_at_ms,
+                )
+            )
+            if pointer.rowcount != 1:
+                raise UniverseInstallConflict(
+                    "CURRENT_UNIVERSE_GENERATION_CONFLICT"
+                )
+        return UniverseActivationResult(
+            status=UniverseActivationStatus.ACTIVATED,
+            reason_code=None,
+            event_spec_id=event_spec_id,
+            universe_version_id=request.universe_version_id,
+            previous_universe_version_id=previous_universe_version_id,
+            activation_generation=generation,
+            activated_at_ms=request.attempted_at_ms,
+        )
+
+    async def _current_universe_identity_is_complete(
+        self,
+        current: RowMapping,
+    ) -> bool:
+        universe_version_id = str(current["universe_version_id"])
+        version = (
+            await self._connection.execute(
+                sa.select(strategy_universe_versions)
+                .where(
+                    strategy_universe_versions.c.universe_version_id
+                    == universe_version_id
+                )
+                .with_for_update(of=strategy_universe_versions)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if (
+            version is None
+            or version["event_spec_id"] != current["event_spec_id"]
+            or version["semantic_digest"] != current["semantic_digest"]
+            or version["lifecycle_state"] != "active"
+        ):
+            return False
+        members = tuple(
+            str(row[0])
+            for row in (
+                await self._connection.execute(
+                    sa.select(
+                        strategy_universe_members.c.exchange_instrument_id
+                    )
+                    .where(
+                        strategy_universe_members.c.universe_version_id
+                        == universe_version_id
+                    )
+                    .order_by(
+                        strategy_universe_members.c.exchange_instrument_id
+                    )
+                    .limit(MAX_UNIVERSE_MEMBERS + 1)
+                )
+            ).all()
+        )
+        scopes = (
+            await self._connection.execute(
+                sa.select(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.universe_version_id
+                    == universe_version_id
+                )
+                .order_by(
+                    runtime_scopes_current.c.exchange_instrument_id
+                )
+                .with_for_update(of=runtime_scopes_current)
+                .limit(MAX_UNIVERSE_MEMBERS + 1)
+            )
+        ).mappings().all()
+        return (
+            1 <= len(members) <= MAX_UNIVERSE_MEMBERS
+            and len(scopes) == len(members)
+            and tuple(
+                str(scope["exchange_instrument_id"])
+                for scope in scopes
+            )
+            == members
+            and all(
+                scope["event_spec_id"] == current["event_spec_id"]
+                and scope["universe_semantic_digest"]
+                == current["semantic_digest"]
+                and scope["lifecycle_state"] == "active"
+                and scope["observation_enabled"]
+                and scope["entry_enabled"]
+                for scope in scopes
+            )
+        )
+
+    async def _activation_readiness(
+        self,
+        *,
+        target: RowMapping,
+        attempted_at_ms: int,
+        current_is_complete: bool,
+        event_is_active: bool,
+        comparative_event: bool,
+    ) -> UniverseActivationReadiness:
+        universe_version_id = str(target["universe_version_id"])
+        members = tuple(
+            str(row[0])
+            for row in (
+                await self._connection.execute(
+                    sa.select(
+                        strategy_universe_members.c.exchange_instrument_id
+                    )
+                    .where(
+                        strategy_universe_members.c.universe_version_id
+                        == universe_version_id
+                    )
+                    .order_by(
+                        strategy_universe_members.c.exchange_instrument_id
+                    )
+                    .limit(MAX_UNIVERSE_MEMBERS + 1)
+                )
+            ).all()
+        )
+        members_are_complete = (
+            1 <= len(members) <= MAX_UNIVERSE_MEMBERS
+            and members == tuple(sorted(set(members)))
+        )
+        scopes = (
+            await self._connection.execute(
+                sa.select(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.universe_version_id
+                    == universe_version_id
+                )
+                .order_by(
+                    runtime_scopes_current.c.exchange_instrument_id
+                )
+                .with_for_update(of=runtime_scopes_current)
+                .limit(MAX_UNIVERSE_MEMBERS + 1)
+            )
+        ).mappings().all()
+        scopes_are_complete = (
+            members_are_complete
+            and len(scopes) == len(members)
+            and tuple(
+                str(scope["exchange_instrument_id"])
+                for scope in scopes
+            )
+            == members
+            and all(
+                scope["event_spec_id"] == target["event_spec_id"]
+                and scope["universe_semantic_digest"]
+                == target["semantic_digest"]
+                and scope["lifecycle_state"] == "warming"
+                and scope["observation_enabled"]
+                and not scope["entry_enabled"]
+                for scope in scopes
+            )
+        )
+
+        instrument_rows = (
+            await self._connection.execute(
+                sa.select(
+                    instruments.c.exchange_instrument_id,
+                    instruments.c.status,
+                )
+                .where(
+                    instruments.c.exchange_instrument_id.in_(members)
+                )
+                .with_for_update(of=instruments)
+                .limit(MAX_UNIVERSE_MEMBERS + 1)
+            )
+        ).mappings().all()
+        instrument_statuses = {
+            str(row["exchange_instrument_id"]): str(row["status"])
+            for row in instrument_rows
+        }
+        certification_keys = tuple(
+            (
+                str(scope["runtime_profile_id"]),
+                str(scope["exchange_instrument_id"]),
+            )
+            for scope in scopes
+        )
+        certifications = (
+            await self._connection.execute(
+                sa.select(instrument_certification_current)
+                .where(
+                    sa.tuple_(
+                        instrument_certification_current.c.runtime_profile_id,
+                        instrument_certification_current.c.exchange_instrument_id,
+                    ).in_(certification_keys)
+                )
+                .with_for_update(of=instrument_certification_current)
+                .limit(MAX_UNIVERSE_MEMBERS + 1)
+            )
+        ).mappings().all()
+        certifications_by_key = {
+            (
+                str(row["runtime_profile_id"]),
+                str(row["exchange_instrument_id"]),
+            ): row
+            for row in certifications
+        }
+        certifications_are_complete = bool(certification_keys) and all(
+            key in certifications_by_key for key in certification_keys
+        )
+        certifications_are_eligible = (
+            certifications_are_complete
+            and all(
+                certifications_by_key[key]["status"] == "eligible"
+                and certifications_by_key[key]["blocker_code"] is None
+                and certifications_by_key[key]["product_rules_digest"]
+                is not None
+                and certifications_by_key[key]["configured_leverage"] == 5
+                and certifications_by_key[key]["margin_mode"] == "cross"
+                and certifications_by_key[key]["position_mode"]
+                == "independent_sides"
+                and instrument_statuses.get(key[1]) == "active"
+                for key in certification_keys
+            )
+        )
+        certifications_are_fresh = (
+            certifications_are_complete
+            and all(
+                int(certifications_by_key[key]["observed_at_ms"])
+                <= attempted_at_ms
+                < int(certifications_by_key[key]["valid_until_ms"])
+                for key in certification_keys
+            )
+        )
+        warm_readiness_is_complete = bool(scopes) and all(
+            scope["warm_ready_at_ms"] is not None
+            and scope["warm_readiness_digest"] is not None
+            and scope["warm_valid_until_ms"] is not None
+            for scope in scopes
+        )
+        warm_readiness_is_fresh = (
+            warm_readiness_is_complete
+            and all(
+                int(scope["warm_ready_at_ms"])
+                <= attempted_at_ms
+                < int(scope["warm_valid_until_ms"])
+                for scope in scopes
+            )
+        )
+        comparative_projection_is_complete = not comparative_event
+        if (
+            comparative_event
+            and members_are_complete
+            and scopes_are_complete
+            and warm_readiness_is_complete
+            and warm_readiness_is_fresh
+        ):
+            warm_close_times = {
+                int(scope["warm_ready_at_ms"]) for scope in scopes
+            }
+            if len(warm_close_times) == 1:
+                closed_bar_time_ms = next(iter(warm_close_times))
+                member_set_digest = comparative_member_set_digest(
+                    members
+                )
+                projection_row = (
+                    await self._connection.execute(
+                        sa.select(comparative_projection_current)
+                        .where(
+                            comparative_projection_current.c.event_spec_id
+                            == target["event_spec_id"],
+                            comparative_projection_current.c.universe_version_id
+                            == universe_version_id,
+                            comparative_projection_current.c.closed_bar_time_ms
+                            == closed_bar_time_ms,
+                            comparative_projection_current.c.member_set_digest
+                            == member_set_digest,
+                        )
+                        .with_for_update(
+                            of=comparative_projection_current
+                        )
+                        .limit(1)
+                    )
+                ).mappings().one_or_none()
+                comparative_projection_is_complete = (
+                    _ready_comparative_projection_is_valid(
+                        projection_row,
+                        attempted_at_ms=attempted_at_ms,
+                    )
+                )
+        return UniverseActivationReadiness(
+            target_is_warming=target["lifecycle_state"] == "warming",
+            current_is_complete=current_is_complete,
+            event_is_active=event_is_active,
+            members_are_complete=members_are_complete,
+            scopes_are_complete=scopes_are_complete,
+            certifications_are_complete=certifications_are_complete,
+            certifications_are_eligible=certifications_are_eligible,
+            certifications_are_fresh=certifications_are_fresh,
+            warm_readiness_is_complete=warm_readiness_is_complete,
+            warm_readiness_is_fresh=warm_readiness_is_fresh,
+            comparative_projection_is_required=comparative_event,
+            comparative_projection_is_complete=(
+                comparative_projection_is_complete
+            ),
+        )
 
     async def get_comparative_projection(
         self,
@@ -947,6 +1454,61 @@ def _result(
         inserted_member_count=inserted_member_count,
         inserted_scope_count=inserted_scope_count,
     )
+
+
+def _not_ready_activation(
+    *,
+    target: RowMapping,
+    current: RowMapping | None,
+    reason_code: str,
+) -> UniverseActivationResult:
+    return UniverseActivationResult(
+        status=UniverseActivationStatus.NOT_READY,
+        reason_code=reason_code,
+        event_spec_id=str(target["event_spec_id"]),
+        universe_version_id=str(target["universe_version_id"]),
+        previous_universe_version_id=(
+            None
+            if current is None
+            else str(current["universe_version_id"])
+        ),
+        activation_generation=(
+            None
+            if current is None
+            else int(current["activation_generation"])
+        ),
+        activated_at_ms=None,
+    )
+
+
+def _ready_comparative_projection_is_valid(
+    row: RowMapping | None,
+    *,
+    attempted_at_ms: int,
+) -> bool:
+    if (
+        row is None
+        or row["projection_status"] != "ready"
+        or row["failure_reason"] is not None
+        or int(row["valid_until_ms"]) <= attempted_at_ms
+    ):
+        return False
+    try:
+        ComparativeUniverseProjection.model_validate(
+            {
+                **dict(row["projection"]),
+                "event_spec_id": row["event_spec_id"],
+                "universe_version_id": row["universe_version_id"],
+                "member_set_digest": row["member_set_digest"],
+                "closed_bar_time_ms": row["closed_bar_time_ms"],
+                "observed_at_ms": row["observed_at_ms"],
+                "valid_until_ms": row["valid_until_ms"],
+                "projection_version": row["projection_version"],
+            }
+        )
+    except ValidationError:
+        return False
+    return True
 
 
 def _universe_version_id(event_spec_id: str, universe_version: int) -> str:
