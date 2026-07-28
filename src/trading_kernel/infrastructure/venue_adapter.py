@@ -55,6 +55,10 @@ from src.trading_kernel.domain.fee_valuation import (
     NativeFee,
     value_native_fee,
 )
+from src.trading_kernel.domain.instrument_identity import (
+    parse_binance_usdm_instrument_id,
+    to_ccxt_symbol,
+)
 from src.trading_kernel.domain.order_attribution import (
     OrderRole,
     ResolvedOrderIdentity,
@@ -198,12 +202,16 @@ class CcxtVenueAdapter:
         venue_symbols: Mapping[tuple[str, str], str],
         settlement_assets: Mapping[tuple[str, str], str] | None = None,
         taker_fee_rates: Mapping[tuple[str, str], Decimal] | None = None,
+        default_settlement_asset: str | None = None,
+        default_taker_fee_rate: Decimal | None = None,
         clock_ms: Callable[[], int],
     ) -> None:
         self._exchanges = dict(exchanges)
         self._venue_symbols = dict(venue_symbols)
         self._settlement_assets = dict(settlement_assets or {})
         self._taker_fee_rates = dict(taker_fee_rates or {})
+        self._default_settlement_asset = default_settlement_asset
+        self._default_taker_fee_rate = default_taker_fee_rate
         self._clock_ms = clock_ms
 
     async def close(self) -> None:
@@ -479,8 +487,14 @@ class CcxtVenueAdapter:
             exchange_instrument_id=domain.exchange_instrument_id,
         )
         key = (domain.venue_id, domain.exchange_instrument_id)
-        settlement_asset = self._settlement_assets.get(key)
-        taker_fee_rate = self._taker_fee_rates.get(key)
+        settlement_asset = self._settlement_assets.get(
+            key,
+            self._default_settlement_asset,
+        )
+        taker_fee_rate = self._taker_fee_rates.get(
+            key,
+            self._default_taker_fee_rate,
+        )
         if not settlement_asset:
             raise RuntimeError("canonical instrument has no settlement asset mapping")
         if taker_fee_rate is None:
@@ -647,7 +661,8 @@ class CcxtVenueAdapter:
             exchange_instrument_id=domain.exchange_instrument_id,
         )
         settlement_asset = self._settlement_assets.get(
-            (domain.venue_id, domain.exchange_instrument_id)
+            (domain.venue_id, domain.exchange_instrument_id),
+            self._default_settlement_asset,
         )
         if not settlement_asset:
             raise RuntimeError("canonical instrument has no settlement asset mapping")
@@ -749,10 +764,10 @@ class CcxtVenueAdapter:
         exchange = self._exchanges.get(exchange_key)
         if exchange is None:
             raise RuntimeError("venue/account adapter is not configured")
-        symbol_key = (request.venue_id, request.exchange_instrument_id)
-        symbol = self._venue_symbols.get(symbol_key)
-        if not symbol:
-            raise RuntimeError("canonical instrument has no venue symbol mapping")
+        symbol = self._symbol_for(
+            venue_id=request.venue_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+        )
 
         params: dict[str, object] = {"positionSide": request.position_side.upper()}
 
@@ -1054,10 +1069,29 @@ class CcxtVenueAdapter:
         exchange = self._exchanges.get((venue_id, account_id))
         if exchange is None:
             raise RuntimeError("venue/account adapter is not configured")
-        symbol = self._venue_symbols.get((venue_id, exchange_instrument_id))
-        if not symbol:
-            raise RuntimeError("canonical instrument has no venue symbol mapping")
+        symbol = self._symbol_for(
+            venue_id=venue_id,
+            exchange_instrument_id=exchange_instrument_id,
+        )
         return exchange, symbol
+
+    def _symbol_for(
+        self,
+        *,
+        venue_id: str,
+        exchange_instrument_id: str,
+    ) -> str:
+        configured = self._venue_symbols.get((venue_id, exchange_instrument_id))
+        if configured is not None:
+            return configured
+        if venue_id != "binance-usdm":
+            raise RuntimeError("canonical instrument has no venue symbol mapping")
+        try:
+            return to_ccxt_symbol(
+                parse_binance_usdm_instrument_id(exchange_instrument_id)
+            )
+        except ValueError as exc:
+            raise RuntimeError("canonical instrument has no venue symbol mapping") from exc
 
     def _instrument_id_for_symbol(
         self,

@@ -27,7 +27,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (  # noqa: 
 
 
 SCHEMA = "brc.trading_kernel.readonly_certification.v1"
-EXPECTED_ALEMBIC_REVISION = "0001_initial"
+EXPECTED_ALEMBIC_REVISION = "0002_crypto_strategy_universe"
 LEGACY_EXECUTION_TABLES = (
     "brc_runtime_execution_tickets",
     "brc_runtime_execution_orders",
@@ -596,7 +596,7 @@ async def _certify(
             "seed_identity",
         }
         and actual_tables == expected_tables
-        and runtime_scope_count == 22
+        and runtime_scope_count == 0
         and capabilities_are_current
         and policy_is_dynamic
         and integrity_orphans == 0

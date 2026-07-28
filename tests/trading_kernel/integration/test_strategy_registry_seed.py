@@ -99,8 +99,8 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
     assert first.inserted_exit_policy_count == 6
     assert first.inserted_fact_definition_count == 18
     assert first.inserted_event_fact_count == 19
-    assert "inserted_instrument_count" not in first.model_fields
-    assert "inserted_candidate_scope_count" not in first.model_fields
+    assert "inserted_instrument_count" not in type(first).model_fields
+    assert "inserted_candidate_scope_count" not in type(first).model_fields
     assert second.total_inserted_count == 0
     assert event_ids == (
         "BRF2-SHORT",

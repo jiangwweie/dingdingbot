@@ -57,7 +57,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     seed.add_argument(
         "--schema-revision",
-        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+        default=os.getenv(
+            "TRADING_KERNEL_SCHEMA_REVISION",
+            "0002_crypto_strategy_universe",
+        ),
     )
     seed.add_argument("--now-ms", type=int)
 
@@ -75,7 +78,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     deploy.add_argument(
         "--schema-revision",
-        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+        default=os.getenv(
+            "TRADING_KERNEL_SCHEMA_REVISION",
+            "0002_crypto_strategy_universe",
+        ),
     )
     deploy.add_argument("--now-ms", type=int)
 
@@ -94,7 +100,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     recovery.add_argument(
         "--schema-revision",
-        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+        default=os.getenv(
+            "TRADING_KERNEL_SCHEMA_REVISION",
+            "0002_crypto_strategy_universe",
+        ),
     )
     recovery.add_argument("--now-ms", type=int)
 
@@ -117,7 +126,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     protected.add_argument(
         "--schema-revision",
-        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+        default=os.getenv(
+            "TRADING_KERNEL_SCHEMA_REVISION",
+            "0002_crypto_strategy_universe",
+        ),
     )
     protected.add_argument("--now-ms", type=int)
 
@@ -136,7 +148,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     closure.add_argument(
         "--schema-revision",
-        default=os.getenv("TRADING_KERNEL_SCHEMA_REVISION", "0001_initial"),
+        default=os.getenv(
+            "TRADING_KERNEL_SCHEMA_REVISION",
+            "0002_crypto_strategy_universe",
+        ),
     )
     closure.add_argument("--now-ms", type=int)
 

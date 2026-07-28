@@ -9,6 +9,10 @@ import inspect
 from typing import Protocol
 
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
+from src.trading_kernel.domain.instrument_identity import (
+    parse_binance_usdm_instrument_id,
+    to_ccxt_symbol,
+)
 from src.trading_kernel.domain.market import ClosedCandle, Timeframe
 
 
@@ -50,8 +54,17 @@ class CcxtBinancePublicMarketSource:
         request: ClosedCandleRequest,
     ) -> tuple[ClosedCandle, ...]:
         symbol = self._venue_symbols.get(request.exchange_instrument_id)
-        if not symbol:
-            raise RuntimeError("canonical instrument has no public venue symbol")
+        if symbol is None:
+            try:
+                symbol = to_ccxt_symbol(
+                    parse_binance_usdm_instrument_id(
+                        request.exchange_instrument_id
+                    )
+                )
+            except ValueError as exc:
+                raise RuntimeError(
+                    "canonical instrument has no public venue symbol"
+                ) from exc
         response = await asyncio.wait_for(
             self._fetch(symbol, request),
             timeout=self._timeout_seconds,

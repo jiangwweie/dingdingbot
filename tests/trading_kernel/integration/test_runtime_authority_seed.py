@@ -12,7 +12,7 @@ import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
@@ -24,8 +24,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_capabilities_current,
     runtime_incidents,
     runtime_profiles,
-    runtime_scopes_current,
     schema_metadata,
+    strategy_universe_versions,
     trade_aggregates,
     trade_reviews,
     trade_tickets,
@@ -40,6 +40,14 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+_TICKET_STRATEGY_GROUP_ID = "CPM-RO-001"
+_TICKET_STRATEGY_VERSION_ID = "sgv:CPM-RO-001:v2"
+_TICKET_EVENT_SPEC_ID = "event_spec:CPM-RO-001:CPM-LONG:v2"
+_TICKET_UNIVERSE_VERSION_ID = "universe:test-cpm:v1"
+_TICKET_UNIVERSE_DIGEST = "sha256:" + "3" * 64
+_TICKET_RUNTIME_SCOPE_ID = "scope:test-cpm"
+_TICKET_EXCHANGE_INSTRUMENT_ID = "binance-usdm:ETHUSDT:perpetual"
+_TICKET_POSITION_SIDE = "long"
 
 
 def _runtime_seed_module() -> ModuleType:
@@ -115,7 +123,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
 
@@ -127,7 +135,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
             request.model_copy(update={"seeded_at_ms": 1_800_000_000_001}),
         )
 
-    assert first.runtime_scope_count == 22
+    assert "runtime_scope_count" not in type(first).model_fields
     assert first.new_entry_submit_enabled is False
     assert first.policy_version == 1
     assert first.max_concurrent_tickets == 3
@@ -162,18 +170,26 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         assert Decimal(
             policy["max_post_fill_stop_risk_overrun_fraction"]
         ) == Decimal("0.10")
+        assert policy["scope"] == {
+            "runtime_profile_id": "tiny-live-v1",
+            "allowed_event_spec_ids": [
+                "event_spec:BRF2-001:BRF2-SHORT:v2",
+                "event_spec:CPM-RO-001:CPM-LONG:v2",
+                "event_spec:MI-001:MI-LONG:v2",
+                "event_spec:MPG-001:MPG-LONG:v2",
+                "event_spec:SOR-001:SOR-LONG:v2",
+                "event_spec:SOR-001:SOR-SHORT:v2",
+            ],
+        }
 
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(runtime_profiles)
         ) == 1
         assert await connection.scalar(
-            sa.select(sa.func.count()).select_from(runtime_scopes_current)
-        ) == 22
-        assert await connection.scalar(
-            sa.select(sa.func.count()).select_from(runtime_scopes_current).where(
-                runtime_scopes_current.c.enabled.is_(True)
+            sa.select(sa.func.count()).select_from(
+                sa.table("brc_runtime_scopes_current")
             )
-        ) == 22
+        ) == 0
 
         lane = (
             await connection.execute(sa.select(entry_lane_current))
@@ -209,7 +225,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
             ).mappings()
         }
         assert metadata_rows["runtime_commit"] == "commit-acceptance"
-        assert metadata_rows["schema_revision"] == "0001_initial"
+        assert metadata_rows["schema_revision"] == "0002_crypto_strategy_universe"
         assert metadata_rows["registry_semantic_hash"].startswith("sha256:")
         assert metadata_rows["seed_identity"].startswith("sha256:")
 
@@ -222,7 +238,7 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -288,7 +304,7 @@ async def test_recovery_identity_refuses_a_runtime_without_one_unknown_leverage_
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -319,7 +335,7 @@ async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -362,7 +378,7 @@ async def test_closure_identity_rotates_only_one_exact_released_pending_ticket(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -392,7 +408,7 @@ async def test_readonly_certification_emits_exact_pending_closure_manifest(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -432,7 +448,7 @@ async def test_protected_identity_refuses_extra_activity_and_open_incidents(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -539,7 +555,7 @@ async def test_protected_identity_rotates_a_complete_runner_ticket(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -575,7 +591,7 @@ async def test_readonly_certification_emits_exact_protected_ticket_manifest(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -608,7 +624,7 @@ async def test_protected_identity_refuses_missing_active_budget_reservation(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -645,7 +661,7 @@ async def test_protected_identity_refuses_unrelated_active_budget_reservation(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -705,7 +721,7 @@ async def test_protected_identity_refuses_mismatched_account_exposure_totals(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -743,7 +759,7 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     seed_request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0001_initial",
+        schema_revision="0002_crypto_strategy_universe",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -814,33 +830,44 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
         assert exchange_commands_enabled is True
 
 
+async def _insert_ticket_universe(connection: AsyncConnection) -> None:
+    await connection.execute(
+        sa.insert(strategy_universe_versions).values(
+            universe_version_id=_TICKET_UNIVERSE_VERSION_ID,
+            strategy_group_id=_TICKET_STRATEGY_GROUP_ID,
+            event_spec_id=_TICKET_EVENT_SPEC_ID,
+            universe_version=1,
+            semantic_digest=_TICKET_UNIVERSE_DIGEST,
+            lifecycle_state="active",
+            installed_at_ms=1_800_000_000_001,
+            activated_at_ms=1_800_000_000_002,
+            retired_at_ms=None,
+        )
+    )
+
+
 async def _insert_terminal_reviewed_ticket(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
-        scope = (
-            await connection.execute(
-                sa.select(runtime_scopes_current).order_by(
-                    runtime_scopes_current.c.runtime_scope_id
-                )
-            )
-        ).mappings().first()
-        assert scope is not None
+        await _insert_ticket_universe(connection)
         await connection.execute(
             sa.insert(trade_tickets).values(
                 ticket_id="ticket-acceptance",
                 exposure_episode_id="exposure-acceptance",
                 signal_event_id="signal-acceptance",
-                strategy_group_id=scope["strategy_group_id"],
-                strategy_version_id=scope["strategy_version_id"],
-                event_spec_id=scope["event_spec_id"],
-                runtime_profile_id=scope["runtime_profile_id"],
-                owner_policy_id=scope["owner_policy_id"],
+                strategy_group_id=_TICKET_STRATEGY_GROUP_ID,
+                strategy_version_id=_TICKET_STRATEGY_VERSION_ID,
+                event_spec_id=_TICKET_EVENT_SPEC_ID,
+                universe_version_id=_TICKET_UNIVERSE_VERSION_ID,
+                universe_semantic_digest=_TICKET_UNIVERSE_DIGEST,
+                runtime_profile_id="tiny-live-v1",
+                owner_policy_id="policy-main",
                 owner_policy_version=2,
-                runtime_scope_id=scope["runtime_scope_id"],
-                runtime_scope_version=scope["scope_version"],
+                runtime_scope_id=_TICKET_RUNTIME_SCOPE_ID,
+                runtime_scope_version=1,
                 account_id="subaccount-main",
                 venue_id="binance-usdm",
-                exchange_instrument_id=scope["exchange_instrument_id"],
-                position_side=scope["position_side"],
+                exchange_instrument_id=_TICKET_EXCHANGE_INSTRUMENT_ID,
+                position_side=_TICKET_POSITION_SIDE,
                 netting_domain_key="acceptance-domain",
                 active_netting_domain_key=None,
                 entry_reference_price=Decimal("100"),
@@ -885,31 +912,26 @@ async def _insert_terminal_reviewed_ticket(engine: AsyncEngine) -> None:
 
 async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
-        scope = (
-            await connection.execute(
-                sa.select(runtime_scopes_current).order_by(
-                    runtime_scopes_current.c.runtime_scope_id
-                )
-            )
-        ).mappings().first()
-        assert scope is not None
+        await _insert_ticket_universe(connection)
         await connection.execute(
             sa.insert(trade_tickets).values(
                 ticket_id="ticket:closure",
                 exposure_episode_id="exposure:closure",
                 signal_event_id="signal:closure",
-                strategy_group_id=scope["strategy_group_id"],
-                strategy_version_id=scope["strategy_version_id"],
-                event_spec_id=scope["event_spec_id"],
-                runtime_profile_id=scope["runtime_profile_id"],
-                owner_policy_id=scope["owner_policy_id"],
+                strategy_group_id=_TICKET_STRATEGY_GROUP_ID,
+                strategy_version_id=_TICKET_STRATEGY_VERSION_ID,
+                event_spec_id=_TICKET_EVENT_SPEC_ID,
+                universe_version_id=_TICKET_UNIVERSE_VERSION_ID,
+                universe_semantic_digest=_TICKET_UNIVERSE_DIGEST,
+                runtime_profile_id="tiny-live-v1",
+                owner_policy_id="policy-main",
                 owner_policy_version=2,
-                runtime_scope_id=scope["runtime_scope_id"],
-                runtime_scope_version=scope["scope_version"],
+                runtime_scope_id=_TICKET_RUNTIME_SCOPE_ID,
+                runtime_scope_version=1,
                 account_id="subaccount-main",
                 venue_id="binance-usdm",
-                exchange_instrument_id=scope["exchange_instrument_id"],
-                position_side=scope["position_side"],
+                exchange_instrument_id=_TICKET_EXCHANGE_INSTRUMENT_ID,
+                position_side=_TICKET_POSITION_SIDE,
                 netting_domain_key="closure-domain",
                 active_netting_domain_key=None,
                 entry_reference_price=Decimal("100"),
@@ -1005,14 +1027,7 @@ async def _insert_protected_tickets(
     exposure_risk_delta: Decimal = Decimal(0),
 ) -> None:
     async with engine.begin() as connection:
-        scope = (
-            await connection.execute(
-                sa.select(runtime_scopes_current).order_by(
-                    runtime_scopes_current.c.runtime_scope_id
-                )
-            )
-        ).mappings().first()
-        assert scope is not None
+        await _insert_ticket_universe(connection)
         total_notional = Decimal("0")
         total_risk = Decimal("0")
         for index, ticket_id in enumerate(ticket_ids, start=1):
@@ -1029,14 +1044,16 @@ async def _insert_protected_tickets(
                     ticket_id=ticket_id,
                     exposure_episode_id=f"exposure:{index}",
                     signal_event_id=f"signal:{index}",
-                    strategy_group_id=scope["strategy_group_id"],
-                    strategy_version_id=scope["strategy_version_id"],
-                    event_spec_id=scope["event_spec_id"],
-                    runtime_profile_id=scope["runtime_profile_id"],
-                    owner_policy_id=scope["owner_policy_id"],
+                    strategy_group_id=_TICKET_STRATEGY_GROUP_ID,
+                    strategy_version_id=_TICKET_STRATEGY_VERSION_ID,
+                    event_spec_id=_TICKET_EVENT_SPEC_ID,
+                    universe_version_id=_TICKET_UNIVERSE_VERSION_ID,
+                    universe_semantic_digest=_TICKET_UNIVERSE_DIGEST,
+                    runtime_profile_id="tiny-live-v1",
+                    owner_policy_id="policy-main",
                     owner_policy_version=1,
-                    runtime_scope_id=scope["runtime_scope_id"],
-                    runtime_scope_version=scope["scope_version"],
+                    runtime_scope_id=_TICKET_RUNTIME_SCOPE_ID,
+                    runtime_scope_version=1,
                     account_id="subaccount-main",
                     venue_id="binance-usdm",
                     exchange_instrument_id=f"instrument:{index}",

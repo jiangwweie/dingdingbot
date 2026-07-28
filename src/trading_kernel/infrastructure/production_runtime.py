@@ -12,7 +12,6 @@ from typing import Literal
 import ccxt.async_support as ccxt_async  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
-from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.binance_public_market_source import (
     CcxtBinancePublicMarketSource,
 )
@@ -22,8 +21,6 @@ from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
 BINANCE_USDM_VENUE_ID: Literal["binance-usdm"] = "binance-usdm"
 BINANCE_USDM_POSITION_MODE: Literal["independent_sides"] = "independent_sides"
 LIVE_ENVIRONMENT: Literal["live"] = "live"
-_EXPECTED_UNIQUE_INSTRUMENTS = 6
-
 
 class ProductionRuntimeSettings(BaseModel):
     """Masked, exact identity and credential inputs for the live venue adapter."""
@@ -118,7 +115,7 @@ def build_binance_usdm_market_source() -> CcxtBinancePublicMarketSource:
     )
     return CcxtBinancePublicMarketSource(
         exchange=exchange,
-        venue_symbols=_canonical_venue_symbols(),
+        venue_symbols={},
         timeout_seconds=timeout_seconds,
     )
 
@@ -140,29 +137,15 @@ def build_binance_usdm_venue_adapter() -> CcxtVenueAdapter:
             },
         }
     )
-    venue_symbols = _canonical_venue_symbols()
-    instrument_keys = tuple(
-        (settings.venue_id, exchange_instrument_id)
-        for exchange_instrument_id in venue_symbols
-    )
     return CcxtVenueAdapter(
         exchanges={(settings.venue_id, settings.account_id): exchange},
-        venue_symbols={
-            (settings.venue_id, exchange_instrument_id): venue_symbol
-            for exchange_instrument_id, venue_symbol in venue_symbols.items()
-        },
-        settlement_assets={key: "USDT" for key in instrument_keys},
-        taker_fee_rates={
-            key: settings.exit_taker_fee_rate for key in instrument_keys
-        },
+        venue_symbols={},
+        settlement_assets={},
+        taker_fee_rates={},
+        default_settlement_asset="USDT",
+        default_taker_fee_rate=settings.exit_taker_fee_rate,
         clock_ms=lambda: int(time.time() * 1_000),
     )
-
-
-def canonical_binance_usdm_instruments() -> tuple[str, ...]:
-    """Return the exact sorted canonical instrument identities used in production."""
-
-    return tuple(_canonical_venue_symbols())
 
 
 def _read_exact_identity(
@@ -185,23 +168,6 @@ def _read_exact_identity(
         _required(values, "TRADING_KERNEL_ACCOUNT_ID") if require_account else ""
     )
     return _ProductionIdentity(account_id=account_id)
-
-
-def _canonical_venue_symbols() -> dict[str, str]:
-    by_instrument: dict[str, str] = {}
-    for contract in registered_strategy_contracts():
-        for instrument in contract.candidate_instruments:
-            venue_symbol = instrument.venue_symbol
-            if not venue_symbol.endswith("USDT") or len(venue_symbol) <= 4:
-                raise RuntimeError("Registry contains a non-USDT production instrument")
-            ccxt_symbol = f"{venue_symbol[:-4]}/USDT:USDT"
-            existing = by_instrument.get(instrument.exchange_instrument_id)
-            if existing is not None and existing != ccxt_symbol:
-                raise RuntimeError("Registry contains contradictory venue symbol mapping")
-            by_instrument[instrument.exchange_instrument_id] = ccxt_symbol
-    if len(by_instrument) != _EXPECTED_UNIQUE_INSTRUMENTS:
-        raise RuntimeError("production Registry must contain exactly six instruments")
-    return dict(sorted(by_instrument.items()))
 
 
 def _required(values: Mapping[str, str], key: str) -> str:

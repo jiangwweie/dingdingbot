@@ -28,7 +28,6 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_capabilities_current,
     runtime_incidents,
     runtime_profiles,
-    runtime_scopes_current,
     schema_metadata,
     positions_current,
     trade_aggregates,
@@ -61,7 +60,7 @@ class RuntimeAuthoritySeedRequest(BaseModel):
 
     account_id: str
     runtime_commit: str
-    schema_revision: Literal["0001_initial"]
+    schema_revision: Literal["0002_crypto_strategy_universe"]
     seeded_at_ms: int
 
     @field_validator("account_id", "runtime_commit", mode="before")
@@ -133,7 +132,6 @@ class RuntimePolicyState(BaseModel):
 class RuntimeAuthoritySeedResult(RuntimePolicyState):
     registry_semantic_hash: str
     runtime_seed_semantic_hash: str
-    runtime_scope_count: int
     registry_inserted_count: int
     runtime_inserted_count: int
 
@@ -146,7 +144,7 @@ class RuntimeDeploymentIdentityResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     runtime_commit: str
-    schema_revision: Literal["0001_initial"]
+    schema_revision: Literal["0002_crypto_strategy_universe"]
     runtime_seed_semantic_hash: str
     refreshed_existing_authority: bool
 
@@ -199,12 +197,11 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
     """Compute the exact seed identity before touching PostgreSQL."""
 
     contracts = registered_strategy_contracts()
-    scope_ids = _scope_ids(_runtime_scope_rows(request.seeded_at_ms))
     return _seed_identity(
         account_id=request.account_id,
         schema_revision=request.schema_revision,
         registry_semantic_hash=build_registry_semantic_hash(contracts),
-        scope_ids=scope_ids,
+        allowed_event_spec_ids=_allowed_event_spec_ids(contracts),
     )
 
 
@@ -216,18 +213,17 @@ async def seed_runtime_authority(
 
     registry = await seed_strategy_registry(uow, seeded_at_ms=request.seeded_at_ms)
     connection = uow._require_connection()
-    scope_rows = _runtime_scope_rows(request.seeded_at_ms)
-    scope_ids = _scope_ids(scope_rows)
+    allowed_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
     seed_identity = _seed_identity(
         account_id=request.account_id,
         schema_revision=request.schema_revision,
         registry_semantic_hash=registry.registry_semantic_hash,
-        scope_ids=scope_ids,
+        allowed_event_spec_ids=allowed_event_spec_ids,
     )
     policy = _policy_values(
         version=1,
         new_entry_submit_enabled=False,
-        scope_ids=scope_ids,
+        allowed_event_spec_ids=allowed_event_spec_ids,
         updated_at_ms=request.seeded_at_ms,
     )
 
@@ -314,25 +310,6 @@ async def seed_runtime_authority(
     ]
     rows.extend(
         _ExactRow(
-            runtime_scopes_current,
-            "runtime_scope_id",
-            values,
-            (
-                "strategy_group_id",
-                "strategy_version_id",
-                "event_spec_id",
-                "runtime_profile_id",
-                "owner_policy_id",
-                "exchange_instrument_id",
-                "position_side",
-                "enabled",
-                "scope_version",
-            ),
-        )
-        for values in scope_rows
-    )
-    rows.extend(
-        _ExactRow(
             runtime_capabilities_current,
             "capability_key",
             {
@@ -384,12 +361,6 @@ async def seed_runtime_authority(
     )
     await _assert_exact_identity_set(
         connection,
-        runtime_scopes_current,
-        "runtime_scope_id",
-        set(scope_ids),
-    )
-    await _assert_exact_identity_set(
-        connection,
         runtime_capabilities_current,
         "capability_key",
         {"exchange_commands", "strategy_signal_ingest"},
@@ -400,7 +371,6 @@ async def seed_runtime_authority(
         **state.model_dump(mode="python"),
         registry_semantic_hash=registry.registry_semantic_hash,
         runtime_seed_semantic_hash=seed_identity,
-        runtime_scope_count=len(scope_rows),
         registry_inserted_count=registry.total_inserted_count,
         runtime_inserted_count=inserted,
     )
@@ -580,13 +550,6 @@ async def _deploy_runtime_identity(
             "runtime profile differs from deployment identity"
         )
 
-    expected_scope_ids = set(_scope_ids(_runtime_scope_rows(request.seeded_at_ms)))
-    await _assert_exact_identity_set(
-        connection,
-        runtime_scopes_current,
-        "runtime_scope_id",
-        expected_scope_ids,
-    )
     capabilities = (
         await connection.execute(
             sa.select(runtime_capabilities_current).with_for_update(
@@ -685,20 +648,20 @@ async def _transition_policy(
     acceptance_ticket_id: str | None = None,
 ) -> RuntimePolicyState:
     connection = uow._require_connection()
-    scope_ids = await _load_scope_ids(connection)
+    allowed_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
     current = dict(await _lock_policy(connection))
     if _policy_matches(
         current,
         version=target_version,
         new_entry_submit_enabled=True,
-        scope_ids=scope_ids,
+        allowed_event_spec_ids=allowed_event_spec_ids,
     ):
         return _policy_state(current)
     if not _policy_matches(
         current,
         version=expected_version,
         new_entry_submit_enabled=expected_submit,
-        scope_ids=scope_ids,
+        allowed_event_spec_ids=allowed_event_spec_ids,
     ):
         raise RuntimeAuthorityTransitionRefused(
             "runtime policy transition is not monotonic"
@@ -715,7 +678,7 @@ async def _transition_policy(
     target = _policy_values(
         version=target_version,
         new_entry_submit_enabled=True,
-        scope_ids=scope_ids,
+        allowed_event_spec_ids=allowed_event_spec_ids,
         updated_at_ms=occurred_at_ms,
     )
     await _insert_exact(
@@ -752,62 +715,27 @@ async def _transition_policy(
     return _policy_state(target)
 
 
-def _runtime_scope_rows(seeded_at_ms: int) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = [
-        {
-            "runtime_scope_id": (
-                f"scope:{contract.event_id}:{instrument.venue_symbol}:"
-                f"{contract.position_side}"
-            ),
-            "strategy_group_id": contract.strategy_group_id,
-            "strategy_version_id": contract.strategy_version_id,
-            "event_spec_id": contract.event_spec_id,
-            "runtime_profile_id": RUNTIME_PROFILE_ID,
-            "owner_policy_id": OWNER_POLICY_ID,
-            "exchange_instrument_id": instrument.exchange_instrument_id,
-            "position_side": contract.position_side,
-            "enabled": True,
-            "scope_version": 1,
-            "observation_due_at_ms": seeded_at_ms,
-            "observation_lease_until_ms": None,
-            "observation_claim_owner": None,
-            "updated_at_ms": seeded_at_ms,
-        }
-        for contract in registered_strategy_contracts()
-        for instrument in contract.candidate_instruments
-    ]
-    rows.sort(key=lambda row: str(row["runtime_scope_id"]))
-    if len(rows) != 22:
-        raise RuntimeAuthoritySeedConflict("runtime authority requires 22 scopes")
-    return rows
-
-
-def _scope_ids(rows: list[dict[str, object]]) -> tuple[str, ...]:
-    return tuple(str(row["runtime_scope_id"]) for row in rows)
-
-
-async def _load_scope_ids(connection: AsyncConnection) -> tuple[str, ...]:
-    rows = (
-        await connection.execute(
-            sa.select(runtime_scopes_current).where(
-                runtime_scopes_current.c.owner_policy_id == OWNER_POLICY_ID,
-                runtime_scopes_current.c.runtime_profile_id == RUNTIME_PROFILE_ID,
-                runtime_scopes_current.c.enabled.is_(True),
-            )
+def _allowed_event_spec_ids(
+    contracts: tuple[object, ...],
+) -> tuple[str, ...]:
+    event_spec_ids = tuple(
+        sorted(
+            {
+                str(getattr(contract, "event_spec_id"))
+                for contract in contracts
+            }
         )
-    ).mappings().all()
-    if len(rows) != 22:
-        raise RuntimeAuthorityTransitionRefused(
-            "runtime policy transition requires all 22 enabled scopes"
-        )
-    return tuple(sorted(str(row["runtime_scope_id"]) for row in rows))
+    )
+    if not event_spec_ids:
+        raise RuntimeAuthoritySeedConflict("runtime policy requires registered Events")
+    return event_spec_ids
 
 
 def _policy_values(
     *,
     version: int,
     new_entry_submit_enabled: bool,
-    scope_ids: tuple[str, ...],
+    allowed_event_spec_ids: tuple[str, ...],
     updated_at_ms: int,
 ) -> dict[str, object]:
     return {
@@ -831,7 +759,7 @@ def _policy_values(
         ),
         "scope": {
             "runtime_profile_id": RUNTIME_PROFILE_ID,
-            "runtime_scope_ids": list(scope_ids),
+            "allowed_event_spec_ids": list(allowed_event_spec_ids),
         },
         "updated_at_ms": updated_at_ms,
     }
@@ -863,12 +791,12 @@ def _seed_identity(
     account_id: str,
     schema_revision: str,
     registry_semantic_hash: str,
-    scope_ids: tuple[str, ...],
+    allowed_event_spec_ids: tuple[str, ...],
 ) -> str:
     semantics = _policy_values(
         version=1,
         new_entry_submit_enabled=False,
-        scope_ids=scope_ids,
+        allowed_event_spec_ids=allowed_event_spec_ids,
         updated_at_ms=1,
     )
     semantics.pop("updated_at_ms")
@@ -894,12 +822,12 @@ def _policy_matches(
     *,
     version: int,
     new_entry_submit_enabled: bool,
-    scope_ids: tuple[str, ...],
+    allowed_event_spec_ids: tuple[str, ...],
 ) -> bool:
     expected = _policy_values(
         version=version,
         new_entry_submit_enabled=new_entry_submit_enabled,
-        scope_ids=scope_ids,
+        allowed_event_spec_ids=allowed_event_spec_ids,
         updated_at_ms=int(str(row["updated_at_ms"])),
     )
     return all(row[key] == expected[key] for key in _POLICY_COMPARE_KEYS)

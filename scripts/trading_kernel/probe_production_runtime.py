@@ -29,7 +29,6 @@ from src.trading_kernel.application.runtime_facts import (  # noqa: E402
 from src.trading_kernel.infrastructure.production_runtime import (  # noqa: E402
     ProductionRuntimeSettings,
     build_binance_usdm_venue_adapter,
-    canonical_binance_usdm_instruments,
 )
 
 
@@ -87,6 +86,12 @@ class ProductionRuntimeProbe(BaseModel):
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--now-ms", type=int)
+    parser.add_argument(
+        "--exchange-instrument-id",
+        action="append",
+        default=[],
+        help="Canonical active Universe instrument identity to probe.",
+    )
     parser.add_argument("--validity-ms", type=int, default=5_000)
     parser.add_argument(
         "--protected-ticket-json",
@@ -103,15 +108,16 @@ async def probe_production_runtime(
     *,
     now_ms: int,
     validity_ms: int,
+    exchange_instrument_ids: tuple[str, ...],
     expected_protected_tickets: tuple[ProtectedHandoverTicketProbe, ...] = (),
 ) -> ProductionRuntimeProbe:
     if now_ms <= 0 or validity_ms <= 0:
         raise ValueError("probe time and validity must be positive")
 
-    instruments = canonical_binance_usdm_instruments()
-    account_probe_instrument = next(
-        instrument for instrument in instruments if ":BTCUSDT:" in instrument
-    )
+    instruments = tuple(sorted({item.strip() for item in exchange_instrument_ids}))
+    if not instruments or any(not item for item in instruments):
+        raise ValueError("probe requires canonical active Universe instruments")
+    account_probe_instrument = instruments[0]
     admission_snapshot = await adapter.read_entry_admission_snapshot(
         EntryAdmissionSnapshotRequest(
             venue_id=settings.venue_id,
@@ -297,6 +303,7 @@ async def _run(args: argparse.Namespace) -> int:
             settings,
             now_ms=args.now_ms or int(time.time() * 1_000),
             validity_ms=args.validity_ms,
+            exchange_instrument_ids=tuple(args.exchange_instrument_id),
             expected_protected_tickets=expected_protected_tickets,
         )
         print(result.model_dump_json())
