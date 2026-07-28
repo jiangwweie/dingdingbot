@@ -6,7 +6,6 @@ import re
 
 from pydantic import BaseModel, ConfigDict
 
-
 _CANONICAL_INSTRUMENT_ID = re.compile(
     r"^binance-usdm:([A-Z0-9]+)USDT:perpetual$"
 )

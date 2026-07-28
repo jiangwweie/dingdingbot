@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from decimal import Decimal
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -16,34 +16,33 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.trading_kernel.domain.commands import (
-    ExchangeCommandKind,
-    ExchangeCommandStatus,
-)
-from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.application.ports import (
     BudgetReservationRecord,
     RuntimeIncidentRecord,
 )
+from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.commands import (
+    ExchangeCommandKind,
+    ExchangeCommandStatus,
+)
+from src.trading_kernel.domain.events import ReconciliationMatched, TicketIssued
+from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
 )
-from src.trading_kernel.domain.events import ReconciliationMatched, TicketIssued
-from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.ticket import build_ticket_id
+from src.trading_kernel.infrastructure.pg_models import runtime_incidents
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     AggregateVersionConflict,
     PostgresKernelUnitOfWork,
 )
-from src.trading_kernel.infrastructure.pg_models import runtime_incidents
-from tests.trading_kernel.unit.test_ticket import _identity, _ticket
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_registry,
 )
-
+from tests.trading_kernel.unit.test_ticket import _identity, _ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -363,7 +362,7 @@ async def test_admission_ownership_is_bounded_to_exact_account_and_instrument(
     assert tuple(
         (item.netting_domain_key, item.quantity)
         for item in ownership.owned_position_projections
-    ) == ((ticket.identity.netting_domain.key(), Decimal("0")),)
+    ) == ((ticket.identity.netting_domain.key(), Decimal(0)),)
     assert ownership.open_incident_scopes == (EntryBlockScope.ACCOUNT_CAPACITY,)
 
 

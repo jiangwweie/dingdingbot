@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
-import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 from src.trading_kernel.domain.identities import TicketIdentity
 
@@ -72,7 +79,7 @@ class OrderCommandPayload(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_order_shape(self) -> "OrderCommandPayload":
+    def _validate_order_shape(self) -> OrderCommandPayload:
         if self.order_type == "limit":
             if self.limit_price is None:
                 raise ValueError("limit order requires limit_price")
@@ -209,7 +216,7 @@ class ExchangeCommand(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_command(self) -> "ExchangeCommand":
+    def _validate_command(self) -> ExchangeCommand:
         if self.kind in {
             ExchangeCommandKind.SET_LEVERAGE,
             ExchangeCommandKind.ENTRY,
@@ -280,7 +287,7 @@ class ExchangeCommandResult(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_result_shape(self) -> "ExchangeCommandResult":
+    def _validate_result_shape(self) -> ExchangeCommandResult:
         if self.status not in {
             ExchangeCommandStatus.ACCEPTED,
             ExchangeCommandStatus.REJECTED,
@@ -339,7 +346,7 @@ def build_command_id(
         raise ValueError("ticket_id must be non-blank")
     if generation <= 0:
         raise ValueError("generation must be positive")
-    payload = f"{normalized_ticket_id}|{kind.value}|{generation}".encode("utf-8")
+    payload = f"{normalized_ticket_id}|{kind.value}|{generation}".encode()
     return f"command:{sha256(payload).hexdigest()[:32]}"
 
 

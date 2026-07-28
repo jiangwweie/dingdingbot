@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
 import json
-from typing import Sequence
+from collections.abc import Sequence
+from hashlib import sha256
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
-
 
 MAX_UNIVERSE_MEMBERS = 10
 
@@ -49,7 +48,7 @@ class StrategyUniverseVersion(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_members_and_digest(self) -> "StrategyUniverseVersion":
+    def _validate_members_and_digest(self) -> StrategyUniverseVersion:
         members = self.exchange_instrument_ids
         if not 1 <= len(members) <= MAX_UNIVERSE_MEMBERS:
             raise ValueError("universe requires between one and ten members")

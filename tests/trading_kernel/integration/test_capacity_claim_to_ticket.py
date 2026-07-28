@@ -4,7 +4,6 @@ from decimal import Decimal
 
 import pytest
 
-from tests.trading_kernel.integration import test_signal_to_ticket as signal_fixture
 from src.trading_kernel.application.ingest_signal import (
     IngestSignalRequest,
     IngestSignalStatus,
@@ -26,11 +25,11 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     EntryAdmissionSnapshot,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from tests.trading_kernel.integration import test_signal_to_ticket as signal_fixture
 from tests.trading_kernel.integration.test_signal_to_ticket import (
     _seed_runtime_authority,
     _signal,
 )
-
 
 issue_engine = signal_fixture.signal_engine
 
@@ -88,7 +87,7 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
     assert ticket == claim.to_ticket()
     assert ticket is not None
     assert ticket.take_profit_quantities == claim.take_profit_quantities
-    assert sum(ticket.take_profit_quantities, Decimal("0")) < ticket.quantity
+    assert sum(ticket.take_profit_quantities, Decimal(0)) < ticket.quantity
     assert reservation is not None
     assert reservation.reserved_notional == claim.notional
     assert reservation.reserved_risk == claim.risk_at_stop
@@ -143,17 +142,17 @@ def _admission_snapshot() -> EntryAdmissionSnapshot:
         account_id="subaccount-main",
         position_mode="independent_sides",
         margin_mode="cross",
-        total_wallet_balance=Decimal("1000"),
-        total_margin_balance=Decimal("1000"),
-        total_initial_margin=Decimal("0"),
-        total_maintenance_margin=Decimal("0"),
-        available_margin=Decimal("1000"),
+        total_wallet_balance=Decimal(1000),
+        total_margin_balance=Decimal(1000),
+        total_initial_margin=Decimal(0),
+        total_maintenance_margin=Decimal(0),
+        available_margin=Decimal(1000),
         best_bid_price=Decimal("9999.9"),
-        best_ask_price=Decimal("10000"),
+        best_ask_price=Decimal(10000),
         instrument_facts=(
             AdmissionInstrumentFacts(
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                mark_price=Decimal("10000"),
+                mark_price=Decimal(10000),
                 configured_leverage=10,
             ),
         ),

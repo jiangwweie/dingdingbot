@@ -28,7 +28,7 @@ class OwnerProjectionFacts(BaseModel):
     incident_id: str | None = None
 
     @model_validator(mode="after")
-    def _validate_policy(self) -> "OwnerProjectionFacts":
+    def _validate_policy(self) -> OwnerProjectionFacts:
         if self.policy_enabled and not self.policy_exists:
             raise ValueError("enabled policy must exist")
         return self
@@ -132,10 +132,7 @@ def derive_owner_projection(
     }:
         status = MonitorOwnerStatus.COMPLETED
         summary = "本次交易已完成"
-    elif facts.aggregate_status is not None:
-        status = MonitorOwnerStatus.PROCESSING
-        summary = "系统自动处理中"
-    elif facts.readiness_state in {"candidate_ready", "processing"}:
+    elif facts.aggregate_status is not None or facts.readiness_state in {"candidate_ready", "processing"}:
         status = MonitorOwnerStatus.PROCESSING
         summary = "系统自动处理中"
     elif facts.readiness_state == "signal_absent":

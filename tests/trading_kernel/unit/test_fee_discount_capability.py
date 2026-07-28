@@ -33,7 +33,7 @@ def test_fee_discount_capability_is_warning_only_when_fee_burn_is_disabled_or_bn
     empty = classify_fee_discount_capability(
         FeeDiscountCapabilityFacts(
             fee_burn_enabled=True,
-            bnb_futures_wallet_balance=Decimal("0"),
+            bnb_futures_wallet_balance=Decimal(0),
             observed_at_ms=1_000,
             source="binance_usdm_readonly",
         )

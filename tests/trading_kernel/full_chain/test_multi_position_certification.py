@@ -400,7 +400,7 @@ async def _protect(
                     quantity=ticket.quantity,
                     average_entry_price="60000",
                     liquidation_price=_safe_liquidation_price(
-                        ticket, Decimal("60000")
+                        ticket, Decimal(60000)
                     ),
                     observed_at_ms=fill_observed_at_ms,
                 ),
@@ -488,9 +488,9 @@ def _ticket_for_domain(
     if position_side == "short":
         terms.update(
             {
-                "initial_stop_price": Decimal("61000"),
-                "take_profit_prices": (Decimal("58000"),),
-                "projected_liquidation_price": Decimal("63000"),
+                "initial_stop_price": Decimal(61000),
+                "take_profit_prices": (Decimal(58000),),
+                "projected_liquidation_price": Decimal(63000),
             }
         )
     return template.model_copy(update=terms)

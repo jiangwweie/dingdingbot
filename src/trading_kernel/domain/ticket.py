@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import re
 from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
-import json
-import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -16,7 +16,6 @@ from src.trading_kernel.domain.identities import (
     RuntimeIdentity,
     TicketIdentity,
 )
-
 
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -154,7 +153,7 @@ class TradeTicket(BaseModel):
         return values
 
     @model_validator(mode="after")
-    def _validate_deadline_and_order_shape(self) -> "TradeTicket":
+    def _validate_deadline_and_order_shape(self) -> TradeTicket:
         if self.expires_at_ms <= self.created_at_ms:
             raise ValueError("ticket expiry must be after creation")
         if self.entry_order_type is EntryOrderType.LIMIT:
@@ -164,7 +163,7 @@ class TradeTicket(BaseModel):
             raise ValueError("market entry forbids a limit price")
         if len(self.take_profit_prices) != len(self.take_profit_quantities):
             raise ValueError("take-profit prices and quantities must align")
-        if sum(self.take_profit_quantities, Decimal("0")) >= self.quantity:
+        if sum(self.take_profit_quantities, Decimal(0)) >= self.quantity:
             raise ValueError("take-profit quantities must preserve a runner position")
         if self.risk_at_stop > self.planned_stop_risk_budget:
             raise ValueError("Ticket stop risk cannot exceed planned risk budget")

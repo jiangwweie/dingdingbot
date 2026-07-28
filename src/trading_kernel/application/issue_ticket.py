@@ -14,9 +14,9 @@ from src.trading_kernel.application.ports import (
 from src.trading_kernel.application.strategy_authority import (
     strategy_authority_matches_ticket,
 )
+from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.events import TicketIssued
 from src.trading_kernel.domain.reducer import reduce_event
-from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.ticket import TradeTicket
 
 

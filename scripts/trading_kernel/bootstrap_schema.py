@@ -5,12 +5,11 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_CONFIG = REPO_ROOT / "migrations" / "trading_kernel" / "alembic.ini"

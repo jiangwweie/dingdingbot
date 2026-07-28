@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from decimal import Decimal, InvalidOperation
 import math
 import os
 import time
+from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 import ccxt.async_support as ccxt_async  # type: ignore[import-untyped]
@@ -16,7 +16,6 @@ from src.trading_kernel.infrastructure.binance_public_market_source import (
     CcxtBinancePublicMarketSource,
 )
 from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
-
 
 BINANCE_USDM_VENUE_ID: Literal["binance-usdm"] = "binance-usdm"
 BINANCE_USDM_POSITION_MODE: Literal["independent_sides"] = "independent_sides"
@@ -65,7 +64,7 @@ class ProductionRuntimeSettings(BaseModel):
     @field_validator("exit_taker_fee_rate")
     @classmethod
     def _require_fee_rate(cls, value: Decimal) -> Decimal:
-        if not Decimal("0") <= value < Decimal("1"):
+        if not Decimal(0) <= value < Decimal(1):
             raise ValueError("exit taker fee rate must be in [0, 1)")
         return value
 
@@ -73,7 +72,7 @@ class ProductionRuntimeSettings(BaseModel):
     def from_environment(
         cls,
         environ: Mapping[str, str] | None = None,
-    ) -> "ProductionRuntimeSettings":
+    ) -> ProductionRuntimeSettings:
         values = os.environ if environ is None else environ
         identity = _read_exact_identity(values, require_account=True)
         return cls(

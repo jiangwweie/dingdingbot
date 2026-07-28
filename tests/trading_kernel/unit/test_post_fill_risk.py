@@ -16,11 +16,11 @@ def _request(**changes: object) -> PostFillRiskRequest:
     payload: dict[str, object] = {
         "position_side": "long",
         "filled_quantity": Decimal("0.001"),
-        "average_fill_price": Decimal("60000"),
-        "initial_stop_price": Decimal("57000"),
+        "average_fill_price": Decimal(60000),
+        "initial_stop_price": Decimal(57000),
         "planned_stop_risk_budget": Decimal("3.00"),
         "post_fill_stop_risk_limit": Decimal("3.30"),
-        "current_liquidation_price": Decimal("50000"),
+        "current_liquidation_price": Decimal(50000),
         "min_liquidation_distance_to_stop_distance_ratio": Decimal("2.0"),
     }
     payload.update(changes)
@@ -40,7 +40,7 @@ def test_post_fill_risk_uses_exact_frozen_limit(
     expected: PostFillRiskStatus,
 ) -> None:
     decision = assess_post_fill_risk(
-        _request(initial_stop_price=Decimal("60000") - actual_stop_risk * 1000)
+        _request(initial_stop_price=Decimal(60000) - actual_stop_risk * 1000)
     )
 
     assert decision.actual_stop_risk == actual_stop_risk
@@ -48,7 +48,7 @@ def test_post_fill_risk_uses_exact_frozen_limit(
 
 
 def test_wrong_side_stop_requests_immediate_flatten() -> None:
-    decision = assess_post_fill_risk(_request(initial_stop_price=Decimal("60001")))
+    decision = assess_post_fill_risk(_request(initial_stop_price=Decimal(60001)))
 
     assert decision.status is PostFillRiskStatus.PROTECTION_DIRECTION_INVALID
     assert decision.disposition is PostFillDisposition.FLATTEN_IMMEDIATELY
@@ -56,7 +56,7 @@ def test_wrong_side_stop_requests_immediate_flatten() -> None:
 
 @pytest.mark.parametrize(
     "liquidation_price",
-    [None, Decimal("58000")],
+    [None, Decimal(58000)],
 )
 def test_missing_or_degraded_liquidation_evidence_requires_protect_then_flatten(
     liquidation_price: Decimal | None,
@@ -81,7 +81,7 @@ def test_hard_risk_overrun_requires_protect_then_flatten() -> None:
 def test_liquidation_evidence_uses_stop_to_liquidation_distance() -> None:
     decision = assess_post_fill_risk(_request())
 
-    assert decision.actual_liquidation_distance == Decimal("7000")
+    assert decision.actual_liquidation_distance == Decimal(7000)
     assert decision.actual_liquidation_distance_to_stop_distance_ratio == (
         Decimal(7) / Decimal(3)
     )

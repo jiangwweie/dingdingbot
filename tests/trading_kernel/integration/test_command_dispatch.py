@@ -229,17 +229,17 @@ class PreflightFacts:
             account_id=request.account_id,
             position_mode="independent_sides",
             margin_mode="cross",
-            total_wallet_balance=Decimal("100"),
-            total_margin_balance=Decimal("100"),
-            total_initial_margin=Decimal("10"),
-            total_maintenance_margin=Decimal("1"),
-            available_margin=Decimal("90"),
-            best_bid_price=Decimal("59999"),
-            best_ask_price=Decimal("60000"),
+            total_wallet_balance=Decimal(100),
+            total_margin_balance=Decimal(100),
+            total_initial_margin=Decimal(10),
+            total_maintenance_margin=Decimal(1),
+            available_margin=Decimal(90),
+            best_bid_price=Decimal(59999),
+            best_ask_price=Decimal(60000),
             instrument_facts=(
                 AdmissionInstrumentFacts(
                     exchange_instrument_id=request.exchange_instrument_id,
-                    mark_price=Decimal("60000"),
+                    mark_price=Decimal(60000),
                     configured_leverage=self._configured_leverage,
                 ),
             ),
@@ -255,10 +255,10 @@ class PreflightFacts:
         brackets = (
             MaintenanceMarginBracket(
                 bracket_id="test:1",
-                notional_floor=Decimal("0"),
+                notional_floor=Decimal(0),
                 notional_cap=None,
                 maintenance_margin_rate=Decimal("0.005"),
-                maintenance_amount=Decimal("0"),
+                maintenance_amount=Decimal(0),
             ),
         )
         return InstrumentRulesFacts(
@@ -266,7 +266,7 @@ class PreflightFacts:
             quantity_step=Decimal("0.001"),
             price_tick=Decimal("0.1"),
             min_quantity=Decimal("0.001"),
-            min_notional=Decimal("5"),
+            min_notional=Decimal(5),
             exchange_max_leverage=10,
             maintenance_margin_brackets=brackets,
             maintenance_margin_brackets_digest=canonical_digest(brackets),
@@ -834,7 +834,7 @@ async def test_prepared_command_is_superseded_before_venue_write_when_state_move
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity=Decimal("0"),
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -950,7 +950,7 @@ async def test_tp1_and_replacement_commands_reach_protected_runner(
             occurred_at_ms=2_300,
             filled_qty=ticket.take_profit_quantities[0],
             average_fill_price=ticket.take_profit_prices[0],
-            runner_floor_price=Decimal("60010"),
+            runner_floor_price=Decimal(60010),
         )
         await uow.commit_reduction(
             event=event,
@@ -976,7 +976,7 @@ async def test_tp1_and_replacement_commands_reach_protected_runner(
     )
     assert isinstance(replacement.payload, OrderCommandPayload)
     assert replacement.payload.order_type == "stop_market"
-    assert replacement.payload.stop_price == Decimal("60010")
+    assert replacement.payload.stop_price == Decimal(60010)
     assert replacement.payload.replaces_exchange_order_id == "venue-initial_stop-1"
     assert replacement.payload.source_watermark_ms == 2_300
 
@@ -1065,7 +1065,7 @@ async def test_replacement_rejection_preserves_the_prior_active_stop(
             occurred_at_ms=2_300,
             filled_qty=ticket.take_profit_quantities[0],
             average_fill_price=ticket.take_profit_prices[0],
-            runner_floor_price=Decimal("60010"),
+            runner_floor_price=Decimal(60010),
         )
         await uow.commit_reduction(
             event=event,
@@ -1361,7 +1361,7 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
                     quantity=ticket.quantity,
                     average_entry_price="60000",
                     liquidation_price=_safe_liquidation_price(
-                        ticket, Decimal("60000")
+                        ticket, Decimal(60000)
                     ),
                     observed_at_ms=2_100,
                 ),
@@ -1432,7 +1432,7 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
                     quantity=ticket.quantity,
                     average_entry_price="60000",
                     liquidation_price=_safe_liquidation_price(
-                        ticket, Decimal("60000")
+                        ticket, Decimal(60000)
                     ),
                     observed_at_ms=2_100,
                 ),
@@ -1505,7 +1505,7 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
                     quantity=ticket.quantity,
                     average_entry_price="60000",
                     liquidation_price=_safe_liquidation_price(
-                        ticket, Decimal("60000")
+                        ticket, Decimal(60000)
                     ),
                     observed_at_ms=2_100,
                 ),
@@ -1876,7 +1876,7 @@ async def _reach_cancel_pending(
                     quantity=ticket.quantity,
                     average_entry_price="60000",
                     liquidation_price=_safe_liquidation_price(
-                        ticket, Decimal("60000")
+                        ticket, Decimal(60000)
                     ),
                     observed_at_ms=2_100,
                 ),

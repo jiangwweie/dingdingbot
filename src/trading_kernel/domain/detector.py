@@ -57,7 +57,7 @@ class DetectorResult(BaseModel):
         return ordered
 
     @model_validator(mode="after")
-    def _validate_status_shape(self) -> "DetectorResult":
+    def _validate_status_shape(self) -> DetectorResult:
         if self.status is DetectorStatus.TRIGGERED:
             if self.occurred_at_ms is None or self.occurred_at_ms <= 0:
                 raise ValueError("triggered detector result requires occurrence time")

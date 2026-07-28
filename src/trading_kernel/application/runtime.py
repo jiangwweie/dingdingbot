@@ -33,7 +33,7 @@ class RuntimeDispatchRequest(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_window(self) -> "RuntimeDispatchRequest":
+    def _validate_window(self) -> RuntimeDispatchRequest:
         if self.now_ms <= 0 or self.lease_until_ms <= self.now_ms:
             raise ValueError("runtime worker lease must end after its tick")
         if self.timeout_seconds <= 0:

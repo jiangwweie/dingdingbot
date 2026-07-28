@@ -338,7 +338,7 @@ def reduce_event(
                 AggregateStatus.ENTRY_ACCEPTED,
             },
         )
-        if not Decimal("0") < event.filled_qty < event.requested_qty:
+        if not Decimal(0) < event.filled_qty < event.requested_qty:
             raise InvalidLifecycleTransition("partial fill quantity is contradictory")
         if event.requested_qty != current.ticket.quantity:
             raise InvalidLifecycleTransition("partial fill request differs from Ticket")
@@ -1063,7 +1063,7 @@ def reduce_event(
                 AggregateStatus.CONTROLLED_FLATTEN_OUTCOME_UNKNOWN,
             },
         )
-        updates: dict[str, object] = {"position_qty": Decimal("0")}
+        updates: dict[str, object] = {"position_qty": Decimal(0)}
         flat_effects: list[KernelEffect] = []
         cleanup_order_id = _next_cleanup_order_id(current)
         if cleanup_order_id is not None:
@@ -1114,7 +1114,7 @@ def reduce_event(
             event,
             status=AggregateStatus.RECONCILIATION_PENDING,
             updates={
-                "position_qty": Decimal("0"),
+                "position_qty": Decimal(0),
                 "pending_cancel_exchange_order_id": cleanup_order_id,
             },
             effects=(
@@ -1547,7 +1547,7 @@ def _clear_cleanup_order(
     if exchange_order_id == current.active_stop_exchange_order_id:
         updates["active_stop_exchange_order_id"] = None
         updates["active_stop_price"] = None
-        updates["protected_qty"] = Decimal("0")
+        updates["protected_qty"] = Decimal(0)
     if exchange_order_id == current.initial_stop_exchange_order_id:
         updates["initial_stop_exchange_order_id"] = None
     return updates

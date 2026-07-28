@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-from decimal import Decimal, InvalidOperation
 import json
 import os
 import re
@@ -13,6 +12,7 @@ import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Protocol
 

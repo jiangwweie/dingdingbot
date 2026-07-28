@@ -57,24 +57,24 @@ def _ticket(**updates: object) -> TradeTicket:
         "capacity_claim_id": "claim:" + "2" * 32,
         "created_at_ms": 1_000,
         "expires_at_ms": 31_000,
-        "entry_reference_price": Decimal("60000"),
+        "entry_reference_price": Decimal(60000),
         "quantity": Decimal("0.001"),
-        "notional": Decimal("60"),
-        "planned_stop_risk_budget": Decimal("3"),
+        "notional": Decimal(60),
+        "planned_stop_risk_budget": Decimal(3),
         "post_fill_stop_risk_limit": Decimal("3.3"),
         "selected_leverage": 5,
         "leverage_change_required": False,
-        "reserved_margin": Decimal("12"),
+        "reserved_margin": Decimal(12),
         "risk_reservation_basis": "planned_stop_distance",
         "margin_mode": "cross",
-        "min_liquidation_distance_to_stop_distance_ratio": Decimal("2"),
-        "projected_liquidation_price": Decimal("57000"),
+        "min_liquidation_distance_to_stop_distance_ratio": Decimal(2),
+        "projected_liquidation_price": Decimal(57000),
         "projected_liquidation_distance_to_stop_distance_ratio": Decimal("2.5"),
-        "risk_at_stop": Decimal("3"),
+        "risk_at_stop": Decimal(3),
         "entry_order_type": EntryOrderType.MARKET,
         "entry_limit_price": None,
-        "initial_stop_price": Decimal("59000"),
-        "take_profit_prices": (Decimal("62000"),),
+        "initial_stop_price": Decimal(59000),
+        "take_profit_prices": (Decimal(62000),),
         "take_profit_quantities": (Decimal("0.0005"),),
         "status": TicketStatus.ISSUED,
     }
@@ -108,13 +108,13 @@ def test_trade_ticket_freezes_policy_and_scope_identity_and_version() -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("quantity", Decimal("0")),
-        ("notional", Decimal("-1")),
+        ("quantity", Decimal(0)),
+        ("notional", Decimal(-1)),
         ("selected_leverage", 0),
-        ("reserved_margin", Decimal("0")),
-        ("entry_reference_price", Decimal("0")),
+        ("reserved_margin", Decimal(0)),
+        ("entry_reference_price", Decimal(0)),
         ("risk_at_stop", Decimal("-0.1")),
-        ("initial_stop_price", Decimal("0")),
+        ("initial_stop_price", Decimal(0)),
     ],
 )
 def test_trade_ticket_rejects_invalid_financial_values(
@@ -137,7 +137,7 @@ def test_limit_ticket_requires_limit_price_and_market_ticket_forbids_it() -> Non
     with pytest.raises(ValidationError):
         _ticket(
             entry_order_type=EntryOrderType.MARKET,
-            entry_limit_price=Decimal("60000"),
+            entry_limit_price=Decimal(60000),
         )
 
 

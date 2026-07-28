@@ -17,7 +17,7 @@ def test_usdt_fee_uses_native_one_to_one_valuation_without_snapshot() -> None:
         native_fee=NativeFee(asset="USDT", amount=Decimal("0.25")),
         valuation_evidence=FeeValuationEvidence(
             method="native_usdt",
-            rate_usdt_per_asset=Decimal("1"),
+            rate_usdt_per_asset=Decimal(1),
             price_pair=None,
             observed_at_ms=None,
             valued_at_ms=1_000,
@@ -32,7 +32,7 @@ def test_bnb_fee_uses_a_review_time_bnbusdt_index_snapshot() -> None:
         native_fee=NativeFee(asset="BNB", amount=Decimal("0.001")),
         valuation_evidence=FeeValuationEvidence(
             method="binance_usdm_bnbusdt_review_index_snapshot",
-            rate_usdt_per_asset=Decimal("600"),
+            rate_usdt_per_asset=Decimal(600),
             price_pair="BNBUSDT",
             observed_at_ms=1_500_000,
             valued_at_ms=1_000_000,
@@ -44,7 +44,7 @@ def test_bnb_fee_uses_a_review_time_bnbusdt_index_snapshot() -> None:
     with pytest.raises(ValidationError, match="observed"):
         FeeValuationEvidence(
             method="binance_usdm_bnbusdt_review_index_snapshot",
-            rate_usdt_per_asset=Decimal("600"),
+            rate_usdt_per_asset=Decimal(600),
             price_pair="BNBUSDT",
             observed_at_ms=None,
             valued_at_ms=1_000_000,

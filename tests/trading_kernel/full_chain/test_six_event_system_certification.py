@@ -202,7 +202,7 @@ class CertifiedMarketSource:
 class CertifiedEntryAdmissionFactsSource:
     def __init__(self, *, reference_price: Decimal, position_side: str) -> None:
         offset = max(reference_price * Decimal("0.0001"), Decimal("0.01"))
-        spread = offset / Decimal("2")
+        spread = offset / Decimal(2)
         if position_side == "long":
             self.best_ask = reference_price + offset
             self.best_bid = self.best_ask - spread
@@ -219,17 +219,17 @@ class CertifiedEntryAdmissionFactsSource:
             account_id=request.account_id,
             position_mode="independent_sides",
             margin_mode="cross",
-            total_wallet_balance=Decimal("1000000"),
-            total_margin_balance=Decimal("1000000"),
-            total_initial_margin=Decimal("0"),
-            total_maintenance_margin=Decimal("0"),
-            available_margin=Decimal("1000000"),
+            total_wallet_balance=Decimal(1000000),
+            total_margin_balance=Decimal(1000000),
+            total_initial_margin=Decimal(0),
+            total_maintenance_margin=Decimal(0),
+            available_margin=Decimal(1000000),
             best_bid_price=self.best_bid,
             best_ask_price=self.best_ask,
             instrument_facts=(
                 AdmissionInstrumentFacts(
                     exchange_instrument_id=request.exchange_instrument_id,
-                    mark_price=(self.best_bid + self.best_ask) / Decimal("2"),
+                    mark_price=(self.best_bid + self.best_ask) / Decimal(2),
                     configured_leverage=10,
                 ),
             ),
@@ -248,7 +248,7 @@ class CertifiedEntryAdmissionFactsSource:
             quantity_step=Decimal("0.001"),
             price_tick=Decimal("0.1"),
             min_quantity=Decimal("0.001"),
-            min_notional=Decimal("5"),
+            min_notional=Decimal(5),
             exchange_max_leverage=10,
             maintenance_margin_brackets=_maintenance_brackets(),
             maintenance_margin_brackets_digest=canonical_digest(
@@ -286,7 +286,7 @@ class CertifiedVenue:
 
 class CertifiedPositionSource:
     def __init__(self) -> None:
-        self.quantity = Decimal("0")
+        self.quantity = Decimal(0)
         self.average_entry_price: Decimal | None = None
         self.liquidation_price: Decimal | None = None
 
@@ -304,7 +304,7 @@ class CertifiedPositionSource:
         )
 
     def set_flat(self) -> None:
-        self.quantity = Decimal("0")
+        self.quantity = Decimal(0)
         self.average_entry_price = None
         self.liquidation_price = None
 
@@ -346,13 +346,13 @@ class CertifiedReviewEconomicsSource:
         request: ReviewEconomicsRequest,
     ) -> ReviewEconomicsFacts:
         self.requests.append(request)
-        entry_price = Decimal("100")
+        entry_price = Decimal(100)
         exit_price = (
-            Decimal("110")
+            Decimal(110)
             if request.netting_domain.position_side == "long"
-            else Decimal("90")
+            else Decimal(90)
         )
-        half = request.expected_entry_quantity / Decimal("2")
+        half = request.expected_entry_quantity / Decimal(2)
         return ReviewEconomicsFacts(
             ticket_id=request.ticket_id,
             entry_fills=(
@@ -366,7 +366,7 @@ class CertifiedReviewEconomicsSource:
                     quantity=request.expected_entry_quantity,
                     price=entry_price,
                     fee=_valued_usdt_fee("0.1", request.entry_time_ms),
-                    realized_pnl_quote=Decimal("0"),
+                    realized_pnl_quote=Decimal(0),
                     occurred_at_ms=request.entry_time_ms,
                 ),
             ),
@@ -381,7 +381,7 @@ class CertifiedReviewEconomicsSource:
                     quantity=half,
                     price=exit_price,
                     fee=_valued_usdt_fee("0.05", request.exit_time_ms),
-                    realized_pnl_quote=Decimal("0"),
+                    realized_pnl_quote=Decimal(0),
                     occurred_at_ms=request.exit_time_ms,
                 ),
                 ReviewFill(
@@ -394,11 +394,11 @@ class CertifiedReviewEconomicsSource:
                     quantity=request.expected_entry_quantity - half,
                     price=exit_price,
                     fee=_valued_usdt_fee("0.05", request.exit_time_ms),
-                    realized_pnl_quote=Decimal("0"),
+                    realized_pnl_quote=Decimal(0),
                     occurred_at_ms=request.exit_time_ms,
                 ),
             ),
-            funding_quote=Decimal("0"),
+            funding_quote=Decimal(0),
             funding_unavailable_reason=None,
             observed_at_ms=request.observed_at_ms,
         )
@@ -409,7 +409,7 @@ def _valued_usdt_fee(amount: str, valued_at_ms: int):
         native_fee=NativeFee(asset="USDT", amount=Decimal(amount)),
         valuation_evidence=FeeValuationEvidence(
             method="native_usdt",
-            rate_usdt_per_asset=Decimal("1"),
+            rate_usdt_per_asset=Decimal(1),
             price_pair=None,
             observed_at_ms=None,
             valued_at_ms=valued_at_ms,
@@ -421,10 +421,10 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
     return (
         MaintenanceMarginBracket(
             bracket_id="test:1",
-            notional_floor=Decimal("0"),
+            notional_floor=Decimal(0),
             notional_cap=None,
             maintenance_margin_rate=Decimal("0.005"),
-            maintenance_amount=Decimal("0"),
+            maintenance_amount=Decimal(0),
         ),
     )
 

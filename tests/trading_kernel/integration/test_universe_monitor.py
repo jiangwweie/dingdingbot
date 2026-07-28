@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
-
-import pytest
 
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
@@ -16,8 +15,10 @@ from tests.trading_kernel.integration.universe_certification_support import (
     NOW_MS,
     RUNTIME_PROFILE_ID,
     RecordingReadonlyCertificationSource,
-    certification_engine as _certification_engine,  # noqa: F401
     worker_request,
+)
+from tests.trading_kernel.integration.universe_certification_support import (
+    certification_engine as _certification_engine,  # noqa: F401
 )
 
 

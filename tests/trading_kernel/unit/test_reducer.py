@@ -20,9 +20,9 @@ from src.trading_kernel.domain.effects import (
     ReleaseBudget,
     ReleaseCapitalAuthorities,
     ReleaseEntryLane,
-    ResolveTicketIncidentsAtClosure,
     RequestControlledFlatten,
     ResolveIncident,
+    ResolveTicketIncidentsAtClosure,
 )
 from src.trading_kernel.domain.events import (
     BudgetSettled,
@@ -243,9 +243,9 @@ def test_authoritative_entry_rejection_is_terminal_and_never_retries() -> None:
                 sequence=3,
                 occurred_at_ms=1_200,
                 filled_qty=Decimal("0.001"),
-                average_fill_price=Decimal("60000"),
+                average_fill_price=Decimal(60000),
                 post_fill_risk=_normal_post_fill_risk(
-                    issued.ticket, Decimal("60000")
+                    issued.ticket, Decimal(60000)
                 ),
             ),
         )
@@ -329,8 +329,8 @@ def test_full_entry_fill_requires_initial_stop_before_releasing_entry_lane() -> 
             sequence=2,
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
+            average_fill_price=Decimal(60000),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     )
 
@@ -389,7 +389,7 @@ def test_partial_entry_fill_is_incident_and_controlled_flatten_not_normal_positi
             occurred_at_ms=1_100,
             filled_qty=Decimal("0.0004"),
             requested_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
+            average_fill_price=Decimal(60000),
         ),
     )
 
@@ -426,8 +426,8 @@ def test_initial_stop_rejection_opens_hard_incident_and_requests_flatten() -> No
             sequence=2,
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
+            average_fill_price=Decimal(60000),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
 
@@ -491,8 +491,8 @@ def test_unknown_initial_stop_outcome_waits_for_venue_truth_without_exit() -> No
             sequence=2,
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
+            average_fill_price=Decimal(60000),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
 
@@ -536,8 +536,8 @@ def test_reconciled_initial_stop_submission_protects_position_and_resolves_unkno
             sequence=2,
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
+            average_fill_price=Decimal(60000),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
     aggregate = reduce_event(
@@ -599,8 +599,8 @@ def test_reconciled_initial_stop_absence_enters_controlled_exit() -> None:
             sequence=2,
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
+            average_fill_price=Decimal(60000),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
     aggregate = reduce_event(
@@ -663,8 +663,8 @@ def test_external_flat_enters_reconciliation_and_cancels_owned_protection() -> N
             sequence=2,
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
+            average_fill_price=Decimal(60000),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
     aggregate = reduce_event(
@@ -690,7 +690,7 @@ def test_external_flat_enters_reconciliation_and_cancels_owned_protection() -> N
     )
 
     assert external_flat.aggregate.status is AggregateStatus.RECONCILIATION_PENDING
-    assert external_flat.aggregate.position_qty == Decimal("0")
+    assert external_flat.aggregate.position_qty == Decimal(0)
     assert external_flat.aggregate.pending_cancel_exchange_order_id == "stop-1"
     assert external_flat.effects == (
         OpenIncident(
@@ -1122,7 +1122,7 @@ def test_reconciled_partial_fill_cancel_absence_starts_controlled_flatten() -> N
             occurred_at_ms=1_200,
             filled_qty=Decimal("0.0004"),
             requested_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
+            average_fill_price=Decimal(60000),
         ),
     ).aggregate
     aggregate = reduce_event(
@@ -1234,8 +1234,8 @@ def _position_protected_aggregate():
             sequence=2,
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("60000")),
+            average_fill_price=Decimal(60000),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
     aggregate = reduce_event(
@@ -1317,7 +1317,7 @@ def _controlled_flatten_outcome_unknown_aggregate():
             occurred_at_ms=1_200,
             filled_qty=Decimal("0.0004"),
             requested_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
+            average_fill_price=Decimal(60000),
         ),
     ).aggregate
     cancel_confirmed = reduce_event(
@@ -1438,7 +1438,7 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
     )
     assert cancelled.aggregate.initial_stop_exchange_order_id is None
     assert cancelled.aggregate.active_stop_exchange_order_id is None
-    assert cancelled.aggregate.protected_qty == Decimal("0")
+    assert cancelled.aggregate.protected_qty == Decimal(0)
 
     reconciled = reduce_event(
         cancelled.aggregate,
@@ -1681,7 +1681,7 @@ def test_proven_absent_replacement_unknown_retries_exact_frozen_terms() -> None:
         PrepareProtectionReplacementCommand(
             ticket_id=unknown.identity.ticket_id,
             quantity=unknown.position_qty,
-            stop_price=Decimal("60010"),
+            stop_price=Decimal(60010),
             replaces_exchange_order_id="stop-1",
             source_watermark_ms=1_500,
         ),
@@ -1699,7 +1699,7 @@ def test_proven_absent_old_stop_cancel_finishes_runner_protection() -> None:
             occurred_at_ms=1_600,
             exchange_order_id="stop-2",
             protected_qty=replacement.position_qty,
-            stop_price=Decimal("60010"),
+            stop_price=Decimal(60010),
             replaces_exchange_order_id="stop-1",
             source_watermark_ms=1_500,
         ),
@@ -1793,6 +1793,6 @@ def _replacement_pending_aggregate():
             occurred_at_ms=1_500,
             filled_qty=aggregate.tp1_target_qty,
             average_fill_price=aggregate.ticket.take_profit_prices[0],
-            runner_floor_price=Decimal("60010"),
+            runner_floor_price=Decimal(60010),
         ),
     ).aggregate

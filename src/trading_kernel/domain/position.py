@@ -53,7 +53,7 @@ class PositionSnapshot(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_price_shape(self) -> "PositionSnapshot":
+    def _validate_price_shape(self) -> PositionSnapshot:
         if self.quantity > 0:
             if self.average_entry_price is None or self.average_entry_price <= 0:
                 raise ValueError("open position requires average entry price")

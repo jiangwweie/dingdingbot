@@ -92,7 +92,7 @@ def test_mi_below_threshold_and_nonleader_are_not_triggered() -> None:
 def test_mi_comparative_return_mismatch_is_invalid() -> None:
     result = detector_for(
         "event_spec:MI-001:MI-LONG:v2"
-    ).evaluate(mi_long_snapshot(candidate_return_pct=Decimal("99")))
+    ).evaluate(mi_long_snapshot(candidate_return_pct=Decimal(99)))
 
     assert result.status is DetectorStatus.INVALID
     assert result.reason_code == "mi_invalid_comparative_return_mismatch"

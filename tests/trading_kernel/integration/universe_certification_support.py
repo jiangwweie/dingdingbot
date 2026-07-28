@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -35,7 +35,6 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -144,11 +143,11 @@ class RecordingReadonlyCertificationSource:
             tick_size=Decimal("0.1"),
             step_size=Decimal("0.001"),
             min_qty=Decimal("0.001"),
-            min_notional=Decimal("5"),
+            min_notional=Decimal(5),
             position_mode="independent_sides",
             margin_mode="cross",
             configured_leverage=5,
-            unowned_position_qty=Decimal("0"),
+            unowned_position_qty=Decimal(0),
             unowned_open_order_count=0,
             observed_at_ms=observed_at_ms,
         ).model_copy(update=self.changes)
@@ -159,15 +158,15 @@ class RecordingReadonlyCertificationSource:
                 quantity_step=Decimal("0.001"),
                 price_tick=Decimal("0.1"),
                 min_quantity=Decimal("0.001"),
-                min_notional=Decimal("5"),
+                min_notional=Decimal(5),
                 exchange_max_leverage=125,
                 maintenance_margin_brackets=(
                     MaintenanceMarginBracket(
                         bracket_id="1",
-                        notional_floor=Decimal("0"),
-                        notional_cap=Decimal("50000"),
+                        notional_floor=Decimal(0),
+                        notional_cap=Decimal(50000),
                         maintenance_margin_rate=Decimal("0.004"),
-                        maintenance_amount=Decimal("0"),
+                        maintenance_amount=Decimal(0),
                     ),
                 ),
                 maintenance_margin_brackets_digest=(

@@ -22,8 +22,8 @@ from src.trading_kernel.domain.commands import (
     build_venue_client_order_id,
     require_next_generation_allowed,
 )
-from tests.trading_kernel.unit.test_ticket import _identity
 from tests.trading_kernel.unit.test_reducer import _reconciliation_pending_aggregate
+from tests.trading_kernel.unit.test_ticket import _identity
 
 
 def _payload(*, reduce_only: bool = False) -> OrderCommandPayload:
@@ -44,7 +44,7 @@ def test_limit_order_requires_explicit_time_in_force() -> None:
             quantity=Decimal("0.001"),
             order_type="limit",
             reduce_only=True,
-            limit_price=Decimal("101"),
+            limit_price=Decimal(101),
         )
 
 
@@ -55,7 +55,7 @@ def test_stop_market_forbids_time_in_force() -> None:
             quantity=Decimal("0.001"),
             order_type="stop_market",
             reduce_only=True,
-            stop_price=Decimal("99"),
+            stop_price=Decimal(99),
             time_in_force="GTX",
         )
 
@@ -66,7 +66,7 @@ def test_limit_gtx_payload_is_immutable_and_serializable() -> None:
         quantity=Decimal("0.001"),
         order_type="limit",
         reduce_only=True,
-        limit_price=Decimal("101"),
+        limit_price=Decimal(101),
         time_in_force="GTX",
     )
 

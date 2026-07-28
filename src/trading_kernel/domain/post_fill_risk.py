@@ -59,7 +59,7 @@ class PostFillRiskRequest(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_frozen_limits(self) -> "PostFillRiskRequest":
+    def _validate_frozen_limits(self) -> PostFillRiskRequest:
         if self.post_fill_stop_risk_limit < self.planned_stop_risk_budget:
             raise ValueError("post-fill limit cannot undercut the planned budget")
         return self

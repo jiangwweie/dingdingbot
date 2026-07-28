@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import inspect
+from decimal import Decimal
 
-from ccxt.base.errors import RequestTimeout
 import pytest
+from ccxt.base.errors import RequestTimeout
 
 from src.trading_kernel.application.certify_universe_instrument import (
     InstrumentCertificationReadRequest,
@@ -32,13 +32,13 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     SetLeverageCommandPayload,
 )
-from src.trading_kernel.domain.identities import NettingDomain
-from src.trading_kernel.domain.instrument_certification import (
-    classify_instrument_certification,
-)
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionOwnership,
     OwnedPositionProjection,
+)
+from src.trading_kernel.domain.identities import NettingDomain
+from src.trading_kernel.domain.instrument_certification import (
+    classify_instrument_certification,
 )
 from src.trading_kernel.domain.order_attribution import (
     OrderNamespace,
@@ -133,7 +133,7 @@ def test_position_details_requires_liquidation_evidence_for_every_open_row() -> 
     )
 
     assert quantity == Decimal("0.02")
-    assert average_entry_price == Decimal("60000")
+    assert average_entry_price == Decimal(60000)
     assert liquidation_price is None
 
 
@@ -1010,7 +1010,7 @@ async def test_ccxt_adapter_submits_tp1_limit_with_gtx_time_in_force() -> None:
                 quantity=Decimal("0.001"),
                 order_type="limit",
                 reduce_only=True,
-                limit_price=Decimal("60100"),
+                limit_price=Decimal(60100),
                 time_in_force="GTX",
             ),
         }
@@ -1104,8 +1104,8 @@ async def test_ccxt_adapter_recovers_flat_leverage_truth_from_position_risk() ->
     )
 
     assert truth.exchange_configured_leverage == 4
-    assert truth.long_position_quantity == Decimal("0")
-    assert truth.short_position_quantity == Decimal("0")
+    assert truth.long_position_quantity == Decimal(0)
+    assert truth.short_position_quantity == Decimal(0)
     assert exchange.position_risk_calls == [{"symbol": "BTCUSDT"}]
 
 
@@ -1132,16 +1132,16 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
 
     assert snapshot.position_mode == "independent_sides"
     assert snapshot.margin_mode == "cross"
-    assert snapshot.total_wallet_balance == Decimal("1200")
-    assert snapshot.total_margin_balance == Decimal("1198")
-    assert snapshot.total_initial_margin == Decimal("250")
-    assert snapshot.total_maintenance_margin == Decimal("13")
-    assert snapshot.available_margin == Decimal("948")
+    assert snapshot.total_wallet_balance == Decimal(1200)
+    assert snapshot.total_margin_balance == Decimal(1198)
+    assert snapshot.total_initial_margin == Decimal(250)
+    assert snapshot.total_maintenance_margin == Decimal(13)
+    assert snapshot.available_margin == Decimal(948)
     assert snapshot.best_bid_price == Decimal("99.9")
     assert snapshot.best_ask_price == Decimal("100.1")
     assert snapshot.instrument_facts_for(
         "binance-usdm:SOLUSDT:perpetual"
-    ).mark_price == Decimal("100")
+    ).mark_price == Decimal(100)
     assert snapshot.instrument_facts_for(
         "binance-usdm:SOLUSDT:perpetual"
     ).configured_leverage == 4
@@ -1285,8 +1285,8 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
         (row.exchange_instrument_id, row.position_side, row.quantity)
         for row in snapshot.positions
     } == {
-        ("binance-usdm:SOLUSDT:perpetual", "long", Decimal("0")),
-        ("binance-usdm:SOLUSDT:perpetual", "short", Decimal("0")),
+        ("binance-usdm:SOLUSDT:perpetual", "long", Decimal(0)),
+        ("binance-usdm:SOLUSDT:perpetual", "short", Decimal(0)),
         ("binance-usdm:BTCUSDT:perpetual", "long", Decimal("0.01")),
     }
 
@@ -1313,7 +1313,7 @@ async def test_ccxt_adapter_reads_typed_leverage_and_maintenance_rules() -> None
         "binance-usdm:BTCUSDT:1",
         "binance-usdm:BTCUSDT:2",
     )
-    assert facts.maintenance_margin_brackets[1].maintenance_amount == Decimal("50")
+    assert facts.maintenance_margin_brackets[1].maintenance_amount == Decimal(50)
     assert facts.maintenance_margin_brackets_digest.startswith("sha256:")
 
 
@@ -1562,7 +1562,7 @@ def test_binance_rules_accept_a_finite_final_maintenance_tier() -> None:
     )
 
     assert maximum_leverage == 20
-    assert brackets[-1].notional_cap == Decimal("250000")
+    assert brackets[-1].notional_cap == Decimal(250000)
 
 
 @pytest.mark.asyncio
@@ -1590,7 +1590,7 @@ async def test_ccxt_adapter_builds_position_snapshot_for_exact_netting_domain() 
 
     assert snapshot.netting_domain == domain
     assert snapshot.quantity == Decimal("0.01")
-    assert snapshot.average_entry_price == Decimal("59000")
+    assert snapshot.average_entry_price == Decimal(59000)
     assert snapshot.liquidation_price is None
     assert {order.exchange_order_id for order in snapshot.open_orders} == {
         "order-False-long",
@@ -1645,7 +1645,7 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
 
     assert facts.position_quantity == Decimal("0.005")
     assert facts.tp1_filled_quantity == Decimal("0.005")
-    assert facts.tp1_average_fill_price == Decimal("61000")
+    assert facts.tp1_average_fill_price == Decimal(61000)
     exchange = adapter._exchanges[("binance-usdm", "experiment-1")]
     assert isinstance(exchange, LifecycleFactsExchange)
     assert exchange.tp1_order_calls == [
@@ -1656,7 +1656,7 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
     assert facts.price_tick == Decimal("0.1")
     assert facts.market_facts is not None
     assert facts.market_facts.is_final_closed_candle is True
-    assert facts.market_facts.structure_reference == Decimal("60002")
+    assert facts.market_facts.structure_reference == Decimal(60002)
     assert facts.market_facts.atr > 0
 
 
@@ -2189,7 +2189,7 @@ def _review_request() -> ReviewEconomicsRequest:
             exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
             position_side="long",
         ),
-        expected_entry_quantity=Decimal("1"),
+        expected_entry_quantity=Decimal(1),
         entry_order_reference=_entry_order_reference(),
         exit_order_references=(
             TicketOrderReference(

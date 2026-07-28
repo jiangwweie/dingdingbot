@@ -184,11 +184,11 @@ async def test_observer_ignores_open_tail_and_appends_no_signal_history(
     future = ClosedCandle(
         open_time_ms=NOW_MS + 1,
         close_time_ms=NOW_MS + 900_000,
-        open=Decimal("101"),
-        high=Decimal("104"),
-        low=Decimal("100"),
-        close=Decimal("103"),
-        volume=Decimal("100"),
+        open=Decimal(101),
+        high=Decimal(104),
+        low=Decimal(100),
+        close=Decimal(103),
+        volume=Decimal(100),
     )
     source = FakeMarketSource(
         {

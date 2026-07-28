@@ -10,8 +10,8 @@ from src.trading_kernel.domain.exit_policy import (
     RunnerKind,
     calculate_cost_adjusted_break_even,
     calculate_structural_runner_stop,
-    exit_policy_for,
     evaluate_exit_policy,
+    exit_policy_for,
     split_tp1_quantity,
 )
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
@@ -38,7 +38,7 @@ def test_each_registered_event_has_one_current_exit_policy(event_id: str) -> Non
     assert policy.exit_policy_id == contract.exit_policy_id
     assert policy.event_spec_id == contract.event_spec_id
     assert policy.position_side == contract.position_side
-    assert policy.tp1.reward_multiple == Decimal("1")
+    assert policy.tp1.reward_multiple == Decimal(1)
     assert policy.tp1.quantity_fraction == Decimal("0.5")
     assert policy.runner.kind is RunnerKind.STRUCTURAL_ATR
     assert policy.runner.timeframe == contract.timeframe
@@ -88,8 +88,8 @@ def test_cost_adjusted_break_even_covers_entry_fee_exit_fee_and_slippage(
 ) -> None:
     result = calculate_cost_adjusted_break_even(
         side=side,
-        entry_average_price=Decimal("100"),
-        runner_quantity=Decimal("1"),
+        entry_average_price=Decimal(100),
+        runner_quantity=Decimal(1),
         allocated_entry_fee_quote=Decimal("0.1"),
         exit_taker_fee_rate=Decimal("0.001"),
         price_tick=Decimal("0.1"),
@@ -102,8 +102,8 @@ def test_cost_adjusted_break_even_covers_entry_fee_exit_fee_and_slippage(
 @pytest.mark.parametrize(
     ("side", "structure_reference", "expected"),
     [
-        ("long", Decimal("100"), Decimal("98.9")),
-        ("short", Decimal("100"), Decimal("101.1")),
+        ("long", Decimal(100), Decimal("98.9")),
+        ("short", Decimal(100), Decimal("101.1")),
     ],
 )
 def test_structural_atr_runner_stop_uses_side_safe_tick_rounding(
@@ -130,15 +130,15 @@ def test_sor_long_time_stop_closes_runner_at_96_final_bars() -> None:
     )
     decision = evaluate_exit_policy(
         policy=exit_policy_for(contract.event_spec_id),
-        current_stop=Decimal("100"),
-        break_even_floor=Decimal("100"),
+        current_stop=Decimal(100),
+        break_even_floor=Decimal(100),
         price_tick=Decimal("0.1"),
         last_runner_watermark_ms=1_000,
         market_facts=LifecycleMarketFacts(
             watermark_ms=2_000,
             is_final_closed_candle=True,
-            structure_reference=Decimal("102"),
-            atr=Decimal("2"),
+            structure_reference=Decimal(102),
+            atr=Decimal(2),
             holding_bars=96,
         ),
     )
@@ -155,21 +155,21 @@ def test_non_sor_event_does_not_invent_time_stop() -> None:
     )
     decision = evaluate_exit_policy(
         policy=exit_policy_for(contract.event_spec_id),
-        current_stop=Decimal("100"),
-        break_even_floor=Decimal("100"),
+        current_stop=Decimal(100),
+        break_even_floor=Decimal(100),
         price_tick=Decimal("0.1"),
         last_runner_watermark_ms=1_000,
         market_facts=LifecycleMarketFacts(
             watermark_ms=2_000,
             is_final_closed_candle=True,
-            structure_reference=Decimal("102"),
-            atr=Decimal("2"),
+            structure_reference=Decimal(102),
+            atr=Decimal(2),
             holding_bars=10_000,
         ),
     )
 
     assert decision.kind is ExitDecisionKind.MOVE_STOP
-    assert decision.proposed_stop == Decimal("101")
+    assert decision.proposed_stop == Decimal(101)
 
 
 def test_runner_ignores_open_or_duplicate_candle_and_requires_two_tick_improvement() -> None:
@@ -182,36 +182,36 @@ def test_runner_ignores_open_or_duplicate_candle_and_requires_two_tick_improveme
 
     open_candle = evaluate_exit_policy(
         policy=policy,
-        current_stop=Decimal("100"),
-        break_even_floor=Decimal("100"),
+        current_stop=Decimal(100),
+        break_even_floor=Decimal(100),
         price_tick=Decimal("0.1"),
         last_runner_watermark_ms=1_000,
         market_facts=LifecycleMarketFacts(
             watermark_ms=2_000,
             is_final_closed_candle=False,
-            structure_reference=Decimal("98"),
-            atr=Decimal("2"),
+            structure_reference=Decimal(98),
+            atr=Decimal(2),
             holding_bars=10,
         ),
     )
     duplicate = evaluate_exit_policy(
         policy=policy,
-        current_stop=Decimal("100"),
-        break_even_floor=Decimal("100"),
+        current_stop=Decimal(100),
+        break_even_floor=Decimal(100),
         price_tick=Decimal("0.1"),
         last_runner_watermark_ms=2_000,
         market_facts=LifecycleMarketFacts(
             watermark_ms=2_000,
             is_final_closed_candle=True,
-            structure_reference=Decimal("98"),
-            atr=Decimal("2"),
+            structure_reference=Decimal(98),
+            atr=Decimal(2),
             holding_bars=10,
         ),
     )
     too_small = evaluate_exit_policy(
         policy=policy,
-        current_stop=Decimal("100"),
-        break_even_floor=Decimal("100"),
+        current_stop=Decimal(100),
+        break_even_floor=Decimal(100),
         price_tick=Decimal("0.1"),
         last_runner_watermark_ms=1_000,
         market_facts=LifecycleMarketFacts(

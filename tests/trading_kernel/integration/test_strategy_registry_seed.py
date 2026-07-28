@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -11,6 +11,10 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.trading_kernel.domain.strategy_registry import (
+    build_registry_semantic_hash,
+    registered_strategy_contracts,
+)
 from src.trading_kernel.infrastructure.pg_models import (
     event_specs,
     exit_policies,
@@ -24,17 +28,12 @@ from src.trading_kernel.infrastructure.strategy_registry_seed import (
     RegistrySeedConflict,
     seed_strategy_registry,
 )
-from src.trading_kernel.domain.strategy_registry import (
-    build_registry_semantic_hash,
-    registered_strategy_contracts,
-)
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
     SAFE_DATABASE,
     _database_url,
     _run_alembic,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 

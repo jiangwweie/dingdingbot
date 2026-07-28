@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from contextlib import suppress
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -14,7 +14,6 @@ import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from tests.trading_kernel.integration.test_schema_baseline import EXPECTED_TABLES
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(

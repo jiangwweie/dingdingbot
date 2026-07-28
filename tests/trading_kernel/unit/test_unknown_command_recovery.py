@@ -370,8 +370,8 @@ def _truth(
     lookup_status: VenueLookupStatus,
     order: VenueOrderTruth | None = None,
     observed_at_ms: int = 1_500,
-    position_quantity: Decimal = Decimal("0"),
-    matching_fill_quantity: Decimal = Decimal("0"),
+    position_quantity: Decimal = Decimal(0),
+    matching_fill_quantity: Decimal = Decimal(0),
     reason: str | None = None,
 ) -> VenueTruthSnapshot:
     return VenueTruthSnapshot(

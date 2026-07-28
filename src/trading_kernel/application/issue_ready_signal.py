@@ -18,10 +18,10 @@ from src.trading_kernel.application.issue_ticket import (
     issue_ticket,
 )
 from src.trading_kernel.application.ports import KernelUnitOfWork
-from src.trading_kernel.domain.arbitration import rank_candidates
 from src.trading_kernel.domain.account_entry_health import (
     classify_account_entry_health,
 )
+from src.trading_kernel.domain.arbitration import rank_candidates
 from src.trading_kernel.domain.capacity import (
     CapacityClaimStatus,
     CapacityInstrumentRules,
@@ -191,10 +191,10 @@ async def issue_ready_signal(
     )
     usage = CapacityUsage(
         gross_notional=(
-            exposure.gross_notional if exposure else Decimal("0")
+            exposure.gross_notional if exposure else Decimal(0)
         ),
         gross_risk_at_stop=(
-            exposure.gross_risk_at_stop if exposure else Decimal("0")
+            exposure.gross_risk_at_stop if exposure else Decimal(0)
         ),
         active_ticket_count=(exposure.active_ticket_count if exposure else 0),
     )

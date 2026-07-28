@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
 import json
+from hashlib import sha256
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.ticket import EntryOrderType
-
 
 FactValueType = Literal["boolean", "decimal"]
 FactRole = Literal["condition", "protection_reference", "disable"]
@@ -69,7 +68,7 @@ class RegisteredFactRequirement(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_role_value_type(self) -> "RegisteredFactRequirement":
+    def _validate_role_value_type(self) -> RegisteredFactRequirement:
         if self.role == "protection_reference" and self.value_type != "decimal":
             raise ValueError("protection reference facts must be decimal")
         if self.role in {"condition", "disable"} and self.value_type != "boolean":
@@ -119,7 +118,7 @@ class RegisteredStrategyContract(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_contract(self) -> "RegisteredStrategyContract":
+    def _validate_contract(self) -> RegisteredStrategyContract:
         expected_version = f"sgv:{self.strategy_group_id}:v2"
         expected_event = (
             f"event_spec:{self.strategy_group_id}:{self.event_id}:v2"

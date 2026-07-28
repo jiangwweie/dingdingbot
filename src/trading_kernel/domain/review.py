@@ -116,7 +116,7 @@ class ReviewEconomicsFacts(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_funding_shape(self) -> "ReviewEconomicsFacts":
+    def _validate_funding_shape(self) -> ReviewEconomicsFacts:
         reason = str(self.funding_unavailable_reason or "").strip()
         if self.funding_quote is None:
             if not reason:
@@ -213,7 +213,7 @@ def calculate_review_economics(
             "exit fill quantity does not equal Ticket quantity"
         )
 
-    direction = Decimal("1") if position_side == "long" else Decimal("-1")
+    direction = Decimal(1) if position_side == "long" else Decimal(-1)
     gross_realized_pnl = sum(
         (
             (fill.price - entry_average_price)
@@ -221,11 +221,11 @@ def calculate_review_economics(
             * direction
             for fill in facts.exit_fills
         ),
-        Decimal("0"),
+        Decimal(0),
     )
     trading_fees = sum(
         (fill.fee_quote for fill in (*facts.entry_fills, *facts.exit_fills)),
-        Decimal("0"),
+        Decimal(0),
     )
     net_before_funding = gross_realized_pnl - trading_fees
     risk_variance = (
@@ -273,11 +273,11 @@ def calculate_review_economics(
 
 
 def _fill_totals(fills: tuple[ReviewFill, ...]) -> tuple[Decimal, Decimal]:
-    quantity = sum((fill.quantity for fill in fills), Decimal("0"))
+    quantity = sum((fill.quantity for fill in fills), Decimal(0))
     if quantity <= 0:
         raise ReviewEconomicsUnavailable("fill quantity must be positive")
     notional = sum(
         (fill.quantity * fill.price for fill in fills),
-        Decimal("0"),
+        Decimal(0),
     )
     return quantity, notional / quantity

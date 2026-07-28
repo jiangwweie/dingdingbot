@@ -35,8 +35,8 @@ class MILongDetector:
         lookback = candles[-13]
         impulse_return_pct = (
             (latest.close - lookback.close) / lookback.close
-        ) * Decimal("100")
-        impulse_confirmed = impulse_return_pct >= Decimal("3")
+        ) * Decimal(100)
+        impulse_confirmed = impulse_return_pct >= Decimal(3)
         local_facts = (
             fact_snapshot(
                 self._contract,

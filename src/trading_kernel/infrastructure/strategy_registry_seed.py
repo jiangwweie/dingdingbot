@@ -10,8 +10,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import KernelUnitOfWork
-from src.trading_kernel.domain.exit_policy import registered_exit_policies
-from src.trading_kernel.domain.exit_policy import ExitPolicy
+from src.trading_kernel.domain.exit_policy import ExitPolicy, registered_exit_policies
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     RegistrySeedConflict,
@@ -27,7 +26,6 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_groups,
     strategy_versions,
 )
-
 
 __all__ = [
     "PostgresStrategyRegistryRepository",

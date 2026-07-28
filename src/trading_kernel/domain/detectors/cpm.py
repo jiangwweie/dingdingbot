@@ -47,7 +47,7 @@ class CPMLongDetector:
         lookback_low = min(item.low for item in lookback)
         pullback_depth_pct = (
             (lookback_high - lookback_low) / lookback_high
-        ) * Decimal("100")
+        ) * Decimal(100)
         pullback_depth_normal = (
             Decimal("0.5") <= pullback_depth_pct <= Decimal("8.0")
         )
@@ -101,4 +101,4 @@ class CPMLongDetector:
 
 
 def _sma(values: tuple[Decimal, ...]) -> Decimal:
-    return sum(values, Decimal("0")) / Decimal(len(values))
+    return sum(values, Decimal(0)) / Decimal(len(values))

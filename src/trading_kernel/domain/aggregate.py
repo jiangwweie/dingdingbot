@@ -100,7 +100,7 @@ class TradeAggregate(BaseModel):
     version: int
     last_event_sequence: int
     entry_lane_held: bool = True
-    position_qty: Decimal = Decimal("0")
+    position_qty: Decimal = Decimal(0)
     average_fill_price: Decimal | None = None
     actual_stop_risk: Decimal | None = None
     actual_liquidation_price: Decimal | None = None
@@ -108,14 +108,14 @@ class TradeAggregate(BaseModel):
     actual_liquidation_distance_to_stop_distance_ratio: Decimal | None = None
     post_fill_risk_status: PostFillRiskStatus | None = None
     post_fill_disposition: PostFillDisposition | None = None
-    protected_qty: Decimal = Decimal("0")
+    protected_qty: Decimal = Decimal(0)
     entry_exchange_order_id: str | None = None
     initial_stop_exchange_order_id: str | None = None
     active_stop_exchange_order_id: str | None = None
     active_stop_price: Decimal | None = None
     tp1_exchange_order_id: str | None = None
-    tp1_target_qty: Decimal = Decimal("0")
-    tp1_filled_qty: Decimal = Decimal("0")
+    tp1_target_qty: Decimal = Decimal(0)
+    tp1_filled_qty: Decimal = Decimal(0)
     break_even_floor_price: Decimal | None = None
     pending_replaced_stop_exchange_order_id: str | None = None
     pending_stop_price: Decimal | None = None

@@ -49,7 +49,7 @@ async def test_repository_builds_exact_regular_and_conditional_order_references(
             quantity=Decimal("0.01"),
             order_type="stop_market",
             reduce_only=True,
-            stop_price=Decimal("59000"),
+            stop_price=Decimal(59000),
         ),
     )
 

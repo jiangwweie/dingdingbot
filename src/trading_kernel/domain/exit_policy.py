@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+import json
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from enum import StrEnum
 from hashlib import sha256
-import json
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -14,7 +14,6 @@ from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     registered_strategy_contracts,
 )
-
 
 PositionSide = Literal["long", "short"]
 
@@ -39,7 +38,7 @@ class LifecycleMarketFacts(BaseModel):
     holding_bars: int
 
     @model_validator(mode="after")
-    def _validate_facts(self) -> "LifecycleMarketFacts":
+    def _validate_facts(self) -> LifecycleMarketFacts:
         if self.watermark_ms <= 0 or self.holding_bars < 0:
             raise ValueError("lifecycle market watermark and holding bars are invalid")
         if self.structure_reference <= 0 or self.atr <= 0:
@@ -56,7 +55,7 @@ class ExitDecision(BaseModel):
     proposed_stop: Decimal | None = None
 
     @model_validator(mode="after")
-    def _validate_shape(self) -> "ExitDecision":
+    def _validate_shape(self) -> ExitDecision:
         if not self.reason.strip() or self.source_watermark_ms <= 0:
             raise ValueError("exit decision reason and watermark are required")
         if self.kind is ExitDecisionKind.MOVE_STOP:
@@ -76,10 +75,10 @@ class TakeProfitRule(BaseModel):
     market_fallback_allowed: Literal[False] = False
 
     @model_validator(mode="after")
-    def _validate_rule(self) -> "TakeProfitRule":
+    def _validate_rule(self) -> TakeProfitRule:
         if self.reward_multiple <= 0:
             raise ValueError("take-profit reward multiple must be positive")
-        if not Decimal("0") < self.quantity_fraction < Decimal("1"):
+        if not Decimal(0) < self.quantity_fraction < Decimal(1):
             raise ValueError("take-profit quantity fraction must be in (0, 1)")
         return self
 
@@ -92,7 +91,7 @@ class BreakEvenFloorRule(BaseModel):
     minimum_improvement_ticks: int
 
     @model_validator(mode="after")
-    def _validate_ticks(self) -> "BreakEvenFloorRule":
+    def _validate_ticks(self) -> BreakEvenFloorRule:
         if self.slippage_buffer_ticks < 0:
             raise ValueError("break-even slippage ticks cannot be negative")
         if self.minimum_improvement_ticks <= 0:
@@ -121,7 +120,7 @@ class StructuralAtrRunnerRule(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_parameters(self) -> "StructuralAtrRunnerRule":
+    def _validate_parameters(self) -> StructuralAtrRunnerRule:
         if self.structure_window_bars <= 0 or self.atr_period <= 0:
             raise ValueError("runner structure and ATR windows must be positive")
         if self.atr_buffer_multiple < 0:
@@ -188,7 +187,7 @@ class TakeProfitSplit(BaseModel):
     runner_quantity: Decimal
 
     @model_validator(mode="after")
-    def _require_two_positive_legs(self) -> "TakeProfitSplit":
+    def _require_two_positive_legs(self) -> TakeProfitSplit:
         if self.tp1_quantity <= 0 or self.runner_quantity <= 0:
             raise ValueError("TP1 and runner quantities must both be positive")
         return self
@@ -220,7 +219,7 @@ def split_tp1_quantity(
         raise ValueError("quantity and quantity step must be positive")
     if total_quantity % quantity_step != 0:
         raise ValueError("total quantity must be aligned to the quantity step")
-    if not Decimal("0") < quantity_fraction < Decimal("1"):
+    if not Decimal(0) < quantity_fraction < Decimal(1):
         raise ValueError("TP1 quantity fraction must be in (0, 1)")
     tp1_quantity = _round_to_step(
         total_quantity * quantity_fraction,
@@ -260,14 +259,14 @@ def calculate_cost_adjusted_break_even(
             entry_notional
             + allocated_entry_fee_quote
             + slippage_buffer_quote
-        ) / (runner_quantity * (Decimal("1") - exit_taker_fee_rate))
+        ) / (runner_quantity * (Decimal(1) - exit_taker_fee_rate))
         return _round_to_step(raw, price_tick, rounding=ROUND_CEILING)
     if side == "short":
         raw = (
             entry_notional
             - allocated_entry_fee_quote
             - slippage_buffer_quote
-        ) / (runner_quantity * (Decimal("1") + exit_taker_fee_rate))
+        ) / (runner_quantity * (Decimal(1) + exit_taker_fee_rate))
         if raw <= 0:
             raise ValueError("short break-even floor must remain positive")
         return _round_to_step(raw, price_tick, rounding=ROUND_FLOOR)
@@ -378,7 +377,7 @@ def _policy_for_contract(contract: RegisteredStrategyContract) -> ExitPolicy:
         event_id=contract.event_id,
         position_side=contract.position_side,
         tp1=TakeProfitRule(
-            reward_multiple=Decimal("1"),
+            reward_multiple=Decimal(1),
             quantity_fraction=Decimal("0.5"),
         ),
         break_even_floor=BreakEvenFloorRule(
@@ -423,7 +422,7 @@ def _require_financial_inputs(
         raise ValueError("break-even price, quantity, and tick must be positive")
     if allocated_entry_fee_quote < 0 or slippage_buffer_ticks < 0:
         raise ValueError("break-even fee and slippage values cannot be negative")
-    if not Decimal("0") <= exit_taker_fee_rate < Decimal("1"):
+    if not Decimal(0) <= exit_taker_fee_rate < Decimal(1):
         raise ValueError("exit taker fee rate must be in [0, 1)")
 
 

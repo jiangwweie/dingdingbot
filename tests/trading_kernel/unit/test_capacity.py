@@ -35,8 +35,8 @@ def test_capacity_claim_freezes_configured_leverage_and_demand_based_margin() ->
         position_mode="independent_sides",
         policy=_policy(),
         usage=CapacityUsage(
-            gross_notional=Decimal("0"),
-            gross_risk_at_stop=Decimal("0"),
+            gross_notional=Decimal(0),
+            gross_risk_at_stop=Decimal(0),
             active_ticket_count=0,
         ),
         instrument_rules=_rules(),
@@ -57,9 +57,9 @@ def test_capacity_claim_freezes_configured_leverage_and_demand_based_margin() ->
     assert decision.claim is not None
     claim = decision.claim
     assert claim.selected_leverage == 5
-    assert claim.planned_stop_risk_budget == Decimal("30")
-    assert claim.post_fill_stop_risk_limit == Decimal("33")
-    assert claim.reserved_margin == Decimal("240")
+    assert claim.planned_stop_risk_budget == Decimal(30)
+    assert claim.post_fill_stop_risk_limit == Decimal(33)
+    assert claim.reserved_margin == Decimal(240)
     assert claim.entry_admission_snapshot_digest == snapshot.digest()
     assert claim.account_capacity_domain_key == "binance-usdm:experiment-1"
     assert claim.leverage_domain_key == "binance-usdm:experiment-1:binance-usdm:BTCUSDT:perpetual"
@@ -113,7 +113,7 @@ def _policy() -> CapacityPolicy:
         max_initial_margin_utilization=Decimal("0.90"),
         max_leverage=10,
         supported_margin_mode="cross",
-        min_liquidation_distance_to_stop_distance_ratio=Decimal("2"),
+        min_liquidation_distance_to_stop_distance_ratio=Decimal(2),
         max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
     )
 
@@ -122,10 +122,10 @@ def _rules() -> CapacityInstrumentRules:
     brackets = (
         MaintenanceMarginBracket(
             bracket_id="binance-usdm:BTCUSDT:1",
-            notional_floor=Decimal("0"),
+            notional_floor=Decimal(0),
             notional_cap=None,
             maintenance_margin_rate=Decimal("0.005"),
-            maintenance_amount=Decimal("0"),
+            maintenance_amount=Decimal(0),
         ),
     )
     return CapacityInstrumentRules(
@@ -134,7 +134,7 @@ def _rules() -> CapacityInstrumentRules:
         quantity_step=Decimal("0.1"),
         price_tick=Decimal("0.1"),
         min_quantity=Decimal("0.1"),
-        min_notional=Decimal("5"),
+        min_notional=Decimal(5),
         exchange_max_leverage=10,
         maintenance_margin_brackets=brackets,
         maintenance_margin_brackets_digest=canonical_digest(brackets),
@@ -150,17 +150,17 @@ def _snapshot() -> EntryAdmissionSnapshot:
         account_id="experiment-1",
         position_mode="independent_sides",
         margin_mode="cross",
-        total_wallet_balance=Decimal("1000"),
-        total_margin_balance=Decimal("1000"),
-        total_initial_margin=Decimal("0"),
-        total_maintenance_margin=Decimal("0"),
-        available_margin=Decimal("1000"),
+        total_wallet_balance=Decimal(1000),
+        total_margin_balance=Decimal(1000),
+        total_initial_margin=Decimal(0),
+        total_maintenance_margin=Decimal(0),
+        available_margin=Decimal(1000),
         best_bid_price=Decimal("99.9"),
-        best_ask_price=Decimal("100"),
+        best_ask_price=Decimal(100),
         instrument_facts=(
             AdmissionInstrumentFacts(
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                mark_price=Decimal("100"),
+                mark_price=Decimal(100),
                 configured_leverage=5,
             ),
         ),

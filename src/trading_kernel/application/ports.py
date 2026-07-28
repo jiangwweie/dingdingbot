@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 from types import TracebackType
-from typing import Callable, Literal, Protocol, Self
+from typing import Literal, Protocol, Self
 
 from pydantic import (
     BaseModel,
@@ -109,7 +110,7 @@ class RuntimeIncidentRecord(BaseModel):
     resolved_at_ms: int | None = None
 
     @model_validator(mode="after")
-    def _validate_entry_block_identity(self) -> "RuntimeIncidentRecord":
+    def _validate_entry_block_identity(self) -> RuntimeIncidentRecord:
         if self.entry_block_scope is EntryBlockScope.NONE:
             if self.entry_block_key is not None:
                 raise ValueError("non-blocking Incident must not carry a block key")
@@ -1023,12 +1024,12 @@ class StrategyUniverseRepository(Protocol):
         worker_id: str,
         now_ms: int,
         lease_until_ms: int,
-    ) -> "InstrumentCertificationTarget | None": ...
+    ) -> InstrumentCertificationTarget | None: ...
 
     async def save_instrument_certification(
         self,
         *,
-        target: "InstrumentCertificationTarget",
+        target: InstrumentCertificationTarget,
         certification: InstrumentCertification,
         product_rules_digest: str | None,
         configured_leverage: int | None,
@@ -1050,7 +1051,7 @@ class InstrumentCertificationTarget(BaseModel):
     lease_expires_at_ms: int
 
     @model_validator(mode="after")
-    def _validate_target(self) -> "InstrumentCertificationTarget":
+    def _validate_target(self) -> InstrumentCertificationTarget:
         for value in (
             self.runtime_profile_id,
             self.venue_id,
@@ -1119,7 +1120,7 @@ class LeverageTruthSnapshot(BaseModel):
     observed_at_ms: int
 
     @model_validator(mode="after")
-    def _validate_exact_truth(self) -> "LeverageTruthSnapshot":
+    def _validate_exact_truth(self) -> LeverageTruthSnapshot:
         if (
             isinstance(self.exchange_configured_leverage, bool)
             or not isinstance(self.exchange_configured_leverage, int)

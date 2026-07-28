@@ -47,7 +47,7 @@ def _fee() -> ValuedFee:
         usdt_value=Decimal("0.10"),
         evidence=FeeValuationEvidence(
             method="native_usdt",
-            rate_usdt_per_asset=Decimal("1"),
+            rate_usdt_per_asset=Decimal(1),
             price_pair=None,
             observed_at_ms=None,
             valued_at_ms=1_000,
@@ -107,9 +107,9 @@ def test_attributed_fill_uses_exact_actual_order_identity_and_valued_fee() -> No
         command_id="command:entry",
         role=OrderRole.ENTRY,
         quantity=Decimal("0.1"),
-        price=Decimal("60000"),
+        price=Decimal(60000),
         fee=_fee(),
-        realized_pnl_quote=Decimal("0"),
+        realized_pnl_quote=Decimal(0),
         occurred_at_ms=1_001,
     )
 
@@ -124,9 +124,9 @@ def test_attribution_digest_is_stable_for_fill_order_and_changes_for_content() -
         command_id="command:entry",
         role=OrderRole.ENTRY,
         quantity=Decimal("0.1"),
-        price=Decimal("60000"),
+        price=Decimal(60000),
         fee=_fee(),
-        realized_pnl_quote=Decimal("0"),
+        realized_pnl_quote=Decimal(0),
         occurred_at_ms=1_001,
     )
     second = first.model_copy(update={"exchange_trade_id": "trade-2"})

@@ -9,7 +9,6 @@ from src.trading_kernel.domain.market import (
     MarketSnapshot,
 )
 
-
 NOW_MS = 1_800_000_000_000
 BTC = "binance-usdm:BTCUSDT:perpetual"
 ETH = "binance-usdm:ETHUSDT:perpetual"
@@ -22,7 +21,7 @@ SUI = "binance-usdm:SUIUSDT:perpetual"
 def cpm_long_snapshot() -> MarketSnapshot:
     one_hour: list[ClosedCandle] = []
     for index in range(20):
-        close = Decimal("100") + Decimal(index) * Decimal("0.2")
+        close = Decimal(100) + Decimal(index) * Decimal("0.2")
         one_hour.append(
             _candle(
                 index=index,
@@ -41,8 +40,8 @@ def cpm_long_snapshot() -> MarketSnapshot:
             duration_ms=3_600_000,
             open_=Decimal("103.5"),
             high=Decimal("105.2"),
-            low=Decimal("102"),
-            close=Decimal("105"),
+            low=Decimal(102),
+            close=Decimal(105),
         )
     )
     return snapshot(candles_1h=tuple(one_hour), candles_4h=_up_context_4h())
@@ -58,12 +57,12 @@ def cpm_flat_snapshot() -> MarketSnapshot:
 def mpg_long_snapshot(
     *,
     candidate_rank: int = 1,
-    candidate_return_pct: Decimal = Decimal("8"),
+    candidate_return_pct: Decimal = Decimal(8),
     comparative_valid_until_ms: int = NOW_MS + 3_600_000,
 ) -> MarketSnapshot:
     one_hour: list[ClosedCandle] = []
     for index in range(16):
-        close = Decimal("100") + Decimal(index) * Decimal("0.35")
+        close = Decimal(100) + Decimal(index) * Decimal("0.35")
         one_hour.append(
             _candle(
                 index=index,
@@ -82,8 +81,8 @@ def mpg_long_snapshot(
             duration_ms=3_600_000,
             open_=Decimal("105.4"),
             high=Decimal("107.2"),
-            low=Decimal("105"),
-            close=Decimal("107"),
+            low=Decimal(105),
+            close=Decimal(107),
         )
     )
     peer_rank = 2 if candidate_rank == 1 else 1
@@ -100,7 +99,7 @@ def mpg_long_snapshot(
             ),
             ComparativeStrengthMember(
                 exchange_instrument_id=ETH,
-                return_pct=Decimal("6"),
+                return_pct=Decimal(6),
                 rank=peer_rank,
             ),
         ),
@@ -131,7 +130,7 @@ def mi_long_snapshot(
 ) -> MarketSnapshot:
     candles: list[ClosedCandle] = []
     for index in range(14):
-        close = Decimal("100") + Decimal(index) * Decimal("0.45")
+        close = Decimal(100) + Decimal(index) * Decimal("0.45")
         candles.append(
             _candle(
                 index=index,
@@ -145,7 +144,7 @@ def mi_long_snapshot(
         )
     start = candles[-13].close
     end = candles[-1].close
-    actual_return = ((end - start) / start) * Decimal("100")
+    actual_return = ((end - start) / start) * Decimal(100)
     peer_rank = 2 if candidate_rank == 1 else 1
     comparative = ComparativeStrengthSnapshot(
         strategy_group_id="MI-001",
@@ -164,7 +163,7 @@ def mi_long_snapshot(
             ),
             ComparativeStrengthMember(
                 exchange_instrument_id=SOL,
-                return_pct=Decimal("2"),
+                return_pct=Decimal(2),
                 rank=peer_rank,
             ),
         ),
@@ -252,7 +251,7 @@ def flat_candles(count: int, duration_ms: int) -> tuple[ClosedCandle, ...]:
 def _up_context_4h() -> tuple[ClosedCandle, ...]:
     candles: list[ClosedCandle] = []
     for index in range(21):
-        close = Decimal("100") + Decimal(index) * Decimal("0.3")
+        close = Decimal(100) + Decimal(index) * Decimal("0.3")
         candles.append(
             _candle(
                 index=index,
@@ -312,5 +311,5 @@ def _candle(
         high=high,
         low=low,
         close=close,
-        volume=Decimal("100"),
+        volume=Decimal(100),
     )

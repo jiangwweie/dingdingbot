@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
 import json
+from hashlib import sha256
 
 from src.trading_kernel.application.ports import RuntimeScopeSnapshot
 from src.trading_kernel.domain.detector import DetectorResult, detector_for

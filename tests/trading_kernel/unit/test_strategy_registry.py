@@ -9,7 +9,6 @@ from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
 
-
 EXPECTED_EVENTS = {
     ("CPM-RO-001", "CPM-LONG", "long"),
     ("MPG-001", "MPG-LONG", "long"),

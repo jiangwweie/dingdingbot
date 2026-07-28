@@ -8,27 +8,27 @@ import asyncio
 import importlib
 import inspect
 import os
-from pathlib import Path
 import sys
 import time
-from typing import Callable, cast
+from collections.abc import Callable
+from pathlib import Path
+from typing import cast
 
 from sqlalchemy.ext.asyncio import create_async_engine
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.trading_kernel.application.market_ports import PublicMarketSource  # noqa: E402
-from src.trading_kernel.infrastructure.pg_unit_of_work import (  # noqa: E402
+from src.trading_kernel.application.market_ports import PublicMarketSource
+from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
-from src.trading_kernel.interfaces.observation_worker import (  # noqa: E402
+from src.trading_kernel.interfaces.observation_worker import (
     ObservationWorkerRequest,
     run_observation_worker_once,
 )
-from src.trading_kernel.interfaces.worker_process import (  # noqa: E402
+from src.trading_kernel.interfaces.worker_process import (
     run_worker_process,
 )
 

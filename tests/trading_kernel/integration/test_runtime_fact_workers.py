@@ -85,17 +85,17 @@ class FakeEntryAdmissionFactsSource:
             account_id=request.account_id,
             position_mode="independent_sides",
             margin_mode="cross",
-            total_wallet_balance=Decimal("1000"),
-            total_margin_balance=Decimal("1000"),
-            total_initial_margin=Decimal("0"),
-            total_maintenance_margin=Decimal("0"),
-            available_margin=Decimal("1000"),
+            total_wallet_balance=Decimal(1000),
+            total_margin_balance=Decimal(1000),
+            total_initial_margin=Decimal(0),
+            total_maintenance_margin=Decimal(0),
+            available_margin=Decimal(1000),
             best_bid_price=Decimal("9999.9"),
-            best_ask_price=Decimal("10000"),
+            best_ask_price=Decimal(10000),
             instrument_facts=(
                 AdmissionInstrumentFacts(
                     exchange_instrument_id=request.exchange_instrument_id,
-                    mark_price=Decimal("10000"),
+                    mark_price=Decimal(10000),
                     configured_leverage=10,
                 ),
             ),
@@ -115,7 +115,7 @@ class FakeEntryAdmissionFactsSource:
             quantity_step=Decimal("0.001"),
             price_tick=Decimal("0.1"),
             min_quantity=Decimal("0.001"),
-            min_notional=Decimal("5"),
+            min_notional=Decimal(5),
             exchange_max_leverage=10,
             maintenance_margin_brackets=_maintenance_brackets(),
             maintenance_margin_brackets_digest=canonical_digest(
@@ -130,10 +130,10 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
     return (
         MaintenanceMarginBracket(
             bracket_id="test:1",
-            notional_floor=Decimal("0"),
+            notional_floor=Decimal(0),
             notional_cap=None,
             maintenance_margin_rate=Decimal("0.005"),
-            maintenance_amount=Decimal("0"),
+            maintenance_amount=Decimal(0),
         ),
     )
 
@@ -370,7 +370,7 @@ async def test_reconciliation_selector_prioritizes_overdue_closure_over_due_posi
                 version=1,
                 last_event_sequence=1,
                 entry_lane_held=False,
-                position_qty=Decimal("0"),
+                position_qty=Decimal(0),
                 average_fill_price=closure_ticket.entry_reference_price,
             ),
             updated_at_ms=1_000,
@@ -480,11 +480,11 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
 
     snapshots = FakePositionSnapshotSource(
         quantity=ticket.quantity,
-        average_entry_price=Decimal("10000"),
+        average_entry_price=Decimal(10000),
         liquidation_price=(
             ticket.initial_stop_price
             - (
-                abs(Decimal("10000") - ticket.initial_stop_price)
+                abs(Decimal(10000) - ticket.initial_stop_price)
                 * ticket.min_liquidation_distance_to_stop_distance_ratio
             )
         ),
@@ -600,9 +600,9 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     no_fill_facts = FakeLifecycleFactsSource(
         TicketLifecycleFacts(
             position_quantity=ticket.quantity,
-            tp1_filled_quantity=Decimal("0"),
+            tp1_filled_quantity=Decimal(0),
             tp1_average_fill_price=None,
-            allocated_entry_fee_quote=Decimal("0"),
+            allocated_entry_fee_quote=Decimal(0),
             exit_taker_fee_rate=Decimal("0.0005"),
             price_tick=Decimal("0.1"),
             market_facts=None,
@@ -657,10 +657,10 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
 
     mismatched_facts = FakeLifecycleFactsSource(
         TicketLifecycleFacts(
-            position_quantity=Decimal("0"),
-            tp1_filled_quantity=Decimal("0"),
+            position_quantity=Decimal(0),
+            tp1_filled_quantity=Decimal(0),
             tp1_average_fill_price=None,
-            allocated_entry_fee_quote=Decimal("0"),
+            allocated_entry_fee_quote=Decimal(0),
             exit_taker_fee_rate=Decimal("0.0005"),
             price_tick=Decimal("0.1"),
             market_facts=None,

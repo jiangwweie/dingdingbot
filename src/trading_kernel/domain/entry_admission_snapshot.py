@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
-from hashlib import sha256
 import json
 import re
+from decimal import Decimal
+from hashlib import sha256
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
-
 
 _CANONICAL_SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -122,7 +121,7 @@ class AdmissionPosition(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _require_average_for_open_position(self) -> "AdmissionPosition":
+    def _require_average_for_open_position(self) -> AdmissionPosition:
         if self.quantity > 0 and self.average_entry_price is None:
             raise ValueError("open position requires average entry price")
         if self.quantity == 0 and self.average_entry_price is not None:
@@ -218,7 +217,7 @@ class AdmissionOwnership(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_position_projections(self) -> "AdmissionOwnership":
+    def _validate_position_projections(self) -> AdmissionOwnership:
         projection_keys = tuple(
             projection.netting_domain_key
             for projection in self.owned_position_projections
@@ -291,7 +290,7 @@ class EntryAdmissionSnapshot(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_snapshot_shape(self) -> "EntryAdmissionSnapshot":
+    def _validate_snapshot_shape(self) -> EntryAdmissionSnapshot:
         if self.observed_at_ms <= 0 or self.valid_until_ms <= self.observed_at_ms:
             raise ValueError("admission snapshot window must be positive and ordered")
         if self.best_ask_price < self.best_bid_price:

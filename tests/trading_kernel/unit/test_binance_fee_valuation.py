@@ -28,7 +28,7 @@ async def test_reads_one_bnbusdt_index_snapshot_at_review_time() -> None:
         review_observed_at_ms=1_500_000,
     )
 
-    assert evidence.rate_usdt_per_asset == Decimal("600")
+    assert evidence.rate_usdt_per_asset == Decimal(600)
     assert evidence.observed_at_ms == 1_500_000
     assert exchange.calls[0]["symbol"] == "BNBUSDT"
 

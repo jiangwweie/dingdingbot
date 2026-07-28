@@ -7,7 +7,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-
 Timeframe = Literal["15m", "1h", "4h"]
 
 
@@ -23,12 +22,12 @@ class ClosedCandle(BaseModel):
     volume: Decimal
 
     @model_validator(mode="after")
-    def _validate_closed_candle(self) -> "ClosedCandle":
+    def _validate_closed_candle(self) -> ClosedCandle:
         if self.open_time_ms <= 0 or self.close_time_ms <= self.open_time_ms:
             raise ValueError("closed candle requires a positive time window")
-        if min(self.open, self.high, self.low, self.close) <= Decimal("0"):
+        if min(self.open, self.high, self.low, self.close) <= Decimal(0):
             raise ValueError("OHLC values must be positive")
-        if self.volume < Decimal("0"):
+        if self.volume < Decimal(0):
             raise ValueError("candle volume must be nonnegative")
         if self.high < max(self.open, self.close) or self.low > min(
             self.open,
@@ -82,7 +81,7 @@ class ComparativeStrengthSnapshot(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_comparative_snapshot(self) -> "ComparativeStrengthSnapshot":
+    def _validate_comparative_snapshot(self) -> ComparativeStrengthSnapshot:
         if self.lookback_bars <= 0 or self.trigger_candle_close_time_ms <= 0:
             raise ValueError("comparative lookback and trigger must be positive")
         if self.observed_at_ms <= 0 or self.valid_until_ms < self.observed_at_ms:
@@ -125,7 +124,7 @@ class MarketSnapshot(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_market_snapshot(self) -> "MarketSnapshot":
+    def _validate_market_snapshot(self) -> MarketSnapshot:
         if self.trigger_candle_close_time_ms <= 0:
             raise ValueError("market snapshot trigger must be positive")
         for candles in (self.candles_15m, self.candles_1h, self.candles_4h):

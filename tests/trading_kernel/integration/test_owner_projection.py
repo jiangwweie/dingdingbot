@@ -14,7 +14,6 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import _seed_policy
 
-
 owner_projection_engine = dispatch_fixture.dispatch_engine
 
 

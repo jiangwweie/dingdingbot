@@ -4,6 +4,12 @@ from decimal import Decimal
 
 import pytest
 
+from src.trading_kernel.domain.fee_valuation import (
+    FeeValuationEvidence,
+    NativeFee,
+    value_native_fee,
+)
+from src.trading_kernel.domain.order_attribution import OrderRole
 from src.trading_kernel.domain.review import (
     ReviewEconomicsCompleteness,
     ReviewEconomicsFacts,
@@ -11,12 +17,6 @@ from src.trading_kernel.domain.review import (
     ReviewFill,
     calculate_review_economics,
 )
-from src.trading_kernel.domain.fee_valuation import (
-    FeeValuationEvidence,
-    NativeFee,
-    value_native_fee,
-)
-from src.trading_kernel.domain.order_attribution import OrderRole
 
 
 def test_complete_review_economics_reports_planned_and_actual_r_multiples() -> None:
@@ -35,14 +35,14 @@ def test_complete_review_economics_reports_planned_and_actual_r_multiples() -> N
             funding_unavailable_reason=None,
             observed_at_ms=5_000,
         ),
-        expected_entry_quantity=Decimal("1"),
+        expected_entry_quantity=Decimal(1),
         position_side="long",
-        planned_risk_at_stop=Decimal("10"),
-        actual_risk_at_stop=Decimal("8"),
+        planned_risk_at_stop=Decimal(10),
+        actual_risk_at_stop=Decimal(8),
     )
 
     assert economics.entry_average_price == Decimal("101.2")
-    assert economics.exit_average_price == Decimal("107")
+    assert economics.exit_average_price == Decimal(107)
     assert economics.gross_realized_pnl_quote == Decimal("5.8")
     assert economics.trading_fees_quote == Decimal("0.20")
     assert economics.net_pnl_before_funding_quote == Decimal("5.60")
@@ -59,17 +59,17 @@ def test_short_review_economics_has_the_correct_pnl_direction() -> None:
             ticket_id="ticket-short",
             entry_fills=(_fill("entry", quantity="2", price="100", fee="0.1"),),
             exit_fills=(_fill("exit", quantity="2", price="90", fee="0.1"),),
-            funding_quote=Decimal("0"),
+            funding_quote=Decimal(0),
             funding_unavailable_reason=None,
             observed_at_ms=5_000,
         ),
-        expected_entry_quantity=Decimal("2"),
+        expected_entry_quantity=Decimal(2),
         position_side="short",
-        planned_risk_at_stop=Decimal("20"),
-        actual_risk_at_stop=Decimal("20"),
+        planned_risk_at_stop=Decimal(20),
+        actual_risk_at_stop=Decimal(20),
     )
 
-    assert economics.gross_realized_pnl_quote == Decimal("20")
+    assert economics.gross_realized_pnl_quote == Decimal(20)
     assert economics.net_pnl_quote == Decimal("19.8")
     assert economics.planned_r_multiple == Decimal("0.99")
     assert economics.actual_r_multiple == Decimal("0.99")
@@ -85,10 +85,10 @@ def test_funding_unavailable_never_fabricates_net_pnl_or_r_multiples() -> None:
             funding_unavailable_reason="overlapping_instrument_exposure",
             observed_at_ms=5_000,
         ),
-        expected_entry_quantity=Decimal("1"),
+        expected_entry_quantity=Decimal(1),
         position_side="long",
-        planned_risk_at_stop=Decimal("10"),
-        actual_risk_at_stop=Decimal("8"),
+        planned_risk_at_stop=Decimal(10),
+        actual_risk_at_stop=Decimal(8),
     )
 
     assert economics.net_pnl_before_funding_quote == Decimal("9.8")
@@ -108,13 +108,13 @@ def test_missing_actual_stop_risk_keeps_only_the_planned_r_multiple() -> None:
             ticket_id="ticket-without-post-fill-risk",
             entry_fills=(_fill("entry", quantity="1", price="100", fee="0.1"),),
             exit_fills=(_fill("exit", quantity="1", price="110", fee="0.1"),),
-            funding_quote=Decimal("0"),
+            funding_quote=Decimal(0),
             funding_unavailable_reason=None,
             observed_at_ms=5_000,
         ),
-        expected_entry_quantity=Decimal("1"),
+        expected_entry_quantity=Decimal(1),
         position_side="long",
-        planned_risk_at_stop=Decimal("10"),
+        planned_risk_at_stop=Decimal(10),
         actual_risk_at_stop=None,
     )
 
@@ -138,14 +138,14 @@ def test_review_economics_rejects_incomplete_exit_quantity() -> None:
                 exit_fills=(
                     _fill("exit", quantity="0.5", price="110", fee="0.05"),
                 ),
-                funding_quote=Decimal("0"),
+                funding_quote=Decimal(0),
                 funding_unavailable_reason=None,
                 observed_at_ms=5_000,
             ),
-            expected_entry_quantity=Decimal("1"),
+            expected_entry_quantity=Decimal(1),
             position_side="long",
-            planned_risk_at_stop=Decimal("10"),
-            actual_risk_at_stop=Decimal("10"),
+            planned_risk_at_stop=Decimal(10),
+            actual_risk_at_stop=Decimal(10),
         )
 
 
@@ -171,12 +171,12 @@ def _fill(
             native_fee=NativeFee(asset="USDT", amount=Decimal(fee)),
             valuation_evidence=FeeValuationEvidence(
                 method="native_usdt",
-                rate_usdt_per_asset=Decimal("1"),
+                rate_usdt_per_asset=Decimal(1),
                 price_pair=None,
                 observed_at_ms=None,
                 valued_at_ms=4_000,
             ),
         ),
-        realized_pnl_quote=Decimal("0"),
+        realized_pnl_quote=Decimal(0),
         occurred_at_ms=4_000,
     )

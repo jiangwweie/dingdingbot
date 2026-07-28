@@ -137,7 +137,7 @@ class CapacityInstrumentRules(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_rule_authority(self) -> "CapacityInstrumentRules":
+    def _validate_rule_authority(self) -> CapacityInstrumentRules:
         if (
             self.projection_version <= 0
             or self.observed_at_ms <= 0
@@ -303,7 +303,7 @@ class CapacityClaim(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_claim(self) -> "CapacityClaim":
+    def _validate_claim(self) -> CapacityClaim:
         if (
             self.owner_policy_version <= 0
             or self.runtime_scope_version <= 0
@@ -323,7 +323,7 @@ class CapacityClaim(BaseModel):
             raise ValueError("CapacityClaim take-profit prices must be positive")
         if any(value <= 0 for value in self.take_profit_quantities):
             raise ValueError("CapacityClaim take-profit quantities must be positive")
-        if sum(self.take_profit_quantities, Decimal("0")) >= self.quantity:
+        if sum(self.take_profit_quantities, Decimal(0)) >= self.quantity:
             raise ValueError("CapacityClaim take-profit legs must preserve a runner")
         if self.selected_leverage > self.exchange_max_leverage:
             raise ValueError("CapacityClaim selected leverage exceeds exchange maximum")
@@ -391,7 +391,7 @@ class CapacityClaimDecision(BaseModel):
     claim: CapacityClaim | None
 
     @model_validator(mode="after")
-    def _validate_decision_shape(self) -> "CapacityClaimDecision":
+    def _validate_decision_shape(self) -> CapacityClaimDecision:
         if (self.status is CapacityClaimStatus.CLAIMED) != (self.claim is not None):
             raise ValueError("claimed decisions require exactly one CapacityClaim")
         return self

@@ -200,10 +200,10 @@ async def test_registry_independent_instrument_routes_market_and_existing_ticket
             kind=ExchangeCommandKind.REPLACE_PROTECTION,
             payload=OrderCommandPayload(
                 side="sell",
-                quantity=Decimal("1"),
+                quantity=Decimal(1),
                 order_type="stop_market",
                 reduce_only=True,
-                stop_price=Decimal("10"),
+                stop_price=Decimal(10),
                 replaces_exchange_order_id="venue-old-stop",
                 source_watermark_ms=2_500,
             ),
@@ -214,7 +214,7 @@ async def test_registry_independent_instrument_routes_market_and_existing_ticket
             kind=ExchangeCommandKind.EXIT,
             payload=OrderCommandPayload(
                 side="sell",
-                quantity=Decimal("1"),
+                quantity=Decimal(1),
                 order_type="market",
                 reduce_only=True,
             ),
@@ -231,7 +231,7 @@ async def test_registry_independent_instrument_routes_market_and_existing_ticket
             venue_client_order_id="brc-exit",
             payload=OrderCommandPayload(
                 side="sell",
-                quantity=Decimal("1"),
+                quantity=Decimal(1),
                 order_type="market",
                 reduce_only=True,
             ),
@@ -453,7 +453,7 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=Decimal("57000"),
+                    liquidation_price=Decimal(57000),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -505,7 +505,7 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity=Decimal("0"),
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=3_300,

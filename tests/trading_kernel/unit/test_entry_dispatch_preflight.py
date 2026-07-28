@@ -47,7 +47,7 @@ from tests.trading_kernel.unit.test_capacity import (
 
 def test_entry_preflight_refuses_when_frozen_margin_no_longer_fits() -> None:
     request = _preflight_request(
-        snapshot=_snapshot().model_copy(update={"available_margin": Decimal("4")})
+        snapshot=_snapshot().model_copy(update={"available_margin": Decimal(4)})
     )
 
     decision = revalidate_entry_dispatch(request)
@@ -111,8 +111,8 @@ def _preflight_request(*, snapshot):
         position_mode="independent_sides",
         policy=_policy(),
         usage=CapacityUsage(
-            gross_notional=Decimal("0"),
-            gross_risk_at_stop=Decimal("0"),
+            gross_notional=Decimal(0),
+            gross_risk_at_stop=Decimal(0),
             active_ticket_count=0,
         ),
         instrument_rules=_rules(),
@@ -173,7 +173,7 @@ def _preflight_request(*, snapshot):
             max_initial_margin_utilization=Decimal("0.90"),
             max_leverage=10,
             supported_margin_mode="cross",
-            min_liquidation_distance_to_stop_distance_ratio=Decimal("2"),
+            min_liquidation_distance_to_stop_distance_ratio=Decimal(2),
             max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
         ),
         runtime_scope=RuntimeScopeSnapshot(
@@ -234,7 +234,7 @@ def _preflight_request(*, snapshot):
             quantity_step=Decimal("0.1"),
             price_tick=Decimal("0.1"),
             min_quantity=Decimal("0.1"),
-            min_notional=Decimal("5"),
+            min_notional=Decimal(5),
             exchange_max_leverage=10,
             maintenance_margin_brackets=_rules().maintenance_margin_brackets,
             maintenance_margin_brackets_digest=(

@@ -63,10 +63,10 @@ class TicketLifecycleFacts(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_facts(self) -> "TicketLifecycleFacts":
+    def _validate_facts(self) -> TicketLifecycleFacts:
         if self.observed_at_ms <= 0:
             raise ValueError("lifecycle observation time must be positive")
-        if not Decimal("0") <= self.exit_taker_fee_rate < Decimal("1"):
+        if not Decimal(0) <= self.exit_taker_fee_rate < Decimal(1):
             raise ValueError("exit taker fee rate must be in [0, 1)")
         if self.tp1_filled_quantity > 0:
             if self.tp1_average_fill_price is None or self.tp1_average_fill_price <= 0:
@@ -92,7 +92,7 @@ class LifecycleMaintenanceRequest(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_time(self) -> "LifecycleMaintenanceRequest":
+    def _validate_time(self) -> LifecycleMaintenanceRequest:
         if self.now_ms < self.facts.observed_at_ms:
             raise ValueError("lifecycle maintenance cannot precede its facts")
         return self

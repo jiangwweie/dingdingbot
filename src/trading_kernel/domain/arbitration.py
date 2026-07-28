@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from src.trading_kernel.domain.signal import StrategySignal
 
-
 MAX_CANDIDATES_PER_ARBITRATION = 64
 
 

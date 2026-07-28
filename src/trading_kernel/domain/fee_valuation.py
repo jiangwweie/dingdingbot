@@ -46,11 +46,11 @@ class FeeValuationEvidence(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_evidence_shape(self) -> "FeeValuationEvidence":
+    def _validate_evidence_shape(self) -> FeeValuationEvidence:
         if self.valued_at_ms <= 0:
             raise ValueError("fee valuation time must be positive")
         if self.method == "native_usdt":
-            if self.rate_usdt_per_asset != Decimal("1"):
+            if self.rate_usdt_per_asset != Decimal(1):
                 raise ValueError("native USDT valuation rate must equal one")
             if self.price_pair is not None or self.observed_at_ms is not None:
                 raise ValueError("native USDT valuation forbids price snapshot evidence")
@@ -79,7 +79,7 @@ class ValuedFee(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_native_asset_and_value(self) -> "ValuedFee":
+    def _validate_native_asset_and_value(self) -> ValuedFee:
         required_method = (
             "native_usdt"
             if self.native.asset == "USDT"

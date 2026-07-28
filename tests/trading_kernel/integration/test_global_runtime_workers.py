@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 from src.trading_kernel.application import runtime
 from src.trading_kernel.application.runtime import worker_ownership_map
 from src.trading_kernel.interfaces import observation_worker
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 

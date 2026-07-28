@@ -5,22 +5,22 @@ from decimal import Decimal
 import pytest
 
 import src.trading_kernel.interfaces.reconciliation_worker as worker_module
+from src.trading_kernel.application.ports import MonitorOwnerStatus
 from src.trading_kernel.application.reconcile_ticket import (
     ReconcileTicketResult,
     ReconcileTicketStatus,
 )
 from src.trading_kernel.application.runtime_facts import FeeDiscountCapabilityFacts
-from src.trading_kernel.application.ports import MonitorOwnerStatus
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.venue_truth import (
     UnknownRecoveryDecision,
     UnknownRecoveryStatus,
 )
 from src.trading_kernel.interfaces.reconciliation_worker import (
-    ReconciliationWorkItem,
-    ReconciliationWorkKind,
     ReconciliationWorkerRequest,
     ReconciliationWorkerStatus,
+    ReconciliationWorkItem,
+    ReconciliationWorkKind,
     run_reconciliation_worker_once,
     select_reconciliation_work,
 )
@@ -89,7 +89,7 @@ class _PositionSource:
         self.requests.append(request)
         return PositionSnapshot(
             netting_domain=self.aggregate.identity.netting_domain,
-            quantity=Decimal("0"),
+            quantity=Decimal(0),
             average_entry_price=None,
             observed_at_ms=request.observed_at_ms,
         )
@@ -101,7 +101,6 @@ class _MonitorRepository:
 
     async def get(self, monitor_key):
         del monitor_key
-        return None
 
     async def save_if_changed(self, state):
         self.states.append(state)

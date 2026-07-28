@@ -397,10 +397,10 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
     return (
         MaintenanceMarginBracket(
             bracket_id="test:1",
-            notional_floor=Decimal("0"),
+            notional_floor=Decimal(0),
             notional_cap=None,
             maintenance_margin_rate=Decimal("0.005"),
-            maintenance_amount=Decimal("0"),
+            maintenance_amount=Decimal(0),
         ),
     )
 
@@ -455,7 +455,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 quantity_step=Decimal("0.001"),
                 price_tick=Decimal("0.1"),
                 min_quantity=Decimal("0.001"),
-                min_notional=Decimal("5"),
+                min_notional=Decimal(5),
                 exchange_max_leverage=10,
                 maintenance_margin_brackets=[
                     item.model_dump(mode="json") for item in _maintenance_brackets()
@@ -603,17 +603,17 @@ def _admission_snapshot() -> EntryAdmissionSnapshot:
         account_id="subaccount-main",
         position_mode="independent_sides",
         margin_mode="cross",
-        total_wallet_balance=Decimal("1000"),
-        total_margin_balance=Decimal("1000"),
-        total_initial_margin=Decimal("0"),
-        total_maintenance_margin=Decimal("0"),
-        available_margin=Decimal("1000"),
+        total_wallet_balance=Decimal(1000),
+        total_margin_balance=Decimal(1000),
+        total_initial_margin=Decimal(0),
+        total_maintenance_margin=Decimal(0),
+        available_margin=Decimal(1000),
         best_bid_price=Decimal("9999.9"),
-        best_ask_price=Decimal("10000"),
+        best_ask_price=Decimal(10000),
         instrument_facts=(
             AdmissionInstrumentFacts(
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                mark_price=Decimal("10000"),
+                mark_price=Decimal(10000),
                 configured_leverage=1,
             ),
         ),

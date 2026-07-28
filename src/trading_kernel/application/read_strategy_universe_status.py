@@ -68,7 +68,7 @@ class StrategyUniverseVersionStatus(BaseModel):
     members: tuple[StrategyUniverseMemberStatus, ...]
 
     @model_validator(mode="after")
-    def _validate_bounded_current_status(self) -> "StrategyUniverseVersionStatus":
+    def _validate_bounded_current_status(self) -> StrategyUniverseVersionStatus:
         if not 1 <= len(self.members) <= 10:
             raise ValueError("status Universe must contain between one and ten members")
         member_ids = tuple(member.exchange_instrument_id for member in self.members)
@@ -100,7 +100,7 @@ class StrategyUniverseStatusResult(BaseModel):
 
 
 async def read_strategy_universe_status(
-    uow: "KernelUnitOfWork",
+    uow: KernelUnitOfWork,
     request: StrategyUniverseStatusRequest,
 ) -> StrategyUniverseStatusResult:
     """Read current/warming authority through the application repository port."""

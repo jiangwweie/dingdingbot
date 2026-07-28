@@ -123,8 +123,8 @@ async def test_runner_maintenance_uses_closed_candle_and_sor_time_stop(
                     market_facts=LifecycleMarketFacts(
                         watermark_ms=3_000,
                         is_final_closed_candle=False,
-                        structure_reference=Decimal("60500"),
-                        atr=Decimal("100"),
+                        structure_reference=Decimal(60500),
+                        atr=Decimal(100),
                         holding_bars=95,
                     ),
                     observed_at_ms=3_000,
@@ -151,8 +151,8 @@ async def test_runner_maintenance_uses_closed_candle_and_sor_time_stop(
                     market_facts=LifecycleMarketFacts(
                         watermark_ms=3_100,
                         is_final_closed_candle=True,
-                        structure_reference=Decimal("60500"),
-                        atr=Decimal("100"),
+                        structure_reference=Decimal(60500),
+                        atr=Decimal(100),
                         holding_bars=96,
                     ),
                     observed_at_ms=3_100,
@@ -195,8 +195,8 @@ async def test_runner_maintenance_requests_monotonic_structural_atr_stop(
                     market_facts=LifecycleMarketFacts(
                         watermark_ms=3_100,
                         is_final_closed_candle=True,
-                        structure_reference=Decimal("60500"),
-                        atr=Decimal("100"),
+                        structure_reference=Decimal(60500),
+                        atr=Decimal(100),
                         holding_bars=10,
                     ),
                     observed_at_ms=3_100,
@@ -214,7 +214,7 @@ async def test_runner_maintenance_requests_monotonic_structural_atr_stop(
         events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.RUNNER_REPLACEMENT_PENDING
-    assert aggregate.pending_stop_price == Decimal("60450")
+    assert aggregate.pending_stop_price == Decimal(60450)
     replacements = [
         item
         for item in commands
@@ -249,7 +249,7 @@ async def test_flat_cleanup_cancels_tp1_then_active_stop_before_settlement(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity=Decimal("0"),
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -283,7 +283,7 @@ async def test_flat_cleanup_cancels_tp1_then_active_stop_before_settlement(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity=Decimal("0"),
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -307,7 +307,7 @@ async def test_flat_cleanup_cancels_tp1_then_active_stop_before_settlement(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity=Decimal("0"),
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=3_600,
@@ -337,8 +337,8 @@ async def test_hard_post_fill_risk_protects_then_flattens_without_tp1(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price=Decimal("64000"),
-                    liquidation_price=Decimal("48000"),
+                    average_entry_price=Decimal(64000),
+                    liquidation_price=Decimal(48000),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -353,7 +353,7 @@ async def test_hard_post_fill_risk_protects_then_flattens_without_tp1(
         )
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.PROTECTION_PENDING
-    assert aggregate.actual_stop_risk == Decimal("5")
+    assert aggregate.actual_stop_risk == Decimal(5)
     assert aggregate.post_fill_risk_status is not None
     assert aggregate.post_fill_risk_status.value == "hard_overrun"
     assert incident is not None and incident.incident_kind == "hard_overrun"
@@ -436,8 +436,8 @@ async def test_invalid_stop_direction_flattens_immediately_without_stop_or_tp1(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price=Decimal("58000"),
-                    liquidation_price=Decimal("50000"),
+                    average_entry_price=Decimal(58000),
+                    liquidation_price=Decimal(50000),
                     observed_at_ms=2_100,
                 ),
             ),

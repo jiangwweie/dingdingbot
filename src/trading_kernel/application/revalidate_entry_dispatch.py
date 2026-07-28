@@ -186,7 +186,7 @@ def revalidate_entry_dispatch(
             snapshot.total_margin_balance
             * request.owner_policy.max_initial_margin_utilization
             - snapshot.total_initial_margin,
-            Decimal("0"),
+            Decimal(0),
         ),
     )
     if ticket.reserved_margin > executable_margin:
@@ -394,7 +394,7 @@ def _liquidation_safety_passes(
         + bracket.maintenance_amount
     )
     if ticket.identity.netting_domain.position_side == "long":
-        denominator = ticket.quantity * (Decimal("1") - bracket.maintenance_margin_rate)
+        denominator = ticket.quantity * (Decimal(1) - bracket.maintenance_margin_rate)
         if denominator <= 0:
             return False
         liquidation_price = max(
@@ -405,14 +405,14 @@ def _liquidation_safety_passes(
                 + ticket.quantity * mark_price
             )
             / denominator,
-            Decimal("0"),
+            Decimal(0),
         )
         directional = liquidation_price < ticket.initial_stop_price < entry_price_for(
             ticket, snapshot
         )
         liquidation_distance = ticket.initial_stop_price - liquidation_price
     else:
-        denominator = ticket.quantity * (Decimal("1") + bracket.maintenance_margin_rate)
+        denominator = ticket.quantity * (Decimal(1) + bracket.maintenance_margin_rate)
         if denominator <= 0:
             return False
         liquidation_price = (

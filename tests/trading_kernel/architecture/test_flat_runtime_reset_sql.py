@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RESET_SQL = REPO_ROOT / "scripts" / "trading_kernel" / "reset_flat_runtime.sql"
 

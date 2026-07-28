@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from decimal import Decimal
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -21,11 +21,11 @@ from src.trading_kernel.application.issue_ticket import (
     IssueTicketStatus,
     issue_ticket,
 )
+from src.trading_kernel.domain.capacity import freeze_capacity_claim
 from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     SetLeverageCommandPayload,
 )
-from src.trading_kernel.domain.capacity import freeze_capacity_claim
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionInstrumentFacts,
     canonical_digest,
@@ -51,7 +51,6 @@ from src.trading_kernel.infrastructure.pg_models import (
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from tests.trading_kernel.unit.test_ticket import _identity, _ticket
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -733,9 +732,9 @@ def _ticket_for_signal(
         terms.update(
             {
                 "universe_version_id": "universe:sor-short:4",
-                "initial_stop_price": Decimal("61000"),
-                "take_profit_prices": (Decimal("58000"),),
-                "projected_liquidation_price": Decimal("63000"),
+                "initial_stop_price": Decimal(61000),
+                "take_profit_prices": (Decimal(58000),),
+                "projected_liquidation_price": Decimal(63000),
             }
         )
     return _ticket(**terms)
@@ -770,11 +769,11 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
                 f"{ticket.identity.netting_domain.account_id}:"
                 f"{ticket.identity.netting_domain.exchange_instrument_id}"
             ),
-            total_wallet_balance_at_claim=Decimal("100"),
-            total_margin_balance_at_claim=Decimal("100"),
-            total_initial_margin_at_claim=Decimal("0"),
-            total_maintenance_margin_at_claim=Decimal("0"),
-            available_margin_at_claim=Decimal("100"),
+            total_wallet_balance_at_claim=Decimal(100),
+            total_margin_balance_at_claim=Decimal(100),
+            total_initial_margin_at_claim=Decimal(0),
+            total_maintenance_margin_at_claim=Decimal(0),
+            available_margin_at_claim=Decimal(100),
             mark_price_at_claim=ticket.entry_reference_price,
             position_mode_at_claim="independent_sides",
             margin_mode_at_claim=ticket.margin_mode,
@@ -788,7 +787,7 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
             min_liquidation_distance_to_stop_distance_ratio=(
                 ticket.min_liquidation_distance_to_stop_distance_ratio
             ),
-            ticket_margin_budget=Decimal("30"),
+            ticket_margin_budget=Decimal(30),
             required_leverage=ticket.selected_leverage,
             selected_leverage=ticket.selected_leverage,
             configured_leverage_at_claim=configured_leverage,
@@ -797,7 +796,7 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
             reserved_margin=ticket.reserved_margin,
             maintenance_margin_bracket_id="test:1",
             projected_liquidation_price=ticket.projected_liquidation_price,
-            projected_liquidation_distance=Decimal("2000"),
+            projected_liquidation_distance=Decimal(2000),
             projected_liquidation_distance_to_stop_distance_ratio=(
                 ticket.projected_liquidation_distance_to_stop_distance_ratio
             ),

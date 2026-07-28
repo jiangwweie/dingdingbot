@@ -18,8 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.trading_kernel.infrastructure.pg_models import metadata  # noqa: E402
-from src.trading_kernel.infrastructure.runtime_authority_seed import (  # noqa: E402
+from src.trading_kernel.infrastructure.pg_models import metadata
+from src.trading_kernel.infrastructure.runtime_authority_seed import (
     DYNAMIC_POLICY,
     OWNER_POLICY_ID,
 )

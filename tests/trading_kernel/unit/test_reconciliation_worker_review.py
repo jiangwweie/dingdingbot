@@ -5,8 +5,8 @@ from decimal import Decimal
 import pytest
 
 import src.trading_kernel.interfaces.reconciliation_worker as worker_module
-from src.trading_kernel.application.runtime_facts import ReviewEconomicsRequest
 from src.trading_kernel.application.ports import RuntimeCapabilitySnapshot
+from src.trading_kernel.application.runtime_facts import ReviewEconomicsRequest
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
@@ -21,14 +21,14 @@ from src.trading_kernel.domain.events import (
     ExternalFlatDetected,
     TicketIssued,
 )
-from src.trading_kernel.domain.post_fill_risk import (
-    PostFillRiskRequest,
-    assess_post_fill_risk,
-)
 from src.trading_kernel.domain.order_attribution import (
     OrderNamespace,
     OrderRole,
     TicketOrderReference,
+)
+from src.trading_kernel.domain.post_fill_risk import (
+    PostFillRiskRequest,
+    assess_post_fill_risk,
 )
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
@@ -125,7 +125,7 @@ class _IncidentRepository:
 
 
 class _FakeUnitOfWork:
-    def __init__(self, state: "_WorkerState") -> None:
+    def __init__(self, state: _WorkerState) -> None:
         self.aggregates = state.aggregates
         self.exchange_commands = state.commands
         self.events = state.events
@@ -150,8 +150,8 @@ class _WorkerState:
             version=5,
             last_event_sequence=5,
             entry_lane_held=False,
-            position_qty=Decimal("0"),
-            average_fill_price=Decimal("60000"),
+            position_qty=Decimal(0),
+            average_fill_price=Decimal(60000),
         )
         self.aggregates = _AggregateRepository(self.aggregate)
         commands = [_command(ticket, ExchangeCommandKind.ENTRY, reduce_only=False)]
@@ -172,16 +172,16 @@ class _WorkerState:
                     sequence=2,
                     occurred_at_ms=1_100,
                     filled_qty=ticket.quantity,
-                    average_fill_price=Decimal("60000"),
+                    average_fill_price=Decimal(60000),
                     post_fill_risk=assess_post_fill_risk(
                         PostFillRiskRequest(
                             position_side=ticket.identity.netting_domain.position_side,
                             filled_quantity=ticket.quantity,
-                            average_fill_price=Decimal("60000"),
+                            average_fill_price=Decimal(60000),
                             initial_stop_price=ticket.initial_stop_price,
                             planned_stop_risk_budget=ticket.planned_stop_risk_budget,
                             post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
-                            current_liquidation_price=Decimal("57000"),
+                            current_liquidation_price=Decimal(57000),
                             min_liquidation_distance_to_stop_distance_ratio=(
                                 ticket.min_liquidation_distance_to_stop_distance_ratio
                             ),

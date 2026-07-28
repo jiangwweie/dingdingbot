@@ -83,8 +83,8 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
             sequence=2,
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
-            average_fill_price=Decimal("100"),
-            post_fill_risk=_normal_post_fill_risk(ticket, Decimal("100")),
+            average_fill_price=Decimal(100),
+            post_fill_risk=_normal_post_fill_risk(ticket, Decimal(100)),
         ),
     ).aggregate
 
@@ -201,9 +201,9 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
             sequence=8,
             occurred_at_ms=2_000,
             stop_price=(
-                Decimal("101")
+                Decimal(101)
                 if policy.position_side == "long"
-                else Decimal("99")
+                else Decimal(99)
             ),
             source_watermark_ms=2_000,
         ),
@@ -214,9 +214,9 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
             ticket_id=ticket.identity.ticket_id,
             quantity=Decimal("0.003"),
             stop_price=(
-                Decimal("101")
+                Decimal(101)
                 if policy.position_side == "long"
-                else Decimal("99")
+                else Decimal(99)
             ),
             replaces_exchange_order_id="runner-stop-1",
             source_watermark_ms=2_000,
@@ -250,12 +250,12 @@ def _ticket_for_event(event_spec_id: str):
             "identity": identity,
             "quantity": Decimal("0.005"),
             "notional": Decimal("0.5"),
-            "entry_reference_price": Decimal("100"),
+            "entry_reference_price": Decimal(100),
             "initial_stop_price": (
-                Decimal("95") if contract.position_side == "long" else Decimal("105")
+                Decimal(95) if contract.position_side == "long" else Decimal(105)
             ),
             "take_profit_prices": (
-                Decimal("105") if contract.position_side == "long" else Decimal("95"),
+                Decimal(105) if contract.position_side == "long" else Decimal(95),
             ),
             "take_profit_quantities": (Decimal("0.002"),),
         }

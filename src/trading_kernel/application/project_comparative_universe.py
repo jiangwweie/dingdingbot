@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from threading import Lock
-from typing import Literal, Sequence
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -57,7 +57,7 @@ class ComparativeMemberWindow(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_window(self) -> "ComparativeMemberWindow":
+    def _validate_window(self) -> ComparativeMemberWindow:
         if not self.candles_1h:
             raise ValueError("comparative member window must not be empty")
         close_times = tuple(item.close_time_ms for item in self.candles_1h)
@@ -97,7 +97,7 @@ class ComparativeUniverseProjection(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_projection(self) -> "ComparativeUniverseProjection":
+    def _validate_projection(self) -> ComparativeUniverseProjection:
         if (
             self.closed_bar_time_ms <= 0
             or self.observed_at_ms != self.closed_bar_time_ms
@@ -177,7 +177,7 @@ class ComparativeProjectionFailure(BaseModel):
     projection_version: int = 1
 
     @model_validator(mode="after")
-    def _validate_failure(self) -> "ComparativeProjectionFailure":
+    def _validate_failure(self) -> ComparativeProjectionFailure:
         identities = (
             self.event_spec_id,
             self.universe_version_id,
@@ -331,7 +331,7 @@ def build_comparative_universe_projection(
             )
         return_pct = (
             (sample[-1].close - sample[0].close) / sample[0].close
-        ) * Decimal("100")
+        ) * Decimal(100)
         returns.append((window.exchange_instrument_id, return_pct))
 
     ranked = tuple(sorted(returns, key=lambda item: (-item[1], item[0])))

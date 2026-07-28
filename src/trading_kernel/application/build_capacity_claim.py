@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
 from src.trading_kernel.domain.account_entry_health import (
     AccountEntryHealth,
@@ -23,7 +23,11 @@ from src.trading_kernel.domain.capacity_sizing import (
 )
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.exit_policy import exit_policy_for
-from src.trading_kernel.domain.identities import NettingDomain, RuntimeIdentity, TicketIdentity
+from src.trading_kernel.domain.identities import (
+    NettingDomain,
+    RuntimeIdentity,
+    TicketIdentity,
+)
 from src.trading_kernel.domain.instrument_entry_health import (
     InstrumentEntryHealth,
     InstrumentEntryHealthStatus,
@@ -182,7 +186,7 @@ def build_capacity_claim(
         netting_domain=netting_domain,
     )
     post_fill_stop_risk_limit = selected.planned_stop_risk_budget * (
-        Decimal("1") + policy.max_post_fill_stop_risk_overrun_fraction
+        Decimal(1) + policy.max_post_fill_stop_risk_overrun_fraction
     )
     claim = freeze_capacity_claim(
         ticket_identity=ticket_identity,

@@ -917,9 +917,9 @@ def _ticket_for_side(
     if side == "short":
         terms.update(
             {
-                "initial_stop_price": Decimal("61000"),
-                "take_profit_prices": (Decimal("58000"),),
-                "projected_liquidation_price": Decimal("63000"),
+                "initial_stop_price": Decimal(61000),
+                "take_profit_prices": (Decimal(58000),),
+                "projected_liquidation_price": Decimal(63000),
             }
         )
     return base_ticket.model_copy(update=terms)

@@ -149,8 +149,8 @@ async def test_unknown_leverage_readback_mismatch_releases_without_resend(
         StaticLeverageTruthPort(
             LeverageTruthSnapshot(
                 exchange_configured_leverage=ticket.selected_leverage - 1,
-                long_position_quantity=Decimal("0"),
-                short_position_quantity=Decimal("0"),
+                long_position_quantity=Decimal(0),
+                short_position_quantity=Decimal(0),
                 regular_open_order_ids=(),
                 conditional_open_order_ids=(),
                 observed_at_ms=2_100,
@@ -190,8 +190,8 @@ async def test_unknown_leverage_readback_confirmation_prepares_only_one_entry(
         StaticLeverageTruthPort(
             LeverageTruthSnapshot(
                 exchange_configured_leverage=ticket.selected_leverage,
-                long_position_quantity=Decimal("0"),
-                short_position_quantity=Decimal("0"),
+                long_position_quantity=Decimal(0),
+                short_position_quantity=Decimal(0),
                 regular_open_order_ids=(),
                 conditional_open_order_ids=(),
                 observed_at_ms=2_100,
@@ -231,7 +231,7 @@ async def test_unknown_leverage_position_contradiction_retains_block_and_never_e
             LeverageTruthSnapshot(
                 exchange_configured_leverage=ticket.selected_leverage,
                 long_position_quantity=Decimal("0.01"),
-                short_position_quantity=Decimal("0"),
+                short_position_quantity=Decimal(0),
                 regular_open_order_ids=(),
                 conditional_open_order_ids=(),
                 observed_at_ms=2_100,
@@ -272,8 +272,8 @@ async def test_generic_unknown_recovery_routes_leverage_to_exact_readback(
         StaticLeverageTruthPort(
             LeverageTruthSnapshot(
                 exchange_configured_leverage=ticket.selected_leverage,
-                long_position_quantity=Decimal("0"),
-                short_position_quantity=Decimal("0"),
+                long_position_quantity=Decimal(0),
+                short_position_quantity=Decimal(0),
                 regular_open_order_ids=(),
                 conditional_open_order_ids=(),
                 observed_at_ms=2_100,
@@ -309,8 +309,8 @@ async def test_visible_unknown_entry_reconciles_submitted_without_redispatch(
                 quantity=ticket.quantity,
                 reduce_only=False,
             ),
-            position_quantity=Decimal("0"),
-            matching_fill_quantity=Decimal("0"),
+            position_quantity=Decimal(0),
+            matching_fill_quantity=Decimal(0),
             regular_open_client_order_ids=(command.venue_client_order_id,),
             conditional_open_client_order_ids=(),
             observed_at_ms=2_100,
@@ -433,8 +433,8 @@ async def test_identity_contradiction_keeps_unknown_and_opens_hard_incident(
                 quantity=ticket.quantity,
                 reduce_only=False,
             ),
-            position_quantity=Decimal("0"),
-            matching_fill_quantity=Decimal("0"),
+            position_quantity=Decimal(0),
+            matching_fill_quantity=Decimal(0),
             regular_open_client_order_ids=(),
             conditional_open_client_order_ids=(),
             observed_at_ms=2_100,
@@ -756,8 +756,8 @@ async def test_terminal_unknown_cancel_confirms_target_removal_and_resolves_unkn
                     order_namespace="conditional",
                     is_open=False,
                 ),
-                position_quantity=Decimal("0"),
-                matching_fill_quantity=Decimal("0"),
+                position_quantity=Decimal(0),
+                matching_fill_quantity=Decimal(0),
                 regular_open_client_order_ids=(),
                 conditional_open_client_order_ids=(),
                 observed_at_ms=3_500,
@@ -807,8 +807,8 @@ async def test_still_open_unknown_cancel_is_marked_absent_and_becomes_retryable(
                     reduce_only=True,
                     order_namespace="conditional",
                 ),
-                position_quantity=Decimal("0"),
-                matching_fill_quantity=Decimal("0"),
+                position_quantity=Decimal(0),
+                matching_fill_quantity=Decimal(0),
                 regular_open_client_order_ids=(),
                 conditional_open_client_order_ids=(),
                 observed_at_ms=3_500,
@@ -1043,7 +1043,7 @@ async def _make_unknown_initial_stop(engine):
                     quantity=ticket.quantity,
                     average_entry_price="60000",
                     liquidation_price=_safe_liquidation_price(
-                        ticket, Decimal("60000")
+                        ticket, Decimal(60000)
                     ),
                     observed_at_ms=2_100,
                 ),
@@ -1162,7 +1162,7 @@ async def _make_unknown_replacement(
             occurred_at_ms=2_400,
             filled_qty=ticket.take_profit_quantities[0],
             average_fill_price=ticket.take_profit_prices[0],
-            runner_floor_price=Decimal("60010"),
+            runner_floor_price=Decimal(60010),
         )
         await uow.commit_reduction(
             event=event,
@@ -1334,8 +1334,8 @@ def _visible_truth(
             quantity=command.payload.quantity,
             reduce_only=command.payload.reduce_only,
         ),
-        position_quantity=Decimal("0"),
-        matching_fill_quantity=Decimal("0"),
+        position_quantity=Decimal(0),
+        matching_fill_quantity=Decimal(0),
         regular_open_client_order_ids=(command.venue_client_order_id,),
         conditional_open_client_order_ids=(),
         observed_at_ms=2_500,
@@ -1345,12 +1345,12 @@ def _visible_truth(
 def _absent_truth(
     *,
     observed_at_ms: int,
-    position_quantity: Decimal = Decimal("0"),
+    position_quantity: Decimal = Decimal(0),
 ) -> VenueTruthSnapshot:
     return VenueTruthSnapshot(
         lookup_status=VenueLookupStatus.ABSENT,
         position_quantity=position_quantity,
-        matching_fill_quantity=Decimal("0"),
+        matching_fill_quantity=Decimal(0),
         regular_open_client_order_ids=(),
         conditional_open_client_order_ids=(),
         observed_at_ms=observed_at_ms,

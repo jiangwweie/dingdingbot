@@ -144,7 +144,7 @@ class FakeProbeAdapter:
             quantity_step=Decimal("0.001"),
             price_tick=Decimal("0.1"),
             min_quantity=Decimal("0.001"),
-            min_notional=Decimal("5"),
+            min_notional=Decimal(5),
             exchange_max_leverage=10,
             maintenance_margin_brackets=_maintenance_brackets(),
             maintenance_margin_brackets_digest=canonical_digest(_maintenance_brackets()),
@@ -162,13 +162,13 @@ class FakeProbeAdapter:
             account_id=request.account_id,
             position_mode="independent_sides",
             margin_mode="cross",
-            total_wallet_balance=Decimal("1000"),
-            total_margin_balance=Decimal("1000"),
-            total_initial_margin=Decimal("0"),
-            total_maintenance_margin=Decimal("0"),
-            available_margin=Decimal("900"),
-            best_bid_price=Decimal("99"),
-            best_ask_price=Decimal("100"),
+            total_wallet_balance=Decimal(1000),
+            total_margin_balance=Decimal(1000),
+            total_initial_margin=Decimal(0),
+            total_maintenance_margin=Decimal(0),
+            available_margin=Decimal(900),
+            best_bid_price=Decimal(99),
+            best_ask_price=Decimal(100),
             instrument_facts=(
                 AdmissionInstrumentFacts(
                     exchange_instrument_id=request.exchange_instrument_id,
@@ -188,8 +188,8 @@ class FakeProbeAdapter:
     ) -> LeverageTruthSnapshot:
         return LeverageTruthSnapshot(
             exchange_configured_leverage=self.configured_leverage,
-            long_position_quantity=Decimal("0"),
-            short_position_quantity=Decimal("0"),
+            long_position_quantity=Decimal(0),
+            short_position_quantity=Decimal(0),
             regular_open_order_ids=(),
             conditional_open_order_ids=(),
             observed_at_ms=request.observed_at_ms,
@@ -200,10 +200,10 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
     return (
         MaintenanceMarginBracket(
             bracket_id="test:1",
-            notional_floor=Decimal("0"),
+            notional_floor=Decimal(0),
             notional_cap=None,
             maintenance_margin_rate=Decimal("0.005"),
-            maintenance_amount=Decimal("0"),
+            maintenance_amount=Decimal(0),
         ),
     )
 
@@ -353,7 +353,7 @@ async def test_authenticated_factory_routes_registry_independent_rules_and_close
     assert created[0].bracket_market_ids == ["OPUSDT"]
     assert rules.quantity_step == Decimal("0.001")
     assert rules.price_tick == Decimal("0.1")
-    assert rules.min_notional == Decimal("5")
+    assert rules.min_notional == Decimal(5)
 
     await adapter.close()
     assert created[0].closed is True
@@ -522,8 +522,8 @@ async def test_readonly_probe_verifies_each_protected_ticket_against_exact_excha
             AdmissionPosition(
                 exchange_instrument_id=instrument_id,
                 position_side="long",
-                quantity=Decimal("1"),
-                average_entry_price=Decimal("100"),
+                quantity=Decimal(1),
+                average_entry_price=Decimal(100),
             ),
         ),
         open_orders=(
@@ -535,8 +535,8 @@ async def test_readonly_probe_verifies_each_protected_ticket_against_exact_excha
                 reduce_only=True,
                 order_namespace="conditional",
                 order_side="sell",
-                quantity=Decimal("1"),
-                trigger_price=Decimal("99"),
+                quantity=Decimal(1),
+                trigger_price=Decimal(99),
             ),
             AdmissionOrder(
                 exchange_order_id="tp1:btc",
@@ -606,8 +606,8 @@ async def test_readonly_probe_rejects_a_protected_stop_with_wrong_price(
             AdmissionPosition(
                 exchange_instrument_id=instrument_id,
                 position_side="short",
-                quantity=Decimal("1"),
-                average_entry_price=Decimal("100"),
+                quantity=Decimal(1),
+                average_entry_price=Decimal(100),
             ),
         ),
         open_orders=(
@@ -619,8 +619,8 @@ async def test_readonly_probe_rejects_a_protected_stop_with_wrong_price(
                 reduce_only=True,
                 order_namespace="conditional",
                 order_side="buy",
-                quantity=Decimal("1"),
-                trigger_price=Decimal("102"),
+                quantity=Decimal(1),
+                trigger_price=Decimal(102),
             ),
         ),
     )

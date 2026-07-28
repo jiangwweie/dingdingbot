@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from hashlib import sha256
 import json
 import re
+from collections.abc import Sequence
+from hashlib import sha256
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
-
 
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 FactRole = Literal["condition", "protection_reference", "disable"]
@@ -35,7 +34,7 @@ class SignalFactSnapshot(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_fact_window(self) -> "SignalFactSnapshot":
+    def _validate_fact_window(self) -> SignalFactSnapshot:
         if (
             self.observed_at_ms <= 0
             or self.valid_until_ms <= self.observed_at_ms
@@ -137,7 +136,7 @@ class StrategySignal(BaseModel):
         return ordered
 
     @model_validator(mode="after")
-    def _validate_time_and_facts(self) -> "StrategySignal":
+    def _validate_time_and_facts(self) -> StrategySignal:
         if (
             self.occurred_at_ms <= 0
             or self.observed_at_ms < self.occurred_at_ms

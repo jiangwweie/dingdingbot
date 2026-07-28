@@ -43,15 +43,15 @@ class BRF2ShortDetector:
         rally_low = min(item.low for item in lookback)
         rally_high = max(item.high for item in (*lookback, latest))
         rally_pct = _pct(rally_high - rally_low, rally_low)
-        latest_range = max(latest.high - latest.low, Decimal("0"))
+        latest_range = max(latest.high - latest.low, Decimal(0))
         upper_wick = max(
             latest.high - max(latest.open, latest.close),
-            Decimal("0"),
+            Decimal(0),
         )
         upper_wick_ratio = (
             upper_wick / latest_range
-            if latest_range > Decimal("0")
-            else Decimal("0")
+            if latest_range > Decimal(0)
+            else Decimal(0)
         )
         close_reversal_pct = _pct(latest.high - latest.close, latest.high)
         htf_net_pct = _pct(
@@ -119,6 +119,6 @@ class BRF2ShortDetector:
 
 
 def _pct(numerator: Decimal, denominator: Decimal) -> Decimal:
-    if denominator == Decimal("0"):
-        return Decimal("0")
-    return (numerator / denominator) * Decimal("100")
+    if denominator == Decimal(0):
+        return Decimal(0)
+    return (numerator / denominator) * Decimal(100)

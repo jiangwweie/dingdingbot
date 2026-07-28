@@ -6,21 +6,20 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import create_async_engine
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.trading_kernel.infrastructure.pg_unit_of_work import (  # noqa: E402
+from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
-from src.trading_kernel.infrastructure.runtime_authority_seed import (  # noqa: E402
+from src.trading_kernel.infrastructure.runtime_authority_seed import (
     ArmAcceptancePolicyRequest,
     PromoteFullPolicyRequest,
     RuntimeAuthoritySeedRequest,
@@ -28,8 +27,8 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (  # noqa: 
     RuntimeDeploymentIdentityResult,
     RuntimePolicyState,
     arm_acceptance_policy,
-    deploy_protected_identity,
     deploy_closure_identity,
+    deploy_protected_identity,
     deploy_recovery_identity,
     deploy_runtime_identity,
     promote_full_policy,
