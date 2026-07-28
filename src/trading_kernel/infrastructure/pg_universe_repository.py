@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Literal, cast
@@ -21,6 +22,7 @@ from src.trading_kernel.application.advance_strategy_universe import (
 )
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseCurrent,
+    UniverseInstallContext,
     UniverseInstallPolicyScope,
     UniverseInstallRequest,
     UniverseInstallResult,
@@ -32,6 +34,14 @@ from src.trading_kernel.application.project_comparative_universe import (
     ComparativeProjectionOutcome,
     ComparativeUniverseProjection,
     comparative_member_set_digest,
+)
+from src.trading_kernel.application.read_strategy_universe_status import (
+    CertificationDisplayStatus,
+    MonitorDisplayStatus,
+    StrategyUniverseMemberStatus,
+    StrategyUniverseStatusRequest,
+    StrategyUniverseStatusResult,
+    StrategyUniverseVersionStatus,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
@@ -50,6 +60,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     event_specs,
     instrument_certification_current,
     instruments,
+    monitor_current,
     owner_policy_current,
     runtime_profiles,
     runtime_scopes_current,
@@ -83,6 +94,72 @@ class PostgresStrategyUniverseRepository:
 
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
+
+    async def resolve_install_context(
+        self,
+        *,
+        runtime_profile_id: str,
+        event_id: str,
+    ) -> UniverseInstallContext:
+        event = (
+            await self._connection.execute(
+                sa.select(
+                    event_specs.c.event_spec_id,
+                    event_specs.c.status,
+                )
+                .where(event_specs.c.event_id == event_id)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if event is None or event["status"] != "active":
+            raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
+
+        profile = (
+            await self._connection.execute(
+                sa.select(
+                    runtime_profiles.c.venue_id,
+                    runtime_profiles.c.status,
+                )
+                .where(
+                    runtime_profiles.c.runtime_profile_id
+                    == runtime_profile_id
+                )
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if (
+            profile is None
+            or profile["status"] != "active"
+            or profile["venue_id"] != "binance-usdm"
+        ):
+            raise UniverseInstallConflict(
+                "RUNTIME_PROFILE_AUTHORITY_CONFLICT"
+            )
+
+        event_spec_id = str(event["event_spec_id"])
+        policies = (
+            await self._connection.execute(
+                sa.select(owner_policy_current.c.owner_policy_id)
+                .where(
+                    owner_policy_current.c.enabled.is_(True),
+                    owner_policy_current.c.scope[
+                        "runtime_profile_id"
+                    ].as_string()
+                    == runtime_profile_id,
+                    owner_policy_current.c.scope[
+                        "allowed_event_spec_ids"
+                    ].contains([event_spec_id]),
+                )
+                .order_by(owner_policy_current.c.owner_policy_id)
+                .limit(2)
+            )
+        ).scalars().all()
+        if len(policies) != 1:
+            raise UniverseInstallConflict("OWNER_POLICY_AUTHORITY_CONFLICT")
+        return UniverseInstallContext(
+            event_spec_id=event_spec_id,
+            owner_policy_id=str(policies[0]),
+        )
 
     async def install(
         self,
@@ -232,6 +309,206 @@ class PostgresStrategyUniverseRepository:
         if len(rows) > MAX_UNIVERSE_MEMBERS:
             raise UniverseInstallConflict("UNIVERSE_MEMBER_CARDINALITY_CONFLICT")
         return tuple(str(row[0]) for row in rows)
+
+    async def read_status(
+        self,
+        request: StrategyUniverseStatusRequest,
+    ) -> StrategyUniverseStatusResult:
+        profile = (
+            await self._connection.execute(
+                sa.select(runtime_profiles.c.status)
+                .where(
+                    runtime_profiles.c.runtime_profile_id
+                    == request.runtime_profile_id
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if profile != "active":
+            raise UniverseInstallConflict(
+                "RUNTIME_PROFILE_AUTHORITY_CONFLICT"
+            )
+        if request.event_id is not None:
+            event_exists = (
+                await self._connection.execute(
+                    sa.select(event_specs.c.event_spec_id)
+                    .where(
+                        event_specs.c.event_id == request.event_id,
+                        event_specs.c.status == "active",
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if event_exists is None:
+                raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
+
+        certification = instrument_certification_current
+        monitor_key = sa.func.concat(
+            "strategy-universe:",
+            strategy_universe_versions.c.universe_version_id,
+            ":",
+            strategy_universe_members.c.exchange_instrument_id,
+        )
+        query = (
+            sa.select(
+                event_specs.c.event_id,
+                strategy_universe_versions.c.event_spec_id,
+                strategy_universe_versions.c.universe_version_id,
+                strategy_universe_versions.c.universe_version,
+                strategy_universe_versions.c.semantic_digest,
+                strategy_universe_versions.c.lifecycle_state,
+                strategy_universe_current.c.activation_generation,
+                strategy_universe_members.c.exchange_instrument_id,
+                certification.c.status.label("certification_status"),
+                certification.c.blocker_code,
+                runtime_scopes_current.c.warm_ready_at_ms,
+                runtime_scopes_current.c.warm_readiness_digest,
+                runtime_scopes_current.c.warm_valid_until_ms,
+                monitor_current.c.owner_status.label("monitor_status"),
+            )
+            .select_from(
+                strategy_universe_versions.join(
+                    event_specs,
+                    event_specs.c.event_spec_id
+                    == strategy_universe_versions.c.event_spec_id,
+                )
+                .join(
+                    strategy_universe_members,
+                    strategy_universe_members.c.universe_version_id
+                    == strategy_universe_versions.c.universe_version_id,
+                )
+                .join(
+                    runtime_scopes_current,
+                    sa.and_(
+                        runtime_scopes_current.c.universe_version_id
+                        == strategy_universe_members.c.universe_version_id,
+                        runtime_scopes_current.c.exchange_instrument_id
+                        == strategy_universe_members.c.exchange_instrument_id,
+                        runtime_scopes_current.c.runtime_profile_id
+                        == request.runtime_profile_id,
+                    ),
+                )
+                .outerjoin(
+                    strategy_universe_current,
+                    sa.and_(
+                        strategy_universe_current.c.event_spec_id
+                        == strategy_universe_versions.c.event_spec_id,
+                        strategy_universe_current.c.universe_version_id
+                        == strategy_universe_versions.c.universe_version_id,
+                    ),
+                )
+                .outerjoin(
+                    certification,
+                    sa.and_(
+                        certification.c.runtime_profile_id
+                        == request.runtime_profile_id,
+                        certification.c.exchange_instrument_id
+                        == strategy_universe_members.c.exchange_instrument_id,
+                    ),
+                )
+                .outerjoin(
+                    monitor_current,
+                    monitor_current.c.monitor_key == monitor_key,
+                )
+            )
+            .where(
+                strategy_universe_versions.c.lifecycle_state.in_(
+                    ("warming", "active")
+                )
+            )
+            .order_by(
+                event_specs.c.event_id,
+                sa.case(
+                    (
+                        strategy_universe_versions.c.lifecycle_state
+                        == "active",
+                        0,
+                    ),
+                    else_=1,
+                ),
+                strategy_universe_versions.c.universe_version,
+                strategy_universe_members.c.exchange_instrument_id,
+            )
+            .limit(71)
+        )
+        if request.event_id is not None:
+            query = query.where(event_specs.c.event_id == request.event_id)
+        rows = (await self._connection.execute(query)).mappings().all()
+        if len(rows) > 70:
+            raise UniverseInstallConflict("UNIVERSE_STATUS_BOUND_CONFLICT")
+
+        versions: dict[str, list[RowMapping]] = {}
+        for row in rows:
+            versions.setdefault(
+                str(row["universe_version_id"]),
+                [],
+            ).append(row)
+        result: list[StrategyUniverseVersionStatus] = []
+        for version_rows in versions.values():
+            first = version_rows[0]
+            lifecycle_state = str(first["lifecycle_state"])
+            if lifecycle_state not in {"warming", "active"}:
+                raise UniverseInstallConflict(
+                    "UNIVERSE_STATUS_LIFECYCLE_CONFLICT"
+                )
+            generation = first["activation_generation"]
+            if lifecycle_state == "active" and generation is None:
+                raise UniverseInstallConflict(
+                    "CURRENT_UNIVERSE_IDENTITY_CONFLICT"
+                )
+            result.append(
+                StrategyUniverseVersionStatus(
+                    event_id=str(first["event_id"]),
+                    event_spec_id=str(first["event_spec_id"]),
+                    universe_version_id=str(first["universe_version_id"]),
+                    semantic_digest=str(first["semantic_digest"]),
+                    lifecycle_state=cast(
+                        Literal["warming", "active"],
+                        lifecycle_state,
+                    ),
+                    current_generation=(
+                        None if generation is None else int(generation)
+                    ),
+                    members=tuple(
+                        StrategyUniverseMemberStatus(
+                            exchange_instrument_id=str(
+                                row["exchange_instrument_id"]
+                            ),
+                            certification_status=(
+                                "missing"
+                                if row["certification_status"] is None
+                                else cast(
+                                    CertificationDisplayStatus,
+                                    str(row["certification_status"]),
+                                )
+                            ),
+                            warm_ready=(
+                                row["warm_ready_at_ms"] is not None
+                                and row["warm_readiness_digest"] is not None
+                                and row["warm_valid_until_ms"] is not None
+                            ),
+                            monitor_status=(
+                                None
+                                if row["monitor_status"] is None
+                                else cast(
+                                    MonitorDisplayStatus,
+                                    str(row["monitor_status"]),
+                                )
+                            ),
+                            blocker_code=(
+                                None
+                                if row["blocker_code"] is None
+                                else str(row["blocker_code"])
+                            ),
+                        )
+                        for row in version_rows
+                    ),
+                )
+            )
+        return StrategyUniverseStatusResult(
+            runtime_profile_id=request.runtime_profile_id,
+            universes=tuple(result),
+        )
 
     async def try_activate(
         self,
@@ -767,7 +1044,7 @@ class PostgresStrategyUniverseRepository:
         self,
         *,
         target: RowMapping,
-        scopes: list[RowMapping],
+        scopes: Sequence[RowMapping],
         expected_lifecycle: Literal["warming", "active"],
         event: RowMapping | None,
     ) -> bool:

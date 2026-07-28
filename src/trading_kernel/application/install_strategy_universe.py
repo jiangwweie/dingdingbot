@@ -75,6 +75,50 @@ class UniverseInstallRequest(BaseModel):
         return value
 
 
+class UniverseConfigurationRequest(BaseModel):
+    """Owner-facing install request before PostgreSQL resolves canonical authority."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime_profile_id: str
+    event_id: str
+    exchange_instrument_ids: tuple[str, ...]
+    installed_at_ms: int
+
+    @field_validator("runtime_profile_id", "event_id", mode="before")
+    @classmethod
+    def _require_exact_identity(cls, value: object) -> str:
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise ValueError("Universe configuration identities must be exact")
+        return value
+
+    @field_validator("exchange_instrument_ids", mode="before")
+    @classmethod
+    def _canonical_members(cls, value: object) -> tuple[str, ...]:
+        return UniverseInstallRequest._canonical_members(value)
+
+    @field_validator("installed_at_ms")
+    @classmethod
+    def _require_install_time(cls, value: int) -> int:
+        return UniverseInstallRequest._require_install_time(value)
+
+
+class UniverseInstallContext(BaseModel):
+    """Exact current Event and Owner Policy selected for one configuration."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str
+    owner_policy_id: str
+
+    @field_validator("event_spec_id", "owner_policy_id", mode="before")
+    @classmethod
+    def _require_exact_identity(cls, value: object) -> str:
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise ValueError("Universe install context identities must be exact")
+        return value
+
+
 class UniverseInstallPolicyScope(BaseModel):
     """Exact Owner Policy shape consumed by Universe installation."""
 
@@ -148,3 +192,25 @@ async def install_strategy_universe(
     """Delegate one short transaction's persistence to the Universe repository."""
 
     return await uow.strategy_universes.install(request)
+
+
+async def configure_strategy_universe(
+    uow: "KernelUnitOfWork",
+    request: UniverseConfigurationRequest,
+) -> UniverseInstallResult:
+    """Resolve current PostgreSQL authority, then use the canonical installer."""
+
+    context = await uow.strategy_universes.resolve_install_context(
+        runtime_profile_id=request.runtime_profile_id,
+        event_id=request.event_id,
+    )
+    return await install_strategy_universe(
+        uow,
+        UniverseInstallRequest(
+            event_spec_id=context.event_spec_id,
+            runtime_profile_id=request.runtime_profile_id,
+            owner_policy_id=context.owner_policy_id,
+            exchange_instrument_ids=request.exchange_instrument_ids,
+            installed_at_ms=request.installed_at_ms,
+        ),
+    )

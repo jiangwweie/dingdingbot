@@ -24,6 +24,7 @@ from src.trading_kernel.application.advance_strategy_universe import (
 )
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseCurrent,
+    UniverseInstallContext,
     UniverseInstallRequest,
     UniverseInstallResult,
 )
@@ -31,6 +32,10 @@ from src.trading_kernel.application.project_comparative_universe import (
     ComparativeProjectionFailure,
     ComparativeProjectionOutcome,
     ComparativeUniverseProjection,
+)
+from src.trading_kernel.application.read_strategy_universe_status import (
+    StrategyUniverseStatusRequest,
+    StrategyUniverseStatusResult,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
@@ -961,6 +966,13 @@ class StrategyRegistryRepository(Protocol):
 
 
 class StrategyUniverseRepository(Protocol):
+    async def resolve_install_context(
+        self,
+        *,
+        runtime_profile_id: str,
+        event_id: str,
+    ) -> UniverseInstallContext: ...
+
     async def install(
         self,
         request: UniverseInstallRequest,
@@ -975,6 +987,11 @@ class StrategyUniverseRepository(Protocol):
         self,
         universe_version_id: str,
     ) -> tuple[str, ...]: ...
+
+    async def read_status(
+        self,
+        request: StrategyUniverseStatusRequest,
+    ) -> StrategyUniverseStatusResult: ...
 
     async def try_activate(
         self,
