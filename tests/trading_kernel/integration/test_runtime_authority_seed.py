@@ -14,24 +14,28 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
+from scripts.trading_kernel.certify_readonly import _certify
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     budget_reservations,
     entry_lane_current,
     exchange_commands,
+    instruments,
     owner_policy_current,
     positions_current,
     runtime_capabilities_current,
     runtime_incidents,
     runtime_profiles,
+    runtime_scopes_current,
     schema_metadata,
+    strategy_universe_current,
+    strategy_universe_members,
     strategy_universe_versions,
     trade_aggregates,
     trade_reviews,
     trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from scripts.trading_kernel.certify_readonly import _certify
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
     SAFE_DATABASE,
@@ -832,6 +836,16 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
 
 async def _insert_ticket_universe(connection: AsyncConnection) -> None:
     await connection.execute(
+        sa.insert(instruments).values(
+            exchange_instrument_id=_TICKET_EXCHANGE_INSTRUMENT_ID,
+            venue_id="binance-usdm",
+            asset_class="crypto",
+            venue_symbol="ETHUSDT",
+            contract_kind="perpetual",
+            status="active",
+        )
+    )
+    await connection.execute(
         sa.insert(strategy_universe_versions).values(
             universe_version_id=_TICKET_UNIVERSE_VERSION_ID,
             strategy_group_id=_TICKET_STRATEGY_GROUP_ID,
@@ -842,6 +856,48 @@ async def _insert_ticket_universe(connection: AsyncConnection) -> None:
             installed_at_ms=1_800_000_000_001,
             activated_at_ms=1_800_000_000_002,
             retired_at_ms=None,
+        )
+    )
+    await connection.execute(
+        sa.insert(strategy_universe_members).values(
+            universe_version_id=_TICKET_UNIVERSE_VERSION_ID,
+            exchange_instrument_id=_TICKET_EXCHANGE_INSTRUMENT_ID,
+        )
+    )
+    await connection.execute(
+        sa.insert(strategy_universe_current).values(
+            event_spec_id=_TICKET_EVENT_SPEC_ID,
+            universe_version_id=_TICKET_UNIVERSE_VERSION_ID,
+            semantic_digest=_TICKET_UNIVERSE_DIGEST,
+            lifecycle_state="active",
+            activation_generation=1,
+            activated_at_ms=1_800_000_000_002,
+        )
+    )
+    await connection.execute(
+        sa.insert(runtime_scopes_current).values(
+            runtime_scope_id=_TICKET_RUNTIME_SCOPE_ID,
+            strategy_group_id=_TICKET_STRATEGY_GROUP_ID,
+            strategy_version_id=_TICKET_STRATEGY_VERSION_ID,
+            event_spec_id=_TICKET_EVENT_SPEC_ID,
+            runtime_profile_id="tiny-live-v1",
+            owner_policy_id="policy-main",
+            exchange_instrument_id=_TICKET_EXCHANGE_INSTRUMENT_ID,
+            position_side=_TICKET_POSITION_SIDE,
+            universe_version_id=_TICKET_UNIVERSE_VERSION_ID,
+            universe_semantic_digest=_TICKET_UNIVERSE_DIGEST,
+            lifecycle_state="active",
+            observation_enabled=True,
+            entry_enabled=True,
+            scope_version=1,
+            warm_ready_at_ms=1_800_000_000_002,
+            warm_readiness_digest="sha256:" + "4" * 64,
+            warm_valid_until_ms=1_800_000_060_002,
+            next_observation_due_at_ms=1_800_000_000_002,
+            lease_expires_at_ms=None,
+            lease_owner=None,
+            observation_generation=0,
+            updated_at_ms=1_800_000_000_002,
         )
     )
 
