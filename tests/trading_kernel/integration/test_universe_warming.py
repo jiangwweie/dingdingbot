@@ -18,12 +18,14 @@ from src.trading_kernel.application.market_ports import ClosedCandleRequest
 from src.trading_kernel.application.observe_strategy_scope import (
     ObservationRequest,
     ObservationStatus,
+    build_warm_readiness,
     observe_strategy_scope,
 )
 from src.trading_kernel.application.ports import WarmReadiness
 from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_models import (
+    event_specs,
     exchange_commands,
     facts_current,
     readiness_current,
@@ -410,6 +412,217 @@ async def test_warm_readiness_cannot_be_saved_for_changed_version_or_digest(
 
 
 @pytest.mark.asyncio
+async def test_old_warm_success_cannot_resurrect_after_later_invalid_clear(
+    warming_engine: AsyncEngine,
+) -> None:
+    scope_row = (await _warming_scopes(warming_engine))[0]
+    source = _triggering_source(
+        warming_engine,
+        (scope_row["exchange_instrument_id"],),
+    )
+    first = await _observe(
+        warming_engine,
+        source,
+        scope_row["runtime_scope_id"],
+    )
+    assert first.status is ObservationStatus.WARMED
+    async with PostgresKernelUnitOfWork(warming_engine) as uow:
+        scope = await uow.signals.get_runtime_scope(scope_row["runtime_scope_id"])
+        facts = await uow.signals.get_required_facts(
+            runtime_scope_id=scope_row["runtime_scope_id"],
+            event_spec_id=CONTRACT.event_spec_id,
+        )
+    assert scope is not None
+    assert facts is not None
+    old_success = build_warm_readiness(
+        scope=scope,
+        facts=facts,
+        expected_fact_definition_ids=tuple(
+            item.fact_definition_id
+            for item in (*CONTRACT.required_facts, *CONTRACT.disable_facts)
+        ),
+        ready_at_ms=NOW_MS,
+    )
+
+    later_invalid = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        source,
+        ObservationRequest(
+            runtime_scope_id=scope.runtime_scope_id,
+            runtime_commit=RUNTIME_COMMIT,
+            schema_revision=SCHEMA_REVISION,
+            trigger_candle_close_time_ms=NOW_MS + 900_000,
+        ),
+    )
+
+    assert later_invalid.status is ObservationStatus.INVALID
+    with pytest.raises(RuntimeError, match="warm readiness authority changed"):
+        async with PostgresKernelUnitOfWork(warming_engine) as uow:
+            await uow.signals.save_warm_readiness(old_success)
+    persisted = await _persisted_scope(warming_engine, scope.runtime_scope_id)
+    assert persisted["warm_ready_at_ms"] is None
+    assert persisted["warm_readiness_digest"] is None
+    assert persisted["warm_valid_until_ms"] is None
+    assert persisted["updated_at_ms"] == NOW_MS + 900_000
+
+
+@pytest.mark.asyncio
+async def test_old_warm_failure_cannot_clear_a_newer_success(
+    warming_engine: AsyncEngine,
+) -> None:
+    scope = (await _warming_scopes(warming_engine))[0]
+    later_ms = NOW_MS + 900_000
+    later_source = _shifted_triggering_source(
+        warming_engine,
+        (scope["exchange_instrument_id"],),
+        delta_ms=900_000,
+    )
+
+    later_success = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        later_source,
+        ObservationRequest(
+            runtime_scope_id=scope["runtime_scope_id"],
+            runtime_commit=RUNTIME_COMMIT,
+            schema_revision=SCHEMA_REVISION,
+            trigger_candle_close_time_ms=later_ms,
+        ),
+    )
+
+    assert later_success.status is ObservationStatus.WARMED
+    before = await _persisted_scope(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    with pytest.raises(RuntimeError, match="warm readiness authority changed"):
+        async with PostgresKernelUnitOfWork(warming_engine) as uow:
+            await uow.signals.clear_warm_readiness(
+                runtime_scope_id=scope["runtime_scope_id"],
+                scope_version=scope["scope_version"],
+                event_spec_id=scope["event_spec_id"],
+                exchange_instrument_id=scope["exchange_instrument_id"],
+                universe_version_id=scope["universe_version_id"],
+                universe_semantic_digest=scope["universe_semantic_digest"],
+                blocker="old_worker_failure",
+                updated_at_ms=NOW_MS,
+            )
+    after = await _persisted_scope(warming_engine, scope["runtime_scope_id"])
+    assert after["warm_ready_at_ms"] == later_ms
+    assert after["warm_readiness_digest"] == before["warm_readiness_digest"]
+    assert after["warm_valid_until_ms"] == before["warm_valid_until_ms"]
+    assert after["updated_at_ms"] == later_ms
+
+
+@pytest.mark.parametrize(
+    "drift_kind",
+    ("event", "contract", "permission"),
+)
+@pytest.mark.asyncio
+async def test_identified_warming_scope_drift_clears_prior_readiness(
+    warming_engine: AsyncEngine,
+    drift_kind: str,
+) -> None:
+    scope = (await _warming_scopes(warming_engine))[0]
+    first = await _observe(
+        warming_engine,
+        _triggering_source(
+            warming_engine,
+            (scope["exchange_instrument_id"],),
+        ),
+        scope["runtime_scope_id"],
+    )
+    assert first.status is ObservationStatus.WARMED
+
+    async with warming_engine.begin() as connection:
+        if drift_kind == "event":
+            await connection.execute(
+                sa.update(event_specs)
+                .where(event_specs.c.event_spec_id == scope["event_spec_id"])
+                .values(status="inactive")
+            )
+        elif drift_kind == "contract":
+            await connection.execute(
+                sa.update(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == scope["runtime_scope_id"]
+                )
+                .values(strategy_version_id="sgv:contract-drift:v99")
+            )
+        else:
+            await connection.exec_driver_sql(
+                "ALTER TABLE brc_runtime_scopes_current "
+                "DROP CONSTRAINT ck_brc_runtime_scope_lifecycle_permissions"
+            )
+            await connection.execute(
+                sa.update(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == scope["runtime_scope_id"]
+                )
+                .values(entry_enabled=True)
+            )
+    unused_source = TypedMarketFake(warming_engine, {})
+
+    invalid = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        unused_source,
+        ObservationRequest(
+            runtime_scope_id=scope["runtime_scope_id"],
+            runtime_commit=RUNTIME_COMMIT,
+            schema_revision=SCHEMA_REVISION,
+            trigger_candle_close_time_ms=NOW_MS + 1,
+        ),
+    )
+
+    assert invalid.status is ObservationStatus.INVALID
+    assert unused_source.calls == []
+    assert not await _scope_is_warm_ready(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    persisted = await _persisted_scope(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    assert persisted["updated_at_ms"] == NOW_MS + 1
+
+
+@pytest.mark.asyncio
+async def test_clear_warm_readiness_rejects_arbitrary_scope_identity(
+    warming_engine: AsyncEngine,
+) -> None:
+    scope = (await _warming_scopes(warming_engine))[0]
+    first = await _observe(
+        warming_engine,
+        _triggering_source(
+            warming_engine,
+            (scope["exchange_instrument_id"],),
+        ),
+        scope["runtime_scope_id"],
+    )
+    assert first.status is ObservationStatus.WARMED
+
+    with pytest.raises(RuntimeError, match="warm readiness authority changed"):
+        async with PostgresKernelUnitOfWork(warming_engine) as uow:
+            await uow.signals.clear_warm_readiness(
+                runtime_scope_id=scope["runtime_scope_id"],
+                scope_version=scope["scope_version"] + 1,
+                event_spec_id=scope["event_spec_id"],
+                exchange_instrument_id=scope["exchange_instrument_id"],
+                universe_version_id=scope["universe_version_id"],
+                universe_semantic_digest=scope["universe_semantic_digest"],
+                blocker="arbitrary_cleanup",
+                updated_at_ms=NOW_MS + 1,
+            )
+
+    assert await _scope_is_warm_ready(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+
+
+@pytest.mark.asyncio
 async def test_crashed_warming_claim_is_recovered_after_lease_expiry(
     warming_engine: AsyncEngine,
 ) -> None:
@@ -510,6 +723,27 @@ def _triggering_source(
     )
 
 
+def _shifted_triggering_source(
+    engine: AsyncEngine,
+    members: tuple[str, ...],
+    *,
+    delta_ms: int,
+) -> TypedMarketFake:
+    candles = tuple(
+        candle.model_copy(
+            update={
+                "open_time_ms": candle.open_time_ms + delta_ms,
+                "close_time_ms": candle.close_time_ms + delta_ms,
+            }
+        )
+        for candle in sor_snapshot(side="long").candles_15m
+    )
+    return TypedMarketFake(
+        engine,
+        {(member, "15m"): candles for member in members},
+    )
+
+
 async def _observe(
     engine: AsyncEngine,
     source: TypedMarketFake,
@@ -572,6 +806,21 @@ async def _scope_is_warm_ready(
             )
         ).one()
     return all(value is not None for value in row)
+
+
+async def _persisted_scope(
+    engine: AsyncEngine,
+    runtime_scope_id: str,
+):
+    async with engine.connect() as connection:
+        return (
+            await connection.execute(
+                sa.select(runtime_scopes_current).where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == runtime_scope_id
+                )
+            )
+        ).mappings().one()
 
 
 def _worker_request(*, now_ms: int) -> ObservationWorkerRequest:

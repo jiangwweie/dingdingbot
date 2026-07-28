@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+import src.trading_kernel.application.observe_strategy_scope as observation_module
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
 from src.trading_kernel.application.observe_strategy_scope import (
     ObservationRequest,
@@ -312,6 +313,64 @@ async def test_market_timeout_fails_closed_as_observation_unavailable(
         ) == 0
     assert readiness["readiness_state"] == "blocked"
     assert readiness["first_blocker"] == "observation_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_active_detector_exception_preserves_worker_retry_semantics(
+    observation_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_sor_scope(observation_engine)
+    snapshot = sor_snapshot(side=None)
+    source = FakeMarketSource(
+        {
+            (
+                snapshot.exchange_instrument_id,
+                "15m",
+            ): snapshot.candles_15m
+        }
+    )
+
+    def fail_detector(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("detector infrastructure failure")
+
+    monkeypatch.setattr(
+        observation_module,
+        "evaluate_strategy_snapshot",
+        fail_detector,
+    )
+
+    result = await run_observation_worker_once(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        source,
+        ObservationWorkerRequest(
+            worker_id="active-detector-retry-worker",
+            runtime_commit="kernel-test-head",
+            schema_revision="0001_initial",
+            now_ms=NOW_MS,
+            lease_until_ms=NOW_MS + 30_000,
+            timeout_seconds=1,
+            retry_interval_ms=30_000,
+        ),
+    )
+
+    assert result.status is ObservationWorkerStatus.RETRY_SCHEDULED
+    assert result.detail == "RuntimeError"
+    async with observation_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(readiness_current)
+        ) == 0
+        scope = (
+            await connection.execute(
+                sa.select(runtime_scopes_current).where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == "scope-sor-eth-long"
+                )
+            )
+        ).mappings().one()
+    assert scope["next_observation_due_at_ms"] == NOW_MS + 30_000
+    assert scope["warm_ready_at_ms"] == NOW_MS - 1
 
 
 @pytest.mark.asyncio

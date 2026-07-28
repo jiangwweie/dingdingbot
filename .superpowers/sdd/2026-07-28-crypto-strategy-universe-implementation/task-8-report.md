@@ -155,3 +155,97 @@ or exchange check was run.
 Task 8 stops with per-scope warm readiness. It does not activate a Universe,
 switch current pointers, enable Entry, replay a warming trigger, call
 certification, create a Signal for a warming scope, or implement Task 10.
+
+## Independent Review Fix — Causal Fencing And Drift Cleanup
+
+The independent review found three Task 8 defects. They were fixed before any
+Task 9 production implementation.
+
+### Monotonic warm projection
+
+A real PostgreSQL RED proved that an old successful observation could restore
+`warm_*` after a later invalid observation had cleared it:
+
+```text
+test_old_warm_success_cannot_resurrect_after_later_invalid_clear
+Failed: DID NOT RAISE RuntimeError
+```
+
+Both `save_warm_readiness` and `clear_warm_readiness` now use the scope row's
+`updated_at_ms` as the shared monotonic observation-time CAS. A successful
+write advances `updated_at_ms`; an older worker can therefore neither restore
+an invalidated proof nor clear a newer successful proof.
+
+The clear fence also binds the exact runtime scope, scope version, Event,
+instrument, Universe version, Universe semantic digest, and warming lifecycle.
+It deliberately does not require valid warming permissions, so an exactly
+identified warming row with corrupted permissions can clear its own stale
+proof. A mismatched scope identity remains rejected.
+
+### Fail-closed warming drift
+
+A parameterized disposable PostgreSQL RED first warmed a scope and then
+introduced Event, Registry contract, or permission drift. The Event case
+demonstrated the defect:
+
+```text
+test_identified_warming_scope_drift_clears_prior_readiness[event]
+assert not True
+```
+
+Every early fail-closed return after an exact warming scope is identified now
+clears its prior warm projection. The permission case intentionally removes
+the disposable database's lifecycle-permission check before corrupting the row;
+this proves application-level fail-closed behavior without weakening the
+production schema invariant.
+
+### Active retry semantics
+
+A real PostgreSQL worker RED injected a detector `RuntimeError` into an active
+scope:
+
+```text
+expected RETRY_SCHEDULED
+actual OBSERVED / warm_facts_invalid
+```
+
+Detector exception conversion is now limited to warming. Active detector
+exceptions propagate to the existing worker boundary, which schedules a retry
+and writes no `warm_facts_invalid` readiness projection.
+
+### Review-fix verification
+
+Focused Task 8 verification:
+
+```text
+uv run pytest -q \
+  tests/trading_kernel/unit/test_observe_strategy_scope.py \
+  tests/trading_kernel/integration/test_universe_warming.py \
+  tests/trading_kernel/integration/test_observation_to_signal.py -x
+
+22 passed in 16.62s
+```
+
+Task 9 remained RED and its production behavior was not implemented:
+
+```text
+test_eight_mpg_scopes_read_each_member_once_per_closed_bar
+expected each of 8 members to be read once
+actual each member was read 8 times
+```
+
+Static gates:
+
+```text
+uvx ruff check --select E4,E7,E9,F,I <Task 8 source/tests and Task 9 RED>
+All checks passed!
+
+uv run --with mypy mypy --follow-imports=skip \
+  src/trading_kernel/application/observe_strategy_scope.py \
+  src/trading_kernel/application/ports.py \
+  src/trading_kernel/infrastructure/pg_signal_repository.py
+Success: no issues found in 3 source files
+
+git diff --check
+exit 0
+```

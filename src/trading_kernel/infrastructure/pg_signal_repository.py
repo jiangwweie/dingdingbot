@@ -464,11 +464,8 @@ class PostgresSignalRepository:
                 runtime_scopes_current.c.lifecycle_state == "warming",
                 runtime_scopes_current.c.observation_enabled.is_(True),
                 runtime_scopes_current.c.entry_enabled.is_(False),
-                sa.or_(
-                    runtime_scopes_current.c.warm_ready_at_ms.is_(None),
-                    runtime_scopes_current.c.warm_ready_at_ms
-                    <= readiness.ready_at_ms,
-                ),
+                runtime_scopes_current.c.updated_at_ms
+                <= readiness.ready_at_ms,
             )
             .values(
                 warm_ready_at_ms=readiness.ready_at_ms,
@@ -501,6 +498,8 @@ class PostgresSignalRepository:
         *,
         runtime_scope_id: str,
         scope_version: int,
+        event_spec_id: str,
+        exchange_instrument_id: str,
         universe_version_id: str,
         universe_semantic_digest: str,
         blocker: str,
@@ -511,17 +510,15 @@ class PostgresSignalRepository:
             .where(
                 runtime_scopes_current.c.runtime_scope_id == runtime_scope_id,
                 runtime_scopes_current.c.scope_version == scope_version,
+                runtime_scopes_current.c.event_spec_id == event_spec_id,
+                runtime_scopes_current.c.exchange_instrument_id
+                == exchange_instrument_id,
                 runtime_scopes_current.c.universe_version_id
                 == universe_version_id,
                 runtime_scopes_current.c.universe_semantic_digest
                 == universe_semantic_digest,
                 runtime_scopes_current.c.lifecycle_state == "warming",
-                runtime_scopes_current.c.observation_enabled.is_(True),
-                runtime_scopes_current.c.entry_enabled.is_(False),
-                sa.or_(
-                    runtime_scopes_current.c.warm_ready_at_ms.is_(None),
-                    runtime_scopes_current.c.warm_ready_at_ms <= updated_at_ms,
-                ),
+                runtime_scopes_current.c.updated_at_ms <= updated_at_ms,
             )
             .values(
                 warm_ready_at_ms=None,

@@ -807,6 +807,8 @@ class SignalRepository(Protocol):
         *,
         runtime_scope_id: str,
         scope_version: int,
+        event_spec_id: str,
+        exchange_instrument_id: str,
         universe_version_id: str,
         universe_semantic_digest: str,
         blocker: str,

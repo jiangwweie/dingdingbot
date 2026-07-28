@@ -160,14 +160,36 @@ async def observe_strategy_scope(
 ) -> ObservationResult:
     async with uow_factory() as uow:
         scope = await uow.signals.get_runtime_scope(request.runtime_scope_id)
-        if scope is None or not _scope_observation_permissions_are_valid(scope):
+        if scope is None:
             return _invalid_observation(
                 request,
-                event_spec_id=None if scope is None else scope.event_spec_id,
+                event_spec_id=None,
+                reason="scope_or_policy_mismatch",
+            )
+        if not _scope_observation_permissions_are_valid(scope):
+            if scope.lifecycle_state == "warming":
+                await _save_observation_blocker(
+                    uow,
+                    scope=scope,
+                    blocker="scope_or_policy_mismatch",
+                    detector_reason="scope_or_policy_mismatch",
+                    updated_at_ms=request.trigger_candle_close_time_ms,
+                )
+            return _invalid_observation(
+                request,
+                event_spec_id=scope.event_spec_id,
                 reason="scope_or_policy_mismatch",
             )
         event_spec = await uow.signals.get_event_spec(scope.event_spec_id)
         if event_spec is None or event_spec.status != "active":
+            if scope.lifecycle_state == "warming":
+                await _save_observation_blocker(
+                    uow,
+                    scope=scope,
+                    blocker="registry_event_unavailable",
+                    detector_reason="registry_event_unavailable",
+                    updated_at_ms=request.trigger_candle_close_time_ms,
+                )
             return _invalid_observation(
                 request,
                 event_spec_id=scope.event_spec_id,
@@ -217,6 +239,14 @@ async def observe_strategy_scope(
             )
         contract = _contract_for_scope(scope)
         if contract is None:
+            if scope.lifecycle_state == "warming":
+                await _save_observation_blocker(
+                    uow,
+                    scope=scope,
+                    blocker="registry_scope_mismatch",
+                    detector_reason="registry_scope_mismatch",
+                    updated_at_ms=request.trigger_candle_close_time_ms,
+                )
             return _invalid_observation(
                 request,
                 event_spec_id=scope.event_spec_id,
@@ -246,22 +276,25 @@ async def observe_strategy_scope(
             reason="market_snapshot_unavailable",
         )
 
-    try:
+    if scope.lifecycle_state != "warming":
         detector_result = evaluate_strategy_snapshot(contract, snapshot)
-    except (RuntimeError, ValueError):
-        async with uow_factory() as uow:
-            await _save_observation_blocker(
-                uow,
-                scope=scope,
-                blocker="warm_facts_invalid",
-                detector_reason="warm_facts_invalid",
-                updated_at_ms=request.trigger_candle_close_time_ms,
+    else:
+        try:
+            detector_result = evaluate_strategy_snapshot(contract, snapshot)
+        except (RuntimeError, ValueError):
+            async with uow_factory() as uow:
+                await _save_observation_blocker(
+                    uow,
+                    scope=scope,
+                    blocker="warm_facts_invalid",
+                    detector_reason="warm_facts_invalid",
+                    updated_at_ms=request.trigger_candle_close_time_ms,
+                )
+            return _invalid_observation(
+                request,
+                event_spec_id=contract.event_spec_id,
+                reason="warm_facts_invalid",
             )
-        return _invalid_observation(
-            request,
-            event_spec_id=contract.event_spec_id,
-            reason="warm_facts_invalid",
-        )
     async with uow_factory() as uow:
         if detector_result.status is DetectorStatus.INVALID:
             await _save_observation_blocker(
@@ -407,6 +440,8 @@ async def _save_observation_blocker(
         await uow.signals.clear_warm_readiness(
             runtime_scope_id=scope.runtime_scope_id,
             scope_version=scope.scope_version,
+            event_spec_id=scope.event_spec_id,
+            exchange_instrument_id=scope.exchange_instrument_id,
             universe_version_id=scope.universe_version_id,
             universe_semantic_digest=scope.universe_semantic_digest,
             blocker=blocker,
