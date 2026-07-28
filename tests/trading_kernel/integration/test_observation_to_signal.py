@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from hashlib import sha256
 from uuid import uuid4
 
 import asyncpg
@@ -18,6 +17,7 @@ from src.trading_kernel.application.observe_strategy_scope import (
     observe_strategy_scope,
 )
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
     facts_current,
@@ -388,7 +388,11 @@ async def _seed_sor_scope(engine: AsyncEngine) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
     event_spec_id = "event_spec:SOR-001:SOR-LONG:v2"
-    universe_version_id, universe_digest = _universe_identity(event_spec_id)
+    universe_version_id, universe_digest = _universe_identity(
+        strategy_group_id="SOR-001",
+        event_spec_id=event_spec_id,
+        members=(ETH,),
+    )
     async with engine.begin() as connection:
         await _seed_active_universe(
             connection,
@@ -501,7 +505,11 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
             position_side,
             members,
         ) in rows:
-            universe_version_id, universe_digest = _universe_identity(event_spec_id)
+            universe_version_id, universe_digest = _universe_identity(
+                strategy_group_id=strategy_group_id,
+                event_spec_id=event_spec_id,
+                members=members,
+            )
             await _seed_active_universe(
                 connection,
                 strategy_group_id=strategy_group_id,
@@ -544,11 +552,22 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
         )
 
 
-def _universe_identity(event_spec_id: str) -> tuple[str, str]:
-    return (
-        f"universe:test:{event_spec_id}",
-        f"sha256:{sha256(event_spec_id.encode()).hexdigest()}",
+def _universe_identity(
+    *,
+    strategy_group_id: str,
+    event_spec_id: str,
+    members: tuple[str, ...],
+) -> tuple[str, str]:
+    universe_version_id = f"universe:test:{event_spec_id}"
+    universe = build_strategy_universe(
+        universe_version_id=universe_version_id,
+        strategy_group_id=strategy_group_id,
+        event_spec_id=event_spec_id,
+        universe_version=1,
+        exchange_instrument_ids=members,
+        installed_at_ms=NOW_MS - 1,
     )
+    return universe_version_id, universe.semantic_digest
 
 
 async def _seed_active_universe(

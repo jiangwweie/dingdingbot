@@ -1,0 +1,592 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from hashlib import sha256
+from uuid import uuid4
+
+import asyncpg
+import pytest
+import pytest_asyncio
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+from src.trading_kernel.application.install_strategy_universe import (
+    UniverseInstallRequest,
+    install_strategy_universe,
+)
+from src.trading_kernel.application.market_ports import ClosedCandleRequest
+from src.trading_kernel.application.observe_strategy_scope import (
+    ObservationRequest,
+    ObservationStatus,
+    observe_strategy_scope,
+)
+from src.trading_kernel.application.ports import WarmReadiness
+from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.infrastructure.pg_models import (
+    exchange_commands,
+    facts_current,
+    readiness_current,
+    runtime_scopes_current,
+    signal_events,
+    trade_tickets,
+)
+from src.trading_kernel.infrastructure.pg_signal_repository import (
+    PostgresSignalRepository,
+)
+from src.trading_kernel.infrastructure.pg_unit_of_work import (
+    PostgresKernelUnitOfWork,
+)
+from src.trading_kernel.infrastructure.runtime_authority_seed import (
+    OWNER_POLICY_ID,
+    RUNTIME_PROFILE_ID,
+    RuntimeAuthoritySeedRequest,
+    seed_runtime_authority,
+)
+from src.trading_kernel.interfaces.observation_worker import (
+    ObservationWorkerRequest,
+    ObservationWorkerStatus,
+    run_observation_worker_once,
+)
+from tests.trading_kernel.integration.universe_certification_support import (
+    ADMIN_DSN,
+    SAFE_DATABASE,
+    _database_url,
+    _run_alembic,
+)
+from tests.trading_kernel.unit.detectors.fixtures import (
+    BTC,
+    ETH,
+    NOW_MS,
+    OP,
+    SOL,
+    flat_candles,
+    mpg_long_snapshot,
+    sor_snapshot,
+)
+
+RUNTIME_COMMIT = "task-8-test"
+SCHEMA_REVISION = "0002_crypto_strategy_universe"
+CONTRACT = next(
+    item
+    for item in registered_strategy_contracts()
+    if item.event_id == "SOR-LONG"
+)
+MPG_CONTRACT = next(
+    item
+    for item in registered_strategy_contracts()
+    if item.event_id == "MPG-LONG"
+)
+MEMBERS = (BTC, ETH)
+
+
+@pytest_asyncio.fixture
+async def warming_engine(request) -> AsyncEngine:
+    contract, members = getattr(request, "param", (CONTRACT, MEMBERS))
+    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
+    assert SAFE_DATABASE.fullmatch(database_name)
+    admin = await asyncpg.connect(ADMIN_DSN)
+    await admin.execute(f'CREATE DATABASE "{database_name}"')
+    database_url = _database_url(database_name)
+    engine: AsyncEngine | None = None
+    try:
+        _run_alembic(database_url, "upgrade", "head")
+        engine = create_async_engine(database_url)
+        await _install_warming_universe(engine, contract, members)
+        yield engine
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        await admin.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            database_name,
+        )
+        await admin.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
+        await admin.close()
+
+
+class TypedMarketFake:
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        responses: Mapping[
+            tuple[str, str],
+            tuple[ClosedCandle, ...],
+        ],
+    ) -> None:
+        self._engine = engine
+        self._responses = responses
+        self.calls: list[ClosedCandleRequest] = []
+
+    async def fetch_closed_candles(
+        self,
+        request: ClosedCandleRequest,
+    ) -> tuple[ClosedCandle, ...]:
+        self.calls.append(request)
+        async with self._engine.connect() as connection:
+            idle_in_transaction = int(
+                (
+                    await connection.exec_driver_sql(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() "
+                        "AND state = 'idle in transaction'"
+                    )
+                ).scalar_one()
+            )
+        assert idle_in_transaction == 0
+        return self._responses.get(
+            (request.exchange_instrument_id, request.timeframe),
+            (),
+        )
+
+
+@pytest.mark.asyncio
+async def test_all_warming_members_become_ready_without_signal_chain(
+    warming_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def forbidden_signal_add(self, signal):
+        del self, signal
+        raise AssertionError("warming must never call SignalRepository.add")
+
+    monkeypatch.setattr(
+        PostgresSignalRepository,
+        "add",
+        forbidden_signal_add,
+    )
+    source = _triggering_source(warming_engine, MEMBERS)
+    scopes = await _warming_scopes(warming_engine)
+
+    first = await _observe(warming_engine, source, scopes[0]["runtime_scope_id"])
+
+    assert first.status.value == "warmed"
+    assert first.signal_event_id is None
+    assert await _warm_ready_count(warming_engine) == 1
+    assert len(scopes) == 2
+
+    second = await _observe(warming_engine, source, scopes[1]["runtime_scope_id"])
+
+    assert second.status is ObservationStatus.WARMED
+    assert second.signal_event_id is None
+    assert await _warm_ready_count(warming_engine) == len(MEMBERS)
+    assert len(source.calls) == len(MEMBERS)
+    async with warming_engine.connect() as connection:
+        ready_rows = (
+            await connection.execute(
+                sa.select(
+                    runtime_scopes_current.c.exchange_instrument_id,
+                    runtime_scopes_current.c.universe_version_id,
+                    runtime_scopes_current.c.universe_semantic_digest,
+                    runtime_scopes_current.c.entry_enabled,
+                    runtime_scopes_current.c.warm_ready_at_ms,
+                    runtime_scopes_current.c.warm_readiness_digest,
+                    runtime_scopes_current.c.warm_valid_until_ms,
+                ).order_by(runtime_scopes_current.c.exchange_instrument_id)
+            )
+        ).mappings().all()
+        readiness_rows = (
+            await connection.execute(
+                sa.select(readiness_current).order_by(
+                    readiness_current.c.runtime_scope_id
+                )
+            )
+        ).mappings().all()
+        counts = {
+            "signals": await connection.scalar(
+                sa.select(sa.func.count()).select_from(signal_events)
+            ),
+            "tickets": await connection.scalar(
+                sa.select(sa.func.count()).select_from(trade_tickets)
+            ),
+            "commands": await connection.scalar(
+                sa.select(sa.func.count()).select_from(exchange_commands)
+            ),
+            "facts": await connection.scalar(
+                sa.select(sa.func.count()).select_from(facts_current)
+            ),
+        }
+    assert {row["exchange_instrument_id"] for row in ready_rows} == set(MEMBERS)
+    assert len({row["universe_version_id"] for row in ready_rows}) == 1
+    assert len({row["universe_semantic_digest"] for row in ready_rows}) == 1
+    assert all(row["entry_enabled"] is False for row in ready_rows)
+    assert all(row["warm_ready_at_ms"] == NOW_MS for row in ready_rows)
+    assert all(
+        str(row["warm_readiness_digest"]).startswith("sha256:")
+        for row in ready_rows
+    )
+    assert all(row["warm_valid_until_ms"] > NOW_MS for row in ready_rows)
+    assert [row["readiness_state"] for row in readiness_rows] == [
+        "warm_ready",
+        "warm_ready",
+    ]
+    assert counts == {"signals": 0, "tickets": 0, "commands": 0, "facts": 6}
+
+
+@pytest.mark.asyncio
+async def test_missing_or_stale_warming_market_data_clears_prior_readiness(
+    warming_engine: AsyncEngine,
+) -> None:
+    scope = (await _warming_scopes(warming_engine))[0]
+    valid_source = _triggering_source(
+        warming_engine,
+        (scope["exchange_instrument_id"],),
+    )
+    first = await _observe(
+        warming_engine,
+        valid_source,
+        scope["runtime_scope_id"],
+    )
+    assert first.status is ObservationStatus.WARMED
+    assert await _scope_is_warm_ready(warming_engine, scope["runtime_scope_id"])
+
+    missing = await _observe(
+        warming_engine,
+        TypedMarketFake(warming_engine, {}),
+        scope["runtime_scope_id"],
+    )
+    assert missing.status is ObservationStatus.INVALID
+    assert not await _scope_is_warm_ready(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+
+    await _observe(
+        warming_engine,
+        valid_source,
+        scope["runtime_scope_id"],
+    )
+    stale = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        valid_source,
+        ObservationRequest(
+            runtime_scope_id=scope["runtime_scope_id"],
+            runtime_commit=RUNTIME_COMMIT,
+            schema_revision=SCHEMA_REVISION,
+            trigger_candle_close_time_ms=NOW_MS + 900_000,
+        ),
+    )
+    assert stale.status is ObservationStatus.INVALID
+    assert not await _scope_is_warm_ready(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    async with warming_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(signal_events)
+        ) == 0
+
+
+@pytest.mark.parametrize(
+    "warming_engine",
+    [(MPG_CONTRACT, (SOL, OP))],
+    indirect=True,
+)
+@pytest.mark.asyncio
+async def test_comparative_warming_requires_market_data_for_every_member(
+    warming_engine: AsyncEngine,
+) -> None:
+    scope = next(
+        row
+        for row in await _warming_scopes(warming_engine)
+        if row["exchange_instrument_id"] == SOL
+    )
+    snapshot = mpg_long_snapshot()
+    missing_peer = TypedMarketFake(
+        warming_engine,
+        {
+            (SOL, "1h"): snapshot.candles_1h,
+            (SOL, "4h"): snapshot.candles_4h,
+        },
+    )
+
+    incomplete = await _observe(
+        warming_engine,
+        missing_peer,
+        scope["runtime_scope_id"],
+    )
+
+    assert incomplete.status is ObservationStatus.INVALID
+    assert not await _scope_is_warm_ready(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    complete = TypedMarketFake(
+        warming_engine,
+        {
+            (SOL, "1h"): snapshot.candles_1h,
+            (SOL, "4h"): snapshot.candles_4h,
+            (OP, "1h"): flat_candles(9, 3_600_000),
+        },
+    )
+
+    warmed = await _observe(
+        warming_engine,
+        complete,
+        scope["runtime_scope_id"],
+    )
+
+    assert warmed.status is ObservationStatus.WARMED
+    assert await _scope_is_warm_ready(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    assert {
+        call.exchange_instrument_id
+        for call in complete.calls
+        if call.timeframe == "1h"
+    } == {SOL, OP}
+    async with warming_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(signal_events)
+        ) == 0
+
+
+@pytest.mark.asyncio
+async def test_warm_readiness_cannot_be_saved_for_changed_version_or_digest(
+    warming_engine: AsyncEngine,
+) -> None:
+    scope_row = (await _warming_scopes(warming_engine))[0]
+    source = _triggering_source(
+        warming_engine,
+        (scope_row["exchange_instrument_id"],),
+    )
+    result = await _observe(
+        warming_engine,
+        source,
+        scope_row["runtime_scope_id"],
+    )
+    assert result.status is ObservationStatus.WARMED
+    async with PostgresKernelUnitOfWork(warming_engine) as uow:
+        scope = await uow.signals.get_runtime_scope(scope_row["runtime_scope_id"])
+        facts = await uow.signals.get_required_facts(
+            runtime_scope_id=scope_row["runtime_scope_id"],
+            event_spec_id=CONTRACT.event_spec_id,
+        )
+    assert scope is not None
+    assert facts is not None
+    wrong_version_id = "universe:changed-version"
+    wrong_digest = f"sha256:{sha256(b'changed-digest').hexdigest()}"
+    readiness_digest = WarmReadiness.digest_for(
+        runtime_scope_id=scope.runtime_scope_id,
+        scope_version=scope.scope_version,
+        event_spec_id=scope.event_spec_id,
+        exchange_instrument_id=scope.exchange_instrument_id,
+        universe_version_id=wrong_version_id,
+        universe_semantic_digest=wrong_digest,
+        fact_digest=_fact_digest(facts),
+        ready_at_ms=NOW_MS,
+        valid_until_ms=min(item.valid_until_ms for item in facts),
+    )
+    changed = WarmReadiness(
+        runtime_scope_id=scope.runtime_scope_id,
+        scope_version=scope.scope_version,
+        event_spec_id=scope.event_spec_id,
+        exchange_instrument_id=scope.exchange_instrument_id,
+        universe_version_id=wrong_version_id,
+        universe_semantic_digest=wrong_digest,
+        fact_digest=_fact_digest(facts),
+        ready_at_ms=NOW_MS,
+        valid_until_ms=min(item.valid_until_ms for item in facts),
+        readiness_digest=readiness_digest,
+    )
+
+    with pytest.raises(RuntimeError, match="warm readiness authority changed"):
+        async with PostgresKernelUnitOfWork(warming_engine) as uow:
+            await uow.signals.save_warm_readiness(changed)
+
+    async with warming_engine.connect() as connection:
+        persisted = (
+            await connection.execute(
+                sa.select(runtime_scopes_current).where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == scope.runtime_scope_id
+                )
+            )
+        ).mappings().one()
+    assert persisted["universe_version_id"] == scope.universe_version_id
+    assert persisted["universe_semantic_digest"] == scope.universe_semantic_digest
+    assert persisted["warm_readiness_digest"] == scope.warm_readiness_digest
+
+
+@pytest.mark.asyncio
+async def test_crashed_warming_claim_is_recovered_after_lease_expiry(
+    warming_engine: AsyncEngine,
+) -> None:
+    scopes = await _warming_scopes(warming_engine)
+    crashed_scope_id = scopes[0]["runtime_scope_id"]
+    async with warming_engine.begin() as connection:
+        await connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id
+                != crashed_scope_id
+            )
+            .values(next_observation_due_at_ms=NOW_MS + 1_800_000)
+        )
+    async with PostgresKernelUnitOfWork(warming_engine) as uow:
+        claim = await uow.signals.claim_next_observation_scope(
+            worker_id="crashed-worker",
+            now_ms=NOW_MS,
+            lease_until_ms=NOW_MS + 60_000,
+        )
+    assert claim is not None
+    assert claim.runtime_scope_id == crashed_scope_id
+    source = _triggering_source(
+        warming_engine,
+        (scopes[0]["exchange_instrument_id"],),
+    )
+
+    before_expiry = await run_observation_worker_once(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        source,
+        _worker_request(now_ms=NOW_MS + 30_000),
+    )
+    recovered = await run_observation_worker_once(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        source,
+        _worker_request(now_ms=NOW_MS + 60_000),
+    )
+
+    assert before_expiry.status is ObservationWorkerStatus.NO_WORK
+    assert recovered.status is ObservationWorkerStatus.OBSERVED
+    assert recovered.runtime_scope_id == crashed_scope_id
+    assert recovered.observation_status is ObservationStatus.WARMED
+    assert len(source.calls) == 1
+    async with warming_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(signal_events)
+        ) == 0
+        persisted = (
+            await connection.execute(
+                sa.select(runtime_scopes_current).where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == crashed_scope_id
+                )
+            )
+        ).mappings().one()
+    assert persisted["lease_owner"] is None
+    assert persisted["lease_expires_at_ms"] is None
+    assert persisted["warm_ready_at_ms"] == NOW_MS
+
+
+async def _install_warming_universe(
+    engine: AsyncEngine,
+    contract,
+    members: tuple[str, ...],
+) -> None:
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await seed_runtime_authority(
+            uow,
+            RuntimeAuthoritySeedRequest(
+                account_id="subaccount-warming-test",
+                runtime_commit=RUNTIME_COMMIT,
+                schema_revision=SCHEMA_REVISION,
+                seeded_at_ms=NOW_MS - 10_000,
+            ),
+        )
+        result = await install_strategy_universe(
+            uow,
+            UniverseInstallRequest(
+                event_spec_id=contract.event_spec_id,
+                runtime_profile_id=RUNTIME_PROFILE_ID,
+                owner_policy_id=OWNER_POLICY_ID,
+                exchange_instrument_ids=members,
+                installed_at_ms=NOW_MS - 1_000,
+            ),
+        )
+    assert result.universe is not None
+    assert result.universe.exchange_instrument_ids == tuple(sorted(members))
+
+
+def _triggering_source(
+    engine: AsyncEngine,
+    members: tuple[str, ...],
+) -> TypedMarketFake:
+    candles = sor_snapshot(side="long").candles_15m
+    return TypedMarketFake(
+        engine,
+        {(member, "15m"): candles for member in members},
+    )
+
+
+async def _observe(
+    engine: AsyncEngine,
+    source: TypedMarketFake,
+    runtime_scope_id: str,
+):
+    return await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(engine),
+        source,
+        ObservationRequest(
+            runtime_scope_id=runtime_scope_id,
+            runtime_commit=RUNTIME_COMMIT,
+            schema_revision=SCHEMA_REVISION,
+            trigger_candle_close_time_ms=NOW_MS,
+        ),
+    )
+
+
+async def _warming_scopes(engine: AsyncEngine):
+    async with engine.connect() as connection:
+        return (
+            await connection.execute(
+                sa.select(runtime_scopes_current)
+                .where(runtime_scopes_current.c.lifecycle_state == "warming")
+                .order_by(runtime_scopes_current.c.exchange_instrument_id)
+                .limit(11)
+            )
+        ).mappings().all()
+
+
+async def _warm_ready_count(engine: AsyncEngine) -> int:
+    async with engine.connect() as connection:
+        return int(
+            await connection.scalar(
+                sa.select(sa.func.count())
+                .select_from(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.lifecycle_state == "warming",
+                    runtime_scopes_current.c.warm_ready_at_ms.is_not(None),
+                    runtime_scopes_current.c.warm_valid_until_ms > NOW_MS,
+                )
+            )
+            or 0
+        )
+
+
+async def _scope_is_warm_ready(
+    engine: AsyncEngine,
+    runtime_scope_id: str,
+) -> bool:
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                sa.select(
+                    runtime_scopes_current.c.warm_ready_at_ms,
+                    runtime_scopes_current.c.warm_readiness_digest,
+                    runtime_scopes_current.c.warm_valid_until_ms,
+                ).where(
+                    runtime_scopes_current.c.runtime_scope_id == runtime_scope_id
+                )
+            )
+        ).one()
+    return all(value is not None for value in row)
+
+
+def _worker_request(*, now_ms: int) -> ObservationWorkerRequest:
+    return ObservationWorkerRequest(
+        worker_id="warming-recovery-worker",
+        runtime_commit=RUNTIME_COMMIT,
+        schema_revision=SCHEMA_REVISION,
+        now_ms=now_ms,
+        lease_until_ms=now_ms + 30_000,
+        timeout_seconds=1,
+        retry_interval_ms=30_000,
+    )
+
+
+def _fact_digest(facts) -> str:
+    from src.trading_kernel.domain.signal import build_signal_fact_digest
+
+    return build_signal_fact_digest(facts)

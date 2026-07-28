@@ -18,8 +18,10 @@ from src.trading_kernel.application.market_ports import (
     PublicMarketSource,
 )
 from src.trading_kernel.application.ports import (
+    KernelUnitOfWork,
     RuntimeScopeSnapshot,
     UnitOfWorkFactory,
+    WarmReadiness,
 )
 from src.trading_kernel.application.produce_strategy_signal import (
     evaluate_strategy_snapshot,
@@ -33,6 +35,10 @@ from src.trading_kernel.domain.market import (
     MarketSnapshot,
     Timeframe,
 )
+from src.trading_kernel.domain.signal import (
+    SignalFactSnapshot,
+    build_signal_fact_digest,
+)
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     registered_strategy_contracts,
@@ -40,6 +46,7 @@ from src.trading_kernel.domain.strategy_registry import (
 
 
 class ObservationStatus(StrEnum):
+    WARMED = "warmed"
     SIGNAL_CREATED = "signal_created"
     DUPLICATE_SIGNAL = "duplicate_signal"
     NO_SIGNAL = "no_signal"
@@ -86,6 +93,66 @@ class ObservationResult(BaseModel):
     current_fact_count: int
 
 
+def build_warm_readiness(
+    *,
+    scope: RuntimeScopeSnapshot,
+    facts: tuple[SignalFactSnapshot, ...],
+    expected_fact_definition_ids: tuple[str, ...],
+    ready_at_ms: int,
+) -> WarmReadiness:
+    """Bind one complete, fresh typed Fact bundle to one Warming scope."""
+
+    if (
+        scope.lifecycle_state != "warming"
+        or not scope.observation_enabled
+        or scope.entry_enabled
+    ):
+        raise ValueError("warm readiness requires a warming-only scope")
+    if ready_at_ms <= 0:
+        raise ValueError("warm readiness time must be positive")
+    expected = tuple(sorted(expected_fact_definition_ids))
+    actual = tuple(sorted(item.fact_definition_id for item in facts))
+    if (
+        not expected
+        or len(expected) != len(set(expected))
+        or actual != expected
+        or len(actual) != len(set(actual))
+    ):
+        raise ValueError("warm readiness requires the exact Registry Fact set")
+    if any(
+        fact.observed_at_ms > ready_at_ms
+        or fact.valid_until_ms <= ready_at_ms
+        for fact in facts
+    ):
+        raise ValueError("warm readiness facts are stale or future-dated")
+
+    fact_digest = build_signal_fact_digest(facts)
+    valid_until_ms = min(item.valid_until_ms for item in facts)
+    readiness_digest = WarmReadiness.digest_for(
+        runtime_scope_id=scope.runtime_scope_id,
+        scope_version=scope.scope_version,
+        event_spec_id=scope.event_spec_id,
+        exchange_instrument_id=scope.exchange_instrument_id,
+        universe_version_id=scope.universe_version_id,
+        universe_semantic_digest=scope.universe_semantic_digest,
+        fact_digest=fact_digest,
+        ready_at_ms=ready_at_ms,
+        valid_until_ms=valid_until_ms,
+    )
+    return WarmReadiness(
+        runtime_scope_id=scope.runtime_scope_id,
+        scope_version=scope.scope_version,
+        event_spec_id=scope.event_spec_id,
+        exchange_instrument_id=scope.exchange_instrument_id,
+        universe_version_id=scope.universe_version_id,
+        universe_semantic_digest=scope.universe_semantic_digest,
+        fact_digest=fact_digest,
+        ready_at_ms=ready_at_ms,
+        valid_until_ms=valid_until_ms,
+        readiness_digest=readiness_digest,
+    )
+
+
 async def observe_strategy_scope(
     uow_factory: UnitOfWorkFactory,
     market_source: PublicMarketSource,
@@ -93,12 +160,7 @@ async def observe_strategy_scope(
 ) -> ObservationResult:
     async with uow_factory() as uow:
         scope = await uow.signals.get_runtime_scope(request.runtime_scope_id)
-        if (
-            scope is None
-            or scope.lifecycle_state != "active"
-            or not scope.observation_enabled
-            or not scope.entry_enabled
-        ):
+        if scope is None or not _scope_observation_permissions_are_valid(scope):
             return _invalid_observation(
                 request,
                 event_spec_id=None if scope is None else scope.event_spec_id,
@@ -111,17 +173,43 @@ async def observe_strategy_scope(
                 event_spec_id=scope.event_spec_id,
                 reason="registry_event_unavailable",
             )
-        active_universe = await uow.signals.get_active_universe_members(
-            event_spec_id=scope.event_spec_id,
-        )
+        try:
+            observation_universe = (
+                await uow.signals.get_observation_universe_members(
+                    event_spec_id=scope.event_spec_id,
+                    universe_version_id=scope.universe_version_id,
+                )
+            )
+        except (RuntimeError, ValueError):
+            await _save_observation_blocker(
+                uow,
+                scope=scope,
+                blocker="universe_identity_inconsistent",
+                detector_reason="universe_identity_inconsistent",
+                updated_at_ms=request.trigger_candle_close_time_ms,
+            )
+            return _invalid_observation(
+                request,
+                event_spec_id=scope.event_spec_id,
+                reason="scope_or_policy_mismatch",
+            )
         if (
-            active_universe is None
-            or active_universe.universe_version_id != scope.universe_version_id
-            or active_universe.semantic_digest
+            observation_universe is None
+            or observation_universe.universe_version_id
+            != scope.universe_version_id
+            or observation_universe.semantic_digest
             != scope.universe_semantic_digest
+            or observation_universe.lifecycle_state != scope.lifecycle_state
             or scope.exchange_instrument_id
-            not in active_universe.exchange_instrument_ids
+            not in observation_universe.exchange_instrument_ids
         ):
+            await _save_observation_blocker(
+                uow,
+                scope=scope,
+                blocker="universe_identity_inconsistent",
+                detector_reason="universe_identity_inconsistent",
+                updated_at_ms=request.trigger_candle_close_time_ms,
+            )
             return _invalid_observation(
                 request,
                 event_spec_id=scope.event_spec_id,
@@ -141,16 +229,15 @@ async def observe_strategy_scope(
             contract,
             scope,
             request.trigger_candle_close_time_ms,
-            active_universe.exchange_instrument_ids,
+            observation_universe.exchange_instrument_ids,
         )
     except (RuntimeError, TimeoutError, ValueError):
         async with uow_factory() as uow:
-            await uow.signals.save_readiness(
-                runtime_scope_id=scope.runtime_scope_id,
-                readiness_state="blocked",
-                first_blocker="observation_unavailable",
-                signal_event_id=None,
-                fact_summary={"detector_reason": "market_snapshot_unavailable"},
+            await _save_observation_blocker(
+                uow,
+                scope=scope,
+                blocker="observation_unavailable",
+                detector_reason="market_snapshot_unavailable",
                 updated_at_ms=request.trigger_candle_close_time_ms,
             )
         return _invalid_observation(
@@ -159,15 +246,29 @@ async def observe_strategy_scope(
             reason="market_snapshot_unavailable",
         )
 
-    detector_result = evaluate_strategy_snapshot(contract, snapshot)
+    try:
+        detector_result = evaluate_strategy_snapshot(contract, snapshot)
+    except (RuntimeError, ValueError):
+        async with uow_factory() as uow:
+            await _save_observation_blocker(
+                uow,
+                scope=scope,
+                blocker="warm_facts_invalid",
+                detector_reason="warm_facts_invalid",
+                updated_at_ms=request.trigger_candle_close_time_ms,
+            )
+        return _invalid_observation(
+            request,
+            event_spec_id=contract.event_spec_id,
+            reason="warm_facts_invalid",
+        )
     async with uow_factory() as uow:
         if detector_result.status is DetectorStatus.INVALID:
-            await uow.signals.save_readiness(
-                runtime_scope_id=scope.runtime_scope_id,
-                readiness_state="blocked",
-                first_blocker="observation_unavailable",
-                signal_event_id=None,
-                fact_summary={"detector_reason": detector_result.reason_code},
+            await _save_observation_blocker(
+                uow,
+                scope=scope,
+                blocker="observation_unavailable",
+                detector_reason=detector_result.reason_code,
                 updated_at_ms=request.trigger_candle_close_time_ms,
             )
             return ObservationResult(
@@ -183,6 +284,40 @@ async def observe_strategy_scope(
             runtime_scope_id=scope.runtime_scope_id,
             facts=detector_result.facts,
         )
+        if scope.lifecycle_state == "warming":
+            expected_fact_ids = tuple(
+                item.fact_definition_id
+                for item in (*contract.required_facts, *contract.disable_facts)
+            )
+            try:
+                warm_readiness = build_warm_readiness(
+                    scope=scope,
+                    facts=persisted_facts,
+                    expected_fact_definition_ids=expected_fact_ids,
+                    ready_at_ms=request.trigger_candle_close_time_ms,
+                )
+            except ValueError:
+                await _save_observation_blocker(
+                    uow,
+                    scope=scope,
+                    blocker="warm_facts_invalid",
+                    detector_reason="warm_facts_invalid",
+                    updated_at_ms=request.trigger_candle_close_time_ms,
+                )
+                return _invalid_observation(
+                    request,
+                    event_spec_id=contract.event_spec_id,
+                    reason="warm_facts_invalid",
+                )
+            await uow.signals.save_warm_readiness(warm_readiness)
+            return ObservationResult(
+                status=ObservationStatus.WARMED,
+                runtime_scope_id=scope.runtime_scope_id,
+                event_spec_id=contract.event_spec_id,
+                detector_reason=detector_result.reason_code,
+                signal_event_id=None,
+                current_fact_count=len(persisted_facts),
+            )
         if detector_result.status is DetectorStatus.NOT_TRIGGERED:
             await uow.signals.save_readiness(
                 runtime_scope_id=scope.runtime_scope_id,
@@ -244,6 +379,48 @@ async def observe_strategy_scope(
             signal_event_id=signal.signal_event_id,
             current_fact_count=len(persisted_facts),
         )
+
+
+def _scope_observation_permissions_are_valid(
+    scope: RuntimeScopeSnapshot,
+) -> bool:
+    return (
+        scope.lifecycle_state == "warming"
+        and scope.observation_enabled
+        and not scope.entry_enabled
+    ) or (
+        scope.lifecycle_state == "active"
+        and scope.observation_enabled
+        and scope.entry_enabled
+    )
+
+
+async def _save_observation_blocker(
+    uow: KernelUnitOfWork,
+    *,
+    scope: RuntimeScopeSnapshot,
+    blocker: str,
+    detector_reason: str,
+    updated_at_ms: int,
+) -> None:
+    if scope.lifecycle_state == "warming":
+        await uow.signals.clear_warm_readiness(
+            runtime_scope_id=scope.runtime_scope_id,
+            scope_version=scope.scope_version,
+            universe_version_id=scope.universe_version_id,
+            universe_semantic_digest=scope.universe_semantic_digest,
+            blocker=blocker,
+            updated_at_ms=updated_at_ms,
+        )
+        return
+    await uow.signals.save_readiness(
+        runtime_scope_id=scope.runtime_scope_id,
+        readiness_state="blocked",
+        first_blocker=blocker,
+        signal_event_id=None,
+        fact_summary={"detector_reason": detector_reason},
+        updated_at_ms=updated_at_ms,
+    )
 
 
 def _contract_for_scope(

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import re
 from decimal import Decimal
 from enum import StrEnum
-import re
+from hashlib import sha256
 from types import TracebackType
 from typing import Callable, Literal, Protocol, Self
 
@@ -19,23 +21,23 @@ from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.commands import (
+    CommandPayload,
+    ExchangeCommand,
+    ExchangeCommandKind,
+    ExchangeCommandResult,
+    SetLeverageCommandPayload,
+    SetLeverageCommandResult,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
+from src.trading_kernel.domain.events import TradeEvent
+from src.trading_kernel.domain.exit_policy import ExitPolicy
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertification,
 )
-from src.trading_kernel.domain.commands import (
-    ExchangeCommand,
-    ExchangeCommandKind,
-    ExchangeCommandResult,
-    CommandPayload,
-    SetLeverageCommandPayload,
-    SetLeverageCommandResult,
-)
-from src.trading_kernel.domain.events import TradeEvent
-from src.trading_kernel.domain.exit_policy import ExitPolicy
-from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.order_attribution import TicketOrderReference
+from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.signal import SignalFactSnapshot, StrategySignal
 from src.trading_kernel.domain.strategy_registry import (
@@ -221,6 +223,95 @@ class RuntimeScopeSnapshot(BaseModel):
     observation_enabled: bool
     entry_enabled: bool
     scope_version: int
+    warm_ready_at_ms: int | None = None
+    warm_readiness_digest: str | None = None
+    warm_valid_until_ms: int | None = None
+
+
+class WarmReadiness(BaseModel):
+    """One scope's immutable, Universe-bound market-readiness proof."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime_scope_id: str
+    scope_version: int
+    event_spec_id: str
+    exchange_instrument_id: str
+    universe_version_id: str
+    universe_semantic_digest: str
+    fact_digest: str
+    ready_at_ms: int
+    valid_until_ms: int
+    readiness_digest: str
+
+    @classmethod
+    def digest_for(
+        cls,
+        *,
+        runtime_scope_id: str,
+        scope_version: int,
+        event_spec_id: str,
+        exchange_instrument_id: str,
+        universe_version_id: str,
+        universe_semantic_digest: str,
+        fact_digest: str,
+        ready_at_ms: int,
+        valid_until_ms: int,
+    ) -> str:
+        canonical = json.dumps(
+            {
+                "event_spec_id": event_spec_id,
+                "exchange_instrument_id": exchange_instrument_id,
+                "fact_digest": fact_digest,
+                "ready_at_ms": ready_at_ms,
+                "runtime_scope_id": runtime_scope_id,
+                "scope_version": scope_version,
+                "universe_semantic_digest": universe_semantic_digest,
+                "universe_version_id": universe_version_id,
+                "valid_until_ms": valid_until_ms,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return f"sha256:{sha256(canonical).hexdigest()}"
+
+    @model_validator(mode="after")
+    def _validate_readiness(self) -> WarmReadiness:
+        identities = (
+            self.runtime_scope_id,
+            self.event_spec_id,
+            self.exchange_instrument_id,
+            self.universe_version_id,
+        )
+        if any(not value.strip() for value in identities):
+            raise ValueError("warm readiness identities must be non-blank")
+        digests = (
+            self.universe_semantic_digest,
+            self.fact_digest,
+            self.readiness_digest,
+        )
+        if any(re.fullmatch(r"sha256:[0-9a-f]{64}", item) is None for item in digests):
+            raise ValueError("warm readiness digests must be exact sha256 identities")
+        if (
+            self.scope_version <= 0
+            or self.ready_at_ms <= 0
+            or self.valid_until_ms <= self.ready_at_ms
+        ):
+            raise ValueError("warm readiness version and time window are invalid")
+        expected = self.digest_for(
+            runtime_scope_id=self.runtime_scope_id,
+            scope_version=self.scope_version,
+            event_spec_id=self.event_spec_id,
+            exchange_instrument_id=self.exchange_instrument_id,
+            universe_version_id=self.universe_version_id,
+            universe_semantic_digest=self.universe_semantic_digest,
+            fact_digest=self.fact_digest,
+            ready_at_ms=self.ready_at_ms,
+            valid_until_ms=self.valid_until_ms,
+        )
+        if self.readiness_digest != expected:
+            raise ValueError("warm readiness digest differs from bound inputs")
+        return self
 
 
 class ActiveStrategyUniverseSnapshot(BaseModel):
@@ -238,6 +329,16 @@ class ActiveStrategyUniverseMembershipSnapshot(BaseModel):
     event_spec_id: str
     universe_version_id: str
     semantic_digest: str
+    exchange_instrument_ids: tuple[str, ...]
+
+
+class ObservationUniverseMembershipSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str
+    universe_version_id: str
+    semantic_digest: str
+    lifecycle_state: Literal["warming", "active"]
     exchange_instrument_ids: tuple[str, ...]
 
 
@@ -696,6 +797,22 @@ class SignalRepository(Protocol):
         updated_at_ms: int,
     ) -> ReadinessSnapshot: ...
 
+    async def save_warm_readiness(
+        self,
+        readiness: WarmReadiness,
+    ) -> None: ...
+
+    async def clear_warm_readiness(
+        self,
+        *,
+        runtime_scope_id: str,
+        scope_version: int,
+        universe_version_id: str,
+        universe_semantic_digest: str,
+        blocker: str,
+        updated_at_ms: int,
+    ) -> None: ...
+
     async def get_strategy_group(
         self,
         strategy_group_id: str,
@@ -731,6 +848,13 @@ class SignalRepository(Protocol):
         *,
         event_spec_id: str,
     ) -> ActiveStrategyUniverseMembershipSnapshot | None: ...
+
+    async def get_observation_universe_members(
+        self,
+        *,
+        event_spec_id: str,
+        universe_version_id: str,
+    ) -> ObservationUniverseMembershipSnapshot | None: ...
 
     async def get_runtime_profile(
         self,

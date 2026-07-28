@@ -18,12 +18,14 @@ from src.trading_kernel.application.ports import (
     InstrumentRulesSnapshot,
     InstrumentSnapshot,
     ObservationScopeClaim,
+    ObservationUniverseMembershipSnapshot,
     ReadinessSnapshot,
     RuntimeCapabilitySnapshot,
     RuntimeProfileSnapshot,
     RuntimeScopeSnapshot,
     StrategyGroupSnapshot,
     StrategyVersionSnapshot,
+    WarmReadiness,
 )
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
@@ -31,12 +33,14 @@ from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
 )
+from src.trading_kernel.domain.strategy_universe import StrategyUniverseVersion
 from src.trading_kernel.infrastructure.pg_models import (
-    event_specs,
     event_required_facts,
+    event_specs,
     facts_current,
     instrument_rules_current,
     instruments,
+    owner_policy_current,
     readiness_current,
     runtime_capabilities_current,
     runtime_profiles,
@@ -46,9 +50,9 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_groups,
     strategy_universe_current,
     strategy_universe_members,
+    strategy_universe_versions,
     strategy_versions,
     trade_tickets,
-    owner_policy_current,
 )
 
 
@@ -279,6 +283,9 @@ class PostgresSignalRepository:
             )
             .where(
                 runtime_scopes_current.c.observation_enabled.is_(True),
+                runtime_scopes_current.c.lifecycle_state.in_(
+                    ("warming", "active")
+                ),
                 event_specs.c.status == "active",
                 sa.or_(
                     runtime_scopes_current.c.next_observation_due_at_ms.is_(None),
@@ -435,6 +442,108 @@ class PostgresSignalRepository:
             raise RuntimeError("readiness upsert did not persist current state")
         return persisted
 
+    async def save_warm_readiness(
+        self,
+        readiness: WarmReadiness,
+    ) -> None:
+        result = await self._connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id
+                == readiness.runtime_scope_id,
+                runtime_scopes_current.c.scope_version
+                == readiness.scope_version,
+                runtime_scopes_current.c.event_spec_id
+                == readiness.event_spec_id,
+                runtime_scopes_current.c.exchange_instrument_id
+                == readiness.exchange_instrument_id,
+                runtime_scopes_current.c.universe_version_id
+                == readiness.universe_version_id,
+                runtime_scopes_current.c.universe_semantic_digest
+                == readiness.universe_semantic_digest,
+                runtime_scopes_current.c.lifecycle_state == "warming",
+                runtime_scopes_current.c.observation_enabled.is_(True),
+                runtime_scopes_current.c.entry_enabled.is_(False),
+                sa.or_(
+                    runtime_scopes_current.c.warm_ready_at_ms.is_(None),
+                    runtime_scopes_current.c.warm_ready_at_ms
+                    <= readiness.ready_at_ms,
+                ),
+            )
+            .values(
+                warm_ready_at_ms=readiness.ready_at_ms,
+                warm_readiness_digest=readiness.readiness_digest,
+                warm_valid_until_ms=readiness.valid_until_ms,
+                updated_at_ms=readiness.ready_at_ms,
+            )
+        )
+        if result.rowcount != 1:
+            raise RuntimeError("warm readiness authority changed")
+        await self.save_readiness(
+            runtime_scope_id=readiness.runtime_scope_id,
+            readiness_state="warm_ready",
+            first_blocker=None,
+            signal_event_id=None,
+            fact_summary={
+                "fact_digest": readiness.fact_digest,
+                "universe_version_id": readiness.universe_version_id,
+                "universe_semantic_digest": (
+                    readiness.universe_semantic_digest
+                ),
+                "warm_readiness_digest": readiness.readiness_digest,
+                "warm_valid_until_ms": readiness.valid_until_ms,
+            },
+            updated_at_ms=readiness.ready_at_ms,
+        )
+
+    async def clear_warm_readiness(
+        self,
+        *,
+        runtime_scope_id: str,
+        scope_version: int,
+        universe_version_id: str,
+        universe_semantic_digest: str,
+        blocker: str,
+        updated_at_ms: int,
+    ) -> None:
+        result = await self._connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id == runtime_scope_id,
+                runtime_scopes_current.c.scope_version == scope_version,
+                runtime_scopes_current.c.universe_version_id
+                == universe_version_id,
+                runtime_scopes_current.c.universe_semantic_digest
+                == universe_semantic_digest,
+                runtime_scopes_current.c.lifecycle_state == "warming",
+                runtime_scopes_current.c.observation_enabled.is_(True),
+                runtime_scopes_current.c.entry_enabled.is_(False),
+                sa.or_(
+                    runtime_scopes_current.c.warm_ready_at_ms.is_(None),
+                    runtime_scopes_current.c.warm_ready_at_ms <= updated_at_ms,
+                ),
+            )
+            .values(
+                warm_ready_at_ms=None,
+                warm_readiness_digest=None,
+                warm_valid_until_ms=None,
+                updated_at_ms=updated_at_ms,
+            )
+        )
+        if result.rowcount != 1:
+            raise RuntimeError("warm readiness authority changed")
+        await self.save_readiness(
+            runtime_scope_id=runtime_scope_id,
+            readiness_state="blocked",
+            first_blocker=blocker,
+            signal_event_id=None,
+            fact_summary={
+                "universe_version_id": universe_version_id,
+                "universe_semantic_digest": universe_semantic_digest,
+            },
+            updated_at_ms=updated_at_ms,
+        )
+
     async def get_strategy_group(
         self,
         strategy_group_id: str,
@@ -582,6 +691,91 @@ class PostgresSignalRepository:
             exchange_instrument_ids=tuple(
                 str(row["exchange_instrument_id"]) for row in rows
             ),
+        )
+
+    async def get_observation_universe_members(
+        self,
+        *,
+        event_spec_id: str,
+        universe_version_id: str,
+    ) -> ObservationUniverseMembershipSnapshot | None:
+        result = await self._connection.execute(
+            sa.select(
+                strategy_universe_versions.c.event_spec_id,
+                strategy_universe_versions.c.universe_version_id,
+                strategy_universe_versions.c.strategy_group_id,
+                strategy_universe_versions.c.universe_version,
+                strategy_universe_versions.c.semantic_digest,
+                strategy_universe_versions.c.lifecycle_state,
+                strategy_universe_versions.c.installed_at_ms,
+                strategy_universe_members.c.exchange_instrument_id,
+            )
+            .join(
+                strategy_universe_members,
+                strategy_universe_members.c.universe_version_id
+                == strategy_universe_versions.c.universe_version_id,
+            )
+            .outerjoin(
+                strategy_universe_current,
+                sa.and_(
+                    strategy_universe_current.c.event_spec_id
+                    == strategy_universe_versions.c.event_spec_id,
+                    strategy_universe_current.c.universe_version_id
+                    == strategy_universe_versions.c.universe_version_id,
+                    strategy_universe_current.c.semantic_digest
+                    == strategy_universe_versions.c.semantic_digest,
+                    strategy_universe_current.c.lifecycle_state == "active",
+                ),
+            )
+            .where(
+                strategy_universe_versions.c.event_spec_id == event_spec_id,
+                strategy_universe_versions.c.universe_version_id
+                == universe_version_id,
+                strategy_universe_versions.c.lifecycle_state.in_(
+                    ("warming", "active")
+                ),
+                sa.or_(
+                    strategy_universe_versions.c.lifecycle_state == "warming",
+                    strategy_universe_current.c.universe_version_id.is_not(None),
+                ),
+            )
+            .order_by(strategy_universe_members.c.exchange_instrument_id)
+            .limit(11)
+        )
+        rows = result.mappings().all()
+        if not rows:
+            return None
+        if len(rows) > 10:
+            raise RuntimeError("observation Universe exceeds ten members")
+        first = rows[0]
+        if any(
+            row["event_spec_id"] != first["event_spec_id"]
+            or row["universe_version_id"] != first["universe_version_id"]
+            or row["semantic_digest"] != first["semantic_digest"]
+            or row["lifecycle_state"] != first["lifecycle_state"]
+            for row in rows
+        ):
+            raise RuntimeError("observation Universe identity is inconsistent")
+        universe = StrategyUniverseVersion(
+            universe_version_id=str(first["universe_version_id"]),
+            strategy_group_id=str(first["strategy_group_id"]),
+            event_spec_id=str(first["event_spec_id"]),
+            universe_version=int(first["universe_version"]),
+            exchange_instrument_ids=tuple(
+                str(row["exchange_instrument_id"]) for row in rows
+            ),
+            semantic_digest=str(first["semantic_digest"]),
+            installed_at_ms=int(first["installed_at_ms"]),
+        )
+        return ObservationUniverseMembershipSnapshot(
+            event_spec_id=universe.event_spec_id,
+            universe_version_id=universe.universe_version_id,
+            semantic_digest=universe.semantic_digest,
+            lifecycle_state=cast(
+                Literal["warming", "active"],
+                str(first["lifecycle_state"]),
+            ),
+            exchange_instrument_ids=universe.exchange_instrument_ids,
         )
 
     async def get_runtime_profile(
