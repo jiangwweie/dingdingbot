@@ -13,6 +13,7 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from scripts.trading_kernel.certify_readonly import _certify
 from src.trading_kernel.infrastructure.pg_models import (
     instrument_certification_current,
     monitor_current,
@@ -156,6 +157,49 @@ async def test_configure_cli_installs_only_one_warming_universe(
         ("binance-usdm:SOLUSDT:perpetual", "warming", True, False),
     )
     assert downstream_counts == (0, 0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_readonly_certification_accepts_only_structurally_consistent_universe(
+    script_database_url: str,
+    tmp_path: Path,
+) -> None:
+    """Catches treating every configured Scope as a certification failure."""
+
+    configured = _run_configure(
+        script_database_url,
+        tmp_path,
+        event_id="SOR-LONG",
+        runtime_profile_id=RUNTIME_PROFILE_ID,
+        instruments=("SOLUSDT", "BTCUSDT"),
+    )
+    assert configured.returncode == 0, configured.stderr
+
+    coherent = await _certify(script_database_url, require_flat=True)
+
+    engine = create_async_engine(script_database_url)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.delete(runtime_scopes_current).where(
+                    runtime_scopes_current.c.exchange_instrument_id
+                    == "binance-usdm:SOLUSDT:perpetual"
+                )
+            )
+        inconsistent = await _certify(script_database_url, require_flat=True)
+    finally:
+        await engine.dispose()
+
+    assert coherent["status"] == "pass"
+    assert coherent["strategy_universe"] == {
+        "version_count": 1,
+        "current_count": 0,
+        "member_count": 2,
+        "scope_count": 2,
+        "integrity_violation_count": 0,
+    }
+    assert inconsistent["status"] == "fail"
+    assert inconsistent["strategy_universe"]["integrity_violation_count"] == 1
 
 
 @pytest.mark.asyncio

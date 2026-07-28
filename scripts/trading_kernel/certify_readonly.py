@@ -5,15 +5,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from decimal import Decimal
 import json
 import os
-from pathlib import Path
 import sys
+from decimal import Decimal
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -24,7 +23,6 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (  # noqa: 
     DYNAMIC_POLICY,
     OWNER_POLICY_ID,
 )
-
 
 SCHEMA = "brc.trading_kernel.readonly_certification.v1"
 EXPECTED_ALEMBIC_REVISION = "0002_crypto_strategy_universe"
@@ -220,6 +218,77 @@ async def _certify(
                     )
                 ).scalar_one()
             )
+            universe_counts = (
+                await connection.execute(
+                    text(
+                        """
+                        WITH violations AS (
+                            SELECT member.universe_version_id,
+                                   member.exchange_instrument_id
+                              FROM brc_strategy_universe_members member
+                              LEFT JOIN brc_runtime_scopes_current scope
+                                ON scope.universe_version_id =
+                                   member.universe_version_id
+                               AND scope.exchange_instrument_id =
+                                   member.exchange_instrument_id
+                             WHERE scope.runtime_scope_id IS NULL
+                            UNION ALL
+                            SELECT scope.universe_version_id,
+                                   scope.exchange_instrument_id
+                              FROM brc_runtime_scopes_current scope
+                              LEFT JOIN brc_strategy_universe_versions version
+                                ON version.universe_version_id =
+                                   scope.universe_version_id
+                              LEFT JOIN brc_strategy_universe_members member
+                                ON member.universe_version_id =
+                                   scope.universe_version_id
+                               AND member.exchange_instrument_id =
+                                   scope.exchange_instrument_id
+                             WHERE version.universe_version_id IS NULL
+                                OR member.universe_version_id IS NULL
+                                OR scope.event_spec_id <> version.event_spec_id
+                                OR scope.universe_semantic_digest <>
+                                   version.semantic_digest
+                                OR scope.lifecycle_state <>
+                                   version.lifecycle_state
+                            UNION ALL
+                            SELECT current.universe_version_id,
+                                   current.event_spec_id
+                              FROM brc_strategy_universe_current current
+                              LEFT JOIN brc_strategy_universe_versions version
+                                ON version.universe_version_id =
+                                   current.universe_version_id
+                             WHERE version.universe_version_id IS NULL
+                                OR version.event_spec_id <>
+                                   current.event_spec_id
+                                OR version.semantic_digest <>
+                                   current.semantic_digest
+                                OR version.lifecycle_state <> 'active'
+                                OR current.lifecycle_state <> 'active'
+                            UNION ALL
+                            SELECT version.universe_version_id,
+                                   version.event_spec_id
+                              FROM brc_strategy_universe_versions version
+                              LEFT JOIN brc_strategy_universe_current current
+                                ON current.universe_version_id =
+                                   version.universe_version_id
+                             WHERE version.lifecycle_state = 'active'
+                               AND current.universe_version_id IS NULL
+                        )
+                        SELECT
+                            (SELECT count(*)
+                               FROM brc_strategy_universe_versions),
+                            (SELECT count(*)
+                               FROM brc_strategy_universe_current),
+                            (SELECT count(*)
+                               FROM brc_strategy_universe_members),
+                            (SELECT count(*)
+                               FROM brc_runtime_scopes_current),
+                            (SELECT count(*) FROM violations)
+                        """
+                    )
+                )
+            ).one()
             capabilities = {
                 str(row["capability_key"]): bool(row["enabled"])
                 for row in (
@@ -517,6 +586,13 @@ async def _certify(
         if owner_projection_row is None
         else {key: owner_projection_row[key] for key in owner_projection_row}
     )
+    strategy_universe = {
+        "version_count": int(universe_counts[0]),
+        "current_count": int(universe_counts[1]),
+        "member_count": int(universe_counts[2]),
+        "scope_count": int(universe_counts[3]),
+        "integrity_violation_count": int(universe_counts[4]),
+    }
     protected_tickets = (
         []
         if normalized_closure_ticket_id is not None
@@ -596,7 +672,7 @@ async def _certify(
             "seed_identity",
         }
         and actual_tables == expected_tables
-        and runtime_scope_count == 0
+        and strategy_universe["integrity_violation_count"] == 0
         and capabilities_are_current
         and policy_is_dynamic
         and integrity_orphans == 0
@@ -616,6 +692,7 @@ async def _certify(
         "runtime_identity": runtime_identity,
         "table_allowlist": table_allowlist,
         "runtime_scope_count": runtime_scope_count,
+        "strategy_universe": strategy_universe,
         "capabilities": capabilities,
         "owner_policy": owner_policy,
         "release_counts": release_counts,
