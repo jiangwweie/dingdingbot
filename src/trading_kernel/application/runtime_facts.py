@@ -11,6 +11,10 @@ from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.order_attribution import (
+    OrderRole,
+    TicketOrderReference,
+)
 from src.trading_kernel.domain.review import ReviewEconomicsFacts
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
@@ -197,7 +201,7 @@ class LifecycleFactsRequest(BaseModel):
     timeframe: Literal["15m", "1h"]
     entry_quantity: Decimal
     expected_position_quantity: Decimal
-    entry_venue_client_order_id: str
+    entry_order_reference: TicketOrderReference
     tp1_exchange_order_id: str | None
     entered_at_ms: int
     price_tick: Decimal
@@ -209,7 +213,6 @@ class LifecycleFactsRequest(BaseModel):
     @field_validator(
         "ticket_id",
         "event_spec_id",
-        "entry_venue_client_order_id",
         mode="before",
     )
     @classmethod
@@ -229,6 +232,8 @@ class LifecycleFactsRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_facts(self) -> "LifecycleFactsRequest":
+        if self.entry_order_reference.role is not OrderRole.ENTRY:
+            raise ValueError("lifecycle entry order reference must be an ENTRY")
         if self.entry_quantity <= 0 or self.expected_position_quantity < 0:
             raise ValueError("lifecycle quantities are invalid")
         if self.price_tick <= 0:
@@ -256,8 +261,8 @@ class ReviewEconomicsRequest(BaseModel):
     ticket_id: str
     netting_domain: NettingDomain
     expected_entry_quantity: Decimal
-    entry_venue_client_order_id: str
-    exit_venue_client_order_ids: tuple[str, ...]
+    entry_order_reference: TicketOrderReference
+    exit_order_references: tuple[TicketOrderReference, ...]
     entry_time_ms: int
     exit_time_ms: int
     funding_attribution_exact: bool
@@ -265,7 +270,6 @@ class ReviewEconomicsRequest(BaseModel):
 
     @field_validator(
         "ticket_id",
-        "entry_venue_client_order_id",
         mode="before",
     )
     @classmethod
@@ -275,24 +279,35 @@ class ReviewEconomicsRequest(BaseModel):
             raise ValueError("review economics request identities must be non-blank")
         return normalized
 
-    @field_validator("exit_venue_client_order_ids", mode="before")
+    @field_validator("exit_order_references", mode="before")
     @classmethod
-    def _normalize_exit_identities(cls, value: object) -> tuple[str, ...]:
+    def _normalize_exit_references(
+        cls,
+        value: object,
+    ) -> tuple[TicketOrderReference, ...]:
         if not isinstance(value, (list, tuple)):
-            raise ValueError("review exit order identities must be a sequence")
-        normalized = tuple(str(item or "").strip() for item in value)
-        if not normalized or any(not item for item in normalized):
-            raise ValueError("review requires non-blank exit order identities")
-        if len(set(normalized)) != len(normalized):
-            raise ValueError("review exit order identities must be unique")
+            raise ValueError("review exit order references must be a sequence")
+        normalized = tuple(value)
+        if not normalized:
+            raise ValueError("review requires exit order references")
+        if any(not isinstance(item, TicketOrderReference) for item in normalized):
+            raise ValueError("review exit order references must be typed")
+        if len({item.command_id for item in normalized}) != len(normalized):
+            raise ValueError("review exit order commands must be unique")
         return normalized
 
     @model_validator(mode="after")
     def _validate_review_window(self) -> "ReviewEconomicsRequest":
         if self.expected_entry_quantity <= 0:
             raise ValueError("review expected entry quantity must be positive")
-        if self.entry_venue_client_order_id in self.exit_venue_client_order_ids:
-            raise ValueError("entry order identity cannot also be an exit identity")
+        if self.entry_order_reference.role is not OrderRole.ENTRY:
+            raise ValueError("review entry order reference must be an ENTRY")
+        if any(reference.role is not OrderRole.EXIT for reference in self.exit_order_references):
+            raise ValueError("review exit order references must be EXIT commands")
+        if self.entry_order_reference.command_id in {
+            reference.command_id for reference in self.exit_order_references
+        }:
+            raise ValueError("entry command cannot also be an exit command")
         if (
             self.entry_time_ms <= 0
             or self.exit_time_ms < self.entry_time_ms

@@ -640,6 +640,7 @@ async def test_tp1_and_replacement_commands_reach_protected_runner(
     )
     assert isinstance(tp1.payload, OrderCommandPayload)
     assert tp1.payload.order_type == "limit"
+    assert tp1.payload.time_in_force == "GTX"
     assert tp1.payload.reduce_only is True
     assert tp1.payload.quantity == ticket.take_profit_quantities[0]
     assert tp1.payload.limit_price == ticket.take_profit_prices[0]

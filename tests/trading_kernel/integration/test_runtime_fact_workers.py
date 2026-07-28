@@ -317,6 +317,69 @@ async def test_runtime_selector_reschedules_no_change_ticket_without_starving_ne
 
 
 @pytest.mark.asyncio
+async def test_reconciliation_selector_prioritizes_overdue_closure_over_due_position(
+    runtime_fact_worker_engine,
+) -> None:
+    position_ticket = _ticket()
+    closure_identity = position_ticket.identity.model_copy(
+        update={
+            "ticket_id": "ticket:closure-overdue",
+            "exposure_episode_id": "episode-closure-overdue",
+            "signal_event_id": "signal-closure-overdue",
+            "netting_domain": NettingDomain(
+                venue_id="binance-usdm",
+                account_id="experiment-1",
+                exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+                position_side="long",
+            ),
+        }
+    )
+    closure_ticket = _ticket(identity=closure_identity)
+    async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
+        await uow.tickets.add(position_ticket)
+        await uow.tickets.add(closure_ticket)
+        await uow.aggregates.add(
+            TradeAggregate(
+                identity=position_ticket.identity,
+                ticket=position_ticket,
+                status=AggregateStatus.POSITION_PROTECTED,
+                version=1,
+                last_event_sequence=1,
+                entry_lane_held=False,
+                position_qty=position_ticket.quantity,
+                average_fill_price=position_ticket.entry_reference_price,
+                protected_qty=position_ticket.quantity,
+                initial_stop_exchange_order_id="stop:position",
+                active_stop_exchange_order_id="stop:position",
+                active_stop_price=position_ticket.initial_stop_price,
+            ),
+            updated_at_ms=1_000,
+        )
+        await uow.aggregates.add(
+            TradeAggregate(
+                identity=closure_ticket.identity,
+                ticket=closure_ticket,
+                status=AggregateStatus.SETTLEMENT_PENDING,
+                version=1,
+                last_event_sequence=1,
+                entry_lane_held=False,
+                position_qty=Decimal("0"),
+                average_fill_price=closure_ticket.entry_reference_price,
+            ),
+            updated_at_ms=1_000,
+        )
+
+    async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
+        selected = await uow.aggregates.get_next_reconciliation_work(
+            now_ms=31_000,
+            closure_starvation_limit_ms=30_000,
+        )
+
+    assert selected is not None
+    assert selected.identity.ticket_id == closure_ticket.identity.ticket_id
+
+
+@pytest.mark.asyncio
 async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
     runtime_fact_worker_engine,
 ) -> None:

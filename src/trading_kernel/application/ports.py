@@ -27,6 +27,7 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.exit_policy import ExitPolicy
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.signal import SignalFactSnapshot, StrategySignal
 from src.trading_kernel.domain.strategy_registry import (
@@ -327,6 +328,13 @@ class AggregateRepository(Protocol):
         now_ms: int | None = None,
     ) -> TradeAggregate | None: ...
 
+    async def get_next_reconciliation_work(
+        self,
+        *,
+        now_ms: int,
+        closure_starvation_limit_ms: int,
+    ) -> TradeAggregate | None: ...
+
     async def schedule_next_check(
         self,
         ticket_id: str,
@@ -356,6 +364,11 @@ class ExchangeCommandRepository(Protocol):
     async def get(self, command_id: str) -> ExchangeCommand | None: ...
 
     async def list_for_ticket(self, ticket_id: str) -> list[ExchangeCommand]: ...
+
+    async def list_order_references(
+        self,
+        ticket_id: str,
+    ) -> tuple[TicketOrderReference, ...]: ...
 
     async def next_generation(
         self,

@@ -59,6 +59,38 @@ class AggregateStatus(StrEnum):
     TERMINAL = "terminal"
 
 
+RECONCILIATION_POSITION_STATUSES = (
+    AggregateStatus.ENTRY_ACCEPTED,
+    AggregateStatus.PARTIAL_FILL_INCIDENT,
+    AggregateStatus.PARTIAL_FILL_CANCEL_REJECTED,
+    AggregateStatus.PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN,
+    AggregateStatus.PROTECTION_PENDING,
+    AggregateStatus.INITIAL_STOP_OUTCOME_UNKNOWN,
+    AggregateStatus.TP1_PENDING,
+    AggregateStatus.TP1_REJECTED,
+    AggregateStatus.TP1_OUTCOME_UNKNOWN,
+    AggregateStatus.POSITION_PROTECTED,
+    AggregateStatus.RUNNER_REPLACEMENT_PENDING,
+    AggregateStatus.RUNNER_REPLACEMENT_REJECTED,
+    AggregateStatus.RUNNER_REPLACEMENT_OUTCOME_UNKNOWN,
+    AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING,
+    AggregateStatus.RUNNER_OLD_STOP_CANCEL_REJECTED,
+    AggregateStatus.RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN,
+    AggregateStatus.RUNNER_PROTECTED,
+    AggregateStatus.EXIT_PENDING,
+    AggregateStatus.EXIT_ACCEPTED,
+    AggregateStatus.EXIT_REJECTED,
+    AggregateStatus.EXIT_OUTCOME_UNKNOWN,
+    AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+    AggregateStatus.CONTROLLED_FLATTEN_ACCEPTED,
+    AggregateStatus.CONTROLLED_FLATTEN_REJECTED,
+    AggregateStatus.CONTROLLED_FLATTEN_OUTCOME_UNKNOWN,
+    AggregateStatus.RECONCILIATION_PENDING,
+    AggregateStatus.CANCEL_REJECTED,
+    AggregateStatus.CANCEL_OUTCOME_UNKNOWN,
+)
+
+
 class TradeAggregate(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

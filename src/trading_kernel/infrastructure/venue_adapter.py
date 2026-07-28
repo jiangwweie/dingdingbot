@@ -48,12 +48,27 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     canonical_digest,
 )
 from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
+from src.trading_kernel.domain.fee_valuation import (
+    FeeValuationEvidence,
+    NativeFee,
+    value_native_fee,
+)
+from src.trading_kernel.domain.order_attribution import (
+    OrderRole,
+    ResolvedOrderIdentity,
+)
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.review import ReviewEconomicsFacts, ReviewFill
 from src.trading_kernel.domain.venue_truth import (
     VenueLookupStatus,
     VenueOrderTruth,
     VenueTruthSnapshot,
+)
+from src.trading_kernel.infrastructure.binance_fee_valuation import (
+    read_bnbusdt_fee_valuation_evidence,
+)
+from src.trading_kernel.infrastructure.binance_order_attribution import (
+    resolve_binance_order_identity,
 )
 
 
@@ -452,12 +467,19 @@ class CcxtVenueAdapter:
             [symbol],
             {"positionSide": domain.position_side.upper()},
         )
+        resolved_entry = await resolve_binance_order_identity(
+            exchange=exchange,
+            reference=request.entry_order_reference,
+            observed_at_ms=request.observed_at_ms,
+        )
+        if resolved_entry.actual_order_id is None:
+            raise RuntimeError("filled entry command has no executable order identity")
         entry_fills_call = _call_raw_exchange(
             exchange.fetch_my_trades,
             symbol,
             None,
             100,
-            {"clientOrderId": request.entry_venue_client_order_id},
+            {"orderId": resolved_entry.actual_order_id},
         )
         tp1_order_call = (
             _call_raw_exchange(
@@ -491,10 +513,24 @@ class CcxtVenueAdapter:
             expected_symbol=symbol,
             position_side=domain.position_side,
         )
-        _, _, entry_fee_quote = _fill_metrics(
-            _require_list(entry_fills, name="entry fills"),
-            venue_client_order_id=request.entry_venue_client_order_id,
-            settlement_asset=settlement_asset,
+        attributed_entry_fills: list[ReviewFill] = []
+        for row in _require_list(entry_fills, name="entry fills"):
+            fill = await _review_fill(
+                row,
+                resolved=resolved_entry,
+                exchange=exchange,
+                settlement_asset=settlement_asset,
+                position_side=domain.position_side,
+                entry_time_ms=request.entered_at_ms,
+                exit_time_ms=request.observed_at_ms,
+            )
+            if fill is not None:
+                attributed_entry_fills.append(fill)
+        if not attributed_entry_fills:
+            raise RuntimeError("entry fills are unavailable for the exact order identity")
+        entry_fee_quote = sum(
+            (fill.fee_quote for fill in attributed_entry_fills),
+            Decimal("0"),
         )
         tp1_quantity, tp1_average_price = _order_fill_metrics(tp1_order)
         allocated_entry_fee = (
@@ -540,41 +576,54 @@ class CcxtVenueAdapter:
         if not settlement_asset:
             raise RuntimeError("canonical instrument has no settlement asset mapping")
 
-        client_ids = (
-            request.entry_venue_client_order_id,
-            *request.exit_venue_client_order_ids,
+        references = (
+            request.entry_order_reference,
+            *request.exit_order_references,
         )
-        rows: list[object] = []
-        for client_id in client_ids:
-            rows.extend(
-                _require_list(
-                    await _call_raw_exchange(
-                        exchange.fetch_my_trades,
-                        symbol,
-                        request.entry_time_ms,
-                        100,
-                        {"clientOrderId": client_id},
-                    ),
-                    name="review fills",
+        resolved_references = tuple(
+            await asyncio.gather(
+                *(
+                    resolve_binance_order_identity(
+                        exchange=exchange,
+                        reference=reference,
+                        observed_at_ms=request.observed_at_ms,
+                    )
+                    for reference in references
                 )
             )
+        )
         fills_by_trade_id: dict[str, ReviewFill] = {}
-        known_client_ids = set(client_ids)
-        for row in rows:
-            fill = _review_fill(
-                row,
-                known_client_ids=known_client_ids,
-                settlement_asset=settlement_asset,
-                position_side=domain.position_side,
-                entry_time_ms=request.entry_time_ms,
-                exit_time_ms=request.exit_time_ms,
-            )
-            if fill is None:
+        for resolved in resolved_references:
+            if resolved.actual_order_id is None:
                 continue
-            existing = fills_by_trade_id.get(fill.exchange_trade_id)
-            if existing is not None and existing != fill:
-                raise RuntimeError("venue returned contradictory duplicate review fill")
-            fills_by_trade_id[fill.exchange_trade_id] = fill
+            rows = _require_list(
+                await _call_raw_exchange(
+                    exchange.fetch_my_trades,
+                    symbol,
+                    request.entry_time_ms,
+                    100,
+                    {"orderId": resolved.actual_order_id},
+                ),
+                name="review fills",
+            )
+            for row in rows:
+                fill = await _review_fill(
+                    row,
+                    resolved=resolved,
+                    exchange=exchange,
+                    settlement_asset=settlement_asset,
+                    position_side=domain.position_side,
+                    entry_time_ms=request.entry_time_ms,
+                    exit_time_ms=request.exit_time_ms,
+                )
+                if fill is None:
+                    continue
+                existing = fills_by_trade_id.get(fill.exchange_trade_id)
+                if existing is not None and existing != fill:
+                    raise RuntimeError(
+                        "venue returned contradictory duplicate review fill"
+                    )
+                fills_by_trade_id[fill.exchange_trade_id] = fill
 
         ordered_fills = tuple(
             sorted(
@@ -585,13 +634,12 @@ class CcxtVenueAdapter:
         entry_fills = tuple(
             fill
             for fill in ordered_fills
-            if fill.venue_client_order_id == request.entry_venue_client_order_id
+            if fill.role is OrderRole.ENTRY
         )
-        exit_client_ids = set(request.exit_venue_client_order_ids)
         exit_fills = tuple(
             fill
             for fill in ordered_fills
-            if fill.venue_client_order_id in exit_client_ids
+            if fill.role is OrderRole.EXIT
         )
 
         if request.funding_attribution_exact:
@@ -656,6 +704,8 @@ class CcxtVenueAdapter:
         params["newClientOrderId"] = request.venue_client_order_id
         if request.payload.reduce_only and request.venue_id != "binance-usdm":
             params["reduceOnly"] = True
+        if request.payload.time_in_force is not None:
+            params["timeInForce"] = request.payload.time_in_force
         if request.payload.stop_price is not None:
             params["stopPrice"] = request.payload.stop_price
 
@@ -824,16 +874,6 @@ class CcxtVenueAdapter:
             ),
             name="positions",
         )
-        fills = _require_list(
-            await _call_raw_exchange(
-                exchange.fetch_my_trades,
-                symbol,
-                None,
-                100,
-                {"clientOrderId": request.venue_client_order_id},
-            ),
-            name="fills",
-        )
         regular_orders = _require_list(
             await _call_raw_exchange(
                 exchange.fetch_open_orders,
@@ -885,6 +925,20 @@ class CcxtVenueAdapter:
                 ),
             )
         )
+        fills = (
+            _require_list(
+                await _call_raw_exchange(
+                    exchange.fetch_my_trades,
+                    symbol,
+                    None,
+                    100,
+                    {"orderId": order.exchange_order_id},
+                ),
+                name="fills",
+            )
+            if order is not None
+            else []
+        )
         return VenueTruthSnapshot(
             lookup_status=(
                 VenueLookupStatus.ABSENT
@@ -899,7 +953,9 @@ class CcxtVenueAdapter:
             ),
             matching_fill_quantity=_matching_fill_quantity(
                 fills,
-                venue_client_order_id=request.venue_client_order_id,
+                exchange_order_id=(
+                    order.exchange_order_id if order is not None else None
+                ),
             ),
             regular_open_client_order_ids=_open_client_order_ids(regular_orders),
             conditional_open_client_order_ids=_open_client_order_ids(
@@ -1622,49 +1678,11 @@ def _order_fill_metrics(value: object | None) -> tuple[Decimal, Decimal | None]:
     return quantity, average_price
 
 
-def _fill_metrics(
-    rows: list[object],
-    *,
-    venue_client_order_id: str | None,
-    settlement_asset: str,
-) -> tuple[Decimal, Decimal | None, Decimal]:
-    if venue_client_order_id is None:
-        return Decimal("0"), None, Decimal("0")
-    quantity = Decimal("0")
-    weighted_price = Decimal("0")
-    fee_quote = Decimal("0")
-    for value in rows:
-        if not isinstance(value, Mapping):
-            raise RuntimeError("venue fill row is not a mapping")
-        info = value.get("info")
-        raw_info = info if isinstance(info, Mapping) else {}
-        client_id = str(
-            value.get("clientOrderId")
-            or raw_info.get("clientOrderId")
-            or ""
-        )
-        if client_id != venue_client_order_id:
-            continue
-        fill_quantity = abs(Decimal(str(value.get("amount") or "0")))
-        fill_price = Decimal(str(value.get("price") or "0"))
-        if fill_quantity <= 0 or fill_price <= 0:
-            raise RuntimeError("venue fill quantity and price must be positive")
-        quantity += fill_quantity
-        weighted_price += fill_quantity * fill_price
-        fee = value.get("fee")
-        if isinstance(fee, Mapping) and fee.get("cost") is not None:
-            currency = str(fee.get("currency") or "").upper()
-            if currency != settlement_asset.upper():
-                raise RuntimeError("venue fill fee is not in settlement asset")
-            fee_quote += abs(Decimal(str(fee.get("cost"))))
-    average_price = None if quantity == 0 else weighted_price / quantity
-    return quantity, average_price, fee_quote
-
-
-def _review_fill(
+async def _review_fill(
     value: object,
     *,
-    known_client_ids: set[str],
+    resolved: ResolvedOrderIdentity,
+    exchange: object,
     settlement_asset: str,
     position_side: Literal["long", "short"],
     entry_time_ms: int,
@@ -1674,12 +1692,13 @@ def _review_fill(
         raise RuntimeError("venue review fill row is not a mapping")
     info = value.get("info")
     raw_info = info if isinstance(info, Mapping) else {}
-    client_id = str(
-        value.get("clientOrderId")
-        or raw_info.get("clientOrderId")
+    exchange_order_id = str(
+        value.get("order")
+        or value.get("orderId")
+        or raw_info.get("orderId")
         or ""
     ).strip()
-    if client_id not in known_client_ids:
+    if exchange_order_id != resolved.actual_order_id:
         return None
     raw_position_side = str(
         value.get("positionSide")
@@ -1709,18 +1728,56 @@ def _review_fill(
     if quantity <= 0 or price <= 0:
         raise RuntimeError("review fill quantity and price must be positive")
     fee = value.get("fee")
-    if not isinstance(fee, Mapping) or fee.get("cost") is None:
+    raw_fee_amount = (
+        fee.get("cost")
+        if isinstance(fee, Mapping)
+        else raw_info.get("commission")
+    )
+    if raw_fee_amount is None:
         raise RuntimeError("review fill fee is unavailable")
-    fee_asset = str(fee.get("currency") or "").strip().upper()
-    if fee_asset != settlement_asset.upper():
-        raise RuntimeError("review fill fee is not in the settlement asset")
-    fee_quote = abs(Decimal(str(fee.get("cost"))))
+    fee_asset = str(
+        (fee.get("currency") if isinstance(fee, Mapping) else None)
+        or raw_info.get("commissionAsset")
+        or settlement_asset
+    ).strip().upper()
+    if fee_asset not in {"USDT", "BNB"}:
+        raise RuntimeError("review fill fee asset is unsupported")
+    native_fee = NativeFee(
+        asset=cast(Literal["USDT", "BNB"], fee_asset),
+        amount=abs(Decimal(str(raw_fee_amount))),
+    )
+    if native_fee.asset == "BNB":
+        valuation = await read_bnbusdt_fee_valuation_evidence(
+            exchange=exchange,
+            trade_occurred_at_ms=occurred_at_ms,
+        )
+    else:
+        if settlement_asset.upper() != "USDT":
+            raise RuntimeError("non-USDT settlement asset has no review fee valuation")
+        valuation = FeeValuationEvidence(
+            method="native_usdt",
+            rate_usdt_per_asset=Decimal("1"),
+            price_pair=None,
+            candle_open_time_ms=None,
+            candle_close_time_ms=None,
+            valued_at_ms=occurred_at_ms,
+        )
+    valued_fee = value_native_fee(
+        native_fee=native_fee,
+        valuation_evidence=valuation,
+    )
+    realized_pnl_quote = Decimal(
+        str(value.get("realizedPnl") or raw_info.get("realizedPnl") or "0")
+    )
     return ReviewFill(
         exchange_trade_id=trade_id,
-        venue_client_order_id=client_id,
+        exchange_order_id=exchange_order_id,
+        command_id=resolved.reference.command_id,
+        role=resolved.reference.role,
         quantity=quantity,
         price=price,
-        fee_quote=fee_quote,
+        fee=valued_fee,
+        realized_pnl_quote=realized_pnl_quote,
         occurred_at_ms=occurred_at_ms,
     )
 
@@ -1887,20 +1944,23 @@ def _order_side_literal(value: str) -> Literal["buy", "sell"]:
 def _matching_fill_quantity(
     rows: list[object],
     *,
-    venue_client_order_id: str,
+    exchange_order_id: str | None,
 ) -> Decimal:
+    if exchange_order_id is None:
+        return Decimal("0")
     total = Decimal("0")
     for value in rows:
         if not isinstance(value, Mapping):
             raise RuntimeError("venue fill row is not a mapping")
         info = value.get("info")
         raw_info = info if isinstance(info, Mapping) else {}
-        client_id = str(
-            value.get("clientOrderId")
-            or raw_info.get("clientOrderId")
+        row_order_id = str(
+            value.get("order")
+            or value.get("orderId")
+            or raw_info.get("orderId")
             or ""
         )
-        if client_id == venue_client_order_id:
+        if row_order_id == exchange_order_id:
             total += abs(Decimal(str(value.get("amount") or "0")))
     return total
 

@@ -26,6 +26,7 @@ from src.trading_kernel.application.runtime_facts import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind
+from src.trading_kernel.domain.order_attribution import OrderRole
 from src.trading_kernel.domain.events import EntryFilled
 
 
@@ -141,7 +142,7 @@ async def run_lifecycle_worker_once(
             aggregate.identity.netting_domain.venue_id,
             aggregate.identity.netting_domain.exchange_instrument_id
         )
-        commands = await uow.exchange_commands.list_for_ticket(
+        order_references = await uow.exchange_commands.list_order_references(
             aggregate.identity.ticket_id
         )
         events = await uow.events.list_for_ticket(aggregate.identity.ticket_id)
@@ -157,11 +158,11 @@ async def run_lifecycle_worker_once(
             ticket_id=aggregate.identity.ticket_id,
             detail="exit_policy_or_instrument_rules_missing",
         )
-    entry_command = next(
+    entry_order_reference = next(
         (
-            command
-            for command in commands
-            if command.kind is ExchangeCommandKind.ENTRY
+            reference
+            for reference in order_references
+            if reference.role is OrderRole.ENTRY
         ),
         None,
     )
@@ -169,7 +170,7 @@ async def run_lifecycle_worker_once(
         (event for event in events if isinstance(event, EntryFilled)),
         None,
     )
-    if entry_command is None or entry_fill is None:
+    if entry_order_reference is None or entry_fill is None:
         async with uow_factory() as uow:
             await uow.aggregates.schedule_next_check(
                 aggregate.identity.ticket_id,
@@ -188,7 +189,7 @@ async def run_lifecycle_worker_once(
         timeframe=policy.runner.timeframe,
         entry_quantity=aggregate.ticket.quantity,
         expected_position_quantity=aggregate.position_qty,
-        entry_venue_client_order_id=entry_command.venue_client_order_id,
+        entry_order_reference=entry_order_reference,
         tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
         entered_at_ms=entry_fill.occurred_at_ms,
         price_tick=rules.price_tick,

@@ -34,11 +34,15 @@ from src.trading_kernel.application.settle_ticket import (
     record_trade_review,
     settle_ticket,
 )
-from src.trading_kernel.domain.aggregate import AggregateStatus
-from src.trading_kernel.domain.commands import (
-    ExchangeCommand,
-    ExchangeCommandKind,
-    ExchangeCommandStatus,
+from src.trading_kernel.domain.aggregate import (
+    RECONCILIATION_POSITION_STATUSES,
+    AggregateStatus,
+)
+from src.trading_kernel.domain.aggregate import TradeAggregate
+from src.trading_kernel.domain.order_attribution import (
+    OrderRole,
+    TicketOrderReference,
+    attribution_digest,
 )
 from src.trading_kernel.domain.events import (
     EntryFilled,
@@ -56,36 +60,84 @@ from src.trading_kernel.domain.review import (
 from src.trading_kernel.domain.venue_truth import UnknownRecoveryStatus
 
 
-_POSITION_RECONCILIATION_STATUSES = (
-    AggregateStatus.ENTRY_ACCEPTED,
-    AggregateStatus.PARTIAL_FILL_INCIDENT,
-    AggregateStatus.PARTIAL_FILL_CANCEL_REJECTED,
-    AggregateStatus.PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN,
-    AggregateStatus.PROTECTION_PENDING,
-    AggregateStatus.INITIAL_STOP_OUTCOME_UNKNOWN,
-    AggregateStatus.TP1_PENDING,
-    AggregateStatus.TP1_REJECTED,
-    AggregateStatus.TP1_OUTCOME_UNKNOWN,
-    AggregateStatus.POSITION_PROTECTED,
-    AggregateStatus.RUNNER_REPLACEMENT_PENDING,
-    AggregateStatus.RUNNER_REPLACEMENT_REJECTED,
-    AggregateStatus.RUNNER_REPLACEMENT_OUTCOME_UNKNOWN,
-    AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING,
-    AggregateStatus.RUNNER_OLD_STOP_CANCEL_REJECTED,
-    AggregateStatus.RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN,
-    AggregateStatus.RUNNER_PROTECTED,
-    AggregateStatus.EXIT_PENDING,
-    AggregateStatus.EXIT_ACCEPTED,
-    AggregateStatus.EXIT_REJECTED,
-    AggregateStatus.EXIT_OUTCOME_UNKNOWN,
-    AggregateStatus.CONTROLLED_FLATTEN_PENDING,
-    AggregateStatus.CONTROLLED_FLATTEN_ACCEPTED,
-    AggregateStatus.CONTROLLED_FLATTEN_REJECTED,
-    AggregateStatus.CONTROLLED_FLATTEN_OUTCOME_UNKNOWN,
-    AggregateStatus.RECONCILIATION_PENDING,
-    AggregateStatus.CANCEL_REJECTED,
-    AggregateStatus.CANCEL_OUTCOME_UNKNOWN,
-)
+_POSITION_RECONCILIATION_STATUSES = RECONCILIATION_POSITION_STATUSES
+
+
+class ReconciliationWorkKind(StrEnum):
+    POSITION = "position"
+    SETTLEMENT = "settlement"
+    REVIEW = "review"
+
+
+class ReconciliationWorkItem(BaseModel):
+    """One bounded Reconciliation action selected outside venue I/O."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    ticket_id: str
+    kind: ReconciliationWorkKind
+    status: AggregateStatus
+    due_at_ms: int
+    status_entered_at_ms: int
+
+    @field_validator("ticket_id", mode="before")
+    @classmethod
+    def _require_ticket_id(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("reconciliation work requires Ticket identity")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_kind_and_window(self) -> "ReconciliationWorkItem":
+        if self.due_at_ms <= 0 or self.status_entered_at_ms <= 0:
+            raise ValueError("reconciliation work times must be positive")
+        if self.kind is ReconciliationWorkKind.POSITION:
+            if self.status not in _POSITION_RECONCILIATION_STATUSES:
+                raise ValueError("position work requires a position reconciliation status")
+        elif self.kind is ReconciliationWorkKind.SETTLEMENT:
+            if self.status is not AggregateStatus.SETTLEMENT_PENDING:
+                raise ValueError("settlement work requires SETTLEMENT_PENDING")
+        elif self.status is not AggregateStatus.REVIEW_PENDING:
+            raise ValueError("review work requires REVIEW_PENDING")
+        return self
+
+
+def select_reconciliation_work(
+    *,
+    now_ms: int,
+    closure_starvation_limit_ms: int,
+    position: ReconciliationWorkItem | None,
+    closures: tuple[ReconciliationWorkItem, ...],
+) -> ReconciliationWorkItem | None:
+    """Select one due item while bounding closure starvation behind positions."""
+
+    if now_ms <= 0 or closure_starvation_limit_ms <= 0:
+        raise ValueError("reconciliation selector windows must be positive")
+    if position is not None and position.kind is not ReconciliationWorkKind.POSITION:
+        raise ValueError("position candidate must use position work kind")
+    if any(
+        item.kind not in {ReconciliationWorkKind.SETTLEMENT, ReconciliationWorkKind.REVIEW}
+        for item in closures
+    ):
+        raise ValueError("closure candidates must use settlement or review work kinds")
+
+    due_position = position if position is not None and position.due_at_ms <= now_ms else None
+    due_closures = tuple(item for item in closures if item.due_at_ms <= now_ms)
+    oldest_closure = min(
+        due_closures,
+        key=lambda item: (item.status_entered_at_ms, item.due_at_ms, item.ticket_id),
+        default=None,
+    )
+    if (
+        oldest_closure is not None
+        and now_ms - oldest_closure.status_entered_at_ms
+        >= closure_starvation_limit_ms
+    ):
+        return oldest_closure
+    if due_position is not None:
+        return due_position
+    return oldest_closure
 
 
 class ReconciliationWorkerStatus(StrEnum):
@@ -108,6 +160,8 @@ class ReconciliationWorkerRequest(BaseModel):
     timeout_seconds: float
     unknown_visibility_grace_ms: int
     idle_poll_interval_ms: int
+    closure_starvation_limit_ms: int = 30_000
+    closure_retry_interval_ms: int = 30_000
     review_economics_visibility_grace_ms: int = 300_000
 
     @field_validator("worker_id", "runtime_commit", "schema_revision", mode="before")
@@ -125,6 +179,8 @@ class ReconciliationWorkerRequest(BaseModel):
             or self.timeout_seconds <= 0
             or self.unknown_visibility_grace_ms <= 0
             or self.idle_poll_interval_ms <= 0
+            or self.closure_starvation_limit_ms <= 0
+            or self.closure_retry_interval_ms <= 0
             or self.review_economics_visibility_grace_ms <= 0
         ):
             raise ValueError("reconciliation worker windows must be positive")
@@ -151,6 +207,9 @@ async def run_reconciliation_worker_once(
 ) -> ReconciliationWorkerResult:
     pending_unknown_result: ReconciliationWorkerResult | None = None
     external_fallback_without_exit = False
+    review: TradeAggregate | None = None
+    entry_order_reference: TicketOrderReference | None = None
+    exit_order_references: tuple[TicketOrderReference, ...] = ()
     async with uow_factory() as uow:
         unknown = await uow.exchange_commands.get_one_unknown()
     if unknown is not None:
@@ -182,12 +241,14 @@ async def run_reconciliation_worker_once(
         pending_unknown_result = recovered_result
 
     async with uow_factory() as uow:
-        aggregate = await uow.aggregates.get_next_for_statuses(
-            _POSITION_RECONCILIATION_STATUSES,
-            work_kind="reconciliation",
+        aggregate = await uow.aggregates.get_next_reconciliation_work(
             now_ms=request.now_ms,
+            closure_starvation_limit_ms=request.closure_starvation_limit_ms,
         )
-    if aggregate is not None:
+    if (
+        aggregate is not None
+        and aggregate.status in _POSITION_RECONCILIATION_STATUSES
+    ):
         snapshot_request = PositionSnapshotRequest(
             ticket_id=aggregate.identity.ticket_id,
             netting_domain=aggregate.identity.netting_domain,
@@ -235,39 +296,41 @@ async def run_reconciliation_worker_once(
         return _runtime_fenced_result()
 
     async with uow_factory() as uow:
-        settlement = await uow.aggregates.get_next_for_statuses(
-            (AggregateStatus.SETTLEMENT_PENDING,)
-        )
-        if settlement is not None:
+        if aggregate is not None and aggregate.status is AggregateStatus.SETTLEMENT_PENDING:
             await settle_ticket(
                 uow,
                 SettleTicketRequest(
-                    ticket_id=settlement.identity.ticket_id,
+                    ticket_id=aggregate.identity.ticket_id,
                     settled_at_ms=request.now_ms,
                 ),
             )
             return ReconciliationWorkerResult(
                 status=ReconciliationWorkerStatus.SETTLED,
-                ticket_id=settlement.identity.ticket_id,
+                ticket_id=aggregate.identity.ticket_id,
             )
 
-        review = await uow.aggregates.get_next_for_statuses(
-            (AggregateStatus.REVIEW_PENDING,),
-            work_kind="reconciliation",
-            now_ms=request.now_ms,
-        )
-        if review is not None:
-            commands = await uow.exchange_commands.list_for_ticket(
+        if aggregate is not None and aggregate.status is AggregateStatus.REVIEW_PENDING:
+            review = aggregate
+            order_references = await uow.exchange_commands.list_order_references(
                 review.identity.ticket_id
             )
             events = await uow.events.list_for_ticket(review.identity.ticket_id)
             review_window = _review_window(events)
-            exit_client_ids = _review_exit_client_ids(commands)
+            entry_references = tuple(
+                reference
+                for reference in order_references
+                if reference.role is OrderRole.ENTRY
+            )
+            exit_order_references = tuple(
+                reference
+                for reference in order_references
+                if reference.role is OrderRole.EXIT
+            )
             if review_window is None:
                 await uow.aggregates.schedule_next_check(
                     review.identity.ticket_id,
                     work_kind="reconciliation",
-                    due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                    due_at_ms=request.now_ms + request.closure_retry_interval_ms,
                 )
                 return ReconciliationWorkerResult(
                     status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
@@ -289,19 +352,19 @@ async def run_reconciliation_worker_once(
                     exit_time_ms=exit_time_ms,
                 )
             )
-            entry_client_id = _entry_client_id(commands)
-            if entry_client_id is None:
+            if len(entry_references) != 1:
                 await uow.aggregates.schedule_next_check(
                     review.identity.ticket_id,
                     work_kind="reconciliation",
-                    due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                    due_at_ms=request.now_ms + request.closure_retry_interval_ms,
                 )
                 return ReconciliationWorkerResult(
                     status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
                     ticket_id=review.identity.ticket_id,
                     detail="review_entry_command:missing",
                 )
-            if not exit_client_ids:
+            entry_order_reference = entry_references[0]
+            if not exit_order_references:
                 if _external_review_fallback_due(review_window, request):
                     external_fallback_without_exit = True
                 else:
@@ -317,7 +380,7 @@ async def run_reconciliation_worker_once(
                     )
 
     if review is not None:
-        assert entry_client_id is not None
+        assert entry_order_reference is not None
         assert review_window is not None
         if external_fallback_without_exit:
             return await _record_external_exit_unavailable_review(
@@ -332,7 +395,7 @@ async def run_reconciliation_worker_once(
             await _schedule_review_retry(
                 uow_factory,
                 ticket_id=review.identity.ticket_id,
-                due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                due_at_ms=request.now_ms + request.closure_retry_interval_ms,
             )
             return ReconciliationWorkerResult(
                 status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
@@ -346,8 +409,8 @@ async def run_reconciliation_worker_once(
                         ticket_id=review.identity.ticket_id,
                         netting_domain=review.identity.netting_domain,
                         expected_entry_quantity=executed_entry_quantity,
-                        entry_venue_client_order_id=entry_client_id,
-                        exit_venue_client_order_ids=exit_client_ids,
+                        entry_order_reference=entry_order_reference,
+                        exit_order_references=exit_order_references,
                         entry_time_ms=entry_time_ms,
                         exit_time_ms=exit_time_ms,
                         funding_attribution_exact=not overlapping_exposure,
@@ -382,7 +445,7 @@ async def run_reconciliation_worker_once(
             await _schedule_review_retry(
                 uow_factory,
                 ticket_id=review.identity.ticket_id,
-                due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                due_at_ms=request.now_ms + request.closure_retry_interval_ms,
             )
             return ReconciliationWorkerResult(
                 status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
@@ -396,6 +459,19 @@ async def run_reconciliation_worker_once(
             "ticket_quantity": str(review.ticket.quantity),
             "executed_entry_quantity": str(executed_entry_quantity),
             **economics.model_dump(mode="json"),
+            "order_attribution": [
+                fill.model_dump(mode="json")
+                for fill in (*economics_facts.entry_fills, *economics_facts.exit_fills)
+            ],
+            "order_attribution_digest": attribution_digest(
+                tuple(
+                    fill.to_attributed_trade_fill()
+                    for fill in (
+                        *economics_facts.entry_fills,
+                        *economics_facts.exit_fills,
+                    )
+                )
+            ),
         }
         async with uow_factory() as uow:
             await record_trade_review(
@@ -537,39 +613,6 @@ async def _record_external_exit_unavailable_review(
         status=ReconciliationWorkerStatus.REVIEWED,
         ticket_id=review.identity.ticket_id,
     )
-
-
-def _entry_client_id(commands: list[ExchangeCommand]) -> str | None:
-    entries = [
-        command
-        for command in commands
-        if command.kind is ExchangeCommandKind.ENTRY
-        and command.status
-        in {
-            ExchangeCommandStatus.ACCEPTED,
-            ExchangeCommandStatus.RECONCILED_ACCEPTED,
-        }
-    ]
-    if len(entries) != 1:
-        return None
-    return entries[0].venue_client_order_id
-
-
-def _review_exit_client_ids(
-    commands: list[ExchangeCommand],
-) -> tuple[str, ...]:
-    accepted_statuses = {
-        ExchangeCommandStatus.ACCEPTED,
-        ExchangeCommandStatus.RECONCILED_ACCEPTED,
-    }
-    identities = (
-        command.venue_client_order_id
-        for command in commands
-        if command.kind
-        not in {ExchangeCommandKind.ENTRY, ExchangeCommandKind.CANCEL_ORDER}
-        and command.status in accepted_statuses
-    )
-    return tuple(dict.fromkeys(identities))
 
 
 async def _schedule_review_retry(

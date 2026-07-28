@@ -38,6 +38,11 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     EntryAdmissionSnapshot,
     canonical_digest,
 )
+from src.trading_kernel.domain.fee_valuation import (
+    FeeValuationEvidence,
+    NativeFee,
+    value_native_fee,
+)
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandResult,
@@ -332,28 +337,43 @@ class CertifiedReviewEconomicsSource:
             entry_fills=(
                 ReviewFill(
                     exchange_trade_id=f"trade:{request.ticket_id}:entry",
-                    venue_client_order_id=request.entry_venue_client_order_id,
+                    exchange_order_id=(
+                        request.entry_order_reference.submitted_exchange_order_id
+                    ),
+                    command_id=request.entry_order_reference.command_id,
+                    role=request.entry_order_reference.role,
                     quantity=request.expected_entry_quantity,
                     price=entry_price,
-                    fee_quote=Decimal("0.1"),
+                    fee=_valued_usdt_fee("0.1", request.entry_time_ms),
+                    realized_pnl_quote=Decimal("0"),
                     occurred_at_ms=request.entry_time_ms,
                 ),
             ),
             exit_fills=(
                 ReviewFill(
                     exchange_trade_id=f"trade:{request.ticket_id}:exit:1",
-                    venue_client_order_id=request.exit_venue_client_order_ids[0],
+                    exchange_order_id=(
+                        request.exit_order_references[0].submitted_exchange_order_id
+                    ),
+                    command_id=request.exit_order_references[0].command_id,
+                    role=request.exit_order_references[0].role,
                     quantity=half,
                     price=exit_price,
-                    fee_quote=Decimal("0.05"),
+                    fee=_valued_usdt_fee("0.05", request.exit_time_ms),
+                    realized_pnl_quote=Decimal("0"),
                     occurred_at_ms=request.exit_time_ms,
                 ),
                 ReviewFill(
                     exchange_trade_id=f"trade:{request.ticket_id}:exit:2",
-                    venue_client_order_id=request.exit_venue_client_order_ids[-1],
+                    exchange_order_id=(
+                        request.exit_order_references[-1].submitted_exchange_order_id
+                    ),
+                    command_id=request.exit_order_references[-1].command_id,
+                    role=request.exit_order_references[-1].role,
                     quantity=request.expected_entry_quantity - half,
                     price=exit_price,
-                    fee_quote=Decimal("0.05"),
+                    fee=_valued_usdt_fee("0.05", request.exit_time_ms),
+                    realized_pnl_quote=Decimal("0"),
                     occurred_at_ms=request.exit_time_ms,
                 ),
             ),
@@ -361,6 +381,20 @@ class CertifiedReviewEconomicsSource:
             funding_unavailable_reason=None,
             observed_at_ms=request.observed_at_ms,
         )
+
+
+def _valued_usdt_fee(amount: str, valued_at_ms: int):
+    return value_native_fee(
+        native_fee=NativeFee(asset="USDT", amount=Decimal(amount)),
+        valuation_evidence=FeeValuationEvidence(
+            method="native_usdt",
+            rate_usdt_per_asset=Decimal("1"),
+            price_pair=None,
+            candle_open_time_ms=None,
+            candle_close_time_ms=None,
+            valued_at_ms=valued_at_ms,
+        ),
+    )
 
 
 def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:

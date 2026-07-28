@@ -8,6 +8,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.fee_valuation import ValuedFee
+from src.trading_kernel.domain.order_attribution import (
+    AttributedTradeFill,
+    OrderRole,
+)
+
 
 class ReviewEconomicsUnavailable(ValueError):
     """Raised when exact Ticket-bound economics cannot yet be computed."""
@@ -23,15 +29,19 @@ class ReviewFill(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     exchange_trade_id: str
-    venue_client_order_id: str
+    exchange_order_id: str
+    command_id: str
+    role: OrderRole
     quantity: Decimal
     price: Decimal
-    fee_quote: Decimal
+    fee: ValuedFee
+    realized_pnl_quote: Decimal
     occurred_at_ms: int
 
     @field_validator(
         "exchange_trade_id",
-        "venue_client_order_id",
+        "exchange_order_id",
+        "command_id",
         mode="before",
     )
     @classmethod
@@ -48,19 +58,36 @@ class ReviewFill(BaseModel):
             raise ValueError("review fill quantity and price must be positive")
         return value
 
-    @field_validator("fee_quote")
-    @classmethod
-    def _require_nonnegative_fee(cls, value: Decimal) -> Decimal:
-        if value < 0:
-            raise ValueError("review fill fee cannot be negative")
-        return value
-
     @field_validator("occurred_at_ms")
     @classmethod
     def _require_positive_time(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("review fill time must be positive")
         return value
+
+    @field_validator("realized_pnl_quote")
+    @classmethod
+    def _require_finite_realized_pnl(cls, value: Decimal) -> Decimal:
+        if not value.is_finite():
+            raise ValueError("review fill realized pnl must be finite")
+        return value
+
+    @property
+    def fee_quote(self) -> Decimal:
+        return self.fee.usdt_value
+
+    def to_attributed_trade_fill(self) -> AttributedTradeFill:
+        return AttributedTradeFill(
+            exchange_trade_id=self.exchange_trade_id,
+            exchange_order_id=self.exchange_order_id,
+            command_id=self.command_id,
+            role=self.role,
+            quantity=self.quantity,
+            price=self.price,
+            fee=self.fee,
+            realized_pnl_quote=self.realized_pnl_quote,
+            occurred_at_ms=self.occurred_at_ms,
+        )
 
 
 class ReviewEconomicsFacts(BaseModel):

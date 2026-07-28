@@ -11,6 +11,12 @@ from src.trading_kernel.domain.review import (
     ReviewFill,
     calculate_review_economics,
 )
+from src.trading_kernel.domain.fee_valuation import (
+    FeeValuationEvidence,
+    NativeFee,
+    value_native_fee,
+)
+from src.trading_kernel.domain.order_attribution import OrderRole
 
 
 def test_complete_review_economics_reports_planned_and_actual_r_multiples() -> None:
@@ -152,9 +158,26 @@ def _fill(
 ) -> ReviewFill:
     return ReviewFill(
         exchange_trade_id=trade_id,
-        venue_client_order_id=f"client-{trade_id}",
+        exchange_order_id=f"order-{trade_id}",
+        command_id=f"command-{trade_id}",
+        role=(
+            OrderRole.ENTRY
+            if trade_id.startswith("entry")
+            else OrderRole.EXIT
+        ),
         quantity=Decimal(quantity),
         price=Decimal(price),
-        fee_quote=Decimal(fee),
+        fee=value_native_fee(
+            native_fee=NativeFee(asset="USDT", amount=Decimal(fee)),
+            valuation_evidence=FeeValuationEvidence(
+                method="native_usdt",
+                rate_usdt_per_asset=Decimal("1"),
+                price_pair=None,
+                candle_open_time_ms=None,
+                candle_close_time_ms=None,
+                valued_at_ms=4_000,
+            ),
+        ),
+        realized_pnl_quote=Decimal("0"),
         occurred_at_ms=4_000,
     )

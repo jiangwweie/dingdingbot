@@ -47,6 +47,7 @@ class OrderCommandPayload(BaseModel):
     order_type: Literal["market", "limit", "stop_market", "take_profit_market"]
     reduce_only: bool
     limit_price: Decimal | None = None
+    time_in_force: Literal["GTC", "GTX"] | None = None
     stop_price: Decimal | None = None
     replaces_exchange_order_id: str | None = None
     source_watermark_ms: int | None = None
@@ -72,10 +73,16 @@ class OrderCommandPayload(BaseModel):
 
     @model_validator(mode="after")
     def _validate_order_shape(self) -> "OrderCommandPayload":
-        if self.order_type == "limit" and self.limit_price is None:
-            raise ValueError("limit order requires limit_price")
-        if self.order_type != "limit" and self.limit_price is not None:
-            raise ValueError("non-limit order forbids limit_price")
+        if self.order_type == "limit":
+            if self.limit_price is None:
+                raise ValueError("limit order requires limit_price")
+            if self.time_in_force is None:
+                raise ValueError("limit order requires time_in_force")
+        else:
+            if self.limit_price is not None:
+                raise ValueError("non-limit order forbids limit_price")
+            if self.time_in_force is not None:
+                raise ValueError("non-limit order forbids time_in_force")
         if self.order_type in {"stop_market", "take_profit_market"}:
             if self.stop_price is None:
                 raise ValueError("conditional order requires stop_price")

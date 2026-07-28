@@ -22,7 +22,11 @@ from src.trading_kernel.application.ports import (
     RuntimeIncidentRecord,
     TradeReviewRecord,
 )
-from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
+from src.trading_kernel.domain.aggregate import (
+    RECONCILIATION_POSITION_STATUSES,
+    AggregateStatus,
+    TradeAggregate,
+)
 from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.commands import (
     CommandPayload,
@@ -49,6 +53,11 @@ from src.trading_kernel.domain.incident_blocking import (
     canonical_entry_block_key,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.order_attribution import (
+    OrderNamespace,
+    OrderRole,
+    TicketOrderReference,
+)
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
     PostFillRiskStatus,
@@ -76,6 +85,16 @@ _EVENT_MODELS = {
     for event_type in PERSISTED_TRADE_EVENT_MODELS
 }
 _COMMAND_PAYLOAD_ADAPTER: TypeAdapter[CommandPayload] = TypeAdapter(CommandPayload)
+
+
+def _accepted_exchange_order_id(row: RowMapping) -> str:
+    payload = row["result_payload"]
+    if not isinstance(payload, dict):
+        raise RuntimeError("accepted command lacks a typed result payload")
+    exchange_order_id = str(payload.get("exchange_order_id") or "").strip()
+    if not exchange_order_id:
+        raise RuntimeError("accepted command lacks exchange order identity")
+    return exchange_order_id
 
 
 class PostgresTicketRepository:
@@ -235,6 +254,55 @@ class PostgresAggregateRepository:
         ticket_id = result.scalar_one_or_none()
         return None if ticket_id is None else await self.get(str(ticket_id))
 
+    async def get_next_reconciliation_work(
+        self,
+        *,
+        now_ms: int,
+        closure_starvation_limit_ms: int,
+    ) -> TradeAggregate | None:
+        if now_ms <= 0 or closure_starvation_limit_ms <= 0:
+            raise ValueError("reconciliation selector windows must be positive")
+        due_at = sa.func.coalesce(
+            trade_aggregates.c.reconciliation_due_at_ms,
+            trade_aggregates.c.updated_at_ms,
+        )
+        position_statuses = tuple(
+            status.value for status in RECONCILIATION_POSITION_STATUSES
+        )
+        closure_statuses = (
+            AggregateStatus.SETTLEMENT_PENDING.value,
+            AggregateStatus.REVIEW_PENDING.value,
+        )
+        is_position = trade_aggregates.c.status.in_(position_statuses)
+        is_overdue_closure = sa.and_(
+            trade_aggregates.c.status.in_(closure_statuses),
+            trade_aggregates.c.updated_at_ms <= now_ms - closure_starvation_limit_ms,
+        )
+        priority = sa.case(
+            (is_overdue_closure, 0),
+            (is_position, 1),
+            else_=2,
+        )
+        result = await self._connection.execute(
+            sa.select(trade_aggregates.c.ticket_id)
+            .where(
+                trade_aggregates.c.status.in_((*position_statuses, *closure_statuses)),
+                due_at <= now_ms,
+            )
+            .order_by(
+                priority,
+                sa.case(
+                    (is_position, due_at),
+                    else_=trade_aggregates.c.updated_at_ms,
+                ),
+                trade_aggregates.c.ticket_id,
+            )
+            .with_for_update(skip_locked=True, of=trade_aggregates)
+            .limit(1)
+        )
+        ticket_id = result.scalar_one_or_none()
+        return None if ticket_id is None else await self.get(str(ticket_id))
+
     async def schedule_next_check(
         self,
         ticket_id: str,
@@ -385,6 +453,56 @@ class PostgresExchangeCommandRepository:
             .order_by(exchange_commands.c.created_at_ms, exchange_commands.c.command_id)
         )
         return [await self._command_from_row(row) for row in result.mappings()]
+
+    async def list_order_references(
+        self,
+        ticket_id: str,
+    ) -> tuple[TicketOrderReference, ...]:
+        result = await self._connection.execute(
+            sa.select(exchange_commands).where(
+                exchange_commands.c.ticket_id == ticket_id,
+                exchange_commands.c.status.in_(
+                    (
+                        ExchangeCommandStatus.ACCEPTED.value,
+                        ExchangeCommandStatus.RECONCILED_ACCEPTED.value,
+                    )
+                ),
+            ).order_by(
+                exchange_commands.c.created_at_ms,
+                exchange_commands.c.command_id,
+            )
+        )
+        references: list[TicketOrderReference] = []
+        for row in result.mappings():
+            kind = ExchangeCommandKind(str(row["command_kind"]))
+            if kind in {
+                ExchangeCommandKind.CANCEL_ORDER,
+                ExchangeCommandKind.SET_LEVERAGE,
+            }:
+                continue
+            payload = _COMMAND_PAYLOAD_ADAPTER.validate_python(row["request_payload"])
+            if not isinstance(payload, OrderCommandPayload):
+                raise RuntimeError("accepted order command has a non-order payload")
+            namespace = (
+                OrderNamespace.CONDITIONAL
+                if payload.order_type in {"stop_market", "take_profit_market"}
+                else OrderNamespace.REGULAR
+            )
+            references.append(
+                TicketOrderReference(
+                    command_id=str(row["command_id"]),
+                    command_kind=kind,
+                    role=(
+                        OrderRole.ENTRY
+                        if kind is ExchangeCommandKind.ENTRY
+                        else OrderRole.EXIT
+                    ),
+                    namespace=namespace,
+                    venue_client_order_id=str(row["venue_client_order_id"] or ""),
+                    submitted_exchange_order_id=_accepted_exchange_order_id(row),
+                )
+            )
+        return tuple(references)
 
     async def next_generation(
         self,

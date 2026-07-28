@@ -25,6 +25,11 @@ from src.trading_kernel.domain.post_fill_risk import (
     PostFillRiskRequest,
     assess_post_fill_risk,
 )
+from src.trading_kernel.domain.order_attribution import (
+    OrderNamespace,
+    OrderRole,
+    TicketOrderReference,
+)
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
     ReconciliationWorkerStatus,
@@ -42,6 +47,10 @@ class _AggregateRepository:
         del kwargs
         return self.aggregate if self.aggregate.status in statuses else None
 
+    async def get_next_reconciliation_work(self, **kwargs):
+        del kwargs
+        return self.aggregate
+
     async def schedule_next_check(self, ticket_id, *, work_kind, due_at_ms):
         assert ticket_id == self.aggregate.identity.ticket_id
         assert work_kind == "reconciliation"
@@ -58,6 +67,24 @@ class _CommandRepository:
     async def list_for_ticket(self, ticket_id):
         assert ticket_id == self.commands[0].ticket_identity.ticket_id
         return self.commands
+
+    async def list_order_references(self, ticket_id):
+        assert ticket_id == self.commands[0].ticket_identity.ticket_id
+        return tuple(
+            TicketOrderReference(
+                command_id=command.command_id,
+                command_kind=command.kind,
+                role=(
+                    OrderRole.ENTRY
+                    if command.kind is ExchangeCommandKind.ENTRY
+                    else OrderRole.EXIT
+                ),
+                namespace=OrderNamespace.REGULAR,
+                venue_client_order_id=command.venue_client_order_id,
+                submitted_exchange_order_id=f"venue:{command.command_id}",
+            )
+            for command in self.commands
+        )
 
 
 class _EventRepository:
@@ -201,7 +228,7 @@ async def test_review_worker_does_not_write_a_thin_review_when_facts_are_missing
 
     assert result.status is ReconciliationWorkerStatus.FACTS_UNAVAILABLE
     assert result.detail == "review_economics:RuntimeError"
-    assert state.aggregates.scheduled_due_at_ms == 7_000
+    assert state.aggregates.scheduled_due_at_ms == 35_000
     assert len(source.requests) == 1
 
 

@@ -37,6 +37,43 @@ def _payload(*, reduce_only: bool = False) -> OrderCommandPayload:
     )
 
 
+def test_limit_order_requires_explicit_time_in_force() -> None:
+    with pytest.raises(ValidationError, match="time_in_force"):
+        OrderCommandPayload(
+            side="sell",
+            quantity=Decimal("0.001"),
+            order_type="limit",
+            reduce_only=True,
+            limit_price=Decimal("101"),
+        )
+
+
+def test_stop_market_forbids_time_in_force() -> None:
+    with pytest.raises(ValidationError, match="time_in_force"):
+        OrderCommandPayload(
+            side="sell",
+            quantity=Decimal("0.001"),
+            order_type="stop_market",
+            reduce_only=True,
+            stop_price=Decimal("99"),
+            time_in_force="GTX",
+        )
+
+
+def test_limit_gtx_payload_is_immutable_and_serializable() -> None:
+    payload = OrderCommandPayload(
+        side="sell",
+        quantity=Decimal("0.001"),
+        order_type="limit",
+        reduce_only=True,
+        limit_price=Decimal("101"),
+        time_in_force="GTX",
+    )
+
+    assert payload.time_in_force == "GTX"
+    assert OrderCommandPayload.model_validate(payload.model_dump()) == payload
+
+
 def test_exchange_command_identity_is_deterministic_and_venue_safe() -> None:
     identity = _identity()
     command_id = build_command_id(

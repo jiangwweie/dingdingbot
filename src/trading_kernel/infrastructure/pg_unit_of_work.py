@@ -694,6 +694,7 @@ def _take_profit_command(
             order_type="limit",
             reduce_only=True,
             limit_price=effect.limit_price,
+            time_in_force="GTX",
         ),
         occurred_at_ms=occurred_at_ms,
     )

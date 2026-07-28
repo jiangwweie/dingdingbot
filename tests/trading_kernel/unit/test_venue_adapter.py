@@ -26,6 +26,11 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandPayload,
 )
 from src.trading_kernel.domain.identities import NettingDomain
+from src.trading_kernel.domain.order_attribution import (
+    OrderNamespace,
+    OrderRole,
+    TicketOrderReference,
+)
 from src.trading_kernel.domain.venue_truth import VenueLookupStatus
 from src.trading_kernel.infrastructure.venue_adapter import (
     CcxtVenueAdapter,
@@ -192,6 +197,7 @@ class TruthExchange:
     def __init__(self, *, visible: bool) -> None:
         self.visible = visible
         self.calls: list[str] = []
+        self.fill_params: dict[str, object] | None = None
 
     async def fetch_order(self, order_id, symbol, params):
         self.calls.append("order")
@@ -219,6 +225,7 @@ class TruthExchange:
         ]
 
     async def fetch_my_trades(self, symbol, since, limit, params):
+        self.fill_params = dict(params)
         self.calls.append("fills")
         return []
 
@@ -525,24 +532,30 @@ class LifecycleFactsExchange:
 
     async def fetch_my_trades(self, symbol, since, limit, params):
         del symbol, since, limit
-        client_id = params["clientOrderId"]
-        if client_id == "brc-entry-1":
+        order_id = params["orderId"]
+        if order_id == "venue-entry-1":
             return [
                 {
-                    "clientOrderId": client_id,
+                    "orderId": order_id,
+                    "id": "trade-entry-1",
                     "amount": "0.01",
                     "price": "60000",
                     "fee": {"cost": "0.4", "currency": "USDT"},
+                    "timestamp": 1_100,
+                    "info": {"positionSide": "LONG"},
                 }
             ]
         return [
             {
                 # Binance user-trade payloads do not reliably carry the parent
                 # order client id. TP1 lifecycle truth must use the exact order.
-                "clientOrderId": None,
+                "orderId": order_id,
+                "id": "trade-exit-1",
                 "amount": "0.005",
                 "price": "61000",
                 "fee": {"cost": "0.15", "currency": "USDT"},
+                "timestamp": 1_100,
+                "info": {"positionSide": "LONG"},
             }
         ]
 
@@ -597,6 +610,19 @@ class IncompleteLastLifecycleFactsExchange(LifecycleFactsExchange):
         ]
 
 
+class BnbLifecycleFactsExchange(LifecycleFactsExchange):
+    async def fetch_my_trades(self, symbol, since, limit, params):
+        rows = await super().fetch_my_trades(symbol, since, limit, params)
+        for row in rows:
+            row["fee"] = {"cost": "0.01", "currency": "BNB"}
+        return rows
+
+    async def fapiPublicGetIndexPriceKlines(self, params):
+        assert params["pair"] == "BNBUSDT"
+        assert params["interval"] == "1m"
+        return [[1, "0", "0", "0", "600", "0", 1_000]]
+
+
 class ReviewEconomicsExchange:
     def __init__(self, *, include_fee: bool = True) -> None:
         self.include_fee = include_fee
@@ -612,7 +638,7 @@ class ReviewEconomicsExchange:
         rows = [
             {
                 "id": "trade-entry",
-                "clientOrderId": "brc-entry-1",
+                "orderId": "venue-entry-1",
                 "amount": "1",
                 "price": "100",
                 "fee": fee if self.include_fee else None,
@@ -621,7 +647,7 @@ class ReviewEconomicsExchange:
             },
             {
                 "id": "trade-tp1",
-                "clientOrderId": "brc-tp1-1",
+                "orderId": "venue-tp1-1",
                 "amount": "0.5",
                 "price": "110",
                 "fee": {"cost": "0.05", "currency": "USDT"},
@@ -630,7 +656,7 @@ class ReviewEconomicsExchange:
             },
             {
                 "id": "trade-runner",
-                "clientOrderId": "brc-runner-1",
+                "orderId": "venue-runner-actual-1",
                 "amount": "0.5",
                 "price": "120",
                 "fee": {"cost": "0.05", "currency": "USDT"},
@@ -639,7 +665,7 @@ class ReviewEconomicsExchange:
             },
             {
                 "id": "unrelated-trade",
-                "clientOrderId": "manual-order",
+                "orderId": "manual-order",
                 "amount": "10",
                 "price": "1",
                 "fee": {"cost": "1", "currency": "USDT"},
@@ -647,8 +673,17 @@ class ReviewEconomicsExchange:
                 "info": {"positionSide": "LONG"},
             },
         ]
-        client_id = str(params.get("clientOrderId") or "")
-        return [row for row in rows if row["clientOrderId"] == client_id]
+        order_id = str(params.get("orderId") or "")
+        return [row for row in rows if row["orderId"] == order_id]
+
+    async def fapiPrivateGetAlgoOrder(self, params):
+        assert params == {"algoId": "venue-runner-algo-1"}
+        return {
+            "algoId": "venue-runner-algo-1",
+            "clientAlgoId": "brc-runner-1",
+            "actualOrderId": "venue-runner-actual-1",
+            "status": "FINISHED",
+        }
 
     async def fapiPrivateGetIncome(self, params):
         self.funding_calls.append(dict(params))
@@ -662,6 +697,20 @@ class ReviewEconomicsExchange:
                 "time": 2_500,
             }
         ]
+
+
+class BnbReviewEconomicsExchange(ReviewEconomicsExchange):
+    async def fetch_my_trades(self, symbol, since, limit, params):
+        rows = await super().fetch_my_trades(symbol, since, limit, params)
+        for row in rows:
+            row["fee"] = {"cost": "0.01", "currency": "BNB"}
+        return rows
+
+    async def fapiPublicGetIndexPriceKlines(self, params):
+        assert params["pair"] == "BNBUSDT"
+        assert params["symbol"] == "BNBUSDT"
+        assert params["interval"] == "1m"
+        return [[1, "0", "0", "0", "600", "0", 1_000]]
 
 @pytest.mark.asyncio
 async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> None:
@@ -692,6 +741,45 @@ async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> N
             "positionSide": "LONG",
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_submits_tp1_limit_with_gtx_time_in_force() -> None:
+    exchange = FakeAsyncExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        clock_ms=lambda: 2_000,
+    )
+    request = _request().model_copy(
+        update={
+            "command_id": "command:tp1-1",
+            "kind": ExchangeCommandKind.TAKE_PROFIT,
+            "venue_client_order_id": "brc-tp1-1",
+            "payload": OrderCommandPayload(
+                side="sell",
+                quantity=Decimal("0.001"),
+                order_type="limit",
+                reduce_only=True,
+                limit_price=Decimal("60100"),
+                time_in_force="GTX",
+            ),
+        }
+    )
+
+    await adapter.execute(request)
+
+    assert exchange.call is not None
+    assert exchange.call[-1] == {
+        "newClientOrderId": "brc-tp1-1",
+        "positionSide": "LONG",
+        "timeInForce": "GTX",
+    }
 
 
 @pytest.mark.asyncio
@@ -1063,7 +1151,7 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
         timeframe="15m",
         entry_quantity=Decimal("0.01"),
         expected_position_quantity=Decimal("0.005"),
-        entry_venue_client_order_id="brc-entry-1",
+        entry_order_reference=_entry_order_reference(),
         tp1_exchange_order_id="venue-tp1-1",
         entered_at_ms=1_000,
         price_tick=Decimal("0.1"),
@@ -1129,7 +1217,7 @@ async def test_ccxt_adapter_keeps_runner_window_after_dropping_open_candle() -> 
         timeframe="15m",
         entry_quantity=Decimal("0.01"),
         expected_position_quantity=Decimal("0.005"),
-        entry_venue_client_order_id="brc-entry-1",
+        entry_order_reference=_entry_order_reference(),
         tp1_exchange_order_id=None,
         entered_at_ms=1_000,
         price_tick=Decimal("0.1"),
@@ -1144,6 +1232,59 @@ async def test_ccxt_adapter_keeps_runner_window_after_dropping_open_candle() -> 
     assert exchange.ohlcv_limit == 16
     assert facts.market_facts is not None
     assert facts.market_facts.is_final_closed_candle is True
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_values_lifecycle_entry_fee_in_bnb_without_changing_sizing() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): BnbLifecycleFactsExchange()
+        },
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        taker_fee_rates={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): Decimal("0.0005")
+        },
+        clock_ms=lambda: 20_000_000,
+    )
+    request = LifecycleFactsRequest(
+        ticket_id="ticket-1",
+        netting_domain=NettingDomain(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            position_side="long",
+        ),
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+        timeframe="15m",
+        entry_quantity=Decimal("0.01"),
+        expected_position_quantity=Decimal("0.005"),
+        entry_order_reference=_entry_order_reference(),
+        tp1_exchange_order_id=None,
+        entered_at_ms=1_000,
+        price_tick=Decimal("0.1"),
+        structure_window_bars=4,
+        atr_period=14,
+        runner_market_required=False,
+        observed_at_ms=20_000_000,
+    )
+
+    facts = await adapter.read_lifecycle_facts(request)
+
+    assert facts.allocated_entry_fee_quote == Decimal("3.00")
 
 
 @pytest.mark.asyncio
@@ -1178,9 +1319,9 @@ async def test_ccxt_adapter_builds_exact_ticket_bound_review_economics_facts() -
     assert facts.funding_quote == Decimal("-0.3")
     assert facts.funding_unavailable_reason is None
     assert [call[3] for call in exchange.trade_calls] == [
-        {"clientOrderId": "brc-entry-1"},
-        {"clientOrderId": "brc-tp1-1"},
-        {"clientOrderId": "brc-runner-1"},
+        {"orderId": "venue-entry-1"},
+        {"orderId": "venue-tp1-1"},
+        {"orderId": "venue-runner-actual-1"},
     ]
     assert exchange.funding_calls == [
         {
@@ -1191,6 +1332,33 @@ async def test_ccxt_adapter_builds_exact_ticket_bound_review_economics_facts() -
             "limit": 1000,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_values_bnb_review_fees_from_completed_index_evidence() -> None:
+    exchange = BnbReviewEconomicsExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        clock_ms=lambda: 4_000,
+    )
+
+    facts = await adapter.read_review_economics(_review_request())
+
+    assert facts.entry_fills[0].fee.native.asset == "BNB"
+    assert facts.entry_fills[0].fee.usdt_value == Decimal("6.00")
+    assert facts.entry_fills[0].fee.evidence.price_pair == "BNBUSDT"
 
 
 @pytest.mark.asyncio
@@ -1351,12 +1519,13 @@ async def test_ccxt_adapter_reads_complete_visible_command_truth() -> None:
     )
     assert truth.order.position_side == "long"
     assert truth.order.quantity == Decimal("0.001")
+    assert exchange.fill_params == {"orderId": "venue-order-1"}
     assert exchange.calls == [
         "order",
         "positions",
-        "fills",
         "regular",
         "conditional",
+        "fills",
     ]
 
 
@@ -1374,7 +1543,6 @@ async def test_ccxt_adapter_proves_absence_only_after_all_truth_surfaces() -> No
     assert exchange.calls == [
         "order",
         "positions",
-        "fills",
         "regular",
         "conditional",
     ]
@@ -1529,10 +1697,38 @@ def _review_request() -> ReviewEconomicsRequest:
             position_side="long",
         ),
         expected_entry_quantity=Decimal("1"),
-        entry_venue_client_order_id="brc-entry-1",
-        exit_venue_client_order_ids=("brc-tp1-1", "brc-runner-1"),
+        entry_order_reference=_entry_order_reference(),
+        exit_order_references=(
+            TicketOrderReference(
+                command_id="command:tp1-1",
+                command_kind=ExchangeCommandKind.TAKE_PROFIT,
+                role=OrderRole.EXIT,
+                namespace=OrderNamespace.REGULAR,
+                venue_client_order_id="brc-tp1-1",
+                submitted_exchange_order_id="venue-tp1-1",
+            ),
+            TicketOrderReference(
+                command_id="command:runner-1",
+                command_kind=ExchangeCommandKind.EXIT,
+                role=OrderRole.EXIT,
+                namespace=OrderNamespace.CONDITIONAL,
+                venue_client_order_id="brc-runner-1",
+                submitted_exchange_order_id="venue-runner-algo-1",
+            ),
+        ),
         entry_time_ms=1_000,
         exit_time_ms=3_500,
         funding_attribution_exact=True,
         observed_at_ms=4_000,
+    )
+
+
+def _entry_order_reference() -> TicketOrderReference:
+    return TicketOrderReference(
+        command_id="command:entry-1",
+        command_kind=ExchangeCommandKind.ENTRY,
+        role=OrderRole.ENTRY,
+        namespace=OrderNamespace.REGULAR,
+        venue_client_order_id="brc-entry-1",
+        submitted_exchange_order_id="venue-entry-1",
     )

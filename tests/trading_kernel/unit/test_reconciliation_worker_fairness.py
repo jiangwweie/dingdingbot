@@ -15,9 +15,12 @@ from src.trading_kernel.domain.venue_truth import (
     UnknownRecoveryStatus,
 )
 from src.trading_kernel.interfaces.reconciliation_worker import (
+    ReconciliationWorkItem,
+    ReconciliationWorkKind,
     ReconciliationWorkerRequest,
     ReconciliationWorkerStatus,
     run_reconciliation_worker_once,
+    select_reconciliation_work,
 )
 from tests.trading_kernel.unit.test_reducer import (
     _reconciliation_pending_aggregate,
@@ -41,6 +44,10 @@ class _AggregateRepository:
     async def get_next_for_statuses(self, statuses, **kwargs):
         del kwargs
         return self.aggregate if self.aggregate.status in statuses else None
+
+    async def get_next_reconciliation_work(self, **kwargs):
+        del kwargs
+        return self.aggregate
 
     async def schedule_next_check(self, ticket_id, *, work_kind, due_at_ms):
         assert ticket_id == self.aggregate.identity.ticket_id
@@ -135,3 +142,136 @@ async def test_pending_unknown_does_not_starve_position_reconciliation(
     assert len(position_source.requests) == 1
     assert len(reconciliation_requests) == 1
     assert state.aggregates.scheduled_due_at_ms == 7_000
+
+
+def test_overdue_closure_preempts_due_position_reconciliation() -> None:
+    position = ReconciliationWorkItem(
+        ticket_id="ticket-position",
+        kind=ReconciliationWorkKind.POSITION,
+        status=worker_module.AggregateStatus.POSITION_PROTECTED,
+        due_at_ms=31_000,
+        status_entered_at_ms=1_000,
+    )
+    settlement = ReconciliationWorkItem(
+        ticket_id="ticket-settlement",
+        kind=ReconciliationWorkKind.SETTLEMENT,
+        status=worker_module.AggregateStatus.SETTLEMENT_PENDING,
+        due_at_ms=1_000,
+        status_entered_at_ms=1_000,
+    )
+
+    selected = select_reconciliation_work(
+        now_ms=31_000,
+        closure_starvation_limit_ms=30_000,
+        position=position,
+        closures=(settlement,),
+    )
+
+    assert selected == settlement
+
+
+def test_not_yet_overdue_closure_preserves_position_priority() -> None:
+    position = ReconciliationWorkItem(
+        ticket_id="ticket-position",
+        kind=ReconciliationWorkKind.POSITION,
+        status=worker_module.AggregateStatus.POSITION_PROTECTED,
+        due_at_ms=30_999,
+        status_entered_at_ms=1_000,
+    )
+    review = ReconciliationWorkItem(
+        ticket_id="ticket-review",
+        kind=ReconciliationWorkKind.REVIEW,
+        status=worker_module.AggregateStatus.REVIEW_PENDING,
+        due_at_ms=1_000,
+        status_entered_at_ms=1_000,
+    )
+
+    selected = select_reconciliation_work(
+        now_ms=30_999,
+        closure_starvation_limit_ms=30_000,
+        position=position,
+        closures=(review,),
+    )
+
+    assert selected == position
+
+
+class _AgeAwareAggregateRepository:
+    def __init__(self) -> None:
+        position = _reconciliation_pending_aggregate()
+        self.position = position.model_copy(
+            update={"status": worker_module.AggregateStatus.POSITION_PROTECTED}
+        )
+        self.settlement = position.model_copy(
+            update={"status": worker_module.AggregateStatus.SETTLEMENT_PENDING}
+        )
+
+    async def get_next_reconciliation_work(self, **kwargs):
+        assert kwargs["closure_starvation_limit_ms"] == 30_000
+        return self.settlement
+
+    async def get_next_for_statuses(self, statuses, **kwargs):
+        del kwargs
+        if self.position.status in statuses:
+            return self.position
+        if self.settlement.status in statuses:
+            return self.settlement
+        return None
+
+    async def schedule_next_check(self, *args, **kwargs):
+        raise AssertionError("overdue closure must not schedule position work")
+
+
+class _AgeAwareState:
+    def __init__(self) -> None:
+        self.aggregates = _AgeAwareAggregateRepository()
+        self.commands = type("Commands", (), {"get_one_unknown": _no_unknown})()
+
+    def factory(self):
+        return _UnitOfWork(self)
+
+
+async def _no_unknown(_self):
+    return None
+
+
+class _UnexpectedPositionSource:
+    async def read_position_snapshot(self, request):
+        del request
+        raise AssertionError("overdue closure must preempt position reconciliation")
+
+
+@pytest.mark.asyncio
+async def test_worker_settles_overdue_closure_before_due_position(
+    monkeypatch,
+) -> None:
+    state = _AgeAwareState()
+    settled = []
+
+    async def certified(*args, **kwargs):
+        del args, kwargs
+        return True
+
+    async def settle(_uow, request):
+        settled.append(request.ticket_id)
+
+    monkeypatch.setattr(worker_module, "_runtime_writer_is_certified", certified)
+    monkeypatch.setattr(worker_module, "settle_ticket", settle)
+
+    result = await run_reconciliation_worker_once(
+        state.factory,
+        object(),
+        _UnexpectedPositionSource(),
+        ReconciliationWorkerRequest(
+            worker_id="reconciliation-worker-test",
+            runtime_commit="kernel-test-head",
+            schema_revision="0001_initial",
+            now_ms=31_000,
+            timeout_seconds=1,
+            unknown_visibility_grace_ms=30_000,
+            idle_poll_interval_ms=2_000,
+        ),
+    )
+
+    assert result.status is ReconciliationWorkerStatus.SETTLED
+    assert settled == [state.aggregates.settlement.identity.ticket_id]
