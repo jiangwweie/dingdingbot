@@ -70,7 +70,7 @@ from tests.trading_kernel.integration.universe_activation_support import (
     NOW_MS as ACTIVATION_NOW_MS,
 )
 from tests.trading_kernel.integration.universe_activation_support import (
-    activation_engine as _activation_engine,
+    activation_engine as _activation_engine,  # noqa: F401
 )
 from tests.trading_kernel.integration.universe_activation_support import (
     activation_snapshot,
@@ -400,6 +400,7 @@ async def test_official_replacement_keeps_old_runner_ticket_to_terminal_review(
         _activation_engine,
         old_version_id=old_version_id,
     )
+    frozen_authority = _frozen_ticket_authority(ticket)
     await _assert_ticket_authority(_activation_engine, ticket)
     await reach_runner_protected(_activation_engine, ticket, seed_policy=False)
     await make_warming_ready(
@@ -482,7 +483,7 @@ async def test_official_replacement_keeps_old_runner_ticket_to_terminal_review(
     assert reviewed.status is SettleTicketStatus.REVIEW_RECORDED
     assert aggregate is not None and aggregate.status is AggregateStatus.TERMINAL
     assert persisted_ticket is not None
-    assert persisted_ticket.universe_version_id == ticket.universe_version_id
+    assert _frozen_ticket_authority(persisted_ticket) == frozen_authority
     assert review is not None and review.review_id == "review:old-universe-runner"
 
 
@@ -513,6 +514,16 @@ async def test_official_activation_rolls_back_while_entry_lane_is_claimed(
     before = await activation_snapshot(
         _activation_engine,
         event_spec_id=ticket.identity.runtime.event_spec_id,
+    )
+    assert all(
+        {
+            "next_observation_due_at_ms",
+            "lease_owner",
+            "lease_expires_at_ms",
+            "observation_generation",
+            "updated_at_ms",
+        }.issubset(scope)
+        for scope in before["scope_projections"]
     )
 
     with pytest.raises(DBAPIError) as activation_error:
@@ -568,6 +579,19 @@ async def _assert_ticket_authority(engine: AsyncEngine, ticket) -> None:
     assert scope.scope_version == ticket.runtime_scope_version
     assert scope.owner_policy_id == ticket.owner_policy_id
     assert strategy_authority_matches_ticket(group, version, event, ticket)
+
+
+def _frozen_ticket_authority(ticket) -> tuple[object, ...]:
+    return (
+        ticket.universe_version_id,
+        ticket.universe_semantic_digest,
+        ticket.runtime_scope_id,
+        ticket.runtime_scope_version,
+        ticket.owner_policy_id,
+        ticket.owner_policy_version,
+        ticket.identity.runtime,
+        ticket.identity.netting_domain,
+    )
 
 
 async def _ticket_for_active_universe(

@@ -120,3 +120,17 @@ python3 -m pytest -q \
   tests/trading_kernel/integration/test_strategy_universe_scripts.py
 29 collected; completed successfully
 ```
+
+## Re-review P2 correction
+
+`activation_snapshot()` now retains the complete ordered
+`runtime_scopes_current` projection in addition to its compact assertion view.
+The claimed-ENTRY activation rollback test explicitly requires the activation
+write-set fields `next_observation_due_at_ms`, lease owner/expiry,
+observation generation, and update timestamp, then compares the complete
+before/after snapshot after SQLSTATE `55000`.
+
+The replacement closure test now freezes and compares the full Ticket
+authority tuple: Universe id and digest, runtime Scope id/version, Owner
+Policy id/version, Runtime identity, and Netting Domain. Terminal persistence
+must match every frozen fact, not merely the Universe id.

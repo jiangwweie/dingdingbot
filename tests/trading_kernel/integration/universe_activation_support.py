@@ -318,6 +318,19 @@ async def activation_snapshot(
                 )
             ).mappings()
         )
+        scope_rows = (
+            await connection.execute(
+                sa.select(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.event_spec_id
+                    == event_spec_id
+                )
+                .order_by(
+                    runtime_scopes_current.c.universe_version_id,
+                    runtime_scopes_current.c.exchange_instrument_id,
+                )
+            )
+        ).mappings().all()
         scopes = tuple(
             (
                 str(row["universe_version_id"]),
@@ -327,19 +340,7 @@ async def activation_snapshot(
                 bool(row["entry_enabled"]),
                 int(row["scope_version"]),
             )
-            for row in (
-                await connection.execute(
-                    sa.select(runtime_scopes_current)
-                    .where(
-                        runtime_scopes_current.c.event_spec_id
-                        == event_spec_id
-                    )
-                    .order_by(
-                        runtime_scopes_current.c.universe_version_id,
-                        runtime_scopes_current.c.exchange_instrument_id,
-                    )
-                )
-            ).mappings()
+            for row in scope_rows
         )
         side_effect_counts = tuple(
             int(value)
@@ -360,6 +361,7 @@ async def activation_snapshot(
         "current": dict(current),
         "versions": versions,
         "scopes": scopes,
+        "scope_projections": tuple(dict(row) for row in scope_rows),
         "side_effect_counts": side_effect_counts,
     }
 
