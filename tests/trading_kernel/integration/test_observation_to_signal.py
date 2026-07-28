@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from hashlib import sha256
 from uuid import uuid4
 
 import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
@@ -17,12 +19,18 @@ from src.trading_kernel.application.observe_strategy_scope import (
 )
 from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.infrastructure.pg_models import (
+    exchange_commands,
     facts_current,
+    instruments,
     readiness_current,
     runtime_capabilities_current,
     runtime_scopes_current,
     signal_events,
     signal_fact_snapshots,
+    strategy_universe_current,
+    strategy_universe_members,
+    strategy_universe_versions,
+    trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
@@ -132,9 +140,9 @@ async def test_observation_worker_claims_one_due_scope_and_waits_for_next_close(
                 )
             )
         ).mappings().one()
-    assert scope["observation_due_at_ms"] == NOW_MS + 900_000
-    assert scope["observation_claim_owner"] is None
-    assert scope["observation_lease_until_ms"] is None
+    assert scope["next_observation_due_at_ms"] == NOW_MS + 900_000
+    assert scope["lease_owner"] is None
+    assert scope["lease_expires_at_ms"] is None
 
 
 @pytest_asyncio.fixture(name="observation_engine")
@@ -268,6 +276,12 @@ async def test_triggered_observation_persists_one_stable_strategy_signal(
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(signal_fact_snapshots)
         ) == 3
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(trade_tickets)
+        ) == 0
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(exchange_commands)
+        ) == 0
 
 
 @pytest.mark.asyncio
@@ -373,19 +387,36 @@ async def test_all_six_registered_events_produce_signals_through_observation(
 async def _seed_sor_scope(engine: AsyncEngine) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
+    event_spec_id = "event_spec:SOR-001:SOR-LONG:v2"
+    universe_version_id, universe_digest = _universe_identity(event_spec_id)
     async with engine.begin() as connection:
+        await _seed_active_universe(
+            connection,
+            strategy_group_id="SOR-001",
+            event_spec_id=event_spec_id,
+            universe_version_id=universe_version_id,
+            universe_digest=universe_digest,
+            members=(ETH,),
+        )
         await connection.execute(
             sa.insert(runtime_scopes_current).values(
                 runtime_scope_id="scope-sor-eth-long",
                 strategy_group_id="SOR-001",
                 strategy_version_id="sgv:SOR-001:v2",
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                event_spec_id=event_spec_id,
                 runtime_profile_id="profile-observation-only",
                 owner_policy_id="policy-observation-only",
                 exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
                 position_side="long",
-                enabled=True,
+                universe_version_id=universe_version_id,
+                universe_semantic_digest=universe_digest,
+                lifecycle_state="active",
+                observation_enabled=True,
+                entry_enabled=True,
                 scope_version=1,
+                warm_ready_at_ms=NOW_MS - 1,
+                warm_readiness_digest=universe_digest,
+                warm_valid_until_ms=NOW_MS + 1,
                 updated_at_ms=NOW_MS - 1,
             )
         )
@@ -412,6 +443,7 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
             "event_spec:CPM-RO-001:CPM-LONG:v2",
             ETH,
             "long",
+            (ETH,),
         ),
         (
             "scope-mpg-sol-long",
@@ -420,6 +452,7 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
             "event_spec:MPG-001:MPG-LONG:v2",
             SOL,
             "long",
+            (SOL, OP, AVAX, SUI),
         ),
         (
             "scope-mi-sol-long",
@@ -428,6 +461,7 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
             "event_spec:MI-001:MI-LONG:v2",
             SOL,
             "long",
+            (SOL, OP, AVAX, SUI),
         ),
         (
             "scope-sor-avax-long",
@@ -436,6 +470,7 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
             "event_spec:SOR-001:SOR-LONG:v2",
             AVAX,
             "long",
+            (AVAX,),
         ),
         (
             "scope-sor-btc-short",
@@ -444,6 +479,7 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
             "event_spec:SOR-001:SOR-SHORT:v2",
             BTC,
             "short",
+            (BTC,),
         ),
         (
             "scope-brf2-btc-short",
@@ -452,6 +488,7 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
             "event_spec:BRF2-001:BRF2-SHORT:v2",
             BTC,
             "short",
+            (BTC,),
         ),
     )
     async with engine.begin() as connection:
@@ -462,7 +499,17 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
             event_spec_id,
             exchange_instrument_id,
             position_side,
+            members,
         ) in rows:
+            universe_version_id, universe_digest = _universe_identity(event_spec_id)
+            await _seed_active_universe(
+                connection,
+                strategy_group_id=strategy_group_id,
+                event_spec_id=event_spec_id,
+                universe_version_id=universe_version_id,
+                universe_digest=universe_digest,
+                members=members,
+            )
             await connection.execute(
                 sa.insert(runtime_scopes_current).values(
                     runtime_scope_id=runtime_scope_id,
@@ -473,8 +520,15 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
                     owner_policy_id="policy-observation-only",
                     exchange_instrument_id=exchange_instrument_id,
                     position_side=position_side,
-                    enabled=True,
+                    universe_version_id=universe_version_id,
+                    universe_semantic_digest=universe_digest,
+                    lifecycle_state="active",
+                    observation_enabled=True,
+                    entry_enabled=True,
                     scope_version=1,
+                    warm_ready_at_ms=NOW_MS - 1,
+                    warm_readiness_digest=universe_digest,
+                    warm_valid_until_ms=NOW_MS + 1,
                     updated_at_ms=NOW_MS - 1,
                 )
             )
@@ -488,3 +542,68 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
                 updated_at_ms=NOW_MS - 1,
             )
         )
+
+
+def _universe_identity(event_spec_id: str) -> tuple[str, str]:
+    return (
+        f"universe:test:{event_spec_id}",
+        f"sha256:{sha256(event_spec_id.encode()).hexdigest()}",
+    )
+
+
+async def _seed_active_universe(
+    connection,
+    *,
+    strategy_group_id: str,
+    event_spec_id: str,
+    universe_version_id: str,
+    universe_digest: str,
+    members: tuple[str, ...],
+) -> None:
+    for member in members:
+        await connection.execute(
+            pg_insert(instruments)
+            .values(
+                exchange_instrument_id=member,
+                venue_id="binance-usdm",
+                asset_class="crypto",
+                venue_symbol=member.split(":")[1],
+                contract_kind="perpetual",
+                status="active",
+            )
+            .on_conflict_do_nothing(
+                index_elements=[instruments.c.exchange_instrument_id]
+            )
+        )
+    await connection.execute(
+        sa.insert(strategy_universe_versions).values(
+            universe_version_id=universe_version_id,
+            strategy_group_id=strategy_group_id,
+            event_spec_id=event_spec_id,
+            universe_version=1,
+            semantic_digest=universe_digest,
+            lifecycle_state="active",
+            installed_at_ms=NOW_MS - 1,
+            activated_at_ms=NOW_MS - 1,
+        )
+    )
+    await connection.execute(
+        sa.insert(strategy_universe_members),
+        [
+            {
+                "universe_version_id": universe_version_id,
+                "exchange_instrument_id": member,
+            }
+            for member in members
+        ],
+    )
+    await connection.execute(
+        sa.insert(strategy_universe_current).values(
+            event_spec_id=event_spec_id,
+            universe_version_id=universe_version_id,
+            semantic_digest=universe_digest,
+            lifecycle_state="active",
+            activation_generation=1,
+            activated_at_ms=NOW_MS - 1,
+        )
+    )

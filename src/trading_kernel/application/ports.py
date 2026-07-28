@@ -224,6 +224,15 @@ class ActiveStrategyUniverseSnapshot(BaseModel):
     exchange_instrument_id: str
 
 
+class ActiveStrategyUniverseMembershipSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str
+    universe_version_id: str
+    semantic_digest: str
+    exchange_instrument_ids: tuple[str, ...]
+
+
 class ObservationScopeClaim(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -708,6 +717,12 @@ class SignalRepository(Protocol):
         exchange_instrument_id: str,
         for_update: bool = False,
     ) -> ActiveStrategyUniverseSnapshot | None: ...
+
+    async def get_active_universe_members(
+        self,
+        *,
+        event_spec_id: str,
+    ) -> ActiveStrategyUniverseMembershipSnapshot | None: ...
 
     async def get_runtime_profile(
         self,

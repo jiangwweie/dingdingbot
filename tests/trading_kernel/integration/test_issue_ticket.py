@@ -216,6 +216,9 @@ async def test_current_universe_switch_committing_before_issue_rejects_old_claim
     switch_connection = await issue_engine.connect()
     switch_transaction = await switch_connection.begin()
     try:
+        switch_backend_pid = int(
+            await switch_connection.scalar(sa.text("SELECT pg_backend_pid()"))
+        )
         await switch_connection.execute(
             sa.update(strategy_universe_current)
             .where(
@@ -229,23 +232,43 @@ async def test_current_universe_switch_committing_before_issue_rejects_old_claim
                 activated_at_ms=1_001,
             )
         )
-        issue_task = asyncio.create_task(
-            _issue_once(
-                issue_engine,
-                ticket,
-                now_ms=1_002,
-                claim_owner="worker-race",
+        async with PostgresKernelUnitOfWork(issue_engine) as issue_uow:
+            issue_connection = issue_uow._require_connection()
+            issue_backend_pid = int(
+                await issue_connection.scalar(sa.text("SELECT pg_backend_pid()"))
             )
-        )
-        await asyncio.sleep(0.05)
-        await switch_transaction.commit()
-        result = await issue_task
+            issue_task = asyncio.create_task(
+                issue_ticket(
+                    issue_uow,
+                    _issue_request(
+                        ticket=ticket,
+                        now_ms=1_002,
+                        claim_owner="worker-race",
+                    ),
+                )
+            )
+            await _wait_for_database_blocker(
+                issue_engine,
+                blocked_backend_pid=issue_backend_pid,
+                blocker_backend_pid=switch_backend_pid,
+            )
+            assert issue_task.done() is False
+            await switch_transaction.commit()
+            result = await issue_task
     finally:
         if switch_transaction.is_active:
             await switch_transaction.rollback()
         await switch_connection.close()
 
     assert result.status is IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH
+    async with issue_engine.connect() as connection:
+        current_version_id = await connection.scalar(
+            sa.select(strategy_universe_current.c.universe_version_id).where(
+                strategy_universe_current.c.event_spec_id
+                == ticket.identity.runtime.event_spec_id
+            )
+        )
+    assert current_version_id == "universe:sor-long:replacement"
     await _assert_no_durable_entry_state(issue_engine, ticket.identity.ticket_id)
 
 
@@ -624,22 +647,24 @@ async def _issue_and_release_lane(engine: AsyncEngine, ticket) -> None:
         )
 
 
-async def _issue_once(
+async def _wait_for_database_blocker(
     engine: AsyncEngine,
-    ticket,
     *,
-    now_ms: int,
-    claim_owner: str,
-):
-    async with PostgresKernelUnitOfWork(engine) as uow:
-        return await issue_ticket(
-            uow,
-            _issue_request(
-                ticket=ticket,
-                now_ms=now_ms,
-                claim_owner=claim_owner,
-            ),
-        )
+    blocked_backend_pid: int,
+    blocker_backend_pid: int,
+) -> None:
+    async def wait_until_observed() -> None:
+        while True:
+            async with engine.connect() as connection:
+                blocking_pids = await connection.scalar(
+                    sa.text("SELECT pg_blocking_pids(:blocked_backend_pid)"),
+                    {"blocked_backend_pid": blocked_backend_pid},
+                )
+            if blocker_backend_pid in blocking_pids:
+                return
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_until_observed(), timeout=2)
 
 
 async def _seed_replacement_universe(engine: AsyncEngine, ticket) -> None:

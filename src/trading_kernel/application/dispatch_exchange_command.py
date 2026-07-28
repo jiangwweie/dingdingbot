@@ -222,10 +222,10 @@ async def dispatch_one_command(
     if command is None:
         return DispatchCommandResult(status=DispatchCommandStatus.NO_COMMAND)
 
-    if (
-        command.kind in {ExchangeCommandKind.SET_LEVERAGE, ExchangeCommandKind.ENTRY}
-        and entry_facts_source is not None
-    ):
+    if command.kind in {
+        ExchangeCommandKind.SET_LEVERAGE,
+        ExchangeCommandKind.ENTRY,
+    }:
         preflight = await _preflight_new_entry_mutation(
             uow_factory,
             command=command,

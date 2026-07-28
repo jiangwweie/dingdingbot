@@ -138,3 +138,101 @@ The implementation now:
 - The F842 pair is an unrelated baseline and remains unchanged.
 - Universe installation, certification, warming, activation, and their older
   runtime-authority/observation consumers remain outside Task 11.
+
+## Review fix round 1/5
+
+### Status
+
+All three Important findings and the issue-race P2 finding were fixed locally.
+No Tokyo, production PostgreSQL, systemd, exchange, U.S.-equity, installer,
+warming, or activation action was performed.
+
+### RED evidence
+
+1. Observation integration before fixture/source repair:
+   `python3 -m pytest -q
+   tests/trading_kernel/integration/test_observation_to_signal.py`
+   - Result: **5 failed**.
+   - Exact first failure: canonical 0002 metadata rejected the deleted
+     `enabled` fixture column.
+   - After migrating the fixture, the real producer failed first on deleted
+     `RuntimeScopeSnapshot.enabled`, then the six-event test failed on deleted
+     Registry `candidate_instruments`.
+2. Missing action-time facts:
+   - Command: the two new ENTRY/SET_LEVERAGE no-facts tests.
+   - Result: **2 failed**.
+   - Both commands incorrectly returned `ACCEPTED` and reached the fake Venue.
+3. Preflight-to-Venue Universe race:
+   - Command: the new controlled dispatch race test.
+   - Result: **1 failed**.
+   - A direct current-pointer update committed after the preflight transaction
+     closed and before Venue dispatch; the expected database fence was absent.
+
+### GREEN behavior
+
+- ENTRY and SET_LEVERAGE always run action-time preflight. A missing
+  `EntryFactsSource` returns `RUNTIME_FENCED`, records a rejected command, and
+  performs zero Venue mutations. Non-entry lifecycle dispatch remains
+  independent of Entry facts.
+- `brc_strategy_universe_current` now owns a PostgreSQL statement-level
+  INSERT/UPDATE/DELETE trigger. The trigger atomically creates and locks the
+  existing global Entry lane and rejects every pointer mutation while the lane
+  is non-idle with SQLSTATE `55000`. This is an executable database contract
+  for Task 10 and direct SQL, not a future facade convention.
+- The trigger uses statement-level `BEFORE` execution, preserving the global
+  `Entry lane -> Universe pointer` lock order and holding no transaction across
+  Venue I/O.
+- The controlled race pauses exactly after the dispatch preflight UoW has
+  closed and before Venue invocation. PostgreSQL rejects the concurrent direct
+  pointer update, dispatch then reaches Venue once under unchanged frozen
+  authority, and the current pointer remains unchanged.
+- Observation uses lifecycle state, `observation_enabled`, `entry_enabled`,
+  exact active pointer/digest/member authority, and typed PostgreSQL active
+  Universe membership for comparative peers. The real six-event
+  Observation-to-Signal integration creates Signals without Ticket or Exchange
+  Command side effects.
+- Observation scheduling now uses canonical
+  `next_observation_due_at_ms`/`lease_expires_at_ms`/`lease_owner` columns.
+- The issue race no longer guesses with `asyncio.sleep(0.05)`. It records both
+  PostgreSQL backend PIDs, waits until `pg_blocking_pids(issue_pid)` proves the
+  switch transaction is blocking issue, asserts issue is unfinished, commits
+  the switch, then verifies the replacement pointer is reread and no Claim,
+  Ticket, Command, Reservation, or lane claim was persisted.
+
+### Review-fix verification
+
+1. Observation integration:
+   `python3 -m pytest -q
+   tests/trading_kernel/integration/test_observation_to_signal.py`
+   - Result: **5 passed**.
+2. Dispatch integration:
+   `python3 -m pytest -q
+   tests/trading_kernel/integration/test_command_dispatch.py`
+   - Result: **21 passed**.
+3. Ticket issue integration:
+   `python3 -m pytest -q
+   tests/trading_kernel/integration/test_issue_ticket.py`
+   - Result: **14 passed**.
+4. Schema/migration group:
+   `test_strategy_universe_schema.py`,
+   `test_schema_migration_postgres.py`, and `test_schema_baseline.py`
+   - Result: **23 passed**.
+5. Combined Task 11 focused group:
+   - Result: **87 passed in 51.07s**.
+   - Includes dispatch, issue, Observation-to-Signal, Universe eligibility,
+     Live/Replay parity, persistence chain, PostgreSQL UoW, and affected domain
+     unit tests.
+6. Focused Ruff:
+   `/tmp/brc-p1-static/bin/ruff check --select E4,E7,E9,F ...`
+   - Result: **All checks passed** across all review-fix source and test files.
+7. `git diff --check`
+   - Result: **passed** with no whitespace errors.
+
+### Remaining boundary
+
+- The database trigger deliberately supersedes the retired test shape that
+  mutated the current pointer after Ticket issuance and expected dispatch to
+  notice later. Such a switch is now rejected at the mutation boundary; the
+  stronger controlled preflight-to-Venue race proves that contract directly.
+- Production runtime-authority installation and activation remain later-task
+  work and were not implemented here.

@@ -12,6 +12,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import (
+    ActiveStrategyUniverseMembershipSnapshot,
     ActiveStrategyUniverseSnapshot,
     EventSpecSnapshot,
     InstrumentRulesSnapshot,
@@ -277,20 +278,20 @@ class PostgresSignalRepository:
                 == runtime_scopes_current.c.event_spec_id,
             )
             .where(
-                runtime_scopes_current.c.enabled.is_(True),
+                runtime_scopes_current.c.observation_enabled.is_(True),
                 event_specs.c.status == "active",
                 sa.or_(
-                    runtime_scopes_current.c.observation_due_at_ms.is_(None),
-                    runtime_scopes_current.c.observation_due_at_ms <= now_ms,
+                    runtime_scopes_current.c.next_observation_due_at_ms.is_(None),
+                    runtime_scopes_current.c.next_observation_due_at_ms <= now_ms,
                 ),
                 sa.or_(
-                    runtime_scopes_current.c.observation_lease_until_ms.is_(None),
-                    runtime_scopes_current.c.observation_lease_until_ms <= now_ms,
+                    runtime_scopes_current.c.lease_expires_at_ms.is_(None),
+                    runtime_scopes_current.c.lease_expires_at_ms <= now_ms,
                 ),
             )
             .order_by(
                 sa.func.coalesce(
-                    runtime_scopes_current.c.observation_due_at_ms,
+                    runtime_scopes_current.c.next_observation_due_at_ms,
                     0,
                 ),
                 runtime_scopes_current.c.runtime_scope_id,
@@ -311,8 +312,8 @@ class PostgresSignalRepository:
                 runtime_scopes_current.c.runtime_scope_id == runtime_scope_id
             )
             .values(
-                observation_claim_owner=normalized_worker_id,
-                observation_lease_until_ms=lease_until_ms,
+                lease_owner=normalized_worker_id,
+                lease_expires_at_ms=lease_until_ms,
             )
         )
         return ObservationScopeClaim(
@@ -334,12 +335,12 @@ class PostgresSignalRepository:
             sa.update(runtime_scopes_current)
             .where(
                 runtime_scopes_current.c.runtime_scope_id == runtime_scope_id,
-                runtime_scopes_current.c.observation_claim_owner == worker_id,
+                runtime_scopes_current.c.lease_owner == worker_id,
             )
             .values(
-                observation_due_at_ms=due_at_ms,
-                observation_claim_owner=None,
-                observation_lease_until_ms=None,
+                next_observation_due_at_ms=due_at_ms,
+                lease_owner=None,
+                lease_expires_at_ms=None,
             )
         )
         if result.rowcount != 1:
@@ -538,6 +539,42 @@ class PostgresSignalRepository:
             None
             if row is None
             else ActiveStrategyUniverseSnapshot.model_validate(row)
+        )
+
+    async def get_active_universe_members(
+        self,
+        *,
+        event_spec_id: str,
+    ) -> ActiveStrategyUniverseMembershipSnapshot | None:
+        result = await self._connection.execute(
+            sa.select(
+                strategy_universe_current.c.event_spec_id,
+                strategy_universe_current.c.universe_version_id,
+                strategy_universe_current.c.semantic_digest,
+                strategy_universe_members.c.exchange_instrument_id,
+            )
+            .join(
+                strategy_universe_members,
+                strategy_universe_members.c.universe_version_id
+                == strategy_universe_current.c.universe_version_id,
+            )
+            .where(
+                strategy_universe_current.c.event_spec_id == event_spec_id,
+                strategy_universe_current.c.lifecycle_state == "active",
+            )
+            .order_by(strategy_universe_members.c.exchange_instrument_id)
+        )
+        rows = result.mappings().all()
+        if not rows:
+            return None
+        first = rows[0]
+        return ActiveStrategyUniverseMembershipSnapshot(
+            event_spec_id=str(first["event_spec_id"]),
+            universe_version_id=str(first["universe_version_id"]),
+            semantic_digest=str(first["semantic_digest"]),
+            exchange_instrument_ids=tuple(
+                str(row["exchange_instrument_id"]) for row in rows
+            ),
         )
 
     async def get_runtime_profile(

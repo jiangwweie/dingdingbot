@@ -93,7 +93,12 @@ async def observe_strategy_scope(
 ) -> ObservationResult:
     async with uow_factory() as uow:
         scope = await uow.signals.get_runtime_scope(request.runtime_scope_id)
-        if scope is None or not scope.enabled:
+        if (
+            scope is None
+            or scope.lifecycle_state != "active"
+            or not scope.observation_enabled
+            or not scope.entry_enabled
+        ):
             return _invalid_observation(
                 request,
                 event_spec_id=None if scope is None else scope.event_spec_id,
@@ -105,6 +110,22 @@ async def observe_strategy_scope(
                 request,
                 event_spec_id=scope.event_spec_id,
                 reason="registry_event_unavailable",
+            )
+        active_universe = await uow.signals.get_active_universe_members(
+            event_spec_id=scope.event_spec_id,
+        )
+        if (
+            active_universe is None
+            or active_universe.universe_version_id != scope.universe_version_id
+            or active_universe.semantic_digest
+            != scope.universe_semantic_digest
+            or scope.exchange_instrument_id
+            not in active_universe.exchange_instrument_ids
+        ):
+            return _invalid_observation(
+                request,
+                event_spec_id=scope.event_spec_id,
+                reason="scope_or_policy_mismatch",
             )
         contract = _contract_for_scope(scope)
         if contract is None:
@@ -120,6 +141,7 @@ async def observe_strategy_scope(
             contract,
             scope,
             request.trigger_candle_close_time_ms,
+            active_universe.exchange_instrument_ids,
         )
     except (RuntimeError, TimeoutError, ValueError):
         async with uow_factory() as uow:
@@ -233,11 +255,6 @@ def _contract_for_scope(
             and contract.strategy_group_id == scope.strategy_group_id
             and contract.strategy_version_id == scope.strategy_version_id
             and contract.position_side == scope.position_side
-            and scope.exchange_instrument_id
-            in {
-                item.exchange_instrument_id
-                for item in contract.candidate_instruments
-            }
         ):
             return contract
     return None
@@ -248,6 +265,7 @@ async def _load_market_snapshot(
     contract: RegisteredStrategyContract,
     scope: RuntimeScopeSnapshot,
     trigger_ms: int,
+    universe_member_ids: tuple[str, ...],
 ) -> MarketSnapshot:
     if contract.event_id in {"SOR-LONG", "SOR-SHORT"}:
         raw = await _fetch(
@@ -290,6 +308,7 @@ async def _load_market_snapshot(
         scope,
         trigger_ms,
         candidate_candles=windows.get("1h", ()),
+        universe_member_ids=universe_member_ids,
     )
     return MarketSnapshot(
         exchange_instrument_id=scope.exchange_instrument_id,
@@ -307,6 +326,7 @@ async def _build_comparative_strength(
     trigger_ms: int,
     *,
     candidate_candles: tuple[ClosedCandle, ...],
+    universe_member_ids: tuple[str, ...],
 ) -> ComparativeStrengthSnapshot | None:
     if contract.event_id == "MPG-LONG":
         lookback_bars = 8
@@ -338,8 +358,8 @@ async def _build_comparative_strength(
 
     raw_members = await asyncio.gather(
         *(
-            load_member(item.exchange_instrument_id)
-            for item in contract.candidate_instruments
+            load_member(exchange_instrument_id)
+            for exchange_instrument_id in universe_member_ids
         )
     )
     if any(item is None for item in raw_members):

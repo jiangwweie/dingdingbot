@@ -13,6 +13,8 @@ import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.dispatch_exchange_command import (
@@ -166,7 +168,59 @@ class CountingVenue:
         )
 
 
+class CountingEntryVenue(CountingVenue):
+    def __init__(self) -> None:
+        super().__init__()
+        self.leverage_calls = 0
+
+    async def set_leverage(self, request) -> SetLeverageCommandResult:
+        self.leverage_calls += 1
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "4" * 64,
+        )
+
+
+class PreflightExitBarrierFactory:
+    def __init__(self, engine: AsyncEngine) -> None:
+        self._engine = engine
+        self._exit_count = 0
+        self.preflight_closed = asyncio.Event()
+        self.release_dispatch = asyncio.Event()
+
+    def __call__(self):
+        return _PreflightExitBarrierUnitOfWork(
+            PostgresKernelUnitOfWork(self._engine),
+            self,
+        )
+
+
+class _PreflightExitBarrierUnitOfWork:
+    def __init__(
+        self,
+        inner: PostgresKernelUnitOfWork,
+        barrier: PreflightExitBarrierFactory,
+    ) -> None:
+        self._inner = inner
+        self._barrier = barrier
+
+    async def __aenter__(self):
+        return await self._inner.__aenter__()
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        outcome = await self._inner.__aexit__(exc_type, exc, traceback)
+        self._barrier._exit_count += 1
+        if self._barrier._exit_count == 3:
+            self._barrier.preflight_closed.set()
+            await self._barrier.release_dispatch.wait()
+        return outcome
+
+
 class PreflightFacts:
+    def __init__(self, *, configured_leverage: int = 5) -> None:
+        self._configured_leverage = configured_leverage
+
     async def read_entry_admission_snapshot(
         self, request: EntryAdmissionSnapshotRequest
     ) -> EntryAdmissionSnapshot:
@@ -186,7 +240,7 @@ class PreflightFacts:
                 AdmissionInstrumentFacts(
                     exchange_instrument_id=request.exchange_instrument_id,
                     mark_price=Decimal("60000"),
-                    configured_leverage=5,
+                    configured_leverage=self._configured_leverage,
                 ),
             ),
             positions=(),
@@ -286,6 +340,76 @@ class CodedLeverageFailureVenue:
 
 
 @pytest.mark.asyncio
+async def test_entry_without_action_time_facts_is_rejected_before_venue(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    venue = CountingEntryVenue()
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
+        ),
+        entry_facts_source=None,
+    )
+
+    assert result.status is DispatchCommandStatus.SUPERSEDED
+    assert venue.calls == 0
+    assert venue.leverage_calls == 0
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        command = await uow.exchange_commands.get(result.command_id or "")
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert command is not None and command.status is ExchangeCommandStatus.REJECTED
+    assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_set_leverage_without_action_time_facts_is_rejected_before_venue(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket(leverage_change_required=True)
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    venue = CountingEntryVenue()
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="leverage-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
+        ),
+        entry_facts_source=None,
+    )
+
+    assert result.status is DispatchCommandStatus.SUPERSEDED
+    assert venue.calls == 0
+    assert venue.leverage_calls == 0
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        command = await uow.exchange_commands.get(result.command_id or "")
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert command is not None and command.status is ExchangeCommandStatus.REJECTED
+    assert aggregate is not None and aggregate.status is AggregateStatus.LEVERAGE_REJECTED
+
+
+@pytest.mark.asyncio
 async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations(
     dispatch_engine: AsyncEngine,
 ) -> None:
@@ -293,16 +417,6 @@ async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations
     await _seed_policy(dispatch_engine)
     await _issue(dispatch_engine, ticket)
     async with dispatch_engine.begin() as connection:
-        await connection.execute(
-            sa.insert(runtime_capabilities_current).values(
-                capability_key="exchange_commands",
-                enabled=True,
-                certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                certification={},
-                updated_at_ms=1_000,
-            )
-        )
         await connection.execute(
             sa.update(owner_policy_current)
             .where(owner_policy_current.c.owner_policy_id == "policy-main")
@@ -319,7 +433,7 @@ async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0002_crypto_strategy_universe",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -355,78 +469,12 @@ async def test_retired_strategy_version_before_entry_preflight_causes_zero_venue
     await _issue(dispatch_engine, ticket)
     async with dispatch_engine.begin() as connection:
         await connection.execute(
-            sa.insert(runtime_capabilities_current).values(
-                capability_key="exchange_commands",
-                enabled=True,
-                certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                certification={},
-                updated_at_ms=1_000,
-            )
-        )
-        await connection.execute(
             sa.update(strategy_versions)
             .where(
                 strategy_versions.c.strategy_version_id
                 == ticket.identity.runtime.strategy_version_id
             )
             .values(status="retired")
-        )
-    venue = CountingVenue()
-
-    result = await dispatch_one_command(
-        lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        venue,
-        DispatchCommandRequest(
-            worker_id="entry-dispatcher",
-            now_ms=1_100,
-            lease_until_ms=6_100,
-            timeout_seconds=1,
-            runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
-            admission_snapshot_validity_ms=1_000,
-        ),
-        entry_facts_source=PreflightFacts(),
-    )
-
-    assert result.status is DispatchCommandStatus.SUPERSEDED
-    assert venue.calls == 0
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
-    assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
-
-
-@pytest.mark.asyncio
-async def test_current_universe_switch_before_entry_dispatch_causes_zero_venue_mutations(
-    dispatch_engine: AsyncEngine,
-) -> None:
-    ticket = _ticket()
-    await _seed_policy(dispatch_engine)
-    await _issue(dispatch_engine, ticket)
-    await _seed_replacement_universe(dispatch_engine, ticket)
-    async with dispatch_engine.begin() as connection:
-        await connection.execute(
-            sa.insert(runtime_capabilities_current).values(
-                capability_key="exchange_commands",
-                enabled=True,
-                certified_commit="kernel-test-head",
-                schema_revision="0002_crypto_strategy_universe",
-                certification={},
-                updated_at_ms=1_000,
-            )
-        )
-        await connection.execute(
-            sa.update(strategy_universe_current)
-            .where(
-                strategy_universe_current.c.event_spec_id
-                == ticket.identity.runtime.event_spec_id
-            )
-            .values(
-                universe_version_id="universe:sor-long:replacement",
-                semantic_digest="sha256:" + "b" * 64,
-                activation_generation=2,
-                activated_at_ms=1_050,
-            )
         )
     venue = CountingVenue()
 
@@ -448,10 +496,77 @@ async def test_current_universe_switch_before_entry_dispatch_causes_zero_venue_m
     assert result.status is DispatchCommandStatus.SUPERSEDED
     assert venue.calls == 0
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        command = await uow.exchange_commands.get(result.command_id or "")
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
-    assert command is not None and command.status is ExchangeCommandStatus.REJECTED
     assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_universe_pointer_switch_after_preflight_is_fenced_by_claimed_entry_lane(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    await _seed_replacement_universe(dispatch_engine, ticket)
+    venue = CountingVenue()
+    barrier_factory = PreflightExitBarrierFactory(dispatch_engine)
+    dispatch_task = asyncio.create_task(
+        dispatch_one_command(
+            barrier_factory,
+            venue,
+            DispatchCommandRequest(
+                worker_id="entry-dispatcher",
+                now_ms=1_100,
+                lease_until_ms=6_100,
+                timeout_seconds=1,
+                runtime_commit="kernel-test-head",
+                schema_revision="0002_crypto_strategy_universe",
+                admission_snapshot_validity_ms=1_000,
+            ),
+            entry_facts_source=PreflightFacts(),
+        )
+    )
+    await asyncio.wait_for(barrier_factory.preflight_closed.wait(), timeout=2)
+
+    switch_blocked = False
+    switch_error = ""
+    try:
+        async with dispatch_engine.begin() as connection:
+            await connection.execute(
+                sa.update(strategy_universe_current)
+                .where(
+                    strategy_universe_current.c.event_spec_id
+                    == ticket.identity.runtime.event_spec_id
+                )
+                .values(
+                    universe_version_id="universe:sor-long:replacement",
+                    semantic_digest="sha256:" + "b" * 64,
+                    activation_generation=2,
+                    activated_at_ms=1_101,
+                )
+            )
+    except DBAPIError as exc:
+        switch_error = str(exc)
+        switch_blocked = (
+            "strategy universe activation is fenced by global ENTRY lane"
+            in switch_error
+            and getattr(exc.orig, "sqlstate", None) == "55000"
+        )
+    finally:
+        barrier_factory.release_dispatch.set()
+
+    result = await dispatch_task
+    assert switch_blocked is True, switch_error
+    assert result.status is DispatchCommandStatus.ACCEPTED
+    assert venue.calls == 1
+    async with dispatch_engine.connect() as connection:
+        current_version_id = await connection.scalar(
+            sa.select(strategy_universe_current.c.universe_version_id).where(
+                strategy_universe_current.c.event_spec_id
+                == ticket.identity.runtime.event_spec_id
+            )
+        )
+    assert current_version_id == ticket.universe_version_id
 
 
 @pytest.mark.asyncio
@@ -472,7 +587,11 @@ async def test_confirmed_leverage_creates_first_entry_command_in_later_transacti
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(configured_leverage=4),
     )
 
     assert first.status is DispatchCommandStatus.ACCEPTED
@@ -508,7 +627,11 @@ async def test_leverage_readback_mismatch_becomes_unknown_without_entry_or_resen
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(configured_leverage=4),
     )
 
     assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
@@ -542,7 +665,11 @@ async def test_coded_leverage_failure_persists_sanitized_reason(
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(configured_leverage=4),
     )
 
     assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
@@ -873,7 +1000,11 @@ async def _dispatch_for_ticket(
             now_ms=2_200,
             lease_until_ms=7_200,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
     assert result.status is DispatchCommandStatus.ACCEPTED
 
@@ -895,7 +1026,11 @@ async def test_dispatch_claims_then_calls_venue_outside_transaction_and_records_
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
 
     assert result.status is DispatchCommandStatus.ACCEPTED
@@ -944,7 +1079,11 @@ async def test_authoritative_entry_rejection_releases_lane_and_budget_without_re
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
 
     assert result.status is DispatchCommandStatus.REJECTED
@@ -1000,7 +1139,11 @@ async def test_timeout_becomes_unknown_outcome_incident_and_is_never_redispatche
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=0.01,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
 
     assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
@@ -1094,7 +1237,11 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await reconcile_ticket(
@@ -1161,7 +1308,11 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await reconcile_ticket(
@@ -1230,7 +1381,11 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await reconcile_ticket(
@@ -1553,6 +1708,28 @@ async def _seed_policy(engine: AsyncEngine) -> None:
 
 async def _issue(engine: AsyncEngine, ticket) -> None:
     await _seed_ticket_runtime_scope(engine, ticket)
+    async with engine.begin() as connection:
+        await connection.execute(
+            pg_insert(runtime_capabilities_current)
+            .values(
+                capability_key="exchange_commands",
+                enabled=True,
+                certified_commit="kernel-test-head",
+                schema_revision="0002_crypto_strategy_universe",
+                certification={},
+                updated_at_ms=1_000,
+            )
+            .on_conflict_do_update(
+                index_elements=[runtime_capabilities_current.c.capability_key],
+                set_={
+                    "enabled": True,
+                    "certified_commit": "kernel-test-head",
+                    "schema_revision": "0002_crypto_strategy_universe",
+                    "certification": {},
+                    "updated_at_ms": 1_000,
+                },
+            )
+        )
     async with PostgresKernelUnitOfWork(engine) as uow:
         result = await issue_ticket(
             uow,
@@ -1575,7 +1752,11 @@ async def _reach_cancel_pending(
             now_ms=1_100,
             lease_until_ms=6_100,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
     async with PostgresKernelUnitOfWork(engine) as uow:
         await reconcile_ticket(

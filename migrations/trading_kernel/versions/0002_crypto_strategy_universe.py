@@ -194,6 +194,7 @@ def upgrade() -> None:
             name="ck_brc_strategy_universe_current_active_only",
         ),
     )
+    _create_universe_activation_entry_fence()
 
     op.create_table(
         "brc_instrument_certification_current",
@@ -494,6 +495,75 @@ def _create_member_cardinality_guard() -> None:
             ON brc_instruments
             FOR EACH ROW
             EXECUTE FUNCTION brc_reject_instrument_identity_mutation();
+            """
+        )
+    )
+
+
+def _create_universe_activation_entry_fence() -> None:
+    op.execute(
+        sa.text(
+            """
+            CREATE FUNCTION brc_fence_universe_pointer_during_entry()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            DECLARE
+                lane_status text;
+                blocking_ticket_id text;
+            BEGIN
+                INSERT INTO brc_entry_lane_current (
+                    lane_id,
+                    ticket_id,
+                    signal_event_id,
+                    status,
+                    claimed_at_ms,
+                    lease_until_ms,
+                    claim_owner,
+                    version
+                )
+                VALUES (
+                    'global-entry',
+                    NULL,
+                    NULL,
+                    'idle',
+                    NULL,
+                    NULL,
+                    NULL,
+                    0
+                )
+                ON CONFLICT (lane_id) DO NOTHING;
+
+                SELECT status, ticket_id
+                INTO lane_status, blocking_ticket_id
+                FROM brc_entry_lane_current
+                WHERE lane_id = 'global-entry'
+                FOR UPDATE;
+
+                IF lane_status <> 'idle' THEN
+                    RAISE EXCEPTION
+                        'strategy universe activation is fenced by '
+                        'global ENTRY lane ticket %',
+                        blocking_ticket_id
+                        USING ERRCODE = '55000',
+                              CONSTRAINT =
+                                  'ck_brc_universe_activation_entry_lane_idle';
+                END IF;
+
+                RETURN NULL;
+            END
+            $$;
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            CREATE TRIGGER trg_brc_universe_activation_entry_lane
+            BEFORE INSERT OR UPDATE OR DELETE
+            ON brc_strategy_universe_current
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION brc_fence_universe_pointer_during_entry();
             """
         )
     )
