@@ -8,6 +8,7 @@ from typing import Literal, cast
 
 import sqlalchemy as sa
 from pydantic import ValidationError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -19,6 +20,9 @@ from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallStatus,
 )
 from src.trading_kernel.application.ports import InstrumentCertificationTarget
+from src.trading_kernel.application.project_comparative_universe import (
+    ComparativeUniverseProjection,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertification,
@@ -32,6 +36,7 @@ from src.trading_kernel.domain.strategy_universe import (
     build_strategy_universe,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    comparative_projection_current,
     event_specs,
     instrument_certification_current,
     instruments,
@@ -217,6 +222,98 @@ class PostgresStrategyUniverseRepository:
         if len(rows) > MAX_UNIVERSE_MEMBERS:
             raise UniverseInstallConflict("UNIVERSE_MEMBER_CARDINALITY_CONFLICT")
         return tuple(str(row[0]) for row in rows)
+
+    async def get_comparative_projection(
+        self,
+        *,
+        event_spec_id: str,
+        universe_version_id: str,
+        closed_bar_time_ms: int,
+        member_set_digest: str,
+    ) -> ComparativeUniverseProjection | None:
+        row = (
+            await self._connection.execute(
+                sa.select(comparative_projection_current).where(
+                    comparative_projection_current.c.event_spec_id
+                    == event_spec_id,
+                    comparative_projection_current.c.universe_version_id
+                    == universe_version_id,
+                    comparative_projection_current.c.closed_bar_time_ms
+                    == closed_bar_time_ms,
+                    comparative_projection_current.c.member_set_digest
+                    == member_set_digest,
+                )
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        try:
+            return ComparativeUniverseProjection.model_validate(
+                {
+                    **dict(row["projection"]),
+                    "event_spec_id": row["event_spec_id"],
+                    "universe_version_id": row["universe_version_id"],
+                    "member_set_digest": row["member_set_digest"],
+                    "closed_bar_time_ms": row["closed_bar_time_ms"],
+                    "observed_at_ms": row["observed_at_ms"],
+                    "valid_until_ms": row["valid_until_ms"],
+                    "projection_version": row["projection_version"],
+                }
+            )
+        except ValidationError as exc:
+            raise RuntimeError(
+                "comparative projection payload is invalid"
+            ) from exc
+
+    async def save_comparative_projection(
+        self,
+        projection: ComparativeUniverseProjection,
+    ) -> ComparativeUniverseProjection:
+        statement = (
+            pg_insert(comparative_projection_current)
+            .values(
+                event_spec_id=projection.event_spec_id,
+                universe_version_id=projection.universe_version_id,
+                closed_bar_time_ms=projection.closed_bar_time_ms,
+                member_set_digest=projection.member_set_digest,
+                projection=projection.model_dump(mode="json"),
+                observed_at_ms=projection.observed_at_ms,
+                valid_until_ms=projection.valid_until_ms,
+                projection_version=1,
+            )
+            .on_conflict_do_update(
+                index_elements=[
+                    comparative_projection_current.c.event_spec_id,
+                    comparative_projection_current.c.universe_version_id,
+                ],
+                set_={
+                    "closed_bar_time_ms": projection.closed_bar_time_ms,
+                    "member_set_digest": projection.member_set_digest,
+                    "projection": projection.model_dump(mode="json"),
+                    "observed_at_ms": projection.observed_at_ms,
+                    "valid_until_ms": projection.valid_until_ms,
+                    "projection_version": (
+                        comparative_projection_current.c.projection_version + 1
+                    ),
+                },
+                where=(
+                    comparative_projection_current.c.closed_bar_time_ms
+                    < projection.closed_bar_time_ms
+                ),
+            )
+        )
+        await self._connection.execute(statement)
+        persisted = await self.get_comparative_projection(
+            event_spec_id=projection.event_spec_id,
+            universe_version_id=projection.universe_version_id,
+            closed_bar_time_ms=projection.closed_bar_time_ms,
+            member_set_digest=projection.member_set_digest,
+        )
+        if persisted is None:
+            raise RuntimeError(
+                "comparative projection authority changed"
+            )
+        return persisted
 
     async def claim_due_instrument_certification(
         self,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from decimal import Decimal
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -27,11 +26,15 @@ from src.trading_kernel.application.produce_strategy_signal import (
     evaluate_strategy_snapshot,
     produce_strategy_signal,
 )
+from src.trading_kernel.application.project_comparative_universe import (
+    ComparativeUniverseProjection,
+    comparative_member_set_digest,
+    project_comparative_universe,
+    serialize_comparative_projection,
+)
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.market import (
     ClosedCandle,
-    ComparativeStrengthMember,
-    ComparativeStrengthSnapshot,
     MarketSnapshot,
     Timeframe,
 )
@@ -279,14 +282,65 @@ async def observe_strategy_scope(
                 event_spec_id=scope.event_spec_id,
                 reason="registry_scope_mismatch",
             )
+        comparative_lookback_bars = _comparative_lookback_bars(contract)
+        comparative_projection = None
+        comparative_digest = None
+        if comparative_lookback_bars is not None:
+            try:
+                comparative_digest = comparative_member_set_digest(
+                    observation_universe.exchange_instrument_ids
+                )
+                comparative_projection = (
+                    await uow.strategy_universes.get_comparative_projection(
+                        event_spec_id=scope.event_spec_id,
+                        universe_version_id=scope.universe_version_id,
+                        closed_bar_time_ms=(
+                            request.trigger_candle_close_time_ms
+                        ),
+                        member_set_digest=comparative_digest,
+                    )
+                )
+            except (RuntimeError, ValueError):
+                await _save_observation_blocker(
+                    uow,
+                    scope=scope,
+                    blocker="comparative_projection_invalid",
+                    detector_reason="comparative_projection_invalid",
+                    updated_at_ms=request.trigger_candle_close_time_ms,
+                )
+                return _invalid_observation(
+                    request,
+                    event_spec_id=scope.event_spec_id,
+                    reason="comparative_projection_invalid",
+                )
 
     try:
+        if (
+            comparative_lookback_bars is not None
+            and comparative_projection is None
+            and comparative_digest is not None
+        ):
+            comparative_projection = (
+                await _get_or_create_comparative_projection(
+                    uow_factory,
+                    market_source,
+                    contract=contract,
+                    scope=scope,
+                    trigger_ms=request.trigger_candle_close_time_ms,
+                    universe_member_ids=(
+                        observation_universe.exchange_instrument_ids
+                    ),
+                    member_set_digest=comparative_digest,
+                    lookback_bars=comparative_lookback_bars,
+                )
+            )
         snapshot = await _load_market_snapshot(
             market_source,
             contract,
             scope,
             request.trigger_candle_close_time_ms,
             observation_universe.exchange_instrument_ids,
+            comparative_projection=comparative_projection,
         )
     except (RuntimeError, TimeoutError, ValueError):
         async with uow_factory() as uow:
@@ -506,6 +560,8 @@ async def _load_market_snapshot(
     scope: RuntimeScopeSnapshot,
     trigger_ms: int,
     universe_member_ids: tuple[str, ...],
+    *,
+    comparative_projection: ComparativeUniverseProjection | None,
 ) -> MarketSnapshot:
     if contract.event_id in {"SOR-LONG", "SOR-SHORT"}:
         raw = await _fetch(
@@ -524,10 +580,32 @@ async def _load_market_snapshot(
             ),
         )
 
-    timeframes: tuple[Timeframe, ...]
-    if contract.event_id in {"CPM-LONG", "MPG-LONG", "BRF2-SHORT"}:
+    comparative_lookback_bars = _comparative_lookback_bars(contract)
+    if comparative_lookback_bars is not None:
+        if comparative_projection is None:
+            raise ValueError("comparative projection is unavailable")
+        expected_digest = comparative_member_set_digest(
+            universe_member_ids
+        )
+        if (
+            comparative_projection.event_spec_id != scope.event_spec_id
+            or comparative_projection.universe_version_id
+            != scope.universe_version_id
+            or comparative_projection.closed_bar_time_ms != trigger_ms
+            or comparative_projection.member_set_digest != expected_digest
+        ):
+            raise ValueError("comparative projection identity mismatch")
+        candidate_candles = comparative_projection.candles_for(
+            scope.exchange_instrument_id
+        )
+        timeframes: tuple[Timeframe, ...] = (
+            ("4h",) if contract.event_id == "MPG-LONG" else ()
+        )
+    elif contract.event_id in {"CPM-LONG", "BRF2-SHORT"}:
+        candidate_candles = ()
         timeframes = ("1h", "4h")
     else:
+        candidate_candles = ()
         timeframes = ("1h",)
     fetched = await asyncio.gather(
         *(
@@ -542,93 +620,76 @@ async def _load_market_snapshot(
         )
     )
     windows = dict(zip(timeframes, fetched, strict=True))
-    comparative = await _build_comparative_strength(
-        market_source,
-        contract,
-        scope,
-        trigger_ms,
-        candidate_candles=windows.get("1h", ()),
-        universe_member_ids=universe_member_ids,
-    )
     return MarketSnapshot(
         exchange_instrument_id=scope.exchange_instrument_id,
         trigger_candle_close_time_ms=trigger_ms,
-        candles_1h=windows.get("1h", ()),
+        candles_1h=(
+            candidate_candles
+            if comparative_projection is not None
+            else windows.get("1h", ())
+        ),
         candles_4h=windows.get("4h", ()),
-        comparative_strength=comparative,
+        comparative_strength=(
+            None
+            if comparative_projection is None
+            else comparative_projection.comparative_strength
+        ),
     )
 
 
-async def _build_comparative_strength(
+async def _get_or_create_comparative_projection(
+    uow_factory: UnitOfWorkFactory,
     market_source: PublicMarketSource,
+    *,
     contract: RegisteredStrategyContract,
     scope: RuntimeScopeSnapshot,
     trigger_ms: int,
-    *,
-    candidate_candles: tuple[ClosedCandle, ...],
     universe_member_ids: tuple[str, ...],
-) -> ComparativeStrengthSnapshot | None:
-    if contract.event_id == "MPG-LONG":
-        lookback_bars = 8
-    elif contract.event_id == "MI-LONG":
-        lookback_bars = 12
-    else:
-        return None
-
-    async def load_member(instrument_id: str) -> tuple[str, Decimal] | None:
-        candles = (
-            candidate_candles
-            if instrument_id == scope.exchange_instrument_id
-            and len(candidate_candles) >= lookback_bars + 1
-            else await _fetch(
-                market_source,
-                instrument_id,
-                "1h",
-                limit=lookback_bars + 1,
-                trigger_ms=trigger_ms,
+    member_set_digest: str,
+    lookback_bars: int,
+) -> ComparativeUniverseProjection:
+    async with serialize_comparative_projection(
+        event_spec_id=scope.event_spec_id,
+        universe_version_id=scope.universe_version_id,
+        closed_bar_time_ms=trigger_ms,
+        member_set_digest=member_set_digest,
+    ):
+        async with uow_factory() as uow:
+            persisted = (
+                await uow.strategy_universes.get_comparative_projection(
+                    event_spec_id=scope.event_spec_id,
+                    universe_version_id=scope.universe_version_id,
+                    closed_bar_time_ms=trigger_ms,
+                    member_set_digest=member_set_digest,
+                )
             )
-        )
-        sample = candles[-(lookback_bars + 1) :]
-        if len(sample) < lookback_bars + 1:
-            return None
-        return_pct = (
-            (sample[-1].close - sample[0].close) / sample[0].close
-        ) * Decimal("100")
-        return instrument_id, return_pct
+        if persisted is not None:
+            return persisted
 
-    raw_members = await asyncio.gather(
-        *(
-            load_member(exchange_instrument_id)
-            for exchange_instrument_id in universe_member_ids
+        projected = await project_comparative_universe(
+            market_source,
+            event_spec_id=scope.event_spec_id,
+            universe_version_id=scope.universe_version_id,
+            strategy_group_id=contract.strategy_group_id,
+            exchange_instrument_ids=universe_member_ids,
+            closed_bar_time_ms=trigger_ms,
+            lookback_bars=lookback_bars,
+            freshness_window_ms=contract.freshness_window_ms,
         )
-    )
-    if any(item is None for item in raw_members):
-        return None
-    ranked = sorted(
-        (item for item in raw_members if item is not None),
-        key=lambda item: (-item[1], item[0]),
-    )
-    members = tuple(
-        ComparativeStrengthMember(
-            exchange_instrument_id=instrument_id,
-            return_pct=return_pct,
-            rank=rank,
-        )
-        for rank, (instrument_id, return_pct) in enumerate(ranked, start=1)
-    )
-    return ComparativeStrengthSnapshot(
-        strategy_group_id=contract.strategy_group_id,
-        timeframe="1h",
-        lookback_bars=lookback_bars,
-        trigger_candle_close_time_ms=trigger_ms,
-        members=members,
-        observed_at_ms=trigger_ms,
-        valid_until_ms=trigger_ms + contract.freshness_window_ms,
-        source_ref=(
-            f"public_closed_ohlcv:{contract.strategy_group_id}:"
-            f"{trigger_ms}:comparative"
-        ),
-    )
+        async with uow_factory() as uow:
+            return await uow.strategy_universes.save_comparative_projection(
+                projected
+            )
+
+
+def _comparative_lookback_bars(
+    contract: RegisteredStrategyContract,
+) -> int | None:
+    if contract.event_id == "MPG-LONG":
+        return 8
+    if contract.event_id == "MI-LONG":
+        return 12
+    return None
 
 
 async def _fetch(

@@ -23,6 +23,9 @@ from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     UniverseInstallResult,
 )
+from src.trading_kernel.application.project_comparative_universe import (
+    ComparativeUniverseProjection,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity import CapacityClaim
@@ -966,6 +969,20 @@ class StrategyUniverseRepository(Protocol):
         self,
         universe_version_id: str,
     ) -> tuple[str, ...]: ...
+
+    async def get_comparative_projection(
+        self,
+        *,
+        event_spec_id: str,
+        universe_version_id: str,
+        closed_bar_time_ms: int,
+        member_set_digest: str,
+    ) -> ComparativeUniverseProjection | None: ...
+
+    async def save_comparative_projection(
+        self,
+        projection: ComparativeUniverseProjection,
+    ) -> ComparativeUniverseProjection: ...
 
     async def claim_due_instrument_certification(
         self,

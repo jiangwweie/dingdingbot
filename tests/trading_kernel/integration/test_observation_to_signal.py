@@ -20,6 +20,7 @@ from src.trading_kernel.application.observe_strategy_scope import (
 from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 from src.trading_kernel.infrastructure.pg_models import (
+    comparative_projection_current,
     exchange_commands,
     facts_current,
     instruments,
@@ -141,9 +142,15 @@ async def test_observation_worker_claims_one_due_scope_and_waits_for_next_close(
                 )
             )
         ).mappings().one()
+        comparative_projection_count = await connection.scalar(
+            sa.select(sa.func.count()).select_from(
+                comparative_projection_current
+            )
+        )
     assert scope["next_observation_due_at_ms"] == NOW_MS + 900_000
     assert scope["lease_owner"] is None
     assert scope["lease_expires_at_ms"] is None
+    assert comparative_projection_count == 0
 
 
 @pytest_asyncio.fixture(name="observation_engine")

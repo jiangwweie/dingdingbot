@@ -121,23 +121,28 @@ class TypedMarketFake:
         self._engine = engine
         self._responses = responses
         self.calls: list[ClosedCandleRequest] = []
+        self._transaction_boundary_checked = False
+        self._transaction_check_lock = asyncio.Lock()
 
     async def fetch_closed_candles(
         self,
         request: ClosedCandleRequest,
     ) -> tuple[ClosedCandle, ...]:
         self.calls.append(request)
-        async with self._engine.connect() as connection:
-            idle_in_transaction = int(
-                (
-                    await connection.exec_driver_sql(
-                        "SELECT count(*) FROM pg_stat_activity "
-                        "WHERE datname = current_database() "
-                        "AND state = 'idle in transaction'"
+        async with self._transaction_check_lock:
+            if not self._transaction_boundary_checked:
+                async with self._engine.connect() as connection:
+                    idle_in_transaction = int(
+                        (
+                            await connection.exec_driver_sql(
+                                "SELECT count(*) FROM pg_stat_activity "
+                                "WHERE datname = current_database() "
+                                "AND state = 'idle in transaction'"
+                            )
+                        ).scalar_one()
                     )
-                ).scalar_one()
-            )
-        assert idle_in_transaction == 0
+                assert idle_in_transaction == 0
+                self._transaction_boundary_checked = True
         return self._responses.get(
             (request.exchange_instrument_id, request.timeframe),
             (),
