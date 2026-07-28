@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 _CANONICAL_INSTRUMENT_ID = re.compile(
     r"^binance-usdm:([A-Z0-9]+)USDT:perpetual$"
 )
+_CCXT_BINANCE_USDM_SYMBOL = re.compile(r"^([A-Z0-9]+)/USDT:USDT$")
 
 
 class BinanceUsdmInstrumentIdentity(BaseModel):
@@ -46,3 +47,22 @@ def to_ccxt_symbol(identity: BinanceUsdmInstrumentIdentity) -> str:
     """Convert a validated canonical identity without Registry or database lookup."""
 
     return f"{identity.base_asset}/{identity.quote_asset}:{identity.quote_asset}"
+
+
+def parse_binance_usdm_ccxt_symbol(
+    symbol: str,
+) -> BinanceUsdmInstrumentIdentity:
+    """Parse one strict CCXT Binance USD-M USDT perpetual symbol."""
+
+    match = _CCXT_BINANCE_USDM_SYMBOL.fullmatch(symbol)
+    if match is None:
+        raise ValueError("CCXT symbol must be Binance USD-M BASE/USDT:USDT")
+    return parse_binance_usdm_instrument_id(
+        f"binance-usdm:{match.group(1)}USDT:perpetual"
+    )
+
+
+def to_exchange_instrument_id(identity: BinanceUsdmInstrumentIdentity) -> str:
+    """Render one validated Binance USD-M identity in canonical kernel form."""
+
+    return f"{identity.venue_id}:{identity.symbol}:{identity.product_type}"

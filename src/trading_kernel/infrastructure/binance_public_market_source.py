@@ -46,25 +46,21 @@ class CcxtBinancePublicMarketSource:
         if timeout_seconds <= 0:
             raise ValueError("public market timeout must be positive")
         self._exchange = exchange
-        self._venue_symbols = dict(venue_symbols)
+        del venue_symbols
         self._timeout_seconds = timeout_seconds
 
     async def fetch_closed_candles(
         self,
         request: ClosedCandleRequest,
     ) -> tuple[ClosedCandle, ...]:
-        symbol = self._venue_symbols.get(request.exchange_instrument_id)
-        if symbol is None:
-            try:
-                symbol = to_ccxt_symbol(
-                    parse_binance_usdm_instrument_id(
-                        request.exchange_instrument_id
-                    )
-                )
-            except ValueError as exc:
-                raise RuntimeError(
-                    "canonical instrument has no public venue symbol"
-                ) from exc
+        try:
+            symbol = to_ccxt_symbol(
+                parse_binance_usdm_instrument_id(request.exchange_instrument_id)
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "canonical instrument has no public venue symbol"
+            ) from exc
         response = await asyncio.wait_for(
             self._fetch(symbol, request),
             timeout=self._timeout_seconds,

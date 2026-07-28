@@ -56,8 +56,10 @@ from src.trading_kernel.domain.fee_valuation import (
     value_native_fee,
 )
 from src.trading_kernel.domain.instrument_identity import (
+    parse_binance_usdm_ccxt_symbol,
     parse_binance_usdm_instrument_id,
     to_ccxt_symbol,
+    to_exchange_instrument_id,
 )
 from src.trading_kernel.domain.order_attribution import (
     OrderRole,
@@ -207,7 +209,7 @@ class CcxtVenueAdapter:
         clock_ms: Callable[[], int],
     ) -> None:
         self._exchanges = dict(exchanges)
-        self._venue_symbols = dict(venue_symbols)
+        del venue_symbols
         self._settlement_assets = dict(settlement_assets or {})
         self._taker_fee_rates = dict(taker_fee_rates or {})
         self._default_settlement_asset = default_settlement_asset
@@ -1081,9 +1083,6 @@ class CcxtVenueAdapter:
         venue_id: str,
         exchange_instrument_id: str,
     ) -> str:
-        configured = self._venue_symbols.get((venue_id, exchange_instrument_id))
-        if configured is not None:
-            return configured
         if venue_id != "binance-usdm":
             raise RuntimeError("canonical instrument has no venue symbol mapping")
         try:
@@ -1099,12 +1098,16 @@ class CcxtVenueAdapter:
         venue_id: str,
         symbol: str,
     ) -> str:
-        for (configured_venue_id, exchange_instrument_id), venue_symbol in (
-            self._venue_symbols.items()
-        ):
-            if configured_venue_id == venue_id and venue_symbol == symbol:
-                return exchange_instrument_id
-        return f"unmapped:{symbol}"
+        if venue_id != "binance-usdm":
+            raise RuntimeError("canonical Binance USD-M instrument is unavailable")
+        try:
+            return to_exchange_instrument_id(
+                parse_binance_usdm_ccxt_symbol(symbol)
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "canonical Binance USD-M instrument is unavailable"
+            ) from exc
 
 
 async def _call_exchange(
@@ -1183,14 +1186,21 @@ def _parse_order_truth(
     order_side = _order_side_literal(
         str(value.get("side") or "").strip().lower()
     )
+    if raw_symbol == expected_symbol:
+        exchange_instrument_id = request.exchange_instrument_id
+    else:
+        try:
+            exchange_instrument_id = to_exchange_instrument_id(
+                parse_binance_usdm_ccxt_symbol(raw_symbol)
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "canonical Binance USD-M instrument is unavailable"
+            ) from exc
     return VenueOrderTruth(
         exchange_order_id=str(value.get("id") or ""),
         venue_client_order_id=str(value.get("clientOrderId") or ""),
-        exchange_instrument_id=(
-            request.exchange_instrument_id
-            if raw_symbol == expected_symbol
-            else f"unmapped:{raw_symbol}"
-        ),
+        exchange_instrument_id=exchange_instrument_id,
         position_side=position_side,
         order_side=order_side,
         quantity=Decimal(str(value.get("amount") or "0")),

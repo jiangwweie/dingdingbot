@@ -80,6 +80,12 @@ class PostgresStrategyRegistryRepository:
 
         for strategy_group_id, group_contracts in sorted(contracts_by_group.items()):
             active_version_id = group_contracts[0].strategy_version_id
+            group_statuses = {contract.status for contract in group_contracts}
+            if len(group_statuses) != 1:
+                raise RegistrySeedConflict(
+                    f"strategy Registry group status conflicts: {strategy_group_id}"
+                )
+            status = group_contracts[0].status
             counters["inserted_strategy_group_count"] += await self._insert_exact(
                 strategy_groups,
                 "strategy_group_id",
@@ -87,7 +93,7 @@ class PostgresStrategyRegistryRepository:
                     "strategy_group_id": strategy_group_id,
                     "display_name": _display_name(strategy_group_id),
                     "active_version_id": active_version_id,
-                    "status": "active",
+                    "status": status,
                     "updated_at_ms": seeded_at_ms,
                 },
                 compare_keys=("display_name", "active_version_id", "status"),
@@ -106,7 +112,7 @@ class PostgresStrategyRegistryRepository:
                         "registry_semantic_hash": registry_semantic_hash,
                         "source": "committed_old_main_program_v2",
                     },
-                    "status": "active",
+                    "status": status,
                     "created_at_ms": seeded_at_ms,
                 },
                 compare_keys=(
@@ -173,7 +179,7 @@ class PostgresStrategyRegistryRepository:
                         "signal_grade": "trial_grade_signal",
                         "source": "committed_old_main_program_v2",
                     },
-                    "status": "active",
+                    "status": contract.status,
                     "created_at_ms": seeded_at_ms,
                 },
                 compare_keys=(
@@ -206,7 +212,7 @@ class PostgresStrategyRegistryRepository:
                     "position_side": exit_policy.position_side,
                     "policy": exit_policy.model_dump(mode="json"),
                     "semantic_hash": exit_policy.semantic_hash(),
-                    "status": "active",
+                    "status": contract.status,
                     "created_at_ms": seeded_at_ms,
                 },
                 compare_keys=(

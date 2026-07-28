@@ -151,8 +151,6 @@ class FakeProbeAdapter:
         request: EntryAdmissionSnapshotRequest,
     ) -> EntryAdmissionSnapshot:
         self.admission_requests.append(request.exchange_instrument_id)
-        if request.exchange_instrument_id != "binance-usdm:BTCUSDT:perpetual":
-            raise AssertionError("full account admission probe must use BTC only")
         return EntryAdmissionSnapshot(
             venue_id=request.venue_id,
             account_id=request.account_id,
@@ -202,6 +200,13 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
             maintenance_amount=Decimal("0"),
         ),
     )
+
+
+_ACTIVE_UNIVERSE_TEST_INSTRUMENT_IDS = (
+    "binance-usdm:BTCUSDT:perpetual",
+    "binance-usdm:ETHUSDT:perpetual",
+    "binance-usdm:SOLUSDT:perpetual",
+)
 
 
 def test_entry_service_action_fact_validity_alias_sets_admission_snapshot_window() -> None:
@@ -474,10 +479,11 @@ async def test_readonly_probe_reports_only_bounded_identity_and_counts(
         settings,
         now_ms=10_000,
         validity_ms=5_000,
+        exchange_instrument_ids=_ACTIVE_UNIVERSE_TEST_INSTRUMENT_IDS,
     )
 
-    assert result.instrument_rule_count == 6
-    assert result.netting_domain_count == 12
+    assert result.instrument_rule_count == 3
+    assert result.netting_domain_count == 6
     assert result.non_flat_domain_count == 0
     assert result.open_order_domain_count == 0
     assert result.account_position_mode == "independent_sides"
@@ -570,6 +576,7 @@ async def test_readonly_probe_verifies_each_protected_ticket_against_exact_excha
         production_runtime.ProductionRuntimeSettings.from_environment(),
         now_ms=10_000,
         validity_ms=5_000,
+        exchange_instrument_ids=(instrument_id,),
         expected_protected_tickets=(expected_ticket,),
     )
 
@@ -640,5 +647,42 @@ async def test_readonly_probe_rejects_a_protected_stop_with_wrong_price(
             production_runtime.ProductionRuntimeSettings.from_environment(),
             now_ms=10_000,
             validity_ms=5_000,
+            exchange_instrument_ids=(instrument_id,),
             expected_protected_tickets=(expected_ticket,),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exchange_instrument_ids", "message"),
+    (
+        ((), "requires canonical active Universe instruments"),
+        (
+            (
+                "binance-usdm:BTCUSDT:perpetual",
+                "binance-usdm:BTCUSDT:perpetual",
+            ),
+            "must be distinct",
+        ),
+        (("BTC/USDT:USDT",), "must be canonical Binance USD-M perpetual"),
+    ),
+)
+async def test_readonly_probe_rejects_invalid_active_universe_input(
+    monkeypatch: pytest.MonkeyPatch,
+    exchange_instrument_ids: tuple[str, ...],
+    message: str,
+) -> None:
+    _set_valid_runtime_environment(monkeypatch)
+    production_runtime = _production_runtime()
+    probe_module = importlib.import_module(
+        "scripts.trading_kernel.probe_production_runtime"
+    )
+
+    with pytest.raises(ValueError, match=message):
+        await probe_module.probe_production_runtime(
+            FakeProbeAdapter(),
+            production_runtime.ProductionRuntimeSettings.from_environment(),
+            now_ms=10_000,
+            validity_ms=5_000,
+            exchange_instrument_ids=exchange_instrument_ids,
         )

@@ -24,6 +24,10 @@ from src.trading_kernel.infrastructure.strategy_registry_seed import (
     RegistrySeedConflict,
     seed_strategy_registry,
 )
+from src.trading_kernel.domain.strategy_registry import (
+    build_registry_semantic_hash,
+    registered_strategy_contracts,
+)
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
     SAFE_DATABASE,
@@ -134,6 +138,28 @@ async def test_strategy_seed_fails_closed_on_existing_semantic_conflict(
         )
 
     with pytest.raises(RegistrySeedConflict, match="event_spec:SOR-001:SOR-LONG:v2"):
+        async with PostgresKernelUnitOfWork(registry_engine) as uow:
+            await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)
+
+
+@pytest.mark.asyncio
+async def test_strategy_seed_conflicts_when_contract_status_changes(
+    registry_engine: AsyncEngine,
+) -> None:
+    contracts = registered_strategy_contracts()
+    disabled = contracts[0].model_validate(
+        {**contracts[0].model_dump(mode="python"), "status": "disabled"}
+    )
+    disabled_contracts = (disabled, *contracts[1:])
+
+    async with PostgresKernelUnitOfWork(registry_engine) as uow:
+        await uow.strategy_registry.seed_exact(
+            disabled_contracts,
+            registry_semantic_hash=build_registry_semantic_hash(disabled_contracts),
+            seeded_at_ms=1_800_000_000_000,
+        )
+
+    with pytest.raises(RegistrySeedConflict, match="strategy Registry conflict"):
         async with PostgresKernelUnitOfWork(registry_engine) as uow:
             await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)
 

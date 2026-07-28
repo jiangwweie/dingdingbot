@@ -95,6 +95,20 @@ def test_registry_uses_exact_versioned_semantic_identities() -> None:
         )
 
 
+def test_registry_status_is_frozen_semantics_and_changes_its_hash() -> None:
+    contract = registered_strategy_contracts()[0]
+
+    disabled = RegisteredStrategyContract.model_validate(
+        {**contract.model_dump(mode="python"), "status": "disabled"}
+    )
+
+    assert contract.status == "active"
+    assert disabled.status == "disabled"
+    assert build_registry_semantic_hash((contract,)) != build_registry_semantic_hash(
+        (disabled,)
+    )
+
+
 def test_registry_semantic_hash_is_deterministic_and_order_independent() -> None:
     contracts = registered_strategy_contracts()
 

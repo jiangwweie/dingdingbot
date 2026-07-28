@@ -889,10 +889,12 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
         venue_symbols={
-            ("binance-usdm", "SOLUSDT"): "SOL/USDT:USDT",
-            ("binance-usdm", "BTCUSDT"): "BTC/USDT:USDT",
+            ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "SOL/USDT:USDT",
+            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT",
         },
-        settlement_assets={("binance-usdm", "SOLUSDT"): "USDT"},
+        settlement_assets={
+            ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "USDT"
+        },
         clock_ms=lambda: 2_000,
     )
 
@@ -900,7 +902,7 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
         EntryAdmissionSnapshotRequest(
             venue_id="binance-usdm",
             account_id="experiment-1",
-            exchange_instrument_id="SOLUSDT",
+            exchange_instrument_id="binance-usdm:SOLUSDT:perpetual",
             observed_at_ms=2_000,
             valid_for_ms=5_000,
         )
@@ -915,12 +917,16 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
     assert snapshot.available_margin == Decimal("948")
     assert snapshot.best_bid_price == Decimal("99.9")
     assert snapshot.best_ask_price == Decimal("100.1")
-    assert snapshot.instrument_facts_for("SOLUSDT").mark_price == Decimal("100")
-    assert snapshot.instrument_facts_for("SOLUSDT").configured_leverage == 4
+    assert snapshot.instrument_facts_for(
+        "binance-usdm:SOLUSDT:perpetual"
+    ).mark_price == Decimal("100")
+    assert snapshot.instrument_facts_for(
+        "binance-usdm:SOLUSDT:perpetual"
+    ).configured_leverage == 4
     assert {(row.exchange_instrument_id, row.position_side) for row in snapshot.positions} == {
-        ("SOLUSDT", "long"),
-        ("SOLUSDT", "short"),
-        ("BTCUSDT", "long"),
+        ("binance-usdm:SOLUSDT:perpetual", "long"),
+        ("binance-usdm:SOLUSDT:perpetual", "short"),
+        ("binance-usdm:BTCUSDT:perpetual", "long"),
     }
     assert {order.exchange_order_id for order in snapshot.open_orders} == {
         "regular-btc-order",
@@ -933,6 +939,78 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
         (None, {"conditional": True}),
     ]
     assert snapshot.valid_until_ms == 7_000
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_derives_account_wide_binance_instrument_ids_without_map() -> None:
+    exchange = AdmissionSnapshotExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={},
+        clock_ms=lambda: 2_000,
+    )
+
+    snapshot = await adapter.read_entry_admission_snapshot(
+        EntryAdmissionSnapshotRequest(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:SOLUSDT:perpetual",
+            observed_at_ms=2_000,
+            valid_for_ms=5_000,
+        )
+    )
+
+    assert {
+        (row.exchange_instrument_id, row.position_side)
+        for row in snapshot.positions
+    } == {
+        ("binance-usdm:SOLUSDT:perpetual", "long"),
+        ("binance-usdm:SOLUSDT:perpetual", "short"),
+        ("binance-usdm:BTCUSDT:perpetual", "long"),
+    }
+    assert {
+        order.exchange_instrument_id for order in snapshot.open_orders
+    } == {"binance-usdm:BTCUSDT:perpetual"}
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_rejects_non_usdt_account_wide_symbol_without_fabricating_identity() -> None:
+    exchange = AdmissionSnapshotExchange()
+
+    async def malformed_positions(symbols, params):
+        del symbols, params
+        return [
+            {
+                "symbol": "BTC/USDC:USDC",
+                "contracts": "0.01",
+                "entryPrice": "60000",
+                "side": "long",
+                "info": {
+                    "positionSide": "LONG",
+                    "marginType": "cross",
+                    "leverage": "3",
+                    "markPrice": "60100",
+                },
+            }
+        ]
+
+    exchange.fetch_positions = malformed_positions
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={},
+        clock_ms=lambda: 2_000,
+    )
+
+    with pytest.raises(RuntimeError, match="canonical Binance USD-M instrument"):
+        await adapter.read_entry_admission_snapshot(
+            EntryAdmissionSnapshotRequest(
+                venue_id="binance-usdm",
+                account_id="experiment-1",
+                exchange_instrument_id="binance-usdm:SOLUSDT:perpetual",
+                observed_at_ms=2_000,
+                valid_for_ms=5_000,
+            )
+        )
 
 
 @pytest.mark.asyncio
@@ -965,10 +1043,12 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
         venue_symbols={
-            ("binance-usdm", "SOLUSDT"): "SOL/USDT:USDT",
-            ("binance-usdm", "BTCUSDT"): "BTC/USDT:USDT",
+            ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "SOL/USDT:USDT",
+            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT",
         },
-        settlement_assets={("binance-usdm", "SOLUSDT"): "USDT"},
+        settlement_assets={
+            ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "USDT"
+        },
         clock_ms=lambda: 2_000,
     )
 
@@ -976,20 +1056,22 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
         EntryAdmissionSnapshotRequest(
             venue_id="binance-usdm",
             account_id="experiment-1",
-            exchange_instrument_id="SOLUSDT",
+            exchange_instrument_id="binance-usdm:SOLUSDT:perpetual",
             observed_at_ms=2_000,
             valid_for_ms=5_000,
         )
     )
 
-    assert snapshot.instrument_facts_for("SOLUSDT").configured_leverage == 4
+    assert snapshot.instrument_facts_for(
+        "binance-usdm:SOLUSDT:perpetual"
+    ).configured_leverage == 4
     assert {
         (row.exchange_instrument_id, row.position_side, row.quantity)
         for row in snapshot.positions
     } == {
-        ("SOLUSDT", "long", Decimal("0")),
-        ("SOLUSDT", "short", Decimal("0")),
-        ("BTCUSDT", "long", Decimal("0.01")),
+        ("binance-usdm:SOLUSDT:perpetual", "long", Decimal("0")),
+        ("binance-usdm:SOLUSDT:perpetual", "short", Decimal("0")),
+        ("binance-usdm:BTCUSDT:perpetual", "long", Decimal("0.01")),
     }
 
 

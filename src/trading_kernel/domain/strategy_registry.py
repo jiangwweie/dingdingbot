@@ -93,6 +93,7 @@ class RegisteredStrategyContract(BaseModel):
     required_facts: tuple[RegisteredFactRequirement, ...]
     disable_facts: tuple[RegisteredFactRequirement, ...] = ()
     exit_policy_id: str
+    status: Literal["active", "disabled"] = "active"
 
     @field_validator(
         "strategy_group_id",
@@ -273,6 +274,7 @@ def _contract(
     facts: tuple[tuple[str, Literal["condition", "protection_reference"]], ...],
     protection_reference_fact: str,
     disable_fact_names: tuple[str, ...] = (),
+    status: Literal["active", "disabled"] = "active",
 ) -> RegisteredStrategyContract:
     freshness_window_ms = 900_000 if timeframe == "15m" else 3_600_000
     return RegisteredStrategyContract(
@@ -297,6 +299,7 @@ def _contract(
         exit_policy_id=(
             f"exit-policy:{strategy_group_id}:{event_id}:right-tail-v1"
         ),
+        status=status,
     )
 
 

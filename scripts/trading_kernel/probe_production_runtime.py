@@ -26,6 +26,10 @@ from src.trading_kernel.application.runtime_facts import (  # noqa: E402
     EntryFactsSource,
     InstrumentRulesRequest,
 )
+from src.trading_kernel.domain.instrument_identity import (  # noqa: E402
+    parse_binance_usdm_instrument_id,
+    to_exchange_instrument_id,
+)
 from src.trading_kernel.infrastructure.production_runtime import (  # noqa: E402
     ProductionRuntimeSettings,
     build_binance_usdm_venue_adapter,
@@ -114,9 +118,9 @@ async def probe_production_runtime(
     if now_ms <= 0 or validity_ms <= 0:
         raise ValueError("probe time and validity must be positive")
 
-    instruments = tuple(sorted({item.strip() for item in exchange_instrument_ids}))
-    if not instruments or any(not item for item in instruments):
-        raise ValueError("probe requires canonical active Universe instruments")
+    instruments = _canonical_active_universe_instrument_ids(
+        exchange_instrument_ids
+    )
     account_probe_instrument = instruments[0]
     admission_snapshot = await adapter.read_entry_admission_snapshot(
         EntryAdmissionSnapshotRequest(
@@ -199,6 +203,32 @@ async def probe_production_runtime(
         protected_tickets=protected_tickets,
         observed_at_ms=now_ms,
     )
+
+
+def _canonical_active_universe_instrument_ids(
+    exchange_instrument_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    if not exchange_instrument_ids:
+        raise ValueError("probe requires canonical active Universe instruments")
+    canonical_ids: list[str] = []
+    for raw_identity in exchange_instrument_ids:
+        normalized = raw_identity.strip()
+        try:
+            canonical = to_exchange_instrument_id(
+                parse_binance_usdm_instrument_id(normalized)
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "probe instrument must be canonical Binance USD-M perpetual"
+            ) from exc
+        if normalized != canonical:
+            raise ValueError(
+                "probe instrument must be canonical Binance USD-M perpetual"
+            )
+        canonical_ids.append(canonical)
+    if len(canonical_ids) != len(set(canonical_ids)):
+        raise ValueError("probe active Universe instruments must be distinct")
+    return tuple(sorted(canonical_ids))
 
 
 def _verify_protected_exchange_tickets(
