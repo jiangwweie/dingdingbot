@@ -17,6 +17,7 @@ EXPECTED_TABLES = {
     "brc_fact_definitions",
     "brc_facts_current",
     "brc_instrument_rules_current",
+    "brc_instrument_certification_current",
     "brc_instruments",
     "brc_monitor_current",
     "brc_monitor_events",
@@ -30,10 +31,13 @@ EXPECTED_TABLES = {
     "brc_runtime_profiles",
     "brc_runtime_scopes_current",
     "brc_schema_metadata",
+    "brc_comparative_projection_current",
     "brc_signal_events",
     "brc_signal_fact_snapshots",
     "brc_strategy_groups",
-    "brc_strategy_candidate_scopes",
+    "brc_strategy_universe_current",
+    "brc_strategy_universe_members",
+    "brc_strategy_universe_versions",
     "brc_strategy_versions",
     "brc_trade_aggregates",
     "brc_trade_events",
@@ -44,6 +48,74 @@ EXPECTED_TABLES = {
 
 def test_kernel_metadata_has_exact_clean_table_allowlist() -> None:
     assert set(metadata.tables) == EXPECTED_TABLES
+
+
+def test_strategy_universe_metadata_has_forward_only_authority_shape() -> None:
+    versions = metadata.tables["brc_strategy_universe_versions"]
+    members = metadata.tables["brc_strategy_universe_members"]
+    current = metadata.tables["brc_strategy_universe_current"]
+    certifications = metadata.tables["brc_instrument_certification_current"]
+    comparative = metadata.tables["brc_comparative_projection_current"]
+    instruments = metadata.tables["brc_instruments"]
+    scopes = metadata.tables["brc_runtime_scopes_current"]
+
+    assert "brc_strategy_candidate_scopes" not in metadata.tables
+    assert ("event_spec_id", "universe_version") in _unique_column_sets(versions)
+    assert tuple(column.name for column in members.primary_key.columns) == (
+        "universe_version_id",
+        "exchange_instrument_id",
+    )
+    assert tuple(column.name for column in current.primary_key.columns) == (
+        "event_spec_id",
+    )
+    assert tuple(column.name for column in certifications.primary_key.columns) == (
+        "runtime_profile_id",
+        "exchange_instrument_id",
+    )
+    assert tuple(column.name for column in comparative.primary_key.columns) == (
+        "event_spec_id",
+        "universe_version_id",
+    )
+    assert {
+        "pending_certification",
+        "active",
+    } == _allowed_values(instruments, "status")
+    assert {
+        "lifecycle_state",
+        "observation_enabled",
+        "entry_enabled",
+        "universe_version_id",
+        "warm_ready_at_ms",
+        "warm_readiness_digest",
+        "warm_valid_until_ms",
+    }.issubset(scopes.c.keys())
+    assert "enabled" not in scopes.c
+    assert (
+        "observation_enabled",
+        "next_observation_due_at_ms",
+        "lease_expires_at_ms",
+    ) in _index_column_sets(scopes)
+    assert (
+        "status",
+        "next_check_at_ms",
+        "lease_expires_at_ms",
+    ) in _index_column_sets(certifications)
+    assert (
+        "event_spec_id",
+        "universe_version_id",
+        "closed_bar_time_ms",
+    ) in _index_column_sets(comparative)
+
+
+def test_universe_lineage_is_required_on_signal_claim_and_ticket_metadata() -> None:
+    for table_name in (
+        "brc_signal_events",
+        "brc_capacity_claims",
+        "brc_trade_tickets",
+    ):
+        table = metadata.tables[table_name]
+        assert table.c.universe_version_id.nullable is False
+        assert table.c.universe_semantic_digest.nullable is False
 
 
 def test_kernel_schema_has_core_uniqueness_constraints() -> None:
@@ -328,3 +400,17 @@ def _index_column_sets(table: sa.Table) -> set[tuple[str, ...]]:
         tuple(column.name for column in index.columns)
         for index in table.indexes
     }
+
+
+def _allowed_values(table: sa.Table, column_name: str) -> set[str]:
+    marker = f"{column_name} IN ("
+    for constraint in table.constraints:
+        if not isinstance(constraint, sa.CheckConstraint):
+            continue
+        sql = str(constraint.sqltext)
+        if sql.startswith(marker):
+            return {
+                value.strip().strip("'")
+                for value in sql.removeprefix(marker).removesuffix(")").split(",")
+            }
+    return set()

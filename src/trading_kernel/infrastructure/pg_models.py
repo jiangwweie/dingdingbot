@@ -122,25 +122,205 @@ instruments = sa.Table(
     sa.Column("contract_kind", SHORT_TEXT, nullable=False),
     sa.Column("status", SHORT_TEXT, nullable=False),
     sa.UniqueConstraint("venue_id", "venue_symbol"),
+    sa.CheckConstraint(
+        "status IN ('pending_certification', 'active')",
+        name="status_valid",
+    ),
 )
 
-strategy_candidate_scopes = sa.Table(
-    "brc_strategy_candidate_scopes",
+strategy_universe_versions = sa.Table(
+    "brc_strategy_universe_versions",
     metadata,
-    _id("candidate_scope_id", primary_key=True),
+    _id("universe_version_id", primary_key=True),
     _id("strategy_group_id"),
     _id("event_spec_id"),
-    _id("exchange_instrument_id"),
-    sa.Column("position_side", SHORT_TEXT, nullable=False),
-    sa.Column("priority_rank", sa.Integer, nullable=False),
-    sa.Column("status", SHORT_TEXT, nullable=False),
-    _time("created_at_ms"),
-    sa.UniqueConstraint("event_spec_id", "exchange_instrument_id"),
+    sa.Column("universe_version", sa.Integer, nullable=False),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False),
+    sa.Column("lifecycle_state", SHORT_TEXT, nullable=False),
+    _time("installed_at_ms"),
+    _time("activated_at_ms", nullable=True),
+    _time("retired_at_ms", nullable=True),
+    sa.UniqueConstraint("event_spec_id", "universe_version"),
+    sa.CheckConstraint("universe_version > 0", name="version_positive"),
     sa.CheckConstraint(
-        "position_side IN ('long', 'short')",
-        name="position_side_valid",
+        "semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="semantic_digest_valid",
     ),
-    sa.CheckConstraint("priority_rank > 0", name="priority_positive"),
+    sa.CheckConstraint(
+        "lifecycle_state IN ('warming', 'active', 'retired')",
+        name="lifecycle_state_valid",
+    ),
+    sa.CheckConstraint(
+        "(lifecycle_state = 'warming' "
+        "AND activated_at_ms IS NULL AND retired_at_ms IS NULL) OR "
+        "(lifecycle_state = 'active' "
+        "AND activated_at_ms IS NOT NULL AND retired_at_ms IS NULL) OR "
+        "(lifecycle_state = 'retired' "
+        "AND activated_at_ms IS NOT NULL AND retired_at_ms IS NOT NULL "
+        "AND retired_at_ms >= activated_at_ms)",
+        name="lifecycle_timestamps_valid",
+    ),
+)
+
+sa.Index(
+    "uq_brc_strategy_universe_versions_current_digest",
+    strategy_universe_versions.c.event_spec_id,
+    strategy_universe_versions.c.semantic_digest,
+    unique=True,
+    postgresql_where=strategy_universe_versions.c.lifecycle_state.in_(
+        ("warming", "active")
+    ),
+)
+sa.Index(
+    "uq_brc_strategy_universe_versions_global_warming",
+    strategy_universe_versions.c.lifecycle_state,
+    unique=True,
+    postgresql_where=strategy_universe_versions.c.lifecycle_state == "warming",
+)
+
+strategy_universe_members = sa.Table(
+    "brc_strategy_universe_members",
+    metadata,
+    _id("universe_version_id"),
+    _id("exchange_instrument_id"),
+    sa.PrimaryKeyConstraint("universe_version_id", "exchange_instrument_id"),
+    sa.ForeignKeyConstraint(
+        ["universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+        ondelete="CASCADE",
+    ),
+    sa.ForeignKeyConstraint(
+        ["exchange_instrument_id"],
+        ["brc_instruments.exchange_instrument_id"],
+    ),
+)
+
+strategy_universe_current = sa.Table(
+    "brc_strategy_universe_current",
+    metadata,
+    _id("event_spec_id", primary_key=True),
+    _id("universe_version_id"),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False),
+    sa.Column("activation_generation", sa.BigInteger, nullable=False),
+    _time("activated_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+    ),
+    sa.UniqueConstraint("universe_version_id"),
+    sa.CheckConstraint(
+        "semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="semantic_digest_valid",
+    ),
+    sa.CheckConstraint(
+        "activation_generation > 0",
+        name="activation_generation_positive",
+    ),
+)
+
+instrument_certification_current = sa.Table(
+    "brc_instrument_certification_current",
+    metadata,
+    _id("runtime_profile_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    sa.Column("blocker_code", SHORT_TEXT, nullable=True),
+    sa.Column("facts_digest", LONG_TEXT, nullable=False),
+    sa.Column("product_rules_digest", LONG_TEXT, nullable=True),
+    sa.Column("configured_leverage", sa.Integer, nullable=True),
+    sa.Column("margin_mode", SHORT_TEXT, nullable=True),
+    sa.Column("position_mode", SHORT_TEXT, nullable=True),
+    _time("observed_at_ms"),
+    _time("valid_until_ms"),
+    _time("next_check_at_ms"),
+    sa.Column("lease_owner", SHORT_TEXT, nullable=True),
+    _time("lease_expires_at_ms", nullable=True),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.PrimaryKeyConstraint("runtime_profile_id", "exchange_instrument_id"),
+    sa.ForeignKeyConstraint(
+        ["runtime_profile_id"],
+        ["brc_runtime_profiles.runtime_profile_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["exchange_instrument_id"],
+        ["brc_instruments.exchange_instrument_id"],
+    ),
+    sa.CheckConstraint(
+        "status IN ('eligible', 'owner_action_required', "
+        "'temporarily_unavailable')",
+        name="status_valid",
+    ),
+    sa.CheckConstraint(
+        "facts_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="facts_digest_valid",
+    ),
+    sa.CheckConstraint(
+        "product_rules_digest IS NULL "
+        "OR product_rules_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="product_rules_digest_valid",
+    ),
+    sa.CheckConstraint(
+        "valid_until_ms > observed_at_ms",
+        name="validity_window_valid",
+    ),
+    sa.CheckConstraint(
+        "next_check_at_ms >= observed_at_ms",
+        name="next_check_not_before_observation",
+    ),
+    sa.CheckConstraint(
+        "(lease_owner IS NULL AND lease_expires_at_ms IS NULL) OR "
+        "(lease_owner IS NOT NULL AND lease_expires_at_ms IS NOT NULL)",
+        name="lease_shape_valid",
+    ),
+    sa.CheckConstraint(
+        "projection_version > 0",
+        name="projection_version_positive",
+    ),
+)
+
+sa.Index(
+    "ix_brc_instrument_certification_current_due",
+    instrument_certification_current.c.status,
+    instrument_certification_current.c.next_check_at_ms,
+    instrument_certification_current.c.lease_expires_at_ms,
+)
+
+comparative_projection_current = sa.Table(
+    "brc_comparative_projection_current",
+    metadata,
+    _id("event_spec_id"),
+    _id("universe_version_id"),
+    _time("closed_bar_time_ms"),
+    sa.Column("member_set_digest", LONG_TEXT, nullable=False),
+    _json("projection"),
+    _time("observed_at_ms"),
+    _time("valid_until_ms"),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.PrimaryKeyConstraint("event_spec_id", "universe_version_id"),
+    sa.ForeignKeyConstraint(
+        ["universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+        ondelete="CASCADE",
+    ),
+    sa.CheckConstraint(
+        "member_set_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="member_set_digest_valid",
+    ),
+    sa.CheckConstraint(
+        "valid_until_ms > observed_at_ms",
+        name="validity_window_valid",
+    ),
+    sa.CheckConstraint(
+        "projection_version > 0",
+        name="projection_version_positive",
+    ),
+)
+
+sa.Index(
+    "ix_brc_comparative_projection_current_lookup",
+    comparative_projection_current.c.event_spec_id,
+    comparative_projection_current.c.universe_version_id,
+    comparative_projection_current.c.closed_bar_time_ms,
 )
 
 instrument_rules_current = sa.Table(
@@ -262,26 +442,64 @@ runtime_scopes_current = sa.Table(
     _id("owner_policy_id"),
     _id("exchange_instrument_id"),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
-    sa.Column("enabled", sa.Boolean, nullable=False),
+    _id("universe_version_id"),
+    sa.Column("lifecycle_state", SHORT_TEXT, nullable=False),
+    sa.Column("observation_enabled", sa.Boolean, nullable=False),
+    sa.Column("entry_enabled", sa.Boolean, nullable=False),
     sa.Column("scope_version", sa.Integer, nullable=False),
-    _time("observation_due_at_ms", nullable=True),
-    _time("observation_lease_until_ms", nullable=True),
-    _id("observation_claim_owner", nullable=True),
+    _time("warm_ready_at_ms", nullable=True),
+    sa.Column("warm_readiness_digest", LONG_TEXT, nullable=True),
+    _time("warm_valid_until_ms", nullable=True),
+    _time("next_observation_due_at_ms", nullable=True),
+    _time("lease_expires_at_ms", nullable=True),
+    _id("lease_owner", nullable=True),
     _time("updated_at_ms"),
     sa.UniqueConstraint(
-        "strategy_group_id",
-        "event_spec_id",
+        "universe_version_id",
         "runtime_profile_id",
         "exchange_instrument_id",
         "position_side",
+    ),
+    sa.ForeignKeyConstraint(
+        ["universe_version_id", "exchange_instrument_id"],
+        [
+            "brc_strategy_universe_members.universe_version_id",
+            "brc_strategy_universe_members.exchange_instrument_id",
+        ],
+    ),
+    sa.CheckConstraint(
+        "(lifecycle_state = 'warming' "
+        "AND observation_enabled AND NOT entry_enabled) OR "
+        "(lifecycle_state = 'active' "
+        "AND observation_enabled AND entry_enabled) OR "
+        "(lifecycle_state = 'retired' "
+        "AND NOT observation_enabled AND NOT entry_enabled)",
+        name="lifecycle_permissions_valid",
+    ),
+    sa.CheckConstraint(
+        "(warm_ready_at_ms IS NULL AND warm_readiness_digest IS NULL "
+        "AND warm_valid_until_ms IS NULL) OR "
+        "(warm_ready_at_ms IS NOT NULL AND warm_readiness_digest IS NOT NULL "
+        "AND warm_valid_until_ms IS NOT NULL "
+        "AND warm_valid_until_ms > warm_ready_at_ms)",
+        name="warm_readiness_shape_valid",
+    ),
+    sa.CheckConstraint(
+        "lifecycle_state <> 'active' OR warm_ready_at_ms IS NOT NULL",
+        name="active_requires_warm_readiness",
+    ),
+    sa.CheckConstraint(
+        "warm_readiness_digest IS NULL "
+        "OR warm_readiness_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="warm_readiness_digest_valid",
     ),
 )
 
 sa.Index(
     "ix_brc_runtime_scopes_current_observation_due",
-    runtime_scopes_current.c.enabled,
-    runtime_scopes_current.c.observation_due_at_ms,
-    runtime_scopes_current.c.observation_lease_until_ms,
+    runtime_scopes_current.c.observation_enabled,
+    runtime_scopes_current.c.next_observation_due_at_ms,
+    runtime_scopes_current.c.lease_expires_at_ms,
 )
 
 facts_current = sa.Table(
@@ -307,6 +525,8 @@ signal_events = sa.Table(
     _id("strategy_group_id"),
     _id("strategy_version_id"),
     _id("event_spec_id"),
+    _id("universe_version_id"),
+    sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
     _id("exchange_instrument_id"),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("fact_digest", LONG_TEXT, nullable=False),
@@ -328,6 +548,14 @@ signal_events = sa.Table(
     sa.CheckConstraint(
         "fact_digest ~ '^sha256:[0-9a-f]{64}$'",
         name="fact_digest_valid",
+    ),
+    sa.CheckConstraint(
+        "universe_semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="universe_semantic_digest_valid",
+    ),
+    sa.ForeignKeyConstraint(
+        ["universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
     ),
 )
 
@@ -416,6 +644,8 @@ capacity_claims = sa.Table(
     _id("strategy_group_id"),
     _id("strategy_version_id"),
     _id("event_spec_id"),
+    _id("universe_version_id"),
+    sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
     _id("runtime_profile_id"),
     _id("owner_policy_id"),
     sa.Column("owner_policy_version", sa.Integer, nullable=False),
@@ -492,6 +722,14 @@ capacity_claims = sa.Table(
         name="post_fill_limit_not_below_planned_budget",
     ),
     sa.CheckConstraint("expires_at_ms > created_at_ms", name="time_window_valid"),
+    sa.CheckConstraint(
+        "universe_semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="universe_semantic_digest_valid",
+    ),
+    sa.ForeignKeyConstraint(
+        ["universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+    ),
 )
 
 trade_tickets = sa.Table(
@@ -503,6 +741,8 @@ trade_tickets = sa.Table(
     _id("strategy_group_id"),
     _id("strategy_version_id"),
     _id("event_spec_id"),
+    _id("universe_version_id"),
+    sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
     _id("runtime_profile_id"),
     _id("owner_policy_id"),
     sa.Column("owner_policy_version", sa.Integer, nullable=False),
@@ -546,6 +786,14 @@ trade_tickets = sa.Table(
     sa.CheckConstraint("notional > 0", name="notional_positive"),
     sa.CheckConstraint("selected_leverage > 0", name="selected_leverage_positive"),
     sa.CheckConstraint("risk_at_stop >= 0", name="risk_nonnegative"),
+    sa.CheckConstraint(
+        "universe_semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="universe_semantic_digest_valid",
+    ),
+    sa.ForeignKeyConstraint(
+        ["universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+    ),
 )
 sa.Index(
     "ix_brc_trade_tickets_instrument_window",
