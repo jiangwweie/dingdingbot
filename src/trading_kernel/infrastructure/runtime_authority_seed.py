@@ -437,6 +437,7 @@ async def deploy_protected_identity(
     request: RuntimeAuthoritySeedRequest,
     *,
     protected_ticket_ids: Sequence[str],
+    tp1_replay_ticket_ids: Sequence[str] = (),
 ) -> RuntimeDeploymentIdentityResult:
     """Rotate identity only across an exact, fully protected Ticket set."""
 
@@ -447,10 +448,24 @@ async def deploy_protected_identity(
         raise ValueError("protected Ticket identities must be non-blank")
     if len(set(normalized_ticket_ids)) != len(normalized_ticket_ids):
         raise ValueError("protected Ticket identities must be distinct")
+    normalized_tp1_replay_ticket_ids = tuple(
+        ticket_id.strip() for ticket_id in tp1_replay_ticket_ids
+    )
+    if any(not item for item in normalized_tp1_replay_ticket_ids):
+        raise ValueError("TP1 replay Ticket identities must be non-blank")
+    if len(set(normalized_tp1_replay_ticket_ids)) != len(
+        normalized_tp1_replay_ticket_ids
+    ):
+        raise ValueError("TP1 replay Ticket identities must be distinct")
+    if not set(normalized_tp1_replay_ticket_ids).issubset(
+        normalized_ticket_ids
+    ):
+        raise ValueError("TP1 replay Tickets must be protected Tickets")
     return await _deploy_runtime_identity(
         uow,
         request,
         protected_ticket_ids=frozenset(normalized_ticket_ids),
+        tp1_replay_ticket_ids=frozenset(normalized_tp1_replay_ticket_ids),
     )
 
 
@@ -460,6 +475,7 @@ async def _deploy_runtime_identity(
     *,
     recovery_ticket_id: str | None = None,
     protected_ticket_ids: frozenset[str] | None = None,
+    tp1_replay_ticket_ids: frozenset[str] = frozenset(),
 ) -> RuntimeDeploymentIdentityResult:
     """Install the exact identity after a flat or narrowly safe recovery gate."""
 
@@ -489,6 +505,7 @@ async def _deploy_runtime_identity(
         await _require_protected_identity_activity(
             connection,
             protected_ticket_ids=protected_ticket_ids,
+            tp1_replay_ticket_ids=tp1_replay_ticket_ids,
         )
     elif recovery_ticket_id is None:
         await _require_zero_runtime_activity(connection)
@@ -975,6 +992,7 @@ async def _require_protected_identity_activity(
     connection: AsyncConnection,
     *,
     protected_ticket_ids: frozenset[str],
+    tp1_replay_ticket_ids: frozenset[str],
 ) -> None:
     active_tickets = (
         await connection.execute(
@@ -1034,18 +1052,33 @@ async def _require_protected_identity_activity(
         for row in projected_positions
         if row["ticket_id"] is not None
     }
-    if (
-        set(projected_by_ticket) != protected_ticket_ids
-        or len(projected_by_ticket) != len(projected_positions)
-        or any(
-            Decimal(str(projected_by_ticket[ticket_id]["quantity"]))
-            != Decimal(str(aggregates_by_ticket[ticket_id]["position_qty"]))
-            for ticket_id in protected_ticket_ids
-        )
-    ):
+    if set(projected_by_ticket) != protected_ticket_ids or len(
+        projected_by_ticket
+    ) != len(projected_positions):
         raise RuntimeAuthorityTransitionRefused(
             "protected identity requires matching projected positions"
         )
+    for ticket_id in protected_ticket_ids:
+        aggregate = aggregates_by_ticket[ticket_id]
+        expected_quantity = Decimal(str(aggregate["position_qty"]))
+        if ticket_id in tp1_replay_ticket_ids:
+            tp1_target_quantity = Decimal(str(aggregate["tp1_target_qty"]))
+            if (
+                Decimal(str(aggregate["tp1_filled_qty"])) != 0
+                or tp1_target_quantity <= 0
+                or tp1_target_quantity >= expected_quantity
+            ):
+                raise RuntimeAuthorityTransitionRefused(
+                    "TP1 replay identity requires an unrecorded full TP1 target"
+                )
+            expected_quantity -= tp1_target_quantity
+        if (
+            Decimal(str(projected_by_ticket[ticket_id]["quantity"]))
+            != expected_quantity
+        ):
+            raise RuntimeAuthorityTransitionRefused(
+                "protected identity requires matching projected positions"
+            )
 
     exposures = (
         await connection.execute(

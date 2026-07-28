@@ -63,6 +63,7 @@ class DeploymentPlan:
     expected_configured_leverage: int
     enable_entry: bool
     protected_ticket_ids: tuple[str, ...] = ()
+    tp1_replay_ticket_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _COMMIT.fullmatch(self.target_commit):
@@ -80,6 +81,14 @@ class DeploymentPlan:
             raise ValueError("protected Ticket identities must be non-blank")
         if len(set(self.protected_ticket_ids)) != len(self.protected_ticket_ids):
             raise ValueError("protected Ticket identities must be distinct")
+        if any(not ticket_id.strip() for ticket_id in self.tp1_replay_ticket_ids):
+            raise ValueError("TP1 replay Ticket identities must be non-blank")
+        if len(set(self.tp1_replay_ticket_ids)) != len(self.tp1_replay_ticket_ids):
+            raise ValueError("TP1 replay Ticket identities must be distinct")
+        if not set(self.tp1_replay_ticket_ids).issubset(
+            self.protected_ticket_ids
+        ):
+            raise ValueError("TP1 replay Tickets must be protected Tickets")
 
 
 @dataclass(frozen=True)
@@ -122,6 +131,7 @@ class TokyoReleaseBackend(Protocol):
         commit: str,
         schema_revision: str,
         ticket_ids: tuple[str, ...],
+        tp1_replay_ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]: ...
 
     def activate_release(
@@ -196,6 +206,7 @@ def deploy_tokyo_release(
                 plan.target_commit,
                 plan.schema_revision,
                 plan.protected_ticket_ids,
+                plan.tp1_replay_ticket_ids,
             )
             if plan.protected_ticket_ids
             else backend.deploy_identity(
@@ -534,6 +545,7 @@ class SshTokyoReleaseBackend:
         commit: str,
         schema_revision: str,
         ticket_ids: tuple[str, ...],
+        tp1_replay_ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         return self._release_json(
             release,
@@ -547,6 +559,11 @@ class SshTokyoReleaseBackend:
                 argument
                 for ticket_id in ticket_ids
                 for argument in ("--protected-ticket-id", ticket_id)
+            ),
+            *(
+                argument
+                for ticket_id in tp1_replay_ticket_ids
+                for argument in ("--tp1-replay-ticket-id", ticket_id)
             ),
         )
 
@@ -751,6 +768,15 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--tp1-replay-ticket-id",
+        action="append",
+        default=[],
+        help=(
+            "Named protected Ticket whose projection is the remaining runner "
+            "after an unrecorded full TP1; repeat only for those Tickets."
+        ),
+    )
+    parser.add_argument(
         "--timeout-seconds",
         type=float,
         default=60.0,
@@ -782,6 +808,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_configured_leverage=EXPECTED_CONFIGURED_LEVERAGE,
         enable_entry=args.enable_entry,
         protected_ticket_ids=tuple(args.protected_ticket_id),
+        tp1_replay_ticket_ids=tuple(args.tp1_replay_ticket_id),
     )
     backend = SshTokyoReleaseBackend(
         target=args.target,

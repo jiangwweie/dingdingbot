@@ -31,7 +31,8 @@ An explicit `--protected-ticket-id` handover is a separate, one-time
 fix-forward mode for an exact set of already `position_protected` Tickets. It
 does not relax the normal flat-release rule: the caller must name every active
 Ticket, every named Ticket must retain a complete active Stop and TP1 identity,
-projected quantity must equal protected quantity, the ENTRY lane must be idle,
+projected quantity must equal protected quantity unless that Ticket is
+explicitly named as an unrecorded full-TP1 runner replay, the ENTRY lane must be idle,
 and there must be zero unresolved Exchange Command or Incident. PostgreSQL
 atomically rechecks those predicates while all old workers are stopped before
 it rotates runtime identity. The mode permits no schema change, no new ENTRY,

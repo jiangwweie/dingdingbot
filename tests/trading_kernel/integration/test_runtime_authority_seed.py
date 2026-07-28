@@ -321,9 +321,14 @@ async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    tp1_replay_ticket_ids = ticket_ids[1:]
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
         await runtime_seed.deploy_runtime_identity(uow, initial)
-    await _insert_protected_tickets(runtime_seed_engine, ticket_ids)
+    await _insert_protected_tickets(
+        runtime_seed_engine,
+        ticket_ids,
+        tp1_replay_ticket_ids=tp1_replay_ticket_ids,
+    )
 
     target = initial.model_copy(
         update={
@@ -336,6 +341,7 @@ async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
             uow,
             target,
             protected_ticket_ids=ticket_ids,
+            tp1_replay_ticket_ids=tp1_replay_ticket_ids,
         )
 
     assert result.runtime_commit == "b" * 40
@@ -606,6 +612,8 @@ async def _insert_terminal_reviewed_ticket(engine: AsyncEngine) -> None:
 async def _insert_protected_tickets(
     engine: AsyncEngine,
     ticket_ids: tuple[str, ...],
+    *,
+    tp1_replay_ticket_ids: tuple[str, ...] = (),
 ) -> None:
     async with engine.begin() as connection:
         scope = (
@@ -714,7 +722,11 @@ async def _insert_protected_tickets(
                     account_id="subaccount-main",
                     exchange_instrument_id=f"instrument:{index}",
                     position_side="short",
-                    quantity=quantity,
+                    quantity=(
+                        quantity / Decimal("2")
+                        if ticket_id in tp1_replay_ticket_ids
+                        else quantity
+                    ),
                     average_entry_price=Decimal("100"),
                     observed_at_ms=1_800_000_000_020 + index,
                     projection_version=5,

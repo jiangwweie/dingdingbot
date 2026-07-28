@@ -89,11 +89,16 @@ def test_post_stop_failure_fences_entry_and_restores_safety_workers() -> None:
 
 def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    tp1_replay_ticket_ids = ticket_ids[1:]
     backend = FakeDeploymentBackend(active_ticket_count=len(ticket_ids))
 
     result = deploy_tokyo_release(
         backend,
-        _plan(enable_entry=False, protected_ticket_ids=ticket_ids),
+        _plan(
+            enable_entry=False,
+            protected_ticket_ids=ticket_ids,
+            tp1_replay_ticket_ids=tp1_replay_ticket_ids,
+        ),
     )
 
     assert result.status == "pass"
@@ -113,6 +118,7 @@ def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
             TARGET_COMMIT,
             "0001_initial",
             ticket_ids,
+            tp1_replay_ticket_ids,
         ),
         (
             "activate_release",
@@ -152,6 +158,7 @@ def _plan(
     *,
     enable_entry: bool,
     protected_ticket_ids: tuple[str, ...] = (),
+    tp1_replay_ticket_ids: tuple[str, ...] = (),
 ) -> DeploymentPlan:
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
@@ -160,6 +167,7 @@ def _plan(
         expected_configured_leverage=5,
         enable_entry=enable_entry,
         protected_ticket_ids=protected_ticket_ids,
+        tp1_replay_ticket_ids=tp1_replay_ticket_ids,
     )
 
 
@@ -284,6 +292,7 @@ class FakeDeploymentBackend:
         commit: str,
         schema_revision: str,
         ticket_ids: tuple[str, ...],
+        tp1_replay_ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         self.calls.append(
             (
@@ -292,6 +301,7 @@ class FakeDeploymentBackend:
                 commit,
                 schema_revision,
                 ticket_ids,
+                tp1_replay_ticket_ids,
             )
         )
         self.runtime_commit = commit
