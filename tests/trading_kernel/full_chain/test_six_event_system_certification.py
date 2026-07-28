@@ -390,8 +390,7 @@ def _valued_usdt_fee(amount: str, valued_at_ms: int):
             method="native_usdt",
             rate_usdt_per_asset=Decimal("1"),
             price_pair=None,
-            candle_open_time_ms=None,
-            candle_close_time_ms=None,
+            observed_at_ms=None,
             valued_at_ms=valued_at_ms,
         ),
     )

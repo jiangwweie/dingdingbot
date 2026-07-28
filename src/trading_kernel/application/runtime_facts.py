@@ -192,6 +192,67 @@ class PositionSnapshotSource(Protocol):
     ) -> PositionSnapshot: ...
 
 
+class FeeDiscountCapabilityFacts(BaseModel):
+    """Read-only account facts for the optional BNB fee discount."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    fee_burn_enabled: bool
+    bnb_futures_wallet_balance: Decimal
+    observed_at_ms: int
+    source: Literal["binance_usdm_readonly"]
+
+    @field_validator("bnb_futures_wallet_balance")
+    @classmethod
+    def _require_nonnegative_bnb_balance(cls, value: Decimal) -> Decimal:
+        if not value.is_finite() or value < 0:
+            raise ValueError("BNB fee capability balance must be finite and non-negative")
+        return value
+
+    @field_validator("observed_at_ms")
+    @classmethod
+    def _require_positive_observed_time(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("BNB fee capability observation time must be positive")
+        return value
+
+
+FeeDiscountCapabilityStatus = Literal[
+    "available",
+    "unavailable",
+    "low_balance",
+    "unknown",
+]
+
+
+def classify_fee_discount_capability(
+    facts: FeeDiscountCapabilityFacts,
+    *,
+    low_balance_threshold: Decimal | None = None,
+) -> FeeDiscountCapabilityStatus:
+    """Classify an optional cost optimization without changing trade authority."""
+
+    if low_balance_threshold is not None:
+        if not low_balance_threshold.is_finite() or low_balance_threshold <= 0:
+            raise ValueError("BNB low balance threshold must be finite and positive")
+    if not facts.fee_burn_enabled or facts.bnb_futures_wallet_balance == 0:
+        return "unavailable"
+    if (
+        low_balance_threshold is not None
+        and facts.bnb_futures_wallet_balance < low_balance_threshold
+    ):
+        return "low_balance"
+    return "available"
+
+
+class FeeDiscountCapabilitySource(Protocol):
+    async def read_fee_discount_capability(
+        self,
+        *,
+        observed_at_ms: int,
+    ) -> FeeDiscountCapabilityFacts: ...
+
+
 class LifecycleFactsRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

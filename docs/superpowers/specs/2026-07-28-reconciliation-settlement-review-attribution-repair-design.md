@@ -635,12 +635,11 @@ class FeeValuationEvidence(BaseModel):
 
     method: Literal[
         "native_usdt",
-        "binance_usdm_bnbusdt_index_1m_previous_close",
+        "binance_usdm_bnbusdt_review_index_snapshot",
     ]
     rate_usdt_per_asset: Decimal
     price_pair: str | None
-    candle_open_time_ms: int | None
-    candle_close_time_ms: int | None
+    observed_at_ms: int | None
     valued_at_ms: int
 
 
@@ -661,26 +660,28 @@ class ValuedFee(BaseModel):
 为避免不同消费者各选一个价格，本项目只允许以下 convention：
 
 1. `commissionAsset=USDT`：`rate=1`，method=`native_usdt`。
-2. `commissionAsset=BNB`：读取 Binance USD-M `BNBUSDT`
-   **1 分钟 Index Price Kline**。
-3. 选择 `candle_close_time_ms <= trade.occurred_at_ms` 的最新一根已闭合 K 线。
-4. 使用该根 K 线的 close 作为 `rate_usdt_per_asset`。
-5. `trade.occurred_at_ms - candle_close_time_ms` 不得超过
-   **120,000 ms**。
+2. `commissionAsset=BNB`：只在最终 **Review** 读取一次 Binance USD-M
+   `BNBUSDT` public index price snapshot；同一 Ticket 的所有 BNB fee
+   使用这一份冻结快照。
+3. `method=binance_usdm_bnbusdt_review_index_snapshot`，必须保存
+   `price_pair=BNBUSDT`、`rate_usdt_per_asset` 与 `observed_at_ms`。
+4. 该数值明确是 **Review-time estimate**，不是成交时刻的历史精确汇率；
+   原始 `commission`、`commissionAsset`、`tradeId` 与 `orderId` 始终保留。
 6. 使用 `Decimal` 计算：
 
 ```text
 usdt_value = native_bnb_amount * bnbusdt_index_close
 ```
 
-7. 价格缺失、未闭合、过旧、时间矛盾或非正数时返回
+7. 价格缺失、非正数或读取时间无效时返回
    `FACTS_UNAVAILABLE`，不得把 fee 写成 0，也不得读取本地缓存价格或人工
    输入补位。
-8. 同一 Review 请求内按 candle close time 缓存，避免同一分钟多 fill
-   重复请求；跨请求不建设隐式持久缓存。
+8. Lifecycle、Unknown recovery、Initial Stop、runner floor 与所有 Entry
+   admission 均不读取 BNB price；它们继续使用配置中的非折扣 taker fee
+   上界。BNB 估值失败只影响 Review 的经济数据完整性，不影响交易安全。
 
-这个 USDT 数值是项目的**可复算估值**，不是声称 Binance 在成交回执中直接
-提供了 USDT 等值。
+这个 USDT 数值是项目的**可复算 Review 快照估值**，不是声称 Binance 在
+成交回执中直接提供了 USDT 等值，也不声称它等于成交时刻的历史汇率。
 
 ### BNB 只读能力事实
 
@@ -697,7 +698,7 @@ source = binance_usdm_readonly
 
 - `GET /fapi/v1/feeBurn`；
 - USD-M account balance 中的 BNB wallet balance；
-- public `BNBUSDT` index price klines。
+- public `BNBUSDT` index price snapshot。
 
 明确禁止：
 
@@ -710,8 +711,10 @@ source = binance_usdm_readonly
 
 ### 执行预算与真实费用分离
 
-1. Lifecycle 的已发生 entry fee 使用真实 native fee 的 USDT 估值。
-2. Review 的 entry/exit fee 使用每条真实 trade 的 USDT 估值。
+1. Lifecycle 不将原生 BNB fee 换算为 USDT；它与所有执行风险公式均使用
+   配置的非折扣 taker fee 上界。
+2. Review 的 entry/exit BNB fee 使用一个冻结的 Review-time index snapshot
+   估值，并保留每条真实 native fee。
 3. runner floor 对未来 STOP_MARKET 的费用估计继续使用配置中的
    **非折扣 taker fee 上界**。
 4. 预算、Initial Stop 和 liquidation safety 不假设 BNB 一定存在，也不
@@ -743,10 +746,10 @@ Entry。Binance 若继续以 USDT 扣费，统一 fee model 仍能正常归因�
 `LifecycleFactsRequest` 不再只接收 entry client id，而是接收 typed
 `entry_order_reference`。
 
-入场手续费通过 entry 的 exact regular `orderId` 读取，并在进入 runner
-floor 计算前完成 native fee 的 USDT 估值。TP1 状态仍使用现有正确
-namespace 的 exact order lookup。费用或估值事实不可得时保持
-`FACTS_UNAVAILABLE`，不得把 0 当作“已证明零手续费”。
+入场手续费通过 entry 的 exact regular `orderId` 读取并保留 native fee。
+runner floor 继续采用配置的非折扣 taker fee 上界，不读取 BNB valuation。
+TP1 状态仍使用现有正确 namespace 的 exact order lookup。费用事实不可得时
+保持 `FACTS_UNAVAILABLE`，不得把 0 当作“已证明零手续费”。
 
 ### Unknown command recovery
 
@@ -1028,7 +1031,7 @@ Ticket
 -> conditional resolution(actualOrderId)
 -> Binance trade(tradeId, orderId)
 -> native fee(asset, amount)
--> BNBUSDT completed index candle when required
+-> BNBUSDT Review-time index snapshot when required
 -> AttributedTradeFill + valued fee evidence
 -> Review attribution digest
 -> ReviewRecorded
@@ -1043,7 +1046,7 @@ Ticket
 2. Review 只在 `REVIEW_PENDING` 创建一次。
 3. attribution evidence 与 economics 一起冻结。
 4. 重试读取相同交易所事实时产生相同 canonical digest。
-5. fee valuation evidence 记录 pair、method、rate 和 candle 时间，不能只
+5. fee valuation evidence 记录 pair、method、rate 和 snapshot observed time，不能只
    保存最终 USDT 数值。
 6. Universe 将来仍只通过 Ticket 关联 Review，不影响本次订单归因。
 
@@ -1101,8 +1104,8 @@ intervention = Owner-only manual action or empty
 5. 条件订单解析并发度固定且很小；不能按账户全部 algo order 做全量抓取。
 6. 30 秒 Review retry 避免持续失败时每 5 秒重复打 Binance。
 7. PostgreSQL selector 使用 active status/due 索引并 `LIMIT 1`。
-8. BNBUSDT index kline 只读取覆盖 exact fill timestamp 的有界窗口。
-9. 同一请求内按 1 分钟 candle 去重读取，禁止逐 fill 无缓存重复请求。
+8. 一个 Review 最多读取一次 BNBUSDT public index snapshot，且仅在存在 BNB
+   native fee 时读取。
 
 ## 代码规范与可维护性
 
@@ -1115,8 +1118,8 @@ intervention = Owner-only manual action or empty
 7. fixture 必须复现官方字段，不得给 user trade 伪造 `clientOrderId`。
 8. 一个 resolver 被三个消费者复用，但每个消费者仍保有自己的业务校验。
 9. `venue_adapter.py` 只编排，不复制 order attribution parser。
-10. native fee、valuation evidence 和 order TIF 使用明确类型，不把 BNB
-    分支散落在 Lifecycle、Review 和 runner 公式中。
+10. native fee、valuation evidence 和 order TIF 使用明确类型；BNB 估值只在
+    Review 编排层发生，不能散落到 Lifecycle、Unknown 或 runner 公式中。
 11. Adapter 不实现 GTC/MARKET fallback，不在错误处理层改变策略订单语义。
 12. 所有 API method/endpoint 使用 allowlist port；生产依赖图中不得出现
     fee burn POST、purchase、convert 或 transfer capability。
@@ -1152,6 +1155,7 @@ P1 fairness/order attribution 代码
 | BNB 接入时点 | AVAX 平仓且支持版本部署后 | Owner 人工转入少量 BNB |
 | 自动化边界 | 不自动购买、划转或启用 BNB 扣费 | Agent 只读认证并汇报 |
 | 资金边界 | BNB 不作保证金或风险资产 | 不进入 capital、sizing、Capacity |
+| BNB 估值 | **Review 单次指数快照估值** | 保留 native fee；不进入执行风险链 |
 
 ## 仍需 Owner 确认的设计参数
 
@@ -1162,7 +1166,6 @@ P1 fairness/order attribution 代码
 | BTC 接管方式 | **closure-only、Entry fenced** | 解除现有 flat/protected 双门闭锁 | 不部署 |
 | BTC 状态漂移 | terminal incomplete 时单独设计 correction | 避免覆盖唯一 Review | fail closed |
 | 同类缺陷范围 | Lifecycle + Unknown + Review 一次收口 | 增加测试面，消除重复错误口 | 不做局部补丁 |
-| BNB 估值 | 1m 已闭合 index candle previous-close，最长 **120 秒** | 统一可复算的 USDT fee | 不编码 |
 | BNB 提醒阈值 | 生产播种前由 Owner 固定，只作为 warning | 影响提醒频率，不影响交易 admission | 不硬编码 |
 
 ## 完成定义
@@ -1177,7 +1180,8 @@ P1 fairness/order attribution 代码
 5. closure-only deployment 测试证明 Entry 不能被启用。
 6. 初始止损和 runner 始终为 STOP_MARKET，TP1 始终为 LIMIT + GTX。
 7. GTX 拒绝测试证明不会产生 GTC、MARKET 或调价 fallback command。
-8. USDT、BNB、混合 fee asset 和 BNBUSDT stale/missing facts 全矩阵通过。
+8. USDT、BNB、混合 fee asset、Review snapshot 缺失/非正数全矩阵通过；BNB
+   估值不进入 Lifecycle 或 runner 风险链。
 9. BNB 不进入 sizing/capital/margin 的 architecture 与 integration gate
    通过。
 10. 禁止自动购买、划转、fee burn 变更的静态能力审计通过。

@@ -8,9 +8,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
-_MAX_BNB_INDEX_CANDLE_STALENESS_MS = 120_000
-
-
 class NativeFee(BaseModel):
     """The exact commission asset and amount returned by the venue."""
 
@@ -34,12 +31,11 @@ class FeeValuationEvidence(BaseModel):
 
     method: Literal[
         "native_usdt",
-        "binance_usdm_bnbusdt_index_1m_previous_close",
+        "binance_usdm_bnbusdt_review_index_snapshot",
     ]
     rate_usdt_per_asset: Decimal
     price_pair: str | None
-    candle_open_time_ms: int | None
-    candle_close_time_ms: int | None
+    observed_at_ms: int | None
     valued_at_ms: int
 
     @field_validator("rate_usdt_per_asset")
@@ -53,27 +49,16 @@ class FeeValuationEvidence(BaseModel):
     def _validate_evidence_shape(self) -> "FeeValuationEvidence":
         if self.valued_at_ms <= 0:
             raise ValueError("fee valuation time must be positive")
-        candle_fields = (
-            self.price_pair,
-            self.candle_open_time_ms,
-            self.candle_close_time_ms,
-        )
         if self.method == "native_usdt":
             if self.rate_usdt_per_asset != Decimal("1"):
                 raise ValueError("native USDT valuation rate must equal one")
-            if any(value is not None for value in candle_fields):
-                raise ValueError("native USDT valuation forbids price candle evidence")
+            if self.price_pair is not None or self.observed_at_ms is not None:
+                raise ValueError("native USDT valuation forbids price snapshot evidence")
             return self
         if self.price_pair != "BNBUSDT":
             raise ValueError("BNB valuation requires the BNBUSDT price pair")
-        if self.candle_open_time_ms is None or self.candle_close_time_ms is None:
-            raise ValueError("BNB valuation requires a completed index candle")
-        if self.candle_open_time_ms <= 0 or self.candle_close_time_ms <= self.candle_open_time_ms:
-            raise ValueError("BNB valuation candle window is invalid")
-        if self.candle_close_time_ms > self.valued_at_ms:
-            raise ValueError("BNB valuation candle closes after the valued trade")
-        if self.valued_at_ms - self.candle_close_time_ms > _MAX_BNB_INDEX_CANDLE_STALENESS_MS:
-            raise ValueError("BNB valuation candle is stale")
+        if self.observed_at_ms is None or self.observed_at_ms <= 0:
+            raise ValueError("BNB valuation requires a positive review snapshot observed time")
         return self
 
 
@@ -98,7 +83,7 @@ class ValuedFee(BaseModel):
         required_method = (
             "native_usdt"
             if self.native.asset == "USDT"
-            else "binance_usdm_bnbusdt_index_1m_previous_close"
+            else "binance_usdm_bnbusdt_review_index_snapshot"
         )
         if self.evidence.method != required_method:
             raise ValueError("native fee asset and valuation method differ")

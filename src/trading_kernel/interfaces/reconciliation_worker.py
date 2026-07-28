@@ -9,6 +9,8 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.application.ports import (
+    MonitorOwnerStatus,
+    MonitorStateRecord,
     UnitOfWorkFactory,
     VenueTruthPort,
 )
@@ -25,6 +27,8 @@ from src.trading_kernel.application.recover_unknown_command import (
 from src.trading_kernel.application.runtime_facts import (
     PositionSnapshotRequest,
     PositionSnapshotSource,
+    FeeDiscountCapabilitySource,
+    classify_fee_discount_capability,
     ReviewEconomicsRequest,
     ReviewEconomicsSource,
 )
@@ -198,6 +202,34 @@ class ReconciliationWorkerResult(BaseModel):
 
 
 async def run_reconciliation_worker_once(
+    uow_factory: UnitOfWorkFactory,
+    venue_truth: VenueTruthPort,
+    position_source: PositionSnapshotSource,
+    request: ReconciliationWorkerRequest,
+    *,
+    review_economics_source: ReviewEconomicsSource | None = None,
+    fee_discount_capability_source: FeeDiscountCapabilitySource | None = None,
+) -> ReconciliationWorkerResult:
+    """Advance one safety work item, then record optional BNB cost capability."""
+
+    result = await _run_reconciliation_worker_once_core(
+        uow_factory,
+        venue_truth,
+        position_source,
+        request,
+        review_economics_source=review_economics_source,
+    )
+    if fee_discount_capability_source is not None:
+        await _observe_fee_discount_capability(
+            uow_factory,
+            source=fee_discount_capability_source,
+            now_ms=request.now_ms,
+            timeout_seconds=request.timeout_seconds,
+        )
+    return result
+
+
+async def _run_reconciliation_worker_once_core(
     uow_factory: UnitOfWorkFactory,
     venue_truth: VenueTruthPort,
     position_source: PositionSnapshotSource,
@@ -498,6 +530,51 @@ async def run_reconciliation_worker_once(
     if pending_unknown_result is not None:
         return pending_unknown_result
     return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.NO_WORK)
+
+
+async def _observe_fee_discount_capability(
+    uow_factory: UnitOfWorkFactory,
+    *,
+    source: FeeDiscountCapabilitySource,
+    now_ms: int,
+    timeout_seconds: float,
+) -> None:
+    """Persist a warning-only BNB fee capability state after safety work."""
+
+    monitor_key = "account:binance-usdm:bnb-fee-capability"
+    try:
+        facts = await asyncio.wait_for(
+            source.read_fee_discount_capability(observed_at_ms=now_ms),
+            timeout=timeout_seconds,
+        )
+        capability = classify_fee_discount_capability(facts)
+        summary = (
+            f"bnb_fee_capability:{capability};"
+            f"fee_burn_enabled={str(facts.fee_burn_enabled).lower()};"
+            f"bnb_futures_wallet_balance={facts.bnb_futures_wallet_balance}"
+        )
+        intervention = (
+            "无需操作"
+            if capability == "available"
+            else "仅成本优化提醒；如需折扣由 Owner 手工处理"
+        )
+    except Exception as exc:
+        capability = "unknown"
+        summary = f"bnb_fee_capability:unknown;reason={type(exc).__name__}"
+        intervention = "仅成本优化提醒；无需改变交易状态"
+    desired = MonitorStateRecord(
+        monitor_key=monitor_key,
+        owner_status=(
+            MonitorOwnerStatus.RUNNING
+            if capability == "available"
+            else MonitorOwnerStatus.TEMPORARILY_UNAVAILABLE
+        ),
+        summary=summary,
+        intervention=intervention,
+        updated_at_ms=now_ms,
+    )
+    async with uow_factory() as uow:
+        await uow.monitors.save_if_changed(desired)
 
 
 async def _runtime_writer_is_certified(

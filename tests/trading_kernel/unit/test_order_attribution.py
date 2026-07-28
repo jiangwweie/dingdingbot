@@ -40,8 +40,7 @@ def _fee() -> ValuedFee:
             method="native_usdt",
             rate_usdt_per_asset=Decimal("1"),
             price_pair=None,
-            candle_open_time_ms=None,
-            candle_close_time_ms=None,
+            observed_at_ms=None,
             valued_at_ms=1_000,
         ),
     )

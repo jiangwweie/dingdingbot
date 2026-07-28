@@ -617,12 +617,6 @@ class BnbLifecycleFactsExchange(LifecycleFactsExchange):
             row["fee"] = {"cost": "0.01", "currency": "BNB"}
         return rows
 
-    async def fapiPublicGetIndexPriceKlines(self, params):
-        assert params["pair"] == "BNBUSDT"
-        assert params["interval"] == "1m"
-        return [[1, "0", "0", "0", "600", "0", 1_000]]
-
-
 class ReviewEconomicsExchange:
     def __init__(self, *, include_fee: bool = True) -> None:
         self.include_fee = include_fee
@@ -700,17 +694,32 @@ class ReviewEconomicsExchange:
 
 
 class BnbReviewEconomicsExchange(ReviewEconomicsExchange):
+    def __init__(self) -> None:
+        super().__init__()
+        self.index_snapshot_calls: list[dict[str, object]] = []
+
     async def fetch_my_trades(self, symbol, since, limit, params):
         rows = await super().fetch_my_trades(symbol, since, limit, params)
         for row in rows:
             row["fee"] = {"cost": "0.01", "currency": "BNB"}
         return rows
 
-    async def fapiPublicGetIndexPriceKlines(self, params):
-        assert params["pair"] == "BNBUSDT"
-        assert params["symbol"] == "BNBUSDT"
-        assert params["interval"] == "1m"
-        return [[1, "0", "0", "0", "600", "0", 1_000]]
+    async def fapiPublicGetPremiumIndex(self, params):
+        self.index_snapshot_calls.append(dict(params))
+        return {"symbol": "BNBUSDT", "indexPrice": "600", "time": 4_000}
+
+
+class FeeDiscountCapabilityExchange:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def fapiPrivateGetFeeBurn(self, params):
+        self.calls.append(("fee_burn", dict(params)))
+        return {"feeBurn": True}
+
+    async def fetch_balance(self, params):
+        self.calls.append(("balance", dict(params)))
+        return {"total": {"BNB": "0.02"}}
 
 @pytest.mark.asyncio
 async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> None:
@@ -1235,7 +1244,7 @@ async def test_ccxt_adapter_keeps_runner_window_after_dropping_open_candle() -> 
 
 
 @pytest.mark.asyncio
-async def test_ccxt_adapter_values_lifecycle_entry_fee_in_bnb_without_changing_sizing() -> None:
+async def test_ccxt_adapter_uses_conservative_taker_bound_for_bnb_lifecycle_fee() -> None:
     adapter = CcxtVenueAdapter(
         exchanges={
             ("binance-usdm", "experiment-1"): BnbLifecycleFactsExchange()
@@ -1284,7 +1293,7 @@ async def test_ccxt_adapter_values_lifecycle_entry_fee_in_bnb_without_changing_s
 
     facts = await adapter.read_lifecycle_facts(request)
 
-    assert facts.allocated_entry_fee_quote == Decimal("3.00")
+    assert facts.allocated_entry_fee_quote == Decimal("0.15")
 
 
 @pytest.mark.asyncio
@@ -1335,7 +1344,7 @@ async def test_ccxt_adapter_builds_exact_ticket_bound_review_economics_facts() -
 
 
 @pytest.mark.asyncio
-async def test_ccxt_adapter_values_bnb_review_fees_from_completed_index_evidence() -> None:
+async def test_ccxt_adapter_values_all_bnb_review_fees_from_one_index_snapshot() -> None:
     exchange = BnbReviewEconomicsExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
@@ -1359,6 +1368,35 @@ async def test_ccxt_adapter_values_bnb_review_fees_from_completed_index_evidence
     assert facts.entry_fills[0].fee.native.asset == "BNB"
     assert facts.entry_fills[0].fee.usdt_value == Decimal("6.00")
     assert facts.entry_fills[0].fee.evidence.price_pair == "BNBUSDT"
+    assert facts.entry_fills[0].fee.evidence.method == (
+        "binance_usdm_bnbusdt_review_index_snapshot"
+    )
+    assert exchange.index_snapshot_calls == [{"symbol": "BNBUSDT"}]
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_reads_bnb_fee_capability_with_readonly_calls_only() -> None:
+    exchange = FeeDiscountCapabilityExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        clock_ms=lambda: 4_000,
+    )
+
+    facts = await adapter.read_fee_discount_capability(observed_at_ms=4_000)
+
+    assert facts.fee_burn_enabled is True
+    assert facts.bnb_futures_wallet_balance == Decimal("0.02")
+    assert facts.source == "binance_usdm_readonly"
+    assert exchange.calls == [
+        ("fee_burn", {}),
+        ("balance", {"type": "future"}),
+    ]
 
 
 @pytest.mark.asyncio

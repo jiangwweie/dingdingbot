@@ -15,8 +15,8 @@ program any BNB purchase, transfer, margin, or fee-burn mutation authority.
 **Architecture:** One age-aware selector remains inside the existing
 Reconciliation Worker. A pure order-attribution domain and one Binance
 infrastructure resolver serve Lifecycle, unknown recovery, and Review.
-Native-fee valuation is a separate pure boundary backed by bounded read-only
-BNBUSDT index-kline facts. Closure-only handover is an exact-ticket deployment
+Native-fee valuation is a Review-only pure boundary backed by one bounded
+read-only BNBUSDT index-price snapshot. Closure-only handover is an exact-ticket deployment
 mode with Entry fenced and no schema change. All exchange writes remain durable
 Exchange Commands; no fifth worker, compatibility layer, parallel ledger, or
 automatic BNB operation is introduced.
@@ -86,7 +86,7 @@ Mypy, CCXT-compatible Binance USD-M adapter, four persistent systemd workers.
 | `src/trading_kernel/domain/order_attribution.py` | 新增 | 订单引用、解析和成交归因不变量 |
 | `src/trading_kernel/domain/fee_valuation.py` | 新增 | native fee、USDT 估值和证据不变量 |
 | `src/trading_kernel/infrastructure/binance_order_attribution.py` | 新增 | Binance regular/algo identity 解析 |
-| `src/trading_kernel/infrastructure/binance_fee_valuation.py` | 新增 | BNBUSDT index kline 只读估值 |
+| `src/trading_kernel/infrastructure/binance_fee_valuation.py` | 新增 | BNBUSDT Review snapshot 只读估值 |
 | `src/trading_kernel/domain/commands.py` | 修改 | 显式 time-in-force 不变量 |
 | `src/trading_kernel/domain/review.py` | 修改 | valued fee 与 attribution evidence |
 | `src/trading_kernel/application/ports.py` | 修改 | typed resolver/valuation ports |
@@ -160,8 +160,8 @@ def value_native_fee(
 - [ ] 实现 frozen models、Enum、Decimal 和 extra-forbid。
 - [ ] 普通订单只允许 submitted id 等于 actual order id。
 - [ ] 条件订单只允许 validated algo resolution 产生 actual order id。
-- [ ] USDT 估值固定为 1；BNB 必须携带完整 index candle evidence。
-- [ ] 拒绝未知 fee asset、负 fee、非正 valuation rate、时间矛盾和 stale facts。
+- [ ] USDT 估值固定为 1；BNB 必须携带 Review snapshot evidence。
+- [ ] 拒绝未知 fee asset、负 fee、非正 valuation rate 与无效 snapshot time。
 - [ ] canonical attribution digest 对输入顺序稳定，对内容变化敏感。
 - [ ] focused pytest、Ruff、Mypy 通过。
 
@@ -299,12 +299,11 @@ async def get_next_reconciliation_work(
 - [ ] 先写 `FEE-BNB-*` RED。
 - [ ] 保存真实 `commission` 和 `commissionAsset`。
 - [ ] USDT 不做 market lookup，rate 固定为 1。
-- [ ] BNB 使用 BNBUSDT 1m index price latest completed previous-close。
-- [ ] 精确覆盖 candle 边界、120 秒 staleness、未来 candle、空响应、重复
-  candle 和非正价格。
-- [ ] 同一请求内相同 candle 只调用一次。
+- [ ] BNB 仅在最终 Review 读取一次 BNBUSDT public index-price snapshot。
+- [ ] 覆盖空响应、无效 observed time 与非正价格；保存 method/rate/observed time。
+- [ ] 同一 Ticket Review 有任意 BNB fill 时最多调用一次；无 BNB fill 时零调用。
 - [ ] 混合 USDT/BNB fills 分别估值后汇总。
-- [ ] 未知 asset 与 stale/missing price 返回 facts unavailable，不回退 0。
+- [ ] 未知 asset 与 missing/invalid snapshot 返回 facts unavailable，不回退 0。
 - [ ] 证明 BNB balance 不进入 Owner capital/sizing/margin facts。
 - [ ] 生产 client 只暴露 index-kline readonly method，不暴露 purchase/transfer。
 
@@ -333,8 +332,9 @@ async def get_next_reconciliation_work(
 - Modify:
   `tests/trading_kernel/unit/test_review_economics.py`
 
-- [ ] Lifecycle entry fee 只来自 exact entry order fills。
-- [ ] entry fee facts 不可得时不以 0 进入 runner floor。
+- [ ] Lifecycle entry fee 只来自 exact entry order fills，执行风险计算仍使用非折扣
+  taker fee 上界。
+- [ ] Lifecycle 不读取 BNB valuation facts，也不因 BNB snapshot 不可得阻塞 runner。
 - [ ] runner future fee 保持非折扣 taker 上界。
 - [ ] Unknown regular/conditional 都先解析 order identity，再累计 exact fills。
 - [ ] Unknown visibility deadline、no-resend、Incident 语义保持。

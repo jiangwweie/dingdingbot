@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from dataclasses import dataclass
 import inspect
 import re
 from collections.abc import Callable, Mapping
@@ -26,6 +27,7 @@ from src.trading_kernel.application.ports import (
 )
 from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
+    FeeDiscountCapabilityFacts,
     InstrumentRulesFacts,
     InstrumentRulesRequest,
     LifecycleFactsRequest,
@@ -151,6 +153,31 @@ class _CcxtExchange(Protocol):
     ) -> object: ...
 
     def close(self) -> object: ...
+
+
+@dataclass
+class _ReviewFeeValuationContext:
+    """One Review-scoped readonly BNB index snapshot, fetched only on demand."""
+
+    exchange: object
+    review_observed_at_ms: int
+    bnb_snapshot: FeeValuationEvidence | None = None
+
+    async def valuation_for(self, native_fee: NativeFee) -> FeeValuationEvidence:
+        if native_fee.asset == "USDT":
+            return FeeValuationEvidence(
+                method="native_usdt",
+                rate_usdt_per_asset=Decimal("1"),
+                price_pair=None,
+                observed_at_ms=None,
+                valued_at_ms=self.review_observed_at_ms,
+            )
+        if self.bnb_snapshot is None:
+            self.bnb_snapshot = await read_bnbusdt_fee_valuation_evidence(
+                exchange=self.exchange,
+                review_observed_at_ms=self.review_observed_at_ms,
+            )
+        return self.bnb_snapshot
 
 
 _AUTHORITATIVE_REJECTION_TYPES = {
@@ -513,12 +540,28 @@ class CcxtVenueAdapter:
             expected_symbol=symbol,
             position_side=domain.position_side,
         )
+        lifecycle_fee_context = _ReviewFeeValuationContext(
+            exchange=exchange,
+            review_observed_at_ms=request.observed_at_ms,
+        )
         attributed_entry_fills: list[ReviewFill] = []
+        bnb_entry_fee_upper_quote = Decimal("0")
         for row in _require_list(entry_fills, name="entry fills"):
+            if _review_fee_asset(row, settlement_asset=settlement_asset) == "BNB":
+                notional = _exact_order_fill_notional(
+                    row,
+                    resolved=resolved_entry,
+                    position_side=domain.position_side,
+                    entry_time_ms=request.entered_at_ms,
+                    exit_time_ms=request.observed_at_ms,
+                )
+                if notional is not None:
+                    bnb_entry_fee_upper_quote += notional * taker_fee_rate
+                continue
             fill = await _review_fill(
                 row,
                 resolved=resolved_entry,
-                exchange=exchange,
+                fee_valuation_context=lifecycle_fee_context,
                 settlement_asset=settlement_asset,
                 position_side=domain.position_side,
                 entry_time_ms=request.entered_at_ms,
@@ -526,12 +569,12 @@ class CcxtVenueAdapter:
             )
             if fill is not None:
                 attributed_entry_fills.append(fill)
-        if not attributed_entry_fills:
+        if not attributed_entry_fills and bnb_entry_fee_upper_quote == 0:
             raise RuntimeError("entry fills are unavailable for the exact order identity")
         entry_fee_quote = sum(
             (fill.fee_quote for fill in attributed_entry_fills),
             Decimal("0"),
-        )
+        ) + bnb_entry_fee_upper_quote
         tp1_quantity, tp1_average_price = _order_fill_metrics(tp1_order)
         allocated_entry_fee = (
             entry_fee_quote * position_quantity / request.entry_quantity
@@ -558,6 +601,39 @@ class CcxtVenueAdapter:
             price_tick=request.price_tick,
             market_facts=market_facts,
             observed_at_ms=request.observed_at_ms,
+        )
+
+    async def read_fee_discount_capability(
+        self,
+        *,
+        observed_at_ms: int,
+    ) -> FeeDiscountCapabilityFacts:
+        if observed_at_ms <= 0:
+            raise ValueError("BNB fee capability observation time must be positive")
+        candidates = tuple(
+            (account_id, exchange)
+            for (venue_id, account_id), exchange in self._exchanges.items()
+            if venue_id == "binance-usdm"
+        )
+        if len(candidates) != 1:
+            raise RuntimeError("BNB fee capability requires one Binance USD-M account")
+        _, exchange = candidates[0]
+        fee_burn = getattr(exchange, "fapiPrivateGetFeeBurn", None)
+        if not callable(fee_burn):
+            raise RuntimeError("Binance venue lacks fee burn readonly lookup")
+        fee_burn_result, balance_result = await asyncio.gather(
+            _call_raw_exchange(fee_burn, {}),
+            _call_raw_exchange(exchange.fetch_balance, {"type": "future"}),
+        )
+        fee_burn_mapping = _require_mapping(fee_burn_result, name="fee burn")
+        enabled = fee_burn_mapping.get("feeBurn")
+        if not isinstance(enabled, bool):
+            raise RuntimeError("Binance fee burn readonly fact is invalid")
+        return FeeDiscountCapabilityFacts(
+            fee_burn_enabled=enabled,
+            bnb_futures_wallet_balance=_bnb_futures_wallet_balance(balance_result),
+            observed_at_ms=observed_at_ms,
+            source="binance_usdm_readonly",
         )
 
     async def read_review_economics(
@@ -592,6 +668,10 @@ class CcxtVenueAdapter:
                 )
             )
         )
+        fee_valuation_context = _ReviewFeeValuationContext(
+            exchange=exchange,
+            review_observed_at_ms=request.observed_at_ms,
+        )
         fills_by_trade_id: dict[str, ReviewFill] = {}
         for resolved in resolved_references:
             if resolved.actual_order_id is None:
@@ -610,7 +690,7 @@ class CcxtVenueAdapter:
                 fill = await _review_fill(
                     row,
                     resolved=resolved,
-                    exchange=exchange,
+                    fee_valuation_context=fee_valuation_context,
                     settlement_asset=settlement_asset,
                     position_side=domain.position_side,
                     entry_time_ms=request.entry_time_ms,
@@ -1506,6 +1586,29 @@ def _balance_decimal(
     return result
 
 
+def _bnb_futures_wallet_balance(value: object) -> Decimal:
+    balance = _require_mapping(value, name="BNB futures balance")
+    total = balance.get("total")
+    total_mapping = total if isinstance(total, Mapping) else {}
+    raw_balance = total_mapping.get("BNB")
+    if raw_balance is None:
+        info = balance.get("info")
+        info_mapping = info if isinstance(info, Mapping) else {}
+        assets = info_mapping.get("assets")
+        if isinstance(assets, Sequence) and not isinstance(
+            assets, (str, bytes, bytearray)
+        ):
+            for asset in assets:
+                asset_mapping = asset if isinstance(asset, Mapping) else {}
+                if str(asset_mapping.get("asset") or "").strip().upper() == "BNB":
+                    raw_balance = asset_mapping.get("walletBalance")
+                    break
+    result = Decimal(str(raw_balance if raw_balance is not None else "0"))
+    if not result.is_finite() or result < 0:
+        raise RuntimeError("BNB futures wallet balance is invalid")
+    return result
+
+
 def _instrument_rules(
     market: Mapping[str, object],
 ) -> tuple[Decimal, Decimal, Decimal, Decimal]:
@@ -1678,11 +1781,73 @@ def _order_fill_metrics(value: object | None) -> tuple[Decimal, Decimal | None]:
     return quantity, average_price
 
 
+def _review_fee_asset(
+    value: object,
+    *,
+    settlement_asset: str,
+) -> Literal["USDT", "BNB"]:
+    if not isinstance(value, Mapping):
+        raise RuntimeError("venue review fill row is not a mapping")
+    info = value.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    fee = value.get("fee")
+    fee_asset = str(
+        (fee.get("currency") if isinstance(fee, Mapping) else None)
+        or raw_info.get("commissionAsset")
+        or settlement_asset
+    ).strip().upper()
+    if fee_asset not in {"USDT", "BNB"}:
+        raise RuntimeError("review fill fee asset is unsupported")
+    return cast(Literal["USDT", "BNB"], fee_asset)
+
+
+def _exact_order_fill_notional(
+    value: object,
+    *,
+    resolved: ResolvedOrderIdentity,
+    position_side: Literal["long", "short"],
+    entry_time_ms: int,
+    exit_time_ms: int,
+) -> Decimal | None:
+    if not isinstance(value, Mapping):
+        raise RuntimeError("venue review fill row is not a mapping")
+    info = value.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    exchange_order_id = str(
+        value.get("order")
+        or value.get("orderId")
+        or raw_info.get("orderId")
+        or ""
+    ).strip()
+    if exchange_order_id != resolved.actual_order_id:
+        return None
+    raw_position_side = str(
+        value.get("positionSide")
+        or raw_info.get("positionSide")
+        or ""
+    ).strip().lower()
+    if _position_side_literal(raw_position_side) != position_side:
+        raise RuntimeError("review fill position side differs from Ticket")
+    occurred_at_ms = int(
+        value.get("timestamp")
+        or raw_info.get("time")
+        or raw_info.get("timestamp")
+        or 0
+    )
+    if not entry_time_ms <= occurred_at_ms <= exit_time_ms:
+        raise RuntimeError("review fill falls outside Ticket exposure window")
+    quantity = abs(Decimal(str(value.get("amount") or raw_info.get("qty") or "0")))
+    price = Decimal(str(value.get("price") or raw_info.get("price") or "0"))
+    if quantity <= 0 or price <= 0:
+        raise RuntimeError("review fill quantity and price must be positive")
+    return quantity * price
+
+
 async def _review_fill(
     value: object,
     *,
     resolved: ResolvedOrderIdentity,
-    exchange: object,
+    fee_valuation_context: _ReviewFeeValuationContext,
     settlement_asset: str,
     position_side: Literal["long", "short"],
     entry_time_ms: int,
@@ -1746,22 +1911,9 @@ async def _review_fill(
         asset=cast(Literal["USDT", "BNB"], fee_asset),
         amount=abs(Decimal(str(raw_fee_amount))),
     )
-    if native_fee.asset == "BNB":
-        valuation = await read_bnbusdt_fee_valuation_evidence(
-            exchange=exchange,
-            trade_occurred_at_ms=occurred_at_ms,
-        )
-    else:
-        if settlement_asset.upper() != "USDT":
-            raise RuntimeError("non-USDT settlement asset has no review fee valuation")
-        valuation = FeeValuationEvidence(
-            method="native_usdt",
-            rate_usdt_per_asset=Decimal("1"),
-            price_pair=None,
-            candle_open_time_ms=None,
-            candle_close_time_ms=None,
-            valued_at_ms=occurred_at_ms,
-        )
+    if native_fee.asset == "USDT" and settlement_asset.upper() != "USDT":
+        raise RuntimeError("non-USDT settlement asset has no review fee valuation")
+    valuation = await fee_valuation_context.valuation_for(native_fee)
     valued_fee = value_native_fee(
         native_fee=native_fee,
         valuation_evidence=valuation,

@@ -12,15 +12,14 @@ from src.trading_kernel.domain.fee_valuation import (
 )
 
 
-def test_usdt_fee_uses_native_one_to_one_valuation_without_candle() -> None:
+def test_usdt_fee_uses_native_one_to_one_valuation_without_snapshot() -> None:
     valued = value_native_fee(
         native_fee=NativeFee(asset="USDT", amount=Decimal("0.25")),
         valuation_evidence=FeeValuationEvidence(
             method="native_usdt",
             rate_usdt_per_asset=Decimal("1"),
             price_pair=None,
-            candle_open_time_ms=None,
-            candle_close_time_ms=None,
+            observed_at_ms=None,
             valued_at_ms=1_000,
         ),
     )
@@ -28,29 +27,27 @@ def test_usdt_fee_uses_native_one_to_one_valuation_without_candle() -> None:
     assert valued.usdt_value == Decimal("0.25")
 
 
-def test_bnb_fee_requires_completed_bnbusdt_index_candle_within_staleness_bound() -> None:
+def test_bnb_fee_uses_a_review_time_bnbusdt_index_snapshot() -> None:
     valued = value_native_fee(
         native_fee=NativeFee(asset="BNB", amount=Decimal("0.001")),
         valuation_evidence=FeeValuationEvidence(
-            method="binance_usdm_bnbusdt_index_1m_previous_close",
+            method="binance_usdm_bnbusdt_review_index_snapshot",
             rate_usdt_per_asset=Decimal("600"),
             price_pair="BNBUSDT",
-            candle_open_time_ms=900_000,
-            candle_close_time_ms=959_999,
+            observed_at_ms=1_500_000,
             valued_at_ms=1_000_000,
         ),
     )
 
     assert valued.usdt_value == Decimal("0.600")
 
-    with pytest.raises(ValidationError, match="candle"):
+    with pytest.raises(ValidationError, match="observed"):
         FeeValuationEvidence(
-            method="binance_usdm_bnbusdt_index_1m_previous_close",
+            method="binance_usdm_bnbusdt_review_index_snapshot",
             rate_usdt_per_asset=Decimal("600"),
             price_pair="BNBUSDT",
-            candle_open_time_ms=900_000,
-            candle_close_time_ms=959_999,
-            valued_at_ms=1_080_000,
+            observed_at_ms=None,
+            valued_at_ms=1_000_000,
         )
 
 

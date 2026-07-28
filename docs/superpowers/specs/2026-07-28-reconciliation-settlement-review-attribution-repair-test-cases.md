@@ -74,7 +74,7 @@ Owner 确认设计、实施计划和本测试规格后，实施必须先让相�
 | `unit/test_order_attribution.py` | Unit | reference、resolved identity、fill、digest |
 | `unit/test_fee_valuation.py` | Unit | native fee 和纯估值不变量 |
 | `unit/test_binance_order_attribution.py` | Adapter | regular/algo/orderId/tradeId |
-| `unit/test_binance_fee_valuation.py` | Adapter | BNBUSDT completed candle |
+| `unit/test_binance_fee_valuation.py` | Adapter | BNBUSDT Review index snapshot |
 | `unit/test_commands.py` | Unit | order type 与 TIF |
 | `unit/test_reconciliation_worker_fairness.py` | Unit | age-aware 调度 |
 | `unit/test_reconciliation_worker_review.py` | Unit | Review 请求与失败语义 |
@@ -196,20 +196,15 @@ Owner 确认设计、实施计划和本测试规格后，实施必须先让相�
 | FEE-DOM-004 | fee amount 负数 | validation error | 不取绝对值 |
 | FEE-DOM-005 | 未知 asset | facts unavailable/unsupported | 不按 USDT 处理 |
 | FEE-DOM-006 | rate 0/负数 | validation error | 不生成 ValuedFee |
-| FEE-DOM-007 | evidence 缺 pair/candle | BNB valuation 拒绝 | 不只保存 rate |
-| FEE-DOM-008 | USDT evidence 带 BNB candle | validation error | 不混用方法 |
-| FEE-BNB-001 | trade 在 12:01:05，12:00 candle 12:00:59 闭合 | 选择 12:00 close | 不选正在形成的 12:01 |
-| FEE-BNB-002 | trade timestamp 等于 candle close | 该 candle eligible | 不退到更老 candle |
-| FEE-BNB-003 | 最新 candle close 晚于 trade | 忽略未来 candle | 不发生 look-ahead |
-| FEE-BNB-004 | candle age 120,000ms | 接受边界值 | 不误判 stale |
-| FEE-BNB-005 | candle age 120,001ms | facts unavailable | 不读 ticker latest |
-| FEE-BNB-006 | 空 kline 响应 | facts unavailable | 不用本地缓存 |
-| FEE-BNB-007 | duplicate candle 内容相同 | 幂等去重 | 不重复计价 |
-| FEE-BNB-008 | duplicate candle 内容冲突 | fail closed | 不任选一条 |
-| FEE-BNB-009 | 同一分钟 20 fills | index API 一次 | 不逐 fill 请求 |
-| FEE-BNB-010 | 两个分钟 fills | 最多两个 exact candle lookup | 不抓全日历史 |
-| FEE-BNB-011 | Ticket 混合 USDT/BNB fees | 各自估值后精确汇总 | 不统一假成一种 asset |
-| FEE-BNB-012 | BNB price unavailable | Review economics unavailable | 不以 fee=0 完成 |
+| FEE-DOM-007 | evidence 缺 pair/observed time | BNB valuation 拒绝 | 不只保存 rate |
+| FEE-DOM-008 | USDT evidence 带 BNB snapshot fields | validation error | 不混用方法 |
+| FEE-BNB-001 | Review 含一个或多个 BNB fill | 只读一次 BNBUSDT index snapshot | 不逐 fill 请求 |
+| FEE-BNB-002 | Review 没有 BNB fill | 不调用 BNBUSDT API | 不制造无关网络 I/O |
+| FEE-BNB-003 | snapshot price 非正数 | facts unavailable | 不按 0 计价 |
+| FEE-BNB-004 | snapshot observed time 无效 | facts unavailable | 不伪造时间 |
+| FEE-BNB-005 | snapshot API 空/失败 | Review economics unavailable | 不以 fee=0 完成 |
+| FEE-BNB-006 | Ticket 混合 USDT/BNB fees | USDT 固定 1，BNB 共用快照后汇总 | 不统一假成一种 asset |
+| FEE-BNB-007 | 冻结 Review evidence | 保存 method/rate/pair/observed time | 不声称成交时刻历史汇率 |
 
 ## G. 退出订单与 TP1 Maker-only
 
@@ -235,8 +230,8 @@ Owner 确认设计、实施计划和本测试规格后，实施必须先让相�
 | ID | 场景 / 动作 | 必须断言 | 禁止副作用 |
 | --- | --- | --- | --- |
 | CON-LIF-001 | entry regular fills + USDT fee | exact entry fee 进入 facts | 不按 client id filter |
-| CON-LIF-002 | entry fills + BNB fee | 估值后进入 runner floor | 不把 BNB 数量当 USDT |
-| CON-LIF-003 | BNB price stale | Lifecycle facts unavailable | 不以 0 fee 推进 runner |
+| CON-LIF-002 | entry fills + BNB fee | Lifecycle 不读取 BNB price，runner 仍用非折扣 taker 上界 | 不把 BNB 数量当 USDT |
+| CON-LIF-003 | BNB snapshot 不可用 | Lifecycle 仍可按风险上界推进 | 不以 BNB 估值阻塞保护 |
 | CON-LIF-004 | 未来 runner fee | 使用非折扣 taker 上界 | 不依赖 BNB balance |
 | CON-LIF-005 | TP1 GTX rejected | 保留初始 stop + Incident | 不提前创建 runner |
 | CON-UNK-001 | regular unknown 可见 | 解析 exact orderId 和 fills | 不重发 entry |
@@ -396,7 +391,7 @@ Owner 确认设计、实施计划和本测试规格后，实施必须先让相�
 3. **条件订单**：actualOrderId 是唯一 trade.orderId 桥。
 4. **三消费者**：Lifecycle、Unknown、Review 同时迁移。
 5. **退出语义**：STOP_MARKET/GTX 矩阵和拒绝恢复完整。
-6. **费用语义**：USDT、BNB、mixed、stale/missing 全覆盖。
+6. **费用语义**：USDT、BNB、mixed、Review snapshot missing/invalid 全覆盖。
 7. **资本隔离**：BNB 不改变仓位数量和风险预算。
 8. **禁止能力**：自动购买、划转、fee burn 变更和 BNB margin 不存在。
 9. **BTC 回放**：正常事件链产生唯一完整 Review。
