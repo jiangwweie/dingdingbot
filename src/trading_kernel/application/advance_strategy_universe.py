@@ -22,7 +22,7 @@ class UniverseActivationReadiness(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    target_is_warming: bool
+    target_lifecycle_is_valid: bool
     current_is_complete: bool
     event_is_active: bool
     members_are_complete: bool
@@ -42,7 +42,10 @@ def activation_readiness_blocker(
     """Return the first stable fail-closed blocker for one locked snapshot."""
 
     ordered_checks = (
-        (readiness.target_is_warming, "UNIVERSE_NOT_WARMING"),
+        (
+            readiness.target_lifecycle_is_valid,
+            "UNIVERSE_NOT_WARMING",
+        ),
         (
             readiness.current_is_complete,
             "CURRENT_UNIVERSE_IDENTITY_CONFLICT",

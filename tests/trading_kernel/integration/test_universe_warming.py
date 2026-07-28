@@ -32,6 +32,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     readiness_current,
     runtime_scopes_current,
     signal_events,
+    strategy_universe_current,
+    strategy_universe_versions,
     trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_signal_repository import (
@@ -51,11 +53,19 @@ from src.trading_kernel.interfaces.observation_worker import (
     ObservationWorkerStatus,
     run_observation_worker_once,
 )
+from src.trading_kernel.interfaces.reconciliation_worker import (
+    ReconciliationWorkerStatus,
+    run_reconciliation_worker_once,
+)
 from tests.trading_kernel.integration.universe_certification_support import (
     ADMIN_DSN,
     SAFE_DATABASE,
+    RecordingReadonlyCertificationSource,
     _database_url,
     _run_alembic,
+)
+from tests.trading_kernel.integration.universe_certification_support import (
+    worker_request as certification_worker_request,
 )
 from tests.trading_kernel.unit.detectors.fixtures import (
     BTC,
@@ -258,6 +268,118 @@ async def test_all_warming_members_become_ready_without_signal_chain(
         "warm_ready",
     ]
     assert counts == {"signals": 0, "tickets": 0, "commands": 0, "facts": 6}
+
+
+@pytest.mark.asyncio
+async def test_last_warm_success_auto_activates_fully_certified_universe(
+    warming_engine: AsyncEngine,
+) -> None:
+    """Catches Observation persisting complete warm facts without activation."""
+
+    async with warming_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_runtime_capabilities_current "
+                "SET enabled = true "
+                "WHERE capability_key = 'exchange_commands'"
+            )
+        )
+    certification_source = RecordingReadonlyCertificationSource(
+        warming_engine
+    )
+    for _ in MEMBERS:
+        result = await run_reconciliation_worker_once(
+            lambda: PostgresKernelUnitOfWork(warming_engine),
+            object(),
+            object(),
+            certification_worker_request(NOW_MS).model_copy(
+                update={"runtime_commit": RUNTIME_COMMIT}
+            ),
+            instrument_certification_source=certification_source,
+        )
+        assert (
+            result.status
+            is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+        )
+    source = _triggering_source(warming_engine, MEMBERS)
+
+    first = await run_observation_worker_once(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        source,
+        _worker_request(now_ms=NOW_MS),
+    )
+    async with warming_engine.connect() as connection:
+        state_after_first = (
+            await connection.execute(
+                sa.select(
+                    strategy_universe_versions.c.lifecycle_state
+                )
+            )
+        ).scalar_one()
+        pointer_after_first = int(
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(
+                    strategy_universe_current
+                )
+            )
+            or 0
+        )
+
+    second = await run_observation_worker_once(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        source,
+        _worker_request(now_ms=NOW_MS),
+    )
+    async with warming_engine.connect() as connection:
+        current = (
+            await connection.execute(
+                sa.select(strategy_universe_current)
+            )
+        ).mappings().one()
+        active_scopes = (
+            await connection.execute(
+                sa.select(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.lifecycle_state == "active"
+                )
+                .order_by(
+                    runtime_scopes_current.c.exchange_instrument_id
+                )
+            )
+        ).mappings().all()
+        side_effect_counts = (
+            int(
+                await connection.scalar(
+                    sa.select(sa.func.count()).select_from(signal_events)
+                )
+                or 0
+            ),
+            int(
+                await connection.scalar(
+                    sa.select(sa.func.count()).select_from(trade_tickets)
+                )
+                or 0
+            ),
+            int(
+                await connection.scalar(
+                    sa.select(sa.func.count()).select_from(
+                        exchange_commands
+                    )
+                )
+                or 0
+            ),
+        )
+
+    assert first.status is ObservationWorkerStatus.OBSERVED
+    assert first.observation_status is ObservationStatus.WARMED
+    assert state_after_first == "warming"
+    assert pointer_after_first == 0
+    assert second.status is ObservationWorkerStatus.OBSERVED
+    assert second.observation_status is ObservationStatus.WARMED
+    assert current["activation_generation"] == 1
+    assert len(active_scopes) == len(MEMBERS)
+    assert all(scope["entry_enabled"] for scope in active_scopes)
+    assert side_effect_counts == (0, 0, 0)
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,7 @@ from pydantic import ValidationError
 @pytest.mark.parametrize(
     ("changed_field", "expected_reason"),
     (
-        ("target_is_warming", "UNIVERSE_NOT_WARMING"),
+        ("target_lifecycle_is_valid", "UNIVERSE_NOT_WARMING"),
         ("current_is_complete", "CURRENT_UNIVERSE_IDENTITY_CONFLICT"),
         ("event_is_active", "EVENT_AUTHORITY_CONFLICT"),
         ("members_are_complete", "UNIVERSE_MEMBER_IDENTITY_CONFLICT"),
@@ -39,7 +39,7 @@ def test_activation_readiness_decision_has_stable_fail_closed_precedence(
     assert hasattr(module, "UniverseActivationReadiness")
     assert hasattr(module, "activation_readiness_blocker")
     baseline = {
-        "target_is_warming": True,
+        "target_lifecycle_is_valid": True,
         "current_is_complete": True,
         "event_is_active": True,
         "members_are_complete": True,

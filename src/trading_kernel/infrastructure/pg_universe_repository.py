@@ -237,6 +237,7 @@ class PostgresStrategyUniverseRepository:
         self,
         request: UniverseActivationRequest,
     ) -> UniverseActivationResult:
+        await self._lock_installs()
         target = (
             await self._connection.execute(
                 sa.select(strategy_universe_versions)
@@ -263,26 +264,17 @@ class PostgresStrategyUniverseRepository:
                 .limit(1)
             )
         ).mappings().one_or_none()
-        if target["lifecycle_state"] == "active":
-            if (
-                current is None
-                or current["universe_version_id"]
-                != request.universe_version_id
-                or current["semantic_digest"] != target["semantic_digest"]
-            ):
-                raise UniverseInstallConflict(
-                    "CURRENT_UNIVERSE_IDENTITY_CONFLICT"
-                )
-            return UniverseActivationResult(
-                status=UniverseActivationStatus.ALREADY_ACTIVE,
-                reason_code=None,
-                event_spec_id=event_spec_id,
-                universe_version_id=request.universe_version_id,
-                previous_universe_version_id=None,
-                activation_generation=int(
-                    current["activation_generation"]
-                ),
-                activated_at_ms=int(current["activated_at_ms"]),
+        target_is_active = target["lifecycle_state"] == "active"
+        if target_is_active and (
+            current is None
+            or current["universe_version_id"]
+            != request.universe_version_id
+            or current["semantic_digest"] != target["semantic_digest"]
+        ):
+            return _not_ready_activation(
+                target=target,
+                current=current,
+                reason_code="CURRENT_UNIVERSE_IDENTITY_CONFLICT",
             )
         current_is_complete = (
             current is None
@@ -294,6 +286,8 @@ class PostgresStrategyUniverseRepository:
                     event_specs.c.event_id,
                     event_specs.c.timeframe,
                     event_specs.c.status,
+                    event_specs.c.strategy_version_id,
+                    event_specs.c.position_side,
                 )
                 .where(
                     event_specs.c.event_spec_id == event_spec_id
@@ -316,6 +310,10 @@ class PostgresStrategyUniverseRepository:
                 event is not None
                 and event["event_id"] in {"MPG-LONG", "MI-LONG"}
             ),
+            expected_lifecycle=(
+                "active" if target_is_active else "warming"
+            ),
+            event=event,
         )
         readiness_blocker = activation_readiness_blocker(readiness)
         if readiness_blocker is not None:
@@ -326,6 +324,22 @@ class PostgresStrategyUniverseRepository:
             )
         if event is None:
             raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
+        if target_is_active:
+            if current is None:
+                raise UniverseInstallConflict(
+                    "CURRENT_UNIVERSE_IDENTITY_CONFLICT"
+                )
+            return UniverseActivationResult(
+                status=UniverseActivationStatus.ALREADY_ACTIVE,
+                reason_code=None,
+                event_spec_id=event_spec_id,
+                universe_version_id=request.universe_version_id,
+                previous_universe_version_id=None,
+                activation_generation=int(
+                    current["activation_generation"]
+                ),
+                activated_at_ms=int(current["activated_at_ms"]),
+            )
 
         previous_universe_version_id = (
             None
@@ -521,6 +535,12 @@ class PostgresStrategyUniverseRepository:
                 and scope["entry_enabled"]
                 for scope in scopes
             )
+            and await self._scopes_have_exact_authority(
+                target=version,
+                scopes=scopes,
+                expected_lifecycle="active",
+                event=None,
+            )
         )
 
     async def _activation_readiness(
@@ -531,6 +551,8 @@ class PostgresStrategyUniverseRepository:
         current_is_complete: bool,
         event_is_active: bool,
         comparative_event: bool,
+        expected_lifecycle: Literal["warming", "active"],
+        event: RowMapping | None,
     ) -> UniverseActivationReadiness:
         universe_version_id = str(target["universe_version_id"])
         members = tuple(
@@ -569,6 +591,7 @@ class PostgresStrategyUniverseRepository:
                 .limit(MAX_UNIVERSE_MEMBERS + 1)
             )
         ).mappings().all()
+        expected_entry_enabled = expected_lifecycle == "active"
         scopes_are_complete = (
             members_are_complete
             and len(scopes) == len(members)
@@ -581,10 +604,16 @@ class PostgresStrategyUniverseRepository:
                 scope["event_spec_id"] == target["event_spec_id"]
                 and scope["universe_semantic_digest"]
                 == target["semantic_digest"]
-                and scope["lifecycle_state"] == "warming"
+                and scope["lifecycle_state"] == expected_lifecycle
                 and scope["observation_enabled"]
-                and not scope["entry_enabled"]
+                and scope["entry_enabled"] is expected_entry_enabled
                 for scope in scopes
+            )
+            and await self._scopes_have_exact_authority(
+                target=target,
+                scopes=scopes,
+                expected_lifecycle=expected_lifecycle,
+                event=event,
             )
         )
 
@@ -716,7 +745,9 @@ class PostgresStrategyUniverseRepository:
                     )
                 )
         return UniverseActivationReadiness(
-            target_is_warming=target["lifecycle_state"] == "warming",
+            target_lifecycle_is_valid=(
+                target["lifecycle_state"] == expected_lifecycle
+            ),
             current_is_complete=current_is_complete,
             event_is_active=event_is_active,
             members_are_complete=members_are_complete,
@@ -730,6 +761,140 @@ class PostgresStrategyUniverseRepository:
             comparative_projection_is_complete=(
                 comparative_projection_is_complete
             ),
+        )
+
+    async def _scopes_have_exact_authority(
+        self,
+        *,
+        target: RowMapping,
+        scopes: list[RowMapping],
+        expected_lifecycle: Literal["warming", "active"],
+        event: RowMapping | None,
+    ) -> bool:
+        if not scopes:
+            return False
+        if event is None:
+            event = (
+                await self._connection.execute(
+                    sa.select(
+                        event_specs.c.strategy_version_id,
+                        event_specs.c.position_side,
+                        event_specs.c.status,
+                    )
+                    .where(
+                        event_specs.c.event_spec_id
+                        == target["event_spec_id"]
+                    )
+                    .with_for_update(of=event_specs)
+                    .limit(1)
+                )
+            ).mappings().one_or_none()
+        if event is None or event["status"] != "active":
+            return False
+
+        strategy_version = (
+            await self._connection.execute(
+                sa.select(
+                    strategy_versions.c.strategy_group_id,
+                    strategy_versions.c.status,
+                )
+                .where(
+                    strategy_versions.c.strategy_version_id
+                    == event["strategy_version_id"]
+                )
+                .with_for_update(of=strategy_versions)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        strategy_group = (
+            await self._connection.execute(
+                sa.select(
+                    strategy_groups.c.active_version_id,
+                    strategy_groups.c.status,
+                )
+                .where(
+                    strategy_groups.c.strategy_group_id
+                    == target["strategy_group_id"]
+                )
+                .with_for_update(of=strategy_groups)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        runtime_profile_ids = {
+            str(scope["runtime_profile_id"]) for scope in scopes
+        }
+        owner_policy_ids = {
+            str(scope["owner_policy_id"]) for scope in scopes
+        }
+        if len(runtime_profile_ids) != 1 or len(owner_policy_ids) != 1:
+            return False
+        runtime_profile_id = next(iter(runtime_profile_ids))
+        owner_policy_id = next(iter(owner_policy_ids))
+        runtime_profile = (
+            await self._connection.execute(
+                sa.select(
+                    runtime_profiles.c.venue_id,
+                    runtime_profiles.c.status,
+                )
+                .where(
+                    runtime_profiles.c.runtime_profile_id
+                    == runtime_profile_id
+                )
+                .with_for_update(of=runtime_profiles)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        owner_policy = (
+            await self._connection.execute(
+                sa.select(
+                    owner_policy_current.c.enabled,
+                    owner_policy_current.c.scope,
+                )
+                .where(
+                    owner_policy_current.c.owner_policy_id
+                    == owner_policy_id
+                )
+                .with_for_update(of=owner_policy_current)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if (
+            strategy_version is None
+            or strategy_version["status"] != "active"
+            or strategy_version["strategy_group_id"]
+            != target["strategy_group_id"]
+            or strategy_group is None
+            or strategy_group["status"] != "active"
+            or strategy_group["active_version_id"]
+            != event["strategy_version_id"]
+            or runtime_profile is None
+            or runtime_profile["status"] != "active"
+            or runtime_profile["venue_id"] != "binance-usdm"
+            or owner_policy is None
+            or not owner_policy["enabled"]
+        ):
+            return False
+        try:
+            policy_scope = UniverseInstallPolicyScope.model_validate(
+                owner_policy["scope"]
+            )
+        except ValidationError:
+            return False
+        return (
+            policy_scope.runtime_profile_id == runtime_profile_id
+            and target["lifecycle_state"] == expected_lifecycle
+            and target["event_spec_id"]
+            in policy_scope.allowed_event_spec_ids
+            and all(
+                scope["strategy_group_id"]
+                == target["strategy_group_id"]
+                and scope["strategy_version_id"]
+                == event["strategy_version_id"]
+                and scope["runtime_profile_id"] == runtime_profile_id
+                and scope["owner_policy_id"] == owner_policy_id
+                and scope["position_side"] == event["position_side"]
+                for scope in scopes
+            )
         )
 
     async def get_comparative_projection(

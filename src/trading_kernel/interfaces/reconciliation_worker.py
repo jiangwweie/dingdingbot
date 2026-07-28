@@ -8,35 +8,39 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from src.trading_kernel.application.ports import (
-    MonitorOwnerStatus,
-    MonitorStateRecord,
-    UnitOfWorkFactory,
-    VenueTruthPort,
+from src.trading_kernel.application.advance_strategy_universe import (
+    UniverseActivationRequest,
+    advance_strategy_universe,
 )
 from src.trading_kernel.application.certify_universe_instrument import (
     CertifyUniverseInstrumentRequest,
     InstrumentCertificationSource,
     certify_universe_instrument,
 )
+from src.trading_kernel.application.ports import (
+    MonitorOwnerStatus,
+    MonitorStateRecord,
+    UnitOfWorkFactory,
+    VenueTruthPort,
+)
 from src.trading_kernel.application.reconcile_ticket import (
     ReconcileTicketRequest,
     ReconcileTicketStatus,
     reconcile_ticket,
 )
-from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
 from src.trading_kernel.application.recover_unknown_command import (
     RecoverUnknownCommandRequest,
     recover_unknown_command,
 )
 from src.trading_kernel.application.runtime_facts import (
+    FeeDiscountCapabilitySource,
     PositionSnapshotRequest,
     PositionSnapshotSource,
-    FeeDiscountCapabilitySource,
-    classify_fee_discount_capability,
     ReviewEconomicsRequest,
     ReviewEconomicsSource,
+    classify_fee_discount_capability,
 )
+from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
 from src.trading_kernel.application.settle_ticket import (
     RecordTradeReviewRequest,
     SettleTicketRequest,
@@ -46,12 +50,7 @@ from src.trading_kernel.application.settle_ticket import (
 from src.trading_kernel.domain.aggregate import (
     RECONCILIATION_POSITION_STATUSES,
     AggregateStatus,
-)
-from src.trading_kernel.domain.aggregate import TradeAggregate
-from src.trading_kernel.domain.order_attribution import (
-    OrderRole,
-    TicketOrderReference,
-    attribution_digest,
+    TradeAggregate,
 )
 from src.trading_kernel.domain.events import (
     EntryFilled,
@@ -60,6 +59,11 @@ from src.trading_kernel.domain.events import (
     PositionFlatConfirmed,
     TradeEvent,
 )
+from src.trading_kernel.domain.order_attribution import (
+    OrderRole,
+    TicketOrderReference,
+    attribution_digest,
+)
 from src.trading_kernel.domain.review import (
     ExternalExitUnavailableReview,
     ReviewEconomicsCompleteness,
@@ -67,7 +71,6 @@ from src.trading_kernel.domain.review import (
     calculate_review_economics,
 )
 from src.trading_kernel.domain.venue_truth import UnknownRecoveryStatus
-
 
 _POSITION_RECONCILIATION_STATUSES = RECONCILIATION_POSITION_STATUSES
 
@@ -293,6 +296,14 @@ async def _certify_one_due_instrument(
             ),
         ),
     )
+    async with uow_factory() as uow:
+        await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=target.universe_version_id,
+                attempted_at_ms=request.now_ms,
+            ),
+        )
     return ReconciliationWorkerResult(
         status=ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED,
         exchange_instrument_id=target.exchange_instrument_id,

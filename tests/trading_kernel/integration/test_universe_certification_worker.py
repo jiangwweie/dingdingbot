@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
-
-import pytest
 
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
@@ -16,8 +15,10 @@ from tests.trading_kernel.integration.universe_certification_support import (
     MEMBERS,
     NOW_MS,
     RecordingReadonlyCertificationSource,
-    certification_engine as _certification_engine,  # noqa: F401
     worker_request,
+)
+from tests.trading_kernel.integration.universe_certification_support import (
+    certification_engine as _certification_engine,  # noqa: F401
 )
 
 
@@ -62,6 +63,14 @@ async def test_worker_claims_one_target_and_reads_after_claim_transaction_commit
                 )
             )
         ).scalar_one()
+        active_pointer_count = int(
+            await connection.scalar(
+                sa.text(
+                    "SELECT count(*) FROM brc_strategy_universe_current"
+                )
+            )
+            or 0
+        )
 
     assert result.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
     assert len(source.requests) == 1
@@ -71,6 +80,104 @@ async def test_worker_claims_one_target_and_reads_after_claim_transaction_commit
         (MEMBERS[1], "pending_certification"),
     ]
     assert universe_state == "warming"
+    assert active_pointer_count == 0
+    assert source.mutation_calls == []
+
+
+@pytest.mark.asyncio
+async def test_last_eligible_certification_auto_activates_fully_warmed_universe(
+    _certification_engine: AsyncEngine,  # noqa: F811
+) -> None:
+    """Catches certification persistence stopping before DB-only activation."""
+
+    async with _certification_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_runtime_scopes_current "
+                "SET warm_ready_at_ms = :ready_at_ms, "
+                "warm_readiness_digest = :digest, "
+                "warm_valid_until_ms = :valid_until_ms "
+                "WHERE lifecycle_state = 'warming'"
+            ),
+            {
+                "ready_at_ms": NOW_MS - 1,
+                "digest": "sha256:" + ("d" * 64),
+                "valid_until_ms": NOW_MS + 60_000,
+            },
+        )
+    source = RecordingReadonlyCertificationSource(_certification_engine)
+
+    first = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(_certification_engine),
+        object(),
+        object(),
+        worker_request(NOW_MS),
+        instrument_certification_source=source,
+    )
+    async with _certification_engine.connect() as connection:
+        after_first = (
+            await connection.execute(
+                sa.text(
+                    "SELECT lifecycle_state "
+                    "FROM brc_strategy_universe_versions"
+                )
+            )
+        ).scalar_one()
+        pointer_after_first = int(
+            await connection.scalar(
+                sa.text(
+                    "SELECT count(*) FROM brc_strategy_universe_current"
+                )
+            )
+            or 0
+        )
+
+    second = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(_certification_engine),
+        object(),
+        object(),
+        worker_request(NOW_MS),
+        instrument_certification_source=source,
+    )
+    async with _certification_engine.connect() as connection:
+        current = (
+            await connection.execute(
+                sa.text(
+                    "SELECT lifecycle_state, activation_generation "
+                    "FROM brc_strategy_universe_current"
+                )
+            )
+        ).one()
+        version_state = (
+            await connection.execute(
+                sa.text(
+                    "SELECT lifecycle_state "
+                    "FROM brc_strategy_universe_versions"
+                )
+            )
+        ).scalar_one()
+        scope_states = (
+            await connection.execute(
+                sa.text(
+                    "SELECT lifecycle_state, observation_enabled, "
+                    "entry_enabled "
+                    "FROM brc_runtime_scopes_current "
+                    "ORDER BY exchange_instrument_id"
+                )
+            )
+        ).all()
+
+    assert first.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+    assert after_first == "warming"
+    assert pointer_after_first == 0
+    assert second.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+    assert current == ("active", 1)
+    assert version_state == "active"
+    assert scope_states == [
+        ("active", True, True),
+        ("active", True, True),
+    ]
+    assert len(source.requests) == len(MEMBERS)
     assert source.mutation_calls == []
 
 

@@ -13,6 +13,7 @@ from src.trading_kernel.application.advance_strategy_universe import (
     advance_strategy_universe,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    comparative_projection_current,
     instrument_certification_current,
     runtime_scopes_current,
 )
@@ -317,6 +318,204 @@ async def test_incomplete_current_universe_identity_blocks_replacement(
     )
     assert result.status is UniverseActivationStatus.NOT_READY
     assert result.reason_code == "CURRENT_UNIVERSE_IDENTITY_CONFLICT"
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    ("authority_field", "wrong_value"),
+    (
+        ("strategy_group_id", "strategy-group:wrong"),
+        ("strategy_version_id", "strategy-version:wrong"),
+        ("runtime_profile_id", "runtime-profile:wrong"),
+        ("owner_policy_id", "owner-policy:wrong"),
+        ("position_side", "short"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_warming_scope_authority_mismatch_blocks_activation_without_mutation(
+    activation_engine: AsyncEngine,
+    authority_field: str,
+    wrong_value: str,
+) -> None:
+    """Catches activation that trusts only member and lifecycle identities."""
+
+    _, new_version_id = await prepare_active_and_warming(
+        activation_engine
+    )
+    await make_warming_ready(
+        activation_engine,
+        universe_version_id=new_version_id,
+    )
+    async with activation_engine.begin() as connection:
+        target_scope_id = await connection.scalar(
+            sa.select(runtime_scopes_current.c.runtime_scope_id)
+            .where(
+                runtime_scopes_current.c.universe_version_id
+                == new_version_id
+            )
+            .order_by(runtime_scopes_current.c.runtime_scope_id)
+            .limit(1)
+        )
+        await connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id
+                == target_scope_id
+            )
+            .values(**{authority_field: wrong_value})
+        )
+    before = await activation_snapshot(
+        activation_engine,
+        event_spec_id=DIRECT_CONTRACT.event_spec_id,
+    )
+
+    async with PostgresKernelUnitOfWork(activation_engine) as uow:
+        result = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=new_version_id,
+                attempted_at_ms=NOW_MS,
+            ),
+        )
+
+    after = await activation_snapshot(
+        activation_engine,
+        event_spec_id=DIRECT_CONTRACT.event_spec_id,
+    )
+    assert result.status is UniverseActivationStatus.NOT_READY
+    assert result.reason_code == "WARMING_SCOPE_IDENTITY_CONFLICT"
+    assert after == before
+
+
+@pytest.mark.parametrize("corruption", ("missing_scope", "wrong_binding"))
+@pytest.mark.asyncio
+async def test_already_active_revalidates_complete_scope_authority(
+    activation_engine: AsyncEngine,
+    corruption: str,
+) -> None:
+    """Catches an active-pointer shortcut accepting damaged active authority."""
+
+    _, new_version_id = await prepare_active_and_warming(
+        activation_engine
+    )
+    await make_warming_ready(
+        activation_engine,
+        universe_version_id=new_version_id,
+    )
+    async with PostgresKernelUnitOfWork(activation_engine) as uow:
+        activated = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=new_version_id,
+                attempted_at_ms=NOW_MS,
+            ),
+        )
+    assert activated.status is UniverseActivationStatus.ACTIVATED
+
+    async with activation_engine.begin() as connection:
+        target_scope_id = await connection.scalar(
+            sa.select(runtime_scopes_current.c.runtime_scope_id)
+            .where(
+                runtime_scopes_current.c.universe_version_id
+                == new_version_id
+            )
+            .order_by(runtime_scopes_current.c.runtime_scope_id)
+            .limit(1)
+        )
+        if corruption == "missing_scope":
+            await connection.execute(
+                sa.delete(runtime_scopes_current).where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == target_scope_id
+                )
+            )
+        else:
+            await connection.execute(
+                sa.update(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == target_scope_id
+                )
+                .values(owner_policy_id="owner-policy:wrong")
+            )
+    before = await activation_snapshot(
+        activation_engine,
+        event_spec_id=DIRECT_CONTRACT.event_spec_id,
+    )
+
+    async with PostgresKernelUnitOfWork(activation_engine) as uow:
+        repeated = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=new_version_id,
+                attempted_at_ms=NOW_MS + 1,
+            ),
+        )
+
+    after = await activation_snapshot(
+        activation_engine,
+        event_spec_id=DIRECT_CONTRACT.event_spec_id,
+    )
+    assert repeated.status is UniverseActivationStatus.NOT_READY
+    assert repeated.reason_code == "CURRENT_UNIVERSE_IDENTITY_CONFLICT"
+    assert after == before
+
+
+@pytest.mark.asyncio
+async def test_already_active_revalidates_exact_comparative_projection(
+    activation_engine: AsyncEngine,
+) -> None:
+    """Catches an active-pointer shortcut accepting lost projection authority."""
+
+    _, new_version_id = await prepare_active_and_warming(
+        activation_engine,
+        contract=COMPARATIVE_CONTRACT,
+    )
+    await make_warming_ready(
+        activation_engine,
+        universe_version_id=new_version_id,
+    )
+    await save_complete_comparative_projection(
+        activation_engine,
+        contract=COMPARATIVE_CONTRACT,
+        universe_version_id=new_version_id,
+    )
+    async with PostgresKernelUnitOfWork(activation_engine) as uow:
+        activated = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=new_version_id,
+                attempted_at_ms=NOW_MS,
+            ),
+        )
+    assert activated.status is UniverseActivationStatus.ACTIVATED
+    async with activation_engine.begin() as connection:
+        await connection.execute(
+            sa.delete(comparative_projection_current).where(
+                comparative_projection_current.c.universe_version_id
+                == new_version_id
+            )
+        )
+    before = await activation_snapshot(
+        activation_engine,
+        event_spec_id=COMPARATIVE_CONTRACT.event_spec_id,
+    )
+
+    async with PostgresKernelUnitOfWork(activation_engine) as uow:
+        repeated = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=new_version_id,
+                attempted_at_ms=NOW_MS + 1,
+            ),
+        )
+
+    after = await activation_snapshot(
+        activation_engine,
+        event_spec_id=COMPARATIVE_CONTRACT.event_spec_id,
+    )
+    assert repeated.status is UniverseActivationStatus.NOT_READY
+    assert repeated.reason_code == "COMPARATIVE_PROJECTION_INCOMPLETE"
     assert after == before
 
 

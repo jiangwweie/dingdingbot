@@ -7,6 +7,10 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.application.advance_strategy_universe import (
+    UniverseActivationRequest,
+    advance_strategy_universe,
+)
 from src.trading_kernel.application.market_ports import PublicMarketSource
 from src.trading_kernel.application.observe_strategy_scope import (
     ObservationRequest,
@@ -129,6 +133,21 @@ async def run_observation_worker_once(
             observation_generation=claim.observation_generation,
             due_at_ms=due_at_ms,
         )
+        if observation.status is ObservationStatus.WARMED:
+            scope = await uow.signals.get_runtime_scope(
+                claim.runtime_scope_id
+            )
+            if scope is None:
+                raise RuntimeError(
+                    "warmed observation scope authority disappeared"
+                )
+            await advance_strategy_universe(
+                uow,
+                UniverseActivationRequest(
+                    universe_version_id=scope.universe_version_id,
+                    attempted_at_ms=request.now_ms,
+                ),
+            )
     return ObservationWorkerResult(
         status=(
             ObservationWorkerStatus.RETRY_SCHEDULED

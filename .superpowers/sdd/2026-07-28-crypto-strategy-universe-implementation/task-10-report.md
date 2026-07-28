@@ -62,7 +62,68 @@ One Unit of Work performs this sequence:
 
 Every step is in the same PostgreSQL transaction. A repeated call against the
 exact active target returns `already_active` with the existing generation and
-does not rewrite state.
+does not rewrite state only after the active version, scopes, five frozen
+authority bindings, certifications, warm readiness, and exact comparative
+projection have all been revalidated.
+
+## Review Repair
+
+The first Task 10 review found three closure gaps. The follow-up repair added
+real PostgreSQL RED cases before changing production behavior.
+
+### Exact Scope Authority
+
+Both Warming activation and already-active revalidation now bind every exact
+Scope to:
+
+```text
+strategy_group_id
++ strategy_version_id
++ runtime_profile_id
++ owner_policy_id
++ position_side
+```
+
+Registry group/version/Event rows, active Runtime Profile, enabled Owner
+Policy, Policy scope, Universe identity, member identity, lifecycle
+permissions, and those five Scope fields must agree. A wrong field returns the
+scope/current identity blocker and leaves the old snapshot unchanged.
+
+The initial five-variant RED showed four corrupted bindings activating and the
+wrong Runtime Profile falling through to `CERTIFICATION_MISSING`. After the
+repair, all five fail at the Scope identity boundary.
+
+### Existing Worker Continuation
+
+No fifth Worker was added.
+
+- Reconciliation still prioritizes safety work, claims at most one
+  certification target, closes the claim transaction, performs readonly venue
+  I/O, persists certification/Monitor in a short transaction, and then opens a
+  separate short DB-only activation Unit of Work.
+- Observation still claims one Scope, closes the claim transaction, performs
+  market I/O, persists warm facts, and then calls DB-only activation from the
+  existing scheduling Unit of Work.
+- Expected `not_ready` results commit the newly persisted prerequisite and
+  wait for the remaining prerequisite.
+- Activation exceptions are not swallowed. The activation/scheduling
+  transaction rolls back and the old Active Universe remains authoritative.
+
+Two integration RED cases proved that `certification -> warming` and
+`warming -> certification` both stopped without a current pointer. Both orders
+now activate automatically when the final exact prerequisite becomes current;
+the incomplete first step remains Warming with zero current pointer.
+
+### Already-active Fail-closed Revalidation
+
+The original fast path returned `already_active` immediately from pointer
+identity. PostgreSQL RED cases then deleted an active Scope, changed its Owner
+Policy binding, and deleted an MPG comparative projection; all three were
+incorrectly accepted.
+
+The fast path now executes the same bounded authority/readiness validation as a
+new activation. Damage returns `not_ready`, does not advance the generation,
+and does not mutate the corrupted snapshot.
 
 ## RED And GREEN Evidence
 
@@ -91,15 +152,23 @@ row counts exactly equal the pre-attempt snapshot.
 Task 10 focused verification:
 
 ```text
-25 passed in 11.72s
+61 passed in 40.57s
 ```
 
-Universe regression verification covering repository install, warming,
+Initial Universe regression verification covering repository install, warming,
 certification, comparative projection, market-call bounds, and Signal
 eligibility:
 
 ```text
 43 passed in 37.48s
+```
+
+Review-repair proportional verification covering activation, certification,
+Monitor, warming, Observation-to-Signal, comparative projection, market-call
+bounds, Signal eligibility, and Reconciliation fairness/Review:
+
+```text
+102 passed in 70.06s
 ```
 
 Static gates:
@@ -108,7 +177,9 @@ Static gates:
 Ruff: all new Task 10 files passed
 Ruff: changed adapter and port passed after excluding unrelated pre-existing
       UP035/UP037/TRY004/FLY002 findings
-Mypy: success, no issues found in 3 source files
+Ruff review repair: changed files passed after excluding only unrelated
+                    pre-existing UP037/BLE001/TRY004/FLY002 findings
+Mypy review repair: success, no issues found in 4 source files
 git diff --check: exit 0
 ```
 
