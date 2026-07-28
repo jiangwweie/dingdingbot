@@ -77,7 +77,7 @@ class RecoverUnknownCommandRequest(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_window(self) -> "RecoverUnknownCommandRequest":
+    def _validate_window(self) -> RecoverUnknownCommandRequest:
         if (
             self.now_ms <= 0
             or self.visibility_deadline_ms <= 0
@@ -134,18 +134,18 @@ async def recover_unknown_command(
     except TimeoutError:
         truth = VenueTruthSnapshot(
             lookup_status=VenueLookupStatus.LOOKUP_FAILED,
-            position_quantity=Decimal("0"),
-            matching_fill_quantity=Decimal("0"),
+            position_quantity=Decimal(0),
+            matching_fill_quantity=Decimal(0),
             regular_open_client_order_ids=(),
             conditional_open_client_order_ids=(),
             observed_at_ms=request.now_ms,
             reason="venue_truth_timeout",
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - unknown truth must remain unresolved.
         truth = VenueTruthSnapshot(
             lookup_status=VenueLookupStatus.LOOKUP_FAILED,
-            position_quantity=Decimal("0"),
-            matching_fill_quantity=Decimal("0"),
+            position_quantity=Decimal(0),
+            matching_fill_quantity=Decimal(0),
             regular_open_client_order_ids=(),
             conditional_open_client_order_ids=(),
             observed_at_ms=request.now_ms,

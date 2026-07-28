@@ -137,7 +137,7 @@ class DispatchCommandRequest(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_lease(self) -> "DispatchCommandRequest":
+    def _validate_lease(self) -> DispatchCommandRequest:
         if self.lease_until_ms <= self.now_ms:
             raise ValueError("command lease must end after claim time")
         return self
@@ -302,7 +302,7 @@ async def dispatch_one_command(
             observed_at_ms=request.now_ms,
             reason="venue_timeout",
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - unknown venue outcome must fail closed.
         dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
             observed_at_ms=request.now_ms,
@@ -396,7 +396,7 @@ async def _preflight_new_entry_mutation(
             ),
             timeout=request.timeout_seconds,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - unreadable admission facts must fence Entry.
         return EntryDispatchPreflightStatus.STALE_SNAPSHOT
     async with uow_factory() as uow:
         current_command = await uow.exchange_commands.get(command.command_id)
@@ -563,7 +563,7 @@ def _command_result_event(
             return LeverageOutcomeUnknown(**common, reason=str(result.reason))
         raise RuntimeError("SET_LEVERAGE result is invalid")
     if not isinstance(result, ExchangeCommandResult):
-        raise RuntimeError("order command result is invalid")
+        raise TypeError("order command result is invalid")
     if kind is ExchangeCommandKind.ENTRY and result.status is ExchangeCommandStatus.ACCEPTED:
         return EntryAccepted(
             **common,
@@ -678,7 +678,7 @@ def _cancel_result_event(
     if aggregate_status is not expected_status:
         raise RuntimeError("cancel purpose is incompatible with aggregate state")
     if not isinstance(result, ExchangeCommandResult):
-        raise RuntimeError("cancel command result is invalid")
+        raise TypeError("cancel command result is invalid")
     exchange_order_id = payload.exchange_order_id
     if payload.purpose == "entry_remainder":
         if result.status is ExchangeCommandStatus.ACCEPTED:

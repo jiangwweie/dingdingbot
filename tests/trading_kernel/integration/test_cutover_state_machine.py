@@ -718,9 +718,10 @@ class LocalPostgresCutoverAdapter:
             self.observation_enabled = True
         elif phase is CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE:
             self.signal_to_ticket_no_write_certified = True
-        elif phase is CutoverPhase.CERTIFY_ENTRY_FENCED:
-            if await self._capability_enabled("exchange_commands"):
-                raise RuntimeError("exchange commands must remain disabled")
+        elif phase is CutoverPhase.CERTIFY_ENTRY_FENCED and await self._capability_enabled(
+            "exchange_commands"
+        ):
+            raise RuntimeError("exchange commands must remain disabled")
 
     async def phase_satisfied(
         self,

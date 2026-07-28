@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from decimal import Decimal
 
 from src.trading_kernel.domain.detector import (
@@ -96,7 +97,7 @@ class MPGLongDetector:
                 self._contract,
                 "mpg_invalid_comparative_strength_member_missing",
             )
-        leader_confirmed = member.rank == 1 and member.return_pct > Decimal("0")
+        leader_confirmed = member.rank == 1 and member.return_pct > Decimal(0)
         facts = (
             local_facts[0],
             fact_snapshot(
@@ -146,12 +147,12 @@ def _comparative_invalid_reason(snapshot: MarketSnapshot) -> str | None:
 def _count_higher_closes(candles) -> int:
     return sum(
         1
-        for previous, current in zip(candles, candles[1:])
+        for previous, current in itertools.pairwise(candles)
         if current.close > previous.close
     )
 
 
 def _pct(numerator: Decimal, denominator: Decimal) -> Decimal:
-    if denominator == Decimal("0"):
-        return Decimal("0")
-    return (numerator / denominator) * Decimal("100")
+    if denominator == Decimal(0):
+        return Decimal(0)
+    return (numerator / denominator) * Decimal(100)

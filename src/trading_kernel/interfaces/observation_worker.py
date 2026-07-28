@@ -51,7 +51,7 @@ class ObservationWorkerRequest(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_window(self) -> "ObservationWorkerRequest":
+    def _validate_window(self) -> ObservationWorkerRequest:
         if self.now_ms <= 0 or self.lease_until_ms <= self.now_ms:
             raise ValueError("observation worker lease must end after its tick")
         if self.timeout_seconds <= 0 or self.retry_interval_ms <= 0:
@@ -101,7 +101,7 @@ async def run_observation_worker_once(
             ),
             timeout=request.timeout_seconds,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - observation failure must retain retry authority.
         async with uow_factory() as uow:
             await uow.signals.schedule_observation_scope(
                 runtime_scope_id=claim.runtime_scope_id,

@@ -20,12 +20,12 @@ async def read_bnbusdt_fee_valuation_evidence(
         raise ValueError("review observation time must be positive")
     fetch = getattr(exchange, "fapiPublicGetPremiumIndex", None)
     if not callable(fetch):
-        raise RuntimeError("Binance venue lacks BNBUSDT index snapshot lookup")
+        raise TypeError("Binance venue lacks BNBUSDT index snapshot lookup")
     response = fetch({"symbol": "BNBUSDT"})
     if inspect.isawaitable(response):
         response = await response
     if not isinstance(response, Mapping):
-        raise RuntimeError("Binance BNBUSDT index snapshot is not a mapping")
+        raise TypeError("Binance BNBUSDT index snapshot is not a mapping")
     if str(response.get("symbol") or "").strip().upper() != "BNBUSDT":
         raise RuntimeError("Binance BNBUSDT index snapshot symbol is invalid")
     index_price = Decimal(str(response.get("indexPrice") or "0"))

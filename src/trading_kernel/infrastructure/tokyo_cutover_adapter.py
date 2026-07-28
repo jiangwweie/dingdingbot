@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
-from hashlib import sha256
 import json
 import os
-from pathlib import PurePosixPath
 import shlex
+from collections.abc import Mapping
+from hashlib import sha256
+from pathlib import PurePosixPath
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from scripts.trading_kernel.cutover_tokyo import CutoverPhase
 from scripts.trading_kernel.verify_flat_cutover import CutoverFacts, CutoverPlan
-
 
 EXPECTED_NEW_BRC_UNITS = frozenset(
     {
@@ -549,8 +548,8 @@ class SshTokyoSystem:
                 "-v",
                 "ON_ERROR_STOP=1",
                 "-c",
-                "DROP SCHEMA public CASCADE; "
-                "CREATE SCHEMA public AUTHORIZATION brc_kernel",
+                ("DROP SCHEMA public CASCADE; "
+                "CREATE SCHEMA public AUTHORIZATION brc_kernel"),
             )
         )
         await self._release_python(
@@ -615,16 +614,15 @@ class SshTokyoSystem:
                         "readonly certification omitted runtime identity"
                     )
                 _require_runtime_identity(runtime_identity, plan)
-            if script.endswith("probe_production_runtime.py"):
-                if (
-                    payload.get("venue_id") != plan.venue_id
-                    or payload.get("account_id") != plan.account_id
-                    or payload.get("account_position_mode")
-                    != "independent_sides"
-                ):
-                    raise RuntimeError(
-                        "readonly production identity differs from plan"
-                    )
+            if script.endswith("probe_production_runtime.py") and (
+                payload.get("venue_id") != plan.venue_id
+                or payload.get("account_id") != plan.account_id
+                or payload.get("account_position_mode")
+                != "independent_sides"
+            ):
+                raise RuntimeError(
+                    "readonly production identity differs from plan"
+                )
 
     async def enable_observation(self, plan: CutoverPlan) -> None:
         del plan
@@ -871,7 +869,7 @@ class SshTokyoSystem:
         result = await self._release_python(release, script)
         payload = json.loads(result.stdout)
         if not isinstance(payload, Mapping):
-            raise RuntimeError("Tokyo release command did not return a JSON object")
+            raise TypeError("Tokyo release command did not return a JSON object")
         return payload
 
     async def _release_python(

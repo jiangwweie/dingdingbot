@@ -5,28 +5,27 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from enum import StrEnum
 import inspect
 import json
 import os
-from pathlib import Path
 import re
 import sys
 import time
-from typing import AsyncContextManager, Protocol, cast
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from enum import StrEnum
+from pathlib import Path
+from typing import Protocol, cast
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.trading_kernel.verify_flat_cutover import (  # noqa: E402
+from scripts.trading_kernel.verify_flat_cutover import (
     CutoverFactsAdapter,
     CutoverPlan,
     CutoverVerification,
@@ -34,7 +33,6 @@ from scripts.trading_kernel.verify_flat_cutover import (  # noqa: E402
     load_cutover_adapter,
     verify_cutover_facts,
 )
-
 
 OPS_SCHEMA = "brc_cutover_ops"
 
@@ -131,7 +129,7 @@ class CutoverAdapter(CutoverFactsAdapter, Protocol):
 
 
 class CutoverJournal(Protocol):
-    def run_lock(self, cutover_id: str) -> AsyncContextManager[None]: ...
+    def run_lock(self, cutover_id: str) -> AbstractAsyncContextManager[None]: ...
 
     async def ensure_run(self, plan: CutoverPlan, *, now_ms: int) -> None: ...
 

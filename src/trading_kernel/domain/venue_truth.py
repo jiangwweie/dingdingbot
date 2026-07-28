@@ -93,7 +93,7 @@ class VenueTruthSnapshot(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_lookup_shape(self) -> "VenueTruthSnapshot":
+    def _validate_lookup_shape(self) -> VenueTruthSnapshot:
         if self.lookup_status is VenueLookupStatus.VISIBLE:
             if self.order is None or self.reason is not None:
                 raise ValueError("visible lookup requires order truth only")
@@ -115,7 +115,7 @@ class UnknownRecoveryDecision(BaseModel):
     reason: str | None = None
 
     @model_validator(mode="after")
-    def _validate_decision_shape(self) -> "UnknownRecoveryDecision":
+    def _validate_decision_shape(self) -> UnknownRecoveryDecision:
         if self.status is UnknownRecoveryStatus.RECONCILED_SUBMITTED:
             if not str(self.exchange_order_id or "").strip() or self.reason is not None:
                 raise ValueError("submitted recovery requires exchange order identity")
@@ -200,7 +200,7 @@ def _decide_cancel_recovery(
     visibility_deadline_ms: int,
 ) -> UnknownRecoveryDecision:
     if not isinstance(command.payload, CancelCommandPayload):
-        raise ValueError("cancel recovery requires exact target order identity")
+        raise TypeError("cancel recovery requires exact target order identity")
     if truth.lookup_status is VenueLookupStatus.VISIBLE:
         order = truth.order
         if order is None:

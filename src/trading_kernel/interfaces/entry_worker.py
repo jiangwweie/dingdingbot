@@ -19,8 +19,8 @@ from src.trading_kernel.application.issue_ready_signal import (
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus
 from src.trading_kernel.application.ports import UnitOfWorkFactory, VenuePort
 from src.trading_kernel.application.runtime_facts import (
-    EntryFactsSource,
     EntryAdmissionSnapshotRequest,
+    EntryFactsSource,
     InstrumentRulesRequest,
 )
 from src.trading_kernel.application.select_entry_candidate import (
@@ -65,7 +65,7 @@ class EntryWorkerRequest(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_window(self) -> "EntryWorkerRequest":
+    def _validate_window(self) -> EntryWorkerRequest:
         if self.now_ms <= 0 or self.lease_until_ms <= self.now_ms:
             raise ValueError("ENTRY worker lease must end after its tick")
         if self.timeout_seconds <= 0 or self.admission_snapshot_validity_ms <= 0:
@@ -160,7 +160,7 @@ async def run_entry_worker_once(
             ),
             timeout=request.timeout_seconds,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - action facts failure blocks new Entry.
         async with uow_factory() as uow:
             await uow.signals.save_readiness(
                 runtime_scope_id=signal.runtime_scope_id,

@@ -15,6 +15,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.domain.strategy_registry import (
+    RegisteredStrategyContract,
     build_registry_semantic_hash,
     registered_strategy_contracts,
 )
@@ -292,8 +293,8 @@ async def seed_runtime_authority(
             {
                 "venue_id": VENUE_ID,
                 "account_id": request.account_id,
-                "gross_notional": Decimal("0"),
-                "gross_risk_at_stop": Decimal("0"),
+                "gross_notional": Decimal(0),
+                "gross_risk_at_stop": Decimal(0),
                 "active_ticket_count": 0,
                 "projection_version": 0,
                 "updated_at_ms": request.seeded_at_ms,
@@ -715,12 +716,12 @@ async def _transition_policy(
 
 
 def _allowed_event_spec_ids(
-    contracts: tuple[object, ...],
+    contracts: tuple[RegisteredStrategyContract, ...],
 ) -> tuple[str, ...]:
     event_spec_ids = tuple(
         sorted(
             {
-                str(getattr(contract, "event_spec_id"))
+                str(contract.event_spec_id)
                 for contract in contracts
             }
         )

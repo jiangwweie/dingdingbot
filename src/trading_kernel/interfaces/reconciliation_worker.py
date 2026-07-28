@@ -101,7 +101,7 @@ class ReconciliationWorkItem(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_kind_and_window(self) -> "ReconciliationWorkItem":
+    def _validate_kind_and_window(self) -> ReconciliationWorkItem:
         if self.due_at_ms <= 0 or self.status_entered_at_ms <= 0:
             raise ValueError("reconciliation work times must be positive")
         if self.kind is ReconciliationWorkKind.POSITION:
@@ -191,7 +191,7 @@ class ReconciliationWorkerRequest(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_window(self) -> "ReconciliationWorkerRequest":
+    def _validate_window(self) -> ReconciliationWorkerRequest:
         if (
             self.now_ms <= 0
             or self.timeout_seconds <= 0
@@ -373,7 +373,7 @@ async def _run_reconciliation_worker_once_core(
                 position_source.read_position_snapshot(snapshot_request),
                 timeout=request.timeout_seconds,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - unreadable position truth must retry safely.
             async with uow_factory() as uow:
                 await uow.aggregates.schedule_next_check(
                     aggregate.identity.ticket_id,
@@ -544,7 +544,7 @@ async def _run_reconciliation_worker_once_core(
                 planned_risk_at_stop=review.ticket.risk_at_stop,
                 actual_risk_at_stop=review.actual_stop_risk,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - Review evidence failure remains unavailable.
             if _external_review_fallback_due(review_window, request):
                 return await _record_external_exit_unavailable_review(
                     uow_factory,
@@ -640,7 +640,7 @@ async def _observe_fee_discount_capability(
             if capability == "available"
             else "仅成本优化提醒；如需折扣由 Owner 手工处理"
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - fee capability is advisory, never trade authority.
         capability = "unknown"
         summary = f"bnb_fee_capability:unknown;reason={type(exc).__name__}"
         intervention = "仅成本优化提醒；无需改变交易状态"

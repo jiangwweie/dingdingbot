@@ -42,7 +42,7 @@ class InstrumentCertificationSnapshot(BaseModel):
     instrument_rules: InstrumentRulesFacts | None
 
     @model_validator(mode="after")
-    def _validate_snapshot(self) -> "InstrumentCertificationSnapshot":
+    def _validate_snapshot(self) -> InstrumentCertificationSnapshot:
         rules = self.instrument_rules
         facts = self.facts
         raw_rules = (
@@ -230,11 +230,11 @@ async def certify_universe_instrument(
             position_mode=None if snapshot is None else snapshot.facts.position_mode,
             next_check_at_ms=next_check_at_ms,
         )
-        if monitor is not None:
-            if certification.status == "owner_action_required":
-                await uow.monitors.save_if_changed(monitor)
-            elif await uow.monitors.get(monitor.monitor_key) is not None:
-                await uow.monitors.save_if_changed(monitor)
+        if monitor is not None and (
+            certification.status == "owner_action_required"
+            or await uow.monitors.get(monitor.monitor_key) is not None
+        ):
+            await uow.monitors.save_if_changed(monitor)
     return CertifyUniverseInstrumentResult(
         certification=certification,
         next_check_at_ms=next_check_at_ms,

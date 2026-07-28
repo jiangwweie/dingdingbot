@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -126,7 +127,7 @@ async def test_partial_fill_cancels_remainder_before_controlled_flatten(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=Decimal("0.0004"),
-                    average_entry_price=Decimal("60000"),
+                    average_entry_price=Decimal(60000),
                     observed_at_ms=1_200,
                 ),
             ),
@@ -226,7 +227,8 @@ async def test_readonly_certification_prints_json_without_report_files(
     database_url = fault_engine.url.render_as_string(hide_password=False)
     before = sorted(path.name for path in tmp_path.iterdir())
 
-    result = subprocess.run(
+    result = await asyncio.to_thread(
+        subprocess.run,
         [
             sys.executable,
             "scripts/trading_kernel/certify_readonly.py",
@@ -256,7 +258,8 @@ async def test_schema_verifier_accepts_only_clean_baseline(
 ) -> None:
     database_url = fault_engine.url.render_as_string(hide_password=False)
 
-    result = subprocess.run(
+    result = await asyncio.to_thread(
+        subprocess.run,
         [
             sys.executable,
             "scripts/trading_kernel/verify_schema.py",

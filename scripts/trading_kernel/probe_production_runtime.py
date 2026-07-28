@@ -7,9 +7,10 @@ import argparse
 import asyncio
 import sys
 import time
+from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal, Mapping, Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17,20 +18,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.trading_kernel.application.ports import (  # noqa: E402
+from src.trading_kernel.application.ports import (
     LeverageTruthRequest,
     VenueTruthPort,
 )
-from src.trading_kernel.application.runtime_facts import (  # noqa: E402
+from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     EntryFactsSource,
     InstrumentRulesRequest,
 )
-from src.trading_kernel.domain.instrument_identity import (  # noqa: E402
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionOrder,
+    AdmissionPosition,
+)
+from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
     to_exchange_instrument_id,
 )
-from src.trading_kernel.infrastructure.production_runtime import (  # noqa: E402
+from src.trading_kernel.infrastructure.production_runtime import (
     ProductionRuntimeSettings,
     build_binance_usdm_venue_adapter,
 )
@@ -234,8 +239,8 @@ def _canonical_active_universe_instrument_ids(
 def _verify_protected_exchange_tickets(
     expected_tickets: tuple[ProtectedHandoverTicketProbe, ...],
     *,
-    positions: tuple[object, ...],
-    open_orders: tuple[object, ...],
+    positions: tuple[AdmissionPosition, ...],
+    open_orders: tuple[AdmissionOrder, ...],
 ) -> tuple[ProtectedHandoverTicketProbe, ...]:
     if not expected_tickets:
         return ()
@@ -292,7 +297,7 @@ def _verify_protected_exchange_tickets(
 def _require_exact_protected_order(
     expected: Mapping[str, object],
     *,
-    order: object | None,
+    order: AdmissionOrder | None,
     expected_instrument_id: str,
     expected_position_side: Literal["long", "short"],
     expected_quantity: Decimal,

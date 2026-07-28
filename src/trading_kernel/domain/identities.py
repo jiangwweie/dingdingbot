@@ -30,14 +30,7 @@ class NettingDomain(_FrozenIdentity):
     position_side: Literal["long", "short"]
 
     def key(self) -> str:
-        return ":".join(
-            (
-                self.venue_id,
-                self.account_id,
-                self.exchange_instrument_id,
-                self.position_side,
-            )
-        )
+        return f"{self.venue_id}:{self.account_id}:{self.exchange_instrument_id}:{self.position_side}"
 
 
 class RuntimeIdentity(_FrozenIdentity):

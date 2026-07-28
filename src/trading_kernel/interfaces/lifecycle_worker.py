@@ -19,16 +19,15 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
     maintain_ticket_lifecycle,
 )
 from src.trading_kernel.application.ports import UnitOfWorkFactory, VenuePort
-from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
 from src.trading_kernel.application.runtime_facts import (
     LifecycleFactsRequest,
     LifecycleFactsSource,
 )
+from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind
-from src.trading_kernel.domain.order_attribution import OrderRole
 from src.trading_kernel.domain.events import EntryFilled
-
+from src.trading_kernel.domain.order_attribution import OrderRole
 
 _LIFECYCLE_COMMAND_KINDS = (
     ExchangeCommandKind.INITIAL_STOP,
@@ -70,7 +69,7 @@ class LifecycleWorkerRequest(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_window(self) -> "LifecycleWorkerRequest":
+    def _validate_window(self) -> LifecycleWorkerRequest:
         if self.now_ms <= 0 or self.lease_until_ms <= self.now_ms:
             raise ValueError("lifecycle worker lease must end after its tick")
         if self.timeout_seconds <= 0 or self.idle_poll_interval_ms <= 0:
@@ -205,7 +204,7 @@ async def run_lifecycle_worker_once(
             facts_source.read_lifecycle_facts(facts_request),
             timeout=request.timeout_seconds,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - protection facts failure reschedules safely.
         async with uow_factory() as uow:
             await uow.aggregates.schedule_next_check(
                 aggregate.identity.ticket_id,

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -12,7 +13,6 @@ import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from tests.trading_kernel.integration.test_schema_baseline import EXPECTED_TABLES
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -30,7 +30,8 @@ async def test_bootstrap_schema_creates_only_the_clean_kernel_baseline() -> None
     try:
         await admin.execute(f'CREATE DATABASE "{database_name}"')
         database_url = _database_url(database_name)
-        result = subprocess.run(
+        result = await asyncio.to_thread(
+            subprocess.run,
             [
                 sys.executable,
                 "scripts/trading_kernel/bootstrap_schema.py",

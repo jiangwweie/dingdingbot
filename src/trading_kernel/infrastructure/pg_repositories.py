@@ -94,7 +94,7 @@ _COMMAND_PAYLOAD_ADAPTER: TypeAdapter[CommandPayload] = TypeAdapter(CommandPaylo
 def _accepted_exchange_order_id(row: RowMapping) -> str:
     payload = row["result_payload"]
     if not isinstance(payload, dict):
-        raise RuntimeError("accepted command lacks a typed result payload")
+        raise TypeError("accepted command lacks a typed result payload")
     exchange_order_id = str(payload.get("exchange_order_id") or "").strip()
     if not exchange_order_id:
         raise RuntimeError("accepted command lacks exchange order identity")
@@ -495,7 +495,7 @@ class PostgresExchangeCommandRepository:
                 continue
             payload = _COMMAND_PAYLOAD_ADAPTER.validate_python(row["request_payload"])
             if not isinstance(payload, OrderCommandPayload):
-                raise RuntimeError("accepted order command has a non-order payload")
+                raise TypeError("accepted order command has a non-order payload")
             if payload.order_type in {"stop_market", "take_profit_market"}:
                 namespace = OrderNamespace.CONDITIONAL
                 conditional_expectation: ConditionalOrderExpectation | None = (

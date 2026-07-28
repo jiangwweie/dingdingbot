@@ -52,9 +52,13 @@ class UniverseInstallRequest(BaseModel):
     @classmethod
     def _canonical_members(cls, value: object) -> tuple[str, ...]:
         if isinstance(value, (str, bytes)):
-            raise ValueError("Universe members must be an identity collection")
+            raise ValueError(  # noqa: TRY004 - Pydantic must surface a ValidationError.
+                "Universe members must be an identity collection"
+            )
         if not isinstance(value, (tuple, list)):
-            raise ValueError("Universe members must be an identity collection")
+            raise ValueError(  # noqa: TRY004 - Pydantic must surface a ValidationError.
+                "Universe members must be an identity collection"
+            )
         members: tuple[object, ...] = tuple(value)
         if not 1 <= len(members) <= MAX_UNIVERSE_MEMBERS:
             raise ValueError("Universe install requires between one and ten members")
@@ -138,7 +142,9 @@ class UniverseInstallPolicyScope(BaseModel):
     @classmethod
     def _require_canonical_event_ids(cls, value: object) -> tuple[str, ...]:
         if not isinstance(value, (list, tuple)):
-            raise ValueError("Policy scope Event ids must be a list or tuple")
+            raise ValueError(  # noqa: TRY004 - Pydantic must surface a ValidationError.
+                "Policy scope Event ids must be a list or tuple"
+            )
         event_ids: tuple[object, ...] = tuple(value)
         if not event_ids or any(
             not isinstance(event_id, str)
@@ -186,7 +192,7 @@ class UniverseCurrent(BaseModel):
 
 
 async def install_strategy_universe(
-    uow: "KernelUnitOfWork",
+    uow: KernelUnitOfWork,
     request: UniverseInstallRequest,
 ) -> UniverseInstallResult:
     """Delegate one short transaction's persistence to the Universe repository."""
@@ -195,7 +201,7 @@ async def install_strategy_universe(
 
 
 async def configure_strategy_universe(
-    uow: "KernelUnitOfWork",
+    uow: KernelUnitOfWork,
     request: UniverseConfigurationRequest,
 ) -> UniverseInstallResult:
     """Resolve current PostgreSQL authority, then use the canonical installer."""

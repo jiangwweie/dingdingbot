@@ -16,15 +16,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.trading_kernel.application.read_strategy_universe_status import (  # noqa: E402
+from src.trading_kernel.application.read_strategy_universe_status import (
     StrategyUniverseStatusRequest,
     StrategyUniverseStatusResult,
     read_strategy_universe_status,
 )
-from src.trading_kernel.infrastructure.pg_unit_of_work import (  # noqa: E402
+from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
-from src.trading_kernel.infrastructure.pg_universe_repository import (  # noqa: E402
+from src.trading_kernel.infrastructure.pg_universe_repository import (
     UniverseInstallConflict,
 )
 
@@ -57,7 +57,7 @@ def main() -> int:
     except UniverseInstallConflict as exc:
         print(f"error={exc.reason_code}", file=sys.stderr)
         return 2
-    except Exception:
+    except Exception:  # noqa: BLE001 - CLI must redact every operational failure.
         print("error=operation_failed", file=sys.stderr)
         return 1
     _print_status(result)

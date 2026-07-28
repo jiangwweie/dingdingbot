@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import itertools
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -184,7 +185,7 @@ class _ReviewFeeValuationContext:
         if native_fee.asset == "USDT":
             return FeeValuationEvidence(
                 method="native_usdt",
-                rate_usdt_per_asset=Decimal("1"),
+                rate_usdt_per_asset=Decimal(1),
                 price_pair=None,
                 observed_at_ms=None,
                 valued_at_ms=self.review_observed_at_ms,
@@ -392,7 +393,7 @@ class CcxtVenueAdapter:
             raise RuntimeError("maintenance-margin rules are unsupported for venue")
         raw_leverage_brackets = getattr(exchange, "fapiPrivateGetLeverageBracket", None)
         if not callable(raw_leverage_brackets):
-            raise RuntimeError("venue does not expose maintenance-margin brackets")
+            raise TypeError("venue does not expose maintenance-margin brackets")
         await _call_raw_exchange(exchange.load_markets, False)
         market = exchange.market(symbol)
         quantity_step, price_tick, min_quantity, min_notional = (
@@ -521,7 +522,7 @@ class CcxtVenueAdapter:
                 expected_symbol=symbol,
             )
         )
-        unowned_position_qty = Decimal("0")
+        unowned_position_qty = Decimal(0)
         for position_side, quantity in (
             ("long", long_quantity),
             ("short", short_quantity),
@@ -748,7 +749,7 @@ class CcxtVenueAdapter:
             review_observed_at_ms=request.observed_at_ms,
         )
         attributed_entry_fills: list[ReviewFill] = []
-        bnb_entry_fee_upper_quote = Decimal("0")
+        bnb_entry_fee_upper_quote = Decimal(0)
         for row in _require_list(entry_fills, name="entry fills"):
             if _review_fee_asset(row, settlement_asset=settlement_asset) == "BNB":
                 notional = _exact_order_fill_notional(
@@ -776,7 +777,7 @@ class CcxtVenueAdapter:
             raise RuntimeError("entry fills are unavailable for the exact order identity")
         entry_fee_quote = sum(
             (fill.fee_quote for fill in attributed_entry_fills),
-            Decimal("0"),
+            Decimal(0),
         ) + bnb_entry_fee_upper_quote
         tp1_quantity, tp1_average_price = _order_fill_metrics(tp1_order)
         allocated_entry_fee = (
@@ -823,7 +824,7 @@ class CcxtVenueAdapter:
         _, exchange = candidates[0]
         fee_burn = getattr(exchange, "fapiPrivateGetFeeBurn", None)
         if not callable(fee_burn):
-            raise RuntimeError("Binance venue lacks fee burn readonly lookup")
+            raise TypeError("Binance venue lacks fee burn readonly lookup")
         fee_burn_result, balance_result = await asyncio.gather(
             _call_raw_exchange(fee_burn, {}),
             _call_raw_exchange(exchange.fetch_balance, {"type": "future"}),
@@ -831,7 +832,7 @@ class CcxtVenueAdapter:
         fee_burn_mapping = _require_mapping(fee_burn_result, name="fee burn")
         enabled = fee_burn_mapping.get("feeBurn")
         if not isinstance(enabled, bool):
-            raise RuntimeError("Binance fee burn readonly fact is invalid")
+            raise TypeError("Binance fee burn readonly fact is invalid")
         return FeeDiscountCapabilityFacts(
             fee_burn_enabled=enabled,
             bnb_futures_wallet_balance=_bnb_futures_wallet_balance(balance_result),
@@ -974,7 +975,7 @@ class CcxtVenueAdapter:
             if isinstance(response, ExchangeCommandResult):
                 return response
             if not isinstance(response, Mapping):
-                raise RuntimeError("venue cancel response is not a mapping")
+                raise TypeError("venue cancel response is not a mapping")
             return ExchangeCommandResult(
                 status=ExchangeCommandStatus.ACCEPTED,
                 observed_at_ms=self._clock_ms(),
@@ -983,7 +984,7 @@ class CcxtVenueAdapter:
             )
 
         if not isinstance(request.payload, OrderCommandPayload):
-            raise RuntimeError("unsupported venue command payload")
+            raise TypeError("unsupported venue command payload")
 
         params["newClientOrderId"] = request.venue_client_order_id
         if request.payload.reduce_only and request.venue_id != "binance-usdm":
@@ -1007,7 +1008,7 @@ class CcxtVenueAdapter:
             return response
 
         if not isinstance(response, Mapping):
-            raise RuntimeError("venue response is not a mapping")
+            raise TypeError("venue response is not a mapping")
         exchange_order_id = str(response.get("id") or "").strip()
         if not exchange_order_id:
             raise RuntimeError("venue acceptance lacks exchange order identity")
@@ -1048,7 +1049,7 @@ class CcxtVenueAdapter:
         if isinstance(response, ExchangeCommandResult):
             if response.status is ExchangeCommandStatus.REJECTED:
                 raise VenueMutationRejected(str(response.reason))
-            raise RuntimeError("leverage mutation has no authoritative result")
+            raise TypeError("leverage mutation has no authoritative result")
         configured_leverage, _, _ = await _read_exact_instrument_leverage(
             exchange=exchange,
             symbol=symbol,
@@ -1346,13 +1347,13 @@ def _exchange_error_code(exc: Exception) -> str | None:
 
 def _require_list(value: object, *, name: str) -> list[object]:
     if not isinstance(value, list):
-        raise RuntimeError(f"venue {name} response is not a list")
+        raise TypeError(f"venue {name} response is not a list")
     return value
 
 
 def _require_mapping(value: object, *, name: str) -> Mapping[object, object]:
     if not isinstance(value, Mapping):
-        raise RuntimeError(f"venue {name} response is not a mapping")
+        raise TypeError(f"venue {name} response is not a mapping")
     return value
 
 
@@ -1365,7 +1366,7 @@ def _parse_order_truth(
     order_namespace: Literal["regular", "conditional"],
 ) -> VenueOrderTruth:
     if not isinstance(value, Mapping):
-        raise RuntimeError("venue order truth response is not a mapping")
+        raise TypeError("venue order truth response is not a mapping")
     info = value.get("info")
     raw_info = info if isinstance(info, Mapping) else {}
     raw_symbol = str(value.get("symbol") or "").strip()
@@ -1616,10 +1617,10 @@ def _position_quantity(
     expected_symbol: str,
     position_side: Literal["long", "short"],
 ) -> Decimal:
-    total = Decimal("0")
+    total = Decimal(0)
     for value in rows:
         if not isinstance(value, Mapping):
-            raise RuntimeError("venue position row is not a mapping")
+            raise TypeError("venue position row is not a mapping")
         if str(value.get("symbol") or "") != expected_symbol:
             continue
         if _row_position_side(value) != position_side:
@@ -1646,8 +1647,8 @@ def _configured_leverage_and_position_quantities(
     expected_symbol: str,
 ) -> tuple[int, Decimal, Decimal]:
     leverage_values: set[int] = set()
-    long_quantity = Decimal("0")
-    short_quantity = Decimal("0")
+    long_quantity = Decimal(0)
+    short_quantity = Decimal(0)
     matched_rows = 0
     for value in rows:
         mapping = _require_mapping(value, name="leverage position row")
@@ -1683,13 +1684,13 @@ def _position_details(
     expected_symbol: str,
     position_side: Literal["long", "short"],
 ) -> tuple[Decimal, Decimal | None, Decimal | None]:
-    total_quantity = Decimal("0")
-    weighted_entry = Decimal("0")
+    total_quantity = Decimal(0)
+    weighted_entry = Decimal(0)
     liquidation_prices: set[Decimal] = set()
     liquidation_evidence_missing = False
     for value in rows:
         if not isinstance(value, Mapping):
-            raise RuntimeError("venue position row is not a mapping")
+            raise TypeError("venue position row is not a mapping")
         if str(value.get("symbol") or "") != expected_symbol:
             continue
         if _row_position_side(value) != position_side:
@@ -1720,7 +1721,7 @@ def _position_details(
             raise RuntimeError("venue liquidation evidence is invalid")
         liquidation_prices.add(liquidation)
     if total_quantity == 0:
-        return Decimal("0"), None, None
+        return Decimal(0), None, None
     liquidation_price = (
         next(iter(liquidation_prices))
         if not liquidation_evidence_missing and len(liquidation_prices) == 1
@@ -1739,7 +1740,7 @@ def _position_open_orders(
     orders: list[VenueOrderSnapshot] = []
     for value in rows:
         if not isinstance(value, Mapping):
-            raise RuntimeError("venue open-order row is not a mapping")
+            raise TypeError("venue open-order row is not a mapping")
         if str(value.get("symbol") or "") != expected_symbol:
             continue
         if _row_position_side(value) != position_side:
@@ -1776,7 +1777,7 @@ def _open_order_count(
     count = 0
     for value in rows:
         if not isinstance(value, Mapping):
-            raise RuntimeError("venue open-order row is not a mapping")
+            raise TypeError("venue open-order row is not a mapping")
         if str(value.get("symbol") or "") != expected_symbol:
             continue
         if _row_position_side(value) == position_side:
@@ -1964,7 +1965,7 @@ def _binance_maintenance_margin_brackets(
     max_leverages: list[int] = []
     for row in raw_brackets:
         if not isinstance(row, Mapping):
-            raise RuntimeError("venue maintenance-margin bracket is not a mapping")
+            raise TypeError("venue maintenance-margin bracket is not a mapping")
         raw_number = row.get("bracket")
         try:
             number = int(str(raw_number))
@@ -1996,7 +1997,7 @@ def _binance_maintenance_margin_brackets(
         item.bracket_id for item in parsed
     ):
         raise RuntimeError("venue maintenance-margin brackets are not sorted")
-    for previous, current in zip(ordered, ordered[1:], strict=False):
+    for previous, current in itertools.pairwise(ordered):
         if previous.notional_cap != current.notional_floor:
             raise RuntimeError("venue maintenance-margin brackets are discontinuous")
     return ordered, max(max_leverages)
@@ -2050,7 +2051,7 @@ async def _empty_value() -> None:
 
 def _order_fill_metrics(value: object | None) -> tuple[Decimal, Decimal | None]:
     if value is None:
-        return Decimal("0"), None
+        return Decimal(0), None
     mapping = _require_mapping(value, name="TP1 order")
     info = mapping.get("info")
     raw_info = info if isinstance(info, Mapping) else {}
@@ -2060,7 +2061,7 @@ def _order_fill_metrics(value: object | None) -> tuple[Decimal, Decimal | None]:
         )
     )
     if quantity == 0:
-        return Decimal("0"), None
+        return Decimal(0), None
     average_price = Decimal(
         str(mapping.get("average") or raw_info.get("avgPrice") or "0")
     )
@@ -2075,7 +2076,7 @@ def _review_fee_asset(
     settlement_asset: str,
 ) -> Literal["USDT", "BNB"]:
     if not isinstance(value, Mapping):
-        raise RuntimeError("venue review fill row is not a mapping")
+        raise TypeError("venue review fill row is not a mapping")
     info = value.get("info")
     raw_info = info if isinstance(info, Mapping) else {}
     del settlement_asset
@@ -2091,7 +2092,7 @@ def _exact_order_fill_notional(
     exit_time_ms: int,
 ) -> Decimal | None:
     if not isinstance(value, Mapping):
-        raise RuntimeError("venue review fill row is not a mapping")
+        raise TypeError("venue review fill row is not a mapping")
     info = value.get("info")
     raw_info = info if isinstance(info, Mapping) else {}
     exchange_order_id = str(
@@ -2135,7 +2136,7 @@ async def _review_fill(
     exit_time_ms: int,
 ) -> ReviewFill:
     if not isinstance(value, Mapping):
-        raise RuntimeError("venue review fill row is not a mapping")
+        raise TypeError("venue review fill row is not a mapping")
     info = value.get("info")
     raw_info = info if isinstance(info, Mapping) else {}
     exchange_order_id = _review_row_order_id(value)
@@ -2194,7 +2195,7 @@ async def _review_fill(
 
 def _review_row_order_id(value: object) -> str:
     if not isinstance(value, Mapping):
-        raise RuntimeError("venue review fill row is not a mapping")
+        raise TypeError("venue review fill row is not a mapping")
     info = value.get("info")
     raw_info = info if isinstance(info, Mapping) else {}
     return str(
@@ -2253,7 +2254,7 @@ async def _funding_quote(
     funding_by_id: dict[str, tuple[Decimal, int]] = {}
     for value in rows:
         if not isinstance(value, Mapping):
-            raise RuntimeError("venue funding income row is not a mapping")
+            raise TypeError("venue funding income row is not a mapping")
         if str(value.get("incomeType") or "").upper() != "FUNDING_FEE":
             continue
         if str(value.get("symbol") or "") != market_id:
@@ -2274,7 +2275,7 @@ async def _funding_quote(
             raise RuntimeError("venue returned contradictory duplicate funding income")
         funding_by_id[funding_id] = normalized
     return (
-        sum((amount for amount, _ in funding_by_id.values()), Decimal("0")),
+        sum((amount for amount, _ in funding_by_id.values()), Decimal(0)),
         None,
     )
 
@@ -2321,7 +2322,7 @@ def _lifecycle_market_facts(
                 abs(low - previous_close),
             )
         )
-    atr = sum(true_ranges, Decimal("0")) / Decimal(atr_period)
+    atr = sum(true_ranges, Decimal(0)) / Decimal(atr_period)
     structure_rows = candles[-structure_window_bars:]
     structure_reference = (
         min(item[3] for item in structure_rows)
@@ -2342,7 +2343,7 @@ def _account_position_mode(
 ) -> Literal["independent_sides", "one_way"]:
     hedged = value.get("hedged")
     if not isinstance(hedged, bool):
-        raise RuntimeError("venue position mode response lacks hedged boolean")
+        raise TypeError("venue position mode response lacks hedged boolean")
     return "independent_sides" if hedged else "one_way"
 
 
@@ -2389,11 +2390,11 @@ def _matching_fill_quantity(
     exchange_order_id: str | None,
 ) -> Decimal:
     if exchange_order_id is None:
-        return Decimal("0")
-    total = Decimal("0")
+        return Decimal(0)
+    total = Decimal(0)
     for value in rows:
         if not isinstance(value, Mapping):
-            raise RuntimeError("venue fill row is not a mapping")
+            raise TypeError("venue fill row is not a mapping")
         info = value.get("info")
         raw_info = info if isinstance(info, Mapping) else {}
         row_order_id = str(
@@ -2411,7 +2412,7 @@ def _open_client_order_ids(rows: list[object]) -> tuple[str, ...]:
     identities: set[str] = set()
     for value in rows:
         if not isinstance(value, Mapping):
-            raise RuntimeError("venue open-order row is not a mapping")
+            raise TypeError("venue open-order row is not a mapping")
         identity = str(value.get("clientOrderId") or "").strip()
         if identity:
             identities.add(identity)
@@ -2436,7 +2437,7 @@ def _find_order_by_exchange_id(
 ) -> object | None:
     for value in rows:
         if not isinstance(value, Mapping):
-            raise RuntimeError("venue open-order row is not a mapping")
+            raise TypeError("venue open-order row is not a mapping")
         if str(value.get("id") or "").strip() == exchange_order_id:
             return value
     return None

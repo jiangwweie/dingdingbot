@@ -42,12 +42,12 @@ async def resolve_binance_order_identity(
 
     lookup = getattr(exchange, "fapiPrivateGetAlgoOrder", None)
     if not callable(lookup):
-        raise RuntimeError("Binance venue lacks exact algo order lookup")
+        raise TypeError("Binance venue lacks exact algo order lookup")
     response = lookup({"algoId": reference.submitted_exchange_order_id})
     if inspect.isawaitable(response):
         response = await response
     if not isinstance(response, Mapping):
-        raise RuntimeError("Binance algo order response is not a mapping")
+        raise TypeError("Binance algo order response is not a mapping")
 
     algo_id = str(response.get("algoId") or "").strip()
     if algo_id != reference.submitted_exchange_order_id:

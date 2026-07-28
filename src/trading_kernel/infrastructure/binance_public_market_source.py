@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import Mapping
 from decimal import Decimal
-import inspect
 from typing import Protocol
 
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
@@ -64,7 +64,7 @@ class CcxtBinancePublicMarketSource:
             timeout=self._timeout_seconds,
         )
         if not isinstance(response, list):
-            raise RuntimeError("public OHLCV response is not a list")
+            raise TypeError("public OHLCV response is not a list")
         duration_ms = _TIMEFRAME_MS[request.timeframe]
         candles = tuple(
             sorted(

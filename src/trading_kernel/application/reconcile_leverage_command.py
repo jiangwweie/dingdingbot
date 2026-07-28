@@ -84,7 +84,7 @@ async def reconcile_leverage_command(
         if command.status is not ExchangeCommandStatus.OUTCOME_UNKNOWN:
             raise ValueError("leverage command is not in unknown-outcome state")
         if not isinstance(command.payload, SetLeverageCommandPayload):
-            raise RuntimeError("SET_LEVERAGE command payload is invalid")
+            raise TypeError("SET_LEVERAGE command payload is invalid")
 
     truth_request = LeverageTruthRequest(
         command_id=command.command_id,
@@ -101,7 +101,7 @@ async def reconcile_leverage_command(
             truth_port.read_configured_leverage(truth_request),
             timeout=request.timeout_seconds,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - unavailable readonly truth cannot mutate.
         return ReconcileLeverageCommandResult(
             status=ReconcileLeverageStatus.TRUTH_UNAVAILABLE,
             command_id=command.command_id,

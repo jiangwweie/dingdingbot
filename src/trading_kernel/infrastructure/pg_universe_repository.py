@@ -1292,7 +1292,7 @@ class PostgresStrategyUniverseRepository:
             member_set_digest=projection.member_set_digest,
         )
         if not isinstance(persisted, ComparativeUniverseProjection):
-            raise RuntimeError(
+            raise TypeError(
                 "comparative projection authority changed"
             )
         return persisted
@@ -1969,14 +1969,7 @@ def _runtime_scope_id(
     exchange_instrument_id: str,
     position_side: str,
 ) -> str:
-    identity = ":".join(
-        (
-            universe_version_id,
-            runtime_profile_id,
-            exchange_instrument_id,
-            position_side,
-        )
-    )
+    identity = f"{universe_version_id}:{runtime_profile_id}:{exchange_instrument_id}:{position_side}"
     return f"scope:universe:{sha256(identity.encode('utf-8')).hexdigest()}"
 
 

@@ -8,7 +8,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-
 _MIN_POSITIVE_PROJECTED_PRICE = Decimal("0.000000000000000001")
 
 
@@ -63,7 +62,7 @@ class MaintenanceMarginBracket(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_range(self) -> "MaintenanceMarginBracket":
+    def _validate_range(self) -> MaintenanceMarginBracket:
         if self.notional_cap is not None and self.notional_cap <= self.notional_floor:
             raise ValueError("maintenance bracket cap must exceed its floor")
         return self
@@ -148,14 +147,16 @@ class CapacitySizingRequest(BaseModel):
     @classmethod
     def _require_nonnegative_or_positive_integer(cls, value: int, info: object) -> int:
         if isinstance(value, bool):
-            raise ValueError("sizing count and leverage values must be integers")
+            raise ValueError(  # noqa: TRY004 - Pydantic must surface a ValidationError.
+                "sizing count and leverage values must be integers"
+            )
         field_name = getattr(info, "field_name", "")
         if value < 0 or (field_name != "active_ticket_count" and value <= 0):
             raise ValueError("sizing count and leverage values are invalid")
         return value
 
     @model_validator(mode="after")
-    def _validate_sizing_facts(self) -> "CapacitySizingRequest":
+    def _validate_sizing_facts(self) -> CapacitySizingRequest:
         if self.initial_stop_price == self.entry_reference_price:
             raise ValueError("initial stop must differ from entry reference")
         if (
@@ -204,7 +205,7 @@ class CapacitySizingDecision(BaseModel):
     selected: CapacitySizingSelection | None
 
     @model_validator(mode="after")
-    def _validate_shape(self) -> "CapacitySizingDecision":
+    def _validate_shape(self) -> CapacitySizingDecision:
         if (self.status is CapacitySizingStatus.SELECTED) != (self.selected is not None):
             raise ValueError("selected sizing decisions require exactly one candidate")
         return self
@@ -227,7 +228,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
     )
     remaining_policy_margin = max(
         account_initial_margin_limit - request.total_initial_margin,
-        Decimal("0"),
+        Decimal(0),
     )
     remaining_executable_margin = min(
         request.available_margin,
@@ -414,7 +415,7 @@ def _projected_liquidation_price(
         + bracket.maintenance_amount
     )
     if request.position_side == "long":
-        denominator = quantity * (Decimal("1") - bracket.maintenance_margin_rate)
+        denominator = quantity * (Decimal(1) - bracket.maintenance_margin_rate)
         numerator = (
             request.total_maintenance_margin
             + maintenance_at_liquidation
@@ -425,7 +426,7 @@ def _projected_liquidation_price(
         if not projected.is_finite():
             return None
         return max(projected, _MIN_POSITIVE_PROJECTED_PRICE)
-    denominator = quantity * (Decimal("1") + bracket.maintenance_margin_rate)
+    denominator = quantity * (Decimal(1) + bracket.maintenance_margin_rate)
     numerator = (
         request.total_margin_balance
         + quantity * request.mark_price
@@ -440,7 +441,7 @@ def _projected_liquidation_price(
 
 def _floor_to_step(value: Decimal, step: Decimal) -> Decimal:
     if value <= 0:
-        return Decimal("0")
+        return Decimal(0)
     return (value / step).to_integral_value(rounding=ROUND_FLOOR) * step
 
 

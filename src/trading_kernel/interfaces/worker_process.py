@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Collection
 import json
 import signal
 import time
+from collections.abc import Awaitable, Callable, Collection
 
 from pydantic import BaseModel
 
 
 def _status_value(result: BaseModel) -> str:
-    status = getattr(result, "status")
+    status = getattr(result, "status", None)
+    if status is None:
+        raise TypeError("worker result must expose a status")
     value = getattr(status, "value", status)
     return str(value)
 

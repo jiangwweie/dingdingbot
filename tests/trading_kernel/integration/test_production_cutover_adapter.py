@@ -174,8 +174,8 @@ async def test_target_database_rebuilds_public_schema_before_bootstrap() -> None
         "-v",
         "ON_ERROR_STOP=1",
         "-c",
-        "DROP SCHEMA public CASCADE; "
-        "CREATE SCHEMA public AUTHORIZATION brc_kernel",
+        ("DROP SCHEMA public CASCADE; "
+        "CREATE SCHEMA public AUTHORIZATION brc_kernel"),
     )
 
 
@@ -193,16 +193,16 @@ async def test_runtime_identity_env_is_updated_and_verified_exactly() -> None:
             "sudo",
             "sed",
             "-i",
-            "s/^TRADING_KERNEL_RUNTIME_COMMIT=.*/"
-            f"TRADING_KERNEL_RUNTIME_COMMIT={plan.target_commit}/",
+            ("s/^TRADING_KERNEL_RUNTIME_COMMIT=.*/"
+            f"TRADING_KERNEL_RUNTIME_COMMIT={plan.target_commit}/"),
             "/etc/brc/trading-kernel.env",
         ),
         (
             "sudo",
             "sed",
             "-i",
-            "s/^TRADING_KERNEL_SCHEMA_REVISION=.*/"
-            f"TRADING_KERNEL_SCHEMA_REVISION={plan.target_schema_revision}/",
+            ("s/^TRADING_KERNEL_SCHEMA_REVISION=.*/"
+            f"TRADING_KERNEL_SCHEMA_REVISION={plan.target_schema_revision}/"),
             "/etc/brc/trading-kernel.env",
         ),
         (

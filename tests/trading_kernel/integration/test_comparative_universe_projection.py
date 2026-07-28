@@ -217,7 +217,7 @@ async def test_newer_projection_replaces_current_and_rejects_stale_writer(
         )
 
     with pytest.raises(
-        RuntimeError,
+        TypeError,
         match="comparative projection authority changed",
     ):
         async with PostgresKernelUnitOfWork(projection_engine) as uow:

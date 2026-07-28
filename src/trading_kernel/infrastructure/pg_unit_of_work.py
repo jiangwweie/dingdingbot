@@ -6,10 +6,11 @@ from types import TracebackType
 from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncTransaction
+from typing_extensions import Self
 
 from src.trading_kernel.application.ports import (
-    AggregateVersionConflict,
     AggregateRepository,
+    AggregateVersionConflict,
     BudgetRepository,
     CapacityClaimRepository,
     EntryAdmissionRepository,
@@ -27,6 +28,7 @@ from src.trading_kernel.application.ports import (
     UnsupportedKernelEffect,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommand,
@@ -38,25 +40,24 @@ from src.trading_kernel.domain.commands import (
     build_venue_client_order_id,
     require_next_generation_allowed,
 )
-from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.effects import (
     CancelEntryRemainder,
     CancelProtectionOrders,
     MarkCancelCommandReconciledAbsent,
     OpenIncident,
-    PrepareEntryCommand,
-    PrepareSetLeverageCommand,
     PrepareControlledFlattenCommand,
+    PrepareEntryCommand,
     PrepareExitCommand,
     PrepareInitialStopCommand,
     PrepareProtectionReplacementCommand,
+    PrepareSetLeverageCommand,
     PrepareTakeProfitCommand,
     ReleaseBudget,
+    ReleaseCapitalAuthorities,
     ReleaseEntryLane,
+    RequestControlledFlatten,
     ResolveIncident,
     ResolveTicketIncidentsAtClosure,
-    RequestControlledFlatten,
-    ReleaseCapitalAuthorities,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionInstrumentFacts,
@@ -73,8 +74,8 @@ from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresAggregateRepository,
     PostgresBudgetRepository,
     PostgresCapacityClaimRepository,
-    PostgresEventRepository,
     PostgresEntryAdmissionRepository,
+    PostgresEventRepository,
     PostgresExchangeCommandRepository,
     PostgresIncidentRepository,
     PostgresMonitorRepository,
@@ -91,7 +92,6 @@ from src.trading_kernel.infrastructure.pg_universe_repository import (
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     PostgresStrategyRegistryRepository,
 )
-
 
 __all__ = ["AggregateVersionConflict", "PostgresKernelUnitOfWork"]
 
@@ -117,7 +117,7 @@ class PostgresKernelUnitOfWork:
         self._connection: AsyncConnection | None = None
         self._transaction: AsyncTransaction | None = None
 
-    async def __aenter__(self) -> "PostgresKernelUnitOfWork":
+    async def __aenter__(self) -> Self:
         if self._connection is not None:
             raise RuntimeError("unit of work is already active")
         self._connection = await self._engine.connect()

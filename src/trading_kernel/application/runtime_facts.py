@@ -7,18 +7,18 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.application.maintain_ticket_lifecycle import (
+    TicketLifecycleFacts,
+)
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.identities import NettingDomain
-from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.order_attribution import (
     OrderRole,
     TicketOrderReference,
 )
+from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.review import ReviewEconomicsFacts
-from src.trading_kernel.application.maintain_ticket_lifecycle import (
-    TicketLifecycleFacts,
-)
 
 
 class EntryAdmissionSnapshotRequest(BaseModel):
@@ -46,7 +46,7 @@ class EntryAdmissionSnapshotRequest(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_admission_window(self) -> "EntryAdmissionSnapshotRequest":
+    def _validate_admission_window(self) -> EntryAdmissionSnapshotRequest:
         if self.observed_at_ms <= 0 or self.valid_for_ms <= 0:
             raise ValueError("entry admission request window must be positive")
         return self
@@ -139,7 +139,7 @@ class InstrumentRulesFacts(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_rule_window(self) -> "InstrumentRulesFacts":
+    def _validate_rule_window(self) -> InstrumentRulesFacts:
         if self.observed_at_ms <= 0 or self.valid_until_ms <= self.observed_at_ms:
             raise ValueError("instrument rule window must be current")
         if not self.maintenance_margin_brackets:
@@ -232,9 +232,10 @@ def classify_fee_discount_capability(
 ) -> FeeDiscountCapabilityStatus:
     """Classify an optional cost optimization without changing trade authority."""
 
-    if low_balance_threshold is not None:
-        if not low_balance_threshold.is_finite() or low_balance_threshold <= 0:
-            raise ValueError("BNB low balance threshold must be finite and positive")
+    if low_balance_threshold is not None and (
+        not low_balance_threshold.is_finite() or low_balance_threshold <= 0
+    ):
+        raise ValueError("BNB low balance threshold must be finite and positive")
     if not facts.fee_burn_enabled or facts.bnb_futures_wallet_balance == 0:
         return "unavailable"
     if (
@@ -292,7 +293,7 @@ class LifecycleFactsRequest(BaseModel):
         return normalized or None
 
     @model_validator(mode="after")
-    def _validate_facts(self) -> "LifecycleFactsRequest":
+    def _validate_facts(self) -> LifecycleFactsRequest:
         if self.entry_order_reference.role is not OrderRole.ENTRY:
             raise ValueError("lifecycle entry order reference must be an ENTRY")
         if self.entry_quantity <= 0 or self.expected_position_quantity < 0:
@@ -347,7 +348,9 @@ class ReviewEconomicsRequest(BaseModel):
         value: object,
     ) -> tuple[TicketOrderReference, ...]:
         if not isinstance(value, (list, tuple)):
-            raise ValueError("review exit order references must be a sequence")
+            raise ValueError(  # noqa: TRY004 - Pydantic must surface a ValidationError.
+                "review exit order references must be a sequence"
+            )
         normalized = tuple(value)
         if not normalized:
             raise ValueError("review requires exit order references")
@@ -358,7 +361,7 @@ class ReviewEconomicsRequest(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_review_window(self) -> "ReviewEconomicsRequest":
+    def _validate_review_window(self) -> ReviewEconomicsRequest:
         if self.expected_entry_quantity <= 0:
             raise ValueError("review expected entry quantity must be positive")
         if self.entry_order_reference.role is not OrderRole.ENTRY:

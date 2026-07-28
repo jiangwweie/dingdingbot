@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import subprocess
@@ -331,7 +332,8 @@ async def test_read_status_is_readonly_bounded_and_redacts_sensitive_state(
             )
             before_counts = await _mutable_counts(connection)
 
-        completed = subprocess.run(
+        completed = await asyncio.to_thread(
+            subprocess.run,
             [
                 sys.executable,
                 str(STATUS_SCRIPT),
@@ -393,7 +395,8 @@ async def test_read_status_is_readonly_bounded_and_redacts_sensitive_state(
                 )
                 .values(blocker_code="credential=SECRET")
             )
-        corrupt_blocker = subprocess.run(
+        corrupt_blocker = await asyncio.to_thread(
+            subprocess.run,
             [
                 sys.executable,
                 str(STATUS_SCRIPT),
@@ -431,7 +434,8 @@ async def test_read_status_is_readonly_bounded_and_redacts_sensitive_state(
             await connection.execute(
                 sa.update(monitor_current).values(owner_status="credential=SECRET")
             )
-        corrupt_status = subprocess.run(
+        corrupt_status = await asyncio.to_thread(
+            subprocess.run,
             [
                 sys.executable,
                 str(STATUS_SCRIPT),
@@ -508,7 +512,8 @@ async def test_read_status_displays_active_current_generation(
                 )
             )
 
-        completed = subprocess.run(
+        completed = await asyncio.to_thread(
+            subprocess.run,
             [
                 sys.executable,
                 str(STATUS_SCRIPT),
