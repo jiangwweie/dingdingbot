@@ -70,6 +70,8 @@ class StrategySignal(BaseModel):
     strategy_group_id: str
     strategy_version_id: str
     event_spec_id: str
+    universe_version_id: str
+    universe_semantic_digest: str
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
     fact_digest: str
@@ -84,6 +86,7 @@ class StrategySignal(BaseModel):
         "strategy_group_id",
         "strategy_version_id",
         "event_spec_id",
+        "universe_version_id",
         "exchange_instrument_id",
         mode="before",
     )
@@ -94,12 +97,12 @@ class StrategySignal(BaseModel):
             raise ValueError("signal identity values must be non-blank")
         return normalized
 
-    @field_validator("fact_digest", mode="before")
+    @field_validator("fact_digest", "universe_semantic_digest", mode="before")
     @classmethod
-    def _require_fact_digest(cls, value: object) -> str:
+    def _require_digest(cls, value: object) -> str:
         normalized = str(value or "").strip()
         if _SHA256_DIGEST.fullmatch(normalized) is None:
-            raise ValueError("signal fact digest must be an exact sha256 identity")
+            raise ValueError("signal digests must be exact sha256 identities")
         return normalized
 
     @field_validator("runtime_scope_version")

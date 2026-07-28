@@ -190,6 +190,8 @@ def build_capacity_claim(
         owner_policy_version=policy.policy_version,
         runtime_scope_id=signal.runtime_scope_id,
         runtime_scope_version=signal.runtime_scope_version,
+        universe_version_id=signal.universe_version_id,
+        universe_semantic_digest=signal.universe_semantic_digest,
         fact_digest=signal.fact_digest,
         entry_admission_snapshot_digest=snapshot_digest,
         account_entry_health_digest=account_entry_health.decision_digest,

@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from src.trading_kernel.application.ports import (
+    ActiveStrategyUniverseSnapshot,
     EventSpecSnapshot,
     OwnerPolicySnapshot,
     RuntimeCapabilitySnapshot,
@@ -77,6 +78,24 @@ def test_entry_preflight_refuses_a_retired_current_strategy_version() -> None:
         ),
     )
     request = EntryDispatchPreflightRequest(**payload)
+
+    decision = revalidate_entry_dispatch(request)
+
+    assert decision.status is EntryDispatchPreflightStatus.SCOPE_DRIFT
+
+
+def test_entry_preflight_refuses_a_switched_universe_before_dispatch() -> None:
+    base = _preflight_request(snapshot=_snapshot())
+    request = base.model_copy(
+        update={
+            "runtime_scope": base.runtime_scope.model_copy(
+                update={
+                    "universe_version_id": "universe:SOR-LONG:replacement",
+                    "universe_semantic_digest": "sha256:" + "b" * 64,
+                }
+            )
+        }
+    )
 
     decision = revalidate_entry_dispatch(request)
 
@@ -168,8 +187,20 @@ def _preflight_request(*, snapshot):
                 ticket.identity.netting_domain.exchange_instrument_id
             ),
             position_side=ticket.identity.netting_domain.position_side,
-            enabled=True,
+            universe_version_id=ticket.universe_version_id,
+            universe_semantic_digest=ticket.universe_semantic_digest,
+            lifecycle_state="active",
+            observation_enabled=True,
+            entry_enabled=True,
             scope_version=ticket.runtime_scope_version,
+        ),
+        active_universe=ActiveStrategyUniverseSnapshot(
+            event_spec_id=ticket.identity.runtime.event_spec_id,
+            universe_version_id=ticket.universe_version_id,
+            semantic_digest=ticket.universe_semantic_digest,
+            exchange_instrument_id=(
+                ticket.identity.netting_domain.exchange_instrument_id
+            ),
         ),
         strategy_group=StrategyGroupSnapshot(
             strategy_group_id=ticket.identity.runtime.strategy_group_id,

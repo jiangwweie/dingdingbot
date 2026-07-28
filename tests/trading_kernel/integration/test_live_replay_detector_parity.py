@@ -45,7 +45,11 @@ def test_signal_identity_is_stable_for_the_same_scope_event_and_fact_bundle() ->
         owner_policy_id="policy-observation-only",
         exchange_instrument_id=snapshot.exchange_instrument_id,
         position_side="long",
-        enabled=True,
+        universe_version_id="universe:CPM-LONG:3",
+        universe_semantic_digest="sha256:" + "a" * 64,
+        lifecycle_state="active",
+        observation_enabled=True,
+        entry_enabled=True,
         scope_version=1,
     )
 

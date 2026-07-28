@@ -12,6 +12,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import (
+    ActiveStrategyUniverseSnapshot,
     EventSpecSnapshot,
     InstrumentRulesSnapshot,
     InstrumentSnapshot,
@@ -41,8 +42,9 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_scopes_current,
     signal_events,
     signal_fact_snapshots,
-    strategy_candidate_scopes,
     strategy_groups,
+    strategy_universe_current,
+    strategy_universe_members,
     strategy_versions,
     trade_tickets,
     owner_policy_current,
@@ -181,7 +183,6 @@ class PostgresSignalRepository:
             sa.select(
                 signal_events,
                 owner_policy_current.c.priority_rank.label("owner_priority"),
-                strategy_candidate_scopes.c.priority_rank.label("scope_priority"),
             )
             .join(
                 readiness_current,
@@ -199,28 +200,42 @@ class PostgresSignalRepository:
                 == runtime_scopes_current.c.owner_policy_id,
             )
             .join(
-                strategy_candidate_scopes,
+                strategy_universe_current,
                 sa.and_(
-                    strategy_candidate_scopes.c.event_spec_id
+                    strategy_universe_current.c.event_spec_id
                     == signal_events.c.event_spec_id,
-                    strategy_candidate_scopes.c.exchange_instrument_id
+                    strategy_universe_current.c.universe_version_id
+                    == signal_events.c.universe_version_id,
+                    strategy_universe_current.c.semantic_digest
+                    == signal_events.c.universe_semantic_digest,
+                ),
+            )
+            .join(
+                strategy_universe_members,
+                sa.and_(
+                    strategy_universe_members.c.universe_version_id
+                    == signal_events.c.universe_version_id,
+                    strategy_universe_members.c.exchange_instrument_id
                     == signal_events.c.exchange_instrument_id,
-                    strategy_candidate_scopes.c.position_side
-                    == signal_events.c.position_side,
                 ),
             )
             .where(
                 readiness_current.c.readiness_state == "candidate_ready",
                 signal_events.c.expires_at_ms > now_ms,
-                runtime_scopes_current.c.enabled.is_(True),
+                runtime_scopes_current.c.entry_enabled.is_(True),
+                runtime_scopes_current.c.lifecycle_state == "active",
+                runtime_scopes_current.c.scope_version
+                == signal_events.c.runtime_scope_version,
+                runtime_scopes_current.c.universe_version_id
+                == signal_events.c.universe_version_id,
+                runtime_scopes_current.c.universe_semantic_digest
+                == signal_events.c.universe_semantic_digest,
                 owner_policy_current.c.enabled.is_(True),
                 owner_policy_current.c.new_entry_submit_enabled.is_(True),
-                strategy_candidate_scopes.c.status == "active",
                 ~already_ticketed,
             )
             .order_by(
                 owner_policy_current.c.priority_rank,
-                strategy_candidate_scopes.c.priority_rank,
                 signal_events.c.occurred_at_ms,
                 signal_events.c.observed_at_ms,
                 signal_events.c.signal_event_id,
@@ -235,7 +250,6 @@ class PostgresSignalRepository:
                 EntryCandidate(
                     signal=_signal_from_row(row, facts),
                     owner_policy_priority=int(row["owner_priority"]),
-                    candidate_scope_priority=int(row["scope_priority"]),
                 )
             )
         return tuple(candidates)
@@ -485,6 +499,47 @@ class PostgresSignalRepository:
             else RuntimeScopeSnapshot.model_validate(row, extra="ignore")
         )
 
+    async def get_active_universe_member(
+        self,
+        *,
+        event_spec_id: str,
+        exchange_instrument_id: str,
+        for_update: bool = False,
+    ) -> ActiveStrategyUniverseSnapshot | None:
+        statement = (
+            sa.select(
+                strategy_universe_current.c.event_spec_id,
+                strategy_universe_current.c.universe_version_id,
+                strategy_universe_current.c.semantic_digest,
+                strategy_universe_members.c.exchange_instrument_id,
+            )
+            .join(
+                strategy_universe_members,
+                strategy_universe_members.c.universe_version_id
+                == strategy_universe_current.c.universe_version_id,
+            )
+            .where(
+                strategy_universe_current.c.event_spec_id == event_spec_id,
+                strategy_universe_current.c.lifecycle_state == "active",
+                strategy_universe_members.c.exchange_instrument_id
+                == exchange_instrument_id,
+            )
+        )
+        if for_update:
+            statement = statement.with_for_update(
+                of=(
+                    strategy_universe_current,
+                    strategy_universe_members,
+                )
+            )
+        result = await self._connection.execute(statement)
+        row = result.mappings().one_or_none()
+        return (
+            None
+            if row is None
+            else ActiveStrategyUniverseSnapshot.model_validate(row)
+        )
+
     async def get_runtime_profile(
         self,
         runtime_profile_id: str,
@@ -673,6 +728,8 @@ def _signal_values(signal: StrategySignal) -> dict[str, object]:
         "strategy_group_id": signal.strategy_group_id,
         "strategy_version_id": signal.strategy_version_id,
         "event_spec_id": signal.event_spec_id,
+        "universe_version_id": signal.universe_version_id,
+        "universe_semantic_digest": signal.universe_semantic_digest,
         "exchange_instrument_id": signal.exchange_instrument_id,
         "position_side": signal.position_side,
         "fact_digest": signal.fact_digest,
@@ -709,6 +766,8 @@ def _signal_from_row(
         strategy_group_id=str(row["strategy_group_id"]),
         strategy_version_id=str(row["strategy_version_id"]),
         event_spec_id=str(row["event_spec_id"]),
+        universe_version_id=str(row["universe_version_id"]),
+        universe_semantic_digest=str(row["universe_semantic_digest"]),
         exchange_instrument_id=str(row["exchange_instrument_id"]),
         position_side=cast(Literal["long", "short"], str(row["position_side"])),
         fact_digest=str(row["fact_digest"]),

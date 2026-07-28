@@ -38,6 +38,9 @@ def produce_strategy_signal(
         or scope.strategy_version_id != contract.strategy_version_id
         or scope.event_spec_id != contract.event_spec_id
         or scope.position_side != contract.position_side
+        or scope.lifecycle_state != "active"
+        or not scope.observation_enabled
+        or not scope.entry_enabled
     ):
         raise ValueError("Signal contract and runtime scope identity differ")
     expected_fact_ids = {
@@ -59,6 +62,8 @@ def produce_strategy_signal(
         "occurred_at_ms": occurred_at_ms,
         "runtime_scope_id": scope.runtime_scope_id,
         "runtime_scope_version": scope.scope_version,
+        "universe_version_id": scope.universe_version_id,
+        "universe_semantic_digest": scope.universe_semantic_digest,
     }
     canonical = json.dumps(
         identity_payload,
@@ -73,6 +78,8 @@ def produce_strategy_signal(
         strategy_group_id=contract.strategy_group_id,
         strategy_version_id=contract.strategy_version_id,
         event_spec_id=contract.event_spec_id,
+        universe_version_id=scope.universe_version_id,
+        universe_semantic_digest=scope.universe_semantic_digest,
         exchange_instrument_id=scope.exchange_instrument_id,
         position_side=contract.position_side,
         fact_digest=fact_digest,

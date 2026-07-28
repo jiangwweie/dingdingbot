@@ -38,11 +38,15 @@ from src.trading_kernel.domain.signal import (
 from src.trading_kernel.infrastructure.pg_models import (
     facts_current,
     instrument_rules_current,
+    instruments,
     owner_policy_current,
     runtime_capabilities_current,
     runtime_profiles,
     runtime_scopes_current,
     signal_fact_snapshots,
+    strategy_universe_current,
+    strategy_universe_members,
+    strategy_universe_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
@@ -246,7 +250,25 @@ async def test_signal_authority_matrix_fails_before_persistence(
     elif case == "scope-disabled":
         async with issue_engine.begin() as connection:
             await connection.execute(
-                sa.update(runtime_scopes_current).values(enabled=False)
+                sa.delete(strategy_universe_current).where(
+                    strategy_universe_current.c.event_spec_id
+                    == "event_spec:SOR-001:SOR-LONG:v2"
+                )
+            )
+            await connection.execute(
+                sa.update(runtime_scopes_current).values(
+                    lifecycle_state="retired",
+                    observation_enabled=False,
+                    entry_enabled=False,
+                )
+            )
+            await connection.execute(
+                sa.update(strategy_universe_versions)
+                .where(
+                    strategy_universe_versions.c.universe_version_id
+                    == "universe:sor-long:4"
+                )
+                .values(lifecycle_state="retired", retired_at_ms=1_001)
             )
     elif case == "commit":
         runtime_commit = "wrong-commit"
@@ -359,6 +381,8 @@ def _signal(
         strategy_group_id="SOR-001",
         strategy_version_id="sgv:SOR-001:v2",
         event_spec_id=event_spec_id,
+        universe_version_id="universe:sor-long:4",
+        universe_semantic_digest="sha256:" + "a" * 64,
         exchange_instrument_id=exchange_instrument_id,
         position_side=position_side,
         fact_digest=build_signal_fact_digest(facts),
@@ -386,6 +410,44 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
 
     async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(instruments).values(
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                venue_id="binance-usdm",
+                asset_class="crypto",
+                venue_symbol="BTCUSDT",
+                contract_kind="perpetual",
+                status="active",
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_versions).values(
+                universe_version_id="universe:sor-long:4",
+                strategy_group_id="SOR-001",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                universe_version=4,
+                semantic_digest="sha256:" + "a" * 64,
+                lifecycle_state="active",
+                installed_at_ms=900,
+                activated_at_ms=950,
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_members).values(
+                universe_version_id="universe:sor-long:4",
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_current).values(
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                universe_version_id="universe:sor-long:4",
+                semantic_digest="sha256:" + "a" * 64,
+                lifecycle_state="active",
+                activation_generation=1,
+                activated_at_ms=950,
+            )
+        )
         await connection.execute(
             sa.insert(instrument_rules_current).values(
                 venue_id="binance-usdm",
@@ -446,8 +508,15 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 owner_policy_id="policy-main",
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
                 position_side="long",
-                enabled=True,
+                universe_version_id="universe:sor-long:4",
+                universe_semantic_digest="sha256:" + "a" * 64,
+                lifecycle_state="active",
+                observation_enabled=True,
+                entry_enabled=True,
                 scope_version=4,
+                warm_ready_at_ms=900,
+                warm_readiness_digest="sha256:" + "a" * 64,
+                warm_valid_until_ms=10_000,
                 updated_at_ms=1_000,
             )
         )

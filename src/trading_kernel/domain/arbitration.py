@@ -15,9 +15,8 @@ class EntryCandidate(BaseModel):
 
     signal: StrategySignal
     owner_policy_priority: int
-    candidate_scope_priority: int
 
-    @field_validator("owner_policy_priority", "candidate_scope_priority")
+    @field_validator("owner_policy_priority")
     @classmethod
     def _require_positive_priority(cls, value: int) -> int:
         if value <= 0:
@@ -38,7 +37,6 @@ def rank_candidates(
             candidates,
             key=lambda item: (
                 item.owner_policy_priority,
-                item.candidate_scope_priority,
                 item.signal.occurred_at_ms,
                 item.signal.observed_at_ms,
                 item.signal.signal_event_id,

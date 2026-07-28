@@ -8,12 +8,12 @@ from tests.trading_kernel.unit.test_signal import _signal
 
 def test_arbitration_uses_the_complete_owner_accepted_ordering() -> None:
     candidates = (
-        _candidate("signal:z", owner=2, scope=1, event=1_000, observed=1_100),
-        _candidate("signal:y", owner=1, scope=2, event=1_000, observed=1_100),
-        _candidate("signal:x", owner=1, scope=1, event=1_002, observed=1_100),
-        _candidate("signal:b", owner=1, scope=1, event=1_000, observed=1_102),
-        _candidate("signal:a", owner=1, scope=1, event=1_000, observed=1_102),
-        _candidate("signal:c", owner=1, scope=1, event=1_000, observed=1_101),
+        _candidate("signal:z", owner=2, event=1_000, observed=1_100),
+        _candidate("signal:y", owner=1, event=1_003, observed=1_100),
+        _candidate("signal:x", owner=1, event=1_002, observed=1_100),
+        _candidate("signal:b", owner=1, event=1_000, observed=1_102),
+        _candidate("signal:a", owner=1, event=1_000, observed=1_102),
+        _candidate("signal:c", owner=1, event=1_000, observed=1_101),
     )
 
     ranked = rank_candidates(candidates)
@@ -33,7 +33,6 @@ def test_arbitration_rejects_unbounded_candidate_batches() -> None:
         _candidate(
             f"signal:{index:02d}",
             owner=1,
-            scope=1,
             event=1_000 + index,
             observed=1_100 + index,
         )
@@ -48,7 +47,6 @@ def _candidate(
     signal_event_id: str,
     *,
     owner: int,
-    scope: int,
     event: int,
     observed: int,
 ) -> EntryCandidate:
@@ -60,5 +58,4 @@ def _candidate(
             expires_at_ms=2_000,
         ),
         owner_policy_priority=owner,
-        candidate_scope_priority=scope,
     )

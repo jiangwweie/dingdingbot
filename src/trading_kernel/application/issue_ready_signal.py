@@ -123,7 +123,11 @@ async def issue_ready_signal(
         )
 
     scope = await uow.signals.get_runtime_scope(signal.runtime_scope_id)
-    if scope is None or not scope.enabled:
+    if (
+        scope is None
+        or scope.lifecycle_state != "active"
+        or not scope.entry_enabled
+    ):
         return await _refuse(
             uow,
             signal,

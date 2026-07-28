@@ -107,6 +107,22 @@ async def issue_ticket(
             ticket_id=None,
         )
 
+    universe = await uow.signals.get_active_universe_member(
+        event_spec_id=ticket.identity.runtime.event_spec_id,
+        exchange_instrument_id=(
+            ticket.identity.netting_domain.exchange_instrument_id
+        ),
+        for_update=True,
+    )
+    if (
+        universe is None
+        or universe.universe_version_id != ticket.universe_version_id
+        or universe.semantic_digest != ticket.universe_semantic_digest
+    ):
+        return IssueTicketResult(
+            status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
+            ticket_id=None,
+        )
     scope = await uow.signals.get_runtime_scope(
         ticket.runtime_scope_id,
         for_update=True,
@@ -232,7 +248,11 @@ def _scope_matches_ticket(
 ) -> bool:
     """Require the locked current Scope to match the frozen Claim/Ticket authority."""
 
-    if scope is None or not scope.enabled:
+    if (
+        scope is None
+        or scope.lifecycle_state != "active"
+        or not scope.entry_enabled
+    ):
         return False
     identity = ticket.identity
     return (
@@ -243,6 +263,8 @@ def _scope_matches_ticket(
         and scope.event_spec_id == identity.runtime.event_spec_id
         and scope.runtime_profile_id == identity.runtime.runtime_profile_id
         and scope.owner_policy_id == ticket.owner_policy_id
+        and scope.universe_version_id == ticket.universe_version_id
+        and scope.universe_semantic_digest == ticket.universe_semantic_digest
         and scope.exchange_instrument_id
         == identity.netting_domain.exchange_instrument_id
         and scope.position_side == identity.netting_domain.position_side

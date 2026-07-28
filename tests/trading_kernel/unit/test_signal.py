@@ -46,6 +46,23 @@ def test_strategy_signal_rejects_blank_identity_and_invalid_deadline() -> None:
         _signal(observed_at_ms=2_000, expires_at_ms=2_000)
 
 
+def test_strategy_signal_requires_exact_universe_lineage() -> None:
+    signal = _signal()
+
+    assert signal.universe_version_id == "universe:SOR-SHORT:3"
+    assert signal.universe_semantic_digest == "sha256:" + "a" * 64
+
+    payload = signal.model_dump(mode="python")
+    payload.pop("universe_version_id")
+    with pytest.raises(ValidationError):
+        StrategySignal.model_validate(payload)
+
+    with pytest.raises(ValidationError):
+        _signal(universe_version_id=" ")
+    with pytest.raises(ValidationError):
+        _signal(universe_semantic_digest="sha256:" + "A" * 64)
+
+
 def test_strategy_signal_requires_exact_nonduplicate_fact_bundle() -> None:
     facts = _facts()
     signal = _signal(facts=facts)
@@ -100,6 +117,8 @@ def _signal(
     expires_at_ms: int = 2_000,
     facts: tuple[SignalFactSnapshot, ...] | None = None,
     fact_digest: str | None = None,
+    universe_version_id: str = "universe:SOR-SHORT:3",
+    universe_semantic_digest: str = "sha256:" + "a" * 64,
 ) -> StrategySignal:
     selected_facts = _facts() if facts is None else facts
     return StrategySignal(
@@ -109,6 +128,8 @@ def _signal(
         strategy_group_id="SOR-001",
         strategy_version_id="sgv:SOR-001:v2",
         event_spec_id="event_spec:SOR-001:SOR-SHORT:v2",
+        universe_version_id=universe_version_id,
+        universe_semantic_digest=universe_semantic_digest,
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side="short",
         fact_digest=fact_digest or build_signal_fact_digest(selected_facts),

@@ -161,6 +161,8 @@ class CapacityClaim(BaseModel):
     owner_policy_version: int
     runtime_scope_id: str
     runtime_scope_version: int
+    universe_version_id: str
+    universe_semantic_digest: str
     fact_digest: str
     entry_admission_snapshot_digest: str
     account_entry_health_digest: str
@@ -212,6 +214,7 @@ class CapacityClaim(BaseModel):
         "capacity_claim_id",
         "owner_policy_id",
         "runtime_scope_id",
+        "universe_version_id",
         mode="before",
     )
     @classmethod
@@ -223,6 +226,7 @@ class CapacityClaim(BaseModel):
 
     @field_validator(
         "fact_digest",
+        "universe_semantic_digest",
         "entry_admission_snapshot_digest",
         "account_entry_health_digest",
         "instrument_entry_health_digest",
@@ -347,6 +351,8 @@ class CapacityClaim(BaseModel):
             owner_policy_version=self.owner_policy_version,
             runtime_scope_id=self.runtime_scope_id,
             runtime_scope_version=self.runtime_scope_version,
+            universe_version_id=self.universe_version_id,
+            universe_semantic_digest=self.universe_semantic_digest,
             fact_digest=self.fact_digest,
             capacity_claim_id=self.capacity_claim_id,
             created_at_ms=self.created_at_ms,
@@ -397,6 +403,8 @@ def freeze_capacity_claim(
     owner_policy_version: int,
     runtime_scope_id: str,
     runtime_scope_version: int,
+    universe_version_id: str,
+    universe_semantic_digest: str,
     fact_digest: str,
     entry_admission_snapshot_digest: str,
     account_entry_health_digest: str,
@@ -450,6 +458,8 @@ def freeze_capacity_claim(
         "owner_policy_version": owner_policy_version,
         "runtime_scope_id": runtime_scope_id,
         "runtime_scope_version": runtime_scope_version,
+        "universe_version_id": universe_version_id,
+        "universe_semantic_digest": universe_semantic_digest,
         "fact_digest": fact_digest,
         "entry_admission_snapshot_digest": entry_admission_snapshot_digest,
         "account_entry_health_digest": account_entry_health_digest,

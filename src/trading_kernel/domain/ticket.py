@@ -6,6 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 import json
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -15,6 +16,9 @@ from src.trading_kernel.domain.identities import (
     RuntimeIdentity,
     TicketIdentity,
 )
+
+
+_SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class EntryOrderType(StrEnum):
@@ -41,6 +45,8 @@ class TradeTicket(BaseModel):
     owner_policy_version: int
     runtime_scope_id: str
     runtime_scope_version: int
+    universe_version_id: str
+    universe_semantic_digest: str
     fact_digest: str
     capacity_claim_id: str
     created_at_ms: int
@@ -69,7 +75,7 @@ class TradeTicket(BaseModel):
     @field_validator(
         "owner_policy_id",
         "runtime_scope_id",
-        "fact_digest",
+        "universe_version_id",
         "capacity_claim_id",
         "risk_reservation_basis",
         mode="before",
@@ -79,6 +85,14 @@ class TradeTicket(BaseModel):
         if not isinstance(value, str) or not value.strip():
             raise ValueError("ticket references must be non-blank strings")
         return value.strip()
+
+    @field_validator("fact_digest", "universe_semantic_digest", mode="before")
+    @classmethod
+    def _require_digest(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if _SHA256_DIGEST.fullmatch(normalized) is None:
+            raise ValueError("ticket digests must be exact sha256 identities")
+        return normalized
 
     @field_validator("owner_policy_version", "runtime_scope_version")
     @classmethod

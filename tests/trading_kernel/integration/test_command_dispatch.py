@@ -58,11 +58,13 @@ from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
     owner_policy_current,
     runtime_capabilities_current,
+    strategy_universe_current,
     strategy_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
+    _seed_replacement_universe,
     _seed_ticket_runtime_scope,
 )
 from tests.trading_kernel.unit.test_ticket import _ticket
@@ -391,6 +393,64 @@ async def test_retired_strategy_version_before_entry_preflight_causes_zero_venue
     assert venue.calls == 0
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_current_universe_switch_before_entry_dispatch_causes_zero_venue_mutations(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    await _seed_replacement_universe(dispatch_engine, ticket)
+    async with dispatch_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(runtime_capabilities_current).values(
+                capability_key="exchange_commands",
+                enabled=True,
+                certified_commit="kernel-test-head",
+                schema_revision="0002_crypto_strategy_universe",
+                certification={},
+                updated_at_ms=1_000,
+            )
+        )
+        await connection.execute(
+            sa.update(strategy_universe_current)
+            .where(
+                strategy_universe_current.c.event_spec_id
+                == ticket.identity.runtime.event_spec_id
+            )
+            .values(
+                universe_version_id="universe:sor-long:replacement",
+                semantic_digest="sha256:" + "b" * 64,
+                activation_generation=2,
+                activated_at_ms=1_050,
+            )
+        )
+    venue = CountingVenue()
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
+        ),
+        entry_facts_source=PreflightFacts(),
+    )
+
+    assert result.status is DispatchCommandStatus.SUPERSEDED
+    assert venue.calls == 0
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        command = await uow.exchange_commands.get(result.command_id or "")
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert command is not None and command.status is ExchangeCommandStatus.REJECTED
     assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
 
 

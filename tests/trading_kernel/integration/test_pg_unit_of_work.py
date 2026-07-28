@@ -38,7 +38,10 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
 )
 from src.trading_kernel.infrastructure.pg_models import runtime_incidents
 from tests.trading_kernel.unit.test_ticket import _identity, _ticket
-from tests.trading_kernel.integration.test_issue_ticket import _issue_request
+from tests.trading_kernel.integration.test_issue_ticket import (
+    _issue_request,
+    _seed_ticket_registry,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -58,6 +61,8 @@ async def kernel_engine() -> AsyncEngine:
     database_url = _database_url(database_name)
     _run_alembic(database_url, "upgrade", "head")
     engine = create_async_engine(database_url)
+    async with engine.begin() as connection:
+        await _seed_ticket_registry(connection, _ticket())
     try:
         yield engine
     finally:

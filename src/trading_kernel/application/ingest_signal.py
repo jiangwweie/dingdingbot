@@ -95,15 +95,33 @@ async def validate_signal_authority(
         return SignalAuthorityStatus.SIGNAL_INVALID_OR_STALE
 
     scope = await uow.signals.get_runtime_scope(signal.runtime_scope_id)
-    if scope is None or not scope.enabled:
+    if (
+        scope is None
+        or scope.lifecycle_state != "active"
+        or not scope.observation_enabled
+        or not scope.entry_enabled
+    ):
         return SignalAuthorityStatus.SCOPE_OR_POLICY_MISMATCH
     if (
         scope.scope_version != signal.runtime_scope_version
         or scope.strategy_group_id != signal.strategy_group_id
         or scope.strategy_version_id != signal.strategy_version_id
         or scope.event_spec_id != signal.event_spec_id
+        or scope.universe_version_id != signal.universe_version_id
+        or scope.universe_semantic_digest != signal.universe_semantic_digest
         or scope.exchange_instrument_id != signal.exchange_instrument_id
         or scope.position_side != signal.position_side
+    ):
+        return SignalAuthorityStatus.SCOPE_OR_POLICY_MISMATCH
+
+    universe = await uow.signals.get_active_universe_member(
+        event_spec_id=signal.event_spec_id,
+        exchange_instrument_id=signal.exchange_instrument_id,
+    )
+    if (
+        universe is None
+        or universe.universe_version_id != signal.universe_version_id
+        or universe.semantic_digest != signal.universe_semantic_digest
     ):
         return SignalAuthorityStatus.SCOPE_OR_POLICY_MISMATCH
 

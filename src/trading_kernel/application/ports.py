@@ -207,8 +207,21 @@ class RuntimeScopeSnapshot(BaseModel):
     owner_policy_id: str
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
-    enabled: bool
+    universe_version_id: str
+    universe_semantic_digest: str
+    lifecycle_state: Literal["warming", "active", "retired"]
+    observation_enabled: bool
+    entry_enabled: bool
     scope_version: int
+
+
+class ActiveStrategyUniverseSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str
+    universe_version_id: str
+    semantic_digest: str
+    exchange_instrument_id: str
 
 
 class ObservationScopeClaim(BaseModel):
@@ -687,6 +700,14 @@ class SignalRepository(Protocol):
         *,
         for_update: bool = False,
     ) -> RuntimeScopeSnapshot | None: ...
+
+    async def get_active_universe_member(
+        self,
+        *,
+        event_spec_id: str,
+        exchange_instrument_id: str,
+        for_update: bool = False,
+    ) -> ActiveStrategyUniverseSnapshot | None: ...
 
     async def get_runtime_profile(
         self,

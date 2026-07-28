@@ -8,6 +8,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from src.trading_kernel.application.ports import (
+    ActiveStrategyUniverseSnapshot,
     EventSpecSnapshot,
     OwnerPolicySnapshot,
     RuntimeCapabilitySnapshot,
@@ -70,6 +71,7 @@ class EntryDispatchPreflightRequest(BaseModel):
     capacity_claim: CapacityClaim
     owner_policy: OwnerPolicySnapshot | None
     runtime_scope: RuntimeScopeSnapshot | None
+    active_universe: ActiveStrategyUniverseSnapshot | None
     strategy_group: StrategyGroupSnapshot | None
     strategy_version: StrategyVersionSnapshot | None
     event_spec: EventSpecSnapshot | None
@@ -129,6 +131,8 @@ def revalidate_entry_dispatch(
     if not request.owner_policy.new_entry_submit_enabled:
         return _refused(EntryDispatchPreflightStatus.NEW_ENTRY_DISABLED)
     if not _scope_matches(request.runtime_scope, ticket):
+        return _refused(EntryDispatchPreflightStatus.SCOPE_DRIFT)
+    if not _active_universe_matches(request.active_universe, ticket):
         return _refused(EntryDispatchPreflightStatus.SCOPE_DRIFT)
     if not strategy_authority_matches_ticket(
         request.strategy_group,
@@ -264,7 +268,11 @@ def _scope_matches(
     scope: RuntimeScopeSnapshot | None,
     ticket: TradeTicket,
 ) -> bool:
-    if scope is None or not scope.enabled:
+    if (
+        scope is None
+        or scope.lifecycle_state != "active"
+        or not scope.entry_enabled
+    ):
         return False
     identity = ticket.identity
     return (
@@ -275,8 +283,24 @@ def _scope_matches(
         and scope.event_spec_id == identity.runtime.event_spec_id
         and scope.runtime_profile_id == identity.runtime.runtime_profile_id
         and scope.owner_policy_id == ticket.owner_policy_id
+        and scope.universe_version_id == ticket.universe_version_id
+        and scope.universe_semantic_digest == ticket.universe_semantic_digest
         and scope.exchange_instrument_id == identity.netting_domain.exchange_instrument_id
         and scope.position_side == identity.netting_domain.position_side
+    )
+
+
+def _active_universe_matches(
+    universe: ActiveStrategyUniverseSnapshot | None,
+    ticket: TradeTicket,
+) -> bool:
+    return bool(
+        universe
+        and universe.event_spec_id == ticket.identity.runtime.event_spec_id
+        and universe.universe_version_id == ticket.universe_version_id
+        and universe.semantic_digest == ticket.universe_semantic_digest
+        and universe.exchange_instrument_id
+        == ticket.identity.netting_domain.exchange_instrument_id
     )
 
 

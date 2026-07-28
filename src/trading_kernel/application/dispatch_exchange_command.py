@@ -410,6 +410,10 @@ async def _preflight_new_entry_mutation(
             aggregate.ticket.owner_policy_id
         )
         scope = await uow.signals.get_runtime_scope(aggregate.ticket.runtime_scope_id)
+        active_universe = await uow.signals.get_active_universe_member(
+            event_spec_id=aggregate.ticket.identity.runtime.event_spec_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+        )
         strategy_group = await uow.signals.get_strategy_group(
             aggregate.ticket.identity.runtime.strategy_group_id
         )
@@ -432,6 +436,7 @@ async def _preflight_new_entry_mutation(
             capacity_claim=claim,
             owner_policy=policy,
             runtime_scope=scope,
+            active_universe=active_universe,
             strategy_group=strategy_group,
             strategy_version=strategy_version,
             event_spec=event_spec,

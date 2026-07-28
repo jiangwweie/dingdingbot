@@ -51,6 +51,8 @@ def _ticket(**updates: object) -> TradeTicket:
         "owner_policy_version": 7,
         "runtime_scope_id": "scope-sor-btc-long",
         "runtime_scope_version": 4,
+        "universe_version_id": "universe:sor-long:4",
+        "universe_semantic_digest": "sha256:" + "a" * 64,
         "fact_digest": "sha256:" + "1" * 64,
         "capacity_claim_id": "claim:" + "2" * 32,
         "created_at_ms": 1_000,
@@ -100,6 +102,7 @@ def test_trade_ticket_freezes_policy_and_scope_identity_and_version() -> None:
     assert ticket.owner_policy_version == 7
     assert ticket.runtime_scope_id == "scope-sor-btc-long"
     assert ticket.runtime_scope_version == 4
+    assert ticket.universe_version_id == "universe:sor-long:4"
 
 
 @pytest.mark.parametrize(

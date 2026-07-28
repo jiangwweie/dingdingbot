@@ -36,10 +36,14 @@ from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
     entry_lane_current,
     event_specs,
+    instruments,
     owner_policy_current,
     runtime_incidents,
     runtime_scopes_current,
     strategy_groups,
+    strategy_universe_current,
+    strategy_universe_members,
+    strategy_universe_versions,
     strategy_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
@@ -187,7 +191,6 @@ async def test_scope_drift_after_lane_and_account_lock_leaves_no_durable_entry_s
                         == ticket.runtime_scope_id
                     )
                     .values(
-                        enabled=False,
                         scope_version=ticket.runtime_scope_version + 1,
                     )
                 )
@@ -198,6 +201,49 @@ async def test_scope_drift_after_lane_and_account_lock_leaves_no_durable_entry_s
             uow,
             _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
         )
+
+    assert result.status is IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH
+    await _assert_no_durable_entry_state(issue_engine, ticket.identity.ticket_id)
+
+
+@pytest.mark.asyncio
+async def test_current_universe_switch_committing_before_issue_rejects_old_claim(
+    issue_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(issue_engine)
+    await _seed_replacement_universe(issue_engine, ticket)
+    switch_connection = await issue_engine.connect()
+    switch_transaction = await switch_connection.begin()
+    try:
+        await switch_connection.execute(
+            sa.update(strategy_universe_current)
+            .where(
+                strategy_universe_current.c.event_spec_id
+                == ticket.identity.runtime.event_spec_id
+            )
+            .values(
+                universe_version_id="universe:sor-long:replacement",
+                semantic_digest="sha256:" + "b" * 64,
+                activation_generation=2,
+                activated_at_ms=1_001,
+            )
+        )
+        issue_task = asyncio.create_task(
+            _issue_once(
+                issue_engine,
+                ticket,
+                now_ms=1_002,
+                claim_owner="worker-race",
+            )
+        )
+        await asyncio.sleep(0.05)
+        await switch_transaction.commit()
+        result = await issue_task
+    finally:
+        if switch_transaction.is_active:
+            await switch_transaction.rollback()
+        await switch_connection.close()
 
     assert result.status is IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH
     await _assert_no_durable_entry_state(issue_engine, ticket.identity.ticket_id)
@@ -519,8 +565,15 @@ async def _seed_policy(
                     identity.netting_domain.exchange_instrument_id
                 ),
                 position_side="long",
-                enabled=True,
+                universe_version_id=_ticket().universe_version_id,
+                universe_semantic_digest=_ticket().universe_semantic_digest,
+                lifecycle_state="active",
+                observation_enabled=True,
+                entry_enabled=True,
                 scope_version=4,
+                warm_ready_at_ms=900,
+                warm_readiness_digest=_ticket().universe_semantic_digest,
+                warm_valid_until_ms=2_000,
                 updated_at_ms=1_000,
             )
         )
@@ -536,8 +589,15 @@ async def _seed_policy(
                     identity.netting_domain.exchange_instrument_id
                 ),
                 position_side="short",
-                enabled=True,
+                universe_version_id="universe:sor-short:4",
+                universe_semantic_digest=_ticket().universe_semantic_digest,
+                lifecycle_state="active",
+                observation_enabled=True,
+                entry_enabled=True,
                 scope_version=4,
+                warm_ready_at_ms=900,
+                warm_readiness_digest=_ticket().universe_semantic_digest,
+                warm_valid_until_ms=2_000,
                 updated_at_ms=1_000,
             )
         )
@@ -560,6 +620,48 @@ async def _issue_and_release_lane(engine: AsyncEngine, ticket) -> None:
                 lease_until_ms=None,
                 claim_owner=None,
                 version=entry_lane_current.c.version + 1,
+            )
+        )
+
+
+async def _issue_once(
+    engine: AsyncEngine,
+    ticket,
+    *,
+    now_ms: int,
+    claim_owner: str,
+):
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        return await issue_ticket(
+            uow,
+            _issue_request(
+                ticket=ticket,
+                now_ms=now_ms,
+                claim_owner=claim_owner,
+            ),
+        )
+
+
+async def _seed_replacement_universe(engine: AsyncEngine, ticket) -> None:
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(strategy_universe_versions).values(
+                universe_version_id="universe:sor-long:replacement",
+                strategy_group_id=ticket.identity.runtime.strategy_group_id,
+                event_spec_id=ticket.identity.runtime.event_spec_id,
+                universe_version=2,
+                semantic_digest="sha256:" + "b" * 64,
+                lifecycle_state="active",
+                installed_at_ms=1_000,
+                activated_at_ms=1_001,
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_members).values(
+                universe_version_id="universe:sor-long:replacement",
+                exchange_instrument_id=(
+                    ticket.identity.netting_domain.exchange_instrument_id
+                ),
             )
         )
 
@@ -602,6 +704,7 @@ def _ticket_for_signal(
     if position_side == "short":
         terms.update(
             {
+                "universe_version_id": "universe:sor-short:4",
                 "initial_stop_price": Decimal("61000"),
                 "take_profit_prices": (Decimal("58000"),),
                 "projected_liquidation_price": Decimal("63000"),
@@ -623,6 +726,8 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
             owner_policy_version=ticket.owner_policy_version,
             runtime_scope_id=ticket.runtime_scope_id,
             runtime_scope_version=ticket.runtime_scope_version,
+            universe_version_id=ticket.universe_version_id,
+            universe_semantic_digest=ticket.universe_semantic_digest,
             fact_digest=ticket.fact_digest,
             entry_admission_snapshot_digest="sha256:" + "2" * 64,
             account_entry_health_digest="sha256:" + "3" * 64,
@@ -731,8 +836,15 @@ async def _seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:
         "owner_policy_id": ticket.owner_policy_id,
         "exchange_instrument_id": identity.netting_domain.exchange_instrument_id,
         "position_side": identity.netting_domain.position_side,
-        "enabled": True,
+        "universe_version_id": ticket.universe_version_id,
+        "universe_semantic_digest": ticket.universe_semantic_digest,
+        "lifecycle_state": "active",
+        "observation_enabled": True,
+        "entry_enabled": True,
         "scope_version": ticket.runtime_scope_version,
+        "warm_ready_at_ms": ticket.created_at_ms,
+        "warm_readiness_digest": ticket.universe_semantic_digest,
+        "warm_valid_until_ms": ticket.expires_at_ms,
         "updated_at_ms": ticket.created_at_ms,
     }
     async with engine.begin() as connection:
@@ -750,6 +862,20 @@ async def _seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:
 async def _seed_ticket_registry(connection, ticket) -> None:
     identity = ticket.identity
     runtime = identity.runtime
+    await connection.execute(
+        pg_insert(instruments)
+        .values(
+            exchange_instrument_id=identity.netting_domain.exchange_instrument_id,
+            venue_id=identity.netting_domain.venue_id,
+            asset_class="crypto",
+            venue_symbol="BTCUSDT",
+            contract_kind="perpetual",
+            status="active",
+        )
+        .on_conflict_do_nothing(
+            index_elements=[instruments.c.exchange_instrument_id]
+        )
+    )
     await connection.execute(
         pg_insert(strategy_groups)
         .values(
@@ -810,6 +936,55 @@ async def _seed_ticket_registry(connection, ticket) -> None:
                 "position_side": identity.netting_domain.position_side,
                 "entry_order_type": ticket.entry_order_type.value,
                 "status": "active",
+            },
+        )
+    )
+    await connection.execute(
+        pg_insert(strategy_universe_versions)
+        .values(
+            universe_version_id=ticket.universe_version_id,
+            strategy_group_id=runtime.strategy_group_id,
+            event_spec_id=runtime.event_spec_id,
+            universe_version=1,
+            semantic_digest=ticket.universe_semantic_digest,
+            lifecycle_state="active",
+            installed_at_ms=ticket.created_at_ms,
+            activated_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[strategy_universe_versions.c.universe_version_id]
+        )
+    )
+    await connection.execute(
+        pg_insert(strategy_universe_members)
+        .values(
+            universe_version_id=ticket.universe_version_id,
+            exchange_instrument_id=identity.netting_domain.exchange_instrument_id,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[
+                strategy_universe_members.c.universe_version_id,
+                strategy_universe_members.c.exchange_instrument_id,
+            ]
+        )
+    )
+    await connection.execute(
+        pg_insert(strategy_universe_current)
+        .values(
+            event_spec_id=runtime.event_spec_id,
+            universe_version_id=ticket.universe_version_id,
+            semantic_digest=ticket.universe_semantic_digest,
+            lifecycle_state="active",
+            activation_generation=1,
+            activated_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_update(
+            index_elements=[strategy_universe_current.c.event_spec_id],
+            set_={
+                "universe_version_id": ticket.universe_version_id,
+                "semantic_digest": ticket.universe_semantic_digest,
+                "lifecycle_state": "active",
+                "activated_at_ms": ticket.created_at_ms,
             },
         )
     )

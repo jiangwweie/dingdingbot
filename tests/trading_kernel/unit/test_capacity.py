@@ -64,7 +64,18 @@ def test_capacity_claim_freezes_configured_leverage_and_demand_based_margin() ->
     assert claim.account_capacity_domain_key == "binance-usdm:experiment-1"
     assert claim.leverage_domain_key == "binance-usdm:experiment-1:binance-usdm:BTCUSDT:perpetual"
     assert claim.leverage_change_required is False
-    assert claim.to_ticket().selected_leverage == 5
+    ticket = claim.to_ticket()
+    assert ticket.selected_leverage == 5
+    assert (
+        claim.universe_version_id
+        == ticket.universe_version_id
+        == _long_signal().universe_version_id
+    )
+    assert (
+        claim.universe_semantic_digest
+        == ticket.universe_semantic_digest
+        == _long_signal().universe_semantic_digest
+    )
 
 
 def _long_signal():
