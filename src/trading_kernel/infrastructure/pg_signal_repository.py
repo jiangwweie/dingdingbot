@@ -313,20 +313,55 @@ class PostgresSignalRepository:
         timeframe = cast(Literal["15m", "1h"], str(row["timeframe"]))
         interval_ms = 900_000 if timeframe == "15m" else 3_600_000
         trigger_candle_close_time_ms = now_ms - (now_ms % interval_ms)
-        await self._connection.execute(
-            sa.update(runtime_scopes_current)
-            .where(
-                runtime_scopes_current.c.runtime_scope_id == runtime_scope_id
+        generation = (
+            await self._connection.execute(
+                sa.update(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == runtime_scope_id
+                )
+                .values(
+                    lease_owner=normalized_worker_id,
+                    lease_expires_at_ms=lease_until_ms,
+                    observation_generation=(
+                        runtime_scopes_current.c.observation_generation + 1
+                    ),
+                )
+                .returning(
+                    runtime_scopes_current.c.observation_generation
+                )
             )
-            .values(
-                lease_owner=normalized_worker_id,
-                lease_expires_at_ms=lease_until_ms,
-            )
-        )
+        ).scalar_one()
         return ObservationScopeClaim(
             runtime_scope_id=runtime_scope_id,
             timeframe=timeframe,
             trigger_candle_close_time_ms=trigger_candle_close_time_ms,
+            observation_generation=int(generation),
+        )
+
+    async def claim_observation_generation(
+        self,
+        runtime_scope_id: str,
+    ) -> RuntimeScopeSnapshot | None:
+        row = (
+            await self._connection.execute(
+                sa.update(runtime_scopes_current)
+                .where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == runtime_scope_id
+                )
+                .values(
+                    observation_generation=(
+                        runtime_scopes_current.c.observation_generation + 1
+                    )
+                )
+                .returning(runtime_scopes_current)
+            )
+        ).mappings().one_or_none()
+        return (
+            None
+            if row is None
+            else RuntimeScopeSnapshot.model_validate(row, extra="ignore")
         )
 
     async def schedule_observation_scope(
@@ -334,6 +369,7 @@ class PostgresSignalRepository:
         *,
         runtime_scope_id: str,
         worker_id: str,
+        observation_generation: int,
         due_at_ms: int,
     ) -> None:
         if due_at_ms <= 0:
@@ -343,6 +379,8 @@ class PostgresSignalRepository:
             .where(
                 runtime_scopes_current.c.runtime_scope_id == runtime_scope_id,
                 runtime_scopes_current.c.lease_owner == worker_id,
+                runtime_scopes_current.c.observation_generation
+                == observation_generation,
             )
             .values(
                 next_observation_due_at_ms=due_at_ms,
@@ -453,6 +491,8 @@ class PostgresSignalRepository:
                 == readiness.runtime_scope_id,
                 runtime_scopes_current.c.scope_version
                 == readiness.scope_version,
+                runtime_scopes_current.c.observation_generation
+                == readiness.observation_generation,
                 runtime_scopes_current.c.event_spec_id
                 == readiness.event_spec_id,
                 runtime_scopes_current.c.exchange_instrument_id
@@ -498,6 +538,7 @@ class PostgresSignalRepository:
         *,
         runtime_scope_id: str,
         scope_version: int,
+        observation_generation: int,
         event_spec_id: str,
         exchange_instrument_id: str,
         universe_version_id: str,
@@ -510,6 +551,8 @@ class PostgresSignalRepository:
             .where(
                 runtime_scopes_current.c.runtime_scope_id == runtime_scope_id,
                 runtime_scopes_current.c.scope_version == scope_version,
+                runtime_scopes_current.c.observation_generation
+                == observation_generation,
                 runtime_scopes_current.c.event_spec_id == event_spec_id,
                 runtime_scopes_current.c.exchange_instrument_id
                 == exchange_instrument_id,

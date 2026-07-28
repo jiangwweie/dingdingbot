@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from src.trading_kernel.application.build_capacity_claim import build_capacity_claim
 from src.trading_kernel.application.ports import (
     ActiveStrategyUniverseSnapshot,
     EventSpecSnapshot,
@@ -13,15 +14,16 @@ from src.trading_kernel.application.ports import (
     StrategyGroupSnapshot,
     StrategyVersionSnapshot,
 )
-from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
 from src.trading_kernel.application.revalidate_entry_dispatch import (
     EntryDispatchPreflightRequest,
     EntryDispatchPreflightStatus,
     revalidate_entry_dispatch,
 )
+from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
 from src.trading_kernel.domain.account_entry_health import (
     classify_account_entry_health,
 )
+from src.trading_kernel.domain.capacity import CapacityUsage
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
@@ -34,15 +36,13 @@ from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnershi
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
 )
+from src.trading_kernel.domain.ticket import EntryOrderType
 from tests.trading_kernel.unit.test_capacity import (
     _long_signal,
     _policy,
     _rules,
     _snapshot,
 )
-from src.trading_kernel.application.build_capacity_claim import build_capacity_claim
-from src.trading_kernel.domain.capacity import CapacityUsage
-from src.trading_kernel.domain.ticket import EntryOrderType
 
 
 def test_entry_preflight_refuses_when_frozen_margin_no_longer_fits() -> None:
@@ -193,6 +193,7 @@ def _preflight_request(*, snapshot):
             observation_enabled=True,
             entry_enabled=True,
             scope_version=ticket.runtime_scope_version,
+            observation_generation=0,
         ),
         active_universe=ActiveStrategyUniverseSnapshot(
             event_spec_id=ticket.identity.runtime.event_spec_id,

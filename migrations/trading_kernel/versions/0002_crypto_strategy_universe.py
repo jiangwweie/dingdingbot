@@ -12,10 +12,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 revision: str = "0002_crypto_strategy_universe"
 down_revision: str | None = "0001_initial"
@@ -634,6 +633,15 @@ def _replace_runtime_scope_authority() -> None:
         "brc_runtime_scopes_current",
         _id("lease_owner", nullable=True),
     )
+    op.add_column(
+        "brc_runtime_scopes_current",
+        sa.Column(
+            "observation_generation",
+            sa.BigInteger,
+            nullable=False,
+            server_default="0",
+        ),
+    )
     op.create_unique_constraint(
         "uq_brc_runtime_scopes_current_universe_identity",
         "brc_runtime_scopes_current",
@@ -704,6 +712,11 @@ def _replace_runtime_scope_authority() -> None:
         "ck_brc_runtime_scope_universe_digest_valid",
         "brc_runtime_scopes_current",
         "universe_semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+    )
+    op.create_check_constraint(
+        "ck_brc_runtime_scope_observation_generation_nonnegative",
+        "brc_runtime_scopes_current",
+        "observation_generation >= 0",
     )
     op.create_index(
         "ix_brc_runtime_scopes_current_observation_due",

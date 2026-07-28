@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from hashlib import sha256
 from uuid import uuid4
@@ -137,6 +138,35 @@ class TypedMarketFake:
                 ).scalar_one()
             )
         assert idle_in_transaction == 0
+        return self._responses.get(
+            (request.exchange_instrument_id, request.timeframe),
+            (),
+        )
+
+
+class BlockingMarketFake:
+    def __init__(
+        self,
+        responses: Mapping[
+            tuple[str, str],
+            tuple[ClosedCandle, ...],
+        ],
+        *,
+        failure: Exception | None = None,
+    ) -> None:
+        self._responses = responses
+        self._failure = failure
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def fetch_closed_candles(
+        self,
+        request: ClosedCandleRequest,
+    ) -> tuple[ClosedCandle, ...]:
+        self.started.set()
+        await self.release.wait()
+        if self._failure is not None:
+            raise self._failure
         return self._responses.get(
             (request.exchange_instrument_id, request.timeframe),
             (),
@@ -372,6 +402,7 @@ async def test_warm_readiness_cannot_be_saved_for_changed_version_or_digest(
     readiness_digest = WarmReadiness.digest_for(
         runtime_scope_id=scope.runtime_scope_id,
         scope_version=scope.scope_version,
+        observation_generation=scope.observation_generation,
         event_spec_id=scope.event_spec_id,
         exchange_instrument_id=scope.exchange_instrument_id,
         universe_version_id=wrong_version_id,
@@ -383,6 +414,7 @@ async def test_warm_readiness_cannot_be_saved_for_changed_version_or_digest(
     changed = WarmReadiness(
         runtime_scope_id=scope.runtime_scope_id,
         scope_version=scope.scope_version,
+        observation_generation=scope.observation_generation,
         event_spec_id=scope.event_spec_id,
         exchange_instrument_id=scope.exchange_instrument_id,
         universe_version_id=wrong_version_id,
@@ -499,6 +531,7 @@ async def test_old_warm_failure_cannot_clear_a_newer_success(
             await uow.signals.clear_warm_readiness(
                 runtime_scope_id=scope["runtime_scope_id"],
                 scope_version=scope["scope_version"],
+                observation_generation=scope["observation_generation"],
                 event_spec_id=scope["event_spec_id"],
                 exchange_instrument_id=scope["exchange_instrument_id"],
                 universe_version_id=scope["universe_version_id"],
@@ -511,6 +544,119 @@ async def test_old_warm_failure_cannot_clear_a_newer_success(
     assert after["warm_readiness_digest"] == before["warm_readiness_digest"]
     assert after["warm_valid_until_ms"] == before["warm_valid_until_ms"]
     assert after["updated_at_ms"] == later_ms
+
+
+@pytest.mark.asyncio
+async def test_same_bar_old_success_cannot_resurrect_after_new_invalid(
+    warming_engine: AsyncEngine,
+) -> None:
+    scope = (await _warming_scopes(warming_engine))[0]
+    valid_source = _triggering_source(
+        warming_engine,
+        (scope["exchange_instrument_id"],),
+    )
+    assert (
+        await _observe(
+            warming_engine,
+            valid_source,
+            scope["runtime_scope_id"],
+        )
+    ).status is ObservationStatus.WARMED
+    old_source = BlockingMarketFake(valid_source._responses)
+    old_attempt = asyncio.create_task(
+        _observe(
+            warming_engine,
+            old_source,
+            scope["runtime_scope_id"],
+        )
+    )
+    await old_source.started.wait()
+    old_generation = (
+        await _persisted_scope(
+            warming_engine,
+            scope["runtime_scope_id"],
+        )
+    )["observation_generation"]
+
+    newer_invalid = await _observe(
+        warming_engine,
+        TypedMarketFake(warming_engine, {}),
+        scope["runtime_scope_id"],
+    )
+    assert newer_invalid.status is ObservationStatus.INVALID
+    after_newer = await _warming_projection_state(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    assert (
+        after_newer["scope"]["observation_generation"]
+        == old_generation + 1
+    )
+    old_source.release.set()
+
+    with pytest.raises(RuntimeError, match="warm readiness authority changed"):
+        await old_attempt
+    after_old = await _warming_projection_state(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    assert after_old == after_newer
+    assert after_old["scope"]["warm_ready_at_ms"] is None
+    assert after_old["readiness"]["readiness_state"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_same_bar_old_failure_cannot_clear_new_success(
+    warming_engine: AsyncEngine,
+) -> None:
+    scope = (await _warming_scopes(warming_engine))[0]
+    old_source = BlockingMarketFake(
+        {},
+        failure=TimeoutError("old observation failed"),
+    )
+    old_attempt = asyncio.create_task(
+        _observe(
+            warming_engine,
+            old_source,
+            scope["runtime_scope_id"],
+        )
+    )
+    await old_source.started.wait()
+    old_generation = (
+        await _persisted_scope(
+            warming_engine,
+            scope["runtime_scope_id"],
+        )
+    )["observation_generation"]
+
+    newer_success = await _observe(
+        warming_engine,
+        _triggering_source(
+            warming_engine,
+            (scope["exchange_instrument_id"],),
+        ),
+        scope["runtime_scope_id"],
+    )
+    assert newer_success.status is ObservationStatus.WARMED
+    after_newer = await _warming_projection_state(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    assert (
+        after_newer["scope"]["observation_generation"]
+        == old_generation + 1
+    )
+    old_source.release.set()
+
+    with pytest.raises(RuntimeError, match="warm readiness authority changed"):
+        await old_attempt
+    after_old = await _warming_projection_state(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    assert after_old == after_newer
+    assert after_old["scope"]["warm_ready_at_ms"] == NOW_MS
+    assert after_old["readiness"]["readiness_state"] == "warm_ready"
 
 
 @pytest.mark.parametrize(
@@ -608,6 +754,7 @@ async def test_clear_warm_readiness_rejects_arbitrary_scope_identity(
             await uow.signals.clear_warm_readiness(
                 runtime_scope_id=scope["runtime_scope_id"],
                 scope_version=scope["scope_version"] + 1,
+                observation_generation=scope["observation_generation"],
                 event_spec_id=scope["event_spec_id"],
                 exchange_instrument_id=scope["exchange_instrument_id"],
                 universe_version_id=scope["universe_version_id"],
@@ -681,6 +828,59 @@ async def test_crashed_warming_claim_is_recovered_after_lease_expiry(
     assert persisted["lease_owner"] is None
     assert persisted["lease_expires_at_ms"] is None
     assert persisted["warm_ready_at_ms"] == NOW_MS
+
+
+@pytest.mark.asyncio
+async def test_expired_generation_cannot_release_reclaimed_same_worker_lease(
+    warming_engine: AsyncEngine,
+) -> None:
+    scopes = await _warming_scopes(warming_engine)
+    target_scope_id = scopes[0]["runtime_scope_id"]
+    async with warming_engine.begin() as connection:
+        await connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id != target_scope_id
+            )
+            .values(next_observation_due_at_ms=NOW_MS + 1_800_000)
+        )
+    async with PostgresKernelUnitOfWork(warming_engine) as uow:
+        old_claim = await uow.signals.claim_next_observation_scope(
+            worker_id="same-worker",
+            now_ms=NOW_MS,
+            lease_until_ms=NOW_MS + 60_000,
+        )
+    async with PostgresKernelUnitOfWork(warming_engine) as uow:
+        new_claim = await uow.signals.claim_next_observation_scope(
+            worker_id="same-worker",
+            now_ms=NOW_MS + 60_000,
+            lease_until_ms=NOW_MS + 120_000,
+        )
+    assert old_claim is not None
+    assert new_claim is not None
+    assert (
+        new_claim.observation_generation
+        == old_claim.observation_generation + 1
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="observation scope lease is not owned",
+    ):
+        async with PostgresKernelUnitOfWork(warming_engine) as uow:
+            await uow.signals.schedule_observation_scope(
+                runtime_scope_id=target_scope_id,
+                worker_id="same-worker",
+                observation_generation=old_claim.observation_generation,
+                due_at_ms=NOW_MS + 900_000,
+            )
+
+    persisted = await _persisted_scope(warming_engine, target_scope_id)
+    assert persisted["observation_generation"] == (
+        new_claim.observation_generation
+    )
+    assert persisted["lease_owner"] == "same-worker"
+    assert persisted["lease_expires_at_ms"] == NOW_MS + 120_000
 
 
 async def _install_warming_universe(
@@ -821,6 +1021,40 @@ async def _persisted_scope(
                 )
             )
         ).mappings().one()
+
+
+async def _warming_projection_state(
+    engine: AsyncEngine,
+    runtime_scope_id: str,
+) -> dict[str, object]:
+    async with engine.connect() as connection:
+        scope = (
+            await connection.execute(
+                sa.select(runtime_scopes_current).where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == runtime_scope_id
+                )
+            )
+        ).mappings().one()
+        readiness = (
+            await connection.execute(
+                sa.select(readiness_current).where(
+                    readiness_current.c.runtime_scope_id == runtime_scope_id
+                )
+            )
+        ).mappings().one()
+        facts = (
+            await connection.execute(
+                sa.select(facts_current)
+                .where(facts_current.c.runtime_scope_id == runtime_scope_id)
+                .order_by(facts_current.c.fact_definition_id)
+            )
+        ).mappings().all()
+    return {
+        "scope": dict(scope),
+        "readiness": dict(readiness),
+        "facts": tuple(dict(row) for row in facts),
+    }
 
 
 def _worker_request(*, now_ms: int) -> ObservationWorkerRequest:

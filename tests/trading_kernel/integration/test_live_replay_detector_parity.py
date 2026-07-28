@@ -51,6 +51,7 @@ def test_signal_identity_is_stable_for_the_same_scope_event_and_fact_bundle() ->
         observation_enabled=True,
         entry_enabled=True,
         scope_version=1,
+        observation_generation=0,
     )
 
     first = produce_strategy_signal(

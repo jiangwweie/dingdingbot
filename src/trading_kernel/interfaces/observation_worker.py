@@ -91,6 +91,7 @@ async def run_observation_worker_once(
                     trigger_candle_close_time_ms=(
                         claim.trigger_candle_close_time_ms
                     ),
+                    observation_generation=claim.observation_generation,
                 ),
             ),
             timeout=request.timeout_seconds,
@@ -100,6 +101,7 @@ async def run_observation_worker_once(
             await uow.signals.schedule_observation_scope(
                 runtime_scope_id=claim.runtime_scope_id,
                 worker_id=request.worker_id,
+                observation_generation=claim.observation_generation,
                 due_at_ms=request.now_ms + request.retry_interval_ms,
             )
         return ObservationWorkerResult(
@@ -123,6 +125,7 @@ async def run_observation_worker_once(
         await uow.signals.schedule_observation_scope(
             runtime_scope_id=claim.runtime_scope_id,
             worker_id=request.worker_id,
+            observation_generation=claim.observation_generation,
             due_at_ms=due_at_ms,
         )
     return ObservationWorkerResult(

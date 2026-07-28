@@ -60,6 +60,7 @@ class ObservationRequest(BaseModel):
     runtime_commit: str
     schema_revision: str
     trigger_candle_close_time_ms: int
+    observation_generation: int | None = None
 
     @field_validator(
         "runtime_scope_id",
@@ -79,6 +80,13 @@ class ObservationRequest(BaseModel):
     def _require_positive_trigger(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("observation trigger must be positive")
+        return value
+
+    @field_validator("observation_generation")
+    @classmethod
+    def _require_positive_generation(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("observation generation must be positive")
         return value
 
 
@@ -131,6 +139,7 @@ def build_warm_readiness(
     readiness_digest = WarmReadiness.digest_for(
         runtime_scope_id=scope.runtime_scope_id,
         scope_version=scope.scope_version,
+        observation_generation=scope.observation_generation,
         event_spec_id=scope.event_spec_id,
         exchange_instrument_id=scope.exchange_instrument_id,
         universe_version_id=scope.universe_version_id,
@@ -142,6 +151,7 @@ def build_warm_readiness(
     return WarmReadiness(
         runtime_scope_id=scope.runtime_scope_id,
         scope_version=scope.scope_version,
+        observation_generation=scope.observation_generation,
         event_spec_id=scope.event_spec_id,
         exchange_instrument_id=scope.exchange_instrument_id,
         universe_version_id=scope.universe_version_id,
@@ -159,11 +169,28 @@ async def observe_strategy_scope(
     request: ObservationRequest,
 ) -> ObservationResult:
     async with uow_factory() as uow:
-        scope = await uow.signals.get_runtime_scope(request.runtime_scope_id)
+        if request.observation_generation is None:
+            scope = await uow.signals.claim_observation_generation(
+                request.runtime_scope_id
+            )
+        else:
+            scope = await uow.signals.get_runtime_scope(
+                request.runtime_scope_id
+            )
         if scope is None:
             return _invalid_observation(
                 request,
                 event_spec_id=None,
+                reason="scope_or_policy_mismatch",
+            )
+        if (
+            request.observation_generation is not None
+            and scope.observation_generation
+            != request.observation_generation
+        ):
+            return _invalid_observation(
+                request,
+                event_spec_id=scope.event_spec_id,
                 reason="scope_or_policy_mismatch",
             )
         if not _scope_observation_permissions_are_valid(scope):
@@ -440,6 +467,7 @@ async def _save_observation_blocker(
         await uow.signals.clear_warm_readiness(
             runtime_scope_id=scope.runtime_scope_id,
             scope_version=scope.scope_version,
+            observation_generation=scope.observation_generation,
             event_spec_id=scope.event_spec_id,
             exchange_instrument_id=scope.exchange_instrument_id,
             universe_version_id=scope.universe_version_id,

@@ -10,7 +10,13 @@ from hashlib import sha256
 from types import TracebackType
 from typing import Callable, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, JsonValue, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseCurrent,
@@ -223,9 +229,17 @@ class RuntimeScopeSnapshot(BaseModel):
     observation_enabled: bool
     entry_enabled: bool
     scope_version: int
+    observation_generation: int
     warm_ready_at_ms: int | None = None
     warm_readiness_digest: str | None = None
     warm_valid_until_ms: int | None = None
+
+    @field_validator("observation_generation")
+    @classmethod
+    def _require_nonnegative_generation(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("observation generation must be nonnegative")
+        return value
 
 
 class WarmReadiness(BaseModel):
@@ -235,6 +249,7 @@ class WarmReadiness(BaseModel):
 
     runtime_scope_id: str
     scope_version: int
+    observation_generation: int
     event_spec_id: str
     exchange_instrument_id: str
     universe_version_id: str
@@ -250,6 +265,7 @@ class WarmReadiness(BaseModel):
         *,
         runtime_scope_id: str,
         scope_version: int,
+        observation_generation: int,
         event_spec_id: str,
         exchange_instrument_id: str,
         universe_version_id: str,
@@ -266,6 +282,7 @@ class WarmReadiness(BaseModel):
                 "ready_at_ms": ready_at_ms,
                 "runtime_scope_id": runtime_scope_id,
                 "scope_version": scope_version,
+                "observation_generation": observation_generation,
                 "universe_semantic_digest": universe_semantic_digest,
                 "universe_version_id": universe_version_id,
                 "valid_until_ms": valid_until_ms,
@@ -294,6 +311,7 @@ class WarmReadiness(BaseModel):
             raise ValueError("warm readiness digests must be exact sha256 identities")
         if (
             self.scope_version <= 0
+            or self.observation_generation <= 0
             or self.ready_at_ms <= 0
             or self.valid_until_ms <= self.ready_at_ms
         ):
@@ -301,6 +319,7 @@ class WarmReadiness(BaseModel):
         expected = self.digest_for(
             runtime_scope_id=self.runtime_scope_id,
             scope_version=self.scope_version,
+            observation_generation=self.observation_generation,
             event_spec_id=self.event_spec_id,
             exchange_instrument_id=self.exchange_instrument_id,
             universe_version_id=self.universe_version_id,
@@ -348,6 +367,14 @@ class ObservationScopeClaim(BaseModel):
     runtime_scope_id: str
     timeframe: Literal["15m", "1h"]
     trigger_candle_close_time_ms: int
+    observation_generation: int
+
+    @field_validator("observation_generation")
+    @classmethod
+    def _require_positive_generation(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("observation claim generation must be positive")
+        return value
 
 
 class RuntimeProfileSnapshot(BaseModel):
@@ -773,11 +800,17 @@ class SignalRepository(Protocol):
         lease_until_ms: int,
     ) -> ObservationScopeClaim | None: ...
 
+    async def claim_observation_generation(
+        self,
+        runtime_scope_id: str,
+    ) -> RuntimeScopeSnapshot | None: ...
+
     async def schedule_observation_scope(
         self,
         *,
         runtime_scope_id: str,
         worker_id: str,
+        observation_generation: int,
         due_at_ms: int,
     ) -> None: ...
 
@@ -807,6 +840,7 @@ class SignalRepository(Protocol):
         *,
         runtime_scope_id: str,
         scope_version: int,
+        observation_generation: int,
         event_spec_id: str,
         exchange_instrument_id: str,
         universe_version_id: str,

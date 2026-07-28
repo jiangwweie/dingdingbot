@@ -127,6 +127,7 @@ def _scope(
         observation_enabled=True,
         entry_enabled=False,
         scope_version=1,
+        observation_generation=1,
     )
 
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
-
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
     "uq": "uq_%(table_name)s_%(column_0_N_name)s",
@@ -487,6 +486,12 @@ runtime_scopes_current = sa.Table(
     _time("next_observation_due_at_ms", nullable=True),
     _time("lease_expires_at_ms", nullable=True),
     _id("lease_owner", nullable=True),
+    sa.Column(
+        "observation_generation",
+        sa.BigInteger,
+        nullable=False,
+        server_default="0",
+    ),
     _time("updated_at_ms"),
     sa.UniqueConstraint(
         "universe_version_id",
@@ -546,6 +551,10 @@ runtime_scopes_current = sa.Table(
     sa.CheckConstraint(
         "universe_semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
         name="universe_semantic_digest_valid",
+    ),
+    sa.CheckConstraint(
+        "observation_generation >= 0",
+        name="observation_generation_nonnegative",
     ),
 )
 

@@ -7,9 +7,9 @@ from hashlib import sha256
 from typing import Literal, cast
 
 import sqlalchemy as sa
+from pydantic import ValidationError
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
-from pydantic import ValidationError
 
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseCurrent,
@@ -44,7 +44,6 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_universe_versions,
     strategy_versions,
 )
-
 
 _INSTALL_LOCK_KEY = "brc-strategy-universe-install"
 
@@ -820,6 +819,7 @@ def _warming_scope_values(
         "next_observation_due_at_ms": request.installed_at_ms,
         "lease_expires_at_ms": None,
         "lease_owner": None,
+        "observation_generation": 0,
         "updated_at_ms": request.installed_at_ms,
     }
 

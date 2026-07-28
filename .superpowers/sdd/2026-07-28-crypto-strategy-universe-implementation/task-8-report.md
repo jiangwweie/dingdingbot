@@ -147,6 +147,61 @@ git diff --check
 exit 0
 ```
 
+## Second Review Fix — Same-Bar Observation Generation
+
+The first review fix still allowed equal timestamps. Two workers observing the
+same closed bar could both satisfy the `updated_at_ms <= trigger` predicate, so
+an older same-bar success could restore a proof after a newer invalid result,
+or an older same-bar failure could clear a newer valid proof.
+
+Two concurrent disposable PostgreSQL tests reproduced both directions before
+the fix:
+
+```text
+test_same_bar_old_success_cannot_resurrect_after_new_invalid
+Failed: DID NOT RAISE RuntimeError
+
+test_same_bar_old_failure_cannot_clear_new_success
+Failed: DID NOT RAISE RuntimeError
+```
+
+Each runtime scope now owns a nonnegative, monotonic
+`observation_generation`. Worker claim increments it atomically and carries
+the generation into `ObservationRequest`; direct application observations use
+the same repository claim operation. `WarmReadiness`, its digest, save CAS,
+and clear CAS all bind that exact generation.
+
+Consequently, two attempts with the same Event close still have distinct
+generations. Once the newer attempt claims generation `g + 1`, any save or
+clear from generation `g` fails. Because Fact upsert, warm projection CAS, and
+readiness projection update share one PostgreSQL transaction, the stale
+attempt's Fact/readiness changes roll back together. The concurrent tests
+compare the complete scope warm projection, readiness row, and current Fact
+rows before and after the rejected stale attempt.
+
+Lease scheduling uses the same generation fence in addition to worker identity.
+This prevents an expired attempt from releasing or rescheduling a lease that a
+later generation obtained under the same stable worker id.
+
+The existing observation-time CAS remains as a second monotonic guard for
+out-of-order closed bars. Scope identity, lifecycle, permission, Universe
+version/digest, generation, and observation time must all agree.
+
+Second-review focused gate:
+
+```text
+46 passed in 31.62s
+
+Ruff E4/E7/E9/F/I: All checks passed!
+Mypy focused 5 source files: Success, no issues found
+git diff --check: exit 0
+```
+
+The gate covers Task 8 unit/integration behavior, active Observation behavior,
+Universe schema and repository migration behavior, entry-preflight scope model
+construction, and detector replay parity. Task 9's O(N) test remains a valid
+RED: each of eight members is still read eight times for one MPG closed bar.
+
 Per parent scope, no broad full-suite, Tokyo, production, systemd, deployment,
 or exchange check was run.
 
