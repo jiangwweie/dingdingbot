@@ -16,6 +16,10 @@ from pydantic import JsonValue
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
+from src.trading_kernel.application.certify_universe_instrument import (
+    InstrumentCertificationReadRequest,
+    InstrumentCertificationSnapshot,
+)
 from src.trading_kernel.application.ports import (
     LeverageTruthRequest,
     LeverageTruthSnapshot,
@@ -61,6 +65,10 @@ from src.trading_kernel.domain.instrument_identity import (
     to_ccxt_symbol,
     to_exchange_instrument_id,
 )
+from src.trading_kernel.domain.instrument_certification import (
+    InstrumentCertificationFacts,
+)
+from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.order_attribution import (
     OrderRole,
     ResolvedOrderIdentity,
@@ -417,6 +425,135 @@ class CcxtVenueAdapter:
             ),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_instrument_certification(
+        self,
+        request: InstrumentCertificationReadRequest,
+    ) -> InstrumentCertificationSnapshot:
+        """Read one exact product/account snapshot without mutation authority."""
+
+        target = request.target
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=target.venue_id,
+            account_id=target.account_id,
+            exchange_instrument_id=target.exchange_instrument_id,
+        )
+        await _call_raw_exchange(exchange.load_markets, False)
+        (
+            rules,
+            position_mode,
+            target_positions,
+            regular_orders,
+            conditional_orders,
+        ) = await asyncio.gather(
+            self.read_instrument_rules(
+                InstrumentRulesRequest(
+                    venue_id=target.venue_id,
+                    account_id=target.account_id,
+                    exchange_instrument_id=target.exchange_instrument_id,
+                    observed_at_ms=request.observed_at_ms,
+                    valid_for_ms=request.valid_for_ms,
+                )
+            ),
+            _call_raw_exchange(exchange.fetch_position_mode, symbol, {}),
+            _read_binance_usdm_admission_target_positions(
+                exchange=exchange,
+                symbol=symbol,
+            ),
+            _call_raw_exchange(
+                exchange.fetch_open_orders,
+                symbol,
+                None,
+                100,
+                {"conditional": False},
+            ),
+            _call_raw_exchange(
+                exchange.fetch_open_orders,
+                symbol,
+                None,
+                100,
+                {"conditional": True},
+            ),
+        )
+        position_rows = _require_list(
+            target_positions,
+            name="certification target positions",
+        )
+        configured_leverage, long_quantity, short_quantity = (
+            _configured_leverage_and_position_quantities(
+                position_rows,
+                expected_symbol=symbol,
+            )
+        )
+        unowned_position_qty = Decimal("0")
+        for position_side, quantity in (
+            ("long", long_quantity),
+            ("short", short_quantity),
+        ):
+            domain_key = NettingDomain(
+                venue_id=target.venue_id,
+                account_id=target.account_id,
+                exchange_instrument_id=target.exchange_instrument_id,
+                position_side=cast(Literal["long", "short"], position_side),
+            ).key()
+            if (
+                quantity > 0
+                and domain_key not in request.ownership.owned_position_domain_keys
+            ):
+                unowned_position_qty += quantity
+
+        open_orders = tuple(
+            _admission_order(
+                row,
+                exchange_instrument_id=target.exchange_instrument_id,
+                order_namespace=namespace,
+            )
+            for namespace, rows in (
+                (
+                    "regular",
+                    _require_list(
+                        regular_orders,
+                        name="certification regular open orders",
+                    ),
+                ),
+                (
+                    "conditional",
+                    _require_list(
+                        conditional_orders,
+                        name="certification conditional open orders",
+                    ),
+                ),
+            )
+            for row in rows
+        )
+        owned_order_ids = set(request.ownership.owned_exchange_order_ids)
+        market = exchange.market(symbol)
+        return InstrumentCertificationSnapshot(
+            facts=InstrumentCertificationFacts(
+                runtime_profile_id=target.runtime_profile_id,
+                exchange_instrument_id=target.exchange_instrument_id,
+                product_status=_certification_product_status(market),
+                tick_size=rules.price_tick,
+                step_size=rules.quantity_step,
+                min_qty=rules.min_quantity,
+                min_notional=rules.min_notional,
+                position_mode=_account_position_mode(
+                    _require_mapping(
+                        position_mode,
+                        name="certification position mode",
+                    )
+                ),
+                margin_mode=_admission_margin_mode(position_rows),
+                configured_leverage=configured_leverage,
+                unowned_position_qty=unowned_position_qty,
+                unowned_open_order_count=sum(
+                    order.exchange_order_id not in owned_order_ids
+                    for order in open_orders
+                ),
+                observed_at_ms=request.observed_at_ms,
+            ),
+            instrument_rules=rules,
         )
 
     async def read_position_snapshot(
@@ -1688,6 +1825,19 @@ def _instrument_rules(
         name="minimum notional",
     )
     return quantity_step, price_tick, min_quantity, min_notional
+
+
+def _certification_product_status(market: Mapping[str, object]) -> str:
+    active = market.get("active")
+    info = market.get("info")
+    venue_status = (
+        str(info.get("status") or "").strip().upper()
+        if isinstance(info, Mapping)
+        else ""
+    )
+    if active is True and venue_status == "TRADING":
+        return "trading"
+    return "not_trading"
 
 
 def _binance_market_id(symbol: str) -> str:

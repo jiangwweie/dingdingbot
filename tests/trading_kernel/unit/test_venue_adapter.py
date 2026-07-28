@@ -5,7 +5,11 @@ import inspect
 
 import pytest
 
+from src.trading_kernel.application.certify_universe_instrument import (
+    InstrumentCertificationReadRequest,
+)
 from src.trading_kernel.application.ports import (
+    InstrumentCertificationTarget,
     LeverageTruthRequest,
     VenueCommandRequest,
     VenueMutationFailure,
@@ -27,6 +31,7 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandPayload,
 )
 from src.trading_kernel.domain.identities import NettingDomain
+from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.order_attribution import (
     OrderNamespace,
     OrderRole,
@@ -550,6 +555,78 @@ class InstrumentRulesWithoutMarketLeverageExchange(InstrumentRulesExchange):
         market = super().market(symbol)
         market["limits"] = {}
         return market
+
+
+class InstrumentCertificationExchange(InstrumentRulesExchange):
+    def __init__(self) -> None:
+        super().__init__()
+        self.mutations: list[str] = []
+
+    def market(self, symbol):
+        market = super().market(symbol)
+        market["active"] = True
+        market["info"]["status"] = "TRADING"
+        return market
+
+    async def fetch_position_mode(self, symbol, params):
+        assert symbol == "BTC/USDT:USDT"
+        assert params == {}
+        return {"hedged": True}
+
+    async def fapiPrivateV2GetPositionRisk(self, params):
+        assert params == {"symbol": "BTCUSDT"}
+        return [
+            {
+                "symbol": "BTCUSDT",
+                "positionAmt": "0.01",
+                "entryPrice": "60000",
+                "leverage": "5",
+                "marginType": "cross",
+                "positionSide": "LONG",
+            },
+            {
+                "symbol": "BTCUSDT",
+                "positionAmt": "0",
+                "entryPrice": "0",
+                "leverage": "5",
+                "marginType": "cross",
+                "positionSide": "SHORT",
+            },
+        ]
+
+    async def fetch_open_orders(self, symbol, since, limit, params):
+        assert symbol == "BTC/USDT:USDT"
+        assert since is None
+        assert limit == 100
+        if params == {"conditional": False}:
+            return []
+        assert params == {"conditional": True}
+        return [
+            {
+                "id": "owned-stop-1",
+                "clientOrderId": "brc-owned-stop",
+                "symbol": symbol,
+                "side": "sell",
+                "amount": "0.01",
+                "reduceOnly": True,
+                "info": {"positionSide": "LONG"},
+            }
+        ]
+
+    async def set_leverage(self, *args, **kwargs):
+        del args, kwargs
+        self.mutations.append("set_leverage")
+        raise AssertionError("readonly certification cannot mutate leverage")
+
+    async def set_margin_mode(self, *args, **kwargs):
+        del args, kwargs
+        self.mutations.append("set_margin_mode")
+        raise AssertionError("readonly certification cannot mutate margin mode")
+
+    async def set_position_mode(self, *args, **kwargs):
+        del args, kwargs
+        self.mutations.append("set_position_mode")
+        raise AssertionError("readonly certification cannot mutate position mode")
 
 class LifecycleFactsExchange:
     def __init__(self) -> None:
@@ -1127,6 +1204,53 @@ async def test_ccxt_adapter_uses_bracket_leverage_when_market_limit_is_absent() 
     )
 
     assert facts.exchange_max_leverage == 20
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_certification_is_readonly_and_retains_brc_owned_exposure() -> None:
+    exchange = InstrumentCertificationExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        clock_ms=lambda: 2_000,
+    )
+    target = InstrumentCertificationTarget(
+        runtime_profile_id="profile:main",
+        venue_id="binance-usdm",
+        account_id="experiment-1",
+        universe_version_id="universe:event:v1",
+        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+        lease_owner="reconciliation-worker",
+        lease_expires_at_ms=62_000,
+    )
+
+    snapshot = await adapter.read_instrument_certification(
+        InstrumentCertificationReadRequest(
+            target=target,
+            ownership=AdmissionOwnership(
+                owned_position_domain_keys=(
+                    NettingDomain(
+                        venue_id="binance-usdm",
+                        account_id="experiment-1",
+                        exchange_instrument_id=(
+                            "binance-usdm:BTCUSDT:perpetual"
+                        ),
+                        position_side="long",
+                    ).key(),
+                ),
+                owned_exchange_order_ids=("owned-stop-1",),
+            ),
+            observed_at_ms=2_000,
+            valid_for_ms=60_000,
+        )
+    )
+
+    assert snapshot.facts.product_status == "trading"
+    assert snapshot.facts.position_mode == "independent_sides"
+    assert snapshot.facts.margin_mode == "cross"
+    assert snapshot.facts.configured_leverage == 5
+    assert snapshot.facts.unowned_position_qty == 0
+    assert snapshot.facts.unowned_open_order_count == 0
+    assert exchange.mutations == []
 
 
 def test_binance_rules_accept_a_finite_final_maintenance_tier() -> None:

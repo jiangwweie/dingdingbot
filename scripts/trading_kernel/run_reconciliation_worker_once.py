@@ -21,6 +21,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.trading_kernel.application.ports import VenueTruthPort  # noqa: E402
+from src.trading_kernel.application.certify_universe_instrument import (  # noqa: E402
+    InstrumentCertificationSource,
+)
 from src.trading_kernel.application.runtime_facts import (  # noqa: E402
     PositionSnapshotSource,
     ReviewEconomicsSource,
@@ -100,6 +103,8 @@ async def _run(args: argparse.Namespace) -> int:
         raise TypeError("venue factory must provide ReviewEconomicsSource")
     if not callable(getattr(adapter, "read_fee_discount_capability", None)):
         raise TypeError("venue factory must provide FeeDiscountCapabilitySource")
+    if not callable(getattr(adapter, "read_instrument_certification", None)):
+        raise TypeError("venue factory must provide InstrumentCertificationSource")
 
     engine = create_async_engine(database_url)
     try:
@@ -132,6 +137,10 @@ async def _run(args: argparse.Namespace) -> int:
                 ),
                 review_economics_source=cast(ReviewEconomicsSource, adapter),
                 fee_discount_capability_source=(adapter if observe_fee_capability else None),
+                instrument_certification_source=cast(
+                    InstrumentCertificationSource,
+                    adapter,
+                ),
             )
             if observe_fee_capability:
                 last_fee_capability_observed_at_ms = now_ms

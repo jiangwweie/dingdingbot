@@ -18,6 +18,11 @@ from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallResult,
     UniverseInstallStatus,
 )
+from src.trading_kernel.application.ports import InstrumentCertificationTarget
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.instrument_certification import (
+    InstrumentCertification,
+)
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
@@ -28,6 +33,7 @@ from src.trading_kernel.domain.strategy_universe import (
 )
 from src.trading_kernel.infrastructure.pg_models import (
     event_specs,
+    instrument_certification_current,
     instruments,
     owner_policy_current,
     runtime_profiles,
@@ -212,6 +218,219 @@ class PostgresStrategyUniverseRepository:
         if len(rows) > MAX_UNIVERSE_MEMBERS:
             raise UniverseInstallConflict("UNIVERSE_MEMBER_CARDINALITY_CONFLICT")
         return tuple(str(row[0]) for row in rows)
+
+    async def claim_due_instrument_certification(
+        self,
+        *,
+        worker_id: str,
+        now_ms: int,
+        lease_until_ms: int,
+    ) -> InstrumentCertificationTarget | None:
+        if not worker_id.strip():
+            raise ValueError("certification claim worker must be non-blank")
+        if now_ms <= 0 or lease_until_ms <= now_ms:
+            raise ValueError("certification claim lease must be future-dated")
+        certification = instrument_certification_current
+        row = (
+            await self._connection.execute(
+                sa.select(
+                    runtime_scopes_current.c.runtime_profile_id,
+                    runtime_profiles.c.venue_id,
+                    runtime_profiles.c.account_id,
+                    runtime_scopes_current.c.universe_version_id,
+                    runtime_scopes_current.c.exchange_instrument_id,
+                )
+                .select_from(
+                    runtime_scopes_current.join(
+                        strategy_universe_versions,
+                        strategy_universe_versions.c.universe_version_id
+                        == runtime_scopes_current.c.universe_version_id,
+                    )
+                    .join(
+                        runtime_profiles,
+                        runtime_profiles.c.runtime_profile_id
+                        == runtime_scopes_current.c.runtime_profile_id,
+                    )
+                    .join(
+                        instruments,
+                        instruments.c.exchange_instrument_id
+                        == runtime_scopes_current.c.exchange_instrument_id,
+                    )
+                    .outerjoin(
+                        certification,
+                        sa.and_(
+                            certification.c.runtime_profile_id
+                            == runtime_scopes_current.c.runtime_profile_id,
+                            certification.c.exchange_instrument_id
+                            == runtime_scopes_current.c.exchange_instrument_id,
+                        ),
+                    )
+                )
+                .where(
+                    strategy_universe_versions.c.lifecycle_state.in_(
+                        ("warming", "active")
+                    ),
+                    runtime_scopes_current.c.lifecycle_state.in_(("warming", "active")),
+                    sa.or_(
+                        certification.c.runtime_profile_id.is_(None),
+                        sa.and_(
+                            certification.c.next_check_at_ms <= now_ms,
+                            sa.or_(
+                                certification.c.lease_expires_at_ms.is_(None),
+                                certification.c.lease_expires_at_ms <= now_ms,
+                            ),
+                        ),
+                    ),
+                )
+                .order_by(
+                    sa.case(
+                        (
+                            strategy_universe_versions.c.lifecycle_state == "warming",
+                            0,
+                        ),
+                        else_=1,
+                    ),
+                    sa.func.coalesce(certification.c.next_check_at_ms, 0),
+                    runtime_scopes_current.c.exchange_instrument_id,
+                    runtime_scopes_current.c.runtime_profile_id,
+                )
+                .with_for_update(of=instruments, skip_locked=True)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+
+        key = {
+            "runtime_profile_id": str(row["runtime_profile_id"]),
+            "exchange_instrument_id": str(row["exchange_instrument_id"]),
+        }
+        existing = (
+            await self._connection.execute(
+                sa.select(certification)
+                .where(
+                    certification.c.runtime_profile_id
+                    == key["runtime_profile_id"],
+                    certification.c.exchange_instrument_id
+                    == key["exchange_instrument_id"],
+                )
+                .with_for_update(of=certification)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if existing is None:
+            await self._connection.execute(
+                sa.insert(certification).values(
+                    **key,
+                    status="temporarily_unavailable",
+                    blocker_code=None,
+                    facts_digest=canonical_digest(
+                        {
+                            **key,
+                            "status": "pending_readonly_certification",
+                        }
+                    ),
+                    product_rules_digest=None,
+                    configured_leverage=None,
+                    margin_mode=None,
+                    position_mode=None,
+                    observed_at_ms=now_ms,
+                    valid_until_ms=now_ms + 1,
+                    next_check_at_ms=now_ms,
+                    lease_owner=worker_id,
+                    lease_expires_at_ms=lease_until_ms,
+                    projection_version=1,
+                )
+            )
+        else:
+            await self._connection.execute(
+                sa.update(certification)
+                .where(
+                    certification.c.runtime_profile_id
+                    == key["runtime_profile_id"],
+                    certification.c.exchange_instrument_id
+                    == key["exchange_instrument_id"],
+                    sa.or_(
+                        certification.c.lease_expires_at_ms.is_(None),
+                        certification.c.lease_expires_at_ms <= now_ms,
+                    ),
+                )
+                .values(
+                    lease_owner=worker_id,
+                    lease_expires_at_ms=lease_until_ms,
+                )
+            )
+        return InstrumentCertificationTarget(
+            runtime_profile_id=key["runtime_profile_id"],
+            venue_id=str(row["venue_id"]),
+            account_id=str(row["account_id"]),
+            universe_version_id=str(row["universe_version_id"]),
+            exchange_instrument_id=key["exchange_instrument_id"],
+            lease_owner=worker_id,
+            lease_expires_at_ms=lease_until_ms,
+        )
+
+    async def save_instrument_certification(
+        self,
+        *,
+        target: InstrumentCertificationTarget,
+        certification: InstrumentCertification,
+        product_rules_digest: str | None,
+        configured_leverage: int | None,
+        margin_mode: str | None,
+        position_mode: str | None,
+        next_check_at_ms: int,
+    ) -> None:
+        if next_check_at_ms < certification.observed_at_ms:
+            raise ValueError("certification next check precedes observation")
+        if certification.status == "eligible" and product_rules_digest is None:
+            raise ValueError("eligible certification requires product rules digest")
+        result = await self._connection.execute(
+            sa.update(instrument_certification_current)
+            .where(
+                instrument_certification_current.c.runtime_profile_id
+                == target.runtime_profile_id,
+                instrument_certification_current.c.exchange_instrument_id
+                == target.exchange_instrument_id,
+                instrument_certification_current.c.lease_owner
+                == target.lease_owner,
+                instrument_certification_current.c.lease_expires_at_ms
+                == target.lease_expires_at_ms,
+            )
+            .values(
+                status=certification.status,
+                blocker_code=certification.blocker_code,
+                facts_digest=certification.facts_digest,
+                product_rules_digest=product_rules_digest,
+                configured_leverage=configured_leverage,
+                margin_mode=margin_mode,
+                position_mode=position_mode,
+                observed_at_ms=certification.observed_at_ms,
+                valid_until_ms=certification.valid_until_ms,
+                next_check_at_ms=next_check_at_ms,
+                lease_owner=None,
+                lease_expires_at_ms=None,
+                projection_version=(
+                    instrument_certification_current.c.projection_version + 1
+                ),
+            )
+        )
+        if result.rowcount != 1:
+            raise RuntimeError("instrument certification claim is stale")
+        await self._connection.execute(
+            sa.update(instruments)
+            .where(
+                instruments.c.exchange_instrument_id
+                == target.exchange_instrument_id
+            )
+            .values(
+                status=(
+                    "active"
+                    if certification.status == "eligible"
+                    else "pending_certification"
+                )
+            )
+        )
 
     async def _lock_installs(self) -> None:
         await self._connection.execute(

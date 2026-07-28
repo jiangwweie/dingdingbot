@@ -21,6 +21,9 @@ from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
+from src.trading_kernel.domain.instrument_certification import (
+    InstrumentCertification,
+)
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
@@ -803,6 +806,54 @@ class StrategyUniverseRepository(Protocol):
         self,
         universe_version_id: str,
     ) -> tuple[str, ...]: ...
+
+    async def claim_due_instrument_certification(
+        self,
+        *,
+        worker_id: str,
+        now_ms: int,
+        lease_until_ms: int,
+    ) -> "InstrumentCertificationTarget | None": ...
+
+    async def save_instrument_certification(
+        self,
+        *,
+        target: "InstrumentCertificationTarget",
+        certification: InstrumentCertification,
+        product_rules_digest: str | None,
+        configured_leverage: int | None,
+        margin_mode: str | None,
+        position_mode: str | None,
+        next_check_at_ms: int,
+    ) -> None: ...
+
+
+class InstrumentCertificationTarget(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime_profile_id: str
+    venue_id: str
+    account_id: str
+    universe_version_id: str
+    exchange_instrument_id: str
+    lease_owner: str
+    lease_expires_at_ms: int
+
+    @model_validator(mode="after")
+    def _validate_target(self) -> "InstrumentCertificationTarget":
+        for value in (
+            self.runtime_profile_id,
+            self.venue_id,
+            self.account_id,
+            self.universe_version_id,
+            self.exchange_instrument_id,
+            self.lease_owner,
+        ):
+            if not str(value or "").strip():
+                raise ValueError("certification target identities must be non-blank")
+        if self.lease_expires_at_ms <= 0:
+            raise ValueError("certification lease expiry must be positive")
+        return self
 
 
 class VenueCommandRequest(BaseModel):

@@ -5,11 +5,15 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.application.ports import (
+    InstrumentCertificationTarget,
     KernelUnitOfWork,
     MonitorOwnerStatus,
     MonitorStateRecord,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.instrument_certification import (
+    InstrumentCertification,
+)
 
 
 class OwnerProjectionFacts(BaseModel):
@@ -67,6 +71,43 @@ _INTERVENTION_BLOCKERS = {
     "protection_unavailable",
     "runtime_incident_open",
 }
+
+
+def instrument_certification_monitor_key(
+    target: InstrumentCertificationTarget,
+) -> str:
+    return (
+        f"strategy-universe:{target.universe_version_id}:"
+        f"{target.exchange_instrument_id}"
+    )
+
+
+def derive_instrument_certification_monitor(
+    *,
+    target: InstrumentCertificationTarget,
+    certification: InstrumentCertification,
+    updated_at_ms: int,
+) -> MonitorStateRecord | None:
+    """Project only deterministic Owner blockers and their later resolution."""
+
+    monitor_key = instrument_certification_monitor_key(target)
+    if certification.status == "temporarily_unavailable":
+        return None
+    if certification.status == "owner_action_required":
+        return MonitorStateRecord(
+            monitor_key=monitor_key,
+            owner_status=MonitorOwnerStatus.NEEDS_INTERVENTION,
+            summary=f"OWNER_ACTION_REQUIRED:{certification.blocker_code}",
+            intervention="需要介入",
+            updated_at_ms=updated_at_ms,
+        )
+    return MonitorStateRecord(
+        monitor_key=monitor_key,
+        owner_status=MonitorOwnerStatus.RUNNING,
+        summary="instrument_certification:resolved",
+        intervention="无需操作",
+        updated_at_ms=updated_at_ms,
+    )
 
 
 def derive_owner_projection(

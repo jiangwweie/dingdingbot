@@ -14,6 +14,11 @@ from src.trading_kernel.application.ports import (
     UnitOfWorkFactory,
     VenueTruthPort,
 )
+from src.trading_kernel.application.certify_universe_instrument import (
+    CertifyUniverseInstrumentRequest,
+    InstrumentCertificationSource,
+    certify_universe_instrument,
+)
 from src.trading_kernel.application.reconcile_ticket import (
     ReconcileTicketRequest,
     ReconcileTicketStatus,
@@ -152,6 +157,7 @@ class ReconciliationWorkerStatus(StrEnum):
     FACTS_UNAVAILABLE = "facts_unavailable"
     SETTLED = "settled"
     REVIEWED = "reviewed"
+    INSTRUMENT_CERTIFIED = "instrument_certified"
 
 
 class ReconciliationWorkerRequest(BaseModel):
@@ -167,6 +173,11 @@ class ReconciliationWorkerRequest(BaseModel):
     closure_starvation_limit_ms: int = 30_000
     closure_retry_interval_ms: int = 30_000
     review_economics_visibility_grace_ms: int = 300_000
+    certification_lease_ms: int = 60_000
+    certification_valid_for_ms: int = 60_000
+    certification_eligible_check_interval_ms: int = 60_000
+    certification_owner_action_check_interval_ms: int = 300_000
+    certification_transient_retry_interval_ms: int = 30_000
 
     @field_validator("worker_id", "runtime_commit", "schema_revision", mode="before")
     @classmethod
@@ -186,6 +197,11 @@ class ReconciliationWorkerRequest(BaseModel):
             or self.closure_starvation_limit_ms <= 0
             or self.closure_retry_interval_ms <= 0
             or self.review_economics_visibility_grace_ms <= 0
+            or self.certification_lease_ms <= 0
+            or self.certification_valid_for_ms <= 0
+            or self.certification_eligible_check_interval_ms <= 0
+            or self.certification_owner_action_check_interval_ms <= 0
+            or self.certification_transient_retry_interval_ms <= 0
         ):
             raise ValueError("reconciliation worker windows must be positive")
         return self
@@ -199,6 +215,7 @@ class ReconciliationWorkerResult(BaseModel):
     command_id: str | None = None
     reconciliation_status: ReconcileTicketStatus | None = None
     detail: str | None = None
+    exchange_instrument_id: str | None = None
 
 
 async def run_reconciliation_worker_once(
@@ -209,6 +226,7 @@ async def run_reconciliation_worker_once(
     *,
     review_economics_source: ReviewEconomicsSource | None = None,
     fee_discount_capability_source: FeeDiscountCapabilitySource | None = None,
+    instrument_certification_source: InstrumentCertificationSource | None = None,
 ) -> ReconciliationWorkerResult:
     """Advance one safety work item, then record optional BNB cost capability."""
 
@@ -219,6 +237,17 @@ async def run_reconciliation_worker_once(
         request,
         review_economics_source=review_economics_source,
     )
+    if (
+        result.status is ReconciliationWorkerStatus.NO_WORK
+        and instrument_certification_source is not None
+    ):
+        certification_result = await _certify_one_due_instrument(
+            uow_factory,
+            source=instrument_certification_source,
+            request=request,
+        )
+        if certification_result is not None:
+            result = certification_result
     if fee_discount_capability_source is not None:
         await _observe_fee_discount_capability(
             uow_factory,
@@ -227,6 +256,48 @@ async def run_reconciliation_worker_once(
             timeout_seconds=request.timeout_seconds,
         )
     return result
+
+
+async def _certify_one_due_instrument(
+    uow_factory: UnitOfWorkFactory,
+    *,
+    source: InstrumentCertificationSource,
+    request: ReconciliationWorkerRequest,
+) -> ReconciliationWorkerResult | None:
+    async with uow_factory() as uow:
+        target = await uow.strategy_universes.claim_due_instrument_certification(
+            worker_id=request.worker_id,
+            now_ms=request.now_ms,
+            lease_until_ms=request.now_ms + request.certification_lease_ms,
+        )
+    if target is None:
+        return None
+    result = await certify_universe_instrument(
+        uow_factory,
+        source,
+        CertifyUniverseInstrumentRequest(
+            target=target,
+            now_ms=request.now_ms,
+            timeout_seconds=request.timeout_seconds,
+            required_leverage=5,
+            required_margin_mode="cross",
+            valid_for_ms=request.certification_valid_for_ms,
+            eligible_check_interval_ms=(
+                request.certification_eligible_check_interval_ms
+            ),
+            owner_action_check_interval_ms=(
+                request.certification_owner_action_check_interval_ms
+            ),
+            transient_retry_interval_ms=(
+                request.certification_transient_retry_interval_ms
+            ),
+        ),
+    )
+    return ReconciliationWorkerResult(
+        status=ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED,
+        exchange_instrument_id=target.exchange_instrument_id,
+        detail=result.certification.status,
+    )
 
 
 async def _run_reconciliation_worker_once_core(
