@@ -39,12 +39,27 @@ class InstrumentCertificationSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     facts: InstrumentCertificationFacts
-    instrument_rules: InstrumentRulesFacts
+    instrument_rules: InstrumentRulesFacts | None
 
     @model_validator(mode="after")
     def _validate_snapshot(self) -> "InstrumentCertificationSnapshot":
         rules = self.instrument_rules
         facts = self.facts
+        raw_rules = (
+            facts.tick_size,
+            facts.step_size,
+            facts.min_qty,
+            facts.min_notional,
+        )
+        if rules is None:
+            if all(
+                value is not None and value.is_finite() and value > 0
+                for value in raw_rules
+            ):
+                raise ValueError(
+                    "complete certification facts require typed instrument rules"
+                )
+            return self
         if (
             rules.exchange_instrument_id != facts.exchange_instrument_id
             or rules.observed_at_ms != facts.observed_at_ms
@@ -62,6 +77,10 @@ class InstrumentCertificationSource(Protocol):
         self,
         request: InstrumentCertificationReadRequest,
     ) -> InstrumentCertificationSnapshot: ...
+
+
+class InstrumentCertificationTransientFailure(RuntimeError):
+    """Explicitly retryable readonly Venue/network failure."""
 
 
 class CertifyUniverseInstrumentRequest(BaseModel):
@@ -147,7 +166,11 @@ async def certify_universe_instrument(
             required_margin_mode=request.required_margin_mode,
             valid_for_ms=request.valid_for_ms,
         )
-    except Exception:
+    except (
+        TimeoutError,
+        ConnectionError,
+        InstrumentCertificationTransientFailure,
+    ):
         certification = InstrumentCertification(
             status="temporarily_unavailable",
             blocker_code="readonly_facts_unavailable",
@@ -175,11 +198,11 @@ async def certify_universe_instrument(
     )
     product_rules_digest = (
         None
-        if snapshot is None
+        if snapshot is None or snapshot.instrument_rules is None
         else canonical_digest(snapshot.instrument_rules)
     )
     async with uow_factory() as uow:
-        if snapshot is not None:
+        if snapshot is not None and snapshot.instrument_rules is not None:
             rules = snapshot.instrument_rules
             await uow.signals.upsert_instrument_rules(
                 venue_id=target.venue_id,

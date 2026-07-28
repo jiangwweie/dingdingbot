@@ -3,10 +3,12 @@ from __future__ import annotations
 from decimal import Decimal
 import inspect
 
+from ccxt.base.errors import RequestTimeout
 import pytest
 
 from src.trading_kernel.application.certify_universe_instrument import (
     InstrumentCertificationReadRequest,
+    InstrumentCertificationTransientFailure,
 )
 from src.trading_kernel.application.ports import (
     InstrumentCertificationTarget,
@@ -31,7 +33,13 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandPayload,
 )
 from src.trading_kernel.domain.identities import NettingDomain
-from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
+from src.trading_kernel.domain.instrument_certification import (
+    classify_instrument_certification,
+)
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionOwnership,
+    OwnedPositionProjection,
+)
 from src.trading_kernel.domain.order_attribution import (
     OrderNamespace,
     OrderRole,
@@ -40,6 +48,7 @@ from src.trading_kernel.domain.order_attribution import (
 from src.trading_kernel.domain.venue_truth import VenueLookupStatus
 from src.trading_kernel.infrastructure.venue_adapter import (
     CcxtVenueAdapter,
+    InstrumentCertificationSnapshotContradiction,
     _binance_maintenance_margin_brackets,
     _position_details,
 )
@@ -628,6 +637,33 @@ class InstrumentCertificationExchange(InstrumentRulesExchange):
         self.mutations.append("set_position_mode")
         raise AssertionError("readonly certification cannot mutate position mode")
 
+
+class MissingOrderRuleCertificationExchange(InstrumentCertificationExchange):
+    def market(self, symbol):
+        market = super().market(symbol)
+        market["info"]["filters"] = [
+            row
+            for row in market["info"]["filters"]
+            if row["filterType"] not in {"MIN_NOTIONAL", "NOTIONAL"}
+        ]
+        return market
+
+
+class InvalidOrderRuleCertificationExchange(InstrumentCertificationExchange):
+    def market(self, symbol):
+        market = super().market(symbol)
+        for row in market["info"]["filters"]:
+            if row["filterType"] == "MIN_NOTIONAL":
+                row["notional"] = "0"
+        return market
+
+
+class TransientCertificationExchange(InstrumentCertificationExchange):
+    async def fetch_position_mode(self, symbol, params):
+        del symbol, params
+        raise RequestTimeout("venue request timed out")
+
+
 class LifecycleFactsExchange:
     def __init__(self) -> None:
         self.tp1_order_calls: list[tuple[object, str, dict[str, object]]] = []
@@ -1213,35 +1249,9 @@ async def test_ccxt_adapter_certification_is_readonly_and_retains_brc_owned_expo
         exchanges={("binance-usdm", "experiment-1"): exchange},
         clock_ms=lambda: 2_000,
     )
-    target = InstrumentCertificationTarget(
-        runtime_profile_id="profile:main",
-        venue_id="binance-usdm",
-        account_id="experiment-1",
-        universe_version_id="universe:event:v1",
-        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-        lease_owner="reconciliation-worker",
-        lease_expires_at_ms=62_000,
-    )
 
     snapshot = await adapter.read_instrument_certification(
-        InstrumentCertificationReadRequest(
-            target=target,
-            ownership=AdmissionOwnership(
-                owned_position_domain_keys=(
-                    NettingDomain(
-                        venue_id="binance-usdm",
-                        account_id="experiment-1",
-                        exchange_instrument_id=(
-                            "binance-usdm:BTCUSDT:perpetual"
-                        ),
-                        position_side="long",
-                    ).key(),
-                ),
-                owned_exchange_order_ids=("owned-stop-1",),
-            ),
-            observed_at_ms=2_000,
-            valid_for_ms=60_000,
-        )
+        _certification_read_request(owned_quantity=Decimal("0.01"))
     )
 
     assert snapshot.facts.product_status == "trading"
@@ -1251,6 +1261,135 @@ async def test_ccxt_adapter_certification_is_readonly_and_retains_brc_owned_expo
     assert snapshot.facts.unowned_position_qty == 0
     assert snapshot.facts.unowned_open_order_count == 0
     assert exchange.mutations == []
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_certification_classifies_venue_quantity_above_projection_as_unowned() -> None:
+    exchange = InstrumentCertificationExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        clock_ms=lambda: 2_000,
+    )
+
+    snapshot = await adapter.read_instrument_certification(
+        _certification_read_request(owned_quantity=Decimal("0.001"))
+    )
+    decision = classify_instrument_certification(
+        snapshot.facts,
+        required_leverage=5,
+        required_margin_mode="cross",
+        valid_for_ms=60_000,
+    )
+
+    assert snapshot.facts.unowned_position_qty == Decimal("0.009")
+    assert decision.status == "owner_action_required"
+    assert decision.blocker_code == "unowned_position"
+    assert exchange.mutations == []
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_certification_rejects_projected_quantity_above_venue() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): InstrumentCertificationExchange()
+        },
+        clock_ms=lambda: 2_000,
+    )
+
+    with pytest.raises(
+        InstrumentCertificationSnapshotContradiction,
+        match="projected_position_exceeds_venue",
+    ):
+        await adapter.read_instrument_certification(
+            _certification_read_request(owned_quantity=Decimal("0.02"))
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exchange_type",
+    (
+        MissingOrderRuleCertificationExchange,
+        InvalidOrderRuleCertificationExchange,
+    ),
+)
+async def test_ccxt_adapter_certification_preserves_missing_order_rule_as_raw_fact(
+    exchange_type,
+) -> None:
+    exchange = exchange_type()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        clock_ms=lambda: 2_000,
+    )
+
+    snapshot = await adapter.read_instrument_certification(
+        _certification_read_request(owned_quantity=Decimal("0.01"))
+    )
+    decision = classify_instrument_certification(
+        snapshot.facts,
+        required_leverage=5,
+        required_margin_mode="cross",
+        valid_for_ms=60_000,
+    )
+
+    assert snapshot.facts.min_notional is None
+    assert snapshot.instrument_rules is None
+    assert decision.status == "owner_action_required"
+    assert decision.blocker_code == "missing_order_rule"
+    assert exchange.mutations == []
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_maps_explicit_network_failure_to_transient() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): TransientCertificationExchange()
+        },
+        clock_ms=lambda: 2_000,
+    )
+
+    with pytest.raises(
+        InstrumentCertificationTransientFailure,
+        match="readonly Venue/network failure",
+    ):
+        await adapter.read_instrument_certification(
+            _certification_read_request(owned_quantity=Decimal("0.01"))
+        )
+
+
+def _certification_read_request(
+    *,
+    owned_quantity: Decimal,
+) -> InstrumentCertificationReadRequest:
+    domain = NettingDomain(
+        venue_id="binance-usdm",
+        account_id="experiment-1",
+        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+        position_side="long",
+    )
+    return InstrumentCertificationReadRequest(
+        target=InstrumentCertificationTarget(
+            runtime_profile_id="profile:main",
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            universe_version_id="universe:event:v1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            lease_owner="reconciliation-worker",
+            lease_expires_at_ms=62_000,
+        ),
+        ownership=AdmissionOwnership(
+            owned_position_domain_keys=(domain.key(),),
+            owned_position_projections=(
+                OwnedPositionProjection(
+                    netting_domain_key=domain.key(),
+                    quantity=owned_quantity,
+                ),
+            ),
+            owned_exchange_order_ids=("owned-stop-1",),
+        ),
+        observed_at_ms=2_000,
+        valid_for_ms=60_000,
+    )
 
 
 def test_binance_rules_accept_a_finite_final_maintenance_tier() -> None:

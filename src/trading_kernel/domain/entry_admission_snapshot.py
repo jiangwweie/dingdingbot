@@ -170,12 +170,34 @@ class AdmissionOrder(BaseModel):
         return value
 
 
+class OwnedPositionProjection(BaseModel):
+    """Authoritative Kernel quantity for one currently owned NettingDomain."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    netting_domain_key: str
+    quantity: Decimal
+
+    @field_validator("netting_domain_key", mode="before")
+    @classmethod
+    def _require_domain_key(cls, value: object) -> str:
+        return _require_identity(value, label="owned position domain")
+
+    @field_validator("quantity")
+    @classmethod
+    def _require_projected_quantity(cls, value: Decimal) -> Decimal:
+        if not value.is_finite() or value < 0:
+            raise ValueError("owned position quantity must be finite and nonnegative")
+        return value
+
+
 class AdmissionOwnership(BaseModel):
     """Current kernel-owned external identities loaded before classification."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     owned_position_domain_keys: tuple[str, ...] = ()
+    owned_position_projections: tuple[OwnedPositionProjection, ...] = ()
     owned_exchange_order_ids: tuple[str, ...] = ()
     open_incident_scopes: tuple[EntryBlockScope, ...] = ()
     unknown_command_outcome_ticket_ids: tuple[str, ...] = ()
@@ -194,6 +216,33 @@ class AdmissionOwnership(BaseModel):
         if any(not value for value in normalized) or len(set(normalized)) != len(normalized):
             raise ValueError("ownership identities must be unique and non-blank")
         return normalized
+
+    @model_validator(mode="after")
+    def _validate_position_projections(self) -> "AdmissionOwnership":
+        projection_keys = tuple(
+            projection.netting_domain_key
+            for projection in self.owned_position_projections
+        )
+        if len(set(projection_keys)) != len(projection_keys):
+            raise ValueError("owned position projections must be unique")
+        if set(projection_keys) != set(self.owned_position_domain_keys):
+            raise ValueError(
+                "owned position projections must match owned domain identities"
+            )
+        return self
+
+    def projected_position_quantity(
+        self,
+        netting_domain_key: str,
+    ) -> Decimal | None:
+        return next(
+            (
+                projection.quantity
+                for projection in self.owned_position_projections
+                if projection.netting_domain_key == netting_domain_key
+            ),
+            None,
+        )
 
 
 class EntryAdmissionSnapshot(BaseModel):

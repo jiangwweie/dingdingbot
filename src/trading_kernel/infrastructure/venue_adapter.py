@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from decimal import Decimal
 from typing import Literal, Protocol, cast
 
+from ccxt.base.errors import NetworkError as CcxtNetworkError
 from pydantic import JsonValue
 
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
@@ -19,6 +20,7 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
 from src.trading_kernel.application.certify_universe_instrument import (
     InstrumentCertificationReadRequest,
     InstrumentCertificationSnapshot,
+    InstrumentCertificationTransientFailure,
 )
 from src.trading_kernel.application.ports import (
     LeverageTruthRequest,
@@ -202,6 +204,10 @@ _AUTHORITATIVE_REJECTION_TYPES = {
 }
 _ORDER_NOT_FOUND_TYPES = {"OrderNotFound"}
 _EXCHANGE_CODE = re.compile(r'["\']code["\']\s*:\s*(-?[0-9]{1,6})')
+
+
+class InstrumentCertificationSnapshotContradiction(RuntimeError):
+    """Kernel ownership projection contradicts authenticated Venue quantity."""
 
 
 class CcxtVenueAdapter:
@@ -433,6 +439,17 @@ class CcxtVenueAdapter:
     ) -> InstrumentCertificationSnapshot:
         """Read one exact product/account snapshot without mutation authority."""
 
+        try:
+            return await self._read_instrument_certification_snapshot(request)
+        except CcxtNetworkError as exc:
+            raise InstrumentCertificationTransientFailure(
+                "authenticated readonly Venue/network failure"
+            ) from exc
+
+    async def _read_instrument_certification_snapshot(
+        self,
+        request: InstrumentCertificationReadRequest,
+    ) -> InstrumentCertificationSnapshot:
         target = request.target
         exchange, symbol = self._resolve_exchange_and_symbol(
             venue_id=target.venue_id,
@@ -440,13 +457,11 @@ class CcxtVenueAdapter:
             exchange_instrument_id=target.exchange_instrument_id,
         )
         await _call_raw_exchange(exchange.load_markets, False)
-        (
-            rules,
-            position_mode,
-            target_positions,
-            regular_orders,
-            conditional_orders,
-        ) = await asyncio.gather(
+        market = exchange.market(symbol)
+        quantity_step, price_tick, min_quantity, min_notional = (
+            _raw_instrument_rules(market)
+        )
+        rules_read = (
             self.read_instrument_rules(
                 InstrumentRulesRequest(
                     venue_id=target.venue_id,
@@ -455,7 +470,26 @@ class CcxtVenueAdapter:
                     observed_at_ms=request.observed_at_ms,
                     valid_for_ms=request.valid_for_ms,
                 )
-            ),
+            )
+            if all(
+                value is not None
+                for value in (
+                    quantity_step,
+                    price_tick,
+                    min_quantity,
+                    min_notional,
+                )
+            )
+            else _empty_value()
+        )
+        (
+            rules,
+            position_mode,
+            target_positions,
+            regular_orders,
+            conditional_orders,
+        ) = await asyncio.gather(
+            rules_read,
             _call_raw_exchange(exchange.fetch_position_mode, symbol, {}),
             _read_binance_usdm_admission_target_positions(
                 exchange=exchange,
@@ -497,10 +531,24 @@ class CcxtVenueAdapter:
                 exchange_instrument_id=target.exchange_instrument_id,
                 position_side=cast(Literal["long", "short"], position_side),
             ).key()
-            if (
-                quantity > 0
-                and domain_key not in request.ownership.owned_position_domain_keys
-            ):
+            projected_quantity = request.ownership.projected_position_quantity(
+                domain_key
+            )
+            if domain_key in request.ownership.owned_position_domain_keys:
+                if projected_quantity is None:
+                    raise InstrumentCertificationSnapshotContradiction(
+                        "owned_position_projection_missing"
+                    )
+                if projected_quantity > quantity:
+                    raise InstrumentCertificationSnapshotContradiction(
+                        "projected_position_exceeds_venue"
+                    )
+                unowned_position_qty += quantity - projected_quantity
+            elif projected_quantity is not None:
+                raise InstrumentCertificationSnapshotContradiction(
+                    "projected_position_domain_unowned"
+                )
+            else:
                 unowned_position_qty += quantity
 
         open_orders = tuple(
@@ -528,16 +576,15 @@ class CcxtVenueAdapter:
             for row in rows
         )
         owned_order_ids = set(request.ownership.owned_exchange_order_ids)
-        market = exchange.market(symbol)
         return InstrumentCertificationSnapshot(
             facts=InstrumentCertificationFacts(
                 runtime_profile_id=target.runtime_profile_id,
                 exchange_instrument_id=target.exchange_instrument_id,
                 product_status=_certification_product_status(market),
-                tick_size=rules.price_tick,
-                step_size=rules.quantity_step,
-                min_qty=rules.min_quantity,
-                min_notional=rules.min_notional,
+                tick_size=price_tick,
+                step_size=quantity_step,
+                min_qty=min_quantity,
+                min_notional=min_notional,
                 position_mode=_account_position_mode(
                     _require_mapping(
                         position_mode,
@@ -1827,6 +1874,44 @@ def _instrument_rules(
     return quantity_step, price_tick, min_quantity, min_notional
 
 
+def _raw_instrument_rules(
+    market: Mapping[str, object],
+) -> tuple[Decimal | None, Decimal | None, Decimal | None, Decimal | None]:
+    """Preserve deterministic missing/invalid rules as readonly raw facts."""
+
+    info = market.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    filters = raw_info.get("filters")
+    filter_rows = filters if isinstance(filters, list) else []
+    by_type = {
+        str(row.get("filterType") or ""): row
+        for row in filter_rows
+        if isinstance(row, Mapping)
+    }
+    lot = by_type.get("LOT_SIZE", {})
+    price_filter = by_type.get("PRICE_FILTER", {})
+    notional_filter = by_type.get("MIN_NOTIONAL") or by_type.get("NOTIONAL") or {}
+    return (
+        _optional_positive_rule_value(
+            lot.get("stepSize"),
+            fallback=_nested_market_value(market, "precision", "amount"),
+        ),
+        _optional_positive_rule_value(
+            price_filter.get("tickSize"),
+            fallback=_nested_market_value(market, "precision", "price"),
+        ),
+        _optional_positive_rule_value(
+            lot.get("minQty"),
+            fallback=_nested_market_value(market, "limits", "amount", "min"),
+        ),
+        _optional_positive_rule_value(
+            notional_filter.get("notional")
+            or notional_filter.get("minNotional"),
+            fallback=_nested_market_value(market, "limits", "cost", "min"),
+        ),
+    )
+
+
 def _certification_product_status(market: Mapping[str, object]) -> str:
     active = market.get("active")
     info = market.get("info")
@@ -1940,6 +2025,29 @@ def _positive_rule_value(
     parsed = Decimal(str(value or fallback or "0"))
     if parsed <= 0:
         raise RuntimeError(f"venue {name} is missing or non-positive")
+    return parsed
+
+
+def _optional_positive_rule_value(
+    value: object,
+    *,
+    fallback: object,
+) -> Decimal | None:
+    raw_value = (
+        fallback
+        if value is None or (isinstance(value, str) and not value.strip())
+        else value
+    )
+    if raw_value is None or (
+        isinstance(raw_value, str) and not raw_value.strip()
+    ):
+        return None
+    try:
+        parsed = Decimal(str(raw_value))
+    except (ArithmeticError, ValueError):
+        return None
+    if not parsed.is_finite() or parsed <= 0:
+        return None
     return parsed
 
 

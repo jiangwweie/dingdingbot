@@ -28,12 +28,15 @@ Implemented only **Task 7** from
 - Only `eligible` marks the canonical instrument `active`; owner-action and
   transient results restore `pending_certification`, preserving the Task 6
   Entry gate.
-- Existing BRC-owned position domains and exact exchange order IDs do not count
-  as unowned exposure.
+- Existing BRC-owned position domains subtract only the exact Kernel-projected
+  quantity; any Venue excess remains unowned exposure, while a projection above
+  Venue truth is a fail-closed contradiction. Exact owned exchange order IDs do
+  not count as unowned orders.
 - Account conditions needing human action project
   `OWNER_ACTION_REQUIRED` / `NEEDS_INTERVENTION`.
-- Temporary readonly failures only schedule bounded retry and create no Owner
-  intervention Monitor.
+- Only explicit timeout, connection, and Venue-network failures schedule bounded
+  retry and create no Owner intervention Monitor. Validation, identity, schema,
+  and ownership contradictions fail closed without a transient-state write.
 - Repeated identical blockers do not append duplicate Monitor events; blocker
   change and resolution each append exactly one state-change event.
 - Certification leaves the Universe `warming`; activation remains outside
@@ -181,6 +184,66 @@ uvx ruff check --select E4,E7,E9,F <Task-7 touched files>
 Result: **All checks passed**.
 
 `git diff --check` also passed.
+
+## Review Fix Round 1/5
+
+### Findings closed
+
+1. **Exact projected BRC quantity**
+   - `AdmissionOwnership` now requires one finite, nonnegative projected
+     quantity for every owned Netting Domain.
+   - PostgreSQL reads each active Ticket's canonical aggregate `position_qty`.
+   - Certification subtracts only that projection per side. Venue `0.01`
+     against Kernel `0.001` classifies the `0.009` excess as
+     `unowned_position`.
+   - Kernel projection above Venue quantity, missing projection, or mismatched
+     projection identity fails closed as a snapshot contradiction.
+
+2. **Deterministic rules and narrow retry**
+   - The raw certification snapshot can retain missing or invalid order-rule
+     fields as `None`; the pure classifier returns
+     `owner_action_required/missing_order_rule`.
+   - Complete positive rules are the only path that constructs and persists
+     typed `InstrumentRulesFacts`.
+   - The use case catches only `TimeoutError`, `ConnectionError`, and the
+     explicit `InstrumentCertificationTransientFailure`.
+   - The adapter maps CCXT `NetworkError` to that explicit transient type.
+     Pydantic unknown fields, wrong snapshot identity, and other contradictions
+     propagate without writing a transient certification.
+   - Test fixtures use full model validation rather than `model_copy` to create
+     invalid pseudo-facts.
+
+### Review RED evidence
+
+```text
+3 failed:
+- missing_order_rule was temporarily_unavailable
+- unknown Pydantic field did not raise
+- snapshot identity mismatch did not raise
+```
+
+The real adapter missing-`MIN_NOTIONAL` case also failed with:
+
+```text
+RuntimeError: venue minimum notional is missing or non-positive
+```
+
+### Review GREEN evidence
+
+| Focused boundary | Result |
+|---|---:|
+| Pure classifier and certification use case | **17 passed** |
+| Adapter exact/excess/contradiction/missing/invalid/network paths | **6 passed** |
+| Ownership model projection invariant | **1 passed** |
+| Entry-health ownership regression | **4 passed** |
+| PostgreSQL ownership quantity projection | **1 passed** |
+| PostgreSQL Task 7 worker/lease/Monitor | **4 passed** |
+| Reconciliation fairness | **5 passed** |
+| Ruff `E4,E7,E9,F` | **All checks passed** |
+
+All checks were scoped to Task 7 and its directly affected ownership boundary;
+no broad suite, Tokyo access, production mutation, activation, or exchange
+write was performed.
 
 ## Remaining Boundary
 

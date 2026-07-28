@@ -12,6 +12,7 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionOwnership,
     AdmissionPosition,
     EntryAdmissionSnapshot,
+    OwnedPositionProjection,
 )
 from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
@@ -74,6 +75,14 @@ def test_owned_opposite_side_position_allows_shared_leverage_without_mutation() 
     ownership = AdmissionOwnership(
         owned_position_domain_keys=(
             "binance-usdm:subaccount-main:SOLUSDT:long",
+        ),
+        owned_position_projections=(
+            OwnedPositionProjection(
+                netting_domain_key=(
+                    "binance-usdm:subaccount-main:SOLUSDT:long"
+                ),
+                quantity=Decimal("0.25"),
+            ),
         ),
         owned_exchange_order_ids=("stop:1",),
     )

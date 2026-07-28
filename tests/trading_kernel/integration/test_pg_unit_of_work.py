@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 import os
 from pathlib import Path
 import re
@@ -359,6 +360,10 @@ async def test_admission_ownership_is_bounded_to_exact_account_and_instrument(
     assert ownership.owned_position_domain_keys == (
         ticket.identity.netting_domain.key(),
     )
+    assert tuple(
+        (item.netting_domain_key, item.quantity)
+        for item in ownership.owned_position_projections
+    ) == ((ticket.identity.netting_domain.key(), Decimal("0")),)
     assert ownership.open_incident_scopes == (EntryBlockScope.ACCOUNT_CAPACITY,)
 
 

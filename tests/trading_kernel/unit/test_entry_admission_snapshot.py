@@ -7,8 +7,10 @@ import pytest
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionInstrumentFacts,
     AdmissionOrder,
+    AdmissionOwnership,
     AdmissionPosition,
     EntryAdmissionSnapshot,
+    OwnedPositionProjection,
 )
 
 
@@ -44,6 +46,27 @@ def test_snapshot_rejects_fractional_or_boolean_configured_leverage() -> None:
                     {**instrument_facts[0], "configured_leverage": True},
                 ),
             }
+        )
+
+
+def test_ownership_requires_one_quantity_projection_per_owned_domain() -> None:
+    with pytest.raises(
+        ValueError,
+        match="projections must match owned domain identities",
+    ):
+        AdmissionOwnership(owned_position_domain_keys=("domain:long",))
+
+    with pytest.raises(
+        ValueError,
+        match="projections must match owned domain identities",
+    ):
+        AdmissionOwnership(
+            owned_position_projections=(
+                OwnedPositionProjection(
+                    netting_domain_key="domain:long",
+                    quantity=Decimal("0.001"),
+                ),
+            ),
         )
 
 

@@ -37,7 +37,10 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     SetLeverageCommandResult,
 )
-from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
+from src.trading_kernel.domain.entry_admission_snapshot import (
+    AdmissionOwnership,
+    OwnedPositionProjection,
+)
 from src.trading_kernel.domain.events import (
     PERSISTED_TRADE_EVENT_MODELS,
     TicketIssued,
@@ -1240,17 +1243,33 @@ class PostgresEntryAdmissionRepository:
             trade_tickets.c.account_id == account_id,
             trade_tickets.c.active_netting_domain_key.is_not(None),
         )
-        domains_statement = sa.select(trade_tickets.c.active_netting_domain_key)
-        domains_statement = domains_statement.where(active_ticket).order_by(
-            trade_tickets.c.active_netting_domain_key
+        domains_statement = (
+            sa.select(
+                trade_tickets.c.active_netting_domain_key,
+                trade_aggregates.c.position_qty,
+            )
+            .select_from(
+                trade_tickets.join(
+                    trade_aggregates,
+                    trade_aggregates.c.ticket_id == trade_tickets.c.ticket_id,
+                )
+            )
+            .where(active_ticket)
+            .order_by(trade_tickets.c.active_netting_domain_key)
         )
-        domains_result = await self._connection.execute(
-            domains_statement
-        )
+        domain_rows = (await self._connection.execute(domains_statement)).all()
         owned_position_domain_keys = tuple(
-            str(value)
-            for value in domains_result.scalars().all()
-            if value is not None
+            str(row.active_netting_domain_key)
+            for row in domain_rows
+            if row.active_netting_domain_key is not None
+        )
+        owned_position_projections = tuple(
+            OwnedPositionProjection(
+                netting_domain_key=str(row.active_netting_domain_key),
+                quantity=Decimal(row.position_qty),
+            )
+            for row in domain_rows
+            if row.active_netting_domain_key is not None
         )
 
         order_id_columns = (
@@ -1344,6 +1363,7 @@ class PostgresEntryAdmissionRepository:
         )
         return AdmissionOwnership(
             owned_position_domain_keys=owned_position_domain_keys,
+            owned_position_projections=owned_position_projections,
             owned_exchange_order_ids=owned_exchange_order_ids,
             open_incident_scopes=open_incident_scopes,
             unknown_command_outcome_ticket_ids=unknown_command_outcome_ticket_ids,

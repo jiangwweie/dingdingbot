@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 import src.trading_kernel.interfaces.reconciliation_worker as worker_module
 from src.trading_kernel.application.certify_universe_instrument import (
@@ -111,11 +112,65 @@ class _ReadonlySource:
         self.requests.append(request)
         if self.error is not None:
             raise self.error
-        facts = _facts(observed_at_ms=request.observed_at_ms).model_copy(
-            update=self.changes
+        values = _facts(observed_at_ms=request.observed_at_ms).model_dump(
+            mode="python"
+        )
+        values.update(self.changes)
+        facts = InstrumentCertificationFacts.model_validate(
+            values
         )
         return InstrumentCertificationSnapshot(
             facts=facts,
+            instrument_rules=_rules(observed_at_ms=request.observed_at_ms),
+        )
+
+
+class _MissingRulesSource:
+    async def read_instrument_certification(self, request):
+        return InstrumentCertificationSnapshot(
+            facts=InstrumentCertificationFacts(
+                runtime_profile_id=request.target.runtime_profile_id,
+                exchange_instrument_id=request.target.exchange_instrument_id,
+                product_status="trading",
+                tick_size=Decimal("0.1"),
+                step_size=Decimal("0.001"),
+                min_qty=Decimal("0.001"),
+                min_notional=None,
+                position_mode="independent_sides",
+                margin_mode="cross",
+                configured_leverage=5,
+                unowned_position_qty=Decimal("0"),
+                unowned_open_order_count=0,
+                observed_at_ms=request.observed_at_ms,
+            ),
+            instrument_rules=None,
+        )
+
+
+class _SchemaDriftSource:
+    async def read_instrument_certification(self, request):
+        facts = _facts(observed_at_ms=request.observed_at_ms).model_dump(
+            mode="python"
+        )
+        facts["unknown_venue_field"] = "drift"
+        return InstrumentCertificationSnapshot.model_validate(
+            {
+                "facts": facts,
+                "instrument_rules": _rules(
+                    observed_at_ms=request.observed_at_ms
+                ),
+            }
+        )
+
+
+class _IdentityDriftSource:
+    async def read_instrument_certification(self, request):
+        values = _facts(observed_at_ms=request.observed_at_ms).model_dump(
+            mode="python"
+        )
+        values["runtime_profile_id"] = "profile:wrong"
+        return InstrumentCertificationSnapshot(
+            facts=InstrumentCertificationFacts.model_validate(values),
             instrument_rules=_rules(observed_at_ms=request.observed_at_ms),
         )
 
@@ -178,6 +233,58 @@ async def test_transient_read_failure_releases_claim_without_owner_monitor() -> 
     assert state.rules == []
     assert state.monitors == []
     assert state.persisted[0]["next_check_at_ms"] == 31_000
+
+
+@pytest.mark.asyncio
+async def test_missing_order_rule_is_owner_action_not_transient_retry() -> None:
+    """Catches deterministic raw product-rule absence being hidden as retry."""
+
+    state = _State()
+
+    result = await certify_universe_instrument(
+        state.factory,
+        _MissingRulesSource(),
+        _request(),
+    )
+
+    assert result.certification.status == "owner_action_required"
+    assert result.certification.blocker_code == "missing_order_rule"
+    assert state.rules == []
+    assert state.monitors[0].owner_status is MonitorOwnerStatus.NEEDS_INTERVENTION
+
+
+@pytest.mark.asyncio
+async def test_pydantic_unknown_field_drift_fails_closed_without_transient_write() -> None:
+    """Catches an upstream schema drift being persisted as retryable downtime."""
+
+    state = _State()
+
+    with pytest.raises(ValidationError, match="unknown_venue_field"):
+        await certify_universe_instrument(
+            state.factory,
+            _SchemaDriftSource(),
+            _request(),
+        )
+
+    assert state.persisted == []
+    assert state.monitors == []
+
+
+@pytest.mark.asyncio
+async def test_snapshot_identity_drift_fails_closed_without_transient_write() -> None:
+    """Catches a wrong profile/instrument snapshot being downgraded to retry."""
+
+    state = _State()
+
+    with pytest.raises(ValueError, match="identity mismatch"):
+        await certify_universe_instrument(
+            state.factory,
+            _IdentityDriftSource(),
+            _request(),
+        )
+
+    assert state.persisted == []
+    assert state.monitors == []
 
 
 @pytest.mark.asyncio
