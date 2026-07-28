@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-from decimal import Decimal
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.dispatch_exchange_command import (
@@ -47,14 +48,17 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.ticket import build_ticket_id
-from src.trading_kernel.infrastructure.pg_models import owner_policy_current
+from src.trading_kernel.infrastructure.pg_models import (
+    owner_policy_current,
+    runtime_capabilities_current,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.integration.test_command_dispatch import PreflightFacts
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
 )
-
+from tests.trading_kernel.unit.test_ticket import _ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -1064,6 +1068,28 @@ async def _reach_reconciliation_pending_after_cancel(
 
 async def _issue(engine: AsyncEngine, ticket) -> None:
     await _seed_ticket_runtime_scope(engine, ticket)
+    async with engine.begin() as connection:
+        await connection.execute(
+            pg_insert(runtime_capabilities_current)
+            .values(
+                capability_key="exchange_commands",
+                enabled=True,
+                certified_commit="kernel-test-head",
+                schema_revision="0002_crypto_strategy_universe",
+                certification={},
+                updated_at_ms=1_000,
+            )
+            .on_conflict_do_update(
+                index_elements=[runtime_capabilities_current.c.capability_key],
+                set_={
+                    "enabled": True,
+                    "certified_commit": "kernel-test-head",
+                    "schema_revision": "0002_crypto_strategy_universe",
+                    "certification": {},
+                    "updated_at_ms": 1_000,
+                },
+            )
+        )
     async with PostgresKernelUnitOfWork(engine) as uow:
         result = await issue_ticket(
             uow,
@@ -1086,7 +1112,11 @@ async def _dispatch(
             now_ms=now_ms,
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
 
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -34,18 +34,21 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandStatus,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
-from src.trading_kernel.infrastructure.pg_models import owner_policy_current
+from src.trading_kernel.infrastructure.pg_models import (
+    owner_policy_current,
+    runtime_capabilities_current,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.integration.test_command_dispatch import PreflightFacts
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
 )
-
+from tests.trading_kernel.unit.test_ticket import _ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -216,7 +219,7 @@ async def test_readonly_certification_prints_json_without_report_files(
             RuntimeAuthoritySeedRequest(
                 account_id="subaccount-main",
                 runtime_commit="a" * 40,
-                schema_revision="0001_initial",
+                schema_revision="0002_crypto_strategy_universe",
                 seeded_at_ms=1_000,
             ),
         )
@@ -241,7 +244,7 @@ async def test_readonly_certification_prints_json_without_report_files(
     payload = json.loads(result.stdout)
     assert payload["schema"] == "brc.trading_kernel.readonly_certification.v1"
     assert payload["status"] == "pass"
-    assert payload["alembic_revision"] == "0001_initial"
+    assert payload["alembic_revision"] == "0002_crypto_strategy_universe"
     assert payload["checks"]["integrity_orphans"] == 0
     assert payload["checks"]["legacy_execution_tables"] == 0
     assert sorted(path.name for path in tmp_path.iterdir()) == before
@@ -271,7 +274,7 @@ async def test_schema_verifier_accepts_only_clean_baseline(
     payload = json.loads(result.stdout)
     assert payload["schema"] == "brc.trading_kernel.schema_verification.v1"
     assert payload["status"] == "pass"
-    assert payload["alembic_revision"] == "0001_initial"
+    assert payload["alembic_revision"] == "0002_crypto_strategy_universe"
     assert payload["missing_tables"] == []
     assert payload["unexpected_tables"] == []
 
@@ -319,7 +322,11 @@ async def _dispatch(
             now_ms=now_ms,
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
 
 
@@ -340,6 +347,16 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 min_liquidation_distance_to_stop_distance_ratio="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
                 scope={},
+                updated_at_ms=1_000,
+            )
+        )
+        await connection.execute(
+            sa.insert(runtime_capabilities_current).values(
+                capability_key="exchange_commands",
+                enabled=True,
+                certified_commit="kernel-test-head",
+                schema_revision="0002_crypto_strategy_universe",
+                certification={},
                 updated_at_ms=1_000,
             )
         )

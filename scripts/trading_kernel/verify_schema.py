@@ -7,12 +7,11 @@ import argparse
 import asyncio
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -20,9 +19,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.trading_kernel.infrastructure.pg_models import metadata  # noqa: E402
 
-
 SCHEMA = "brc.trading_kernel.schema_verification.v1"
-EXPECTED_ALEMBIC_REVISION = "0001_initial"
+EXPECTED_ALEMBIC_REVISION = "0002_crypto_strategy_universe"
 
 
 def _parser() -> argparse.ArgumentParser:

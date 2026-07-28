@@ -4,7 +4,6 @@ from decimal import Decimal
 
 import pytest
 
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandRequest,
     dispatch_one_command,
@@ -30,13 +29,14 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
+from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import (
     KindAwareAcceptingVenue,
+    PreflightFacts,
     _issue,
     _seed_policy,
 )
 from tests.trading_kernel.unit.test_ticket import _ticket
-
 
 lifecycle_engine = dispatch_fixture.dispatch_engine
 
@@ -521,7 +521,11 @@ async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
             now_ms=now_ms,
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_crypto_strategy_universe",
+            admission_snapshot_validity_ms=1_000,
         ),
+        entry_facts_source=PreflightFacts(),
     )
     assert result.command_id is not None
 
