@@ -336,6 +336,49 @@ async def test_read_status_is_readonly_bounded_and_redacts_sensitive_state(
     try:
         async with engine.begin() as connection:
             await connection.execute(
+                sa.update(instrument_certification_current)
+                .where(
+                    instrument_certification_current.c.exchange_instrument_id
+                    == "binance-usdm:BTCUSDT:perpetual"
+                )
+                .values(blocker_code="credential=SECRET")
+            )
+        corrupt_blocker = subprocess.run(
+            [
+                sys.executable,
+                str(STATUS_SCRIPT),
+                "--database-url",
+                script_database_url,
+                "--runtime-profile-id",
+                RUNTIME_PROFILE_ID,
+                "--event-spec-id",
+                "SOR-LONG",
+            ],
+            cwd=tmp_path,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.update(instrument_certification_current)
+                .where(
+                    instrument_certification_current.c.exchange_instrument_id
+                    == "binance-usdm:BTCUSDT:perpetual"
+                )
+                .values(blocker_code="configured_leverage_mismatch")
+            )
+    finally:
+        await engine.dispose()
+    assert corrupt_blocker.returncode == 1
+    assert corrupt_blocker.stdout == ""
+    assert corrupt_blocker.stderr == "error=operation_failed\n"
+    assert "SECRET" not in corrupt_blocker.stderr
+
+    engine = create_async_engine(script_database_url)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
                 sa.update(monitor_current).values(owner_status="credential=SECRET")
             )
         corrupt_status = subprocess.run(

@@ -7,7 +7,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
+from src.trading_kernel.application.read_strategy_universe_status import (
+    StrategyUniverseMemberStatus,
+)
 from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -134,6 +138,19 @@ def test_status_cli_rejects_non_exact_identity_without_secret_traceback(
     assert "Traceback" not in completed.stderr
     assert "SECRET" not in completed.stderr
     assert tuple(tmp_path.iterdir()) == ()
+
+
+def test_status_member_rejects_noncanonical_certification_blocker() -> None:
+    """Catches arbitrary persisted blocker text reaching the terminal model."""
+
+    with pytest.raises(ValidationError):
+        StrategyUniverseMemberStatus(
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            certification_status="owner_action_required",
+            warm_ready=False,
+            monitor_status="needs_intervention",
+            blocker_code="credential=SECRET",
+        )
 
 
 @pytest.mark.asyncio

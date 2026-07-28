@@ -6,6 +6,10 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.instrument_certification import (
+    InstrumentCertificationBlockerCode,
+)
+
 if TYPE_CHECKING:
     from src.trading_kernel.application.ports import KernelUnitOfWork
 
@@ -49,7 +53,7 @@ class StrategyUniverseMemberStatus(BaseModel):
     certification_status: CertificationDisplayStatus
     warm_ready: bool
     monitor_status: MonitorDisplayStatus | None
-    blocker_code: str | None
+    blocker_code: InstrumentCertificationBlockerCode | None
 
 
 class StrategyUniverseVersionStatus(BaseModel):

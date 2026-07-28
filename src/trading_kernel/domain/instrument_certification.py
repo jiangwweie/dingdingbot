@@ -15,6 +15,16 @@ CertificationStatus = Literal[
     "owner_action_required",
     "temporarily_unavailable",
 ]
+InstrumentCertificationBlockerCode = Literal[
+    "product_not_trading",
+    "missing_order_rule",
+    "position_mode_mismatch",
+    "margin_mode_mismatch",
+    "configured_leverage_mismatch",
+    "unowned_position",
+    "unowned_open_order",
+    "readonly_facts_unavailable",
+]
 
 
 class InstrumentCertificationFacts(BaseModel):
@@ -61,7 +71,7 @@ class InstrumentCertification(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     status: CertificationStatus
-    blocker_code: str | None
+    blocker_code: InstrumentCertificationBlockerCode | None
     facts_digest: str
     observed_at_ms: int
     valid_until_ms: int
@@ -99,7 +109,7 @@ def _blocker_code(
     *,
     required_leverage: int,
     required_margin_mode: Literal["cross"],
-) -> str | None:
+) -> InstrumentCertificationBlockerCode | None:
     if facts.product_status != "trading":
         return "product_not_trading"
     if any(

@@ -213,6 +213,62 @@ The Task 12 focused, Universe PostgreSQL, fault-recovery, architecture, and
 static gates remain green. Repairing retired full-chain fixtures belongs to a
 separate reviewed task.
 
+## Independent review P2 fix
+
+### Finding
+
+The first review found that `monitor_status` had a canonical display type, but
+`StrategyUniverseMemberStatus.blocker_code` remained `str | None`.
+Consequently, a corrupted PostgreSQL certification blocker such as
+`credential=SECRET` could reach the fixed terminal formatter and be printed
+verbatim.
+
+### RED
+
+1. Model RED:
+   `test_status_member_rejects_noncanonical_certification_blocker`
+   - Result: **1 failed**.
+   - Exact failure: expected `ValidationError` was not raised.
+2. Disposable PostgreSQL plus real CLI RED:
+   `test_read_status_is_readonly_bounded_and_redacts_sensitive_state`
+   - Result: **1 failed**.
+   - Exact failure: after setting persisted
+     `blocker_code=credential=SECRET`, the CLI returned exit 0 and emitted the
+     corrupt blocker instead of fixed `error=operation_failed`.
+
+### GREEN
+
+- Added the shared `InstrumentCertificationBlockerCode` type containing only
+  the eight blockers emitted by the current classifier and transient
+  certification path:
+  - `product_not_trading`;
+  - `missing_order_rule`;
+  - `position_mode_mismatch`;
+  - `margin_mode_mismatch`;
+  - `configured_leverage_mismatch`;
+  - `unowned_position`;
+  - `unowned_open_order`;
+  - `readonly_facts_unavailable`.
+- `InstrumentCertification.blocker_code` and
+  `StrategyUniverseMemberStatus.blocker_code` now share that exact type.
+- The PostgreSQL status query reads no additional columns. An unknown or
+  polluted persisted blocker fails output-model validation; the CLI catches
+  the failure and emits only `error=operation_failed`.
+
+### Review-fix verification
+
+1. Exact RED pair rerun: **2 passed**.
+2. Certification plus Task 12 focused group: **30 passed in 10.07s**.
+3. Universe unit/PostgreSQL/fault-recovery proportional regression:
+   **132 passed in 74.76s**.
+4. Architecture and runtime-file-I/O suite: **28 passed in 0.86s**.
+5. Ruff `E4,E7,E9,F`: **All checks passed**.
+6. Mypy changed source: **no issues found in 3 source files**.
+7. `py_compile` and `git diff --check`: **passed**.
+8. The full-chain suite was not rerun for this output-model-only fix; its
+   previously recorded **24/32** baseline and eight out-of-scope fixture
+   failures remain disclosed above.
+
 ## Stop boundary
 
 Task 12 stops at local commit and independent review. It does not authorize

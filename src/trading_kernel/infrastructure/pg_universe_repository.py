@@ -46,6 +46,7 @@ from src.trading_kernel.application.read_strategy_universe_status import (
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertification,
+    InstrumentCertificationBlockerCode,
 )
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
@@ -498,7 +499,10 @@ class PostgresStrategyUniverseRepository:
                             blocker_code=(
                                 None
                                 if row["blocker_code"] is None
-                                else str(row["blocker_code"])
+                                else cast(
+                                    InstrumentCertificationBlockerCode,
+                                    str(row["blocker_code"]),
+                                )
                             ),
                         )
                         for row in version_rows
