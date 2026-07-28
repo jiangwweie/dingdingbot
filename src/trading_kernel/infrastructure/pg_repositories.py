@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, cast
 
 import sqlalchemy as sa
 from pydantic import TypeAdapter
@@ -496,22 +496,20 @@ class PostgresExchangeCommandRepository:
             payload = _COMMAND_PAYLOAD_ADAPTER.validate_python(row["request_payload"])
             if not isinstance(payload, OrderCommandPayload):
                 raise RuntimeError("accepted order command has a non-order payload")
-            namespace = (
-                OrderNamespace.CONDITIONAL
-                if payload.order_type in {"stop_market", "take_profit_market"}
-                else OrderNamespace.REGULAR
-            )
-            conditional_expectation = (
-                ConditionalOrderExpectation(
+            if payload.order_type in {"stop_market", "take_profit_market"}:
+                namespace = OrderNamespace.CONDITIONAL
+                conditional_expectation: ConditionalOrderExpectation | None = (
+                    ConditionalOrderExpectation(
                     exchange_instrument_id=str(ticket_row["exchange_instrument_id"]),
-                    position_side=str(ticket_row["position_side"]),
-                    side=payload.side,
-                    order_type=payload.order_type,
-                    quantity=payload.quantity,
+                        position_side=_position_side(ticket_row["position_side"]),
+                        side=payload.side,
+                        order_type=payload.order_type,
+                        quantity=payload.quantity,
+                    )
                 )
-                if namespace is OrderNamespace.CONDITIONAL
-                else None
-            )
+            else:
+                namespace = OrderNamespace.REGULAR
+                conditional_expectation = None
             references.append(
                 TicketOrderReference(
                     command_id=str(row["command_id"]),
@@ -1212,6 +1210,9 @@ class PostgresEntryAdmissionRepository:
         row = result.mappings().one_or_none()
         if row is None:
             return None
+        supported_margin_mode = str(row["supported_margin_mode"])
+        if supported_margin_mode != "cross":
+            raise RuntimeError("Owner policy has unsupported margin mode")
         return OwnerPolicySnapshot(
             owner_policy_id=str(row["owner_policy_id"]),
             policy_version=int(row["policy_version"]),
@@ -1224,7 +1225,7 @@ class PostgresEntryAdmissionRepository:
                 row["max_initial_margin_utilization"]
             ),
             max_leverage=int(row["max_leverage"]),
-            supported_margin_mode=str(row["supported_margin_mode"]),
+            supported_margin_mode=cast(Literal["cross"], supported_margin_mode),
             min_liquidation_distance_to_stop_distance_ratio=Decimal(
                 row["min_liquidation_distance_to_stop_distance_ratio"]
             ),
@@ -1621,6 +1622,9 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         runtime=runtime,
         netting_domain=domain,
     )
+    margin_mode = str(row["margin_mode"])
+    if margin_mode != "cross":
+        raise RuntimeError("Ticket has unsupported margin mode")
     return TradeTicket(
         identity=identity,
         owner_policy_id=str(row["owner_policy_id"]),
@@ -1642,7 +1646,7 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         leverage_change_required=bool(row["leverage_change_required"]),
         reserved_margin=Decimal(row["reserved_margin"]),
         risk_reservation_basis=str(row["risk_reservation_basis"]),
-        margin_mode=str(row["margin_mode"]),
+        margin_mode=cast(Literal["cross"], margin_mode),
         min_liquidation_distance_to_stop_distance_ratio=Decimal(
             row["min_liquidation_distance_to_stop_distance_ratio"]
         ),
@@ -1762,6 +1766,12 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         exchange_instrument_id=str(row["exchange_instrument_id"]),
         position_side=_position_side(row["position_side"]),
     )
+    position_mode_at_claim = str(row["position_mode_at_claim"])
+    if position_mode_at_claim not in {"independent_sides", "one_way"}:
+        raise RuntimeError("Capacity Claim has unsupported position mode")
+    margin_mode_at_claim = str(row["margin_mode_at_claim"])
+    if margin_mode_at_claim not in {"cross", "isolated"}:
+        raise RuntimeError("Capacity Claim has unsupported margin mode")
     return CapacityClaim(
         capacity_claim_id=str(row["capacity_claim_id"]),
         ticket_identity=TicketIdentity(
@@ -1794,8 +1804,14 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         ),
         available_margin_at_claim=Decimal(row["available_margin_at_claim"]),
         mark_price_at_claim=Decimal(row["mark_price_at_claim"]),
-        position_mode_at_claim=str(row["position_mode_at_claim"]),
-        margin_mode_at_claim=str(row["margin_mode_at_claim"]),
+        position_mode_at_claim=cast(
+            Literal["independent_sides", "one_way"],
+            position_mode_at_claim,
+        ),
+        margin_mode_at_claim=cast(
+            Literal["cross", "isolated"],
+            margin_mode_at_claim,
+        ),
         active_ticket_count_at_claim=int(row["active_ticket_count_at_claim"]),
         remaining_slots_at_claim=int(row["remaining_slots_at_claim"]),
         planned_stop_risk_fraction=Decimal(row["planned_stop_risk_fraction"]),

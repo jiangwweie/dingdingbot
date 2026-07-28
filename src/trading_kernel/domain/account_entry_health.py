@@ -90,13 +90,17 @@ def _health(
         venue_id=snapshot.venue_id,
         account_id=snapshot.account_id,
     )
-    payload = {
-        "status": status,
-        "entry_block_scope": scope,
-        "entry_block_key": block_key,
-        "entry_admission_snapshot_digest": snapshot_digest,
-    }
     return AccountEntryHealth(
-        **payload,
-        decision_digest=canonical_digest(payload),
+        status=status,
+        entry_block_scope=scope,
+        entry_block_key=block_key,
+        entry_admission_snapshot_digest=snapshot_digest,
+        decision_digest=canonical_digest(
+            {
+                "status": status,
+                "entry_block_scope": scope,
+                "entry_block_key": block_key,
+                "entry_admission_snapshot_digest": snapshot_digest,
+            }
+        ),
     )

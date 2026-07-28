@@ -14,6 +14,11 @@ from src.trading_kernel.application.ports import (
     VenueTruthPort,
     VenueTruthRequest,
 )
+from src.trading_kernel.application.reconcile_leverage_command import (
+    ReconcileLeverageCommandRequest,
+    ReconcileLeverageCommandResult,
+    reconcile_leverage_command,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
@@ -86,7 +91,7 @@ async def recover_unknown_command(
     uow_factory: UnitOfWorkFactory,
     venue_truth: VenueTruthPort,
     request: RecoverUnknownCommandRequest,
-) -> UnknownRecoveryDecision:
+) -> UnknownRecoveryDecision | ReconcileLeverageCommandResult:
     async with uow_factory() as uow:
         command = await uow.exchange_commands.get(request.command_id)
         if command is None:
@@ -95,11 +100,6 @@ async def recover_unknown_command(
             raise ValueError("command is not in unknown-outcome state")
 
     if command.kind is ExchangeCommandKind.SET_LEVERAGE:
-        from src.trading_kernel.application.reconcile_leverage_command import (
-            ReconcileLeverageCommandRequest,
-            reconcile_leverage_command,
-        )
-
         return await reconcile_leverage_command(
             uow_factory,
             venue_truth,
@@ -110,6 +110,9 @@ async def recover_unknown_command(
             ),
         )
 
+    venue_client_order_id = command.venue_client_order_id
+    if venue_client_order_id is None:
+        raise RuntimeError("unknown order command lacks venue client order identity")
     truth_request = VenueTruthRequest(
         command_id=command.command_id,
         kind=command.kind,
@@ -119,7 +122,7 @@ async def recover_unknown_command(
             command.ticket_identity.netting_domain.exchange_instrument_id
         ),
         position_side=command.ticket_identity.netting_domain.position_side,
-        venue_client_order_id=command.venue_client_order_id,
+        venue_client_order_id=venue_client_order_id,
         payload=command.payload,
         observed_at_ms=request.now_ms,
     )

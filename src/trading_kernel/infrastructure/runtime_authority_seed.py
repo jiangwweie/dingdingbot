@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from hashlib import sha256
-import json
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, field_validator
 import sqlalchemy as sa
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -25,11 +25,11 @@ from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
     owner_policy_current,
     owner_policy_events,
+    positions_current,
     runtime_capabilities_current,
     runtime_incidents,
     runtime_profiles,
     schema_metadata,
-    positions_current,
     trade_aggregates,
     trade_reviews,
     trade_tickets,
@@ -38,7 +38,6 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
-
 
 RUNTIME_PROFILE_ID = "tiny-live-v1"
 OWNER_POLICY_ID = "policy-main"
@@ -834,6 +833,9 @@ def _policy_matches(
 
 
 def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
+    supported_margin_mode = str(values["supported_margin_mode"])
+    if supported_margin_mode != "cross":
+        raise RuntimeError("runtime policy has unsupported margin mode")
     return RuntimePolicyState(
         owner_policy_id=str(values["owner_policy_id"]),
         policy_version=int(str(values["policy_version"])),
@@ -846,7 +848,7 @@ def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
             str(values["max_initial_margin_utilization"])
         ),
         max_leverage=int(str(values["max_leverage"])),
-        supported_margin_mode=str(values["supported_margin_mode"]),
+        supported_margin_mode=cast(Literal["cross"], supported_margin_mode),
         min_liquidation_distance_to_stop_distance_ratio=Decimal(
             str(values["min_liquidation_distance_to_stop_distance_ratio"])
         ),

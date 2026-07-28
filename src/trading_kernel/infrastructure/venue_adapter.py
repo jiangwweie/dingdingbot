@@ -3,24 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
-from dataclasses import dataclass
 import inspect
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal, Protocol, cast
 
-from ccxt.base.errors import NetworkError as CcxtNetworkError
+from ccxt.base import errors as ccxt_errors  # type: ignore[import-untyped]
 from pydantic import JsonValue
 
-from src.trading_kernel.application.maintain_ticket_lifecycle import (
-    TicketLifecycleFacts,
-)
 from src.trading_kernel.application.certify_universe_instrument import (
     InstrumentCertificationReadRequest,
     InstrumentCertificationSnapshot,
     InstrumentCertificationTransientFailure,
+)
+from src.trading_kernel.application.maintain_ticket_lifecycle import (
+    TicketLifecycleFacts,
 )
 from src.trading_kernel.application.ports import (
     LeverageTruthRequest,
@@ -61,16 +60,16 @@ from src.trading_kernel.domain.fee_valuation import (
     NativeFee,
     value_native_fee,
 )
+from src.trading_kernel.domain.identities import NettingDomain
+from src.trading_kernel.domain.instrument_certification import (
+    InstrumentCertificationFacts,
+)
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_ccxt_symbol,
     parse_binance_usdm_instrument_id,
     to_ccxt_symbol,
     to_exchange_instrument_id,
 )
-from src.trading_kernel.domain.instrument_certification import (
-    InstrumentCertificationFacts,
-)
-from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.order_attribution import (
     OrderRole,
     ResolvedOrderIdentity,
@@ -88,6 +87,8 @@ from src.trading_kernel.infrastructure.binance_fee_valuation import (
 from src.trading_kernel.infrastructure.binance_order_attribution import (
     resolve_binance_order_identity,
 )
+
+CcxtNetworkError = ccxt_errors.NetworkError
 
 
 class _CcxtExchange(Protocol):
@@ -551,28 +552,32 @@ class CcxtVenueAdapter:
             else:
                 unowned_position_qty += quantity
 
+        open_order_sources: tuple[
+            tuple[Literal["regular", "conditional"], list[object]],
+            tuple[Literal["regular", "conditional"], list[object]],
+        ] = (
+            (
+                "regular",
+                _require_list(
+                    regular_orders,
+                    name="certification regular open orders",
+                ),
+            ),
+            (
+                "conditional",
+                _require_list(
+                    conditional_orders,
+                    name="certification conditional open orders",
+                ),
+            ),
+        )
         open_orders = tuple(
             _admission_order(
                 row,
                 exchange_instrument_id=target.exchange_instrument_id,
                 order_namespace=namespace,
             )
-            for namespace, rows in (
-                (
-                    "regular",
-                    _require_list(
-                        regular_orders,
-                        name="certification regular open orders",
-                    ),
-                ),
-                (
-                    "conditional",
-                    _require_list(
-                        conditional_orders,
-                        name="certification conditional open orders",
-                    ),
-                ),
-            )
+            for namespace, rows in open_order_sources
             for row in rows
         )
         owned_order_ids = set(request.ownership.owned_exchange_order_ids)
@@ -1420,7 +1425,7 @@ def _admission_balance_decimal(
 
 
 def _admission_margin_mode(rows: list[object]) -> Literal["cross", "isolated"]:
-    modes: set[str] = set()
+    modes: set[Literal["cross", "isolated"]] = set()
     for row in rows:
         mapping = _require_mapping(row, name="admission position row")
         raw = _mapping_value(mapping.get("info"), "marginType")
@@ -1429,10 +1434,10 @@ def _admission_margin_mode(rows: list[object]) -> Literal["cross", "isolated"]:
         normalized = str(raw or "").strip().lower()
         if normalized not in {"cross", "isolated"}:
             raise RuntimeError("venue admission position lacks valid margin mode")
-        modes.add(normalized)
+        modes.add(cast(Literal["cross", "isolated"], normalized))
     if len(modes) != 1:
         raise RuntimeError("venue admission margin mode is absent or contradictory")
-    return next(iter(modes))  # type: ignore[return-value]
+    return next(iter(modes))
 
 
 def _admission_instrument_facts(
@@ -2334,7 +2339,7 @@ def _lifecycle_market_facts(
 
 def _account_position_mode(
     value: Mapping[object, object],
-) -> str:
+) -> Literal["independent_sides", "one_way"]:
     hedged = value.get("hedged")
     if not isinstance(hedged, bool):
         raise RuntimeError("venue position mode response lacks hedged boolean")

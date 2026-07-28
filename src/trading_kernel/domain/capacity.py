@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, localcontext
-from enum import StrEnum
-from hashlib import sha256
 import json
 import re
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
+from enum import StrEnum
+from hashlib import sha256
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
-
 
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _PERSISTED_DECIMAL_QUANTUM = Decimal("0.000000000000000001")
@@ -345,6 +344,8 @@ class CapacityClaim(BaseModel):
         return self
 
     def to_ticket(self) -> TradeTicket:
+        if self.margin_mode_at_claim != "cross":
+            raise ValueError("Ticket issuance requires the supported cross margin mode")
         return TradeTicket(
             identity=self.ticket_identity,
             owner_policy_id=self.owner_policy_id,
@@ -644,5 +645,3 @@ def _quantize_storage_decimal(value: Decimal, *, rounding: str) -> Decimal:
     with localcontext() as context:
         context.prec = 60
         return value.quantize(_PERSISTED_DECIMAL_QUANTUM, rounding=rounding)
-    venue_id: str
-    exchange_instrument_id: str

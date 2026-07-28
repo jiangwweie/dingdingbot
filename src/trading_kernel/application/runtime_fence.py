@@ -8,7 +8,6 @@ from src.trading_kernel.application.ports import (
 )
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 
-
 _RUNTIME_FENCE_INCIDENT_ID = "incident:runtime-fence"
 _RUNTIME_FENCE_INCIDENT_KIND = "runtime_identity_mismatch"
 
@@ -30,7 +29,7 @@ async def runtime_writer_is_certified(
             and capability.certified_commit == runtime_commit
             and capability.schema_revision == schema_revision
         )
-        if identity_matches and capability.enabled:
+        if identity_matches and capability is not None and capability.enabled:
             return True
         if identity_matches:
             # Staged readonly operation is an intentional command fence, not drift.

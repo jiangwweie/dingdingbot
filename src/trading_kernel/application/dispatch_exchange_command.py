@@ -164,7 +164,7 @@ async def dispatch_one_command(
             command_kinds=request.command_kinds,
         )
         if expired is not None:
-            result = ExchangeCommandResult(
+            expired_result = ExchangeCommandResult(
                 status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
                 observed_at_ms=request.now_ms,
                 reason="stale_claim_after_restart",
@@ -175,11 +175,11 @@ async def dispatch_one_command(
             event = _command_result_event(
                 command=expired,
                 aggregate=aggregate,
-                result=result,
+                result=expired_result,
             )
             await uow.exchange_commands.record_expired_claim_unknown(
                 command_id=expired.command_id,
-                result=result,
+                result=expired_result,
             )
             await uow.commit_reduction(
                 event=event,
@@ -249,7 +249,7 @@ async def dispatch_one_command(
         if command.kind is ExchangeCommandKind.SET_LEVERAGE:
             if not isinstance(command.payload, SetLeverageCommandPayload):
                 raise RuntimeError("SET_LEVERAGE command payload is invalid")
-            result: ExchangeCommandResult | SetLeverageCommandResult = (
+            dispatch_result: ExchangeCommandResult | SetLeverageCommandResult = (
                 await asyncio.wait_for(
                     venue.set_leverage(
                         VenueSetLeverageRequest(
@@ -280,30 +280,30 @@ async def dispatch_one_command(
                 payload=command.payload,
                 deadline_at_ms=command.deadline_at_ms,
             )
-            result = await asyncio.wait_for(
+            dispatch_result = await asyncio.wait_for(
                 venue.execute(venue_request),
                 timeout=request.timeout_seconds,
             )
     except VenueMutationRejected as exc:
-        result = ExchangeCommandResult(
+        dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.REJECTED,
             observed_at_ms=request.now_ms,
             reason=f"venue_rejected:{type(exc).__name__}",
         )
     except VenueMutationFailure as exc:
-        result = ExchangeCommandResult(
+        dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
             observed_at_ms=request.now_ms,
             reason=f"venue_error:{exc.reason}",
         )
     except TimeoutError:
-        result = ExchangeCommandResult(
+        dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
             observed_at_ms=request.now_ms,
             reason="venue_timeout",
         )
     except Exception as exc:
-        result = ExchangeCommandResult(
+        dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
             observed_at_ms=request.now_ms,
             reason=f"venue_error:{type(exc).__name__}",
@@ -311,13 +311,13 @@ async def dispatch_one_command(
 
     if (
         command.kind is ExchangeCommandKind.SET_LEVERAGE
-        and isinstance(result, SetLeverageCommandResult)
+        and isinstance(dispatch_result, SetLeverageCommandResult)
         and isinstance(command.payload, SetLeverageCommandPayload)
-        and result.exchange_configured_leverage != command.payload.desired_leverage
+        and dispatch_result.exchange_configured_leverage != command.payload.desired_leverage
     ):
-        result = ExchangeCommandResult(
+        dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
-            observed_at_ms=result.leverage_verified_at_ms,
+            observed_at_ms=dispatch_result.leverage_verified_at_ms,
             reason="leverage_readback_mismatch",
         )
 
@@ -328,19 +328,19 @@ async def dispatch_one_command(
         event = _command_result_event(
             command=command,
             aggregate=aggregate,
-            result=result,
+            result=dispatch_result,
         )
-        if isinstance(result, SetLeverageCommandResult):
+        if isinstance(dispatch_result, SetLeverageCommandResult):
             await uow.exchange_commands.record_leverage_result(
                 command_id=command.command_id,
                 worker_id=request.worker_id,
-                result=result,
+                result=dispatch_result,
             )
         else:
             await uow.exchange_commands.record_result(
                 command_id=command.command_id,
                 worker_id=request.worker_id,
-                result=result,
+                result=dispatch_result,
             )
         await uow.commit_reduction(
             event=event,
@@ -351,8 +351,8 @@ async def dispatch_one_command(
     return DispatchCommandResult(
         status=(
             DispatchCommandStatus.ACCEPTED
-            if isinstance(result, SetLeverageCommandResult)
-            else DispatchCommandStatus(result.status.value)
+            if isinstance(dispatch_result, SetLeverageCommandResult)
+            else DispatchCommandStatus(dispatch_result.status.value)
         ),
         command_id=command.command_id,
     )
