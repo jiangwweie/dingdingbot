@@ -27,7 +27,23 @@ configured `5x` leverage for all supported instruments, then stops the old
 workers and switches the release. Schema rebuild and destructive cutover
 checks are outside this regular-release path.
 
-After switching, Observation, Lifecycle, and Reconciliation start first.
+An explicit `--protected-ticket-id` handover is a separate, one-time
+fix-forward mode for an exact set of already `position_protected` Tickets. It
+does not relax the normal flat-release rule: the caller must name every active
+Ticket, every named Ticket must retain a complete active Stop and TP1 identity,
+projected quantity must equal protected quantity, the ENTRY lane must be idle,
+and there must be zero unresolved Exchange Command or Incident. PostgreSQL
+atomically rechecks those predicates while all old workers are stopped before
+it rotates runtime identity. The mode permits no schema change, no new ENTRY,
+no Ticket/quantity/policy mutation, and no exchange write outside the normal
+Lifecycle durable-command chain. It also requires the exchange protected
+position and open-order domain counts to equal the named Ticket count. It is
+not a general active-position upgrade mechanism. Observation and
+Reconciliation restart first for a static target identity check; Lifecycle
+restarts only after that check so its intended recovery mutation cannot race
+the handover certification.
+
+After a normal switch, Observation, Lifecycle, and Reconciliation start first.
 Readonly database and exchange certification repeats against the target
 release. Entry starts last only when explicitly requested and every postflight
 gate passes. A failure after service stop writes the Entry fence and restores

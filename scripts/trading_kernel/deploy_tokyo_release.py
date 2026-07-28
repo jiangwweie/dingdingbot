@@ -27,9 +27,14 @@ CURRENT_RELEASE = "/opt/brc/current"
 RUNTIME_ENV = "/etc/brc/trading-kernel.env"
 WRITE_FENCE = "/etc/brc/trading-kernel.write-fenced"
 ENTRY_SERVICE = "brc-trading-kernel-entry-worker.service"
+LIFECYCLE_SERVICE = "brc-trading-kernel-lifecycle-worker.service"
 SAFETY_SERVICES = (
     "brc-trading-kernel-observation-worker.service",
-    "brc-trading-kernel-lifecycle-worker.service",
+    LIFECYCLE_SERVICE,
+    "brc-trading-kernel-reconciliation-worker.service",
+)
+PROTECTED_HANDOVER_PRE_LIFECYCLE_SERVICES = (
+    "brc-trading-kernel-observation-worker.service",
     "brc-trading-kernel-reconciliation-worker.service",
 )
 ALL_SERVICES = (
@@ -57,6 +62,7 @@ class DeploymentPlan:
     schema_revision: str
     expected_configured_leverage: int
     enable_entry: bool
+    protected_ticket_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _COMMIT.fullmatch(self.target_commit):
@@ -70,6 +76,10 @@ class DeploymentPlan:
             raise ValueError("regular deployment cannot change schema revision")
         if self.expected_configured_leverage != EXPECTED_CONFIGURED_LEVERAGE:
             raise ValueError("production configured leverage must remain fixed at 5x")
+        if any(not ticket_id.strip() for ticket_id in self.protected_ticket_ids):
+            raise ValueError("protected Ticket identities must be non-blank")
+        if len(set(self.protected_ticket_ids)) != len(self.protected_ticket_ids):
+            raise ValueError("protected Ticket identities must be distinct")
 
 
 @dataclass(frozen=True)
@@ -87,6 +97,8 @@ class TokyoReleaseBackend(Protocol):
 
     def certify_flat(self, release: str) -> Mapping[str, object]: ...
 
+    def certify_protected(self, release: str) -> Mapping[str, object]: ...
+
     def probe_exchange(self, release: str) -> Mapping[str, object]: ...
 
     def read_release_marker(self, release: str, marker: str) -> str: ...
@@ -102,6 +114,14 @@ class TokyoReleaseBackend(Protocol):
         release: str,
         commit: str,
         schema_revision: str,
+    ) -> Mapping[str, object]: ...
+
+    def deploy_protected_identity(
+        self,
+        release: str,
+        commit: str,
+        schema_revision: str,
+        ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]: ...
 
     def activate_release(
@@ -125,12 +145,25 @@ def deploy_tokyo_release(
     if current_release == plan.target_release:
         raise DeploymentBlocked("target release is already current")
     backend.install_release(plan.target_commit, plan.target_release)
-    current_certification = backend.certify_flat(plan.target_release)
+    current_certification = (
+        backend.certify_protected(plan.target_release)
+        if plan.protected_ticket_ids
+        else backend.certify_flat(plan.target_release)
+    )
     current_probe = backend.probe_exchange(plan.target_release)
-    current_identity = _require_release_facts(
-        current_certification,
-        current_probe,
-        expected_leverage=plan.expected_configured_leverage,
+    current_identity = (
+        _require_protected_release_facts(
+            current_certification,
+            current_probe,
+            expected_leverage=plan.expected_configured_leverage,
+            protected_ticket_count=len(plan.protected_ticket_ids),
+        )
+        if plan.protected_ticket_ids
+        else _require_release_facts(
+            current_certification,
+            current_probe,
+            expected_leverage=plan.expected_configured_leverage,
+        )
     )
     _require_marker(
         backend,
@@ -157,10 +190,19 @@ def deploy_tokyo_release(
                 + ",".join(sorted(active_after_stop))
             )
 
-        deployment_identity = backend.deploy_identity(
-            plan.target_release,
-            plan.target_commit,
-            plan.schema_revision,
+        deployment_identity = (
+            backend.deploy_protected_identity(
+                plan.target_release,
+                plan.target_commit,
+                plan.schema_revision,
+                plan.protected_ticket_ids,
+            )
+            if plan.protected_ticket_ids
+            else backend.deploy_identity(
+                plan.target_release,
+                plan.target_commit,
+                plan.schema_revision,
+            )
         )
         seed_identity = _require_deployment_identity(
             deployment_identity,
@@ -172,14 +214,32 @@ def deploy_tokyo_release(
             plan.schema_revision,
             seed_identity,
         )
-        backend.start_services(SAFETY_SERVICES)
+        initial_safety_services = (
+            PROTECTED_HANDOVER_PRE_LIFECYCLE_SERVICES
+            if plan.protected_ticket_ids
+            else SAFETY_SERVICES
+        )
+        backend.start_services(initial_safety_services)
 
-        target_certification = backend.certify_flat(plan.target_release)
+        target_certification = (
+            backend.certify_protected(plan.target_release)
+            if plan.protected_ticket_ids
+            else backend.certify_flat(plan.target_release)
+        )
         target_probe = backend.probe_exchange(plan.target_release)
-        target_identity = _require_release_facts(
-            target_certification,
-            target_probe,
-            expected_leverage=plan.expected_configured_leverage,
+        target_identity = (
+            _require_protected_release_facts(
+                target_certification,
+                target_probe,
+                expected_leverage=plan.expected_configured_leverage,
+                protected_ticket_count=len(plan.protected_ticket_ids),
+            )
+            if plan.protected_ticket_ids
+            else _require_release_facts(
+                target_certification,
+                target_probe,
+                expected_leverage=plan.expected_configured_leverage,
+            )
         )
         if target_identity != {
             "runtime_commit": plan.target_commit,
@@ -196,6 +256,8 @@ def deploy_tokyo_release(
         ):
             _require_marker(backend, plan.target_release, marker, expected)
 
+        if plan.protected_ticket_ids:
+            backend.start_services((LIFECYCLE_SERVICE,))
         if plan.enable_entry:
             backend.start_services((ENTRY_SERVICE,))
         expected_services = ALL_SERVICES if plan.enable_entry else SAFETY_SERVICES
@@ -273,6 +335,64 @@ def _require_release_facts(
     return identity
 
 
+def _require_protected_release_facts(
+    certification: Mapping[str, object],
+    probe: Mapping[str, object],
+    *,
+    expected_leverage: int,
+    protected_ticket_count: int,
+) -> dict[str, str]:
+    if certification.get("status") != "pass":
+        raise DeploymentBlocked("database protected certification failed")
+    active_counts = certification.get("active_counts")
+    if not isinstance(active_counts, Mapping) or any(
+        int(str(active_counts.get(key, -1))) != expected
+        for key, expected in (
+            ("tickets", protected_ticket_count),
+            ("commands", 0),
+            ("positions", protected_ticket_count),
+            ("incidents", 0),
+        )
+    ):
+        raise DeploymentBlocked("database protected runtime activity differs")
+    runtime_identity = certification.get("runtime_identity")
+    if not isinstance(runtime_identity, Mapping):
+        raise DeploymentBlocked("database runtime identity is missing")
+    identity = {
+        key: str(runtime_identity.get(key, ""))
+        for key in ("runtime_commit", "schema_revision", "seed_identity")
+    }
+    if (
+        not _COMMIT.fullmatch(identity["runtime_commit"])
+        or identity["schema_revision"] != SCHEMA_REVISION
+        or not _SEED_IDENTITY.fullmatch(identity["seed_identity"])
+    ):
+        raise DeploymentBlocked("database runtime identity is invalid")
+    if probe.get("venue_id") != "binance-usdm":
+        raise DeploymentBlocked("production venue identity differs from policy")
+    if probe.get("account_position_mode") != "independent_sides":
+        raise DeploymentBlocked("production account position mode is invalid")
+    if probe.get("account_margin_mode") != "cross":
+        raise DeploymentBlocked("production account margin mode is invalid")
+    if int(str(probe.get("non_flat_domain_count", -1))) != protected_ticket_count:
+        raise DeploymentBlocked("exchange protected position count differs")
+    if int(str(probe.get("open_order_domain_count", -1))) != protected_ticket_count:
+        raise DeploymentBlocked("exchange protected order count differs")
+    rules = probe.get("rules")
+    if not isinstance(rules, list) or len(rules) != 6:
+        raise DeploymentBlocked("production instrument rule set is incomplete")
+    configured = {
+        int(str(rule.get("configured_leverage", -1)))
+        for rule in rules
+        if isinstance(rule, Mapping)
+    }
+    if configured != {expected_leverage}:
+        raise DeploymentBlocked(
+            "production configured leverage differs from fixed 5x policy"
+        )
+    return identity
+
+
 def _require_deployment_identity(
     payload: Mapping[str, object],
     plan: DeploymentPlan,
@@ -332,6 +452,12 @@ class SshTokyoReleaseBackend:
             release,
             "scripts/trading_kernel/certify_readonly.py",
             "--require-flat",
+        )
+
+    def certify_protected(self, release: str) -> Mapping[str, object]:
+        return self._release_json(
+            release,
+            "scripts/trading_kernel/certify_readonly.py",
         )
 
     def probe_exchange(self, release: str) -> Mapping[str, object]:
@@ -400,6 +526,28 @@ class SshTokyoReleaseBackend:
             commit,
             "--schema-revision",
             schema_revision,
+        )
+
+    def deploy_protected_identity(
+        self,
+        release: str,
+        commit: str,
+        schema_revision: str,
+        ticket_ids: tuple[str, ...],
+    ) -> Mapping[str, object]:
+        return self._release_json(
+            release,
+            "scripts/trading_kernel/seed_runtime_authority.py",
+            "deploy-protected-identity",
+            "--runtime-commit",
+            commit,
+            "--schema-revision",
+            schema_revision,
+            *(
+                argument
+                for ticket_id in ticket_ids
+                for argument in ("--protected-ticket-id", ticket_id)
+            ),
         )
 
     def activate_release(
@@ -594,6 +742,15 @@ def _parser() -> argparse.ArgumentParser:
         help="Enable ENTRY only after all target postflight checks pass.",
     )
     parser.add_argument(
+        "--protected-ticket-id",
+        action="append",
+        default=[],
+        help=(
+            "Exact fully protected Ticket allowed across this one guarded "
+            "identity handover; repeat once per active Ticket."
+        ),
+    )
+    parser.add_argument(
         "--timeout-seconds",
         type=float,
         default=60.0,
@@ -624,6 +781,7 @@ def main(argv: list[str] | None = None) -> int:
         schema_revision=SCHEMA_REVISION,
         expected_configured_leverage=EXPECTED_CONFIGURED_LEVERAGE,
         enable_entry=args.enable_entry,
+        protected_ticket_ids=tuple(args.protected_ticket_id),
     )
     backend = SshTokyoReleaseBackend(
         target=args.target,

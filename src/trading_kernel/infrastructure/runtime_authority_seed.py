@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from hashlib import sha256
@@ -432,14 +432,39 @@ async def deploy_recovery_identity(
     )
 
 
+async def deploy_protected_identity(
+    uow: PostgresKernelUnitOfWork,
+    request: RuntimeAuthoritySeedRequest,
+    *,
+    protected_ticket_ids: Sequence[str],
+) -> RuntimeDeploymentIdentityResult:
+    """Rotate identity only across an exact, fully protected Ticket set."""
+
+    normalized_ticket_ids = tuple(
+        ticket_id.strip() for ticket_id in protected_ticket_ids
+    )
+    if not normalized_ticket_ids or any(not item for item in normalized_ticket_ids):
+        raise ValueError("protected Ticket identities must be non-blank")
+    if len(set(normalized_ticket_ids)) != len(normalized_ticket_ids):
+        raise ValueError("protected Ticket identities must be distinct")
+    return await _deploy_runtime_identity(
+        uow,
+        request,
+        protected_ticket_ids=frozenset(normalized_ticket_ids),
+    )
+
+
 async def _deploy_runtime_identity(
     uow: PostgresKernelUnitOfWork,
     request: RuntimeAuthoritySeedRequest,
     *,
     recovery_ticket_id: str | None = None,
+    protected_ticket_ids: frozenset[str] | None = None,
 ) -> RuntimeDeploymentIdentityResult:
     """Install the exact identity after a flat or narrowly safe recovery gate."""
 
+    if recovery_ticket_id is not None and protected_ticket_ids is not None:
+        raise ValueError("runtime identity transition mode is ambiguous")
     connection = uow._require_connection()
     metadata_count = int(
         await connection.scalar(
@@ -448,9 +473,9 @@ async def _deploy_runtime_identity(
         or 0
     )
     if metadata_count == 0:
-        if recovery_ticket_id is not None:
+        if recovery_ticket_id is not None or protected_ticket_ids is not None:
             raise RuntimeAuthorityTransitionRefused(
-                "recovery identity requires an existing runtime authority"
+                "guarded identity requires an existing runtime authority"
             )
         seeded = await seed_runtime_authority(uow, request)
         return RuntimeDeploymentIdentityResult(
@@ -460,7 +485,12 @@ async def _deploy_runtime_identity(
             refreshed_existing_authority=False,
         )
 
-    if recovery_ticket_id is None:
+    if protected_ticket_ids is not None:
+        await _require_protected_identity_activity(
+            connection,
+            protected_ticket_ids=protected_ticket_ids,
+        )
+    elif recovery_ticket_id is None:
         await _require_zero_runtime_activity(connection)
     else:
         await _require_recovery_identity_activity(
@@ -938,6 +968,140 @@ async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
     if int(unresolved_commands or 0) != 0:
         raise RuntimeAuthorityTransitionRefused(
             "runtime transition requires zero unresolved Exchange Commands"
+        )
+
+
+async def _require_protected_identity_activity(
+    connection: AsyncConnection,
+    *,
+    protected_ticket_ids: frozenset[str],
+) -> None:
+    active_tickets = (
+        await connection.execute(
+            sa.select(trade_tickets)
+            .where(trade_tickets.c.terminal_at_ms.is_(None))
+            .with_for_update(of=trade_tickets)
+        )
+    ).mappings().all()
+    active_ticket_ids = {str(row["ticket_id"]) for row in active_tickets}
+    if active_ticket_ids != protected_ticket_ids:
+        raise RuntimeAuthorityTransitionRefused(
+            "protected identity requires the exact active protected Ticket set"
+        )
+
+    aggregates = (
+        await connection.execute(
+            sa.select(trade_aggregates)
+            .where(trade_aggregates.c.ticket_id.in_(protected_ticket_ids))
+            .with_for_update(of=trade_aggregates)
+        )
+    ).mappings().all()
+    aggregates_by_ticket = {str(row["ticket_id"]): row for row in aggregates}
+    if set(aggregates_by_ticket) != protected_ticket_ids or any(
+        any(
+            (
+                row["status"] != "position_protected",
+                Decimal(str(row["position_qty"])) <= 0,
+                Decimal(str(row["protected_qty"]))
+                != Decimal(str(row["position_qty"])),
+                row["entry_exchange_order_id"] is None,
+                row["initial_stop_exchange_order_id"] is None,
+                row["active_stop_exchange_order_id"] is None,
+                row["active_stop_price"] is None,
+                row["tp1_exchange_order_id"] is None,
+                row["pending_replaced_stop_exchange_order_id"] is not None,
+                row["pending_stop_price"] is not None,
+                row["pending_cancel_exchange_order_id"] is not None,
+                row["exit_exchange_order_id"] is not None,
+                row["review_id"] is not None,
+            )
+        )
+        for row in aggregates
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "protected identity requires complete active protection"
+        )
+
+    projected_positions = (
+        await connection.execute(
+            sa.select(positions_current)
+            .where(positions_current.c.quantity != 0)
+            .with_for_update(of=positions_current)
+        )
+    ).mappings().all()
+    projected_by_ticket = {
+        str(row["ticket_id"]): row
+        for row in projected_positions
+        if row["ticket_id"] is not None
+    }
+    if (
+        set(projected_by_ticket) != protected_ticket_ids
+        or len(projected_by_ticket) != len(projected_positions)
+        or any(
+            Decimal(str(projected_by_ticket[ticket_id]["quantity"]))
+            != Decimal(str(aggregates_by_ticket[ticket_id]["position_qty"]))
+            for ticket_id in protected_ticket_ids
+        )
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "protected identity requires matching projected positions"
+        )
+
+    exposures = (
+        await connection.execute(
+            sa.select(account_exposure_current).with_for_update(
+                of=account_exposure_current
+            )
+        )
+    ).mappings().all()
+    if (
+        len(exposures) != 1
+        or int(str(exposures[0]["active_ticket_count"]))
+        != len(protected_ticket_ids)
+        or Decimal(str(exposures[0]["gross_notional"])) <= 0
+        or Decimal(str(exposures[0]["gross_risk_at_stop"])) < 0
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "protected identity requires matching account exposure"
+        )
+
+    lane = (
+        await connection.execute(
+            sa.select(entry_lane_current)
+            .where(entry_lane_current.c.lane_id == GLOBAL_ENTRY_LANE_ID)
+            .with_for_update(of=entry_lane_current)
+        )
+    ).mappings().one_or_none()
+    if (
+        lane is None
+        or lane["status"] != "idle"
+        or lane["ticket_id"] is not None
+        or lane["signal_event_id"] is not None
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "protected identity requires an idle global ENTRY lane"
+        )
+
+    unresolved_commands = await connection.scalar(
+        sa.select(sa.func.count()).select_from(exchange_commands).where(
+            exchange_commands.c.status.in_(
+                ("prepared", "claimed", "dispatch_started", "outcome_unknown")
+            )
+        )
+    )
+    if int(unresolved_commands or 0) != 0:
+        raise RuntimeAuthorityTransitionRefused(
+            "protected identity requires zero unresolved Exchange Commands"
+        )
+
+    open_incidents = await connection.scalar(
+        sa.select(sa.func.count()).select_from(runtime_incidents).where(
+            runtime_incidents.c.status != "resolved"
+        )
+    )
+    if int(open_incidents or 0) != 0:
+        raise RuntimeAuthorityTransitionRefused(
+            "protected identity requires zero open Incidents"
         )
 
 

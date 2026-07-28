@@ -17,11 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     entry_lane_current,
+    exchange_commands,
     owner_policy_current,
+    positions_current,
     runtime_capabilities_current,
+    runtime_incidents,
     runtime_profiles,
     runtime_scopes_current,
     schema_metadata,
+    trade_aggregates,
     trade_reviews,
     trade_tickets,
 )
@@ -73,6 +77,7 @@ def test_runtime_authority_seed_cli_is_runnable_outside_repo(
 
     assert result.returncode == 0, result.stderr
     assert "deploy-identity" in result.stdout
+    assert "deploy-protected-identity" in result.stdout
     assert "arm-acceptance" in result.stdout
     assert "promote-full" in result.stdout
     assert list(tmp_path.rglob("*")) == []
@@ -305,6 +310,152 @@ async def test_recovery_identity_refuses_a_runtime_without_one_unknown_leverage_
 
 
 @pytest.mark.asyncio
+async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    await _insert_protected_tickets(runtime_seed_engine, ticket_ids)
+
+    target = initial.model_copy(
+        update={
+            "runtime_commit": "b" * 40,
+            "seeded_at_ms": 1_800_000_000_100,
+        }
+    )
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        result = await runtime_seed.deploy_protected_identity(
+            uow,
+            target,
+            protected_ticket_ids=ticket_ids,
+        )
+
+    assert result.runtime_commit == "b" * 40
+    async with runtime_seed_engine.connect() as connection:
+        runtime_commit = await connection.scalar(
+            sa.select(schema_metadata.c.metadata_value).where(
+                schema_metadata.c.metadata_key == "runtime_commit"
+            )
+        )
+    assert runtime_commit == "b" * 40
+
+
+@pytest.mark.asyncio
+async def test_protected_identity_refuses_extra_activity_and_open_incidents(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    request = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_initial",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, request)
+    await _insert_protected_tickets(runtime_seed_engine, ticket_ids)
+
+    with pytest.raises(
+        runtime_seed.RuntimeAuthorityTransitionRefused,
+        match="exact active protected Ticket set",
+    ):
+        async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+            await runtime_seed.deploy_protected_identity(
+                uow,
+                request.model_copy(
+                    update={
+                        "runtime_commit": "b" * 40,
+                        "seeded_at_ms": 1_800_000_000_100,
+                    }
+                ),
+                protected_ticket_ids=ticket_ids[:2],
+            )
+
+    async with runtime_seed_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(exchange_commands).values(
+                command_id="command:protected",
+                ticket_id=ticket_ids[0],
+                command_kind="set_leverage",
+                generation=1,
+                idempotency_key="idempotency:protected",
+                venue_client_order_id=None,
+                status="outcome_unknown",
+                quantity=None,
+                request_payload={},
+                result_payload=None,
+                claim_owner=None,
+                lease_until_ms=None,
+                created_at_ms=1_800_000_000_125,
+                deadline_at_ms=1_800_000_010_125,
+                completed_at_ms=None,
+            )
+        )
+
+    with pytest.raises(
+        runtime_seed.RuntimeAuthorityTransitionRefused,
+        match="zero unresolved Exchange Commands",
+    ):
+        async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+            await runtime_seed.deploy_protected_identity(
+                uow,
+                request.model_copy(
+                    update={
+                        "runtime_commit": "b" * 40,
+                        "seeded_at_ms": 1_800_000_000_125,
+                    }
+                ),
+                protected_ticket_ids=ticket_ids,
+            )
+
+    async with runtime_seed_engine.begin() as connection:
+        await connection.execute(
+            sa.delete(exchange_commands).where(
+                exchange_commands.c.command_id == "command:protected"
+            )
+        )
+        await connection.execute(
+            sa.insert(runtime_incidents).values(
+                incident_id="incident:protected",
+                ticket_id=ticket_ids[0],
+                incident_kind="handover_blocked",
+                status="open",
+                first_blocker="test",
+                entry_block_scope="none",
+                entry_block_key=None,
+                details={},
+                opened_at_ms=1_800_000_000_150,
+                resolved_at_ms=None,
+            )
+        )
+
+    with pytest.raises(
+        runtime_seed.RuntimeAuthorityTransitionRefused,
+        match="zero open Incidents",
+    ):
+        async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+            await runtime_seed.deploy_protected_identity(
+                uow,
+                request.model_copy(
+                    update={
+                        "runtime_commit": "b" * 40,
+                        "seeded_at_ms": 1_800_000_000_200,
+                    }
+                ),
+                protected_ticket_ids=ticket_ids,
+            )
+
+
+@pytest.mark.asyncio
 async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     runtime_seed_engine: AsyncEngine,
 ) -> None:
@@ -448,5 +599,140 @@ async def _insert_terminal_reviewed_ticket(engine: AsyncEngine) -> None:
                 metrics={"net_pnl_quote": "0"},
                 decision_impact={"policy_transition": "acceptance_complete"},
                 created_at_ms=1_800_000_000_260,
+            )
+        )
+
+
+async def _insert_protected_tickets(
+    engine: AsyncEngine,
+    ticket_ids: tuple[str, ...],
+) -> None:
+    async with engine.begin() as connection:
+        scope = (
+            await connection.execute(
+                sa.select(runtime_scopes_current).order_by(
+                    runtime_scopes_current.c.runtime_scope_id
+                )
+            )
+        ).mappings().first()
+        assert scope is not None
+        total_notional = Decimal("0")
+        total_risk = Decimal("0")
+        for index, ticket_id in enumerate(ticket_ids, start=1):
+            quantity = Decimal(index)
+            notional = Decimal("100") * quantity
+            risk = Decimal("3") * quantity
+            netting_domain = f"binance-usdm:subaccount-main:{index}:short"
+            await connection.execute(
+                sa.insert(trade_tickets).values(
+                    ticket_id=ticket_id,
+                    exposure_episode_id=f"exposure:{index}",
+                    signal_event_id=f"signal:{index}",
+                    strategy_group_id=scope["strategy_group_id"],
+                    strategy_version_id=scope["strategy_version_id"],
+                    event_spec_id=scope["event_spec_id"],
+                    runtime_profile_id=scope["runtime_profile_id"],
+                    owner_policy_id=scope["owner_policy_id"],
+                    owner_policy_version=1,
+                    runtime_scope_id=scope["runtime_scope_id"],
+                    runtime_scope_version=scope["scope_version"],
+                    account_id="subaccount-main",
+                    venue_id="binance-usdm",
+                    exchange_instrument_id=f"instrument:{index}",
+                    position_side="short",
+                    netting_domain_key=netting_domain,
+                    active_netting_domain_key=netting_domain,
+                    entry_reference_price=Decimal("100"),
+                    quantity=quantity,
+                    notional=notional,
+                    capacity_claim_id=f"claim:{index}",
+                    planned_stop_risk_budget=risk,
+                    post_fill_stop_risk_limit=risk * Decimal("1.1"),
+                    selected_leverage=5,
+                    leverage_change_required=False,
+                    reserved_margin=notional / Decimal("5"),
+                    risk_reservation_basis="planned_stop_distance",
+                    margin_mode="cross",
+                    min_liquidation_distance_to_stop_distance_ratio=Decimal("2"),
+                    projected_liquidation_price=Decimal("110"),
+                    projected_liquidation_distance_to_stop_distance_ratio=Decimal("2"),
+                    risk_at_stop=risk,
+                    entry_order_type="market",
+                    entry_limit_price=None,
+                    initial_stop_price=Decimal("103"),
+                    take_profit_prices=["97"],
+                    take_profit_quantities=[str(quantity / Decimal("2"))],
+                    fact_digest="sha256:" + "1" * 64,
+                    decision_digest="sha256:" + "2" * 64,
+                    status="position_protected",
+                    created_at_ms=1_800_000_000_010 + index,
+                    expires_at_ms=1_800_000_100_010 + index,
+                    terminal_at_ms=None,
+                )
+            )
+            await connection.execute(
+                sa.insert(trade_aggregates).values(
+                    ticket_id=ticket_id,
+                    status="position_protected",
+                    version=5,
+                    last_event_sequence=5,
+                    entry_lane_held=False,
+                    position_qty=quantity,
+                    average_fill_price=Decimal("100"),
+                    actual_stop_risk=risk,
+                    actual_liquidation_price=Decimal("110"),
+                    actual_liquidation_distance=Decimal("10"),
+                    actual_liquidation_distance_to_stop_distance_ratio=Decimal("3"),
+                    post_fill_risk_status="within_limit",
+                    post_fill_disposition="protected",
+                    protected_qty=quantity,
+                    entry_exchange_order_id=f"entry:{index}",
+                    initial_stop_exchange_order_id=f"initial-stop:{index}",
+                    active_stop_exchange_order_id=f"stop:{index}",
+                    active_stop_price=Decimal("103"),
+                    tp1_exchange_order_id=f"tp1:{index}",
+                    tp1_target_qty=quantity / Decimal("2"),
+                    tp1_filled_qty=Decimal("0"),
+                    break_even_floor_price=None,
+                    pending_replaced_stop_exchange_order_id=None,
+                    pending_stop_price=None,
+                    pending_stop_watermark_ms=None,
+                    runner_stop_watermark_ms=None,
+                    pending_cancel_exchange_order_id=None,
+                    exit_exchange_order_id=None,
+                    review_id=None,
+                    lifecycle_due_at_ms=None,
+                    reconciliation_due_at_ms=None,
+                    updated_at_ms=1_800_000_000_020 + index,
+                )
+            )
+            await connection.execute(
+                sa.insert(positions_current).values(
+                    netting_domain_key=netting_domain,
+                    ticket_id=ticket_id,
+                    venue_id="binance-usdm",
+                    account_id="subaccount-main",
+                    exchange_instrument_id=f"instrument:{index}",
+                    position_side="short",
+                    quantity=quantity,
+                    average_entry_price=Decimal("100"),
+                    observed_at_ms=1_800_000_000_020 + index,
+                    projection_version=5,
+                )
+            )
+            total_notional += notional
+            total_risk += risk
+        await connection.execute(
+            sa.update(account_exposure_current)
+            .where(
+                account_exposure_current.c.venue_id == "binance-usdm",
+                account_exposure_current.c.account_id == "subaccount-main",
+            )
+            .values(
+                gross_notional=total_notional,
+                gross_risk_at_stop=total_risk,
+                active_ticket_count=len(ticket_ids),
+                projection_version=5,
+                updated_at_ms=1_800_000_000_030,
             )
         )

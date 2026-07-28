@@ -7,6 +7,8 @@ import pytest
 from scripts.trading_kernel.deploy_tokyo_release import (
     ALL_SERVICES,
     ENTRY_SERVICE,
+    LIFECYCLE_SERVICE,
+    PROTECTED_HANDOVER_PRE_LIFECYCLE_SERVICES,
     SAFETY_SERVICES,
     DeploymentBlocked,
     DeploymentPlan,
@@ -85,13 +87,79 @@ def test_post_stop_failure_fences_entry_and_restores_safety_workers() -> None:
     assert ("start_services", (ENTRY_SERVICE,)) not in backend.calls
 
 
-def _plan(*, enable_entry: bool) -> DeploymentPlan:
+def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
+    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
+    backend = FakeDeploymentBackend(active_ticket_count=len(ticket_ids))
+
+    result = deploy_tokyo_release(
+        backend,
+        _plan(enable_entry=False, protected_ticket_ids=ticket_ids),
+    )
+
+    assert result.status == "pass"
+    assert backend.calls == [
+        ("read_current_release",),
+        ("install_release", TARGET_COMMIT, TARGET_RELEASE),
+        ("certify_protected", TARGET_RELEASE),
+        ("probe_exchange", TARGET_RELEASE),
+        ("read_release_marker", CURRENT_RELEASE, ".brc-runtime-commit"),
+        ("read_release_marker", CURRENT_RELEASE, ".brc-schema-revision"),
+        ("stop_services", ALL_SERVICES),
+        ("fence_entry",),
+        ("services_active", ALL_SERVICES),
+        (
+            "deploy_protected_identity",
+            TARGET_RELEASE,
+            TARGET_COMMIT,
+            "0001_initial",
+            ticket_ids,
+        ),
+        (
+            "activate_release",
+            TARGET_RELEASE,
+            TARGET_COMMIT,
+            "0001_initial",
+            SEED_IDENTITY,
+        ),
+        ("start_services", PROTECTED_HANDOVER_PRE_LIFECYCLE_SERVICES),
+        ("certify_protected", TARGET_RELEASE),
+        ("probe_exchange", TARGET_RELEASE),
+        ("read_current_release",),
+        ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
+        ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
+        ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
+        ("start_services", (LIFECYCLE_SERVICE,)),
+        ("services_active", ALL_SERVICES),
+    ]
+
+
+def test_protected_release_refuses_exchange_domains_outside_ticket_set() -> None:
+    backend = FakeDeploymentBackend(active_ticket_count=3, open_order_domain_count=2)
+
+    with pytest.raises(DeploymentBlocked, match="protected order count"):
+        deploy_tokyo_release(
+            backend,
+            _plan(
+                enable_entry=False,
+                protected_ticket_ids=("ticket:avax", "ticket:btc", "ticket:sol"),
+            ),
+        )
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+
+
+def _plan(
+    *,
+    enable_entry: bool,
+    protected_ticket_ids: tuple[str, ...] = (),
+) -> DeploymentPlan:
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
         schema_revision="0001_initial",
         expected_configured_leverage=5,
         enable_entry=enable_entry,
+        protected_ticket_ids=protected_ticket_ids,
     )
 
 
@@ -100,9 +168,17 @@ class FakeDeploymentBackend:
         self,
         *,
         configured_leverage: int = 5,
+        active_ticket_count: int = 0,
+        open_order_domain_count: int | None = None,
         fail_at: str | None = None,
     ) -> None:
         self.configured_leverage = configured_leverage
+        self.active_ticket_count = active_ticket_count
+        self.open_order_domain_count = (
+            active_ticket_count
+            if open_order_domain_count is None
+            else open_order_domain_count
+        )
         self.fail_at = fail_at
         self.calls: list[tuple[object, ...]] = []
         self.current_release = CURRENT_RELEASE
@@ -130,14 +206,31 @@ class FakeDeploymentBackend:
             },
         }
 
+    def certify_protected(self, release: str) -> Mapping[str, object]:
+        self.calls.append(("certify_protected", release))
+        return {
+            "status": "pass",
+            "runtime_identity": {
+                "runtime_commit": self.runtime_commit,
+                "schema_revision": "0001_initial",
+                "seed_identity": SEED_IDENTITY,
+            },
+            "active_counts": {
+                "tickets": self.active_ticket_count,
+                "commands": 0,
+                "positions": self.active_ticket_count,
+                "incidents": 0,
+            },
+        }
+
     def probe_exchange(self, release: str) -> Mapping[str, object]:
         self.calls.append(("probe_exchange", release))
         return {
             "venue_id": "binance-usdm",
             "account_position_mode": "independent_sides",
             "account_margin_mode": "cross",
-            "non_flat_domain_count": 0,
-            "open_order_domain_count": 0,
+            "non_flat_domain_count": self.active_ticket_count,
+            "open_order_domain_count": self.open_order_domain_count,
             "rules": [
                 {
                     "exchange_instrument_id": f"instrument-{index}",
@@ -176,6 +269,30 @@ class FakeDeploymentBackend:
     ) -> Mapping[str, object]:
         self.calls.append(
             ("deploy_identity", release, commit, schema_revision)
+        )
+        self.runtime_commit = commit
+        return {
+            "runtime_commit": commit,
+            "schema_revision": schema_revision,
+            "runtime_seed_semantic_hash": SEED_IDENTITY,
+            "refreshed_existing_authority": True,
+        }
+
+    def deploy_protected_identity(
+        self,
+        release: str,
+        commit: str,
+        schema_revision: str,
+        ticket_ids: tuple[str, ...],
+    ) -> Mapping[str, object]:
+        self.calls.append(
+            (
+                "deploy_protected_identity",
+                release,
+                commit,
+                schema_revision,
+                ticket_ids,
+            )
         )
         self.runtime_commit = commit
         return {
