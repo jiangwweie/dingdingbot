@@ -33,6 +33,8 @@ class FakeCcxtExchange:
         self.config = config
         self.closed = False
         self.ohlcv_symbols: list[str] = []
+        self.market_symbols: list[str] = []
+        self.bracket_market_ids: list[str] = []
 
     async def fetch_ohlcv(
         self,
@@ -50,7 +52,7 @@ class FakeCcxtExchange:
         return {}
 
     def market(self, symbol: str) -> dict[str, object]:
-        assert symbol == "BTC/USDT:USDT"
+        self.market_symbols.append(symbol)
         return {
             "info": {
                 "filters": [
@@ -66,11 +68,15 @@ class FakeCcxtExchange:
             "limits": {"leverage": {"max": 20}},
         }
 
-    async def fapiPrivateGetLeverageBracket(self, params: dict[str, object]) -> list[dict[str, object]]:
-        assert params == {"symbol": "BTCUSDT"}
+    async def fapiPrivateGetLeverageBracket(
+        self,
+        params: dict[str, object],
+    ) -> list[dict[str, object]]:
+        market_id = str(params["symbol"])
+        self.bracket_market_ids.append(market_id)
         return [
             {
-                "symbol": "BTCUSDT",
+                "symbol": market_id,
                 "brackets": [
                     {
                         "bracket": 1,
@@ -280,7 +286,7 @@ def test_settings_mask_credentials_and_require_independent_sides(
 
 
 @pytest.mark.asyncio
-async def test_public_factory_uses_only_canonical_registry_symbols_and_closes(
+async def test_public_factory_routes_registry_independent_canonical_id_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set_valid_runtime_environment(monkeypatch)
@@ -314,7 +320,7 @@ async def test_public_factory_uses_only_canonical_registry_symbols_and_closes(
 
 
 @pytest.mark.asyncio
-async def test_authenticated_factory_builds_exact_mapping_rules_and_closes(
+async def test_authenticated_factory_routes_registry_independent_rules_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set_valid_runtime_environment(monkeypatch)
@@ -333,7 +339,7 @@ async def test_authenticated_factory_builds_exact_mapping_rules_and_closes(
         InstrumentRulesRequest(
             venue_id="binance-usdm",
             account_id="subaccount-main",
-            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            exchange_instrument_id="binance-usdm:OPUSDT:perpetual",
             observed_at_ms=1_000,
             valid_for_ms=5_000,
         )
@@ -343,6 +349,8 @@ async def test_authenticated_factory_builds_exact_mapping_rules_and_closes(
     assert created[0].config["secret"] == "api-secret-sensitive"
     assert created[0].config["timeout"] == 7_500
     assert created[0].config["options"]["warnOnFetchOpenOrdersWithoutSymbol"] is False
+    assert created[0].market_symbols == ["OP/USDT:USDT"]
+    assert created[0].bracket_market_ids == ["OPUSDT"]
     assert rules.quantity_step == Decimal("0.001")
     assert rules.price_tick == Decimal("0.1")
     assert rules.min_notional == Decimal("5")

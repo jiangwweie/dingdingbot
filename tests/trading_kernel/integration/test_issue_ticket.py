@@ -32,6 +32,9 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
 )
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
+from src.trading_kernel.domain.instrument_identity import (
+    parse_binance_usdm_instrument_id,
+)
 from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
     entry_lane_current,
@@ -887,13 +890,16 @@ async def _seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:
 async def _seed_ticket_registry(connection, ticket) -> None:
     identity = ticket.identity
     runtime = identity.runtime
+    instrument = parse_binance_usdm_instrument_id(
+        identity.netting_domain.exchange_instrument_id
+    )
     await connection.execute(
         pg_insert(instruments)
         .values(
             exchange_instrument_id=identity.netting_domain.exchange_instrument_id,
             venue_id=identity.netting_domain.venue_id,
             asset_class="crypto",
-            venue_symbol="BTCUSDT",
+            venue_symbol=instrument.symbol,
             contract_kind="perpetual",
             status="active",
         )

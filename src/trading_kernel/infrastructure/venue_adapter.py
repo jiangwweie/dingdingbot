@@ -760,12 +760,9 @@ class CcxtVenueAdapter:
         )
 
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
-        exchange_key = (request.venue_id, request.account_id)
-        exchange = self._exchanges.get(exchange_key)
-        if exchange is None:
-            raise RuntimeError("venue/account adapter is not configured")
-        symbol = self._symbol_for(
+        exchange, symbol = self._resolve_exchange_and_symbol(
             venue_id=request.venue_id,
+            account_id=request.account_id,
             exchange_instrument_id=request.exchange_instrument_id,
         )
 
@@ -1066,13 +1063,13 @@ class CcxtVenueAdapter:
         account_id: str,
         exchange_instrument_id: str,
     ) -> tuple[_CcxtExchange, str]:
-        exchange = self._exchanges.get((venue_id, account_id))
-        if exchange is None:
-            raise RuntimeError("venue/account adapter is not configured")
         symbol = self._symbol_for(
             venue_id=venue_id,
             exchange_instrument_id=exchange_instrument_id,
         )
+        exchange = self._exchanges.get((venue_id, account_id))
+        if exchange is None:
+            raise RuntimeError("venue/account adapter is not configured")
         return exchange, symbol
 
     def _symbol_for(
@@ -1082,13 +1079,15 @@ class CcxtVenueAdapter:
         exchange_instrument_id: str,
     ) -> str:
         if venue_id != "binance-usdm":
-            raise RuntimeError("canonical instrument has no venue symbol mapping")
+            raise RuntimeError("canonical Binance USD-M instrument is unavailable")
         try:
             return to_ccxt_symbol(
                 parse_binance_usdm_instrument_id(exchange_instrument_id)
             )
         except ValueError as exc:
-            raise RuntimeError("canonical instrument has no venue symbol mapping") from exc
+            raise RuntimeError(
+                "canonical Binance USD-M instrument is unavailable"
+            ) from exc
 
     def _instrument_id_for_symbol(
         self,

@@ -72,6 +72,29 @@ def test_ccxt_adapter_rejects_retired_venue_symbol_map() -> None:
         )
 
 
+@pytest.mark.asyncio
+async def test_ccxt_adapter_rejects_illegal_instrument_before_account_routing() -> None:
+    exchange = FakeAsyncExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        clock_ms=lambda: 2_000,
+    )
+    request = _request().model_copy(
+        update={
+            "account_id": "unconfigured-account",
+            "exchange_instrument_id": "OP/USDT:USDT",
+        }
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="canonical Binance USD-M instrument is unavailable",
+    ):
+        await adapter.execute(request)
+
+    assert exchange.call is None
+
+
 def test_position_details_requires_liquidation_evidence_for_every_open_row() -> None:
     quantity, average_entry_price, liquidation_price = _position_details(
         [
