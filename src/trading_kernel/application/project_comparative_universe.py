@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from threading import Lock
-from typing import Sequence
+from typing import Literal, Sequence
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -22,6 +23,10 @@ from src.trading_kernel.domain.market import (
     ComparativeStrengthMember,
     ComparativeStrengthSnapshot,
 )
+
+_ONE_HOUR_MS = 3_600_000
+COMPARATIVE_FAILURE_RETRY_MS = 30_000
+_MEMBER_DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 @dataclass
@@ -132,6 +137,11 @@ class ComparativeUniverseProjection(BaseModel):
                 candle.close_time_ms > self.closed_bar_time_ms
                 for candle in window.candles_1h
             )
+            or not _has_exact_contiguous_lookback(
+                window.candles_1h,
+                lookback_bars=strength.lookback_bars,
+                closed_bar_time_ms=self.closed_bar_time_ms,
+            )
             for window in self.member_windows
         ):
             raise ValueError(
@@ -149,6 +159,55 @@ class ComparativeUniverseProjection(BaseModel):
         raise KeyError(exchange_instrument_id)
 
 
+class ComparativeProjectionFailure(BaseModel):
+    """Exact-key unavailable fact; never a ready comparative projection."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str
+    universe_version_id: str
+    member_set_digest: str
+    closed_bar_time_ms: int
+    reason_code: Literal[
+        "comparative_projection_incomplete",
+        "comparative_market_temporarily_unavailable",
+    ]
+    observed_at_ms: int
+    retry_after_ms: int
+    projection_version: int = 1
+
+    @model_validator(mode="after")
+    def _validate_failure(self) -> "ComparativeProjectionFailure":
+        identities = (
+            self.event_spec_id,
+            self.universe_version_id,
+            self.member_set_digest,
+        )
+        if any(not item.strip() for item in identities):
+            raise ValueError(
+                "comparative projection failure identities must be non-blank"
+            )
+        if (
+            _MEMBER_DIGEST_PATTERN.fullmatch(self.member_set_digest) is None
+            or self.closed_bar_time_ms <= 0
+            or self.observed_at_ms <= 0
+            or self.retry_after_ms <= self.observed_at_ms
+            or self.projection_version <= 0
+        ):
+            raise ValueError(
+                "comparative projection failure window is invalid"
+            )
+        return self
+
+    def is_active(self, *, attempted_at_ms: int) -> bool:
+        return attempted_at_ms < self.retry_after_ms
+
+
+ComparativeProjectionOutcome = (
+    ComparativeUniverseProjection | ComparativeProjectionFailure
+)
+
+
 def comparative_member_set_digest(
     exchange_instrument_ids: Sequence[str],
 ) -> str:
@@ -159,6 +218,29 @@ def comparative_member_set_digest(
         raise ValueError("comparative projection requires unique members")
     return canonical_digest(
         {"exchange_instrument_ids": canonical_members}
+    )
+
+
+def build_comparative_projection_failure(
+    *,
+    event_spec_id: str,
+    universe_version_id: str,
+    member_set_digest: str,
+    closed_bar_time_ms: int,
+    observed_at_ms: int,
+    reason_code: Literal[
+        "comparative_projection_incomplete",
+        "comparative_market_temporarily_unavailable",
+    ],
+) -> ComparativeProjectionFailure:
+    return ComparativeProjectionFailure(
+        event_spec_id=event_spec_id,
+        universe_version_id=universe_version_id,
+        member_set_digest=member_set_digest,
+        closed_bar_time_ms=closed_bar_time_ms,
+        reason_code=reason_code,
+        observed_at_ms=observed_at_ms,
+        retry_after_ms=observed_at_ms + COMPARATIVE_FAILURE_RETRY_MS,
     )
 
 
@@ -239,6 +321,14 @@ def build_comparative_universe_projection(
                 "comparative projection requires complete same-close windows"
             )
         sample = window.candles_1h[-minimum_candles:]
+        if not _has_exact_contiguous_lookback(
+            sample,
+            lookback_bars=lookback_bars,
+            closed_bar_time_ms=closed_bar_time_ms,
+        ):
+            raise ValueError(
+                "comparative projection requires a contiguous 1h lookback"
+            )
         return_pct = (
             (sample[-1].close - sample[0].close) / sample[0].close
         ) * Decimal("100")
@@ -326,3 +416,22 @@ async def project_comparative_universe(
         freshness_window_ms=freshness_window_ms,
         member_windows=tuple(windows),
     )
+
+
+def _has_exact_contiguous_lookback(
+    candles: tuple[ClosedCandle, ...],
+    *,
+    lookback_bars: int,
+    closed_bar_time_ms: int,
+) -> bool:
+    required = lookback_bars + 1
+    if len(candles) < required:
+        return False
+    actual = tuple(
+        candle.close_time_ms for candle in candles[-required:]
+    )
+    expected = tuple(
+        closed_bar_time_ms - offset * _ONE_HOUR_MS
+        for offset in range(lookback_bars, -1, -1)
+    )
+    return actual == expected

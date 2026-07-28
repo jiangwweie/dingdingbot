@@ -51,17 +51,24 @@ def test_projection_binds_exact_members_close_and_canonical_digest() -> None:
     assert projection.candles_for(SOL) == candles
 
 
-@pytest.mark.parametrize("invalid_case", ("missing_member", "wrong_close"))
+@pytest.mark.parametrize(
+    "invalid_case",
+    ("missing_member", "wrong_close", "internal_gap"),
+)
 def test_projection_rejects_incomplete_or_mixed_close_windows(
     invalid_case: str,
 ) -> None:
     candles = mpg_long_snapshot().candles_1h
+    if invalid_case == "internal_gap":
+        invalid_candles = (*candles[:-5], *candles[-4:])
+    elif invalid_case == "wrong_close":
+        invalid_candles = candles[:-1]
+    else:
+        invalid_candles = candles
     windows = tuple(
         ComparativeMemberWindow(
             exchange_instrument_id=member,
-            candles_1h=(
-                candles[:-1] if invalid_case == "wrong_close" else candles
-            ),
+            candles_1h=invalid_candles,
         )
         for member in MEMBERS
         if invalid_case != "missing_member" or member != OP

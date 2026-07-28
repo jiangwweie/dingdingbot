@@ -21,6 +21,7 @@ from src.trading_kernel.application.observe_strategy_scope import (
     observe_strategy_scope,
 )
 from src.trading_kernel.application.project_comparative_universe import (
+    COMPARATIVE_FAILURE_RETRY_MS,
     comparative_member_set_digest,
 )
 from src.trading_kernel.domain.market import ClosedCandle
@@ -149,7 +150,7 @@ class CountingMarketSource:
         engine: AsyncEngine,
         *,
         invalid_member: str | None = None,
-        drop_latest: bool = False,
+        invalid_case: str | None = None,
         check_transaction_boundary: bool = True,
     ) -> None:
         self._engine = engine
@@ -160,7 +161,7 @@ class CountingMarketSource:
         self._transaction_boundary_checked = False
         self._transaction_check_lock = asyncio.Lock()
         self._invalid_member = invalid_member
-        self._drop_latest = drop_latest
+        self._invalid_case = invalid_case
         self._check_transaction_boundary = check_transaction_boundary
 
     async def fetch_closed_candles(
@@ -186,9 +187,15 @@ class CountingMarketSource:
                 self._transaction_boundary_checked = True
         if request.timeframe == "1h":
             if request.exchange_instrument_id == self._invalid_member:
-                if not self._drop_latest:
+                if self._invalid_case == "missing":
                     return ()
-                return self._one_hour[:-1][-request.limit :]
+                if self._invalid_case == "mixed_close":
+                    return self._one_hour[:-1][-request.limit :]
+                if self._invalid_case == "internal_gap":
+                    return (
+                        *self._one_hour[:-5],
+                        *self._one_hour[-4:],
+                    )[-request.limit :]
             return self._one_hour[-request.limit :]
         if request.timeframe == "4h":
             return self._four_hour[-request.limit :]
@@ -270,16 +277,19 @@ async def test_eight_mpg_scopes_read_each_member_once_per_closed_bar(
     assert projection["projection_version"] == 1
 
 
-@pytest.mark.parametrize("drop_latest", (False, True))
+@pytest.mark.parametrize(
+    "invalid_case",
+    ("missing", "mixed_close", "internal_gap"),
+)
 @pytest.mark.asyncio
 async def test_incomplete_or_mixed_close_projection_fails_all_scopes_closed(
     comparative_engine: AsyncEngine,
-    drop_latest: bool,
+    invalid_case: str,
 ) -> None:
     source = CountingMarketSource(
         comparative_engine,
         invalid_member=MEMBERS[0],
-        drop_latest=drop_latest,
+        invalid_case=invalid_case,
     )
     async with comparative_engine.connect() as connection:
         scope_ids = tuple(
@@ -314,12 +324,22 @@ async def test_incomplete_or_mixed_close_projection_fails_all_scopes_closed(
     assert [result.status for result in results] == [
         ObservationStatus.INVALID
     ] * len(MEMBERS)
+    assert Counter(
+        request.exchange_instrument_id
+        for request in source.calls
+        if request.timeframe == "1h"
+    ) == Counter({member: 1 for member in MEMBERS})
     async with comparative_engine.connect() as connection:
-        assert await connection.scalar(
-            sa.select(sa.func.count()).select_from(
-                comparative_projection_current
+        failure = (
+            await connection.execute(
+                sa.select(comparative_projection_current)
             )
-        ) == 0
+        ).mappings().one()
+        assert failure["projection_status"] == "unavailable"
+        assert (
+            failure["failure_reason"]
+            == "comparative_projection_incomplete"
+        )
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(signal_events)
         ) == 0
@@ -328,6 +348,134 @@ async def test_incomplete_or_mixed_close_projection_fails_all_scopes_closed(
             .select_from(runtime_scopes_current)
             .where(runtime_scopes_current.c.warm_ready_at_ms.is_not(None))
         ) == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_failed_projection_shares_one_market_read(
+    comparative_engine: AsyncEngine,
+) -> None:
+    source = CountingMarketSource(
+        comparative_engine,
+        invalid_member=MEMBERS[0],
+        invalid_case="missing",
+        check_transaction_boundary=False,
+    )
+    async with comparative_engine.connect() as connection:
+        scope_ids = tuple(
+            str(value)
+            for value in (
+                await connection.scalars(
+                    sa.select(runtime_scopes_current.c.runtime_scope_id)
+                    .where(
+                        runtime_scopes_current.c.event_spec_id
+                        == MPG_CONTRACT.event_spec_id
+                    )
+                    .order_by(runtime_scopes_current.c.runtime_scope_id)
+                    .limit(2)
+                )
+            ).all()
+        )
+
+    async def observe(scope_id: str):
+        return await observe_strategy_scope(
+            lambda: PostgresKernelUnitOfWork(comparative_engine),
+            source,
+            ObservationRequest(
+                runtime_scope_id=scope_id,
+                runtime_commit=RUNTIME_COMMIT,
+                schema_revision=SCHEMA_REVISION,
+                trigger_candle_close_time_ms=NOW_MS,
+            ),
+        )
+
+    results = await asyncio.gather(*(observe(scope_id) for scope_id in scope_ids))
+
+    assert [result.status for result in results] == [
+        ObservationStatus.INVALID,
+        ObservationStatus.INVALID,
+    ]
+    assert Counter(
+        request.exchange_instrument_id
+        for request in source.calls
+        if request.timeframe == "1h"
+    ) == Counter({member: 1 for member in MEMBERS})
+    async with comparative_engine.connect() as connection:
+        failure = (
+            await connection.execute(
+                sa.select(comparative_projection_current)
+            )
+        ).mappings().one()
+    assert failure["projection_status"] == "unavailable"
+    assert failure["projection_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_projection_retries_once_after_bounded_backoff(
+    comparative_engine: AsyncEngine,
+) -> None:
+    source = CountingMarketSource(
+        comparative_engine,
+        invalid_member=MEMBERS[0],
+        invalid_case="missing",
+    )
+    async with comparative_engine.connect() as connection:
+        scope_id = str(
+            await connection.scalar(
+                sa.select(runtime_scopes_current.c.runtime_scope_id)
+                .where(
+                    runtime_scopes_current.c.event_spec_id
+                    == MPG_CONTRACT.event_spec_id
+                )
+                .order_by(runtime_scopes_current.c.runtime_scope_id)
+                .limit(1)
+            )
+        )
+
+    async def observe(*, attempted_at_ms: int):
+        return await observe_strategy_scope(
+            lambda: PostgresKernelUnitOfWork(comparative_engine),
+            source,
+            ObservationRequest(
+                runtime_scope_id=scope_id,
+                runtime_commit=RUNTIME_COMMIT,
+                schema_revision=SCHEMA_REVISION,
+                trigger_candle_close_time_ms=NOW_MS,
+                attempted_at_ms=attempted_at_ms,
+            ),
+        )
+
+    first = await observe(attempted_at_ms=NOW_MS)
+    before_retry = await observe(
+        attempted_at_ms=NOW_MS + COMPARATIVE_FAILURE_RETRY_MS - 1
+    )
+    assert first.status is ObservationStatus.INVALID
+    assert before_retry.status is ObservationStatus.INVALID
+    assert Counter(
+        request.exchange_instrument_id
+        for request in source.calls
+        if request.timeframe == "1h"
+    ) == Counter({member: 1 for member in MEMBERS})
+
+    source._invalid_member = None
+    recovered = await observe(
+        attempted_at_ms=NOW_MS + COMPARATIVE_FAILURE_RETRY_MS
+    )
+
+    assert recovered.status is ObservationStatus.WARMED
+    assert Counter(
+        request.exchange_instrument_id
+        for request in source.calls
+        if request.timeframe == "1h"
+    ) == Counter({member: 2 for member in MEMBERS})
+    async with comparative_engine.connect() as connection:
+        projection = (
+            await connection.execute(
+                sa.select(comparative_projection_current)
+            )
+        ).mappings().one()
+    assert projection["projection_status"] == "ready"
+    assert projection["failure_reason"] is None
+    assert projection["projection_version"] == 2
 
 
 @pytest.mark.asyncio

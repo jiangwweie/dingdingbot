@@ -27,7 +27,9 @@ from src.trading_kernel.application.produce_strategy_signal import (
     produce_strategy_signal,
 )
 from src.trading_kernel.application.project_comparative_universe import (
+    ComparativeProjectionFailure,
     ComparativeUniverseProjection,
+    build_comparative_projection_failure,
     comparative_member_set_digest,
     project_comparative_universe,
     serialize_comparative_projection,
@@ -64,6 +66,7 @@ class ObservationRequest(BaseModel):
     schema_revision: str
     trigger_candle_close_time_ms: int
     observation_generation: int | None = None
+    attempted_at_ms: int | None = None
 
     @field_validator(
         "runtime_scope_id",
@@ -85,11 +88,14 @@ class ObservationRequest(BaseModel):
             raise ValueError("observation trigger must be positive")
         return value
 
-    @field_validator("observation_generation")
+    @field_validator("observation_generation", "attempted_at_ms")
     @classmethod
-    def _require_positive_generation(cls, value: int | None) -> int | None:
+    def _require_positive_optional_time(
+        cls,
+        value: int | None,
+    ) -> int | None:
         if value is not None and value <= 0:
-            raise ValueError("observation generation must be positive")
+            raise ValueError("optional observation values must be positive")
         return value
 
 
@@ -171,6 +177,10 @@ async def observe_strategy_scope(
     market_source: PublicMarketSource,
     request: ObservationRequest,
 ) -> ObservationResult:
+    attempted_at_ms = (
+        request.attempted_at_ms
+        or request.trigger_candle_close_time_ms
+    )
     async with uow_factory() as uow:
         if request.observation_generation is None:
             scope = await uow.signals.claim_observation_generation(
@@ -283,14 +293,14 @@ async def observe_strategy_scope(
                 reason="registry_scope_mismatch",
             )
         comparative_lookback_bars = _comparative_lookback_bars(contract)
-        comparative_projection = None
+        comparative_projection: ComparativeUniverseProjection | None = None
         comparative_digest = None
         if comparative_lookback_bars is not None:
             try:
                 comparative_digest = comparative_member_set_digest(
                     observation_universe.exchange_instrument_ids
                 )
-                comparative_projection = (
+                comparative_outcome = (
                     await uow.strategy_universes.get_comparative_projection(
                         event_spec_id=scope.event_spec_id,
                         universe_version_id=scope.universe_version_id,
@@ -300,6 +310,29 @@ async def observe_strategy_scope(
                         member_set_digest=comparative_digest,
                     )
                 )
+                if isinstance(
+                    comparative_outcome,
+                    ComparativeProjectionFailure,
+                ):
+                    if comparative_outcome.is_active(
+                        attempted_at_ms=attempted_at_ms
+                    ):
+                        await _save_observation_blocker(
+                            uow,
+                            scope=scope,
+                            blocker="observation_unavailable",
+                            detector_reason="market_snapshot_unavailable",
+                            updated_at_ms=(
+                                request.trigger_candle_close_time_ms
+                            ),
+                        )
+                        return _invalid_observation(
+                            request,
+                            event_spec_id=scope.event_spec_id,
+                            reason="market_snapshot_unavailable",
+                        )
+                else:
+                    comparative_projection = comparative_outcome
             except (RuntimeError, ValueError):
                 await _save_observation_blocker(
                     uow,
@@ -332,6 +365,7 @@ async def observe_strategy_scope(
                     ),
                     member_set_digest=comparative_digest,
                     lookback_bars=comparative_lookback_bars,
+                    attempted_at_ms=attempted_at_ms,
                 )
             )
         snapshot = await _load_market_snapshot(
@@ -647,6 +681,7 @@ async def _get_or_create_comparative_projection(
     universe_member_ids: tuple[str, ...],
     member_set_digest: str,
     lookback_bars: int,
+    attempted_at_ms: int,
 ) -> ComparativeUniverseProjection:
     async with serialize_comparative_projection(
         event_spec_id=scope.event_spec_id,
@@ -663,19 +698,49 @@ async def _get_or_create_comparative_projection(
                     member_set_digest=member_set_digest,
                 )
             )
-        if persisted is not None:
+        if isinstance(persisted, ComparativeUniverseProjection):
             return persisted
+        if (
+            isinstance(persisted, ComparativeProjectionFailure)
+            and persisted.is_active(attempted_at_ms=attempted_at_ms)
+        ):
+            raise RuntimeError("comparative projection unavailable")
 
-        projected = await project_comparative_universe(
-            market_source,
-            event_spec_id=scope.event_spec_id,
-            universe_version_id=scope.universe_version_id,
-            strategy_group_id=contract.strategy_group_id,
-            exchange_instrument_ids=universe_member_ids,
-            closed_bar_time_ms=trigger_ms,
-            lookback_bars=lookback_bars,
-            freshness_window_ms=contract.freshness_window_ms,
-        )
+        try:
+            projected = await project_comparative_universe(
+                market_source,
+                event_spec_id=scope.event_spec_id,
+                universe_version_id=scope.universe_version_id,
+                strategy_group_id=contract.strategy_group_id,
+                exchange_instrument_ids=universe_member_ids,
+                closed_bar_time_ms=trigger_ms,
+                lookback_bars=lookback_bars,
+                freshness_window_ms=contract.freshness_window_ms,
+            )
+        except (RuntimeError, TimeoutError, ValueError) as exc:
+            failure = build_comparative_projection_failure(
+                event_spec_id=scope.event_spec_id,
+                universe_version_id=scope.universe_version_id,
+                member_set_digest=member_set_digest,
+                closed_bar_time_ms=trigger_ms,
+                observed_at_ms=attempted_at_ms,
+                reason_code=(
+                    "comparative_projection_incomplete"
+                    if isinstance(exc, ValueError)
+                    else "comparative_market_temporarily_unavailable"
+                ),
+            )
+            async with uow_factory() as uow:
+                persisted_failure = (
+                    await uow.strategy_universes
+                    .save_comparative_projection_failure(failure)
+                )
+            if isinstance(
+                persisted_failure,
+                ComparativeUniverseProjection,
+            ):
+                return persisted_failure
+            raise RuntimeError("comparative projection unavailable") from exc
         async with uow_factory() as uow:
             return await uow.strategy_universes.save_comparative_projection(
                 projected

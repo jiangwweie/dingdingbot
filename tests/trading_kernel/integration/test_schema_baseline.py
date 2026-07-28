@@ -4,7 +4,6 @@ import sqlalchemy as sa
 
 from src.trading_kernel.infrastructure.pg_models import metadata
 
-
 EXPECTED_TABLES = {
     "brc_account_exposure_current",
     "brc_budget_reservations",
@@ -94,6 +93,14 @@ def test_strategy_universe_metadata_has_forward_only_authority_shape() -> None:
         "event_spec_id",
         "universe_version_id",
     )
+    assert {
+        "projection_status",
+        "failure_reason",
+        "projection",
+        "observed_at_ms",
+        "valid_until_ms",
+        "projection_version",
+    }.issubset(comparative.c.keys())
     assert {
         "pending_certification",
         "active",

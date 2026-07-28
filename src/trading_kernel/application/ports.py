@@ -24,6 +24,8 @@ from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallResult,
 )
 from src.trading_kernel.application.project_comparative_universe import (
+    ComparativeProjectionFailure,
+    ComparativeProjectionOutcome,
     ComparativeUniverseProjection,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
@@ -977,12 +979,17 @@ class StrategyUniverseRepository(Protocol):
         universe_version_id: str,
         closed_bar_time_ms: int,
         member_set_digest: str,
-    ) -> ComparativeUniverseProjection | None: ...
+    ) -> ComparativeProjectionOutcome | None: ...
 
     async def save_comparative_projection(
         self,
         projection: ComparativeUniverseProjection,
     ) -> ComparativeUniverseProjection: ...
+
+    async def save_comparative_projection_failure(
+        self,
+        failure: ComparativeProjectionFailure,
+    ) -> ComparativeProjectionOutcome: ...
 
     async def claim_due_instrument_certification(
         self,

@@ -271,6 +271,8 @@ def upgrade() -> None:
         _id("universe_version_id"),
         _time("closed_bar_time_ms"),
         sa.Column("member_set_digest", LONG_TEXT, nullable=False),
+        sa.Column("projection_status", SHORT_TEXT, nullable=False),
+        sa.Column("failure_reason", SHORT_TEXT, nullable=True),
         _json("projection"),
         _time("observed_at_ms"),
         _time("valid_until_ms"),
@@ -289,6 +291,13 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "member_set_digest ~ '^sha256:[0-9a-f]{64}$'",
             name="ck_brc_comparative_projection_member_digest_valid",
+        ),
+        sa.CheckConstraint(
+            "(projection_status = 'ready' AND failure_reason IS NULL) OR "
+            "(projection_status = 'unavailable' AND "
+            "failure_reason IN ('comparative_projection_incomplete', "
+            "'comparative_market_temporarily_unavailable'))",
+            name="ck_brc_comparative_projection_status_shape",
         ),
         sa.CheckConstraint(
             "valid_until_ms > observed_at_ms",

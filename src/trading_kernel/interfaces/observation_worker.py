@@ -92,6 +92,7 @@ async def run_observation_worker_once(
                         claim.trigger_candle_close_time_ms
                     ),
                     observation_generation=claim.observation_generation,
+                    attempted_at_ms=request.now_ms,
                 ),
             ),
             timeout=request.timeout_seconds,

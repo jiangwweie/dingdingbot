@@ -33,18 +33,29 @@ event_spec_id
 - the current PostgreSQL projection version.
 
 Construction rejects missing or duplicate members, incomplete windows,
-different latest close times, future candles, digest drift, strength-member
-drift, and invalid validity windows.
+different latest close times, internal 1h gaps, future candles, digest drift,
+strength-member drift, and invalid validity windows. The final
+`lookback_bars + 1` closes must be anchored exactly one hour apart through the
+requested closed bar.
 
 ## PostgreSQL Semantics
 
-`brc_comparative_projection_current` remains one current row per
-Event/Universe version.
+`brc_comparative_projection_current` remains one current outcome row per
+Event/Universe version. The row is explicitly either `ready` or `unavailable`;
+an unavailable outcome has a typed failure reason and can never be consumed as
+a comparative market projection.
 
 - First persistence inserts projection version 1.
 - A newer closed bar atomically replaces the current payload and increments
   projection version.
 - The same closed bar is idempotent and does not increment the version.
+- An incomplete or temporarily unavailable exact-key build persists one
+  unavailable outcome with a bounded 30-second retry window.
+- Related scopes reuse that unavailable outcome without repeating member
+  market reads before the retry boundary.
+- A successful same-close bounded retry atomically replaces the unavailable
+  outcome and increments projection version.
+- An unavailable writer cannot replace a same-close ready projection.
 - An older closed bar cannot replace newer current state.
 - A newer closed bar increments the current projection version; a later stale
   writer is rejected.
@@ -120,6 +131,15 @@ Failure cases prove:
 - one missing member makes every attempted related scope invalid;
 - one member with a different latest close makes every attempted related scope
   invalid;
+- one internal gap in the final comparative lookback makes every related scope
+  invalid;
+- sequential eight-scope and concurrent two-scope failures read each member
+  exactly once, persist one unavailable outcome, and create zero Signal and
+  zero warm readiness;
+- repeated attempts before the 30-second retry boundary perform zero additional
+  member reads;
+- a successful same-close attempt at the retry boundary replaces unavailable
+  with ready and advances projection version from 1 to 2;
 - a persisted member digest different from the exact Universe digest is not
   consumed and is not overwritten at the same close;
 - all failure cases create zero Signal and zero warm-ready scope;
@@ -130,26 +150,27 @@ Failure cases prove:
 Command:
 
 ```text
-uv run pytest -q \
+pytest -q \
   tests/trading_kernel/unit/test_project_comparative_universe.py \
   tests/trading_kernel/integration/test_comparative_universe_projection.py \
   tests/trading_kernel/integration/test_universe_market_call_bounds.py \
   tests/trading_kernel/integration/test_universe_warming.py \
   tests/trading_kernel/integration/test_observation_to_signal.py \
-  tests/trading_kernel/integration/test_strategy_universe_repository.py -x
+  tests/trading_kernel/integration/test_strategy_universe_repository.py \
+  tests/trading_kernel/integration/test_schema_baseline.py
 ```
 
 Result:
 
 ```text
-45 passed in 37.31s
+66 passed in 39.50s
 ```
 
 Static gate:
 
 ```text
 Ruff E4/E7/E9/F/I: all checks passed
-Mypy focused 4 source files: success, no issues found
+Mypy focused 5 source files with follow-imports skipped: success, no issues found
 git diff --check: exit 0
 ```
 

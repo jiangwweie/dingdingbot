@@ -357,10 +357,16 @@ async def test_comparative_warming_requires_market_data_for_every_member(
         },
     )
 
-    warmed = await _observe(
-        warming_engine,
+    warmed = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
         complete,
-        scope["runtime_scope_id"],
+        ObservationRequest(
+            runtime_scope_id=scope["runtime_scope_id"],
+            runtime_commit=RUNTIME_COMMIT,
+            schema_revision=SCHEMA_REVISION,
+            trigger_candle_close_time_ms=NOW_MS,
+            attempted_at_ms=NOW_MS + 30_000,
+        ),
     )
 
     assert warmed.status is ObservationStatus.WARMED
