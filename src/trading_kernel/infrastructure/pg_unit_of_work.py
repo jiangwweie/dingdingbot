@@ -22,6 +22,7 @@ from src.trading_kernel.application.ports import (
     RuntimeIncidentRecord,
     SignalRepository,
     StrategyRegistryRepository,
+    StrategyUniverseRepository,
     TicketRepository,
     UnsupportedKernelEffect,
 )
@@ -84,6 +85,9 @@ from src.trading_kernel.infrastructure.pg_repositories import (
 from src.trading_kernel.infrastructure.pg_signal_repository import (
     PostgresSignalRepository,
 )
+from src.trading_kernel.infrastructure.pg_universe_repository import (
+    PostgresStrategyUniverseRepository,
+)
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     PostgresStrategyRegistryRepository,
 )
@@ -106,6 +110,7 @@ class PostgresKernelUnitOfWork:
     entry_admission: EntryAdmissionRepository
     signals: SignalRepository
     strategy_registry: StrategyRegistryRepository
+    strategy_universes: StrategyUniverseRepository
 
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
@@ -130,6 +135,7 @@ class PostgresKernelUnitOfWork:
         self.entry_admission = PostgresEntryAdmissionRepository(self._connection)
         self.signals = PostgresSignalRepository(self._connection)
         self.strategy_registry = PostgresStrategyRegistryRepository(self._connection)
+        self.strategy_universes = PostgresStrategyUniverseRepository(self._connection)
         return self
 
     async def __aexit__(

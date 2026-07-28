@@ -10,6 +10,11 @@ from typing import Callable, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, JsonValue, model_validator
 
+from src.trading_kernel.application.install_strategy_universe import (
+    UniverseCurrent,
+    UniverseInstallRequest,
+    UniverseInstallResult,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity import CapacityClaim
@@ -783,6 +788,23 @@ class StrategyRegistryRepository(Protocol):
     async def get_exit_policy(self, event_spec_id: str) -> ExitPolicy | None: ...
 
 
+class StrategyUniverseRepository(Protocol):
+    async def install(
+        self,
+        request: UniverseInstallRequest,
+    ) -> UniverseInstallResult: ...
+
+    async def get_current(
+        self,
+        event_spec_id: str,
+    ) -> UniverseCurrent | None: ...
+
+    async def get_members(
+        self,
+        universe_version_id: str,
+    ) -> tuple[str, ...]: ...
+
+
 class VenueCommandRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -921,6 +943,7 @@ class KernelUnitOfWork(Protocol):
     entry_admission: EntryAdmissionRepository
     signals: SignalRepository
     strategy_registry: StrategyRegistryRepository
+    strategy_universes: StrategyUniverseRepository
 
     async def __aenter__(self) -> Self: ...
 
