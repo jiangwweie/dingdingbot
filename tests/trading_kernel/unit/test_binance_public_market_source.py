@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 
 import pytest
 
@@ -38,6 +39,19 @@ class SlowExchange:
         return []
 
 
+def test_public_market_source_rejects_retired_venue_symbol_map() -> None:
+    assert "venue_symbols" not in inspect.signature(
+        CcxtBinancePublicMarketSource
+    ).parameters
+
+    with pytest.raises(TypeError, match="venue_symbols"):
+        CcxtBinancePublicMarketSource(
+            exchange=FakeExchange([]),
+            venue_symbols={},
+            timeout_seconds=1,
+        )
+
+
 @pytest.mark.asyncio
 async def test_public_source_returns_only_last_requested_closed_candles() -> None:
     duration_ms = 900_000
@@ -56,7 +70,6 @@ async def test_public_source_returns_only_last_requested_closed_candles() -> Non
     exchange = FakeExchange(rows)
     source = CcxtBinancePublicMarketSource(
         exchange=exchange,
-        venue_symbols={"binance-usdm:ETHUSDT:perpetual": "ETH/USDT:USDT"},
         timeout_seconds=1,
     )
 
@@ -78,7 +91,6 @@ async def test_public_source_returns_only_last_requested_closed_candles() -> Non
 async def test_public_source_bounds_exchange_timeout() -> None:
     source = CcxtBinancePublicMarketSource(
         exchange=SlowExchange(),
-        venue_symbols={"binance-usdm:ETHUSDT:perpetual": "ETH/USDT:USDT"},
         timeout_seconds=0.001,
     )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import inspect
 
 import pytest
 
@@ -58,6 +59,17 @@ class InsufficientFunds(Exception):
 
 class ExchangeError(Exception):
     pass
+
+
+def test_ccxt_adapter_rejects_retired_venue_symbol_map() -> None:
+    assert "venue_symbols" not in inspect.signature(CcxtVenueAdapter).parameters
+
+    with pytest.raises(TypeError, match="venue_symbols"):
+        CcxtVenueAdapter(
+            exchanges={},
+            venue_symbols={},
+            clock_ms=lambda: 2_000,
+        )
 
 
 def test_position_details_requires_liquidation_evidence_for_every_open_row() -> None:
@@ -726,12 +738,6 @@ async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> N
     exchange = FakeAsyncExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 2_000,
     )
 
@@ -757,12 +763,6 @@ async def test_ccxt_adapter_submits_tp1_limit_with_gtx_time_in_force() -> None:
     exchange = FakeAsyncExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 2_000,
     )
     request = _request().model_copy(
@@ -796,9 +796,6 @@ async def test_ccxt_adapter_sets_leverage_then_reads_back_without_creating_order
     exchange = LeverageMutationExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 2_000,
     )
 
@@ -831,9 +828,6 @@ async def test_ccxt_adapter_preserves_only_exchange_code_for_leverage_failure() 
         exchanges={
             ("binance-usdm", "experiment-1"): CodedLeverageFailureExchange()
         },
-        venue_symbols={
-            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 2_000,
     )
 
@@ -860,9 +854,6 @@ async def test_ccxt_adapter_recovers_flat_leverage_truth_from_position_risk() ->
     exchange = LeverageMutationExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 2_000,
     )
 
@@ -888,10 +879,6 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
     exchange = AdmissionSnapshotExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "SOL/USDT:USDT",
-            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT",
-        },
         settlement_assets={
             ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "USDT"
         },
@@ -946,7 +933,6 @@ async def test_ccxt_adapter_derives_account_wide_binance_instrument_ids_without_
     exchange = AdmissionSnapshotExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={},
         clock_ms=lambda: 2_000,
     )
 
@@ -997,7 +983,6 @@ async def test_ccxt_adapter_rejects_non_usdt_account_wide_symbol_without_fabrica
     exchange.fetch_positions = malformed_positions
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={},
         clock_ms=lambda: 2_000,
     )
 
@@ -1042,10 +1027,6 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
     exchange.fapiPrivateV2GetPositionRisk = flat_target_position_risk
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "SOL/USDT:USDT",
-            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT",
-        },
         settlement_assets={
             ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "USDT"
         },
@@ -1079,9 +1060,6 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
 async def test_ccxt_adapter_reads_typed_leverage_and_maintenance_rules() -> None:
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): InstrumentRulesExchange()},
-        venue_symbols={
-            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 2_000,
     )
 
@@ -1111,9 +1089,6 @@ async def test_ccxt_adapter_uses_bracket_leverage_when_market_limit_is_absent() 
             ("binance-usdm", "experiment-1"): (
                 InstrumentRulesWithoutMarketLeverageExchange()
             )
-        },
-        venue_symbols={
-            ("binance-usdm", "binance-usdm:BTCUSDT:perpetual"): "BTC/USDT:USDT"
         },
         clock_ms=lambda: 2_000,
     )
@@ -1170,12 +1145,6 @@ async def test_ccxt_adapter_builds_position_snapshot_for_exact_netting_domain() 
         exchanges={
             ("binance-usdm", "experiment-1"): ActionFactsExchange()
         },
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 2_000,
     )
     domain = NettingDomain(
@@ -1209,12 +1178,6 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
     adapter = CcxtVenueAdapter(
         exchanges={
             ("binance-usdm", "experiment-1"): LifecycleFactsExchange()
-        },
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
         },
         settlement_assets={
             (
@@ -1276,12 +1239,6 @@ async def test_ccxt_adapter_keeps_runner_window_after_dropping_open_candle() -> 
     exchange = IncompleteLastLifecycleFactsExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         settlement_assets={
             (
                 "binance-usdm",
@@ -1331,12 +1288,6 @@ async def test_ccxt_adapter_uses_conservative_taker_bound_for_bnb_lifecycle_fee(
         exchanges={
             ("binance-usdm", "experiment-1"): BnbLifecycleFactsExchange()
         },
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         settlement_assets={
             (
                 "binance-usdm",
@@ -1383,12 +1334,6 @@ async def test_ccxt_adapter_builds_exact_ticket_bound_review_economics_facts() -
     exchange = ReviewEconomicsExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         settlement_assets={
             (
                 "binance-usdm",
@@ -1430,12 +1375,6 @@ async def test_ccxt_adapter_values_all_bnb_review_fees_from_one_index_snapshot()
     exchange = BnbReviewEconomicsExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         settlement_assets={
             (
                 "binance-usdm",
@@ -1461,12 +1400,6 @@ async def test_ccxt_adapter_reads_bnb_fee_capability_with_readonly_calls_only() 
     exchange = FeeDiscountCapabilityExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 4_000,
     )
 
@@ -1486,12 +1419,6 @@ async def test_ccxt_adapter_marks_funding_unavailable_for_overlapping_exposure()
     exchange = ReviewEconomicsExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         settlement_assets={
             (
                 "binance-usdm",
@@ -1515,12 +1442,6 @@ async def test_ccxt_adapter_rejects_review_fill_without_exact_fee() -> None:
     exchange = ReviewEconomicsExchange(include_fee=False)
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         settlement_assets={
             (
                 "binance-usdm",
@@ -1538,12 +1459,6 @@ async def test_ccxt_adapter_rejects_review_fill_without_exact_fee() -> None:
 async def test_ccxt_adapter_classifies_only_authoritative_rejection() -> None:
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): RejectingExchange()},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 2_000,
     )
 
@@ -1558,12 +1473,6 @@ async def test_ccxt_adapter_classifies_only_authoritative_rejection() -> None:
 async def test_ccxt_adapter_propagates_unknown_network_outcome() -> None:
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): TimingOutExchange()},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 2_000,
     )
 
@@ -1738,12 +1647,6 @@ def _request() -> VenueCommandRequest:
 def _cancel_adapter(exchange) -> CcxtVenueAdapter:
     return CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
-        venue_symbols={
-            (
-                "binance-usdm",
-                "binance-usdm:BTCUSDT:perpetual",
-            ): "BTC/USDT:USDT"
-        },
         clock_ms=lambda: 2_000,
     )
 

@@ -201,7 +201,6 @@ class CcxtVenueAdapter:
         self,
         *,
         exchanges: Mapping[tuple[str, str], _CcxtExchange],
-        venue_symbols: Mapping[tuple[str, str], str],
         settlement_assets: Mapping[tuple[str, str], str] | None = None,
         taker_fee_rates: Mapping[tuple[str, str], Decimal] | None = None,
         default_settlement_asset: str | None = None,
@@ -209,7 +208,6 @@ class CcxtVenueAdapter:
         clock_ms: Callable[[], int],
     ) -> None:
         self._exchanges = dict(exchanges)
-        del venue_symbols
         self._settlement_assets = dict(settlement_assets or {})
         self._taker_fee_rates = dict(taker_fee_rates or {})
         self._default_settlement_asset = default_settlement_asset

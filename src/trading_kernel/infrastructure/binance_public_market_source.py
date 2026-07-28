@@ -40,13 +40,11 @@ class CcxtBinancePublicMarketSource:
         self,
         *,
         exchange: _CcxtPublicExchange,
-        venue_symbols: Mapping[str, str],
         timeout_seconds: float,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("public market timeout must be positive")
         self._exchange = exchange
-        del venue_symbols
         self._timeout_seconds = timeout_seconds
 
     async def fetch_closed_candles(

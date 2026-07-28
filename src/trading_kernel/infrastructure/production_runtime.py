@@ -115,7 +115,6 @@ def build_binance_usdm_market_source() -> CcxtBinancePublicMarketSource:
     )
     return CcxtBinancePublicMarketSource(
         exchange=exchange,
-        venue_symbols={},
         timeout_seconds=timeout_seconds,
     )
 
@@ -139,7 +138,6 @@ def build_binance_usdm_venue_adapter() -> CcxtVenueAdapter:
     )
     return CcxtVenueAdapter(
         exchanges={(settings.venue_id, settings.account_id): exchange},
-        venue_symbols={},
         settlement_assets={},
         taker_fee_rates={},
         default_settlement_asset="USDT",
