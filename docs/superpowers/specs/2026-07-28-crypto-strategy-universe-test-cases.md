@@ -3,6 +3,7 @@ title: Crypto Strategy Universe General Capability Test Cases
 status: OWNER_REVIEW_REQUIRED
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-28
+revision: 2
 design: 2026-07-28-crypto-strategy-universe-design.md
 plan: ../plans/2026-07-28-crypto-strategy-universe-implementation.md
 ---
@@ -362,13 +363,15 @@ Owner 确认设计、实施计划和本测试规格后，实施必须先让相�
 | ID | 前置事实 | 必须证据 | 未满足时 |
 | --- | --- | --- | --- |
 | DEP-001 | Owner 固定每个 Event 最终清单 | 明确 1..10 个 canonical ids | 不播种 |
-| DEP-002 | 所有 Ticket/position/order flat | PostgreSQL + exchange exact truth | 不迁移 |
-| DEP-003 | schema/runtime identity 一致 | immutable commit/tag/revision | 不启动 writer |
-| DEP-004 | 每成员 Cross/5x/hedge/trading | 只读 certification | Monitor/人工处理 |
-| DEP-005 | Safety Workers postflight 正常 | Observation/Lifecycle/Reconciliation active | Entry 不启动 |
-| DEP-006 | current Universe 与 Scope 一致 | pointer/digest/member/readiness | Entry 不启用 |
-| DEP-007 | 资源警戒线内 | CPU/memory/tasks/restarts/filesystem | 只读诊断 |
-| DEP-008 | Owner 单独确认生产播种/Entry | action-time 授权 | 保持 blocked |
+| DEP-002 | P1 fairness/order attribution 独立验收 | P1 全链、静态、性能证据 | 不创建 0002 |
+| DEP-003 | BTC pending closure 正常 terminal | BudgetSettled、ReviewRecorded、完整 Review | 不迁移 |
+| DEP-004 | 所有 Ticket/position/order/Settlement/Review flat | PostgreSQL + exchange exact truth | 不迁移 |
+| DEP-005 | schema/runtime identity 一致 | immutable commit/tag/revision | 不启动 writer |
+| DEP-006 | 每成员 Cross/5x/hedge/trading | 只读 certification | Monitor/人工处理 |
+| DEP-007 | Safety Workers postflight 正常 | Observation/Lifecycle/Reconciliation active | Entry 不启动 |
+| DEP-008 | current Universe 与 Scope 一致 | pointer/digest/member/readiness | Entry 不启用 |
+| DEP-009 | 资源警戒线内 | CPU/memory/tasks/restarts/filesystem | 只读诊断 |
+| DEP-010 | Owner 单独确认生产播种/Entry | action-time 授权 | 保持 blocked |
 
 ## RED 实施顺序
 

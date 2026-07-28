@@ -67,6 +67,11 @@ persistent systemd workers.
     US-equity instrument。
 12. **不做生产播种**：测试 fixture 可以使用 8 个示例 symbol，但不得把它们
     声明为最终生产池。
+13. **P1 前置**：先合并并验收 Settlement fairness、exact Binance order
+    attribution、BNB fee valuation 和 closure-only handover；Universe 不
+    复制或绕过这些能力。
+14. **发布隔离**：P1 保持 schema `0001` 独立发布并闭合 pending Ticket，
+    Universe `0002` 只能在最终 flat 后另行发布。
 
 ## 文件结构
 
@@ -92,6 +97,27 @@ persistent systemd workers.
 | `src/trading_kernel/infrastructure/runtime_authority_seed.py` | 修改 | Policy 绑定 Event，不展开成员 |
 | `src/trading_kernel/infrastructure/venue_adapter.py` | 修改 | 使用严格 InstrumentCodec |
 | Observation/Reconciliation worker 入口 | 修改 | 每 cadence 最多推进一个有界维护工作 |
+
+## Task 0：完成 P1 闭环前置门
+
+**Required design and plan:**
+
+- `docs/superpowers/specs/2026-07-28-reconciliation-settlement-review-attribution-repair-design.md`
+- `docs/superpowers/plans/2026-07-28-reconciliation-settlement-review-attribution-repair.md`
+- `docs/superpowers/specs/2026-07-28-reconciliation-settlement-review-attribution-repair-test-cases.md`
+
+- [ ] P1 实现已通过 Owner 确认后按 RED/GREEN 完成。
+- [ ] 多 Ticket Settlement/Review fairness、regular/algo actualOrderId
+  attribution、USDT/BNB fee 和 STOP_MARKET/GTX 测试全部通过。
+- [ ] P1 未改变 Alembic head，未夹带 Universe schema。
+- [ ] BTC-like pending Ticket 已经正常 `BudgetSettled -> ReviewRecorded ->
+  terminal`，未使用 DML。
+- [ ] 所有生产 Ticket、position、order、Incident、Settlement 和 Review
+  已完成 flat certification。
+- [ ] 只有上述证据全部存在后，才开始本计划 Task 1。
+
+**Stop gate:** 任一 pending closure、incomplete Review 或 exchange residue
+存在时，不创建 Universe migration，不执行生产播种。
 
 ## Task 1：建立无序 Universe 与 InstrumentCodec 领域边界
 
@@ -594,7 +620,9 @@ read_strategy_universe_status.py
 
 ```text
 Owner 明确固定每个 Event 的最终成员
-and 所有 Ticket/position/order 完整 flat
+and P1 fairness/order attribution 已独立发布并验收
+and BTC pending closure 已正常 terminal
+and 所有 Ticket/position/order/Settlement/Review 完整 flat
 and 本地实现和验收已由 Owner 确认
 and Tokyo action-time facts 已刷新
 ```

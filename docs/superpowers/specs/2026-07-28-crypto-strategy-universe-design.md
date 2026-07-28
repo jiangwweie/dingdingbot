@@ -3,7 +3,7 @@ title: Crypto Strategy Universe General Capability Design
 status: OWNER_REVIEW_REQUIRED
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-28
-revision: 1
+revision: 2
 ---
 
 # Crypto Strategy Universe General Capability Design
@@ -107,7 +107,11 @@ StrategyUniverse 拥有，Registry 不再拥有成员清单。
 Owner 已明确当前工程验证阶段采用 **全平后部署**：
 
 ```text
-所有持仓和 Ticket 完整闭环
+P1 Settlement fairness / exact order attribution 修复先独立验收
+-> SOL/AVAX 等剩余交易所持仓和订单自然全平
+-> closure-only、Entry fenced 发布
+-> BTC 通过正常事件链完成 Settlement/Review
+-> 所有持仓和 Ticket 完整闭环
 -> 停止旧版本
 -> 前向迁移和播种
 -> 启动安全 Worker
@@ -116,7 +120,11 @@ Owner 已明确当前工程验证阶段采用 **全平后部署**：
 ```
 
 因此本次设计不承担旧运行 Ticket、旧 Signal、旧候选池或旧表结构的运行时
-兼容责任。部署前仍必须满足现行 flat-release 和 exchange-flat 门。
+兼容责任。Universe `0002` 不得与 P1 closure-only 发布合并；部署前必须
+满足现行 flat-release 和 exchange-flat 门，并证明不存在
+`SETTLEMENT_PENDING`、`REVIEW_PENDING` 或不完整 Review。
+（衔接设计：
+[`2026-07-28-reconciliation-settlement-review-attribution-repair-design.md`](2026-07-28-reconciliation-settlement-review-attribution-repair-design.md)）
 
 ## 基于事实的架构判断
 
@@ -770,13 +778,15 @@ Universe 激活时间和版本状态足以说明当时的资格，不建设“�
 
 生产播种必须在单独的 Owner 确认门后执行：
 
-1. 所有 Ticket、仓位和订单已闭环；
-2. Owner 固定每个 Event 的最终 1 至 10 个成员，目标为 8；
-3. 代理提交配置；
-4. 自动认证和预热完成；
-5. 只读证据证明每个成员为 Binance USD-M USDT perpetual、Cross、5x；
-6. schema、runtime identity、Policy、Universe current 一致；
-7. Safety Workers 先启动，Entry 最后启用。
+1. P1 fairness/order attribution 版本已完成验收；
+2. BTC-like pending closure 已通过正常 Event/Reducer/UoW 达到 terminal；
+3. 所有 Ticket、仓位、订单、Settlement 和 Review 已闭环；
+4. Owner 固定每个 Event 的最终 1 至 10 个成员，目标为 8；
+5. 代理提交配置；
+6. 自动认证和预热完成；
+7. 只读证据证明每个成员为 Binance USD-M USDT perpetual、Cross、5x；
+8. schema、runtime identity、Policy、Universe current 一致；
+9. Safety Workers 先启动，Entry 最后启用。
 
 ## 编码前 Owner 确认清单
 
