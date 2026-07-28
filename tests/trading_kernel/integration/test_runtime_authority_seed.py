@@ -736,7 +736,9 @@ async def _insert_protected_tickets(
                     post_fill_disposition="protected",
                     protected_qty=projected_quantity,
                     entry_exchange_order_id=f"entry:{index}",
-                    initial_stop_exchange_order_id=f"initial-stop:{index}",
+                    initial_stop_exchange_order_id=(
+                        None if is_runner else f"initial-stop:{index}"
+                    ),
                     active_stop_exchange_order_id=f"stop:{index}",
                     active_stop_price=Decimal("103"),
                     tp1_exchange_order_id=(None if is_runner else f"tp1:{index}"),

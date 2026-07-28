@@ -1128,7 +1128,6 @@ def _aggregate_has_complete_protection(row: Mapping[str, object]) -> bool:
         or position_quantity <= 0
         or Decimal(str(row["protected_qty"])) != position_quantity
         or row["entry_exchange_order_id"] is None
-        or row["initial_stop_exchange_order_id"] is None
         or row["active_stop_exchange_order_id"] is None
         or row["active_stop_price"] is None
         or row["pending_replaced_stop_exchange_order_id"] is not None
@@ -1139,7 +1138,10 @@ def _aggregate_has_complete_protection(row: Mapping[str, object]) -> bool:
     ):
         return False
     if status == "position_protected":
-        return row["tp1_exchange_order_id"] is not None
+        return (
+            row["initial_stop_exchange_order_id"] is not None
+            and row["tp1_exchange_order_id"] is not None
+        )
     return (
         row["tp1_exchange_order_id"] is None
         and Decimal(str(row["tp1_filled_qty"]))
