@@ -27,6 +27,7 @@ from src.trading_kernel.application.produce_strategy_signal import (
     produce_strategy_signal,
 )
 from src.trading_kernel.application.project_comparative_universe import (
+    ComparativeProjectionAuthorityChanged,
     ComparativeProjectionFailure,
     ComparativeUniverseProjection,
     build_comparative_projection_failure,
@@ -375,6 +376,20 @@ async def observe_strategy_scope(
             request.trigger_candle_close_time_ms,
             observation_universe.exchange_instrument_ids,
             comparative_projection=comparative_projection,
+        )
+    except ComparativeProjectionAuthorityChanged:
+        async with uow_factory() as uow:
+            await _save_observation_blocker(
+                uow,
+                scope=scope,
+                blocker="comparative_projection_invalid",
+                detector_reason="comparative_projection_invalid",
+                updated_at_ms=request.trigger_candle_close_time_ms,
+            )
+        return _invalid_observation(
+            request,
+            event_spec_id=contract.event_spec_id,
+            reason="comparative_projection_invalid",
         )
     except (RuntimeError, TimeoutError, ValueError):
         async with uow_factory() as uow:

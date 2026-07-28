@@ -30,6 +30,7 @@ from src.trading_kernel.application.install_strategy_universe import (
 )
 from src.trading_kernel.application.ports import InstrumentCertificationTarget
 from src.trading_kernel.application.project_comparative_universe import (
+    ComparativeProjectionAuthorityChanged,
     ComparativeProjectionFailure,
     ComparativeProjectionOutcome,
     ComparativeUniverseProjection,
@@ -1292,7 +1293,7 @@ class PostgresStrategyUniverseRepository:
             member_set_digest=projection.member_set_digest,
         )
         if not isinstance(persisted, ComparativeUniverseProjection):
-            raise TypeError(
+            raise ComparativeProjectionAuthorityChanged(
                 "comparative projection authority changed"
             )
         return persisted

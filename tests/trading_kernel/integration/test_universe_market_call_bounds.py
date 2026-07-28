@@ -529,17 +529,31 @@ async def test_projection_member_digest_drift_is_not_consumed(
     )
 
     assert second.status is ObservationStatus.INVALID
-    assert second.detector_reason == "market_snapshot_unavailable"
+    assert second.detector_reason == "comparative_projection_invalid"
     async with comparative_engine.connect() as connection:
-        persisted_digest = await connection.scalar(
-            sa.select(
-                comparative_projection_current.c.member_set_digest
+        projection = (
+            await connection.execute(
+                sa.select(comparative_projection_current)
             )
+        ).mappings().one()
+        second_scope = (
+            await connection.execute(
+                sa.select(runtime_scopes_current).where(
+                    runtime_scopes_current.c.runtime_scope_id == scope_ids[1]
+                )
+            )
+        ).mappings().one()
+        assert projection["member_set_digest"] == corrupted_digest
+        assert projection["projection_version"] == 1
+        assert second_scope["warm_ready_at_ms"] is None
+        assert second_scope["warm_readiness_digest"] is None
+        assert second_scope["warm_valid_until_ms"] is None
+        assert (
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(signal_events)
+            )
+            == 0
         )
-        assert await connection.scalar(
-            sa.select(sa.func.count()).select_from(signal_events)
-        ) == 0
-    assert persisted_digest == corrupted_digest
 
 
 @pytest.mark.parametrize(

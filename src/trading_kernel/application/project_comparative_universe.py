@@ -29,6 +29,10 @@ COMPARATIVE_FAILURE_RETRY_MS = 30_000
 _MEMBER_DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 
 
+class ComparativeProjectionAuthorityChanged(RuntimeError):
+    """The exact comparative projection key no longer owns current state."""
+
+
 @dataclass
 class _ProjectionLockState:
     lock: asyncio.Lock

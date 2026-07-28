@@ -15,6 +15,7 @@ from src.trading_kernel.application.install_strategy_universe import (
 )
 from src.trading_kernel.application.project_comparative_universe import (
     ComparativeMemberWindow,
+    ComparativeProjectionAuthorityChanged,
     build_comparative_universe_projection,
 )
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
@@ -216,10 +217,7 @@ async def test_newer_projection_replaces_current_and_rejects_stale_writer(
             newer
         )
 
-    with pytest.raises(
-        TypeError,
-        match="comparative projection authority changed",
-    ):
+    with pytest.raises(ComparativeProjectionAuthorityChanged):
         async with PostgresKernelUnitOfWork(projection_engine) as uow:
             await uow.strategy_universes.save_comparative_projection(old)
 
