@@ -212,6 +212,20 @@ def test_preflight_leverage_drift_blocks_before_any_service_stop() -> None:
     assert not any(call[0] == "activate_release" for call in backend.calls)
 
 
+def test_preflight_rule_identity_drift_blocks_before_service_stop() -> None:
+    backend = FakeDeploymentBackend(
+        rule_instrument_ids=(
+            *TARGET_EXCHANGE_INSTRUMENT_IDS[:-1],
+            "binance-usdm:AVAXUSDT:perpetual",
+        )
+    )
+
+    with pytest.raises(DeploymentBlocked, match="instrument rule identity"):
+        deploy_tokyo_release(backend, _plan(enable_entry=False))
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+
+
 def test_post_stop_failure_fences_entry_and_restores_safety_workers() -> None:
     backend = FakeDeploymentBackend(fail_at="activate_release")
 
@@ -450,6 +464,7 @@ class FakeDeploymentBackend:
         closure_ticket_id: str | None = None,
         open_order_domain_count: int | None = None,
         include_exact_protected_facts: bool = True,
+        rule_instrument_ids: tuple[str, ...] = TARGET_EXCHANGE_INSTRUMENT_IDS,
         fail_at: str | None = None,
     ) -> None:
         self.configured_leverage = configured_leverage
@@ -466,6 +481,7 @@ class FakeDeploymentBackend:
             else open_order_domain_count
         )
         self.include_exact_protected_facts = include_exact_protected_facts
+        self.rule_instrument_ids = rule_instrument_ids
         self.fail_at = fail_at
         self.protected_certification_calls = 0
         self.calls: list[tuple[object, ...]] = []
@@ -573,10 +589,10 @@ class FakeDeploymentBackend:
             "open_order_domain_count": self.open_order_domain_count,
             "rules": [
                 {
-                    "exchange_instrument_id": f"instrument-{index}",
+                    "exchange_instrument_id": instrument_id,
                     "configured_leverage": self.configured_leverage,
                 }
-                for index in range(6)
+                for instrument_id in self.rule_instrument_ids
             ],
         }
         if self.include_exact_protected_facts:

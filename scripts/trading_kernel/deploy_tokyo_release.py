@@ -338,6 +338,7 @@ def _read_release_facts(
                 certification,
                 probe,
                 expected_leverage=plan.expected_configured_leverage,
+                expected_instrument_ids=plan.exchange_instrument_ids,
                 closure_ticket_id=plan.closure_ticket_id,
             ),
         )
@@ -355,6 +356,7 @@ def _read_release_facts(
                 certification,
                 probe,
                 expected_leverage=plan.expected_configured_leverage,
+                expected_instrument_ids=plan.exchange_instrument_ids,
                 protected_ticket_ids=plan.protected_ticket_ids,
             ),
         )
@@ -370,6 +372,7 @@ def _read_release_facts(
             certification,
             probe,
             expected_leverage=plan.expected_configured_leverage,
+            expected_instrument_ids=plan.exchange_instrument_ids,
         ),
     )
 
@@ -379,6 +382,7 @@ def _require_release_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
+    expected_instrument_ids: tuple[str, ...],
 ) -> dict[str, str]:
     if certification.get("status") != "pass":
         raise DeploymentBlocked("database flat certification failed")
@@ -412,18 +416,11 @@ def _require_release_facts(
         raise DeploymentBlocked("exchange position is not flat")
     if int(str(probe.get("open_order_domain_count", -1))) != 0:
         raise DeploymentBlocked("exchange open orders are present")
-    rules = probe.get("rules")
-    if not isinstance(rules, list) or len(rules) != 6:
-        raise DeploymentBlocked("production instrument rule set is incomplete")
-    configured = {
-        int(str(rule.get("configured_leverage", -1)))
-        for rule in rules
-        if isinstance(rule, Mapping)
-    }
-    if configured != {expected_leverage}:
-        raise DeploymentBlocked(
-            "production configured leverage differs from fixed 5x policy"
-        )
+    _require_probe_rules(
+        probe,
+        expected_leverage=expected_leverage,
+        expected_instrument_ids=expected_instrument_ids,
+    )
     return identity
 
 
@@ -432,6 +429,7 @@ def _require_closure_release_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
+    expected_instrument_ids: tuple[str, ...],
     closure_ticket_id: str,
 ) -> dict[str, str]:
     if certification.get("status") != "pass":
@@ -494,7 +492,11 @@ def _require_closure_release_facts(
         or closure_ticket.get("netting_domain_released") is not True
     ):
         raise DeploymentBlocked("closure Ticket authority has not been released")
-    _require_flat_exchange_facts(probe, expected_leverage=expected_leverage)
+    _require_flat_exchange_facts(
+        probe,
+        expected_leverage=expected_leverage,
+        expected_instrument_ids=expected_instrument_ids,
+    )
     return identity
 
 
@@ -502,6 +504,7 @@ def _require_flat_exchange_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
+    expected_instrument_ids: tuple[str, ...],
 ) -> None:
     if probe.get("venue_id") != "binance-usdm":
         raise DeploymentBlocked("production venue identity differs from policy")
@@ -513,18 +516,11 @@ def _require_flat_exchange_facts(
         raise DeploymentBlocked("exchange position is not flat")
     if int(str(probe.get("open_order_domain_count", -1))) != 0:
         raise DeploymentBlocked("exchange open orders are present")
-    rules = probe.get("rules")
-    if not isinstance(rules, list) or len(rules) != 6:
-        raise DeploymentBlocked("production instrument rule set is incomplete")
-    configured = {
-        int(str(rule.get("configured_leverage", -1)))
-        for rule in rules
-        if isinstance(rule, Mapping)
-    }
-    if configured != {expected_leverage}:
-        raise DeploymentBlocked(
-            "production configured leverage differs from fixed 5x policy"
-        )
+    _require_probe_rules(
+        probe,
+        expected_leverage=expected_leverage,
+        expected_instrument_ids=expected_instrument_ids,
+    )
 
 
 def _require_protected_release_facts(
@@ -532,6 +528,7 @@ def _require_protected_release_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
+    expected_instrument_ids: tuple[str, ...],
     protected_ticket_ids: tuple[str, ...],
 ) -> dict[str, str]:
     protected_ticket_count = len(protected_ticket_ids)
@@ -576,9 +573,36 @@ def _require_protected_release_facts(
         probe,
         protected_ticket_ids=protected_ticket_ids,
     )
+    _require_probe_rules(
+        probe,
+        expected_leverage=expected_leverage,
+        expected_instrument_ids=expected_instrument_ids,
+    )
+    return identity
+
+
+def _require_probe_rules(
+    probe: Mapping[str, object],
+    *,
+    expected_leverage: int,
+    expected_instrument_ids: tuple[str, ...],
+) -> None:
     rules = probe.get("rules")
-    if not isinstance(rules, list) or len(rules) != 6:
+    if not isinstance(rules, list) or len(rules) != len(
+        expected_instrument_ids
+    ):
         raise DeploymentBlocked("production instrument rule set is incomplete")
+    if any(not isinstance(rule, Mapping) for rule in rules):
+        raise DeploymentBlocked("production instrument rule set is incomplete")
+    actual_instrument_ids = tuple(
+        sorted(
+            str(rule.get("exchange_instrument_id", ""))
+            for rule in rules
+            if isinstance(rule, Mapping)
+        )
+    )
+    if actual_instrument_ids != expected_instrument_ids:
+        raise DeploymentBlocked("production instrument rule identity differs")
     configured = {
         int(str(rule.get("configured_leverage", -1)))
         for rule in rules
@@ -588,7 +612,6 @@ def _require_protected_release_facts(
         raise DeploymentBlocked(
             "production configured leverage differs from fixed 5x policy"
         )
-    return identity
 
 
 def _require_exact_protected_exchange_facts(
