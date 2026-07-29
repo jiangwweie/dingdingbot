@@ -1,6 +1,6 @@
 ---
 title: Cross-Margin Stop-Stress Authority Repair Design
-status: PROPOSED_OWNER_REVIEW
+status: IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-29
 revision: 2
@@ -15,9 +15,10 @@ supersedes_revision: 1
 
 > **删除“内部清算价求根”，改为账户级 Cross Margin Stop 压力证明。**
 
-本轮只修改设计和测试设计，不授权生产代码、PostgreSQL、Tokyo 服务或交易所
-写入。文档仍是 `PROPOSED_OWNER_REVIEW / NOT_CURRENT_AUTHORITY`。Owner 确认
-本次修订后，才能编写实施计划并进入本地 RED/GREEN/REFACTOR。
+Owner 已确认本次修订，并授权编写实施计划和进入本地
+RED/GREEN/REFACTOR。该授权不包括部署、Tokyo PostgreSQL、Tokyo 服务或
+交易所写入。文档状态为
+`IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY / NOT_CURRENT_AUTHORITY`。
 
 生产 Entry 必须保持 fenced，直到本地完整验收、旧持仓闭环、flat-only 迁移
 前置条件、Tokyo action-time 认证全部通过，并获得独立的 Owner 恢复确认。

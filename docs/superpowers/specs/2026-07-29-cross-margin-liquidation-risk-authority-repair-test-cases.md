@@ -1,6 +1,6 @@
 ---
 title: Cross-Margin Stop-Stress Authority Repair Test Cases
-status: PROPOSED_OWNER_REVIEW
+status: IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-29
 revision: 2
@@ -11,8 +11,8 @@ design: 2026-07-29-cross-margin-liquidation-risk-authority-repair-design.md
 
 ## 目的
 
-本文档把 revision 2 设计转换为可执行断言。Owner 确认后，实施必须先观察
-RED，再修改生产代码。
+本文档把 revision 2 设计转换为可执行断言。Owner 已授权本地实施；每项行为
+必须先观察 RED，再修改生产代码。部署、Tokyo 和交易所写入仍需独立确认。
 
 本文件定义 **81 个语义场景**，不是要求编写 81 个重复测试函数。Long/Short、
 零值/错误方向、bracket 边界和故障矩阵必须使用 `pytest.mark.parametrize`
