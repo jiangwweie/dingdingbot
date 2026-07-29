@@ -64,7 +64,6 @@ AccountRiskPosition
 AccountRiskSnapshot
 StressPosition
 CrossMarginStressRequest
-CrossMarginStressPoint
 CrossMarginStressProof
 CrossMarginStressEvidence
 CrossMarginStressStatus
