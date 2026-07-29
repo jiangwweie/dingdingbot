@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Literal
 
@@ -480,12 +481,20 @@ class PostgresExchangeCommandRepository:
                 ExchangeCommandKind.SET_LEVERAGE,
             }:
                 continue
-            payload = _COMMAND_PAYLOAD_ADAPTER.validate_python(row["request_payload"])
-            if not isinstance(payload, OrderCommandPayload):
-                raise RuntimeError("accepted order command has a non-order payload")
+            payload = row["request_payload"]
+            if not isinstance(payload, Mapping):
+                raise RuntimeError("accepted order command payload is not a mapping")
+            order_type = str(payload.get("order_type") or "").strip()
+            if order_type not in {
+                "market",
+                "limit",
+                "stop_market",
+                "take_profit_market",
+            }:
+                raise RuntimeError("accepted order command has an invalid order type")
             namespace = (
                 OrderNamespace.CONDITIONAL
-                if payload.order_type in {"stop_market", "take_profit_market"}
+                if order_type in {"stop_market", "take_profit_market"}
                 else OrderNamespace.REGULAR
             )
             references.append(

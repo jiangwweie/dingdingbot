@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+import sqlalchemy as sa
 
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
@@ -13,6 +14,7 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.domain.order_attribution import OrderNamespace, OrderRole
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.pg_models import exchange_commands
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.unit.test_ticket import _ticket
 
@@ -82,6 +84,74 @@ async def test_repository_builds_exact_regular_and_conditional_order_references(
         ("command:stop", OrderNamespace.CONDITIONAL, OrderRole.EXIT),
     ]
     assert [item.submitted_exchange_order_id for item in references] == ["1001", "9001"]
+
+
+@pytest.mark.asyncio
+async def test_repository_reads_accepted_historical_limit_order_reference(
+    order_attribution_engine,
+) -> None:
+    ticket = _ticket()
+    tp1 = _command(
+        ticket=ticket,
+        command_id="command:tp1",
+        kind=ExchangeCommandKind.TAKE_PROFIT,
+        payload=OrderCommandPayload(
+            side="sell",
+            quantity=Decimal("0.005"),
+            order_type="limit",
+            limit_price=Decimal("62000"),
+            time_in_force="GTC",
+            reduce_only=True,
+        ),
+    )
+    async with PostgresKernelUnitOfWork(order_attribution_engine) as uow:
+        await uow.tickets.add(ticket)
+        await uow.exchange_commands.add(tp1)
+        claimed = await uow.exchange_commands.claim_one_prepared(
+            worker_id="test-worker",
+            now_ms=1_100,
+            lease_until_ms=2_000,
+            ticket_id=ticket.identity.ticket_id,
+        )
+        assert claimed is not None
+        await uow.exchange_commands.record_result(
+            command_id=tp1.command_id,
+            worker_id="test-worker",
+            result=ExchangeCommandResult(
+                status=ExchangeCommandStatus.ACCEPTED,
+                observed_at_ms=1_200,
+                exchange_order_id="2001",
+            ),
+        )
+
+    async with order_attribution_engine.begin() as connection:
+        await connection.execute(
+            sa.update(exchange_commands)
+            .where(exchange_commands.c.command_id == tp1.command_id)
+            .values(
+                request_payload={
+                    "side": "sell",
+                    "quantity": "0.005",
+                    "order_type": "limit",
+                    "stop_price": None,
+                    "limit_price": "62000",
+                    "reduce_only": True,
+                    "source_watermark_ms": None,
+                    "replaces_exchange_order_id": None,
+                    "leverage_verification_digest": None,
+                    "required_configured_leverage": None,
+                }
+            )
+        )
+
+    async with PostgresKernelUnitOfWork(order_attribution_engine) as uow:
+        references = await uow.exchange_commands.list_order_references(
+            ticket.identity.ticket_id
+        )
+
+    assert len(references) == 1
+    assert references[0].namespace is OrderNamespace.REGULAR
+    assert references[0].submitted_exchange_order_id == "2001"
 
 
 def _command(*, ticket, command_id: str, kind: ExchangeCommandKind, payload) -> ExchangeCommand:
