@@ -60,7 +60,7 @@ async def resolve_binance_order_identity(
             resolved_at_ms=observed_at_ms,
         )
 
-    status = str(response.get("status") or "").strip().upper()
+    status = str(response.get("algoStatus") or "").strip().upper()
     if status not in _NOT_TRIGGERED_TERMINAL_STATUSES:
         raise RuntimeError("Binance algo order has no actual order identity yet")
     return ResolvedOrderIdentity(

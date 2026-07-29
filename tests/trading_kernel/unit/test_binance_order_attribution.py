@@ -74,7 +74,7 @@ async def test_terminal_untriggered_conditional_order_has_no_trade_order_identit
             "algoId": "4000001795783472",
             "clientAlgoId": "brc-runner",
             "actualOrderId": "",
-            "status": "CANCELED",
+            "algoStatus": "CANCELED",
         }
     )
 
