@@ -206,7 +206,6 @@ class TokyoCutoverAdapter:
             return (
                 state.exchange_writes_fenced
                 and not state.entry_worker_enabled
-                and not state.exchange_commands_enabled
             )
         if phase_value == CutoverPhase.STOP_RUNTIME_WRITERS.value:
             return state.runtime_writers_stopped

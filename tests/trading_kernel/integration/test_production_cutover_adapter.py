@@ -99,6 +99,35 @@ async def test_cutover_phase_actions_preserve_entry_fence_and_runtime_workers() 
 
 
 @pytest.mark.asyncio
+async def test_initial_file_fence_does_not_require_old_database_capability_freeze() -> None:
+    module = _production_adapter_module()
+    system = FakeTokyoSystem(module, _facts())
+    system.phase_state = system.phase_state.model_copy(
+        update={"exchange_commands_enabled": True}
+    )
+    adapter = module.TokyoCutoverAdapter(system)
+    plan = _plan()
+    await adapter.inspect_preconditions(plan)
+
+    system.phase_state = system.phase_state.model_copy(
+        update={
+            "exchange_writes_fenced": True,
+            "entry_worker_enabled": False,
+            "exchange_commands_enabled": True,
+        }
+    )
+
+    assert await adapter.phase_satisfied(
+        CutoverPhase.FENCE_EXCHANGE_WRITES,
+        plan,
+    )
+    assert not await adapter.phase_satisfied(
+        CutoverPhase.CERTIFY_ENTRY_FENCED,
+        plan,
+    )
+
+
+@pytest.mark.asyncio
 async def test_cutover_accepts_equivalent_phase_from_cli_main_module() -> None:
     module = _production_adapter_module()
     system = FakeTokyoSystem(module, _facts())
