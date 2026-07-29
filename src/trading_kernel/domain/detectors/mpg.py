@@ -70,6 +70,13 @@ class MPGLongDetector:
             fact_snapshot(
                 self._contract,
                 snapshot,
+                fact_name="leader_strength_confirmed",
+                value=False,
+                satisfied=False,
+            ),
+            fact_snapshot(
+                self._contract,
+                snapshot,
                 fact_name="momentum_floor_reference",
                 value=str(momentum_floor),
                 satisfied=True,
@@ -109,7 +116,7 @@ class MPGLongDetector:
                 observed_at_ms=comparative.observed_at_ms,
                 valid_until_ms=comparative.valid_until_ms,
             ),
-            local_facts[1],
+            local_facts[2],
         )
         return computed_result(
             self._contract,

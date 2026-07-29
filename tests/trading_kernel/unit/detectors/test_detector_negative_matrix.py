@@ -63,7 +63,13 @@ def test_mpg_market_no_action_does_not_require_comparative_snapshot() -> None:
     ).evaluate(mpg_flat_snapshot())
 
     assert result.status is DetectorStatus.NOT_TRIGGERED
+    assert set(result.facts_by_name) == {
+        "momentum_persistence_confirmed",
+        "leader_strength_confirmed",
+        "momentum_floor_reference",
+    }
     assert result.facts_by_name["momentum_persistence_confirmed"].satisfied is False
+    assert result.facts_by_name["leader_strength_confirmed"].satisfied is False
 
 
 def test_mpg_nonleader_is_computed_not_triggered() -> None:
@@ -84,7 +90,13 @@ def test_mi_below_threshold_and_nonleader_are_not_triggered() -> None:
     )
 
     assert below.status is DetectorStatus.NOT_TRIGGERED
+    assert set(below.facts_by_name) == {
+        "impulse_confirmed",
+        "relative_strength_confirmed",
+        "impulse_invalidation_reference",
+    }
     assert below.facts_by_name["impulse_confirmed"].satisfied is False
+    assert below.facts_by_name["relative_strength_confirmed"].satisfied is False
     assert nonleader.status is DetectorStatus.NOT_TRIGGERED
     assert nonleader.facts_by_name["relative_strength_confirmed"].satisfied is False
 
