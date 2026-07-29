@@ -228,7 +228,7 @@ def _review_worker_request(*, now_ms: int) -> ReconciliationWorkerRequest:
     return ReconciliationWorkerRequest(
         worker_id="reconciliation-full-chain",
         runtime_commit="kernel-test-head",
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         now_ms=now_ms,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,

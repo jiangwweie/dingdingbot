@@ -281,7 +281,7 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
         "max_initial_margin_utilization",
         "max_leverage",
         "supported_margin_mode",
-        "min_liquidation_distance_to_stop_distance_ratio",
+        "post_stop_stress_multiple",
         "max_post_fill_stop_risk_overrun_fraction",
     }.issubset(policies.c.keys())
     assert {
@@ -303,7 +303,7 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
     ) in check_sql
     assert "max_leverage >= 1 AND max_leverage <= 10" in check_sql
     assert "supported_margin_mode = 'cross'" in check_sql
-    assert "min_liquidation_distance_to_stop_distance_ratio > 0" in check_sql
+    assert "post_stop_stress_multiple > 0" in check_sql
     assert (
         "max_post_fill_stop_risk_overrun_fraction >= 0 "
         "AND max_post_fill_stop_risk_overrun_fraction < 1"
@@ -321,6 +321,8 @@ def test_instrument_rules_are_venue_scoped_and_freeze_leverage_brackets() -> Non
         "exchange_max_leverage",
         "maintenance_margin_brackets",
         "maintenance_margin_brackets_digest",
+        "notional_coefficient",
+        "notional_coefficient_certified",
     }.issubset(rules.c.keys())
 
 
@@ -347,6 +349,47 @@ def test_ticket_schema_freezes_runtime_scope_identity_and_version() -> None:
     assert "runtime_scope_id" in tickets.c
     assert "runtime_scope_version" in tickets.c
     assert "take_profit_quantities" in tickets.c
+
+
+def test_stop_stress_schema_retires_liquidation_command_authority() -> None:
+    claims = metadata.tables["brc_capacity_claims"]
+    tickets = metadata.tables["brc_trade_tickets"]
+    aggregates = metadata.tables["brc_trade_aggregates"]
+    positions = metadata.tables["brc_positions_current"]
+    retired = {
+        "min_liquidation_distance_to_stop_distance_ratio",
+        "maintenance_margin_bracket_id",
+        "projected_liquidation_price",
+        "projected_liquidation_distance",
+        "projected_liquidation_distance_to_stop_distance_ratio",
+        "actual_liquidation_price",
+        "actual_liquidation_distance",
+        "actual_liquidation_distance_to_stop_distance_ratio",
+    }
+
+    assert retired.isdisjoint(claims.c.keys())
+    assert retired.isdisjoint(tickets.c.keys())
+    assert retired.isdisjoint(aggregates.c.keys())
+    assert {
+        "post_stop_stress_multiple",
+        "cross_margin_stress_evidence",
+    }.issubset(claims.c.keys())
+    assert {
+        "cross_margin_stress_model_id",
+        "post_stop_stress_multiple",
+        "claim_stress_proof_digest",
+    }.issubset(tickets.c.keys())
+    assert "cross_margin_stress_evidence" not in tickets.c
+    assert {
+        "venue_reported_liquidation_price",
+        "post_fill_stress_status",
+        "post_fill_stress_proof_digest",
+    }.issubset(aggregates.c.keys())
+    assert {
+        "venue_reported_liquidation_price",
+        "venue_reported_liquidation_observation_status",
+    }.issubset(positions.c.keys())
+    assert positions.c.venue_reported_liquidation_observation_status.nullable is False
 
 
 def test_dynamic_claim_and_incident_storage_enforce_typed_safety_boundaries() -> None:
@@ -394,11 +437,11 @@ def test_aggregate_schema_conserves_authoritative_entry_order_identity() -> None
     assert "entry_exchange_order_id" in aggregates.c
     assert {
         "actual_stop_risk",
-        "actual_liquidation_price",
-        "actual_liquidation_distance",
-        "actual_liquidation_distance_to_stop_distance_ratio",
+        "venue_reported_liquidation_price",
         "post_fill_risk_status",
         "post_fill_disposition",
+        "post_fill_stress_status",
+        "post_fill_stress_proof_digest",
         "active_stop_exchange_order_id",
         "active_stop_price",
         "tp1_exchange_order_id",

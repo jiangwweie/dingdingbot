@@ -58,7 +58,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                 IngestSignalRequest(
                     signal=signal,
                     runtime_commit="commit-test",
-                    schema_revision="0002_crypto_strategy_universe",
+                    schema_revision="0003_cross_margin_stop_stress",
                     now_ms=1_010,
                 ),
             )
@@ -86,7 +86,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                         update={"signal_event_id": "signal:old-universe-after-switch"}
                     ),
                     runtime_commit="commit-test",
-                    schema_revision="0002_crypto_strategy_universe",
+                    schema_revision="0003_cross_margin_stop_stress",
                     now_ms=1_011,
                 ),
             )
@@ -188,7 +188,7 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             priority_rank, max_concurrent_tickets, planned_stop_risk_fraction,
             max_initial_margin_utilization, max_leverage,
             supported_margin_mode,
-            min_liquidation_distance_to_stop_distance_ratio,
+            post_stop_stress_multiple,
             max_post_fill_stop_risk_overrun_fraction, scope, updated_at_ms
         ) VALUES (
             'policy-a', 1, true, true, 7, 3, 0.03, 0.9, 5,
@@ -219,7 +219,7 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             certification, updated_at_ms
         ) VALUES (
             'strategy_signal_ingest', true, 'commit-test',
-            '0002_crypto_strategy_universe', '{}'::jsonb, 1000
+            '0003_cross_margin_stop_stress', '{}'::jsonb, 1000
         )
         """
     await conn.execute(statement.replace("$1", f"'{DIGEST_A}'"))

@@ -220,7 +220,7 @@ async def test_readonly_certification_prints_json_without_report_files(
             RuntimeAuthoritySeedRequest(
                 account_id="subaccount-main",
                 runtime_commit="a" * 40,
-                schema_revision="0002_crypto_strategy_universe",
+                schema_revision="0003_cross_margin_stop_stress",
                 seeded_at_ms=1_000,
             ),
         )
@@ -246,7 +246,7 @@ async def test_readonly_certification_prints_json_without_report_files(
     payload = json.loads(result.stdout)
     assert payload["schema"] == "brc.trading_kernel.readonly_certification.v1"
     assert payload["status"] == "pass"
-    assert payload["alembic_revision"] == "0002_crypto_strategy_universe"
+    assert payload["alembic_revision"] == "0003_cross_margin_stop_stress"
     assert payload["checks"]["integrity_orphans"] == 0
     assert payload["checks"]["legacy_execution_tables"] == 0
     assert sorted(path.name for path in tmp_path.iterdir()) == before
@@ -277,7 +277,7 @@ async def test_schema_verifier_accepts_only_clean_baseline(
     payload = json.loads(result.stdout)
     assert payload["schema"] == "brc.trading_kernel.schema_verification.v1"
     assert payload["status"] == "pass"
-    assert payload["alembic_revision"] == "0002_crypto_strategy_universe"
+    assert payload["alembic_revision"] == "0003_cross_margin_stop_stress"
     assert payload["missing_tables"] == []
     assert payload["unexpected_tables"] == []
 
@@ -326,7 +326,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -347,7 +347,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 max_initial_margin_utilization="0.90",
                 max_leverage=10,
                 supported_margin_mode="cross",
-                min_liquidation_distance_to_stop_distance_ratio="2.0",
+                post_stop_stress_multiple="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
                 scope={},
                 updated_at_ms=1_000,
@@ -358,7 +358,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0002_crypto_strategy_universe",
+                schema_revision="0003_cross_margin_stop_stress",
                 certification={},
                 updated_at_ms=1_000,
             )

@@ -216,6 +216,10 @@ async def certify_universe_instrument(
                 maintenance_margin_brackets_digest=(
                     rules.maintenance_margin_brackets_digest
                 ),
+                notional_coefficient=rules.notional_coefficient,
+                notional_coefficient_certified=(
+                    rules.notional_coefficient_certified
+                ),
                 observed_at_ms=rules.observed_at_ms,
                 valid_until_ms=rules.valid_until_ms,
             )

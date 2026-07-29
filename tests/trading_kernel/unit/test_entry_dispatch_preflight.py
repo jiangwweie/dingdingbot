@@ -32,6 +32,7 @@ from src.trading_kernel.domain.commands import (
     build_command_id,
     build_venue_client_order_id,
 )
+from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
@@ -46,13 +47,43 @@ from tests.trading_kernel.unit.test_capacity import (
 
 
 def test_entry_preflight_refuses_when_frozen_margin_no_longer_fits() -> None:
+    snapshot = _snapshot()
     request = _preflight_request(
-        snapshot=_snapshot().model_copy(update={"available_margin": Decimal(4)})
+        snapshot=snapshot.model_copy(
+            update={
+                "account_risk_snapshot": (
+                    snapshot.account_risk_snapshot.model_copy(
+                        update={"available_margin": Decimal(4)}
+                    )
+                )
+            }
+        )
     )
 
     decision = revalidate_entry_dispatch(request)
 
     assert decision.status is EntryDispatchPreflightStatus.MARGIN_DRIFT
+
+
+def test_entry_preflight_recomputes_stress_from_fresh_account_facts() -> None:
+    snapshot = _snapshot()
+    risk_values = snapshot.account_risk_snapshot.model_dump(
+        mode="python",
+        exclude={"snapshot_digest"},
+    )
+    risk_values.update(
+        total_margin_balance=Decimal(270),
+        total_maintenance_margin=Decimal(200),
+    )
+    stressed = snapshot.model_copy(
+        update={
+            "account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)
+        }
+    )
+
+    decision = revalidate_entry_dispatch(_preflight_request(snapshot=stressed))
+
+    assert decision.status is EntryDispatchPreflightStatus.STRESS_FAILED
 
 
 def test_entry_preflight_refuses_a_retired_current_strategy_version() -> None:
@@ -173,7 +204,7 @@ def _preflight_request(*, snapshot):
             max_initial_margin_utilization=Decimal("0.90"),
             max_leverage=10,
             supported_margin_mode="cross",
-            min_liquidation_distance_to_stop_distance_ratio=Decimal(2),
+            post_stop_stress_multiple=Decimal(2),
             max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
         ),
         runtime_scope=RuntimeScopeSnapshot(
@@ -240,6 +271,8 @@ def _preflight_request(*, snapshot):
             maintenance_margin_brackets_digest=(
                 _rules().maintenance_margin_brackets_digest
             ),
+            notional_coefficient=Decimal(1),
+            notional_coefficient_certified=True,
             observed_at_ms=1_000,
             valid_until_ms=2_000,
         ),

@@ -20,6 +20,7 @@ InstrumentCertificationBlockerCode = Literal[
     "position_mode_mismatch",
     "margin_mode_mismatch",
     "configured_leverage_mismatch",
+    "notional_coefficient_unverified",
     "unowned_position",
     "unowned_open_order",
     "readonly_facts_unavailable",
@@ -39,6 +40,7 @@ class InstrumentCertificationFacts(BaseModel):
     position_mode: str | None
     margin_mode: str | None
     configured_leverage: int | None
+    notional_coefficient_certified: bool
     unowned_position_qty: Decimal
     unowned_open_order_count: int
     observed_at_ms: int
@@ -122,6 +124,8 @@ def _blocker_code(
         return "margin_mode_mismatch"
     if facts.configured_leverage != required_leverage:
         return "configured_leverage_mismatch"
+    if not facts.notional_coefficient_certified:
+        return "notional_coefficient_unverified"
     if facts.unowned_position_qty != 0:
         return "unowned_position"
     if facts.unowned_open_order_count != 0:

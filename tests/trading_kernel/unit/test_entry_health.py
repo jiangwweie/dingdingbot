@@ -6,11 +6,13 @@ from src.trading_kernel.domain.account_entry_health import (
     AccountEntryHealthStatus,
     classify_account_entry_health,
 )
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskPosition,
+    AccountRiskSnapshot,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
     AdmissionOrder,
     AdmissionOwnership,
-    AdmissionPosition,
     EntryAdmissionSnapshot,
     OwnedPositionProjection,
 )
@@ -55,11 +57,13 @@ def test_unowned_order_anywhere_blocks_cross_account_with_shared_digest() -> Non
 def test_owned_opposite_side_position_allows_shared_leverage_without_mutation() -> None:
     snapshot = _snapshot(
         positions=(
-            AdmissionPosition(
+            AccountRiskPosition(
                 exchange_instrument_id="SOLUSDT",
                 position_side="long",
                 quantity=Decimal("0.25"),
                 average_entry_price=Decimal(100),
+                current_unrealized_pnl=Decimal("0.125"),
+                current_maintenance_margin=Decimal("0.25"),
             ),
         ),
         open_orders=(
@@ -137,29 +141,31 @@ def test_owned_residual_order_after_flatness_blocks_only_leverage_domain() -> No
 
 def _snapshot(
     *,
-    positions: tuple[AdmissionPosition, ...] = (),
+    positions: tuple[AccountRiskPosition, ...] = (),
     open_orders: tuple[AdmissionOrder, ...] = (),
 ) -> EntryAdmissionSnapshot:
     return EntryAdmissionSnapshot(
-        venue_id="binance-usdm",
-        account_id="subaccount-main",
-        position_mode="independent_sides",
-        margin_mode="cross",
-        total_wallet_balance=Decimal(100),
-        total_margin_balance=Decimal(100),
-        total_initial_margin=Decimal(10),
-        total_maintenance_margin=Decimal(1),
-        available_margin=Decimal(90),
+        account_risk_snapshot=AccountRiskSnapshot.create(
+            venue_id="binance-usdm",
+            account_id="subaccount-main",
+            account_risk_mode="standard_usdm_single_asset",
+            settlement_asset="USDT",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            exchange_instrument_id="SOLUSDT",
+            mark_price=Decimal("100.5"),
+            configured_leverage=3,
+            total_wallet_balance=Decimal(100),
+            total_margin_balance=Decimal(100),
+            total_initial_margin=Decimal(10),
+            total_maintenance_margin=Decimal(1),
+            available_margin=Decimal(90),
+            account_positions=positions,
+            observed_at_ms=1_800_000_000_000,
+            valid_until_ms=1_800_000_005_000,
+        ),
         best_bid_price=Decimal(100),
         best_ask_price=Decimal(101),
-        instrument_facts=(
-            AdmissionInstrumentFacts(
-                exchange_instrument_id="SOLUSDT",
-                mark_price=Decimal("100.5"),
-                configured_leverage=3,
-            ),
-        ),
-        positions=positions,
         open_orders=open_orders,
         observed_at_ms=1_800_000_000_000,
         valid_until_ms=1_800_000_005_000,

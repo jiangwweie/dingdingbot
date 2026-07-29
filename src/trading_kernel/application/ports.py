@@ -41,7 +41,6 @@ from src.trading_kernel.application.read_strategy_universe_status import (
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity import CapacityClaim
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.commands import (
     CommandPayload,
     ExchangeCommand,
@@ -50,6 +49,7 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandPayload,
     SetLeverageCommandResult,
 )
+from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.exit_policy import ExitPolicy
@@ -172,7 +172,7 @@ class OwnerPolicySnapshot(BaseModel):
     max_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
-    min_liquidation_distance_to_stop_distance_ratio: Decimal
+    post_stop_stress_multiple: Decimal
     max_post_fill_stop_risk_overrun_fraction: Decimal
 
 
@@ -423,6 +423,8 @@ class InstrumentRulesSnapshot(BaseModel):
     exchange_max_leverage: int
     maintenance_margin_brackets: tuple[MaintenanceMarginBracket, ...]
     maintenance_margin_brackets_digest: str
+    notional_coefficient: Decimal
+    notional_coefficient_certified: bool
     observed_at_ms: int
     valid_until_ms: int
     projection_version: int
@@ -935,6 +937,8 @@ class SignalRepository(Protocol):
         exchange_max_leverage: int,
         maintenance_margin_brackets: tuple[MaintenanceMarginBracket, ...],
         maintenance_margin_brackets_digest: str,
+        notional_coefficient: Decimal,
+        notional_coefficient_certified: bool,
         observed_at_ms: int,
         valid_until_ms: int,
     ) -> InstrumentRulesSnapshot: ...

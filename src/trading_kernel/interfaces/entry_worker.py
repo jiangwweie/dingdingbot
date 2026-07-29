@@ -185,6 +185,10 @@ async def run_entry_worker_once(
             maintenance_margin_brackets_digest=(
                 instrument_rules.maintenance_margin_brackets_digest
             ),
+            notional_coefficient=instrument_rules.notional_coefficient,
+            notional_coefficient_certified=(
+                instrument_rules.notional_coefficient_certified
+            ),
             observed_at_ms=instrument_rules.observed_at_ms,
             valid_until_ms=instrument_rules.valid_until_ms,
         )

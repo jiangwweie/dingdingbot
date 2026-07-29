@@ -6,10 +6,25 @@ import pytest
 
 from src.trading_kernel.domain.capacity_sizing import (
     CapacitySizingRequest,
+    CapacitySizingSelection,
     CapacitySizingStatus,
-    MaintenanceMarginBracket,
     select_capacity_candidate,
 )
+
+
+def test_sizing_models_contain_no_liquidation_or_maintenance_authority() -> None:
+    retired_fragments = ("liquidation", "maintenance_margin", "mark_price")
+
+    assert not any(
+        fragment in field_name
+        for field_name in CapacitySizingRequest.model_fields
+        for fragment in retired_fragments
+    )
+    assert not any(
+        fragment in field_name
+        for field_name in CapacitySizingSelection.model_fields
+        for fragment in retired_fragments
+    )
 
 
 @pytest.mark.parametrize(
@@ -65,9 +80,9 @@ def test_margin_limited_candidate_uses_all_remaining_margin_at_configured_levera
     assert decision.selected.leverage_change_required is False
 
 
-def test_existing_opposite_side_adopts_exact_configured_leverage() -> None:
+def test_sizing_adopts_exact_configured_leverage() -> None:
     decision = select_capacity_candidate(
-        _request(instrument_has_open_position=True, configured_leverage=3)
+        _request(configured_leverage=3)
     )
 
     assert decision.status is CapacitySizingStatus.SELECTED
@@ -81,34 +96,11 @@ def test_refuses_configured_leverage_above_owner_and_exchange_cap_while_flat() -
         _request(
             configured_leverage=11,
             permitted_max_leverage=10,
-            instrument_has_open_position=False,
         )
     )
 
     assert decision.status is CapacitySizingStatus.INVALID_FACTS
     assert decision.selected is None
-
-
-def test_floors_nonpositive_long_projection_to_storage_positive_price() -> None:
-    decision = select_capacity_candidate(
-        _request(
-            total_wallet_balance=Decimal(425),
-            total_margin_balance=Decimal(425),
-            available_margin=Decimal(425),
-            configured_leverage=5,
-            entry_reference_price=Decimal(25),
-            initial_stop_price=Decimal(24),
-            mark_price=Decimal(25),
-            quantity_step=Decimal(1),
-            min_quantity=Decimal(1),
-        )
-    )
-
-    assert decision.status is CapacitySizingStatus.SELECTED
-    assert decision.selected is not None
-    assert decision.selected.projected_liquidation_price == Decimal(
-        "0.000000000000000001"
-    )
 
 
 def test_capacity_refuses_when_all_capital_owning_slots_are_taken() -> None:
@@ -123,7 +115,6 @@ def _request(**changes: object) -> CapacitySizingRequest:
         "total_wallet_balance": Decimal(1000),
         "total_margin_balance": Decimal(1000),
         "total_initial_margin": Decimal(0),
-        "total_maintenance_margin": Decimal(0),
         "available_margin": Decimal(1000),
         "active_ticket_count": 0,
         "max_concurrent_tickets": 3,
@@ -131,25 +122,12 @@ def _request(**changes: object) -> CapacitySizingRequest:
         "max_initial_margin_utilization": Decimal("0.90"),
         "permitted_max_leverage": 10,
         "configured_leverage": 1,
-        "instrument_has_open_position": False,
         "entry_reference_price": Decimal(100),
         "initial_stop_price": Decimal("97.5"),
         "quantity_step": Decimal("0.1"),
         "min_quantity": Decimal("0.1"),
         "min_notional": Decimal(5),
         "tp1_quantity_fraction": Decimal("0.5"),
-        "maintenance_margin_brackets": (
-            MaintenanceMarginBracket(
-                bracket_id="tier-1",
-                notional_floor=Decimal(0),
-                notional_cap=None,
-                maintenance_margin_rate=Decimal("0.005"),
-                maintenance_amount=Decimal(0),
-            ),
-        ),
-        "position_side": "long",
-        "mark_price": Decimal(100),
-        "min_liquidation_distance_to_stop_distance_ratio": Decimal("2.0"),
     }
     payload.update(changes)
     return CapacitySizingRequest.model_validate(payload)

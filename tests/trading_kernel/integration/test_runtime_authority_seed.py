@@ -127,7 +127,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
 
@@ -147,7 +147,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     assert first.max_initial_margin_utilization == Decimal("0.90")
     assert first.max_leverage == 10
     assert first.supported_margin_mode == "cross"
-    assert first.min_liquidation_distance_to_stop_distance_ratio == Decimal("2.0")
+    assert first.post_stop_stress_multiple == Decimal("2.0")
     assert first.max_post_fill_stop_risk_overrun_fraction == Decimal("0.10")
     assert first.total_inserted_count > 0
     assert second.total_inserted_count == 0
@@ -169,7 +169,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         assert policy["max_leverage"] == 10
         assert policy["supported_margin_mode"] == "cross"
         assert Decimal(
-            policy["min_liquidation_distance_to_stop_distance_ratio"]
+            policy["post_stop_stress_multiple"]
         ) == Decimal("2.0")
         assert Decimal(
             policy["max_post_fill_stop_risk_overrun_fraction"]
@@ -229,7 +229,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
             ).mappings()
         }
         assert metadata_rows["runtime_commit"] == "commit-acceptance"
-        assert metadata_rows["schema_revision"] == "0002_crypto_strategy_universe"
+        assert metadata_rows["schema_revision"] == "0003_cross_margin_stop_stress"
         assert metadata_rows["registry_semantic_hash"].startswith("sha256:")
         assert metadata_rows["seed_identity"].startswith("sha256:")
 
@@ -242,7 +242,7 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -308,7 +308,7 @@ async def test_recovery_identity_refuses_a_runtime_without_one_unknown_leverage_
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -339,7 +339,7 @@ async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -382,7 +382,7 @@ async def test_closure_identity_rotates_only_one_exact_released_pending_ticket(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -412,7 +412,7 @@ async def test_readonly_certification_emits_exact_pending_closure_manifest(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -452,7 +452,7 @@ async def test_protected_identity_refuses_extra_activity_and_open_incidents(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -559,7 +559,7 @@ async def test_protected_identity_rotates_a_complete_runner_ticket(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -595,7 +595,7 @@ async def test_readonly_certification_emits_exact_protected_ticket_manifest(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -628,7 +628,7 @@ async def test_protected_identity_refuses_missing_active_budget_reservation(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -665,7 +665,7 @@ async def test_protected_identity_refuses_unrelated_active_budget_reservation(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -725,7 +725,7 @@ async def test_protected_identity_refuses_mismatched_account_exposure_totals(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -763,7 +763,7 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     seed_request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -937,9 +937,9 @@ async def _insert_terminal_reviewed_ticket(engine: AsyncEngine) -> None:
                 reserved_margin=Decimal(5),
                 risk_reservation_basis="planned_stop_distance",
                 margin_mode="cross",
-                min_liquidation_distance_to_stop_distance_ratio=Decimal(2),
-                projected_liquidation_price=Decimal(80),
-                projected_liquidation_distance_to_stop_distance_ratio=Decimal("2.5"),
+                cross_margin_stress_model_id="cross-margin-stop-stress-v1",
+                post_stop_stress_multiple=Decimal(2),
+                claim_stress_proof_digest="sha256:" + "3" * 64,
                 risk_at_stop=Decimal(1),
                 entry_order_type="market",
                 entry_limit_price=None,
@@ -1001,9 +1001,9 @@ async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
                 reserved_margin=Decimal(2),
                 risk_reservation_basis="planned_stop_distance",
                 margin_mode="cross",
-                min_liquidation_distance_to_stop_distance_ratio=Decimal(2),
-                projected_liquidation_price=Decimal(80),
-                projected_liquidation_distance_to_stop_distance_ratio=Decimal("2.5"),
+                cross_margin_stress_model_id="cross-margin-stop-stress-v1",
+                post_stop_stress_multiple=Decimal(2),
+                claim_stress_proof_digest="sha256:" + "3" * 64,
                 risk_at_stop=Decimal(1),
                 entry_order_type="market",
                 entry_limit_price=None,
@@ -1028,11 +1028,11 @@ async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
                 position_qty=Decimal(0),
                 average_fill_price=Decimal(100),
                 actual_stop_risk=Decimal(1),
-                actual_liquidation_price=Decimal(80),
-                actual_liquidation_distance=Decimal(20),
-                actual_liquidation_distance_to_stop_distance_ratio=Decimal(2),
-                post_fill_risk_status="within_limit",
-                post_fill_disposition="closed",
+                venue_reported_liquidation_price=Decimal(80),
+                post_fill_risk_status="within_budget",
+                post_fill_disposition="normal",
+                post_fill_stress_status="passed",
+                post_fill_stress_proof_digest="sha256:" + "4" * 64,
                 protected_qty=Decimal(0),
                 entry_exchange_order_id="entry:closure",
                 initial_stop_exchange_order_id=None,
@@ -1127,9 +1127,9 @@ async def _insert_protected_tickets(
                     reserved_margin=notional / Decimal(5),
                     risk_reservation_basis="planned_stop_distance",
                     margin_mode="cross",
-                    min_liquidation_distance_to_stop_distance_ratio=Decimal(2),
-                    projected_liquidation_price=Decimal(110),
-                    projected_liquidation_distance_to_stop_distance_ratio=Decimal(2),
+                    cross_margin_stress_model_id="cross-margin-stop-stress-v1",
+                    post_stop_stress_multiple=Decimal(2),
+                    claim_stress_proof_digest="sha256:" + "3" * 64,
                     risk_at_stop=risk,
                     entry_order_type="market",
                     entry_limit_price=None,
@@ -1154,11 +1154,11 @@ async def _insert_protected_tickets(
                     position_qty=projected_quantity,
                     average_fill_price=Decimal(100),
                     actual_stop_risk=risk,
-                    actual_liquidation_price=Decimal(110),
-                    actual_liquidation_distance=Decimal(10),
-                    actual_liquidation_distance_to_stop_distance_ratio=Decimal(3),
-                    post_fill_risk_status="within_limit",
-                    post_fill_disposition="protected",
+                    venue_reported_liquidation_price=Decimal(110),
+                    post_fill_risk_status="within_budget",
+                    post_fill_disposition="normal",
+                    post_fill_stress_status="passed",
+                    post_fill_stress_proof_digest="sha256:" + "4" * 64,
                     protected_qty=projected_quantity,
                     entry_exchange_order_id=f"entry:{index}",
                     initial_stop_exchange_order_id=(
@@ -1198,6 +1198,7 @@ async def _insert_protected_tickets(
                     average_entry_price=Decimal(100),
                     observed_at_ms=1_800_000_000_020 + index,
                     projection_version=5,
+                    venue_reported_liquidation_observation_status="missing",
                 )
             )
             if include_budget_reservations:

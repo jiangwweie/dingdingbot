@@ -31,7 +31,7 @@
 - Create: `src/trading_kernel/domain/cross_margin_stress.py`
 - Create: `tests/trading_kernel/unit/test_cross_margin_stress.py`
 
-- [ ] **Step 1: Write typed invariant tests**
+- [x] **Step 1: Write typed invariant tests**
 
 Cover:
 
@@ -45,7 +45,7 @@ Cover:
 - bracket uniqueness, ordering, contiguity, floor/cap validity;
 - coefficient must be finite, positive, and explicitly certified.
 
-- [ ] **Step 2: Run the new test module and preserve RED**
+- [x] **Step 2: Run the new test module and preserve RED**
 
 Run:
 
@@ -55,7 +55,7 @@ uv run pytest -q tests/trading_kernel/unit/test_cross_margin_stress.py
 
 Expected: import/collection failure because the new Domain module and models do not exist.
 
-- [ ] **Step 3: Implement the frozen Domain models**
+- [x] **Step 3: Implement the frozen Domain models**
 
 Implement:
 
@@ -72,7 +72,7 @@ evaluate_cross_margin_stress
 
 Use `canonical_digest()` semantics compatible with existing Kernel SHA-256 identities, but keep the implementation local to the Domain module or move the existing generic canonical digest into one Domain utility only if both call sites can import it without a cycle.
 
-- [ ] **Step 4: Write Long/Short pressure-boundary tests**
+- [x] **Step 4: Write Long/Short pressure-boundary tests**
 
 Parameterize:
 
@@ -86,7 +86,7 @@ Parameterize:
 - same-instrument Long and Short remain separate;
 - account totals subtract current exact-instrument UPNL/MM before projected evaluation.
 
-- [ ] **Step 5: Write bracket-boundary tests**
+- [x] **Step 5: Write bracket-boundary tests**
 
 Assert evaluation includes only:
 
@@ -97,7 +97,7 @@ Assert evaluation includes only:
 
 Assert deterministic deduplication, exact `Decimal` values, minimum surplus identity, and bounded point count.
 
-- [ ] **Step 6: Implement the evaluator**
+- [x] **Step 6: Implement the evaluator**
 
 Use:
 
@@ -120,7 +120,7 @@ surplus
 
 Return `facts_contradictory` only for complete typed facts that contradict one another. External absence/timeouts do not enter the evaluator.
 
-- [ ] **Step 7: Run Domain tests and targeted static checks**
+- [x] **Step 7: Run Domain tests and targeted static checks**
 
 Run:
 
@@ -131,7 +131,7 @@ uv run ruff check src/trading_kernel/domain/cross_margin_stress.py tests/trading
 
 Expected: all new Domain tests pass with no lint errors.
 
-- [ ] **Step 8: Commit the Domain slice**
+- [x] **Step 8: Commit the Domain slice**
 
 ```bash
 git add src/trading_kernel/domain/cross_margin_stress.py tests/trading_kernel/unit/test_cross_margin_stress.py
@@ -152,7 +152,7 @@ git commit -m "feat(kernel): add cross-margin stop stress proof"
 - Modify: `tests/trading_kernel/unit/test_venue_adapter.py`
 - Modify: `tests/trading_kernel/unit/test_instrument_certification.py`
 
-- [ ] **Step 1: Add failing AccountRiskSnapshot port and composition tests**
+- [x] **Step 1: Add failing AccountRiskSnapshot port and composition tests**
 
 Assert:
 
@@ -162,7 +162,7 @@ Assert:
 - admission no longer duplicates account balances, modes, mark, or positions;
 - Kernel ownership remains separate PostgreSQL authority.
 
-- [ ] **Step 2: Add failing Binance account parser tests**
+- [x] **Step 2: Add failing Binance account parser tests**
 
 Use sanitized payloads for:
 
@@ -185,7 +185,7 @@ uv run pytest -q \
 
 Expected: failures show the old duplicated snapshot and missing canonical parser.
 
-- [ ] **Step 3: Implement the shared read port and single parser**
+- [x] **Step 3: Implement the shared read port and single parser**
 
 Implement exactly one infrastructure helper:
 
@@ -197,7 +197,7 @@ Both `read_entry_admission_snapshot()` and `read_account_risk_snapshot()` call i
 
 Use the existing action-time timeout boundary and keep every network call outside PostgreSQL transactions.
 
-- [ ] **Step 4: Rename raw liquidation observation**
+- [x] **Step 4: Rename raw liquidation observation**
 
 Replace:
 
@@ -213,7 +213,7 @@ PositionSnapshot.venue_reported_liquidation_price
 
 Preserve parseable `"0"` as `Decimal("0")`, preserve direction-inconsistent positive values, and distinguish missing from invalid through the existing Monitor boundary. The raw value must not enter `AccountRiskSnapshot` or its digest.
 
-- [ ] **Step 5: Extend certified instrument rules**
+- [x] **Step 5: Extend certified instrument rules**
 
 Add `notional_coefficient` and coefficient certification state to:
 
@@ -224,7 +224,7 @@ Add `notional_coefficient` and coefficient certification state to:
 
 Use Binance `cum` as `maintenance_amount`. Reject gaps, overlaps, unsorted/duplicate brackets. Default coefficient `1` is accepted only when the payload explicitly represents the default schedule; non-default or semantically unverified coefficients produce `OWNER_ACTION_REQUIRED`, not an inferred transformation.
 
-- [ ] **Step 6: Prove parser reuse and bounded calls**
+- [x] **Step 6: Prove parser reuse and bounded calls**
 
 Add spy/call assertions showing:
 
@@ -233,7 +233,7 @@ Add spy/call assertions showing:
 - exact-symbol reads are bounded;
 - raw liquidation changes do not change account snapshot/rules digest.
 
-- [ ] **Step 7: Run the focused fact-boundary suite**
+- [x] **Step 7: Run the focused fact-boundary suite**
 
 ```bash
 uv run pytest -q \
@@ -251,7 +251,7 @@ uv run ruff check \
   tests/trading_kernel/unit/test_venue_adapter.py
 ```
 
-- [ ] **Step 8: Commit the canonical fact boundary**
+- [x] **Step 8: Commit the canonical fact boundary**
 
 ```bash
 git add \
@@ -285,7 +285,7 @@ git commit -m "refactor(kernel): unify account risk facts"
 - Modify: `tests/trading_kernel/integration/test_capacity_claim_to_ticket.py`
 - Modify: `tests/trading_kernel/integration/test_command_dispatch.py`
 
-- [ ] **Step 1: Write RED tests for retirement and one evaluator**
+- [x] **Step 1: Write RED tests for retirement and one evaluator**
 
 Assert:
 
@@ -297,7 +297,7 @@ Assert:
 - changed balance, position, mode, bracket, coefficient, or mark re-evaluates and fails closed;
 - strategy and Universe identity cannot override a failed risk proof.
 
-- [ ] **Step 2: Run the focused Claim/dispatch suite**
+- [x] **Step 2: Run the focused Claim/dispatch suite**
 
 ```bash
 uv run pytest -q \
@@ -311,7 +311,7 @@ uv run pytest -q \
 
 Expected: old liquidation fields/formulas violate new assertions.
 
-- [ ] **Step 3: Separate sizing from stress authority**
+- [x] **Step 3: Separate sizing from stress authority**
 
 Retain slot, stop-risk, margin-utilization, leverage, exchange-minimum, TP1, and runner sizing in `select_capacity_candidate()`.
 
@@ -324,7 +324,7 @@ Remove:
 
 Application builds the projected Side positions and calls `evaluate_cross_margin_stress()` once the candidate quantity is known.
 
-- [ ] **Step 4: Replace policy and immutable identities**
+- [x] **Step 4: Replace policy and immutable identities**
 
 Replace:
 
@@ -348,7 +348,7 @@ post_stop_stress_multiple
 
 Do not duplicate the full proof in the Ticket.
 
-- [ ] **Step 5: Reuse the evaluator at dispatch**
+- [x] **Step 5: Reuse the evaluator at dispatch**
 
 Build action-time projected positions from:
 
@@ -358,11 +358,11 @@ Build action-time projected positions from:
 
 Reject ENTRY terminally when action facts are stale, unavailable, contradictory, or proof status is not `passed`. Persist no ENTRY Command for a rejected proof.
 
-- [ ] **Step 6: Verify claim-to-ticket round-trip**
+- [x] **Step 6: Verify claim-to-ticket round-trip**
 
 Assert exact evidence serialization, proof digest identity, model id, Policy identity, Universe identity, and risk reservation remain frozen.
 
-- [ ] **Step 7: Run tests and static checks**
+- [x] **Step 7: Run tests and static checks**
 
 ```bash
 uv run pytest -q \
@@ -381,7 +381,7 @@ uv run ruff check \
   src/trading_kernel/application/revalidate_entry_dispatch.py
 ```
 
-- [ ] **Step 8: Commit Claim and dispatch authority**
+- [x] **Step 8: Commit Claim and dispatch authority**
 
 ```bash
 git add \
@@ -415,7 +415,7 @@ git commit -m "refactor(kernel): use stop stress for entry authority"
 - Modify: `tests/trading_kernel/unit/test_reducer.py`
 - Modify: `tests/trading_kernel/architecture/test_event_registry_parity.py`
 
-- [ ] **Step 1: Add RED tests for Stop-first lifecycle**
+- [x] **Step 1: Add RED tests for Stop-first lifecycle**
 
 Assert:
 
@@ -427,7 +427,7 @@ Assert:
 - `InitialStopConfirmed` transitions to `post_fill_risk_pending`;
 - Entry lane remains held and TP1 is absent while pending.
 
-- [ ] **Step 2: Add RED tests for one result Event**
+- [x] **Step 2: Add RED tests for one result Event**
 
 Add:
 
@@ -448,7 +448,7 @@ Assert:
 - facts unavailable/contradictory are not Trade Events;
 - repeated result application is rejected by expected version/sequence.
 
-- [ ] **Step 3: Run RED tests**
+- [x] **Step 3: Run RED tests**
 
 ```bash
 uv run pytest -q \
@@ -457,7 +457,7 @@ uv run pytest -q \
   tests/trading_kernel/architecture/test_event_registry_parity.py
 ```
 
-- [ ] **Step 4: Simplify actual Stop-risk assessment**
+- [x] **Step 4: Simplify actual Stop-risk assessment**
 
 Retain only:
 
@@ -469,7 +469,7 @@ Retain only:
 
 Remove liquidation-price decision inputs and all `actual_liquidation_*` outputs.
 
-- [ ] **Step 5: Add Aggregate state and one Event**
+- [x] **Step 5: Add Aggregate state and one Event**
 
 Add:
 
@@ -482,7 +482,7 @@ post_fill_stress_proof_digest
 
 Do not add a separate Event for unavailable/contradictory reads.
 
-- [ ] **Step 6: Refactor reducer effects**
+- [x] **Step 6: Refactor reducer effects**
 
 Enforce:
 
@@ -497,7 +497,7 @@ EntryFilled
 
 Lane/account block release occurs only at the specified safe boundary.
 
-- [ ] **Step 7: Run focused tests and lint**
+- [x] **Step 7: Run focused tests and lint**
 
 ```bash
 uv run pytest -q \
@@ -513,7 +513,7 @@ uv run ruff check \
   src/trading_kernel/domain/effects.py
 ```
 
-- [ ] **Step 8: Commit the lifecycle state machine**
+- [x] **Step 8: Commit the lifecycle state machine**
 
 ```bash
 git add \
@@ -544,7 +544,7 @@ git commit -m "refactor(kernel): separate post-fill stress lifecycle"
 - Modify: `tests/trading_kernel/integration/test_ticket_lifecycle_maintenance.py`
 - Modify: `tests/trading_kernel/integration/test_pg_unit_of_work.py`
 
-- [ ] **Step 1: Add RED orchestration tests**
+- [x] **Step 1: Add RED orchestration tests**
 
 Cover:
 
@@ -557,7 +557,7 @@ Cover:
 - commit fault rolls everything back;
 - command dispatch occurs only after commit.
 
-- [ ] **Step 2: Add scheduler fairness RED tests**
+- [x] **Step 2: Add scheduler fairness RED tests**
 
 Assert:
 
@@ -567,7 +567,7 @@ Assert:
 - no early return prevents closure work;
 - retry interval is not shorter than worker poll interval.
 
-- [ ] **Step 3: Run RED suites**
+- [x] **Step 3: Run RED suites**
 
 ```bash
 uv run pytest -q \
@@ -576,7 +576,7 @@ uv run pytest -q \
   tests/trading_kernel/integration/test_pg_unit_of_work.py
 ```
 
-- [ ] **Step 4: Add the pending reconciliation branch**
+- [x] **Step 4: Add the pending reconciliation branch**
 
 Use existing worker and selector only. The branch:
 
@@ -586,7 +586,7 @@ Use existing worker and selector only. The branch:
 4. commits either one assessed Event or one retry state;
 5. dispatches a materialized Command after commit.
 
-- [ ] **Step 5: Add idempotent Incident/Monitor retry persistence**
+- [x] **Step 5: Add idempotent Incident/Monitor retry persistence**
 
 Use exact kinds:
 
@@ -598,11 +598,11 @@ post_fill_stress_failed
 
 Account-capacity incidents use the canonical account block key. Do not resolve `post_fill_stress_failed` when creating or accepting Flatten; resolve it only after external flat, no residual orders, and `ReconciliationMatched`.
 
-- [ ] **Step 6: Preserve existing closure work**
+- [x] **Step 6: Preserve existing closure work**
 
 Keep Settlement and Review work in `get_next_reconciliation_work()`. Extend the current selector status set and ordering instead of adding a post-fill-specific queue.
 
-- [ ] **Step 7: Run integration and fairness tests**
+- [x] **Step 7: Run integration and fairness tests**
 
 ```bash
 uv run pytest -q \
@@ -613,7 +613,7 @@ uv run pytest -q \
   tests/trading_kernel/full_chain/test_multi_ticket_closure_fairness.py
 ```
 
-- [ ] **Step 8: Commit the existing-worker orchestration**
+- [x] **Step 8: Commit the existing-worker orchestration**
 
 ```bash
 git add \
@@ -646,7 +646,7 @@ git commit -m "feat(kernel): reconcile post-fill stop stress"
 - Modify: `tests/trading_kernel/integration/test_capacity_claim_to_ticket.py`
 - Modify: `tests/trading_kernel/architecture/test_flat_runtime_reset_sql.py`
 
-- [ ] **Step 1: Write schema RED assertions**
+- [x] **Step 1: Write schema RED assertions**
 
 Require:
 
@@ -660,7 +660,7 @@ Require:
 - raw venue liquidation observation is audit-only;
 - Event payload round-trips `PostFillStressAssessed`.
 
-- [ ] **Step 2: Write flat-only migration refusal tests**
+- [x] **Step 2: Write flat-only migration refusal tests**
 
 Parameterize every relevant runtime/trade table:
 
@@ -671,7 +671,7 @@ Budget, Exposure, Settlement/Review, Monitor, runtime authority
 
 For each populated table, assert migration rejects before DDL and the transaction leaves the schema unchanged.
 
-- [ ] **Step 3: Run schema RED tests against disposable PostgreSQL**
+- [x] **Step 3: Run schema RED tests against disposable PostgreSQL**
 
 Start and health-check repository Docker PostgreSQL if needed, then run:
 
@@ -682,7 +682,7 @@ uv run pytest -q \
   tests/trading_kernel/integration/test_runtime_authority_seed.py
 ```
 
-- [ ] **Step 4: Implement forward-only migration**
+- [x] **Step 4: Implement forward-only migration**
 
 The migration must:
 
@@ -694,15 +694,15 @@ The migration must:
 
 No backfill and no historical Event decoder are allowed.
 
-- [ ] **Step 5: Align SQLAlchemy metadata and repositories**
+- [x] **Step 5: Align SQLAlchemy metadata and repositories**
 
 Use exact Pydantic `model_dump(mode="json")` and `model_validate()` for stress evidence. Do not persist untyped arbitrary dictionaries as authority.
 
-- [ ] **Step 6: Seed only approved policy semantics**
+- [x] **Step 6: Seed only approved policy semantics**
 
 Seed `post_stop_stress_multiple=Decimal("2.0")`. Do not seed a final production Universe member list. Keep target eight/hard maximum ten enforcement in existing Universe authority.
 
-- [ ] **Step 7: Verify fresh schema, refusal, and round trips**
+- [x] **Step 7: Verify fresh schema, refusal, and round trips**
 
 ```bash
 uv run pytest -q \
@@ -714,7 +714,7 @@ uv run pytest -q \
   tests/trading_kernel/architecture/test_flat_runtime_reset_sql.py
 ```
 
-- [ ] **Step 8: Commit schema authority**
+- [x] **Step 8: Commit schema authority**
 
 ```bash
 git add \
@@ -747,7 +747,7 @@ git commit -m "feat(kernel): migrate stop stress authority"
 - Modify: `tests/trading_kernel/full_chain/test_crypto_universe_replacement.py`
 - Modify: `tests/trading_kernel/full_chain/test_crypto_universe_failure_recovery.py`
 
-- [ ] **Step 1: Add ETH/AVAX accident RED fixtures**
+- [x] **Step 1: Add ETH/AVAX accident RED fixtures**
 
 Parameterize:
 
@@ -757,7 +757,7 @@ Parameterize:
 
 Assert raw observation never changes proof, Event, TP1, or Flatten decision.
 
-- [ ] **Step 2: Add complete post-fill recovery paths**
+- [x] **Step 2: Add complete post-fill recovery paths**
 
 Cover:
 
@@ -768,7 +768,7 @@ Cover:
 - failed stress with exactly one durable Flatten;
 - external flat/no residual orders before Incident/lane/budget/domain release.
 
-- [ ] **Step 3: Add multi-position and dual-Side paths**
+- [x] **Step 3: Add multi-position and dual-Side paths**
 
 Cover:
 
@@ -778,7 +778,7 @@ Cover:
 - new Entry global serialization;
 - no cross-Ticket Stop/TP1/Command identities.
 
-- [ ] **Step 4: Preserve complete economic closure**
+- [x] **Step 4: Preserve complete economic closure**
 
 Every successful chain must continue through:
 
@@ -796,7 +796,7 @@ Assert:
 - BNB fee asset converts to USDT Review economics;
 - closure work is not starved by protected/pending Tickets.
 
-- [ ] **Step 5: Preserve StrategyUniverse switching**
+- [x] **Step 5: Preserve StrategyUniverse switching**
 
 Run a full switch with an eight-member independent strategy pool and assert:
 
@@ -807,7 +807,7 @@ Run a full switch with an eight-member independent strategy pool and assert:
 - no detector or order-chain code change is needed per symbol;
 - no final production symbol list is introduced.
 
-- [ ] **Step 6: Run full-chain RED/GREEN loop**
+- [x] **Step 6: Run full-chain RED/GREEN loop**
 
 ```bash
 uv run pytest -q \
@@ -821,7 +821,7 @@ uv run pytest -q \
   tests/trading_kernel/full_chain/test_crypto_universe_failure_recovery.py
 ```
 
-- [ ] **Step 7: Commit full-chain coverage**
+- [x] **Step 7: Commit full-chain coverage**
 
 ```bash
 git add tests/trading_kernel/full_chain
@@ -840,7 +840,7 @@ git commit -m "test(kernel): certify stop stress full chain"
 - Modify: affected unit/integration/full-chain fixtures that still construct retired fields
 - Delete: tests/helpers that encode liquidation-price command authority
 
-- [ ] **Step 1: Add architecture RED scans**
+- [x] **Step 1: Add architecture RED scans**
 
 Assert:
 
@@ -850,11 +850,11 @@ Assert:
 - one `AccountRiskSnapshot` type and one infrastructure parser exist;
 - no new worker, timer, queue, selector, runtime file output, compatibility adapter, alias, or dual read/write exists.
 
-- [ ] **Step 2: Remove retired tests and fixtures**
+- [x] **Step 2: Remove retired tests and fixtures**
 
 Delete tests that require old liquidation authority. Rewrite fixtures to provide canonical account/rules facts and stress evidence. Do not keep old names as aliases.
 
-- [ ] **Step 3: Run architecture and source scans**
+- [x] **Step 3: Run architecture and source scans**
 
 ```bash
 uv run pytest -q tests/trading_kernel/architecture
@@ -866,7 +866,7 @@ rg -n \
 
 Expected: `rg` returns no production/test/schema matches except explicit forbidden-token assertions inside the architecture test.
 
-- [ ] **Step 4: Run performance-bound tests**
+- [x] **Step 4: Run performance-bound tests**
 
 Assert:
 
@@ -876,7 +876,7 @@ Assert:
 - retries update due-at and cannot busy-loop;
 - production no-signal cadence writes zero files.
 
-- [ ] **Step 5: Commit architecture enforcement**
+- [x] **Step 5: Commit architecture enforcement**
 
 ```bash
 git add \
@@ -896,11 +896,11 @@ git commit -m "test(kernel): enforce single stress authority"
 - Modify only if evidence requires: implementation/test files from Tasks 1-8
 - Do not update volatile Tokyo facts in `docs/current/MAIN_CONTROL_ROADMAP.md` without a fresh readonly production refresh
 
-- [ ] **Step 1: Ensure disposable PostgreSQL is healthy**
+- [x] **Step 1: Ensure disposable PostgreSQL is healthy**
 
 Use the repository test dependency only. Never substitute Tokyo.
 
-- [ ] **Step 2: Run the complete test matrix**
+- [x] **Step 2: Run the complete test matrix**
 
 ```bash
 uv run pytest -q \
@@ -910,7 +910,7 @@ uv run pytest -q \
   tests/trading_kernel/architecture
 ```
 
-- [ ] **Step 3: Run static and runtime-file gates**
+- [x] **Step 3: Run static and runtime-file gates**
 
 ```bash
 uv run ruff check \
@@ -927,7 +927,7 @@ uv run python scripts/audit_production_runtime_file_io.py
 git diff --check
 ```
 
-- [ ] **Step 4: Review the final diff**
+- [x] **Step 4: Review the final diff**
 
 Verify:
 
@@ -938,7 +938,7 @@ Verify:
 - no hidden exchange-write path;
 - no weakening of Entry fences, Unknown-outcome handling, STOP_MARKET protection, GTX TP1, order attribution, fee valuation, Settlement/Review fairness, or Universe activation.
 
-- [ ] **Step 5: Record final local evidence**
+- [x] **Step 5: Record final local evidence**
 
 Capture:
 
@@ -948,7 +948,7 @@ Capture:
 - Ruff/Mypy/file-I/O results;
 - explicit statement that Tokyo Entry and deployment were untouched.
 
-- [ ] **Step 6: Commit any evidence-driven final cleanup**
+- [x] **Step 6: Commit any evidence-driven final cleanup**
 
 If verification required no edits, do not create an empty commit. If it required
 edits, inspect `git diff --name-only`, stage only the exact implementation or
@@ -958,7 +958,7 @@ test files changed by the verified cleanup, and commit:
 git commit -m "chore(kernel): complete local stop stress certification"
 ```
 
-- [ ] **Step 7: Stop before deployment**
+- [x] **Step 7: Stop before deployment**
 
 Do not:
 

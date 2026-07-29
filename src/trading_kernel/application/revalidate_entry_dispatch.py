@@ -25,13 +25,18 @@ from src.trading_kernel.domain.account_entry_health import (
     AccountEntryHealthStatus,
 )
 from src.trading_kernel.domain.capacity import CapacityClaim
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
     ExchangeCommandStatus,
     OrderCommandPayload,
     SetLeverageCommandPayload,
+)
+from src.trading_kernel.domain.cross_margin_stress import (
+    CrossMarginStressRequest,
+    CrossMarginStressStatus,
+    StressPosition,
+    evaluate_cross_margin_stress,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.instrument_entry_health import (
@@ -56,7 +61,7 @@ class EntryDispatchPreflightStatus(StrEnum):
     WALLET_RISK_DRIFT = "wallet_risk_drift"
     MARGIN_DRIFT = "margin_drift"
     QUOTE_RISK = "quote_risk"
-    LIQUIDATION_FAILED = "liquidation_failed"
+    STRESS_FAILED = "stress_failed"
     LEVERAGE_MISMATCH = "leverage_mismatch"
     SET_LEVERAGE_INSTRUMENT_NOT_FLAT = "set_leverage_instrument_not_flat"
 
@@ -119,6 +124,7 @@ def revalidate_entry_dispatch(
     ticket = request.ticket
     claim = request.capacity_claim
     snapshot = request.admission_snapshot
+    account_risk = snapshot.account_risk_snapshot
     domain = ticket.identity.netting_domain
 
     if not _command_matches_ticket_and_claim(command, ticket, claim):
@@ -150,10 +156,10 @@ def revalidate_entry_dispatch(
     if not _snapshot_and_rules_are_current(request):
         return _refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
     if (
-        snapshot.venue_id != domain.venue_id
-        or snapshot.account_id != domain.account_id
-        or snapshot.position_mode != "independent_sides"
-        or snapshot.margin_mode != request.owner_policy.supported_margin_mode
+        account_risk.venue_id != domain.venue_id
+        or account_risk.account_id != domain.account_id
+        or account_risk.position_mode != "independent_sides"
+        or account_risk.margin_mode != request.owner_policy.supported_margin_mode
     ):
         return _refused(EntryDispatchPreflightStatus.ACCOUNT_MODE_INVALID)
     if not _health_digest_matches(request):
@@ -176,16 +182,16 @@ def revalidate_entry_dispatch(
     if not _netting_domain_is_flat_and_order_free(snapshot, ticket):
         return _refused(EntryDispatchPreflightStatus.OWNERSHIP_CONFLICT)
     if ticket.risk_at_stop > (
-        snapshot.total_wallet_balance
+        account_risk.total_wallet_balance
         * request.owner_policy.planned_stop_risk_fraction
     ):
         return _refused(EntryDispatchPreflightStatus.WALLET_RISK_DRIFT)
     executable_margin = min(
-        snapshot.available_margin,
+        account_risk.available_margin,
         max(
-            snapshot.total_margin_balance
+            account_risk.total_margin_balance
             * request.owner_policy.max_initial_margin_utilization
-            - snapshot.total_initial_margin,
+            - account_risk.total_initial_margin,
             Decimal(0),
         ),
     )
@@ -203,21 +209,22 @@ def revalidate_entry_dispatch(
         > ticket.post_fill_stop_risk_limit
     ):
         return _refused(EntryDispatchPreflightStatus.QUOTE_RISK)
-    if not _liquidation_safety_passes(
+    if not _cross_margin_stress_passes(
         ticket=ticket,
         snapshot=snapshot,
-        brackets=request.instrument_rules.maintenance_margin_brackets,
+        rules=request.instrument_rules,
     ):
-        return _refused(EntryDispatchPreflightStatus.LIQUIDATION_FAILED)
+        return _refused(EntryDispatchPreflightStatus.STRESS_FAILED)
 
-    facts = snapshot.instrument_facts_for(domain.exchange_instrument_id)
+    if account_risk.exchange_instrument_id != domain.exchange_instrument_id:
+        return _refused(EntryDispatchPreflightStatus.SCOPE_DRIFT)
     if command.kind is ExchangeCommandKind.SET_LEVERAGE:
         if not _exact_instrument_is_flat_and_order_free(snapshot, ticket):
             return _refused(
                 EntryDispatchPreflightStatus.SET_LEVERAGE_INSTRUMENT_NOT_FLAT
             )
         return _allowed()
-    if facts.configured_leverage != ticket.selected_leverage:
+    if account_risk.configured_leverage != ticket.selected_leverage:
         return _refused(EntryDispatchPreflightStatus.LEVERAGE_MISMATCH)
     return _allowed()
 
@@ -350,7 +357,7 @@ def _netting_domain_is_flat_and_order_free(
         position.exchange_instrument_id == domain.exchange_instrument_id
         and position.position_side == domain.position_side
         and position.quantity > 0
-        for position in snapshot.positions
+        for position in snapshot.account_risk_snapshot.account_positions
     ) and not any(
         order.exchange_instrument_id == domain.exchange_instrument_id
         and order.position_side == domain.position_side
@@ -365,7 +372,7 @@ def _exact_instrument_is_flat_and_order_free(
     instrument_id = ticket.identity.netting_domain.exchange_instrument_id
     return not any(
         position.exchange_instrument_id == instrument_id and position.quantity > 0
-        for position in snapshot.positions
+        for position in snapshot.account_risk_snapshot.account_positions
     ) and not any(
         order.exchange_instrument_id == instrument_id for order in snapshot.open_orders
     )
@@ -377,64 +384,53 @@ def _quote_preserves_protection(ticket: TradeTicket, entry_price: Decimal) -> bo
     return ticket.initial_stop_price > entry_price
 
 
-def _liquidation_safety_passes(
+def _cross_margin_stress_passes(
     *,
     ticket: TradeTicket,
     snapshot: EntryAdmissionSnapshot,
-    brackets: tuple[MaintenanceMarginBracket, ...],
+    rules: InstrumentRulesFacts,
 ) -> bool:
-    bracket = _bracket_for_notional(brackets, ticket.notional)
-    if bracket is None:
+    account_risk = snapshot.account_risk_snapshot
+    if (
+        account_risk.exchange_instrument_id
+        != ticket.identity.netting_domain.exchange_instrument_id
+    ):
         return False
-    mark_price = snapshot.instrument_facts_for(
-        ticket.identity.netting_domain.exchange_instrument_id
-    ).mark_price
-    maintenance_at_liquidation = (
-        ticket.quantity * entry_price_for(ticket, snapshot) * bracket.maintenance_margin_rate
-        + bracket.maintenance_amount
+    projected_positions = tuple(
+        StressPosition(
+            position_side=position.position_side,
+            quantity=position.quantity,
+            average_entry_price=position.average_entry_price,
+        )
+        for position in account_risk.account_positions
+        if position.exchange_instrument_id
+        == ticket.identity.netting_domain.exchange_instrument_id
+    ) + (
+        StressPosition(
+            position_side=ticket.identity.netting_domain.position_side,
+            quantity=ticket.quantity,
+            average_entry_price=entry_price_for(ticket, snapshot),
+        ),
     )
-    if ticket.identity.netting_domain.position_side == "long":
-        denominator = ticket.quantity * (Decimal(1) - bracket.maintenance_margin_rate)
-        if denominator <= 0:
-            return False
-        liquidation_price = max(
-            (
-                snapshot.total_maintenance_margin
-                + maintenance_at_liquidation
-                - snapshot.total_margin_balance
-                + ticket.quantity * mark_price
-            )
-            / denominator,
-            Decimal(0),
+    evidence = evaluate_cross_margin_stress(
+        CrossMarginStressRequest(
+            account_snapshot=account_risk,
+            maintenance_margin_brackets=rules.maintenance_margin_brackets,
+            maintenance_margin_brackets_digest=(
+                rules.maintenance_margin_brackets_digest
+            ),
+            notional_coefficient=rules.notional_coefficient,
+            notional_coefficient_certified=(
+                rules.notional_coefficient_certified
+            ),
+            evaluated_side=ticket.identity.netting_domain.position_side,
+            reference_entry_price=entry_price_for(ticket, snapshot),
+            initial_stop_price=ticket.initial_stop_price,
+            post_stop_stress_multiple=ticket.post_stop_stress_multiple,
+            projected_instrument_positions=projected_positions,
         )
-        directional = liquidation_price < ticket.initial_stop_price < entry_price_for(
-            ticket, snapshot
-        )
-        liquidation_distance = ticket.initial_stop_price - liquidation_price
-    else:
-        denominator = ticket.quantity * (Decimal(1) + bracket.maintenance_margin_rate)
-        if denominator <= 0:
-            return False
-        liquidation_price = (
-            snapshot.total_margin_balance
-            + ticket.quantity * mark_price
-            - snapshot.total_maintenance_margin
-            - maintenance_at_liquidation
-        ) / denominator
-        directional = (
-            liquidation_price.is_finite()
-            and liquidation_price > 0
-            and entry_price_for(ticket, snapshot) < ticket.initial_stop_price < liquidation_price
-        )
-        liquidation_distance = liquidation_price - ticket.initial_stop_price
-    stop_distance = abs(entry_price_for(ticket, snapshot) - ticket.initial_stop_price)
-    return bool(
-        directional
-        and liquidation_distance >= 0
-        and stop_distance > 0
-        and liquidation_distance / stop_distance
-        >= ticket.min_liquidation_distance_to_stop_distance_ratio
     )
+    return evidence.proof.status is CrossMarginStressStatus.PASSED
 
 
 def entry_price_for(ticket: TradeTicket, snapshot: EntryAdmissionSnapshot) -> Decimal:
@@ -443,19 +439,6 @@ def entry_price_for(ticket: TradeTicket, snapshot: EntryAdmissionSnapshot) -> De
         if ticket.identity.netting_domain.position_side == "long"
         else snapshot.best_bid_price
     )
-
-
-def _bracket_for_notional(
-    brackets: tuple[MaintenanceMarginBracket, ...],
-    notional: Decimal,
-) -> MaintenanceMarginBracket | None:
-    matches = tuple(
-        bracket
-        for bracket in brackets
-        if notional >= bracket.notional_floor
-        and (bracket.notional_cap is None or notional < bracket.notional_cap)
-    )
-    return matches[0] if len(matches) == 1 else None
 
 
 def _allowed() -> EntryDispatchPreflightDecision:

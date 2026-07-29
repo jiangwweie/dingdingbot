@@ -59,6 +59,7 @@ from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
 from tests.trading_kernel.integration.test_command_dispatch import (
     CountingVenue,
     PreflightFacts,
+    _commit_passed_post_fill_stress_if_pending,
     _issue,
     _seed_policy,
 )
@@ -369,7 +370,7 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -453,7 +454,7 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=Decimal(57000),
+                    venue_reported_liquidation_price=Decimal(57000),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -475,6 +476,10 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
         venue,
         ticket.identity.ticket_id,
         now_ms=2_200,
+    )
+    await _commit_passed_post_fill_stress_if_pending(
+        dispatch_engine,
+        ticket.identity.ticket_id,
     )
     take_profit = await _dispatch_ticket_command(
         dispatch_engine,

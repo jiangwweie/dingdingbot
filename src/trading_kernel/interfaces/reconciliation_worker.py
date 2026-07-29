@@ -24,16 +24,24 @@ from src.trading_kernel.application.ports import (
     VenueTruthPort,
 )
 from src.trading_kernel.application.reconcile_ticket import (
+    PostFillStressReconcileRequest,
+    PostFillStressReconcileStatus,
     ReconcileTicketRequest,
     ReconcileTicketStatus,
+    reconcile_post_fill_stress,
     reconcile_ticket,
+    record_post_fill_stress_retry,
 )
 from src.trading_kernel.application.recover_unknown_command import (
     RecoverUnknownCommandRequest,
     recover_unknown_command,
 )
 from src.trading_kernel.application.runtime_facts import (
+    AccountRiskSnapshotRequest,
+    AccountRiskSnapshotSource,
     FeeDiscountCapabilitySource,
+    InstrumentRulesRequest,
+    InstrumentRulesSource,
     PositionSnapshotRequest,
     PositionSnapshotSource,
     ReviewEconomicsRequest,
@@ -227,6 +235,8 @@ async def run_reconciliation_worker_once(
     position_source: PositionSnapshotSource,
     request: ReconciliationWorkerRequest,
     *,
+    account_risk_source: AccountRiskSnapshotSource | None = None,
+    instrument_rules_source: InstrumentRulesSource | None = None,
     review_economics_source: ReviewEconomicsSource | None = None,
     fee_discount_capability_source: FeeDiscountCapabilitySource | None = None,
     instrument_certification_source: InstrumentCertificationSource | None = None,
@@ -238,6 +248,8 @@ async def run_reconciliation_worker_once(
         venue_truth,
         position_source,
         request,
+        account_risk_source=account_risk_source,
+        instrument_rules_source=instrument_rules_source,
         review_economics_source=review_economics_source,
     )
     if (
@@ -317,6 +329,8 @@ async def _run_reconciliation_worker_once_core(
     position_source: PositionSnapshotSource,
     request: ReconciliationWorkerRequest,
     *,
+    account_risk_source: AccountRiskSnapshotSource | None = None,
+    instrument_rules_source: InstrumentRulesSource | None = None,
     review_economics_source: ReviewEconomicsSource | None = None,
 ) -> ReconciliationWorkerResult:
     pending_unknown_result: ReconciliationWorkerResult | None = None
@@ -358,6 +372,113 @@ async def _run_reconciliation_worker_once_core(
         aggregate = await uow.aggregates.get_next_reconciliation_work(
             now_ms=request.now_ms,
             closure_starvation_limit_ms=request.closure_starvation_limit_ms,
+        )
+    if (
+        aggregate is not None
+        and aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
+    ):
+        ticket_id = aggregate.identity.ticket_id
+        if account_risk_source is None or instrument_rules_source is None:
+            if not await _runtime_writer_is_certified(uow_factory, request):
+                return _runtime_fenced_result(ticket_id=ticket_id)
+            async with uow_factory() as uow:
+                await record_post_fill_stress_retry(
+                    uow,
+                    ticket_id=ticket_id,
+                    status=PostFillStressReconcileStatus.FACTS_UNAVAILABLE,
+                    now_ms=request.now_ms,
+                    due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                )
+            return ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+                ticket_id=ticket_id,
+                detail="post_fill_stress_source:missing",
+            )
+        domain = aggregate.identity.netting_domain
+        valid_for_ms = max(
+            request.idle_poll_interval_ms,
+            int(request.timeout_seconds * 1_000),
+        )
+        try:
+            account_snapshot, instrument_rules = await asyncio.wait_for(
+                asyncio.gather(
+                    account_risk_source.read_account_risk_snapshot(
+                        AccountRiskSnapshotRequest(
+                            venue_id=domain.venue_id,
+                            account_id=domain.account_id,
+                            exchange_instrument_id=(
+                                domain.exchange_instrument_id
+                            ),
+                            observed_at_ms=request.now_ms,
+                            valid_for_ms=valid_for_ms,
+                        )
+                    ),
+                    instrument_rules_source.read_instrument_rules(
+                        InstrumentRulesRequest(
+                            venue_id=domain.venue_id,
+                            account_id=domain.account_id,
+                            exchange_instrument_id=(
+                                domain.exchange_instrument_id
+                            ),
+                            observed_at_ms=request.now_ms,
+                            valid_for_ms=valid_for_ms,
+                        )
+                    ),
+                ),
+                timeout=request.timeout_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001 - retry keeps the Stop active.
+            if not await _runtime_writer_is_certified(uow_factory, request):
+                return _runtime_fenced_result(ticket_id=ticket_id)
+            async with uow_factory() as uow:
+                await record_post_fill_stress_retry(
+                    uow,
+                    ticket_id=ticket_id,
+                    status=PostFillStressReconcileStatus.FACTS_UNAVAILABLE,
+                    now_ms=request.now_ms,
+                    due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                )
+            return ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+                ticket_id=ticket_id,
+                detail=f"post_fill_stress:{type(exc).__name__}",
+            )
+        if not await _runtime_writer_is_certified(uow_factory, request):
+            return _runtime_fenced_result(ticket_id=ticket_id)
+        async with uow_factory() as uow:
+            assessed = await reconcile_post_fill_stress(
+                uow,
+                PostFillStressReconcileRequest(
+                    ticket_id=ticket_id,
+                    account_snapshot=account_snapshot,
+                    instrument_rules=instrument_rules,
+                    assessed_at_ms=request.now_ms,
+                ),
+            )
+            if assessed.status in {
+                PostFillStressReconcileStatus.FACTS_UNAVAILABLE,
+                PostFillStressReconcileStatus.FACTS_CONTRADICTORY,
+            }:
+                await record_post_fill_stress_retry(
+                    uow,
+                    ticket_id=ticket_id,
+                    status=assessed.status,
+                    now_ms=request.now_ms,
+                    due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                )
+        if assessed.status in {
+            PostFillStressReconcileStatus.FACTS_UNAVAILABLE,
+            PostFillStressReconcileStatus.FACTS_CONTRADICTORY,
+        }:
+            return ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+                ticket_id=ticket_id,
+                detail=f"post_fill_stress:{assessed.status.value}",
+            )
+        return ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.POSITION_RECONCILED,
+            ticket_id=ticket_id,
+            detail=f"post_fill_stress:{assessed.status.value}",
         )
     if (
         aggregate is not None

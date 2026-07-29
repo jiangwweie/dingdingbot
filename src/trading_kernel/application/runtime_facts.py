@@ -10,7 +10,10 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskSnapshot,
+    MaintenanceMarginBracket,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.order_attribution import (
@@ -59,6 +62,44 @@ class EntryAdmissionFactsSource(Protocol):
     ) -> EntryAdmissionSnapshot: ...
 
 
+class AccountRiskSnapshotRequest(BaseModel):
+    """Exact account observation requested for one risk decision."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    observed_at_ms: int
+    valid_for_ms: int
+
+    @field_validator(
+        "venue_id",
+        "account_id",
+        "exchange_instrument_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_account_risk_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("account risk request identities must be non-blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_account_risk_window(self) -> AccountRiskSnapshotRequest:
+        if self.observed_at_ms <= 0 or self.valid_for_ms <= 0:
+            raise ValueError("account risk request window must be positive")
+        return self
+
+
+class AccountRiskSnapshotSource(Protocol):
+    async def read_account_risk_snapshot(
+        self,
+        request: AccountRiskSnapshotRequest,
+    ) -> AccountRiskSnapshot: ...
+
+
 class InstrumentRulesRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -100,6 +141,8 @@ class InstrumentRulesFacts(BaseModel):
     exchange_max_leverage: int
     maintenance_margin_brackets: tuple[MaintenanceMarginBracket, ...]
     maintenance_margin_brackets_digest: str
+    notional_coefficient: Decimal
+    notional_coefficient_certified: bool
     observed_at_ms: int
     valid_until_ms: int
 
@@ -116,6 +159,7 @@ class InstrumentRulesFacts(BaseModel):
         "price_tick",
         "min_quantity",
         "min_notional",
+        "notional_coefficient",
     )
     @classmethod
     def _require_positive_rule(cls, value: Decimal) -> Decimal:
@@ -156,6 +200,7 @@ class InstrumentRulesSource(Protocol):
 
 class EntryFactsSource(
     EntryAdmissionFactsSource,
+    AccountRiskSnapshotSource,
     InstrumentRulesSource,
     Protocol,
 ):

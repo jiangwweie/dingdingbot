@@ -148,8 +148,10 @@ async def issue_ready_signal(
     if (
         profile is None
         or profile.status != "active"
-        or profile.venue_id != request.admission_snapshot.venue_id
-        or profile.account_id != request.admission_snapshot.account_id
+        or profile.venue_id
+        != request.admission_snapshot.account_risk_snapshot.venue_id
+        or profile.account_id
+        != request.admission_snapshot.account_risk_snapshot.account_id
         or policy is None
         or not policy.enabled
         or not policy.new_entry_submit_enabled
@@ -220,9 +222,7 @@ async def issue_ready_signal(
             ),
             max_leverage=policy.max_leverage,
             supported_margin_mode=policy.supported_margin_mode,
-            min_liquidation_distance_to_stop_distance_ratio=(
-                policy.min_liquidation_distance_to_stop_distance_ratio
-            ),
+            post_stop_stress_multiple=policy.post_stop_stress_multiple,
             max_post_fill_stop_risk_overrun_fraction=(
                 policy.max_post_fill_stop_risk_overrun_fraction
             ),
@@ -239,6 +239,10 @@ async def issue_ready_signal(
             maintenance_margin_brackets=rules.maintenance_margin_brackets,
             maintenance_margin_brackets_digest=(
                 rules.maintenance_margin_brackets_digest
+            ),
+            notional_coefficient=rules.notional_coefficient,
+            notional_coefficient_certified=(
+                rules.notional_coefficient_certified
             ),
             projection_version=rules.projection_version,
             observed_at_ms=rules.observed_at_ms,

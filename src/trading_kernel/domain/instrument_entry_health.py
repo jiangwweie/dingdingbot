@@ -51,10 +51,13 @@ def classify_instrument_entry_health(
 ) -> InstrumentEntryHealth:
     """Classify one requested instrument from the same frozen account snapshot."""
 
-    facts = snapshot.instrument_facts_for(exchange_instrument_id)
+    risk_snapshot = snapshot.account_risk_snapshot
+    if risk_snapshot.exchange_instrument_id != exchange_instrument_id:
+        raise ValueError("admission account risk instrument identity mismatch")
+    configured_leverage = risk_snapshot.configured_leverage
     exact_positions = tuple(
         position
-        for position in snapshot.positions
+        for position in risk_snapshot.account_positions
         if position.exchange_instrument_id == exchange_instrument_id
     )
     exact_orders = tuple(
@@ -65,7 +68,7 @@ def classify_instrument_entry_health(
     if EntryBlockScope.RUNTIME in ownership.open_incident_scopes:
         return _health(
             snapshot,
-            facts.configured_leverage,
+            configured_leverage,
             InstrumentEntryHealthStatus.RUNTIME_FENCED,
             False,
             EntryBlockScope.RUNTIME,
@@ -74,7 +77,7 @@ def classify_instrument_entry_health(
     if ownership.unknown_command_outcome_ticket_ids:
         return _health(
             snapshot,
-            facts.configured_leverage,
+            configured_leverage,
             InstrumentEntryHealthStatus.UNKNOWN_COMMAND_OUTCOME,
             False,
             EntryBlockScope.ACCOUNT_CAPACITY,
@@ -83,7 +86,7 @@ def classify_instrument_entry_health(
     if EntryBlockScope.LEVERAGE_DOMAIN in ownership.open_incident_scopes:
         return _health(
             snapshot,
-            facts.configured_leverage,
+            configured_leverage,
             InstrumentEntryHealthStatus.LEVERAGE_DOMAIN_INCIDENT,
             False,
             EntryBlockScope.LEVERAGE_DOMAIN,
@@ -97,7 +100,7 @@ def classify_instrument_entry_health(
     ):
         return _health(
             snapshot,
-            facts.configured_leverage,
+            configured_leverage,
             InstrumentEntryHealthStatus.UNOWNED_POSITION,
             False,
             EntryBlockScope.ACCOUNT_CAPACITY,
@@ -109,7 +112,7 @@ def classify_instrument_entry_health(
     ):
         return _health(
             snapshot,
-            facts.configured_leverage,
+            configured_leverage,
             InstrumentEntryHealthStatus.UNOWNED_ORDER,
             False,
             EntryBlockScope.ACCOUNT_CAPACITY,
@@ -121,7 +124,7 @@ def classify_instrument_entry_health(
     ):
         return _health(
             snapshot,
-            facts.configured_leverage,
+            configured_leverage,
             InstrumentEntryHealthStatus.SAME_DIRECTION_OCCUPIED,
             False,
             EntryBlockScope.NONE,
@@ -131,7 +134,7 @@ def classify_instrument_entry_health(
     if exact_orders and not has_exact_position:
         return _health(
             snapshot,
-            facts.configured_leverage,
+            configured_leverage,
             InstrumentEntryHealthStatus.OWNED_RESIDUAL_ORDER,
             False,
             EntryBlockScope.LEVERAGE_DOMAIN,
@@ -140,7 +143,7 @@ def classify_instrument_entry_health(
     if has_exact_position:
         return _health(
             snapshot,
-            facts.configured_leverage,
+            configured_leverage,
             InstrumentEntryHealthStatus.HEALTHY_OPPOSITE_SIDE,
             False,
             EntryBlockScope.NONE,
@@ -148,7 +151,7 @@ def classify_instrument_entry_health(
         )
     return _health(
         snapshot,
-        facts.configured_leverage,
+        configured_leverage,
         InstrumentEntryHealthStatus.HEALTHY_FLAT,
         True,
         EntryBlockScope.NONE,
@@ -167,8 +170,8 @@ def _health(
     snapshot_digest = snapshot.digest()
     block_key = canonical_entry_block_key(
         scope,
-        venue_id=snapshot.venue_id,
-        account_id=snapshot.account_id,
+        venue_id=snapshot.account_risk_snapshot.venue_id,
+        account_id=snapshot.account_risk_snapshot.account_id,
         exchange_instrument_id=exchange_instrument_id,
     )
     return InstrumentEntryHealth(

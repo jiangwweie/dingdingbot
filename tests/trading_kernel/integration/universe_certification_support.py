@@ -21,7 +21,7 @@ from src.trading_kernel.application.install_strategy_universe import (
     install_strategy_universe,
 )
 from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertificationFacts,
 )
@@ -49,7 +49,7 @@ MEMBERS = (
 )
 NOW_MS = 1_800_000_010_000
 RUNTIME_COMMIT = "task-7-test"
-SCHEMA_REVISION = "0002_crypto_strategy_universe"
+SCHEMA_REVISION = "0003_cross_margin_stop_stress"
 
 
 @pytest_asyncio.fixture
@@ -147,6 +147,7 @@ class RecordingReadonlyCertificationSource:
             position_mode="independent_sides",
             margin_mode="cross",
             configured_leverage=5,
+            notional_coefficient_certified=True,
             unowned_position_qty=Decimal(0),
             unowned_open_order_count=0,
             observed_at_ms=observed_at_ms,
@@ -173,6 +174,8 @@ class RecordingReadonlyCertificationSource:
                     "sha256:"
                     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 ),
+                notional_coefficient=Decimal(1),
+                notional_coefficient_certified=True,
                 observed_at_ms=observed_at_ms,
                 valid_until_ms=observed_at_ms + request.valid_for_ms,
             ),

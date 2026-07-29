@@ -73,7 +73,7 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
     plan = _plan()
 
     assert plan.target_commit == "a" * 40
-    assert plan.target_schema_revision == "0002_crypto_strategy_universe"
+    assert plan.target_schema_revision == "0003_cross_margin_stop_stress"
     assert plan.target_seed_identity.startswith("sha256:")
     assert CUTOVER_PHASES == (
         CutoverPhase.PLAN_IDENTITIES,
@@ -462,7 +462,7 @@ async def test_readonly_certification_reports_exact_runtime_authority(
         "max_initial_margin_utilization": "0.9",
         "max_leverage": 10,
         "supported_margin_mode": "cross",
-        "min_liquidation_distance_to_stop_distance_ratio": "2",
+        "post_stop_stress_multiple": "2",
         "max_post_fill_stop_risk_overrun_fraction": "0.1",
     }
     assert payload["release_counts"] == {
@@ -822,7 +822,7 @@ class LocalPostgresCutoverAdapter:
 
 def _plan(**changes: object) -> CutoverPlan:
     runtime_commit = "a" * 40
-    schema_revision = "0002_crypto_strategy_universe"
+    schema_revision = "0003_cross_margin_stop_stress"
     seed_identity = build_runtime_seed_identity(
         RuntimeAuthoritySeedRequest(
             account_id="subaccount-main",

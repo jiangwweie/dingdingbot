@@ -5,6 +5,14 @@ from decimal import Decimal
 import pytest
 
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskPosition,
+    AccountRiskSnapshot,
+    CrossMarginStressRequest,
+    MaintenanceMarginBracket,
+    StressPosition,
+    evaluate_cross_margin_stress,
+)
 from src.trading_kernel.domain.effects import (
     CancelEntryRemainder,
     CancelProtectionOrders,
@@ -55,6 +63,7 @@ from src.trading_kernel.domain.events import (
     LeverageRejected,
     OwnedOrphanOrderDetected,
     PositionFlatConfirmed,
+    PostFillStressAssessed,
     ProtectionCancelAbsenceConfirmed,
     ProtectionCancelConfirmed,
     ProtectionCancelOutcomeUnknown,
@@ -79,15 +88,6 @@ from tests.trading_kernel.unit.test_ticket import _ticket
 
 
 def _normal_post_fill_risk(ticket, average_fill_price: Decimal):
-    liquidation_distance = (
-        abs(average_fill_price - ticket.initial_stop_price)
-        * ticket.min_liquidation_distance_to_stop_distance_ratio
-    )
-    liquidation_price = (
-        ticket.initial_stop_price - liquidation_distance
-        if ticket.identity.netting_domain.position_side == "long"
-        else ticket.initial_stop_price + liquidation_distance
-    )
     return assess_post_fill_risk(
         PostFillRiskRequest(
             position_side=ticket.identity.netting_domain.position_side,
@@ -96,11 +96,93 @@ def _normal_post_fill_risk(ticket, average_fill_price: Decimal):
             initial_stop_price=ticket.initial_stop_price,
             planned_stop_risk_budget=ticket.planned_stop_risk_budget,
             post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
-            current_liquidation_price=liquidation_price,
-            min_liquidation_distance_to_stop_distance_ratio=(
-                ticket.min_liquidation_distance_to_stop_distance_ratio
+        )
+    )
+
+
+def _post_fill_stress_event(aggregate, *, passed: bool = True):
+    ticket = aggregate.ticket
+    assert aggregate.average_fill_price is not None
+    assert aggregate.initial_stop_exchange_order_id is not None
+    account = AccountRiskSnapshot.create(
+        venue_id=ticket.identity.netting_domain.venue_id,
+        account_id=ticket.identity.netting_domain.account_id,
+        account_risk_mode="standard_usdm_single_asset",
+        settlement_asset="USDT",
+        position_mode="independent_sides",
+        margin_mode="cross",
+        exchange_instrument_id=(
+            ticket.identity.netting_domain.exchange_instrument_id
+        ),
+        mark_price=aggregate.average_fill_price,
+        configured_leverage=ticket.selected_leverage,
+        total_wallet_balance=Decimal(100 if passed else 0),
+        total_margin_balance=Decimal(100 if passed else 0),
+        total_initial_margin=Decimal(0),
+        total_maintenance_margin=Decimal(0),
+        available_margin=Decimal(100 if passed else 0),
+        account_positions=(
+            AccountRiskPosition(
+                exchange_instrument_id=(
+                    ticket.identity.netting_domain.exchange_instrument_id
+                ),
+                position_side=ticket.identity.netting_domain.position_side,
+                quantity=aggregate.position_qty,
+                average_entry_price=aggregate.average_fill_price,
+                current_unrealized_pnl=Decimal(0),
+                current_maintenance_margin=Decimal(0),
+            ),
+        ),
+        observed_at_ms=1_250,
+        valid_until_ms=2_250,
+    )
+    evidence = evaluate_cross_margin_stress(
+        CrossMarginStressRequest(
+            account_snapshot=account,
+            maintenance_margin_brackets=(
+                MaintenanceMarginBracket(
+                    bracket_id="test:1",
+                    notional_floor=Decimal(0),
+                    notional_cap=None,
+                    maintenance_margin_rate=Decimal("0.004"),
+                    maintenance_amount=Decimal(0),
+                ),
+            ),
+            maintenance_margin_brackets_digest="sha256:" + "5" * 64,
+            notional_coefficient=Decimal(1),
+            notional_coefficient_certified=True,
+            evaluated_side=ticket.identity.netting_domain.position_side,
+            reference_entry_price=aggregate.average_fill_price,
+            initial_stop_price=ticket.initial_stop_price,
+            post_stop_stress_multiple=ticket.post_stop_stress_multiple,
+            projected_instrument_positions=(
+                StressPosition(
+                    position_side=(
+                        ticket.identity.netting_domain.position_side
+                    ),
+                    quantity=aggregate.position_qty,
+                    average_entry_price=aggregate.average_fill_price,
+                ),
             ),
         )
+    )
+    expected_status = "passed" if passed else "failed"
+    assert evidence.proof.status.value == expected_status
+    return PostFillStressAssessed(
+        event_id=f"event-stress-{aggregate.last_event_sequence + 1}",
+        ticket_id=ticket.identity.ticket_id,
+        sequence=aggregate.last_event_sequence + 1,
+        occurred_at_ms=1_250,
+        status=expected_status,
+        evidence=evidence,
+        owner_policy_id=ticket.owner_policy_id,
+        owner_policy_version=ticket.owner_policy_version,
+        filled_qty=aggregate.position_qty,
+        average_fill_price=aggregate.average_fill_price,
+        initial_stop_price=ticket.initial_stop_price,
+        initial_stop_exchange_order_id=(
+            aggregate.initial_stop_exchange_order_id
+        ),
     )
 
 
@@ -244,6 +326,8 @@ def test_authoritative_entry_rejection_is_terminal_and_never_retries() -> None:
                 occurred_at_ms=1_200,
                 filled_qty=Decimal("0.001"),
                 average_fill_price=Decimal(60000),
+                venue_reported_liquidation_price=None,
+                position_observed_at_ms=1_100,
                 post_fill_risk=_normal_post_fill_risk(
                     issued.ticket, Decimal(60000)
                 ),
@@ -330,6 +414,8 @@ def test_full_entry_fill_requires_initial_stop_before_releasing_entry_lane() -> 
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal(60000),
+            venue_reported_liquidation_price=None,
+            position_observed_at_ms=1_100,
             post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     )
@@ -356,9 +442,17 @@ def test_full_entry_fill_requires_initial_stop_before_releasing_entry_lane() -> 
         ),
     )
 
-    assert protected.aggregate.status is AggregateStatus.TP1_PENDING
+    assert protected.aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
     assert protected.aggregate.initial_stop_exchange_order_id == "stop-1"
-    assert protected.effects == (
+    assert protected.aggregate.entry_lane_held is True
+    assert protected.effects == ()
+
+    assessed = reduce_event(
+        protected.aggregate,
+        _post_fill_stress_event(protected.aggregate),
+    )
+    assert assessed.aggregate.status is AggregateStatus.TP1_PENDING
+    assert assessed.effects == (
         ReleaseEntryLane(ticket_id=ticket.identity.ticket_id),
         PrepareTakeProfitCommand(
             ticket_id=ticket.identity.ticket_id,
@@ -427,6 +521,8 @@ def test_initial_stop_rejection_opens_hard_incident_and_requests_flatten() -> No
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal(60000),
+            venue_reported_liquidation_price=None,
+            position_observed_at_ms=1_100,
             post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
@@ -492,6 +588,8 @@ def test_unknown_initial_stop_outcome_waits_for_venue_truth_without_exit() -> No
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal(60000),
+            venue_reported_liquidation_price=None,
+            position_observed_at_ms=1_100,
             post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
@@ -537,6 +635,8 @@ def test_reconciled_initial_stop_submission_protects_position_and_resolves_unkno
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal(60000),
+            venue_reported_liquidation_price=None,
+            position_observed_at_ms=1_100,
             post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
@@ -563,19 +663,13 @@ def test_reconciled_initial_stop_submission_protects_position_and_resolves_unkno
         ),
     )
 
-    assert recovered.aggregate.status is AggregateStatus.TP1_PENDING
+    assert recovered.aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
     assert recovered.aggregate.initial_stop_exchange_order_id == "stop-recovered-1"
-    assert recovered.aggregate.entry_lane_held is False
+    assert recovered.aggregate.entry_lane_held is True
     assert recovered.effects == (
         ResolveIncident(
             ticket_id=ticket.identity.ticket_id,
             incident_kind="initial_stop_outcome_unknown",
-        ),
-        ReleaseEntryLane(ticket_id=ticket.identity.ticket_id),
-        PrepareTakeProfitCommand(
-            ticket_id=ticket.identity.ticket_id,
-            quantity=ticket.take_profit_quantities[0],
-            limit_price=ticket.take_profit_prices[0],
         ),
     )
 
@@ -600,6 +694,8 @@ def test_reconciled_initial_stop_absence_enters_controlled_exit() -> None:
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal(60000),
+            venue_reported_liquidation_price=None,
+            position_observed_at_ms=1_100,
             post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
@@ -664,6 +760,8 @@ def test_external_flat_enters_reconciliation_and_cancels_owned_protection() -> N
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal(60000),
+            venue_reported_liquidation_price=None,
+            position_observed_at_ms=1_100,
             post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
@@ -678,13 +776,17 @@ def test_external_flat_enters_reconciliation_and_cancels_owned_protection() -> N
             protected_qty=ticket.quantity,
         ),
     ).aggregate
+    aggregate = reduce_event(
+        aggregate,
+        _post_fill_stress_event(aggregate),
+    ).aggregate
 
     external_flat = reduce_event(
         aggregate,
         ExternalFlatDetected(
             event_id="event-4",
             ticket_id=ticket.identity.ticket_id,
-            sequence=4,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_000,
         ),
     )
@@ -1235,6 +1337,8 @@ def _position_protected_aggregate():
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal(60000),
+            venue_reported_liquidation_price=None,
+            position_observed_at_ms=1_100,
             post_fill_risk=_normal_post_fill_risk(ticket, Decimal(60000)),
         ),
     ).aggregate
@@ -1249,12 +1353,16 @@ def _position_protected_aggregate():
             protected_qty=ticket.quantity,
         ),
     ).aggregate
+    aggregate = reduce_event(
+        aggregate,
+        _post_fill_stress_event(aggregate),
+    ).aggregate
     return reduce_event(
         aggregate,
         TakeProfitConfirmed(
-            event_id="event-4",
+            event_id="event-5",
             ticket_id=ticket.identity.ticket_id,
-            sequence=4,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=1_300,
             exchange_order_id="tp-1",
             target_qty=ticket.take_profit_quantities[0],
@@ -1762,12 +1870,14 @@ def _tp1_pending_aggregate():
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=ticket.entry_reference_price,
+            venue_reported_liquidation_price=None,
+            position_observed_at_ms=1_100,
             post_fill_risk=_normal_post_fill_risk(
                 ticket, ticket.entry_reference_price
             ),
         ),
     ).aggregate
-    return reduce_event(
+    aggregate = reduce_event(
         aggregate,
         InitialStopConfirmed(
             event_id="event-3",
@@ -1777,6 +1887,10 @@ def _tp1_pending_aggregate():
             exchange_order_id="stop-1",
             protected_qty=ticket.quantity,
         ),
+    ).aggregate
+    return reduce_event(
+        aggregate,
+        _post_fill_stress_event(aggregate),
     ).aggregate
 
 

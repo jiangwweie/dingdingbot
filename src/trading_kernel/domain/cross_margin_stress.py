@@ -144,9 +144,13 @@ class AccountRiskSnapshot(BaseModel):
     margin_mode: Literal["cross"]
     exchange_instrument_id: str
     mark_price: Decimal
+    configured_leverage: int
+    total_wallet_balance: Decimal
     total_margin_balance: Decimal
+    total_initial_margin: Decimal
     total_maintenance_margin: Decimal
-    current_instrument_positions: tuple[AccountRiskPosition, ...]
+    available_margin: Decimal
+    account_positions: tuple[AccountRiskPosition, ...]
     observed_at_ms: int
     valid_until_ms: int
     snapshot_digest: str
@@ -154,7 +158,7 @@ class AccountRiskSnapshot(BaseModel):
     @classmethod
     def create(cls, **values: object) -> Self:
         payload = dict(values)
-        raw_positions = payload.get("current_instrument_positions", ())
+        raw_positions = payload.get("account_positions", ())
         if not isinstance(raw_positions, (tuple, list)):
             raise ValueError(  # noqa: TRY004 - Pydantic creation rejects bad input.
                 "account risk positions must be a sequence"
@@ -171,7 +175,7 @@ class AccountRiskSnapshot(BaseModel):
                 ),
             )
         )
-        payload["current_instrument_positions"] = positions
+        payload["account_positions"] = positions
         payload["snapshot_digest"] = _canonical_digest(payload)
         return cls.model_validate(payload)
 
@@ -192,6 +196,13 @@ class AccountRiskSnapshot(BaseModel):
             raise ValueError("account risk mark price must be finite and positive")
         return value
 
+    @field_validator("configured_leverage", mode="before")
+    @classmethod
+    def _require_configured_leverage(cls, value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError("configured leverage must be a positive integer")
+        return value
+
     @field_validator("total_margin_balance")
     @classmethod
     def _require_margin_balance(cls, value: Decimal) -> Decimal:
@@ -199,7 +210,12 @@ class AccountRiskSnapshot(BaseModel):
             raise ValueError("account margin balance must be finite")
         return value
 
-    @field_validator("total_maintenance_margin")
+    @field_validator(
+        "total_wallet_balance",
+        "total_initial_margin",
+        "total_maintenance_margin",
+        "available_margin",
+    )
     @classmethod
     def _require_total_maintenance(cls, value: Decimal) -> Decimal:
         if not value.is_finite() or value < 0:
@@ -222,15 +238,10 @@ class AccountRiskSnapshot(BaseModel):
             raise ValueError("account risk snapshot window must be positive and ordered")
         keys = tuple(
             (position.exchange_instrument_id, position.position_side)
-            for position in self.current_instrument_positions
+            for position in self.account_positions
         )
         if len(set(keys)) != len(keys):
             raise ValueError("account risk position sides must be unique")
-        if any(
-            position.exchange_instrument_id != self.exchange_instrument_id
-            for position in self.current_instrument_positions
-        ):
-            raise ValueError("account risk positions must match the target instrument")
         payload = self.model_dump(mode="python", exclude={"snapshot_digest"})
         if _canonical_digest(payload) != self.snapshot_digest:
             raise ValueError("account risk snapshot digest differs from its payload")
@@ -438,7 +449,12 @@ def evaluate_cross_margin_stress(
             reason="maintenance bracket schedule invalid",
         )
 
-    current_positions = request.account_snapshot.current_instrument_positions
+    current_positions = tuple(
+        position
+        for position in request.account_snapshot.account_positions
+        if position.exchange_instrument_id
+        == request.account_snapshot.exchange_instrument_id
+    )
     base_margin_balance = request.account_snapshot.total_margin_balance - sum(
         (
             position.current_unrealized_pnl

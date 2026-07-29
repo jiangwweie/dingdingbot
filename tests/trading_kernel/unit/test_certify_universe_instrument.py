@@ -16,7 +16,7 @@ from src.trading_kernel.application.ports import (
     MonitorOwnerStatus,
 )
 from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertificationFacts,
@@ -139,6 +139,7 @@ class _MissingRulesSource:
                 position_mode="independent_sides",
                 margin_mode="cross",
                 configured_leverage=5,
+                notional_coefficient_certified=True,
                 unowned_position_qty=Decimal(0),
                 unowned_open_order_count=0,
                 observed_at_ms=request.observed_at_ms,
@@ -340,7 +341,7 @@ async def test_ticket_safety_result_preempts_due_instrument_certification(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker",
             runtime_commit="commit:test",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             now_ms=1_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -387,6 +388,7 @@ def _facts(*, observed_at_ms: int = 1_000) -> InstrumentCertificationFacts:
         position_mode="independent_sides",
         margin_mode="cross",
         configured_leverage=5,
+        notional_coefficient_certified=True,
         unowned_position_qty=Decimal(0),
         unowned_open_order_count=0,
         observed_at_ms=observed_at_ms,
@@ -413,6 +415,8 @@ def _rules(*, observed_at_ms: int = 1_000) -> InstrumentRulesFacts:
         maintenance_margin_brackets_digest=(
             "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         ),
+        notional_coefficient=Decimal(1),
+        notional_coefficient_certified=True,
         observed_at_ms=observed_at_ms,
         valid_until_ms=observed_at_ms + 60_000,
     )

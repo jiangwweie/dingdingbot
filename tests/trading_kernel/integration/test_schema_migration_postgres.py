@@ -189,6 +189,69 @@ async def test_nonflat_upgrade_fails_before_any_universe_ddl_postgres() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nonflat_0003_upgrade_fails_before_stop_stress_ddl_postgres() -> None:
+    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
+    assert SAFE_DATABASE.fullmatch(database_name)
+    admin = await asyncpg.connect(ADMIN_DSN)
+    try:
+        await admin.execute(f'CREATE DATABASE "{database_name}"')
+        database_url = _database_url(database_name)
+        _run_alembic(database_url, "upgrade", "0002_crypto_strategy_universe")
+        conn = await asyncpg.connect(database_url.replace("+asyncpg", ""))
+        try:
+            await conn.execute(
+                """
+                INSERT INTO brc_entry_lane_current (
+                    lane_id, status, version
+                ) VALUES ('global-entry', 'available', 1)
+                """
+            )
+        finally:
+            await conn.close()
+
+        result = _run_alembic_result(database_url, "upgrade", "head")
+        assert result.returncode != 0
+        assert "runtime/trade tables must be empty" in result.stderr
+
+        engine = create_async_engine(database_url)
+        try:
+            async with engine.connect() as connection:
+                policy_columns = await connection.run_sync(
+                    lambda sync_connection: {
+                        row["name"]
+                        for row in __import__("sqlalchemy")
+                        .inspect(sync_connection)
+                        .get_columns("brc_owner_policy_current")
+                    }
+                )
+                aggregate_columns = await connection.run_sync(
+                    lambda sync_connection: {
+                        row["name"]
+                        for row in __import__("sqlalchemy")
+                        .inspect(sync_connection)
+                        .get_columns("brc_trade_aggregates")
+                    }
+                )
+            assert (
+                "min_liquidation_distance_to_stop_distance_ratio"
+                in policy_columns
+            )
+            assert "post_stop_stress_multiple" not in policy_columns
+            assert "actual_liquidation_price" in aggregate_columns
+            assert "post_fill_stress_status" not in aggregate_columns
+        finally:
+            await engine.dispose()
+    finally:
+        await admin.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            database_name,
+        )
+        await admin.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
+        await admin.close()
+
+
+@pytest.mark.asyncio
 async def test_flat_preflight_lock_blocks_concurrent_runtime_insert() -> None:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)

@@ -63,6 +63,7 @@ from src.trading_kernel.domain.events import (
     OwnedOrphanCancelConfirmed,
     OwnedOrphanOrderDetected,
     PositionFlatConfirmed,
+    PostFillStressAssessed,
     ProtectionCancelAbsenceConfirmed,
     ProtectionCancelConfirmed,
     ProtectionCancelOutcomeUnknown,
@@ -455,20 +456,80 @@ def reduce_event(
                     incident_kind="initial_stop_outcome_unknown",
                 )
             )
+        stop_updates = {
+            "protected_qty": event.protected_qty,
+            "initial_stop_exchange_order_id": event.exchange_order_id.strip(),
+            "active_stop_exchange_order_id": event.exchange_order_id.strip(),
+            "active_stop_price": current.ticket.initial_stop_price,
+        }
         if current.post_fill_disposition is PostFillDisposition.FLATTEN_AFTER_PROTECTION:
             return _transition(
                 current,
                 event,
                 status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
-                updates={
-                    "entry_lane_held": False,
-                    "protected_qty": event.protected_qty,
-                    "initial_stop_exchange_order_id": event.exchange_order_id.strip(),
-                    "active_stop_exchange_order_id": event.exchange_order_id.strip(),
-                    "active_stop_price": current.ticket.initial_stop_price,
-                },
+                updates=stop_updates,
                 effects=(
-                    ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+                    PrepareControlledFlattenCommand(
+                        ticket_id=current.identity.ticket_id,
+                        quantity=current.position_qty,
+                    ),
+                ),
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.POST_FILL_RISK_PENDING,
+            updates=stop_updates,
+            effects=tuple(initial_stop_effects),
+        )
+
+    if isinstance(event, PostFillStressAssessed):
+        _require_status(current, AggregateStatus.POST_FILL_RISK_PENDING)
+        if (
+            event.owner_policy_id != current.ticket.owner_policy_id
+            or event.owner_policy_version != current.ticket.owner_policy_version
+            or event.filled_qty != current.position_qty
+            or event.average_fill_price != current.average_fill_price
+            or event.initial_stop_price != current.ticket.initial_stop_price
+            or event.initial_stop_exchange_order_id
+            != current.initial_stop_exchange_order_id
+        ):
+            raise InvalidLifecycleTransition(
+                "post-fill stress identity differs from protected exposure"
+            )
+        request = event.evidence.request
+        if (
+            request.account_snapshot.venue_id
+            != current.identity.netting_domain.venue_id
+            or request.account_snapshot.account_id
+            != current.identity.netting_domain.account_id
+            or request.account_snapshot.exchange_instrument_id
+            != current.identity.netting_domain.exchange_instrument_id
+            or request.evaluated_side
+            != current.identity.netting_domain.position_side
+            or request.reference_entry_price != event.average_fill_price
+            or request.initial_stop_price != event.initial_stop_price
+            or request.post_stop_stress_multiple
+            != current.ticket.post_stop_stress_multiple
+        ):
+            raise InvalidLifecycleTransition(
+                "post-fill stress evidence differs from Ticket authority"
+            )
+        stress_updates: dict[str, object] = {
+            "post_fill_stress_status": event.status,
+            "post_fill_stress_proof_digest": event.evidence.proof.proof_digest,
+        }
+        if event.status == "failed":
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+                updates=stress_updates,
+                effects=(
+                    OpenIncident(
+                        ticket_id=current.identity.ticket_id,
+                        incident_kind="post_fill_stress_failed",
+                    ),
                     PrepareControlledFlattenCommand(
                         ticket_id=current.identity.ticket_id,
                         quantity=current.position_qty,
@@ -484,29 +545,23 @@ def reduce_event(
         tp1_quantity = tp_quantities[0]
         if tp1_quantity >= current.position_qty:
             raise InvalidLifecycleTransition("TP1 must preserve a runner quantity")
-        initial_stop_effects.extend(
-            (
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.TP1_PENDING,
+            updates={
+                **stress_updates,
+                "entry_lane_held": False,
+                "tp1_target_qty": tp1_quantity,
+            },
+            effects=(
                 ReleaseEntryLane(ticket_id=current.identity.ticket_id),
                 PrepareTakeProfitCommand(
                     ticket_id=current.identity.ticket_id,
                     quantity=tp1_quantity,
                     limit_price=tp_prices[0],
                 ),
-            )
-        )
-        return _transition(
-            current,
-            event,
-            status=AggregateStatus.TP1_PENDING,
-            updates={
-                "entry_lane_held": False,
-                "protected_qty": event.protected_qty,
-                "initial_stop_exchange_order_id": event.exchange_order_id.strip(),
-                "active_stop_exchange_order_id": event.exchange_order_id.strip(),
-                "active_stop_price": current.ticket.initial_stop_price,
-                "tp1_target_qty": tp1_quantity,
-            },
-            effects=tuple(initial_stop_effects),
+            ),
         )
 
     if isinstance(event, InitialStopRejected):
@@ -580,6 +635,7 @@ def reduce_event(
             current,
             {
                 AggregateStatus.TP1_PENDING,
+                AggregateStatus.POST_FILL_RISK_PENDING,
                 AggregateStatus.TP1_OUTCOME_UNKNOWN,
             },
         )
@@ -1510,10 +1566,8 @@ def _post_fill_updates(event: EntryFilled) -> dict[str, object]:
         "position_qty": event.filled_qty,
         "average_fill_price": event.average_fill_price,
         "actual_stop_risk": assessment.actual_stop_risk,
-        "actual_liquidation_price": assessment.actual_liquidation_price,
-        "actual_liquidation_distance": assessment.actual_liquidation_distance,
-        "actual_liquidation_distance_to_stop_distance_ratio": (
-            assessment.actual_liquidation_distance_to_stop_distance_ratio
+        "venue_reported_liquidation_price": (
+            event.venue_reported_liquidation_price
         ),
         "post_fill_risk_status": assessment.status,
         "post_fill_disposition": assessment.disposition,

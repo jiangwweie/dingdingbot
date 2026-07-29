@@ -60,7 +60,7 @@ def classify_account_entry_health(
         position.quantity > 0
         and snapshot.position_domain_key(position)
         not in ownership.owned_position_domain_keys
-        for position in snapshot.positions
+        for position in snapshot.account_risk_snapshot.account_positions
     ):
         return _health(
             snapshot,
@@ -87,8 +87,8 @@ def _health(
     snapshot_digest = snapshot.digest()
     block_key = canonical_entry_block_key(
         scope,
-        venue_id=snapshot.venue_id,
-        account_id=snapshot.account_id,
+        venue_id=snapshot.account_risk_snapshot.venue_id,
+        account_id=snapshot.account_risk_snapshot.account_id,
     )
     return AccountEntryHealth(
         status=status,

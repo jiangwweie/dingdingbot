@@ -60,7 +60,7 @@ class RuntimeAuthoritySeedRequest(BaseModel):
 
     account_id: str
     runtime_commit: str
-    schema_revision: Literal["0002_crypto_strategy_universe"]
+    schema_revision: Literal["0003_cross_margin_stop_stress"]
     seeded_at_ms: int
 
     @field_validator("account_id", "runtime_commit", mode="before")
@@ -125,7 +125,7 @@ class RuntimePolicyState(BaseModel):
     max_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
-    min_liquidation_distance_to_stop_distance_ratio: Decimal
+    post_stop_stress_multiple: Decimal
     max_post_fill_stop_risk_overrun_fraction: Decimal
 
 
@@ -144,7 +144,7 @@ class RuntimeDeploymentIdentityResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     runtime_commit: str
-    schema_revision: Literal["0002_crypto_strategy_universe"]
+    schema_revision: Literal["0003_cross_margin_stop_stress"]
     runtime_seed_semantic_hash: str
     refreshed_existing_authority: bool
 
@@ -156,7 +156,7 @@ class _DynamicPolicy:
     max_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
-    min_liquidation_distance_to_stop_distance_ratio: Decimal
+    post_stop_stress_multiple: Decimal
     max_post_fill_stop_risk_overrun_fraction: Decimal
 
 
@@ -174,7 +174,7 @@ DYNAMIC_POLICY = _DynamicPolicy(
     max_initial_margin_utilization=Decimal("0.90"),
     max_leverage=10,
     supported_margin_mode="cross",
-    min_liquidation_distance_to_stop_distance_ratio=Decimal("2.0"),
+    post_stop_stress_multiple=Decimal("2.0"),
     max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
 )
 _POLICY_COMPARE_KEYS = (
@@ -187,7 +187,7 @@ _POLICY_COMPARE_KEYS = (
     "max_initial_margin_utilization",
     "max_leverage",
     "supported_margin_mode",
-    "min_liquidation_distance_to_stop_distance_ratio",
+    "post_stop_stress_multiple",
     "max_post_fill_stop_risk_overrun_fraction",
     "scope",
 )
@@ -751,8 +751,8 @@ def _policy_values(
         ),
         "max_leverage": DYNAMIC_POLICY.max_leverage,
         "supported_margin_mode": DYNAMIC_POLICY.supported_margin_mode,
-        "min_liquidation_distance_to_stop_distance_ratio": (
-            DYNAMIC_POLICY.min_liquidation_distance_to_stop_distance_ratio
+        "post_stop_stress_multiple": (
+            DYNAMIC_POLICY.post_stop_stress_multiple
         ),
         "max_post_fill_stop_risk_overrun_fraction": (
             DYNAMIC_POLICY.max_post_fill_stop_risk_overrun_fraction
@@ -850,8 +850,8 @@ def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
         ),
         max_leverage=int(str(values["max_leverage"])),
         supported_margin_mode=cast(Literal["cross"], supported_margin_mode),
-        min_liquidation_distance_to_stop_distance_ratio=Decimal(
-            str(values["min_liquidation_distance_to_stop_distance_ratio"])
+        post_stop_stress_multiple=Decimal(
+            str(values["post_stop_stress_multiple"])
         ),
         max_post_fill_stop_risk_overrun_fraction=Decimal(
             str(values["max_post_fill_stop_risk_overrun_fraction"])

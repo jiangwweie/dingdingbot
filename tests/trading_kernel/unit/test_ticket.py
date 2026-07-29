@@ -67,9 +67,9 @@ def _ticket(**updates: object) -> TradeTicket:
         "reserved_margin": Decimal(12),
         "risk_reservation_basis": "planned_stop_distance",
         "margin_mode": "cross",
-        "min_liquidation_distance_to_stop_distance_ratio": Decimal(2),
-        "projected_liquidation_price": Decimal(57000),
-        "projected_liquidation_distance_to_stop_distance_ratio": Decimal("2.5"),
+        "cross_margin_stress_model_id": "cross-margin-stop-stress-v1",
+        "post_stop_stress_multiple": Decimal(2),
+        "claim_stress_proof_digest": "sha256:" + "3" * 64,
         "risk_at_stop": Decimal(3),
         "entry_order_type": EntryOrderType.MARKET,
         "entry_limit_price": None,
@@ -89,6 +89,8 @@ def test_trade_ticket_is_immutable_and_contains_complete_decision() -> None:
     assert ticket.selected_leverage == 5
     assert ticket.capacity_claim_id.startswith("claim:")
     assert ticket.identity.netting_domain.position_side == "long"
+    assert ticket.cross_margin_stress_model_id == "cross-margin-stop-stress-v1"
+    assert ticket.claim_stress_proof_digest.startswith("sha256:")
     assert ticket.decision_digest().startswith("sha256:")
 
     with pytest.raises(ValidationError):

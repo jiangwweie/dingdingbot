@@ -21,6 +21,12 @@ from src.trading_kernel.domain.capacity_sizing import (
     CapacitySizingStatus,
     select_capacity_candidate,
 )
+from src.trading_kernel.domain.cross_margin_stress import (
+    CrossMarginStressRequest,
+    CrossMarginStressStatus,
+    StressPosition,
+    evaluate_cross_margin_stress,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.exit_policy import exit_policy_for
 from src.trading_kernel.domain.identities import (
@@ -53,11 +59,12 @@ def build_capacity_claim(
     netting_domain_occupied: bool,
     now_ms: int,
 ) -> CapacityClaimDecision:
+    account_risk = admission_snapshot.account_risk_snapshot
     if now_ms < signal.observed_at_ms or now_ms >= signal.expires_at_ms:
         return _refused(CapacityClaimStatus.SIGNAL_INVALID_OR_STALE)
     if (
-        admission_snapshot.venue_id != venue_id
-        or admission_snapshot.account_id != account_id
+        account_risk.venue_id != venue_id
+        or account_risk.account_id != account_id
         or instrument_rules.venue_id != venue_id
         or instrument_rules.exchange_instrument_id != signal.exchange_instrument_id
     ):
@@ -71,8 +78,8 @@ def build_capacity_claim(
         return _refused(CapacityClaimStatus.ACTION_FACTS_INVALID_OR_STALE)
     if (
         position_mode != "independent_sides"
-        or admission_snapshot.position_mode != "independent_sides"
-        or admission_snapshot.margin_mode != policy.supported_margin_mode
+        or account_risk.position_mode != "independent_sides"
+        or account_risk.margin_mode != policy.supported_margin_mode
     ):
         return _refused(CapacityClaimStatus.ACCOUNT_MODE_INVALID)
     snapshot_digest = admission_snapshot.digest()
@@ -113,16 +120,14 @@ def build_capacity_claim(
     ):
         return _refused(CapacityClaimStatus.PROTECTION_UNAVAILABLE)
 
-    instrument_facts = admission_snapshot.instrument_facts_for(
-        signal.exchange_instrument_id
-    )
+    if account_risk.exchange_instrument_id != signal.exchange_instrument_id:
+        return _refused(CapacityClaimStatus.SCOPE_OR_POLICY_MISMATCH)
     sizing = select_capacity_candidate(
         CapacitySizingRequest(
-            total_wallet_balance=admission_snapshot.total_wallet_balance,
-            total_margin_balance=admission_snapshot.total_margin_balance,
-            total_initial_margin=admission_snapshot.total_initial_margin,
-            total_maintenance_margin=admission_snapshot.total_maintenance_margin,
-            available_margin=admission_snapshot.available_margin,
+            total_wallet_balance=account_risk.total_wallet_balance,
+            total_margin_balance=account_risk.total_margin_balance,
+            total_initial_margin=account_risk.total_initial_margin,
+            available_margin=account_risk.available_margin,
             active_ticket_count=usage.active_ticket_count,
             max_concurrent_tickets=policy.max_concurrent_tickets,
             planned_stop_risk_fraction=policy.planned_stop_risk_fraction,
@@ -133,28 +138,57 @@ def build_capacity_claim(
                 policy.max_leverage,
                 instrument_rules.exchange_max_leverage,
             ),
-            configured_leverage=instrument_facts.configured_leverage,
-            instrument_has_open_position=(
-                instrument_entry_health.status
-                is InstrumentEntryHealthStatus.HEALTHY_OPPOSITE_SIDE
-            ),
+            configured_leverage=account_risk.configured_leverage,
             entry_reference_price=entry_price,
             initial_stop_price=stop_price,
             quantity_step=instrument_rules.quantity_step,
             min_quantity=instrument_rules.min_quantity,
             min_notional=instrument_rules.min_notional,
             tp1_quantity_fraction=exit_policy_for(signal.event_spec_id).tp1.quantity_fraction,
-            maintenance_margin_brackets=instrument_rules.maintenance_margin_brackets,
-            position_side=signal.position_side,
-            mark_price=instrument_facts.mark_price,
-            min_liquidation_distance_to_stop_distance_ratio=(
-                policy.min_liquidation_distance_to_stop_distance_ratio
-            ),
         )
     )
     if sizing.status is not CapacitySizingStatus.SELECTED or sizing.selected is None:
         return _refused(_sizing_refusal(sizing.status))
     selected = sizing.selected
+    projected_positions = tuple(
+        StressPosition(
+            position_side=position.position_side,
+            quantity=position.quantity,
+            average_entry_price=position.average_entry_price,
+        )
+        for position in account_risk.account_positions
+        if position.exchange_instrument_id == signal.exchange_instrument_id
+    ) + (
+        StressPosition(
+            position_side=signal.position_side,
+            quantity=selected.quantity,
+            average_entry_price=entry_price,
+        ),
+    )
+    stress_evidence = evaluate_cross_margin_stress(
+        CrossMarginStressRequest(
+            account_snapshot=account_risk,
+            maintenance_margin_brackets=(
+                instrument_rules.maintenance_margin_brackets
+            ),
+            maintenance_margin_brackets_digest=(
+                instrument_rules.maintenance_margin_brackets_digest
+            ),
+            notional_coefficient=instrument_rules.notional_coefficient,
+            notional_coefficient_certified=(
+                instrument_rules.notional_coefficient_certified
+            ),
+            evaluated_side=signal.position_side,
+            reference_entry_price=entry_price,
+            initial_stop_price=stop_price,
+            post_stop_stress_multiple=policy.post_stop_stress_multiple,
+            projected_instrument_positions=projected_positions,
+        )
+    )
+    if stress_evidence.proof.status is CrossMarginStressStatus.FACTS_CONTRADICTORY:
+        return _refused(CapacityClaimStatus.INSTRUMENT_RULES_INVALID)
+    if stress_evidence.proof.status is not CrossMarginStressStatus.PASSED:
+        return _refused(CapacityClaimStatus.PROTECTION_UNAVAILABLE)
     take_profit_price = _round_take_profit(
         entry_price,
         abs(entry_price - stop_price),
@@ -205,16 +239,16 @@ def build_capacity_claim(
         leverage_domain_key=(
             f"{venue_id}:{account_id}:{signal.exchange_instrument_id}"
         ),
-        total_wallet_balance_at_claim=admission_snapshot.total_wallet_balance,
-        total_margin_balance_at_claim=admission_snapshot.total_margin_balance,
-        total_initial_margin_at_claim=admission_snapshot.total_initial_margin,
+        total_wallet_balance_at_claim=account_risk.total_wallet_balance,
+        total_margin_balance_at_claim=account_risk.total_margin_balance,
+        total_initial_margin_at_claim=account_risk.total_initial_margin,
         total_maintenance_margin_at_claim=(
-            admission_snapshot.total_maintenance_margin
+            account_risk.total_maintenance_margin
         ),
-        available_margin_at_claim=admission_snapshot.available_margin,
-        mark_price_at_claim=instrument_facts.mark_price,
-        position_mode_at_claim=admission_snapshot.position_mode,
-        margin_mode_at_claim=admission_snapshot.margin_mode,
+        available_margin_at_claim=account_risk.available_margin,
+        mark_price_at_claim=account_risk.mark_price,
+        position_mode_at_claim=account_risk.position_mode,
+        margin_mode_at_claim=account_risk.margin_mode,
         active_ticket_count_at_claim=usage.active_ticket_count,
         remaining_slots_at_claim=selected.remaining_slots,
         planned_stop_risk_fraction=policy.planned_stop_risk_fraction,
@@ -224,9 +258,7 @@ def build_capacity_claim(
         ),
         post_fill_stop_risk_limit=post_fill_stop_risk_limit,
         max_initial_margin_utilization=policy.max_initial_margin_utilization,
-        min_liquidation_distance_to_stop_distance_ratio=(
-            policy.min_liquidation_distance_to_stop_distance_ratio
-        ),
+        post_stop_stress_multiple=policy.post_stop_stress_multiple,
         ticket_margin_budget=selected.ticket_margin_budget,
         required_leverage=selected.required_leverage,
         selected_leverage=selected.selected_leverage,
@@ -234,12 +266,7 @@ def build_capacity_claim(
         leverage_change_required=selected.leverage_change_required,
         exchange_max_leverage=instrument_rules.exchange_max_leverage,
         reserved_margin=selected.reserved_margin,
-        maintenance_margin_bracket_id=selected.maintenance_margin_bracket_id,
-        projected_liquidation_price=selected.projected_liquidation_price,
-        projected_liquidation_distance=selected.projected_liquidation_distance,
-        projected_liquidation_distance_to_stop_distance_ratio=(
-            selected.projected_liquidation_distance_to_stop_distance_ratio
-        ),
+        cross_margin_stress_evidence=stress_evidence,
         created_at_ms=now_ms,
         expires_at_ms=min(
             signal.expires_at_ms,
@@ -269,8 +296,6 @@ def _sizing_refusal(status: CapacitySizingStatus) -> CapacityClaimStatus:
         CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE,
     }:
         return CapacityClaimStatus.BUDGET_EXHAUSTED
-    if status is CapacitySizingStatus.LIQUIDATION_PROOF_FAILED:
-        return CapacityClaimStatus.PROTECTION_UNAVAILABLE
     return CapacityClaimStatus.INSTRUMENT_RULES_INVALID
 
 

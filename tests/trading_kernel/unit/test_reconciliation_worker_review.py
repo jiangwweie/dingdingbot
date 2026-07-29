@@ -173,6 +173,8 @@ class _WorkerState:
                     occurred_at_ms=1_100,
                     filled_qty=ticket.quantity,
                     average_fill_price=Decimal(60000),
+                    venue_reported_liquidation_price=None,
+                    position_observed_at_ms=1_100,
                     post_fill_risk=assess_post_fill_risk(
                         PostFillRiskRequest(
                             position_side=ticket.identity.netting_domain.position_side,
@@ -181,10 +183,6 @@ class _WorkerState:
                             initial_stop_price=ticket.initial_stop_price,
                             planned_stop_risk_budget=ticket.planned_stop_risk_budget,
                             post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
-                            current_liquidation_price=Decimal(57000),
-                            min_liquidation_distance_to_stop_distance_ratio=(
-                                ticket.min_liquidation_distance_to_stop_distance_ratio
-                            ),
                         )
                     ),
                 ),

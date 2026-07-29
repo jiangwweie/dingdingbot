@@ -23,6 +23,7 @@ from src.trading_kernel.infrastructure.strategy_registry_seed import (
 from tests.trading_kernel.integration.test_command_dispatch import (
     KindAwareAcceptingVenue,
     PreflightFacts,
+    _commit_passed_post_fill_stress_if_pending,
     _issue,
     _seed_policy,
 )
@@ -36,7 +37,8 @@ async def dispatch_lifecycle_command(
     now_ms: int,
     entry: bool = False,
 ):
-    return await dispatch_one_command(
+    await _commit_passed_post_fill_stress_if_pending(engine, ticket_id)
+    result = await dispatch_one_command(
         lambda: PostgresKernelUnitOfWork(engine),
         venue,
         DispatchCommandRequest(
@@ -46,19 +48,13 @@ async def dispatch_lifecycle_command(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision="0002_crypto_strategy_universe" if entry else None,
+            schema_revision="0003_cross_margin_stop_stress" if entry else None,
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
     )
-
-
-def safe_liquidation_price(ticket) -> Decimal:
-    distance = (
-        abs(ticket.entry_reference_price - ticket.initial_stop_price)
-        * ticket.min_liquidation_distance_to_stop_distance_ratio
-    )
-    return ticket.initial_stop_price - distance
+    await _commit_passed_post_fill_stress_if_pending(engine, ticket_id)
+    return result
 
 
 async def reach_runner_protected(engine, ticket, *, seed_policy: bool = True) -> None:
@@ -86,7 +82,7 @@ async def reach_runner_protected(engine, ticket, *, seed_policy: bool = True) ->
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=safe_liquidation_price(ticket),
+                    venue_reported_liquidation_price=Decimal(0),
                     open_orders=(),
                     observed_at_ms=2_100,
                 ),

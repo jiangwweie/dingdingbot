@@ -436,7 +436,13 @@ def _ticket_for_signal(
         runtime=original.runtime,
         netting_domain=domain,
     )
-    return _ticket(identity=identity, runtime_scope_id=f"scope-{signal_event_id}")
+    return _ticket(
+        identity=identity,
+        runtime_scope_id=f"scope-{signal_event_id}",
+        initial_stop_price=(
+            Decimal(61000) if position_side == "short" else Decimal(59000)
+        ),
+    )
 
 
 def _claimed_ticket(ticket, *, now_ms: int):

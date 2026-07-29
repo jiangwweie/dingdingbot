@@ -39,7 +39,6 @@ from src.trading_kernel.application.runtime_facts import (
     InstrumentRulesRequest,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandKind,
@@ -48,12 +47,15 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     SetLeverageCommandResult,
 )
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskSnapshot,
+    MaintenanceMarginBracket,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
     EntryAdmissionSnapshot,
     canonical_digest,
 )
-from src.trading_kernel.domain.events import TakeProfitFilled
+from src.trading_kernel.domain.events import PostFillStressAssessed, TakeProfitFilled
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.infrastructure.pg_models import (
@@ -68,6 +70,7 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_replacement_universe,
     _seed_ticket_runtime_scope,
+    _stress_evidence,
 )
 from tests.trading_kernel.unit.test_ticket import _ticket
 
@@ -79,16 +82,9 @@ ADMIN_DSN = os.getenv(
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 
 
-def _safe_liquidation_price(ticket, average_fill_price: Decimal) -> Decimal:
-    liquidation_distance = (
-        abs(average_fill_price - ticket.initial_stop_price)
-        * ticket.min_liquidation_distance_to_stop_distance_ratio
-    )
-    return (
-        ticket.initial_stop_price - liquidation_distance
-        if ticket.identity.netting_domain.position_side == "long"
-        else ticket.initial_stop_price + liquidation_distance
-    )
+def _raw_liquidation_observation(ticket, average_fill_price: Decimal) -> Decimal:
+    del ticket, average_fill_price
+    return Decimal(0)
 
 
 @pytest_asyncio.fixture
@@ -225,25 +221,27 @@ class PreflightFacts:
         self, request: EntryAdmissionSnapshotRequest
     ) -> EntryAdmissionSnapshot:
         return EntryAdmissionSnapshot(
-            venue_id=request.venue_id,
-            account_id=request.account_id,
-            position_mode="independent_sides",
-            margin_mode="cross",
-            total_wallet_balance=Decimal(100),
-            total_margin_balance=Decimal(100),
-            total_initial_margin=Decimal(10),
-            total_maintenance_margin=Decimal(1),
-            available_margin=Decimal(90),
+            account_risk_snapshot=AccountRiskSnapshot.create(
+                venue_id=request.venue_id,
+                account_id=request.account_id,
+                account_risk_mode="standard_usdm_single_asset",
+                settlement_asset="USDT",
+                position_mode="independent_sides",
+                margin_mode="cross",
+                exchange_instrument_id=request.exchange_instrument_id,
+                mark_price=Decimal(60000),
+                configured_leverage=self._configured_leverage,
+                total_wallet_balance=Decimal(100),
+                total_margin_balance=Decimal(100),
+                total_initial_margin=Decimal(10),
+                total_maintenance_margin=Decimal(1),
+                available_margin=Decimal(90),
+                account_positions=(),
+                observed_at_ms=request.observed_at_ms,
+                valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+            ),
             best_bid_price=Decimal(59999),
             best_ask_price=Decimal(60000),
-            instrument_facts=(
-                AdmissionInstrumentFacts(
-                    exchange_instrument_id=request.exchange_instrument_id,
-                    mark_price=Decimal(60000),
-                    configured_leverage=self._configured_leverage,
-                ),
-            ),
-            positions=(),
             open_orders=(),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
@@ -270,6 +268,8 @@ class PreflightFacts:
             exchange_max_leverage=10,
             maintenance_margin_brackets=brackets,
             maintenance_margin_brackets_digest=canonical_digest(brackets),
+            notional_coefficient=Decimal(1),
+            notional_coefficient_certified=True,
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -358,7 +358,7 @@ async def test_entry_without_action_time_facts_is_rejected_before_venue(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=None,
@@ -393,7 +393,7 @@ async def test_set_leverage_without_action_time_facts_is_rejected_before_venue(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=None,
@@ -433,7 +433,7 @@ async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -487,7 +487,7 @@ async def test_retired_strategy_version_before_entry_preflight_causes_zero_venue
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -520,7 +520,7 @@ async def test_universe_pointer_switch_after_preflight_is_fenced_by_claimed_entr
                 lease_until_ms=6_100,
                 timeout_seconds=1,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_crypto_strategy_universe",
+                schema_revision="0003_cross_margin_stop_stress",
                 admission_snapshot_validity_ms=1_000,
             ),
             entry_facts_source=PreflightFacts(),
@@ -696,7 +696,7 @@ async def test_confirmed_leverage_creates_first_entry_command_in_later_transacti
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -736,7 +736,7 @@ async def test_leverage_readback_mismatch_becomes_unknown_without_entry_or_resen
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -774,7 +774,7 @@ async def test_coded_leverage_failure_persists_sanitized_reason(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -815,7 +815,7 @@ async def test_prepared_command_is_superseded_before_venue_write_when_state_move
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=_safe_liquidation_price(
+                    venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, ticket.entry_reference_price
                     ),
                     observed_at_ms=2_100,
@@ -911,7 +911,7 @@ async def test_tp1_and_replacement_commands_reach_protected_runner(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=_safe_liquidation_price(
+                    venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, ticket.entry_reference_price
                     ),
                     observed_at_ms=2_100,
@@ -999,7 +999,7 @@ async def test_tp1_rejection_is_persisted_without_losing_initial_protection(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=_safe_liquidation_price(
+                    venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, ticket.entry_reference_price
                     ),
                     observed_at_ms=2_100,
@@ -1046,7 +1046,7 @@ async def test_replacement_rejection_preserves_the_prior_active_stop(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=_safe_liquidation_price(
+                    venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, ticket.entry_reference_price
                     ),
                     observed_at_ms=2_100,
@@ -1099,6 +1099,7 @@ async def _dispatch_for_ticket(
     venue,
     ticket_id: str,
 ) -> None:
+    await _commit_passed_post_fill_stress_if_pending(engine, ticket_id)
     result = await dispatch_one_command(
         lambda: PostgresKernelUnitOfWork(engine),
         venue,
@@ -1109,12 +1110,51 @@ async def _dispatch_for_ticket(
             lease_until_ms=7_200,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
     )
     assert result.status is DispatchCommandStatus.ACCEPTED
+    await _commit_passed_post_fill_stress_if_pending(engine, ticket_id)
+
+
+async def _commit_passed_post_fill_stress_if_pending(
+    engine: AsyncEngine,
+    ticket_id: str,
+) -> None:
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        aggregate = await uow.aggregates.get(ticket_id)
+        if (
+            aggregate is not None
+            and aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
+        ):
+            assert aggregate.average_fill_price is not None
+            assert aggregate.initial_stop_exchange_order_id is not None
+            event = PostFillStressAssessed(
+                event_id=(
+                    f"event:{ticket_id}:"
+                    f"{aggregate.last_event_sequence + 1}"
+                ),
+                ticket_id=ticket_id,
+                sequence=aggregate.last_event_sequence + 1,
+                occurred_at_ms=2_200,
+                status="passed",
+                evidence=_stress_evidence(aggregate.ticket),
+                owner_policy_id=aggregate.ticket.owner_policy_id,
+                owner_policy_version=aggregate.ticket.owner_policy_version,
+                filled_qty=aggregate.position_qty,
+                average_fill_price=aggregate.average_fill_price,
+                initial_stop_price=aggregate.ticket.initial_stop_price,
+                initial_stop_exchange_order_id=(
+                    aggregate.initial_stop_exchange_order_id
+                ),
+            )
+            await uow.commit_reduction(
+                event=event,
+                reduction=reduce_event(aggregate, event),
+                expected_version=aggregate.version,
+            )
 
 
 @pytest.mark.asyncio
@@ -1135,7 +1175,7 @@ async def test_dispatch_claims_then_calls_venue_outside_transaction_and_records_
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1188,7 +1228,7 @@ async def test_authoritative_entry_rejection_releases_lane_and_budget_without_re
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1248,7 +1288,7 @@ async def test_timeout_becomes_unknown_outcome_incident_and_is_never_redispatche
             lease_until_ms=6_100,
             timeout_seconds=0.01,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1346,7 +1386,7 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1360,7 +1400,7 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(
+                    venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, Decimal(60000)
                     ),
                     observed_at_ms=2_100,
@@ -1417,7 +1457,7 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1431,7 +1471,7 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(
+                    venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, Decimal(60000)
                     ),
                     observed_at_ms=2_100,
@@ -1490,7 +1530,7 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1504,7 +1544,7 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(
+                    venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, Decimal(60000)
                     ),
                     observed_at_ms=2_100,
@@ -1806,7 +1846,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 max_initial_margin_utilization="0.90",
                 max_leverage=10,
                 supported_margin_mode="cross",
-                min_liquidation_distance_to_stop_distance_ratio="2.0",
+                post_stop_stress_multiple="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
                 scope={},
                 updated_at_ms=1_000,
@@ -1823,7 +1863,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0002_crypto_strategy_universe",
+                schema_revision="0003_cross_margin_stop_stress",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -1832,7 +1872,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 set_={
                     "enabled": True,
                     "certified_commit": "kernel-test-head",
-                    "schema_revision": "0002_crypto_strategy_universe",
+                    "schema_revision": "0003_cross_margin_stop_stress",
                     "certification": {},
                     "updated_at_ms": 1_000,
                 },
@@ -1861,7 +1901,7 @@ async def _reach_cancel_pending(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1875,7 +1915,7 @@ async def _reach_cancel_pending(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(
+                    venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, Decimal(60000)
                     ),
                     observed_at_ms=2_100,

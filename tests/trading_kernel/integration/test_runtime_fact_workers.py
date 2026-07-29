@@ -21,13 +21,15 @@ from src.trading_kernel.application.runtime_facts import (
 )
 from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
 )
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskSnapshot,
+    MaintenanceMarginBracket,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
     EntryAdmissionSnapshot,
     canonical_digest,
 )
@@ -81,25 +83,27 @@ class FakeEntryAdmissionFactsSource:
     ) -> EntryAdmissionSnapshot:
         self.requests.append(request)
         return EntryAdmissionSnapshot(
-            venue_id=request.venue_id,
-            account_id=request.account_id,
-            position_mode="independent_sides",
-            margin_mode="cross",
-            total_wallet_balance=Decimal(1000),
-            total_margin_balance=Decimal(1000),
-            total_initial_margin=Decimal(0),
-            total_maintenance_margin=Decimal(0),
-            available_margin=Decimal(1000),
+            account_risk_snapshot=AccountRiskSnapshot.create(
+                venue_id=request.venue_id,
+                account_id=request.account_id,
+                account_risk_mode="standard_usdm_single_asset",
+                settlement_asset="USDT",
+                position_mode="independent_sides",
+                margin_mode="cross",
+                exchange_instrument_id=request.exchange_instrument_id,
+                mark_price=Decimal(10000),
+                configured_leverage=10,
+                total_wallet_balance=Decimal(1000),
+                total_margin_balance=Decimal(1000),
+                total_initial_margin=Decimal(0),
+                total_maintenance_margin=Decimal(0),
+                available_margin=Decimal(1000),
+                account_positions=(),
+                observed_at_ms=request.observed_at_ms,
+                valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+            ),
             best_bid_price=Decimal("9999.9"),
             best_ask_price=Decimal(10000),
-            instrument_facts=(
-                AdmissionInstrumentFacts(
-                    exchange_instrument_id=request.exchange_instrument_id,
-                    mark_price=Decimal(10000),
-                    configured_leverage=10,
-                ),
-            ),
-            positions=(),
             open_orders=(),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
@@ -121,6 +125,8 @@ class FakeEntryAdmissionFactsSource:
             maintenance_margin_brackets_digest=canonical_digest(
                 _maintenance_brackets()
             ),
+            notional_coefficient=Decimal(1),
+            notional_coefficient_certified=True,
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -163,11 +169,13 @@ class FakePositionSnapshotSource:
         *,
         quantity: Decimal,
         average_entry_price: Decimal | None,
-        liquidation_price: Decimal | None = None,
+        venue_reported_liquidation_price: Decimal | None = None,
     ) -> None:
         self.quantity = quantity
         self.average_entry_price = average_entry_price
-        self.liquidation_price = liquidation_price
+        self.venue_reported_liquidation_price = (
+            venue_reported_liquidation_price
+        )
         self.requests: list[PositionSnapshotRequest] = []
 
     async def read_position_snapshot(
@@ -179,7 +187,9 @@ class FakePositionSnapshotSource:
             netting_domain=request.netting_domain,
             quantity=self.quantity,
             average_entry_price=self.average_entry_price,
-            liquidation_price=self.liquidation_price,
+            venue_reported_liquidation_price=(
+                self.venue_reported_liquidation_price
+            ),
             observed_at_ms=request.observed_at_ms,
         )
 
@@ -481,13 +491,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
     snapshots = FakePositionSnapshotSource(
         quantity=ticket.quantity,
         average_entry_price=Decimal(10000),
-        liquidation_price=(
-            ticket.initial_stop_price
-            - (
-                abs(Decimal(10000) - ticket.initial_stop_price)
-                * ticket.min_liquidation_distance_to_stop_distance_ratio
-            )
-        ),
+        venue_reported_liquidation_price=Decimal(0),
     )
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-1",
@@ -578,13 +582,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         FakePositionSnapshotSource(
             quantity=ticket.quantity,
             average_entry_price=ticket.entry_reference_price,
-            liquidation_price=(
-                ticket.initial_stop_price
-                - (
-                    abs(ticket.entry_reference_price - ticket.initial_stop_price)
-                    * ticket.min_liquidation_distance_to_stop_distance_ratio
-                )
-            ),
+            venue_reported_liquidation_price=Decimal(0),
         ),
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-1",
@@ -645,6 +643,10 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         worker_request,
     )
     assert initial_stop.status is LifecycleWorkerStatus.DISPATCHED
+    await dispatch_fixture._commit_passed_post_fill_stress_if_pending(
+        runtime_fact_worker_engine,
+        ticket.identity.ticket_id,
+    )
     tp1 = await run_lifecycle_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,

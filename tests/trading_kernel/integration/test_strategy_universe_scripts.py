@@ -60,7 +60,7 @@ async def script_database_url() -> str:
                 RuntimeAuthoritySeedRequest(
                     account_id="sensitive-account-id",
                     runtime_commit="task-12-local-test",
-                    schema_revision="0002_crypto_strategy_universe",
+                    schema_revision="0003_cross_margin_stop_stress",
                     seeded_at_ms=NOW_MS - 1_000,
                 ),
             )

@@ -164,7 +164,7 @@ def test_subtracts_current_exact_instrument_values_before_projection() -> None:
             account_snapshot=_snapshot(
                 total_margin_balance=Decimal(990),
                 total_maintenance_margin=Decimal(1),
-                current_instrument_positions=(current_long,),
+                account_positions=(current_long,),
             ),
             projected_instrument_positions=(
                 StressPosition(
@@ -194,7 +194,7 @@ def test_marks_negative_base_maintenance_as_contradictory() -> None:
         _request(
             account_snapshot=_snapshot(
                 total_maintenance_margin=Decimal(1),
-                current_instrument_positions=(current_long,),
+                account_positions=(current_long,),
             )
         )
     )
@@ -330,16 +330,16 @@ def test_snapshot_and_proof_digests_are_canonical_and_value_sensitive() -> None:
     )
     first = _snapshot(
         total_maintenance_margin=Decimal(3),
-        current_instrument_positions=(short_position, long_position),
+        account_positions=(short_position, long_position),
     )
     reordered = _snapshot(
         total_maintenance_margin=Decimal("3.0"),
-        current_instrument_positions=(long_position, short_position),
+        account_positions=(long_position, short_position),
     )
     changed = _snapshot(
         total_margin_balance=Decimal("1000.01"),
         total_maintenance_margin=Decimal(3),
-        current_instrument_positions=(long_position, short_position),
+        account_positions=(long_position, short_position),
     )
 
     assert first.snapshot_digest == reordered.snapshot_digest
@@ -424,7 +424,7 @@ def test_snapshot_rejects_duplicate_side_identity() -> None:
     with pytest.raises(ValidationError, match="position sides must be unique"):
         _snapshot(
             total_maintenance_margin=Decimal(2),
-            current_instrument_positions=(position, position),
+            account_positions=(position, position),
         )
 
 
@@ -471,9 +471,13 @@ def _snapshot(**changes: object) -> AccountRiskSnapshot:
         "margin_mode": "cross",
         "exchange_instrument_id": "ETHUSDT",
         "mark_price": Decimal(100),
+        "configured_leverage": 5,
+        "total_wallet_balance": Decimal(1000),
         "total_margin_balance": Decimal(1000),
+        "total_initial_margin": Decimal(0),
         "total_maintenance_margin": Decimal(0),
-        "current_instrument_positions": (),
+        "available_margin": Decimal(1000),
+        "account_positions": (),
         "observed_at_ms": 1_800_000_000_000,
         "valid_until_ms": 1_800_000_005_000,
     }

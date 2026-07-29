@@ -40,7 +40,10 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_capabilities_current,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from tests.trading_kernel.integration.test_command_dispatch import PreflightFacts
+from tests.trading_kernel.integration.test_command_dispatch import (
+    PreflightFacts,
+    _commit_passed_post_fill_stress_if_pending,
+)
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
@@ -53,18 +56,6 @@ ADMIN_DSN = os.getenv(
     "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
-
-
-def _safe_liquidation_price(ticket, average_fill_price: Decimal) -> Decimal:
-    liquidation_distance = (
-        abs(average_fill_price - ticket.initial_stop_price)
-        * ticket.min_liquidation_distance_to_stop_distance_ratio
-    )
-    return (
-        ticket.initial_stop_price - liquidation_distance
-        if ticket.identity.netting_domain.position_side == "long"
-        else ticket.initial_stop_price + liquidation_distance
-    )
 
 
 @pytest_asyncio.fixture
@@ -399,9 +390,7 @@ async def _protect(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(
-                        ticket, Decimal(60000)
-                    ),
+                    venue_reported_liquidation_price=Decimal(0),
                     observed_at_ms=fill_observed_at_ms,
                 ),
             ),
@@ -426,7 +415,8 @@ async def _dispatch(
     *,
     entry: bool = False,
 ):
-    return await dispatch_one_command(
+    await _commit_passed_post_fill_stress_if_pending(engine, ticket_id)
+    result = await dispatch_one_command(
         lambda: PostgresKernelUnitOfWork(engine),
         venue,
         DispatchCommandRequest(
@@ -436,11 +426,13 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision="0002_crypto_strategy_universe" if entry else None,
+            schema_revision="0003_cross_margin_stop_stress" if entry else None,
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
     )
+    await _commit_passed_post_fill_stress_if_pending(engine, ticket_id)
+    return result
 
 
 def _ticket_for_domain(
@@ -490,7 +482,6 @@ def _ticket_for_domain(
             {
                 "initial_stop_price": Decimal(61000),
                 "take_profit_prices": (Decimal(58000),),
-                "projected_liquidation_price": Decimal(63000),
             }
         )
     return template.model_copy(update=terms)
@@ -510,7 +501,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 max_initial_margin_utilization="0.90",
                 max_leverage=10,
                 supported_margin_mode="cross",
-                min_liquidation_distance_to_stop_distance_ratio="2.0",
+                post_stop_stress_multiple="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
                 scope={},
                 updated_at_ms=1_000,
@@ -521,7 +512,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0002_crypto_strategy_universe",
+                schema_revision="0003_cross_margin_stop_stress",
                 certification={},
                 updated_at_ms=1_000,
             )

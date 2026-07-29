@@ -32,6 +32,7 @@ from src.trading_kernel.application.ports import (
     VenueTruthRequest,
 )
 from src.trading_kernel.application.runtime_facts import (
+    AccountRiskSnapshotRequest,
     EntryAdmissionSnapshotRequest,
     FeeDiscountCapabilityFacts,
     InstrumentRulesFacts,
@@ -40,7 +41,6 @@ from src.trading_kernel.application.runtime_facts import (
     PositionSnapshotRequest,
     ReviewEconomicsRequest,
 )
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandResult,
@@ -48,10 +48,13 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     SetLeverageCommandResult,
 )
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskPosition,
+    AccountRiskSnapshot,
+    MaintenanceMarginBracket,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
     AdmissionOrder,
-    AdmissionPosition,
     EntryAdmissionSnapshot,
     canonical_digest,
 )
@@ -135,6 +138,8 @@ class _CcxtExchange(Protocol):
     ) -> object: ...
 
     def fapiPrivateV2GetPositionRisk(self, params: Mapping[str, object]) -> object: ...
+
+    def fapiPrivateV2GetAccount(self, params: Mapping[str, object]) -> object: ...
 
     def fetch_my_trades(
         self,
@@ -255,20 +260,19 @@ class CcxtVenueAdapter:
         await _call_raw_exchange(exchange.load_markets, False)
         (
             order_book,
-            balance,
-            position_mode,
-            positions,
-            target_positions,
+            account_risk_snapshot,
             regular_orders,
             conditional_orders,
         ) = await asyncio.gather(
             _call_raw_exchange(exchange.fetch_order_book, symbol, 5),
-            _call_raw_exchange(exchange.fetch_balance, {"type": "future"}),
-            _call_raw_exchange(exchange.fetch_position_mode, symbol, {}),
-            _call_raw_exchange(exchange.fetch_positions, [], {}),
-            _read_binance_usdm_admission_target_positions(
+            self._read_account_risk_snapshot(
                 exchange=exchange,
                 symbol=symbol,
+                venue_id=request.venue_id,
+                account_id=request.account_id,
+                exchange_instrument_id=request.exchange_instrument_id,
+                observed_at_ms=request.observed_at_ms,
+                valid_for_ms=request.valid_for_ms,
             ),
             _call_raw_exchange(
                 exchange.fetch_open_orders,
@@ -286,16 +290,8 @@ class CcxtVenueAdapter:
             ),
         )
         order_book_mapping = _require_mapping(order_book, name="admission order book")
-        balance_mapping = _require_mapping(balance, name="admission balance")
-        position_mode_mapping = _require_mapping(
-            position_mode,
-            name="admission position mode",
-        )
-        position_rows = _require_list(positions, name="admission positions")
-        target_position_rows = _require_list(
-            target_positions,
-            name="admission requested-instrument positions",
-        )
+        if not isinstance(account_risk_snapshot, AccountRiskSnapshot):
+            raise TypeError("admission account risk snapshot is invalid")
         regular_order_rows = _require_list(
             regular_orders,
             name="admission regular open orders",
@@ -304,56 +300,10 @@ class CcxtVenueAdapter:
             conditional_orders,
             name="admission conditional open orders",
         )
-        target_rows = tuple(target_position_rows)
-        non_target_position_rows = tuple(
-            row
-            for row in position_rows
-            if _venue_row_symbol(row, row_kind="position") != symbol
-        )
-        snapshot_position_rows = (*non_target_position_rows, *target_rows)
         return EntryAdmissionSnapshot(
-            venue_id=request.venue_id,
-            account_id=request.account_id,
-            position_mode=_account_position_mode(position_mode_mapping),
-            margin_mode=_admission_margin_mode(list(snapshot_position_rows)),
-            total_wallet_balance=_admission_balance_decimal(
-                balance_mapping,
-                key="totalWalletBalance",
-            ),
-            total_margin_balance=_admission_balance_decimal(
-                balance_mapping,
-                key="totalMarginBalance",
-            ),
-            total_initial_margin=_admission_balance_decimal(
-                balance_mapping,
-                key="totalInitialMargin",
-            ),
-            total_maintenance_margin=_admission_balance_decimal(
-                balance_mapping,
-                key="totalMaintMargin",
-            ),
-            available_margin=_admission_balance_decimal(
-                balance_mapping,
-                key="availableBalance",
-            ),
+            account_risk_snapshot=account_risk_snapshot,
             best_bid_price=_top_of_book_price(order_book_mapping, "bids"),
             best_ask_price=_top_of_book_price(order_book_mapping, "asks"),
-            instrument_facts=(
-                _admission_instrument_facts(
-                    target_rows,
-                    exchange_instrument_id=request.exchange_instrument_id,
-                ),
-            ),
-            positions=tuple(
-                _admission_position(
-                    row,
-                    exchange_instrument_id=self._instrument_id_for_symbol(
-                        venue_id=request.venue_id,
-                        symbol=_venue_row_symbol(row, row_kind="position"),
-                    ),
-                )
-                for row in snapshot_position_rows
-            ),
             open_orders=tuple(
                 _admission_order(
                     row,
@@ -378,6 +328,84 @@ class CcxtVenueAdapter:
             ),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_account_risk_snapshot(
+        self,
+        request: AccountRiskSnapshotRequest,
+    ) -> AccountRiskSnapshot:
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+        )
+        await _call_raw_exchange(exchange.load_markets, False)
+        return await self._read_account_risk_snapshot(
+            exchange=exchange,
+            symbol=symbol,
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+            observed_at_ms=request.observed_at_ms,
+            valid_for_ms=request.valid_for_ms,
+        )
+
+    async def _read_account_risk_snapshot(
+        self,
+        *,
+        exchange: _CcxtExchange,
+        symbol: str,
+        venue_id: str,
+        account_id: str,
+        exchange_instrument_id: str,
+        observed_at_ms: int,
+        valid_for_ms: int,
+    ) -> AccountRiskSnapshot:
+        raw_account = getattr(exchange, "fapiPrivateV2GetAccount", None)
+        if not callable(raw_account):
+            raise TypeError("Binance venue lacks USD-M account readonly lookup")
+        account_result, position_mode_result, target_position_result = (
+            await asyncio.gather(
+                _call_raw_exchange(raw_account, {}),
+                _call_raw_exchange(exchange.fetch_position_mode, symbol, {}),
+                _read_binance_usdm_admission_target_positions(
+                    exchange=exchange,
+                    symbol=symbol,
+                ),
+            )
+        )
+        account = _require_mapping(account_result, name="USD-M account risk")
+        position_mode = _account_position_mode(
+            _require_mapping(
+                position_mode_result,
+                name="account risk position mode",
+            )
+        )
+        target_rows = tuple(
+            _require_list(
+                target_position_result,
+                name="account risk target positions",
+            )
+        )
+        settlement_asset = self._settlement_assets.get(
+            (venue_id, exchange_instrument_id),
+            self._default_settlement_asset,
+        )
+        if settlement_asset is None:
+            settlement_asset = parse_binance_usdm_instrument_id(
+                exchange_instrument_id
+            ).quote_asset
+        return _build_account_risk_snapshot(
+            account=account,
+            target_rows=target_rows,
+            venue_id=venue_id,
+            account_id=account_id,
+            exchange_instrument_id=exchange_instrument_id,
+            symbol=symbol,
+            settlement_asset=settlement_asset,
+            position_mode=position_mode,
+            observed_at_ms=observed_at_ms,
+            valid_for_ms=valid_for_ms,
         )
 
     async def read_instrument_rules(
@@ -414,6 +442,12 @@ class CcxtVenueAdapter:
                 market_id=market_id,
             )
         )
+        notional_coefficient, coefficient_certified = (
+            _binance_notional_coefficient(
+                bracket_rows,
+                market_id=market_id,
+            )
+        )
         market_max_leverage = _market_max_leverage(market)
         exchange_max_leverage = (
             bracket_max_leverage
@@ -429,8 +463,14 @@ class CcxtVenueAdapter:
             exchange_max_leverage=exchange_max_leverage,
             maintenance_margin_brackets=maintenance_margin_brackets,
             maintenance_margin_brackets_digest=canonical_digest(
-                maintenance_margin_brackets
+                {
+                    "maintenance_margin_brackets": maintenance_margin_brackets,
+                    "notional_coefficient": notional_coefficient,
+                    "notional_coefficient_certified": coefficient_certified,
+                }
             ),
+            notional_coefficient=notional_coefficient,
+            notional_coefficient_certified=coefficient_certified,
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -599,6 +639,9 @@ class CcxtVenueAdapter:
                 ),
                 margin_mode=_admission_margin_mode(position_rows),
                 configured_leverage=configured_leverage,
+                notional_coefficient_certified=(
+                    rules is not None and rules.notional_coefficient_certified
+                ),
                 unowned_position_qty=unowned_position_qty,
                 unowned_open_order_count=sum(
                     order.exchange_order_id not in owned_order_ids
@@ -641,7 +684,12 @@ class CcxtVenueAdapter:
             ),
         )
         position_rows = _require_list(positions, name="positions")
-        quantity, average_entry_price, liquidation_price = _position_details(
+        (
+            quantity,
+            average_entry_price,
+            liquidation_price,
+            liquidation_observation_status,
+        ) = _position_details(
             position_rows,
             expected_symbol=symbol,
             position_side=domain.position_side,
@@ -661,7 +709,10 @@ class CcxtVenueAdapter:
             netting_domain=domain,
             quantity=quantity,
             average_entry_price=average_entry_price,
-            liquidation_price=liquidation_price,
+            venue_reported_liquidation_price=liquidation_price,
+            venue_reported_liquidation_observation_status=(
+                liquidation_observation_status
+            ),
             open_orders=open_orders,
             observed_at_ms=request.observed_at_ms,
         )
@@ -739,7 +790,7 @@ class CcxtVenueAdapter:
             tp1_order_call,
             candles_call,
         )
-        position_quantity, _, _ = _position_details(
+        position_quantity, _, _, _ = _position_details(
             _require_list(positions, name="positions"),
             expected_symbol=symbol,
             position_side=domain.position_side,
@@ -1425,6 +1476,222 @@ def _admission_balance_decimal(
     return result
 
 
+def _build_account_risk_snapshot(
+    *,
+    account: Mapping[object, object],
+    target_rows: tuple[object, ...],
+    venue_id: str,
+    account_id: str,
+    exchange_instrument_id: str,
+    symbol: str,
+    settlement_asset: str | None,
+    position_mode: Literal["independent_sides", "one_way"],
+    observed_at_ms: int,
+    valid_for_ms: int,
+) -> AccountRiskSnapshot:
+    if venue_id != "binance-usdm":
+        raise RuntimeError("account risk is supported only for Binance USD-M")
+    if account.get("multiAssetsMargin") is not False:
+        raise RuntimeError("account risk requires standard USD-M single-asset mode")
+    if settlement_asset != "USDT":
+        raise RuntimeError("account risk requires USDT settlement")
+    if position_mode != "independent_sides":
+        raise RuntimeError("account risk requires independent position sides")
+
+    raw_positions = _require_list(
+        account.get("positions"),
+        name="USD-M account positions",
+    )
+    account_positions = tuple(
+        position
+        for position in (
+            _account_risk_position(
+                row,
+                venue_id=venue_id,
+            )
+            for row in raw_positions
+        )
+        if position is not None
+    )
+    target_account_positions = {
+        position.position_side: position
+        for position in account_positions
+        if position.exchange_instrument_id == exchange_instrument_id
+    }
+    if len(target_account_positions) != sum(
+        position.exchange_instrument_id == exchange_instrument_id
+        for position in account_positions
+    ):
+        raise RuntimeError("account risk target position sides are contradictory")
+
+    target_position_facts = tuple(
+        _target_position_fact(row)
+        for row in target_rows
+    )
+    if {position_side for position_side, _, _ in target_position_facts} != {
+        "long",
+        "short",
+    }:
+        raise RuntimeError("account risk target position sides are incomplete")
+    for position_side, quantity, average_entry_price in target_position_facts:
+        account_position = target_account_positions.get(
+            position_side
+        )
+        if quantity == 0:
+            if account_position is not None:
+                raise RuntimeError(
+                    "account and position risk target quantities contradict"
+                )
+            continue
+        if (
+            account_position is None
+            or account_position.quantity != quantity
+            or account_position.average_entry_price
+            != average_entry_price
+        ):
+            raise RuntimeError(
+                "account and position risk target facts contradict"
+            )
+
+    mark_price, configured_leverage = _admission_mark_and_leverage(target_rows)
+    margin_mode = _admission_margin_mode(list(target_rows))
+    if margin_mode != "cross":
+        raise RuntimeError("account risk requires Cross margin")
+    if _binance_market_id(symbol) != exchange_instrument_id.split(":")[1]:
+        raise RuntimeError("account risk target identity is contradictory")
+    return AccountRiskSnapshot.create(
+        venue_id=venue_id,
+        account_id=account_id,
+        account_risk_mode="standard_usdm_single_asset",
+        settlement_asset="USDT",
+        position_mode="independent_sides",
+        margin_mode="cross",
+        exchange_instrument_id=exchange_instrument_id,
+        mark_price=mark_price,
+        configured_leverage=configured_leverage,
+        total_wallet_balance=_account_risk_decimal(
+            account,
+            key="totalWalletBalance",
+        ),
+        total_margin_balance=_account_risk_decimal(
+            account,
+            key="totalMarginBalance",
+            signed=True,
+        ),
+        total_initial_margin=_account_risk_decimal(
+            account,
+            key="totalInitialMargin",
+        ),
+        total_maintenance_margin=_account_risk_decimal(
+            account,
+            key="totalMaintMargin",
+        ),
+        available_margin=_account_risk_decimal(
+            account,
+            key="availableBalance",
+        ),
+        account_positions=account_positions,
+        observed_at_ms=observed_at_ms,
+        valid_until_ms=observed_at_ms + valid_for_ms,
+    )
+
+
+def _account_risk_position(
+    value: object,
+    *,
+    venue_id: str,
+) -> AccountRiskPosition | None:
+    row = _require_mapping(value, name="USD-M account position row")
+    market_id = str(row.get("symbol") or "").strip()
+    if not market_id:
+        raise RuntimeError("USD-M account position lacks symbol")
+    position_side = str(row.get("positionSide") or "").strip().upper()
+    if position_side not in {"LONG", "SHORT"}:
+        raise RuntimeError("USD-M account position side is invalid")
+    quantity = _finite_decimal(
+        row.get("positionAmt"),
+        label="USD-M account position quantity",
+    ).copy_abs()
+    if quantity == 0:
+        return None
+    entry_price = _finite_decimal(
+        row.get("entryPrice"),
+        label="USD-M account position entry",
+    )
+    if entry_price <= 0:
+        raise RuntimeError("open USD-M account position lacks entry price")
+    exchange_instrument_id = _instrument_id_from_binance_market_id(
+        venue_id=venue_id,
+        market_id=market_id,
+    )
+    return AccountRiskPosition(
+        exchange_instrument_id=exchange_instrument_id,
+        position_side=cast(
+            Literal["long", "short"],
+            position_side.lower(),
+        ),
+        quantity=quantity,
+        average_entry_price=entry_price,
+        current_unrealized_pnl=_finite_decimal(
+            row.get("unrealizedProfit"),
+            label="USD-M account position unrealized PnL",
+        ),
+        current_maintenance_margin=_finite_nonnegative_decimal(
+            row.get("maintMargin"),
+            label="USD-M account position maintenance margin",
+        ),
+    )
+
+
+def _account_risk_decimal(
+    account: Mapping[object, object],
+    *,
+    key: str,
+    signed: bool = False,
+) -> Decimal:
+    value = _finite_decimal(
+        account.get(key),
+        label=f"USD-M account {key}",
+    )
+    if not signed and value < 0:
+        raise RuntimeError(f"USD-M account {key} must be nonnegative")
+    return value
+
+
+def _finite_nonnegative_decimal(value: object, *, label: str) -> Decimal:
+    parsed = _finite_decimal(value, label=label)
+    if parsed < 0:
+        raise RuntimeError(f"{label} must be nonnegative")
+    return parsed
+
+
+def _finite_decimal(value: object, *, label: str) -> Decimal:
+    if value is None or str(value).strip() == "":
+        raise RuntimeError(f"{label} is unavailable")
+    try:
+        parsed = Decimal(str(value))
+    except ArithmeticError as exc:
+        raise RuntimeError(f"{label} is invalid") from exc
+    if not parsed.is_finite():
+        raise RuntimeError(f"{label} is invalid")
+    return parsed
+
+
+def _instrument_id_from_binance_market_id(
+    *,
+    venue_id: str,
+    market_id: str,
+) -> str:
+    candidate = f"{venue_id}:{market_id}:perpetual"
+    try:
+        parse_binance_usdm_instrument_id(candidate)
+    except ValueError as exc:
+        raise RuntimeError(
+            "canonical Binance USD-M instrument is unavailable for account position"
+        ) from exc
+    return candidate
+
+
 def _admission_margin_mode(rows: list[object]) -> Literal["cross", "isolated"]:
     modes: set[Literal["cross", "isolated"]] = set()
     for row in rows:
@@ -1441,11 +1708,9 @@ def _admission_margin_mode(rows: list[object]) -> Literal["cross", "isolated"]:
     return next(iter(modes))
 
 
-def _admission_instrument_facts(
+def _admission_mark_and_leverage(
     rows: tuple[object, ...],
-    *,
-    exchange_instrument_id: str,
-) -> AdmissionInstrumentFacts:
+) -> tuple[Decimal, int]:
     values: set[tuple[Decimal, int]] = set()
     for row in rows:
         mapping = _require_mapping(row, name="requested admission position row")
@@ -1465,11 +1730,7 @@ def _admission_instrument_facts(
     if len(values) != 1:
         raise RuntimeError("venue admission instrument facts are absent or contradictory")
     mark_price, configured_leverage = next(iter(values))
-    return AdmissionInstrumentFacts(
-        exchange_instrument_id=exchange_instrument_id,
-        mark_price=mark_price,
-        configured_leverage=configured_leverage,
-    )
+    return mark_price, configured_leverage
 
 
 async def _read_binance_usdm_admission_target_positions(
@@ -1525,11 +1786,9 @@ def _venue_row_symbol(value: object, *, row_kind: str) -> str:
     return symbol
 
 
-def _admission_position(
+def _target_position_fact(
     value: object,
-    *,
-    exchange_instrument_id: str,
-) -> AdmissionPosition:
+) -> tuple[Literal["long", "short"], Decimal, Decimal | None]:
     mapping = _require_mapping(value, name="admission position row")
     quantity = abs(Decimal(str(mapping.get("contracts") or "0")))
     if not quantity.is_finite():
@@ -1546,12 +1805,7 @@ def _admission_position(
         )
         if not average_entry_price.is_finite() or average_entry_price <= 0:
             raise RuntimeError("open venue admission position lacks entry price")
-    return AdmissionPosition(
-        exchange_instrument_id=exchange_instrument_id,
-        position_side=_row_position_side(mapping),
-        quantity=quantity,
-        average_entry_price=average_entry_price,
-    )
+    return _row_position_side(mapping), quantity, average_entry_price
 
 
 def _admission_order(
@@ -1683,11 +1937,17 @@ def _position_details(
     *,
     expected_symbol: str,
     position_side: Literal["long", "short"],
-) -> tuple[Decimal, Decimal | None, Decimal | None]:
+) -> tuple[
+    Decimal,
+    Decimal | None,
+    Decimal | None,
+    Literal["valid", "missing", "invalid"],
+]:
     total_quantity = Decimal(0)
     weighted_entry = Decimal(0)
     liquidation_prices: set[Decimal] = set()
     liquidation_evidence_missing = False
+    liquidation_evidence_invalid = False
     for value in rows:
         if not isinstance(value, Mapping):
             raise TypeError("venue position row is not a mapping")
@@ -1713,21 +1973,33 @@ def _position_details(
             value.get("liquidationPrice")
             or _mapping_value(value.get("info"), "liquidationPrice")
         )
-        if raw_liquidation in (None, "", "0", 0):
+        if raw_liquidation in (None, ""):
             liquidation_evidence_missing = True
             continue
-        liquidation = Decimal(str(raw_liquidation))
-        if not liquidation.is_finite() or liquidation <= 0:
-            raise RuntimeError("venue liquidation evidence is invalid")
+        try:
+            liquidation = Decimal(str(raw_liquidation))
+        except ArithmeticError:
+            liquidation_evidence_invalid = True
+            continue
+        if not liquidation.is_finite() or liquidation < 0:
+            liquidation_evidence_invalid = True
+            continue
         liquidation_prices.add(liquidation)
     if total_quantity == 0:
-        return Decimal(0), None, None
+        return Decimal(0), None, None, "missing"
+    if liquidation_evidence_invalid or len(liquidation_prices) > 1:
+        return total_quantity, weighted_entry / total_quantity, None, "invalid"
     liquidation_price = (
         next(iter(liquidation_prices))
         if not liquidation_evidence_missing and len(liquidation_prices) == 1
         else None
     )
-    return total_quantity, weighted_entry / total_quantity, liquidation_price
+    return (
+        total_quantity,
+        weighted_entry / total_quantity,
+        liquidation_price,
+        "valid" if liquidation_price is not None else "missing",
+    )
 
 
 def _position_open_orders(
@@ -2001,6 +2273,29 @@ def _binance_maintenance_margin_brackets(
         if previous.notional_cap != current.notional_floor:
             raise RuntimeError("venue maintenance-margin brackets are discontinuous")
     return ordered, max(max_leverages)
+
+
+def _binance_notional_coefficient(
+    rows: list[object],
+    *,
+    market_id: str,
+) -> tuple[Decimal, bool]:
+    matching = tuple(
+        row
+        for row in rows
+        if isinstance(row, Mapping) and str(row.get("symbol") or "") == market_id
+    )
+    if len(matching) != 1:
+        raise RuntimeError("venue notional coefficient lacks exact instrument truth")
+    raw = matching[0].get("notionalCoef")
+    coefficient = (
+        Decimal(1)
+        if raw is None or str(raw).strip() == ""
+        else _finite_decimal(raw, label="venue notional coefficient")
+    )
+    if coefficient <= 0:
+        raise RuntimeError("venue notional coefficient must be positive")
+    return coefficient, coefficient == 1
 
 
 def _nested_market_value(

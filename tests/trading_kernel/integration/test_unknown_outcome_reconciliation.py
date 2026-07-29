@@ -67,18 +67,6 @@ from tests.trading_kernel.unit.test_ticket import _ticket
 dispatch_engine = dispatch_fixture.dispatch_engine
 
 
-def _safe_liquidation_price(ticket, average_fill_price: Decimal) -> Decimal:
-    liquidation_distance = (
-        abs(average_fill_price - ticket.initial_stop_price)
-        * ticket.min_liquidation_distance_to_stop_distance_ratio
-    )
-    return (
-        ticket.initial_stop_price - liquidation_distance
-        if ticket.identity.netting_domain.position_side == "long"
-        else ticket.initial_stop_price + liquidation_distance
-    )
-
-
 class StaticTruthPort:
     def __init__(self, truth: VenueTruthSnapshot) -> None:
         self.truth = truth
@@ -127,7 +115,7 @@ async def _unknown_leverage_command(dispatch_engine, ticket):
             lease_until_ms=6_100,
             timeout_seconds=0.001,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -509,16 +497,15 @@ async def test_visible_unknown_initial_stop_recovers_protection_without_exit(
         incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
         lane = await uow.entry_admission.get_global_lane()
     assert aggregate is not None
-    assert aggregate.status is AggregateStatus.TP1_PENDING
+    assert aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
     assert aggregate.initial_stop_exchange_order_id == "venue-stop-recovered"
     assert all(item.kind is not ExchangeCommandKind.EXIT for item in commands)
-    assert [
-        item.status
+    assert all(
+        item.kind is not ExchangeCommandKind.TAKE_PROFIT
         for item in commands
-        if item.kind is ExchangeCommandKind.TAKE_PROFIT
-    ] == [ExchangeCommandStatus.PREPARED]
+    )
     assert incident is None
-    assert lane is not None and lane.status == "idle"
+    assert lane is not None and lane.status == "claimed"
 
 
 @pytest.mark.asyncio
@@ -1008,7 +995,7 @@ async def _make_unknown_entry(engine):
             lease_until_ms=1_200,
             timeout_seconds=0.01,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1042,9 +1029,7 @@ async def _make_unknown_initial_stop(engine):
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(
-                        ticket, Decimal(60000)
-                    ),
+                    venue_reported_liquidation_price=Decimal(0),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -1090,9 +1075,7 @@ async def _make_unknown_tp1(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=_safe_liquidation_price(
-                        ticket, ticket.entry_reference_price
-                    ),
+                    venue_reported_liquidation_price=Decimal(0),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -1143,9 +1126,7 @@ async def _make_unknown_replacement(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=_safe_liquidation_price(
-                        ticket, ticket.entry_reference_price
-                    ),
+                    venue_reported_liquidation_price=Decimal(0),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -1284,6 +1265,7 @@ async def _dispatch(
     timeout_seconds: float = 1,
     entry: bool = False,
 ) -> None:
+    await _commit_all_passed_post_fill_stress(engine)
     result = await dispatch_one_command(
         lambda: PostgresKernelUnitOfWork(engine),
         venue,
@@ -1293,12 +1275,27 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=timeout_seconds,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision="0002_crypto_strategy_universe" if entry else None,
+            schema_revision="0003_cross_margin_stop_stress" if entry else None,
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
     )
     assert result.status is not DispatchCommandStatus.NO_COMMAND
+    await _commit_all_passed_post_fill_stress(engine)
+
+
+async def _commit_all_passed_post_fill_stress(engine) -> None:
+    while True:
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            aggregate = await uow.aggregates.get_next_for_statuses(
+                (AggregateStatus.POST_FILL_RISK_PENDING,)
+            )
+        if aggregate is None:
+            return
+        await dispatch_fixture._commit_passed_post_fill_stress_if_pending(
+            engine,
+            aggregate.identity.ticket_id,
+        )
 
 
 async def _command_of_kind(

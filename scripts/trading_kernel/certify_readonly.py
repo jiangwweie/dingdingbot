@@ -25,7 +25,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
 )
 
 SCHEMA = "brc.trading_kernel.readonly_certification.v1"
-EXPECTED_ALEMBIC_REVISION = "0002_crypto_strategy_universe"
+EXPECTED_ALEMBIC_REVISION = "0003_cross_margin_stop_stress"
 LEGACY_EXECUTION_TABLES = (
     "brc_runtime_execution_tickets",
     "brc_runtime_execution_orders",
@@ -37,7 +37,7 @@ _DECIMAL_POLICY_FIELDS = frozenset(
     {
         "planned_stop_risk_fraction",
         "max_initial_margin_utilization",
-        "min_liquidation_distance_to_stop_distance_ratio",
+        "post_stop_stress_multiple",
         "max_post_fill_stop_risk_overrun_fraction",
     }
 )
@@ -350,7 +350,7 @@ async def _certify(
                                max_initial_margin_utilization,
                                max_leverage,
                                supported_margin_mode,
-                               min_liquidation_distance_to_stop_distance_ratio,
+                               post_stop_stress_multiple,
                                max_post_fill_stop_risk_overrun_fraction
                           FROM brc_owner_policy_current
                         """
@@ -671,9 +671,9 @@ async def _certify(
             owner_policy_row["supported_margin_mode"]
             == DYNAMIC_POLICY.supported_margin_mode,
             Decimal(
-                str(owner_policy_row["min_liquidation_distance_to_stop_distance_ratio"])
+                str(owner_policy_row["post_stop_stress_multiple"])
             )
-            == DYNAMIC_POLICY.min_liquidation_distance_to_stop_distance_ratio,
+            == DYNAMIC_POLICY.post_stop_stress_multiple,
             Decimal(
                 str(owner_policy_row["max_post_fill_stop_risk_overrun_fraction"])
             )

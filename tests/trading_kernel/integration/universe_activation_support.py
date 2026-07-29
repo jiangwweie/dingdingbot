@@ -89,7 +89,7 @@ async def activation_engine() -> AsyncEngine:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-activation-test",
                     runtime_commit="task-10-test",
-                    schema_revision="0002_crypto_strategy_universe",
+                    schema_revision="0003_cross_margin_stop_stress",
                     seeded_at_ms=NOW_MS - 1_000_000,
                 ),
             )

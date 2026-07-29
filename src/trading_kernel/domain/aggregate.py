@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -30,6 +31,7 @@ class AggregateStatus(StrEnum):
     PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN = "partial_fill_cancel_outcome_unknown"
     PROTECTION_PENDING = "protection_pending"
     INITIAL_STOP_OUTCOME_UNKNOWN = "initial_stop_outcome_unknown"
+    POST_FILL_RISK_PENDING = "post_fill_risk_pending"
     TP1_PENDING = "tp1_pending"
     TP1_REJECTED = "tp1_rejected"
     TP1_OUTCOME_UNKNOWN = "tp1_outcome_unknown"
@@ -66,6 +68,7 @@ RECONCILIATION_POSITION_STATUSES = (
     AggregateStatus.PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN,
     AggregateStatus.PROTECTION_PENDING,
     AggregateStatus.INITIAL_STOP_OUTCOME_UNKNOWN,
+    AggregateStatus.POST_FILL_RISK_PENDING,
     AggregateStatus.TP1_PENDING,
     AggregateStatus.TP1_REJECTED,
     AggregateStatus.TP1_OUTCOME_UNKNOWN,
@@ -103,11 +106,11 @@ class TradeAggregate(BaseModel):
     position_qty: Decimal = Decimal(0)
     average_fill_price: Decimal | None = None
     actual_stop_risk: Decimal | None = None
-    actual_liquidation_price: Decimal | None = None
-    actual_liquidation_distance: Decimal | None = None
-    actual_liquidation_distance_to_stop_distance_ratio: Decimal | None = None
+    venue_reported_liquidation_price: Decimal | None = None
     post_fill_risk_status: PostFillRiskStatus | None = None
     post_fill_disposition: PostFillDisposition | None = None
+    post_fill_stress_status: Literal["passed", "failed"] | None = None
+    post_fill_stress_proof_digest: str | None = None
     protected_qty: Decimal = Decimal(0)
     entry_exchange_order_id: str | None = None
     initial_stop_exchange_order_id: str | None = None

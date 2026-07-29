@@ -30,7 +30,6 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
 from tests.trading_kernel.full_chain.lifecycle_support import (
     dispatch_lifecycle_command,
     reach_runner_protected,
-    safe_liquidation_price,
 )
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import (
@@ -58,7 +57,7 @@ class _ActivePositionSource:
             netting_domain=ticket.identity.netting_domain,
             quantity=ticket.quantity,
             average_entry_price=ticket.entry_reference_price,
-            liquidation_price=safe_liquidation_price(ticket),
+            venue_reported_liquidation_price=Decimal(0),
             open_orders=self.open_orders_by_ticket[ticket.identity.ticket_id],
             observed_at_ms=request.observed_at_ms,
         )
@@ -107,7 +106,7 @@ async def _reach_position_protected(engine, ticket) -> None:
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=safe_liquidation_price(ticket),
+                    venue_reported_liquidation_price=Decimal(0),
                     open_orders=(),
                     observed_at_ms=2_100,
                 ),
@@ -273,7 +272,7 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
     request = ReconciliationWorkerRequest(
         worker_id="reconciliation-fairness-full-chain",
         runtime_commit="kernel-test-head",
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         now_ms=33_600,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,

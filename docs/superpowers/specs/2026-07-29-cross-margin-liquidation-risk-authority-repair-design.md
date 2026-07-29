@@ -134,9 +134,13 @@ class AccountRiskSnapshot(BaseModel):
     margin_mode: Literal["cross"]
     exchange_instrument_id: str
     mark_price: Decimal
+    configured_leverage: int
+    total_wallet_balance: Decimal
     total_margin_balance: Decimal
+    total_initial_margin: Decimal
     total_maintenance_margin: Decimal
-    current_instrument_positions: tuple[AccountRiskPosition, ...]
+    available_margin: Decimal
+    account_positions: tuple[AccountRiskPosition, ...]
     observed_at_ms: int
     valid_until_ms: int
     snapshot_digest: str
@@ -145,9 +149,11 @@ class AccountRiskSnapshot(BaseModel):
 事实语义：
 
 1. `total_*` 来自同一次账户快照；
-2. 当前精确合约 Long/Short 的 UPNL 和 maintenance margin 也来自该快照；
-3. 不使用本地公式反推需要从账户总值中扣除的当前仓位值；
-4. raw `liquidationPrice` 不进入 snapshot 或 digest。
+2. 所有当前账户持仓的 Long/Short UPNL 和 maintenance margin 也来自该快照；
+3. Entry health 使用账户全量仓位检查 ownership；压力 evaluator 只从同一快照
+   过滤精确目标合约，扣除其当前 UPNL/MM 后再投影候选 Long/Short；
+4. 不使用本地公式反推需要从账户总值中扣除的当前仓位值；
+5. raw `liquidationPrice` 不进入 snapshot 或 digest。
 
 Typed invariants：
 
@@ -205,7 +211,7 @@ Incident/Monitor 并由代理提醒 Owner；本修复不自动切换模式、设
 
 | 来源 | 用途 |
 | --- | --- |
-| `/fapi/v2/account` | 同一 response 的 `multiAssetsMargin`、账户 totals、目标合约各 Side UPNL/MM |
+| `/fapi/v2/account` | 同一 response 的 `multiAssetsMargin`、账户 totals、全部账户持仓各 Side UPNL/MM |
 | 精确 symbol `positionRisk` | mark、entry、quantity、Side、Cross、leverage、raw liquidation observation |
 | Position Mode endpoint | `independent_sides` |
 | InstrumentRulesSource | settlement、bracket、coefficient、rules digest |
@@ -256,7 +262,8 @@ Long 的原始压力价格低于零时，将最终边界限制在自然价格下
 
 ### 当前与候选仓位分离
 
-`AccountRiskSnapshot.current_instrument_positions` 是交易所当前事实。
+`AccountRiskSnapshot.account_positions` 是交易所同一账户快照中的全量当前事实；
+evaluator 按 `exchange_instrument_id` 过滤精确目标合约。
 `CrossMarginStressRequest.projected_instrument_positions` 表示本次决策需要评估
 的精确合约仓位：
 

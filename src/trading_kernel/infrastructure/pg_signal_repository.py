@@ -28,7 +28,7 @@ from src.trading_kernel.application.ports import (
     WarmReadiness,
 )
 from src.trading_kernel.domain.arbitration import EntryCandidate
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -881,6 +881,8 @@ class PostgresSignalRepository:
         exchange_max_leverage: int,
         maintenance_margin_brackets: tuple[MaintenanceMarginBracket, ...],
         maintenance_margin_brackets_digest: str,
+        notional_coefficient: Decimal,
+        notional_coefficient_certified: bool,
         observed_at_ms: int,
         valid_until_ms: int,
     ) -> InstrumentRulesSnapshot:
@@ -908,6 +910,8 @@ class PostgresSignalRepository:
                 for item in maintenance_margin_brackets
             ],
             "maintenance_margin_brackets_digest": maintenance_margin_brackets_digest,
+            "notional_coefficient": notional_coefficient,
+            "notional_coefficient_certified": notional_coefficient_certified,
             "session_and_settlement": {},
             "observed_at_ms": observed_at_ms,
             "valid_until_ms": valid_until_ms,

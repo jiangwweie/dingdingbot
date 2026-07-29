@@ -20,10 +20,8 @@ from src.trading_kernel.application.select_entry_candidate import (
     select_entry_candidate,
 )
 from src.trading_kernel.domain.commands import ExchangeCommandKind
-from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
-    EntryAdmissionSnapshot,
-)
+from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
+from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from tests.trading_kernel.integration import test_signal_to_ticket as signal_fixture
 from tests.trading_kernel.integration.test_signal_to_ticket import (
@@ -112,8 +110,16 @@ async def test_capacity_refusal_persists_no_partial_issuance(issue_engine) -> No
             ),
         )
 
-    stale = _admission_snapshot().model_copy(
-        update={"valid_until_ms": 1_004}
+    stale_base = _admission_snapshot()
+    stale = stale_base.model_copy(
+        update={
+            "account_risk_snapshot": (
+                stale_base.account_risk_snapshot.model_copy(
+                    update={"valid_until_ms": 1_004}
+                )
+            ),
+            "valid_until_ms": 1_004,
+        }
     )
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         result = await issue_ready_signal(
@@ -138,25 +144,27 @@ async def test_capacity_refusal_persists_no_partial_issuance(issue_engine) -> No
 
 def _admission_snapshot() -> EntryAdmissionSnapshot:
     return EntryAdmissionSnapshot(
-        venue_id="binance-usdm",
-        account_id="subaccount-main",
-        position_mode="independent_sides",
-        margin_mode="cross",
-        total_wallet_balance=Decimal(1000),
-        total_margin_balance=Decimal(1000),
-        total_initial_margin=Decimal(0),
-        total_maintenance_margin=Decimal(0),
-        available_margin=Decimal(1000),
+        account_risk_snapshot=AccountRiskSnapshot.create(
+            venue_id="binance-usdm",
+            account_id="subaccount-main",
+            account_risk_mode="standard_usdm_single_asset",
+            settlement_asset="USDT",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            mark_price=Decimal(10000),
+            configured_leverage=10,
+            total_wallet_balance=Decimal(1000),
+            total_margin_balance=Decimal(1000),
+            total_initial_margin=Decimal(0),
+            total_maintenance_margin=Decimal(0),
+            available_margin=Decimal(1000),
+            account_positions=(),
+            observed_at_ms=1_003,
+            valid_until_ms=1_100,
+        ),
         best_bid_price=Decimal("9999.9"),
         best_ask_price=Decimal(10000),
-        instrument_facts=(
-            AdmissionInstrumentFacts(
-                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                mark_price=Decimal(10000),
-                configured_leverage=10,
-            ),
-        ),
-        positions=(),
         open_orders=(),
         observed_at_ms=1_003,
         valid_until_ms=1_100,

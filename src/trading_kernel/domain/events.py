@@ -6,8 +6,12 @@ import re
 from decimal import Decimal
 from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.cross_margin_stress import (
+    CrossMarginStressEvidence,
+    CrossMarginStressStatus,
+)
 from src.trading_kernel.domain.post_fill_risk import PostFillRiskDecision
 from src.trading_kernel.domain.ticket import TradeTicket
 
@@ -122,6 +126,8 @@ class EntryFilled(_TicketEvent):
     filled_qty: Decimal
     average_fill_price: Decimal
     post_fill_risk: PostFillRiskDecision
+    venue_reported_liquidation_price: Decimal | None
+    position_observed_at_ms: int
 
 
 class EntryPartiallyFilled(_TicketEvent):
@@ -147,6 +153,39 @@ class EntryRemainderCancelOutcomeUnknown(_TicketEvent):
 class InitialStopConfirmed(_TicketEvent):
     exchange_order_id: str
     protected_qty: Decimal
+
+
+class PostFillStressAssessed(_TicketEvent):
+    status: Literal["passed", "failed"]
+    evidence: CrossMarginStressEvidence
+    owner_policy_id: str
+    owner_policy_version: int
+    filled_qty: Decimal
+    average_fill_price: Decimal
+    initial_stop_price: Decimal
+    initial_stop_exchange_order_id: str
+
+    @model_validator(mode="after")
+    def _validate_assessment_identity(self) -> PostFillStressAssessed:
+        expected = (
+            CrossMarginStressStatus.PASSED
+            if self.status == "passed"
+            else CrossMarginStressStatus.FAILED
+        )
+        if self.evidence.proof.status is not expected:
+            raise ValueError("post-fill stress status differs from its evidence")
+        if (
+            self.owner_policy_version <= 0
+            or self.filled_qty <= 0
+            or self.average_fill_price <= 0
+            or self.initial_stop_price <= 0
+        ):
+            raise ValueError("post-fill stress identities must be positive")
+        if not self.owner_policy_id.strip():
+            raise ValueError("post-fill stress policy identity must be non-blank")
+        if not self.initial_stop_exchange_order_id.strip():
+            raise ValueError("post-fill stress Stop identity must be non-blank")
+        return self
 
 
 class InitialStopRejected(_TicketEvent):
@@ -333,6 +372,7 @@ TradeEvent = (
     | EntryRemainderCancelRejected
     | EntryRemainderCancelOutcomeUnknown
     | InitialStopConfirmed
+    | PostFillStressAssessed
     | InitialStopRejected
     | InitialStopOutcomeUnknown
     | InitialStopAbsenceConfirmed

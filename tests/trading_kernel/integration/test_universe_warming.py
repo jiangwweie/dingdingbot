@@ -86,7 +86,7 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-8-test"
-SCHEMA_REVISION = "0002_crypto_strategy_universe"
+SCHEMA_REVISION = "0003_cross_margin_stop_stress"
 CONTRACT = next(
     item
     for item in registered_strategy_contracts()

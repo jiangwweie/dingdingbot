@@ -27,9 +27,9 @@ from src.trading_kernel.application.runtime_facts import (
     EntryFactsSource,
     InstrumentRulesRequest,
 )
+from src.trading_kernel.domain.cross_margin_stress import AccountRiskPosition
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionOrder,
-    AdmissionPosition,
 )
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
@@ -136,9 +136,10 @@ async def probe_production_runtime(
             valid_for_ms=validity_ms,
         )
     )
-    if admission_snapshot.position_mode != settings.account_position_mode:
+    account_risk = admission_snapshot.account_risk_snapshot
+    if account_risk.position_mode != settings.account_position_mode:
         raise RuntimeError("production account position mode differs from config")
-    if admission_snapshot.margin_mode != "cross":
+    if account_risk.margin_mode != "cross":
         raise RuntimeError("production account margin mode differs from config")
 
     rule_rows: list[InstrumentRuleProbe] = []
@@ -179,7 +180,7 @@ async def probe_production_runtime(
 
     netting_domain_count = len(instruments) * 2
     non_flat_domain_count = sum(
-        position.quantity > 0 for position in admission_snapshot.positions
+        position.quantity > 0 for position in account_risk.account_positions
     )
     open_order_domain_count = len(
         {
@@ -189,21 +190,21 @@ async def probe_production_runtime(
     )
     protected_tickets = _verify_protected_exchange_tickets(
         expected_protected_tickets,
-        positions=admission_snapshot.positions,
+        positions=account_risk.account_positions,
         open_orders=admission_snapshot.open_orders,
     )
     return ProductionRuntimeProbe(
         environment=settings.environment,
         venue_id=settings.venue_id,
         account_id=settings.account_id,
-        account_position_mode=admission_snapshot.position_mode,
-        account_margin_mode=admission_snapshot.margin_mode,
+        account_position_mode=account_risk.position_mode,
+        account_margin_mode=account_risk.margin_mode,
         instrument_rule_count=len(rule_rows),
         netting_domain_count=netting_domain_count,
         non_flat_domain_count=non_flat_domain_count,
         open_order_domain_count=open_order_domain_count,
-        total_wallet_balance=admission_snapshot.total_wallet_balance,
-        available_margin=admission_snapshot.available_margin,
+        total_wallet_balance=account_risk.total_wallet_balance,
+        available_margin=account_risk.available_margin,
         rules=tuple(rule_rows),
         protected_tickets=protected_tickets,
         observed_at_ms=now_ms,
@@ -239,7 +240,7 @@ def _canonical_active_universe_instrument_ids(
 def _verify_protected_exchange_tickets(
     expected_tickets: tuple[ProtectedHandoverTicketProbe, ...],
     *,
-    positions: tuple[AdmissionPosition, ...],
+    positions: tuple[AccountRiskPosition, ...],
     open_orders: tuple[AdmissionOrder, ...],
 ) -> tuple[ProtectedHandoverTicketProbe, ...]:
     if not expected_tickets:

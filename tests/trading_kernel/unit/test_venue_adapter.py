@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
 import pytest
 from ccxt.base.errors import RequestTimeout
@@ -19,6 +20,7 @@ from src.trading_kernel.application.ports import (
     VenueTruthRequest,
 )
 from src.trading_kernel.application.runtime_facts import (
+    AccountRiskSnapshotRequest,
     EntryAdmissionSnapshotRequest,
     InstrumentRulesRequest,
     LifecycleFactsRequest,
@@ -110,7 +112,7 @@ async def test_ccxt_adapter_rejects_illegal_instrument_before_account_routing() 
 
 
 def test_position_details_requires_liquidation_evidence_for_every_open_row() -> None:
-    quantity, average_entry_price, liquidation_price = _position_details(
+    quantity, average_entry_price, liquidation_price, status = _position_details(
         [
             {
                 "symbol": "BTC/USDT:USDT",
@@ -135,6 +137,63 @@ def test_position_details_requires_liquidation_evidence_for_every_open_row() -> 
     assert quantity == Decimal("0.02")
     assert average_entry_price == Decimal(60000)
     assert liquidation_price is None
+    assert status == "missing"
+
+
+@pytest.mark.parametrize(
+    ("raw_liquidation_price", "expected"),
+    [
+        ("0", Decimal(0)),
+        ("70000", Decimal(70000)),
+    ],
+)
+def test_position_details_preserves_raw_liquidation_observation_without_direction_logic(
+    raw_liquidation_price: str,
+    expected: Decimal,
+) -> None:
+    quantity, average_entry_price, observation, status = _position_details(
+        [
+            {
+                "symbol": "BTC/USDT:USDT",
+                "contracts": "0.01",
+                "entryPrice": "60000",
+                "side": "long",
+                "liquidationPrice": raw_liquidation_price,
+                "info": {"positionSide": "LONG"},
+            }
+        ],
+        expected_symbol="BTC/USDT:USDT",
+        position_side="long",
+    )
+
+    assert quantity == Decimal("0.01")
+    assert average_entry_price == Decimal(60000)
+    assert observation == expected
+    assert status == "valid"
+
+
+def test_position_details_distinguishes_invalid_from_missing_observation() -> None:
+    common = {
+        "symbol": "BTC/USDT:USDT",
+        "contracts": "0.01",
+        "entryPrice": "60000",
+        "side": "long",
+        "info": {"positionSide": "LONG"},
+    }
+
+    *_, missing_status = _position_details(
+        [common],
+        expected_symbol="BTC/USDT:USDT",
+        position_side="long",
+    )
+    *_, invalid_status = _position_details(
+        [{**common, "liquidationPrice": "not-a-number"}],
+        expected_symbol="BTC/USDT:USDT",
+        position_side="long",
+    )
+
+    assert missing_status == "missing"
+    assert invalid_status == "invalid"
 
 
 class RejectingExchange:
@@ -432,6 +491,43 @@ class AdmissionSnapshotExchange:
                 "totalMaintMargin": "13",
                 "availableBalance": "948",
             }
+        }
+
+    async def fapiPrivateV2GetAccount(self, params):
+        assert params == {}
+        return {
+            "multiAssetsMargin": False,
+            "totalWalletBalance": "1200",
+            "totalMarginBalance": "1198",
+            "totalInitialMargin": "250",
+            "totalMaintMargin": "13",
+            "availableBalance": "948",
+            "positions": [
+                {
+                    "symbol": "SOLUSDT",
+                    "positionSide": "LONG",
+                    "positionAmt": "0",
+                    "entryPrice": "0",
+                    "unrealizedProfit": "0",
+                    "maintMargin": "0",
+                },
+                {
+                    "symbol": "SOLUSDT",
+                    "positionSide": "SHORT",
+                    "positionAmt": "-0.25",
+                    "entryPrice": "101",
+                    "unrealizedProfit": "0.25",
+                    "maintMargin": "1",
+                },
+                {
+                    "symbol": "BTCUSDT",
+                    "positionSide": "LONG",
+                    "positionAmt": "0.01",
+                    "entryPrice": "60000",
+                    "unrealizedProfit": "1",
+                    "maintMargin": "3",
+                },
+            ],
         }
 
     async def fetch_position_mode(self, symbol, params):
@@ -1110,6 +1206,106 @@ async def test_ccxt_adapter_recovers_flat_leverage_truth_from_position_risk() ->
 
 
 @pytest.mark.asyncio
+async def test_ccxt_adapter_reads_one_canonical_account_risk_snapshot() -> None:
+    exchange = AdmissionSnapshotExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        settlement_assets={
+            ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "USDT"
+        },
+        clock_ms=lambda: 2_000,
+    )
+
+    snapshot = await adapter.read_account_risk_snapshot(
+        AccountRiskSnapshotRequest(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:SOLUSDT:perpetual",
+            observed_at_ms=2_000,
+            valid_for_ms=5_000,
+        )
+    )
+
+    assert snapshot.account_risk_mode == "standard_usdm_single_asset"
+    assert snapshot.settlement_asset == "USDT"
+    assert snapshot.position_mode == "independent_sides"
+    assert snapshot.margin_mode == "cross"
+    assert snapshot.configured_leverage == 4
+    assert snapshot.mark_price == Decimal(100)
+    assert snapshot.total_wallet_balance == Decimal(1200)
+    assert snapshot.total_margin_balance == Decimal(1198)
+    assert snapshot.total_initial_margin == Decimal(250)
+    assert snapshot.total_maintenance_margin == Decimal(13)
+    assert snapshot.available_margin == Decimal(948)
+    assert {
+        (
+            position.exchange_instrument_id,
+            position.position_side,
+            position.quantity,
+            position.current_unrealized_pnl,
+            position.current_maintenance_margin,
+        )
+        for position in snapshot.account_positions
+    } == {
+        (
+            "binance-usdm:BTCUSDT:perpetual",
+            "long",
+            Decimal("0.01"),
+            Decimal(1),
+            Decimal(3),
+        ),
+        (
+            "binance-usdm:SOLUSDT:perpetual",
+            "short",
+            Decimal("0.25"),
+            Decimal("0.25"),
+            Decimal(1),
+        ),
+    }
+    assert snapshot.snapshot_digest.startswith("sha256:")
+    assert exchange.position_risk_calls == [{"symbol": "SOLUSDT"}]
+
+
+@pytest.mark.asyncio
+async def test_entry_and_narrow_reads_reuse_one_account_risk_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exchange = AdmissionSnapshotExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        clock_ms=lambda: 2_000,
+    )
+    parser_spy = AsyncMock(wraps=adapter._read_account_risk_snapshot)
+    monkeypatch.setattr(adapter, "_read_account_risk_snapshot", parser_spy)
+
+    await adapter.read_entry_admission_snapshot(
+        EntryAdmissionSnapshotRequest(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:SOLUSDT:perpetual",
+            observed_at_ms=2_000,
+            valid_for_ms=5_000,
+        )
+    )
+    await adapter.read_account_risk_snapshot(
+        AccountRiskSnapshotRequest(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:SOLUSDT:perpetual",
+            observed_at_ms=3_000,
+            valid_for_ms=5_000,
+        )
+    )
+
+    assert parser_spy.await_count == 2
+    assert exchange.position_calls == []
+    assert exchange.position_risk_calls == [
+        {"symbol": "SOLUSDT"},
+        {"symbol": "SOLUSDT"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> None:
     exchange = AdmissionSnapshotExchange()
     adapter = CcxtVenueAdapter(
@@ -1130,23 +1326,23 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
         )
     )
 
-    assert snapshot.position_mode == "independent_sides"
-    assert snapshot.margin_mode == "cross"
-    assert snapshot.total_wallet_balance == Decimal(1200)
-    assert snapshot.total_margin_balance == Decimal(1198)
-    assert snapshot.total_initial_margin == Decimal(250)
-    assert snapshot.total_maintenance_margin == Decimal(13)
-    assert snapshot.available_margin == Decimal(948)
+    risk = snapshot.account_risk_snapshot
+    assert risk.position_mode == "independent_sides"
+    assert risk.margin_mode == "cross"
+    assert risk.total_wallet_balance == Decimal(1200)
+    assert risk.total_margin_balance == Decimal(1198)
+    assert risk.total_initial_margin == Decimal(250)
+    assert risk.total_maintenance_margin == Decimal(13)
+    assert risk.available_margin == Decimal(948)
     assert snapshot.best_bid_price == Decimal("99.9")
     assert snapshot.best_ask_price == Decimal("100.1")
-    assert snapshot.instrument_facts_for(
-        "binance-usdm:SOLUSDT:perpetual"
-    ).mark_price == Decimal(100)
-    assert snapshot.instrument_facts_for(
-        "binance-usdm:SOLUSDT:perpetual"
-    ).configured_leverage == 4
-    assert {(row.exchange_instrument_id, row.position_side) for row in snapshot.positions} == {
-        ("binance-usdm:SOLUSDT:perpetual", "long"),
+    assert risk.exchange_instrument_id == "binance-usdm:SOLUSDT:perpetual"
+    assert risk.mark_price == Decimal(100)
+    assert risk.configured_leverage == 4
+    assert {
+        (row.exchange_instrument_id, row.position_side)
+        for row in risk.account_positions
+    } == {
         ("binance-usdm:SOLUSDT:perpetual", "short"),
         ("binance-usdm:BTCUSDT:perpetual", "long"),
     }
@@ -1154,7 +1350,7 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
         "regular-btc-order",
         "conditional-btc-order",
     }
-    assert exchange.position_calls == [([], {})]
+    assert exchange.position_calls == []
     assert exchange.position_risk_calls == [{"symbol": "SOLUSDT"}]
     assert exchange.order_calls == [
         (None, {"conditional": False}),
@@ -1183,9 +1379,8 @@ async def test_ccxt_adapter_derives_account_wide_binance_instrument_ids_without_
 
     assert {
         (row.exchange_instrument_id, row.position_side)
-        for row in snapshot.positions
+        for row in snapshot.account_risk_snapshot.account_positions
     } == {
-        ("binance-usdm:SOLUSDT:perpetual", "long"),
         ("binance-usdm:SOLUSDT:perpetual", "short"),
         ("binance-usdm:BTCUSDT:perpetual", "long"),
     }
@@ -1198,24 +1393,28 @@ async def test_ccxt_adapter_derives_account_wide_binance_instrument_ids_without_
 async def test_ccxt_adapter_rejects_non_usdt_account_wide_symbol_without_fabricating_identity() -> None:
     exchange = AdmissionSnapshotExchange()
 
-    async def malformed_positions(symbols, params):
-        del symbols, params
-        return [
-            {
-                "symbol": "BTC/USDC:USDC",
-                "contracts": "0.01",
-                "entryPrice": "60000",
-                "side": "long",
-                "info": {
+    async def malformed_account(params):
+        del params
+        return {
+            "multiAssetsMargin": False,
+            "totalWalletBalance": "1200",
+            "totalMarginBalance": "1198",
+            "totalInitialMargin": "250",
+            "totalMaintMargin": "13",
+            "availableBalance": "948",
+            "positions": [
+                {
+                    "symbol": "BTCUSDC",
                     "positionSide": "LONG",
-                    "marginType": "cross",
-                    "leverage": "3",
-                    "markPrice": "60100",
-                },
-            }
-        ]
+                    "positionAmt": "0.01",
+                    "entryPrice": "60000",
+                    "unrealizedProfit": "1",
+                    "maintMargin": "3",
+                }
+            ],
+        }
 
-    exchange.fetch_positions = malformed_positions
+    exchange.fapiPrivateV2GetAccount = malformed_account
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
         clock_ms=lambda: 2_000,
@@ -1259,7 +1458,19 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
             },
         ]
 
+    original_account = exchange.fapiPrivateV2GetAccount
+
+    async def flat_target_account(params):
+        account = await original_account(params)
+        account["positions"] = [
+            row
+            for row in account["positions"]
+            if row["symbol"] != "SOLUSDT"
+        ]
+        return account
+
     exchange.fapiPrivateV2GetPositionRisk = flat_target_position_risk
+    exchange.fapiPrivateV2GetAccount = flat_target_account
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
         settlement_assets={
@@ -1278,15 +1489,11 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
         )
     )
 
-    assert snapshot.instrument_facts_for(
-        "binance-usdm:SOLUSDT:perpetual"
-    ).configured_leverage == 4
+    assert snapshot.account_risk_snapshot.configured_leverage == 4
     assert {
         (row.exchange_instrument_id, row.position_side, row.quantity)
-        for row in snapshot.positions
+        for row in snapshot.account_risk_snapshot.account_positions
     } == {
-        ("binance-usdm:SOLUSDT:perpetual", "long", Decimal(0)),
-        ("binance-usdm:SOLUSDT:perpetual", "short", Decimal(0)),
         ("binance-usdm:BTCUSDT:perpetual", "long", Decimal("0.01")),
     }
 
@@ -1591,7 +1798,7 @@ async def test_ccxt_adapter_builds_position_snapshot_for_exact_netting_domain() 
     assert snapshot.netting_domain == domain
     assert snapshot.quantity == Decimal("0.01")
     assert snapshot.average_entry_price == Decimal(59000)
-    assert snapshot.liquidation_price is None
+    assert snapshot.venue_reported_liquidation_price is None
     assert {order.exchange_order_id for order in snapshot.open_orders} == {
         "order-False-long",
         "order-True-long",

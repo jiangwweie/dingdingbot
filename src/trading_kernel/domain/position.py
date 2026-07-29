@@ -34,9 +34,32 @@ class PositionSnapshot(BaseModel):
     netting_domain: NettingDomain
     quantity: Decimal
     average_entry_price: Decimal | None
-    liquidation_price: Decimal | None = None
+    venue_reported_liquidation_price: Decimal | None = None
+    venue_reported_liquidation_observation_status: Literal[
+        "valid",
+        "missing",
+        "invalid",
+    ] | None = None
     open_orders: tuple[VenueOrderSnapshot, ...] = ()
     observed_at_ms: int
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_liquidation_observation_status(
+        cls,
+        value: object,
+    ) -> object:
+        if isinstance(value, dict) and value.get(
+            "venue_reported_liquidation_observation_status"
+        ) is None:
+            normalized = dict(value)
+            normalized["venue_reported_liquidation_observation_status"] = (
+                "valid"
+                if value.get("venue_reported_liquidation_price") is not None
+                else "missing"
+            )
+            return normalized
+        return value
 
     @field_validator("quantity")
     @classmethod
@@ -59,9 +82,23 @@ class PositionSnapshot(BaseModel):
                 raise ValueError("open position requires average entry price")
         elif (
             self.average_entry_price is not None
-            or self.liquidation_price is not None
+            or self.venue_reported_liquidation_price is not None
         ):
             raise ValueError("flat position forbids entry and liquidation prices")
-        if self.liquidation_price is not None and self.liquidation_price <= 0:
-            raise ValueError("liquidation price must be positive when present")
+        if (
+            self.venue_reported_liquidation_price is not None
+            and (
+                not self.venue_reported_liquidation_price.is_finite()
+                or self.venue_reported_liquidation_price < 0
+            )
+        ):
+            raise ValueError(
+                "venue-reported liquidation price must be finite and nonnegative"
+            )
+        if (
+            self.venue_reported_liquidation_observation_status == "valid"
+        ) != (self.venue_reported_liquidation_price is not None):
+            raise ValueError(
+                "venue liquidation observation status differs from its value"
+            )
         return self

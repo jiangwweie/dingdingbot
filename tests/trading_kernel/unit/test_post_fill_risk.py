@@ -20,8 +20,6 @@ def _request(**changes: object) -> PostFillRiskRequest:
         "initial_stop_price": Decimal(57000),
         "planned_stop_risk_budget": Decimal("3.00"),
         "post_fill_stop_risk_limit": Decimal("3.30"),
-        "current_liquidation_price": Decimal(50000),
-        "min_liquidation_distance_to_stop_distance_ratio": Decimal("2.0"),
     }
     payload.update(changes)
     return PostFillRiskRequest.model_validate(payload)
@@ -54,21 +52,6 @@ def test_wrong_side_stop_requests_immediate_flatten() -> None:
     assert decision.disposition is PostFillDisposition.FLATTEN_IMMEDIATELY
 
 
-@pytest.mark.parametrize(
-    "liquidation_price",
-    [None, Decimal(58000)],
-)
-def test_missing_or_degraded_liquidation_evidence_requires_protect_then_flatten(
-    liquidation_price: Decimal | None,
-) -> None:
-    decision = assess_post_fill_risk(
-        _request(current_liquidation_price=liquidation_price)
-    )
-
-    assert decision.status is PostFillRiskStatus.LIQUIDATION_SAFETY_DEGRADED
-    assert decision.disposition is PostFillDisposition.FLATTEN_AFTER_PROTECTION
-
-
 def test_hard_risk_overrun_requires_protect_then_flatten() -> None:
     decision = assess_post_fill_risk(
         _request(initial_stop_price=Decimal("56699.999999999999999"))
@@ -78,10 +61,11 @@ def test_hard_risk_overrun_requires_protect_then_flatten() -> None:
     assert decision.disposition is PostFillDisposition.FLATTEN_AFTER_PROTECTION
 
 
-def test_liquidation_evidence_uses_stop_to_liquidation_distance() -> None:
+def test_stop_risk_decision_has_no_liquidation_command_authority() -> None:
     decision = assess_post_fill_risk(_request())
 
-    assert decision.actual_liquidation_distance == Decimal(7000)
-    assert decision.actual_liquidation_distance_to_stop_distance_ratio == (
-        Decimal(7) / Decimal(3)
-    )
+    assert set(type(decision).model_fields) == {
+        "status",
+        "disposition",
+        "actual_stop_risk",
+    }

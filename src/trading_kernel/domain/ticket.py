@@ -60,9 +60,9 @@ class TradeTicket(BaseModel):
     reserved_margin: Decimal
     risk_reservation_basis: str
     margin_mode: Literal["cross"]
-    min_liquidation_distance_to_stop_distance_ratio: Decimal
-    projected_liquidation_price: Decimal
-    projected_liquidation_distance_to_stop_distance_ratio: Decimal
+    cross_margin_stress_model_id: Literal["cross-margin-stop-stress-v1"]
+    post_stop_stress_multiple: Decimal
+    claim_stress_proof_digest: str
     risk_at_stop: Decimal
     entry_order_type: EntryOrderType
     entry_limit_price: Decimal | None = None
@@ -85,7 +85,12 @@ class TradeTicket(BaseModel):
             raise ValueError("ticket references must be non-blank strings")
         return value.strip()
 
-    @field_validator("fact_digest", "universe_semantic_digest", mode="before")
+    @field_validator(
+        "fact_digest",
+        "universe_semantic_digest",
+        "claim_stress_proof_digest",
+        mode="before",
+    )
     @classmethod
     def _require_digest(cls, value: object) -> str:
         normalized = str(value or "").strip()
@@ -108,9 +113,7 @@ class TradeTicket(BaseModel):
         "reserved_margin",
         "entry_reference_price",
         "initial_stop_price",
-        "min_liquidation_distance_to_stop_distance_ratio",
-        "projected_liquidation_price",
-        "projected_liquidation_distance_to_stop_distance_ratio",
+        "post_stop_stress_multiple",
     )
     @classmethod
     def _require_positive_decimal(cls, value: Decimal) -> Decimal:
@@ -169,11 +172,6 @@ class TradeTicket(BaseModel):
             raise ValueError("Ticket stop risk cannot exceed planned risk budget")
         if self.post_fill_stop_risk_limit < self.planned_stop_risk_budget:
             raise ValueError("Ticket post-fill stop risk limit cannot undercut plan")
-        if (
-            self.projected_liquidation_distance_to_stop_distance_ratio
-            < self.min_liquidation_distance_to_stop_distance_ratio
-        ):
-            raise ValueError("Ticket liquidation proof is below the required ratio")
         return self
 
     def decision_digest(self) -> str:

@@ -41,18 +41,6 @@ from tests.trading_kernel.unit.test_ticket import _ticket
 lifecycle_engine = dispatch_fixture.dispatch_engine
 
 
-def _safe_liquidation_price(ticket, average_fill_price: Decimal) -> Decimal:
-    liquidation_distance = (
-        abs(average_fill_price - ticket.initial_stop_price)
-        * ticket.min_liquidation_distance_to_stop_distance_ratio
-    )
-    return (
-        ticket.initial_stop_price - liquidation_distance
-        if ticket.identity.netting_domain.position_side == "long"
-        else ticket.initial_stop_price + liquidation_distance
-    )
-
-
 @pytest.mark.asyncio
 async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protection(
     lifecycle_engine,
@@ -338,7 +326,7 @@ async def test_hard_post_fill_risk_protects_then_flattens_without_tp1(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=Decimal(64000),
-                    liquidation_price=Decimal(48000),
+                    venue_reported_liquidation_price=Decimal(48000),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -378,7 +366,7 @@ async def test_hard_post_fill_risk_protects_then_flattens_without_tp1(
 
 
 @pytest.mark.asyncio
-async def test_missing_liquidation_evidence_protects_then_flattens_without_tp1(
+async def test_missing_liquidation_observation_does_not_control_post_fill_risk(
     lifecycle_engine,
 ) -> None:
     ticket = _ticket()
@@ -396,7 +384,7 @@ async def test_missing_liquidation_evidence_protects_then_flattens_without_tp1(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=None,
+                    venue_reported_liquidation_price=None,
                     observed_at_ms=2_100,
                 ),
             ),
@@ -410,10 +398,11 @@ async def test_missing_liquidation_evidence_protects_then_flattens_without_tp1(
         )
     assert aggregate is not None
     assert aggregate.post_fill_risk_status is not None
-    assert aggregate.post_fill_risk_status.value == "liquidation_safety_degraded"
-    assert aggregate.actual_liquidation_price is None
-    assert aggregate.status is AggregateStatus.CONTROLLED_FLATTEN_PENDING
-    assert ExchangeCommandKind.TAKE_PROFIT not in {
+    assert aggregate.post_fill_risk_status.value == "within_budget"
+    assert aggregate.venue_reported_liquidation_price is None
+    assert aggregate.post_fill_stress_status == "passed"
+    assert aggregate.status is AggregateStatus.TP1_PENDING
+    assert ExchangeCommandKind.TAKE_PROFIT in {
         command.kind for command in commands
     }
 
@@ -437,7 +426,7 @@ async def test_invalid_stop_direction_flattens_immediately_without_stop_or_tp1(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=Decimal(58000),
-                    liquidation_price=Decimal(50000),
+                    venue_reported_liquidation_price=Decimal(50000),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -472,9 +461,7 @@ async def _reach_position_protected(engine, ticket) -> None:
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    liquidation_price=_safe_liquidation_price(
-                        ticket, ticket.entry_reference_price
-                    ),
+                    venue_reported_liquidation_price=Decimal(0),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -512,6 +499,10 @@ async def _reach_runner_protected(engine, ticket) -> None:
 
 
 async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
+    await dispatch_fixture._commit_passed_post_fill_stress_if_pending(
+        engine,
+        ticket_id,
+    )
     result = await dispatch_one_command(
         lambda: PostgresKernelUnitOfWork(engine),
         venue,
@@ -522,12 +513,16 @@ async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
     )
     assert result.command_id is not None
+    await dispatch_fixture._commit_passed_post_fill_stress_if_pending(
+        engine,
+        ticket_id,
+    )
 
 
 def _registered_sor_long_ticket():

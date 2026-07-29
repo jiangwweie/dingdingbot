@@ -26,10 +26,14 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     SetLeverageCommandPayload,
 )
-from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
-    canonical_digest,
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskSnapshot,
+    CrossMarginStressRequest,
+    MaintenanceMarginBracket,
+    StressPosition,
+    evaluate_cross_margin_stress,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.instrument_identity import (
@@ -566,7 +570,7 @@ async def _seed_policy(
                 max_initial_margin_utilization="0.90",
                 max_leverage=10,
                 supported_margin_mode="cross",
-                min_liquidation_distance_to_stop_distance_ratio="2.0",
+                post_stop_stress_multiple="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
                 scope={},
                 updated_at_ms=1_000,
@@ -734,7 +738,6 @@ def _ticket_for_signal(
                 "universe_version_id": "universe:sor-short:4",
                 "initial_stop_price": Decimal(61000),
                 "take_profit_prices": (Decimal(58000),),
-                "projected_liquidation_price": Decimal(63000),
             }
         )
     return _ticket(**terms)
@@ -746,6 +749,7 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
         if ticket.leverage_change_required
         else ticket.selected_leverage
     )
+    stress_balance = max(Decimal(100), ticket.notional * Decimal(10))
     return IssueTicketRequest(
         capacity_claim=freeze_capacity_claim(
             ticket_identity=ticket.identity,
@@ -769,11 +773,11 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
                 f"{ticket.identity.netting_domain.account_id}:"
                 f"{ticket.identity.netting_domain.exchange_instrument_id}"
             ),
-            total_wallet_balance_at_claim=Decimal(100),
-            total_margin_balance_at_claim=Decimal(100),
+            total_wallet_balance_at_claim=stress_balance,
+            total_margin_balance_at_claim=stress_balance,
             total_initial_margin_at_claim=Decimal(0),
             total_maintenance_margin_at_claim=Decimal(0),
-            available_margin_at_claim=Decimal(100),
+            available_margin_at_claim=stress_balance,
             mark_price_at_claim=ticket.entry_reference_price,
             position_mode_at_claim="independent_sides",
             margin_mode_at_claim=ticket.margin_mode,
@@ -784,9 +788,7 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
             max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
             post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
             max_initial_margin_utilization=Decimal("0.90"),
-            min_liquidation_distance_to_stop_distance_ratio=(
-                ticket.min_liquidation_distance_to_stop_distance_ratio
-            ),
+            post_stop_stress_multiple=ticket.post_stop_stress_multiple,
             ticket_margin_budget=Decimal(30),
             required_leverage=ticket.selected_leverage,
             selected_leverage=ticket.selected_leverage,
@@ -794,12 +796,7 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
             leverage_change_required=ticket.leverage_change_required,
             exchange_max_leverage=10,
             reserved_margin=ticket.reserved_margin,
-            maintenance_margin_bracket_id="test:1",
-            projected_liquidation_price=ticket.projected_liquidation_price,
-            projected_liquidation_distance=Decimal(2000),
-            projected_liquidation_distance_to_stop_distance_ratio=(
-                ticket.projected_liquidation_distance_to_stop_distance_ratio
-            ),
+            cross_margin_stress_evidence=_stress_evidence(ticket),
             created_at_ms=ticket.created_at_ms,
             expires_at_ms=ticket.expires_at_ms,
             entry_reference_price=ticket.entry_reference_price,
@@ -817,20 +814,78 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
     )
 
 
-def _expected_leverage_fact_digest(*, claim) -> str:
-    instrument_facts = AdmissionInstrumentFacts(
-        exchange_instrument_id=(
-            claim.ticket_identity.netting_domain.exchange_instrument_id
-        ),
-        mark_price=claim.mark_price_at_claim,
-        configured_leverage=claim.configured_leverage_at_claim,
+def _stress_evidence(ticket):
+    stress_balance = max(Decimal(100), ticket.notional * Decimal(10))
+    configured_leverage = (
+        ticket.selected_leverage - 1
+        if ticket.leverage_change_required
+        else ticket.selected_leverage
     )
+    snapshot = AccountRiskSnapshot.create(
+        venue_id=ticket.identity.netting_domain.venue_id,
+        account_id=ticket.identity.netting_domain.account_id,
+        account_risk_mode="standard_usdm_single_asset",
+        settlement_asset="USDT",
+        position_mode="independent_sides",
+        margin_mode="cross",
+        exchange_instrument_id=(
+            ticket.identity.netting_domain.exchange_instrument_id
+        ),
+        mark_price=ticket.entry_reference_price,
+        configured_leverage=configured_leverage,
+        total_wallet_balance=stress_balance,
+        total_margin_balance=stress_balance,
+        total_initial_margin=Decimal(0),
+        total_maintenance_margin=Decimal(0),
+        available_margin=stress_balance,
+        account_positions=(),
+        observed_at_ms=ticket.created_at_ms,
+        valid_until_ms=ticket.expires_at_ms,
+    )
+    bracket = MaintenanceMarginBracket(
+        bracket_id="test:1",
+        notional_floor=Decimal(0),
+        notional_cap=None,
+        maintenance_margin_rate=Decimal("0.004"),
+        maintenance_amount=Decimal(0),
+    )
+    return evaluate_cross_margin_stress(
+        CrossMarginStressRequest(
+            account_snapshot=snapshot,
+            maintenance_margin_brackets=(bracket,),
+            maintenance_margin_brackets_digest="sha256:" + "5" * 64,
+            notional_coefficient=Decimal(1),
+            notional_coefficient_certified=True,
+            evaluated_side=ticket.identity.netting_domain.position_side,
+            reference_entry_price=ticket.entry_reference_price,
+            initial_stop_price=ticket.initial_stop_price,
+            post_stop_stress_multiple=ticket.post_stop_stress_multiple,
+            projected_instrument_positions=(
+                StressPosition(
+                    position_side=(
+                        ticket.identity.netting_domain.position_side
+                    ),
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                ),
+            ),
+        )
+    )
+
+
+def _expected_leverage_fact_digest(*, claim) -> str:
     return canonical_digest(
         {
             "entry_admission_snapshot_digest": (
                 claim.entry_admission_snapshot_digest
             ),
-            "instrument_facts": instrument_facts,
+            "instrument_facts": {
+                "exchange_instrument_id": (
+                    claim.ticket_identity.netting_domain.exchange_instrument_id
+                ),
+                "mark_price": claim.mark_price_at_claim,
+                "configured_leverage": claim.configured_leverage_at_claim,
+            },
         }
     )
 

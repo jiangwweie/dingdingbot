@@ -28,19 +28,11 @@ from src.trading_kernel.domain.post_fill_risk import (
 )
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from tests.trading_kernel.unit.test_reducer import _post_fill_stress_event
 from tests.trading_kernel.unit.test_ticket import _ticket
 
 
 def _normal_post_fill_risk(ticket, average_fill_price: Decimal):
-    liquidation_distance = (
-        abs(average_fill_price - ticket.initial_stop_price)
-        * ticket.min_liquidation_distance_to_stop_distance_ratio
-    )
-    liquidation_price = (
-        ticket.initial_stop_price - liquidation_distance
-        if ticket.identity.netting_domain.position_side == "long"
-        else ticket.initial_stop_price + liquidation_distance
-    )
     return assess_post_fill_risk(
         PostFillRiskRequest(
             position_side=ticket.identity.netting_domain.position_side,
@@ -49,10 +41,6 @@ def _normal_post_fill_risk(ticket, average_fill_price: Decimal):
             initial_stop_price=ticket.initial_stop_price,
             planned_stop_risk_budget=ticket.planned_stop_risk_budget,
             post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
-            current_liquidation_price=liquidation_price,
-            min_liquidation_distance_to_stop_distance_ratio=(
-                ticket.min_liquidation_distance_to_stop_distance_ratio
-            ),
         )
     )
 
@@ -84,6 +72,8 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
             occurred_at_ms=1_100,
             filled_qty=ticket.quantity,
             average_fill_price=Decimal(100),
+            venue_reported_liquidation_price=None,
+            position_observed_at_ms=1_100,
             post_fill_risk=_normal_post_fill_risk(ticket, Decimal(100)),
         ),
     ).aggregate
@@ -100,8 +90,16 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
         ),
     )
 
-    assert stop_confirmed.aggregate.status is AggregateStatus.TP1_PENDING
-    assert stop_confirmed.effects == (
+    assert (
+        stop_confirmed.aggregate.status
+        is AggregateStatus.POST_FILL_RISK_PENDING
+    )
+    assessed = reduce_event(
+        stop_confirmed.aggregate,
+        _post_fill_stress_event(stop_confirmed.aggregate),
+    )
+    assert assessed.aggregate.status is AggregateStatus.TP1_PENDING
+    assert assessed.effects == (
         ReleaseEntryLane(ticket_id=ticket.identity.ticket_id),
         PrepareTakeProfitCommand(
             ticket_id=ticket.identity.ticket_id,
@@ -110,11 +108,11 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
         ),
     )
     tp1_confirmed = reduce_event(
-        stop_confirmed.aggregate,
+        assessed.aggregate,
         TakeProfitConfirmed(
             event_id="event-4",
             ticket_id=ticket.identity.ticket_id,
-            sequence=4,
+            sequence=assessed.aggregate.last_event_sequence + 1,
             occurred_at_ms=1_300,
             exchange_order_id="tp1-1",
             target_qty=Decimal("0.002"),
@@ -127,7 +125,7 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
         TakeProfitFilled(
             event_id="event-5",
             ticket_id=ticket.identity.ticket_id,
-            sequence=5,
+            sequence=tp1_confirmed.last_event_sequence + 1,
             occurred_at_ms=1_400,
             filled_qty=Decimal("0.002"),
             average_fill_price=ticket.take_profit_prices[0],
@@ -157,7 +155,7 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
         ProtectionReplacementConfirmed(
             event_id="event-6",
             ticket_id=ticket.identity.ticket_id,
-            sequence=6,
+            sequence=tp1_filled.aggregate.last_event_sequence + 1,
             occurred_at_ms=1_500,
             exchange_order_id="runner-stop-1",
             protected_qty=Decimal("0.003"),
@@ -186,7 +184,7 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
         ProtectionCancelConfirmed(
             event_id="event-7",
             ticket_id=ticket.identity.ticket_id,
-            sequence=7,
+            sequence=replacement.aggregate.last_event_sequence + 1,
             occurred_at_ms=1_600,
             exchange_order_id="stop-initial-1",
         ),
@@ -198,7 +196,7 @@ def test_each_registered_event_progresses_tp1_to_break_even_runner(
         RunnerStopRequested(
             event_id="event-8",
             ticket_id=ticket.identity.ticket_id,
-            sequence=8,
+            sequence=runner.last_event_sequence + 1,
             occurred_at_ms=2_000,
             stop_price=(
                 Decimal(101)

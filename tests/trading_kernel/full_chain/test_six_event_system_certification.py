@@ -28,6 +28,7 @@ from src.trading_kernel.application.project_owner_state import (
     project_owner_state,
 )
 from src.trading_kernel.application.runtime_facts import (
+    AccountRiskSnapshotRequest,
     EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
     InstrumentRulesRequest,
@@ -36,14 +37,17 @@ from src.trading_kernel.application.runtime_facts import (
     ReviewEconomicsRequest,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandResult,
     ExchangeCommandStatus,
 )
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskPosition,
+    AccountRiskSnapshot,
+    MaintenanceMarginBracket,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
     EntryAdmissionSnapshot,
     canonical_digest,
 )
@@ -215,25 +219,27 @@ class CertifiedEntryAdmissionFactsSource:
         request: EntryAdmissionSnapshotRequest,
     ) -> EntryAdmissionSnapshot:
         return EntryAdmissionSnapshot(
-            venue_id=request.venue_id,
-            account_id=request.account_id,
-            position_mode="independent_sides",
-            margin_mode="cross",
-            total_wallet_balance=Decimal(1000000),
-            total_margin_balance=Decimal(1000000),
-            total_initial_margin=Decimal(0),
-            total_maintenance_margin=Decimal(0),
-            available_margin=Decimal(1000000),
+            account_risk_snapshot=AccountRiskSnapshot.create(
+                venue_id=request.venue_id,
+                account_id=request.account_id,
+                account_risk_mode="standard_usdm_single_asset",
+                settlement_asset="USDT",
+                position_mode="independent_sides",
+                margin_mode="cross",
+                exchange_instrument_id=request.exchange_instrument_id,
+                mark_price=(self.best_bid + self.best_ask) / Decimal(2),
+                configured_leverage=10,
+                total_wallet_balance=Decimal(1000000),
+                total_margin_balance=Decimal(1000000),
+                total_initial_margin=Decimal(0),
+                total_maintenance_margin=Decimal(0),
+                available_margin=Decimal(1000000),
+                account_positions=(),
+                observed_at_ms=request.observed_at_ms,
+                valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+            ),
             best_bid_price=self.best_bid,
             best_ask_price=self.best_ask,
-            instrument_facts=(
-                AdmissionInstrumentFacts(
-                    exchange_instrument_id=request.exchange_instrument_id,
-                    mark_price=(self.best_bid + self.best_ask) / Decimal(2),
-                    configured_leverage=10,
-                ),
-            ),
-            positions=(),
             open_orders=(),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
@@ -254,6 +260,8 @@ class CertifiedEntryAdmissionFactsSource:
             maintenance_margin_brackets_digest=canonical_digest(
                 _maintenance_brackets()
             ),
+            notional_coefficient=Decimal(1),
+            notional_coefficient_certified=True,
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -316,9 +324,70 @@ class CertifiedPositionSource:
             netting_domain=request.netting_domain,
             quantity=self.quantity,
             average_entry_price=self.average_entry_price,
-            liquidation_price=self.liquidation_price,
+            venue_reported_liquidation_price=self.liquidation_price,
             open_orders=(),
             observed_at_ms=request.observed_at_ms,
+        )
+
+
+class CertifiedPostFillFactsSource:
+    def __init__(self, ticket) -> None:
+        self.ticket = ticket
+
+    async def read_account_risk_snapshot(
+        self,
+        request: AccountRiskSnapshotRequest,
+    ) -> AccountRiskSnapshot:
+        ticket = self.ticket
+        stress_balance = max(Decimal(1000000), ticket.notional * Decimal(10))
+        return AccountRiskSnapshot.create(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            account_risk_mode="standard_usdm_single_asset",
+            settlement_asset="USDT",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            exchange_instrument_id=request.exchange_instrument_id,
+            mark_price=ticket.entry_reference_price,
+            configured_leverage=ticket.selected_leverage,
+            total_wallet_balance=stress_balance,
+            total_margin_balance=stress_balance,
+            total_initial_margin=ticket.reserved_margin,
+            total_maintenance_margin=Decimal(0),
+            available_margin=stress_balance - ticket.reserved_margin,
+            account_positions=(
+                AccountRiskPosition(
+                    exchange_instrument_id=request.exchange_instrument_id,
+                    position_side=ticket.identity.netting_domain.position_side,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    current_unrealized_pnl=Decimal(0),
+                    current_maintenance_margin=Decimal(0),
+                ),
+            ),
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_instrument_rules(
+        self,
+        request: InstrumentRulesRequest,
+    ) -> InstrumentRulesFacts:
+        return InstrumentRulesFacts(
+            exchange_instrument_id=request.exchange_instrument_id,
+            quantity_step=Decimal("0.001"),
+            price_tick=Decimal("0.1"),
+            min_quantity=Decimal("0.001"),
+            min_notional=Decimal(5),
+            exchange_max_leverage=10,
+            maintenance_margin_brackets=_maintenance_brackets(),
+            maintenance_margin_brackets_digest=canonical_digest(
+                _maintenance_brackets()
+            ),
+            notional_coefficient=Decimal(1),
+            notional_coefficient_certified=True,
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
 
 
@@ -456,7 +525,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         ObservationWorkerRequest(
             worker_id="observation-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             now_ms=NOW_MS,
             lease_until_ms=NOW_MS + 30_000,
             timeout_seconds=5,
@@ -491,7 +560,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         EntryWorkerRequest(
             worker_id="entry-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             now_ms=NOW_MS + 1_000,
             lease_until_ms=NOW_MS + 6_000,
             timeout_seconds=1,
@@ -512,7 +581,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         now_ms=NOW_MS + 2_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -529,7 +598,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     lifecycle_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0002_crypto_strategy_universe",
+        schema_revision="0003_cross_margin_stop_stress",
         now_ms=NOW_MS + 3_000,
         lease_until_ms=NOW_MS + 8_000,
         timeout_seconds=1,
@@ -542,6 +611,19 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         lifecycle_request,
     )
     assert initial_stop.status is LifecycleWorkerStatus.DISPATCHED
+    post_fill_source = CertifiedPostFillFactsSource(ticket)
+    post_fill = await run_reconciliation_worker_once(
+        uow_factory,
+        venue,
+        position_source,
+        reconciliation_request.model_copy(
+            update={"now_ms": NOW_MS + 3_500}
+        ),
+        account_risk_source=post_fill_source,
+        instrument_rules_source=post_fill_source,
+    )
+    assert post_fill.status is ReconciliationWorkerStatus.POSITION_RECONCILED
+    assert post_fill.detail == "post_fill_stress:passed"
     take_profit = await run_lifecycle_worker_once(
         uow_factory,
         venue,
@@ -681,7 +763,7 @@ async def _seed_runtime(
             RuntimeAuthoritySeedRequest(
                 account_id="account-certification",
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_crypto_strategy_universe",
+                schema_revision="0003_cross_margin_stop_stress",
                 seeded_at_ms=warm_now_ms - 10_000,
             ),
         )
@@ -707,7 +789,7 @@ async def _seed_runtime(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-universe-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             now_ms=warm_now_ms,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -729,7 +811,7 @@ async def _seed_runtime(
         ObservationWorkerRequest(
             worker_id="observation-worker-universe-warming",
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             now_ms=warm_now_ms,
             lease_until_ms=warm_now_ms + 30_000,
             timeout_seconds=5,

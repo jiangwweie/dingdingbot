@@ -25,6 +25,8 @@ from src.trading_kernel.application.certify_universe_instrument import (
 )
 from src.trading_kernel.application.ports import VenueTruthPort
 from src.trading_kernel.application.runtime_facts import (
+    AccountRiskSnapshotSource,
+    InstrumentRulesSource,
     PositionSnapshotSource,
     ReviewEconomicsSource,
 )
@@ -99,6 +101,10 @@ async def _run(args: argparse.Namespace) -> int:
         raise TypeError("venue factory must provide VenueTruthPort")
     if not callable(getattr(adapter, "read_position_snapshot", None)):
         raise TypeError("venue factory must provide PositionSnapshotSource")
+    if not callable(getattr(adapter, "read_account_risk_snapshot", None)):
+        raise TypeError("venue factory must provide AccountRiskSnapshotSource")
+    if not callable(getattr(adapter, "read_instrument_rules", None)):
+        raise TypeError("venue factory must provide InstrumentRulesSource")
     if not callable(getattr(adapter, "read_review_economics", None)):
         raise TypeError("venue factory must provide ReviewEconomicsSource")
     if not callable(getattr(adapter, "read_fee_discount_capability", None)):
@@ -135,6 +141,8 @@ async def _run(args: argparse.Namespace) -> int:
                     ),
                     idle_poll_interval_ms=args.idle_poll_interval_ms,
                 ),
+                account_risk_source=cast(AccountRiskSnapshotSource, adapter),
+                instrument_rules_source=cast(InstrumentRulesSource, adapter),
                 review_economics_source=cast(ReviewEconomicsSource, adapter),
                 fee_discount_capability_source=(adapter if observe_fee_capability else None),
                 instrument_certification_source=cast(

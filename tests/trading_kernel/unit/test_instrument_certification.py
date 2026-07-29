@@ -33,6 +33,10 @@ def test_certification_accepts_exact_cross_5x_independent_sides_without_unowned_
         ({"unowned_position_qty": Decimal(1)}, "unowned_position"),
         ({"unowned_open_order_count": 1}, "unowned_open_order"),
         ({"tick_size": None}, "missing_order_rule"),
+        (
+            {"notional_coefficient_certified": False},
+            "notional_coefficient_unverified",
+        ),
     ),
 )
 def test_certification_reports_stable_non_mutating_blockers(
@@ -72,6 +76,7 @@ def _facts() -> InstrumentCertificationFacts:
         position_mode="independent_sides",
         margin_mode="cross",
         configured_leverage=5,
+        notional_coefficient_certified=True,
         unowned_position_qty=Decimal(0),
         unowned_open_order_count=0,
         observed_at_ms=1_000,

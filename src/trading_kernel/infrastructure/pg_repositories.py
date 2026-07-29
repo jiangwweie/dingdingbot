@@ -37,6 +37,7 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     SetLeverageCommandResult,
 )
+from src.trading_kernel.domain.cross_margin_stress import CrossMarginStressEvidence
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionOwnership,
     OwnedPositionProjection,
@@ -1043,6 +1044,12 @@ class PostgresPositionRepository:
             "position_side": snapshot.netting_domain.position_side,
             "quantity": snapshot.quantity,
             "average_entry_price": snapshot.average_entry_price,
+            "venue_reported_liquidation_price": (
+                snapshot.venue_reported_liquidation_price
+            ),
+            "venue_reported_liquidation_observation_status": (
+                snapshot.venue_reported_liquidation_observation_status
+            ),
             "observed_at_ms": snapshot.observed_at_ms,
             "projection_version": 1 if version is None else int(version) + 1,
         }
@@ -1081,6 +1088,15 @@ class PostgresPositionRepository:
                 None
                 if row["average_entry_price"] is None
                 else Decimal(row["average_entry_price"])
+            ),
+            venue_reported_liquidation_price=(
+                None
+                if row["venue_reported_liquidation_price"] is None
+                else Decimal(row["venue_reported_liquidation_price"])
+            ),
+            venue_reported_liquidation_observation_status=cast(
+                Literal["valid", "missing", "invalid"],
+                str(row["venue_reported_liquidation_observation_status"]),
             ),
             open_orders=(),
             observed_at_ms=int(row["observed_at_ms"]),
@@ -1226,9 +1242,7 @@ class PostgresEntryAdmissionRepository:
             ),
             max_leverage=int(row["max_leverage"]),
             supported_margin_mode=cast(Literal["cross"], supported_margin_mode),
-            min_liquidation_distance_to_stop_distance_ratio=Decimal(
-                row["min_liquidation_distance_to_stop_distance_ratio"]
-            ),
+            post_stop_stress_multiple=Decimal(row["post_stop_stress_multiple"]),
             max_post_fill_stop_risk_overrun_fraction=Decimal(
                 row["max_post_fill_stop_risk_overrun_fraction"]
             ),
@@ -1578,13 +1592,9 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
         "reserved_margin": ticket.reserved_margin,
         "risk_reservation_basis": ticket.risk_reservation_basis,
         "margin_mode": ticket.margin_mode,
-        "min_liquidation_distance_to_stop_distance_ratio": (
-            ticket.min_liquidation_distance_to_stop_distance_ratio
-        ),
-        "projected_liquidation_price": ticket.projected_liquidation_price,
-        "projected_liquidation_distance_to_stop_distance_ratio": (
-            ticket.projected_liquidation_distance_to_stop_distance_ratio
-        ),
+        "cross_margin_stress_model_id": ticket.cross_margin_stress_model_id,
+        "post_stop_stress_multiple": ticket.post_stop_stress_multiple,
+        "claim_stress_proof_digest": ticket.claim_stress_proof_digest,
         "risk_at_stop": ticket.risk_at_stop,
         "entry_order_type": ticket.entry_order_type.value,
         "entry_limit_price": ticket.entry_limit_price,
@@ -1647,13 +1657,12 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         reserved_margin=Decimal(row["reserved_margin"]),
         risk_reservation_basis=str(row["risk_reservation_basis"]),
         margin_mode=cast(Literal["cross"], margin_mode),
-        min_liquidation_distance_to_stop_distance_ratio=Decimal(
-            row["min_liquidation_distance_to_stop_distance_ratio"]
+        cross_margin_stress_model_id=cast(
+            Literal["cross-margin-stop-stress-v1"],
+            str(row["cross_margin_stress_model_id"]),
         ),
-        projected_liquidation_price=Decimal(row["projected_liquidation_price"]),
-        projected_liquidation_distance_to_stop_distance_ratio=Decimal(
-            row["projected_liquidation_distance_to_stop_distance_ratio"]
-        ),
+        post_stop_stress_multiple=Decimal(row["post_stop_stress_multiple"]),
+        claim_stress_proof_digest=str(row["claim_stress_proof_digest"]),
         risk_at_stop=Decimal(row["risk_at_stop"]),
         entry_order_type=EntryOrderType(str(row["entry_order_type"])),
         entry_limit_price=(
@@ -1720,9 +1729,7 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         ),
         "post_fill_stop_risk_limit": claim.post_fill_stop_risk_limit,
         "max_initial_margin_utilization": claim.max_initial_margin_utilization,
-        "min_liquidation_distance_to_stop_distance_ratio": (
-            claim.min_liquidation_distance_to_stop_distance_ratio
-        ),
+        "post_stop_stress_multiple": claim.post_stop_stress_multiple,
         "ticket_margin_budget": claim.ticket_margin_budget,
         "required_leverage": claim.required_leverage,
         "selected_leverage": claim.selected_leverage,
@@ -1730,11 +1737,8 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "leverage_change_required": claim.leverage_change_required,
         "exchange_max_leverage": claim.exchange_max_leverage,
         "reserved_margin": claim.reserved_margin,
-        "maintenance_margin_bracket_id": claim.maintenance_margin_bracket_id,
-        "projected_liquidation_price": claim.projected_liquidation_price,
-        "projected_liquidation_distance": claim.projected_liquidation_distance,
-        "projected_liquidation_distance_to_stop_distance_ratio": (
-            claim.projected_liquidation_distance_to_stop_distance_ratio
+        "cross_margin_stress_evidence": (
+            claim.cross_margin_stress_evidence.model_dump(mode="json")
         ),
         "entry_reference_price": claim.entry_reference_price,
         "quantity": claim.quantity,
@@ -1823,9 +1827,7 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         max_initial_margin_utilization=Decimal(
             row["max_initial_margin_utilization"]
         ),
-        min_liquidation_distance_to_stop_distance_ratio=Decimal(
-            row["min_liquidation_distance_to_stop_distance_ratio"]
-        ),
+        post_stop_stress_multiple=Decimal(row["post_stop_stress_multiple"]),
         ticket_margin_budget=Decimal(row["ticket_margin_budget"]),
         required_leverage=int(row["required_leverage"]),
         selected_leverage=int(row["selected_leverage"]),
@@ -1833,11 +1835,8 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         leverage_change_required=bool(row["leverage_change_required"]),
         exchange_max_leverage=int(row["exchange_max_leverage"]),
         reserved_margin=Decimal(row["reserved_margin"]),
-        maintenance_margin_bracket_id=str(row["maintenance_margin_bracket_id"]),
-        projected_liquidation_price=Decimal(row["projected_liquidation_price"]),
-        projected_liquidation_distance=Decimal(row["projected_liquidation_distance"]),
-        projected_liquidation_distance_to_stop_distance_ratio=Decimal(
-            row["projected_liquidation_distance_to_stop_distance_ratio"]
+        cross_margin_stress_evidence=CrossMarginStressEvidence.model_validate(
+            row["cross_margin_stress_evidence"]
         ),
         created_at_ms=int(row["created_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),
@@ -1876,10 +1875,8 @@ def _aggregate_values(
         "position_qty": aggregate.position_qty,
         "average_fill_price": aggregate.average_fill_price,
         "actual_stop_risk": aggregate.actual_stop_risk,
-        "actual_liquidation_price": aggregate.actual_liquidation_price,
-        "actual_liquidation_distance": aggregate.actual_liquidation_distance,
-        "actual_liquidation_distance_to_stop_distance_ratio": (
-            aggregate.actual_liquidation_distance_to_stop_distance_ratio
+        "venue_reported_liquidation_price": (
+            aggregate.venue_reported_liquidation_price
         ),
         "post_fill_risk_status": (
             None
@@ -1890,6 +1887,10 @@ def _aggregate_values(
             None
             if aggregate.post_fill_disposition is None
             else aggregate.post_fill_disposition.value
+        ),
+        "post_fill_stress_status": aggregate.post_fill_stress_status,
+        "post_fill_stress_proof_digest": (
+            aggregate.post_fill_stress_proof_digest
         ),
         "protected_qty": aggregate.protected_qty,
         "entry_exchange_order_id": aggregate.entry_exchange_order_id,
@@ -1937,20 +1938,10 @@ def _aggregate_from_row(
             if row["actual_stop_risk"] is None
             else Decimal(row["actual_stop_risk"])
         ),
-        actual_liquidation_price=(
+        venue_reported_liquidation_price=(
             None
-            if row["actual_liquidation_price"] is None
-            else Decimal(row["actual_liquidation_price"])
-        ),
-        actual_liquidation_distance=(
-            None
-            if row["actual_liquidation_distance"] is None
-            else Decimal(row["actual_liquidation_distance"])
-        ),
-        actual_liquidation_distance_to_stop_distance_ratio=(
-            None
-            if row["actual_liquidation_distance_to_stop_distance_ratio"] is None
-            else Decimal(row["actual_liquidation_distance_to_stop_distance_ratio"])
+            if row["venue_reported_liquidation_price"] is None
+            else Decimal(row["venue_reported_liquidation_price"])
         ),
         post_fill_risk_status=(
             None
@@ -1961,6 +1952,16 @@ def _aggregate_from_row(
             None
             if row["post_fill_disposition"] is None
             else PostFillDisposition(str(row["post_fill_disposition"]))
+        ),
+        post_fill_stress_status=(
+            None
+            if row["post_fill_stress_status"] is None
+            else cast(Literal["passed", "failed"], str(row["post_fill_stress_status"]))
+        ),
+        post_fill_stress_proof_digest=(
+            None
+            if row["post_fill_stress_proof_digest"] is None
+            else str(row["post_fill_stress_proof_digest"])
         ),
         protected_qty=Decimal(row["protected_qty"]),
         entry_exchange_order_id=(

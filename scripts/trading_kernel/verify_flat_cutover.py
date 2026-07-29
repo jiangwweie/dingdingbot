@@ -99,9 +99,9 @@ class CutoverPlan(BaseModel):
     @classmethod
     def _require_schema_revision(cls, value: object) -> str:
         normalized = str(value or "").strip()
-        if normalized != "0002_crypto_strategy_universe":
+        if normalized != "0003_cross_margin_stop_stress":
             raise ValueError(
-                "target schema revision must be 0002_crypto_strategy_universe"
+                "target schema revision must be 0003_cross_margin_stop_stress"
             )
         return normalized
 

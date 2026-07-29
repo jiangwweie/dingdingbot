@@ -65,7 +65,7 @@ async def universe_engine() -> AsyncEngine:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-universe-test",
                     runtime_commit="task-5-test",
-                    schema_revision="0002_crypto_strategy_universe",
+                    schema_revision="0003_cross_margin_stop_stress",
                     seeded_at_ms=1_800_000_000_000,
                 ),
             )

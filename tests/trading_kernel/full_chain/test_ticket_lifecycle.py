@@ -53,7 +53,10 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_capabilities_current,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from tests.trading_kernel.integration.test_command_dispatch import PreflightFacts
+from tests.trading_kernel.integration.test_command_dispatch import (
+    PreflightFacts,
+    _commit_passed_post_fill_stress_if_pending,
+)
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
@@ -66,20 +69,6 @@ ADMIN_DSN = os.getenv(
     "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
-
-
-def _safe_liquidation_price(ticket, average_fill_price) -> str:
-    fill = Decimal(str(average_fill_price))
-    liquidation_distance = (
-        abs(fill - ticket.initial_stop_price)
-        * ticket.min_liquidation_distance_to_stop_distance_ratio
-    )
-    value = (
-        ticket.initial_stop_price - liquidation_distance
-        if ticket.identity.netting_domain.position_side == "long"
-        else ticket.initial_stop_price + liquidation_distance
-    )
-    return str(value)
 
 
 @pytest_asyncio.fixture
@@ -161,7 +150,7 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(ticket, "60000"),
+                    venue_reported_liquidation_price="0",
                     open_orders=(),
                     observed_at_ms=2_100,
                 ),
@@ -404,7 +393,7 @@ async def test_external_flat_opens_incident_and_enters_owned_protection_cleanup(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(ticket, "60000"),
+                    venue_reported_liquidation_price="0",
                     open_orders=(),
                     observed_at_ms=2_100,
                 ),
@@ -521,7 +510,7 @@ async def test_exit_timeout_is_conserved_as_unknown_and_never_redispatched(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(ticket, "60000"),
+                    venue_reported_liquidation_price="0",
                     observed_at_ms=2_100,
                 ),
             ),
@@ -728,7 +717,7 @@ async def test_unowned_open_order_opens_incident_without_creating_cancel(
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
     assert incident is not None and incident.incident_kind == "unowned_open_order"
     assert len(commands) == 6
-    assert len(events) == 12
+    assert len(events) == 13
     assert reservation is not None and reservation.status == "active"
 
 
@@ -880,7 +869,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 max_initial_margin_utilization="0.90",
                 max_leverage=10,
                 supported_margin_mode="cross",
-                min_liquidation_distance_to_stop_distance_ratio="2.0",
+                post_stop_stress_multiple="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
                 scope={},
                 updated_at_ms=1_000,
@@ -919,7 +908,6 @@ def _ticket_for_side(
             {
                 "initial_stop_price": Decimal(61000),
                 "take_profit_prices": (Decimal(58000),),
-                "projected_liquidation_price": Decimal(63000),
             }
         )
     return base_ticket.model_copy(update=terms)
@@ -950,7 +938,7 @@ async def _protect_ticket(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(ticket, "60000"),
+                    venue_reported_liquidation_price="0",
                     observed_at_ms=observed_at_ms,
                 ),
             ),
@@ -990,7 +978,7 @@ async def _reach_reconciliation_pending_after_cancel(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price="60000",
-                    liquidation_price=_safe_liquidation_price(ticket, "60000"),
+                    venue_reported_liquidation_price="0",
                     observed_at_ms=2_100,
                 ),
             ),
@@ -1075,7 +1063,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0002_crypto_strategy_universe",
+                schema_revision="0003_cross_margin_stop_stress",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -1084,7 +1072,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 set_={
                     "enabled": True,
                     "certified_commit": "kernel-test-head",
-                    "schema_revision": "0002_crypto_strategy_universe",
+                    "schema_revision": "0003_cross_margin_stop_stress",
                     "certification": {},
                     "updated_at_ms": 1_000,
                 },
@@ -1104,7 +1092,8 @@ async def _dispatch(
     worker_id: str,
     now_ms: int,
 ):
-    return await dispatch_one_command(
+    await _commit_all_passed_post_fill_stress(engine)
+    result = await dispatch_one_command(
         lambda: PostgresKernelUnitOfWork(engine),
         venue,
         DispatchCommandRequest(
@@ -1113,11 +1102,27 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_crypto_strategy_universe",
+            schema_revision="0003_cross_margin_stop_stress",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
     )
+    await _commit_all_passed_post_fill_stress(engine)
+    return result
+
+
+async def _commit_all_passed_post_fill_stress(engine: AsyncEngine) -> None:
+    while True:
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            aggregate = await uow.aggregates.get_next_for_statuses(
+                (AggregateStatus.POST_FILL_RISK_PENDING,)
+            )
+        if aggregate is None:
+            return
+        await _commit_passed_post_fill_stress_if_pending(
+            engine,
+            aggregate.identity.ticket_id,
+        )
 
 
 def _database_url(database_name: str) -> str:

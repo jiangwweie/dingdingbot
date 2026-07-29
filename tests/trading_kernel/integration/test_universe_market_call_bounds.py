@@ -58,7 +58,7 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-9-test"
-SCHEMA_REVISION = "0002_crypto_strategy_universe"
+SCHEMA_REVISION = "0003_cross_margin_stop_stress"
 MPG_CONTRACT = next(
     contract
     for contract in registered_strategy_contracts()

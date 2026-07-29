@@ -18,11 +18,13 @@ from src.trading_kernel.application.runtime_facts import (
     InstrumentRulesFacts,
     InstrumentRulesRequest,
 )
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskPosition,
+    AccountRiskSnapshot,
+    MaintenanceMarginBracket,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
     AdmissionOrder,
-    AdmissionPosition,
     EntryAdmissionSnapshot,
     canonical_digest,
 )
@@ -127,7 +129,7 @@ class FakeProbeAdapter:
         self,
         *,
         configured_leverage: int = 5,
-        positions: tuple[AdmissionPosition, ...] = (),
+        positions: tuple[AccountRiskPosition, ...] = (),
         open_orders: tuple[AdmissionOrder, ...] = (),
     ) -> None:
         self.configured_leverage = configured_leverage
@@ -148,6 +150,8 @@ class FakeProbeAdapter:
             exchange_max_leverage=10,
             maintenance_margin_brackets=_maintenance_brackets(),
             maintenance_margin_brackets_digest=canonical_digest(_maintenance_brackets()),
+            notional_coefficient=Decimal(1),
+            notional_coefficient_certified=True,
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -158,25 +162,33 @@ class FakeProbeAdapter:
     ) -> EntryAdmissionSnapshot:
         self.admission_requests.append(request.exchange_instrument_id)
         return EntryAdmissionSnapshot(
-            venue_id=request.venue_id,
-            account_id=request.account_id,
-            position_mode="independent_sides",
-            margin_mode="cross",
-            total_wallet_balance=Decimal(1000),
-            total_margin_balance=Decimal(1000),
-            total_initial_margin=Decimal(0),
-            total_maintenance_margin=Decimal(0),
-            available_margin=Decimal(900),
+            account_risk_snapshot=AccountRiskSnapshot.create(
+                venue_id=request.venue_id,
+                account_id=request.account_id,
+                account_risk_mode="standard_usdm_single_asset",
+                settlement_asset="USDT",
+                position_mode="independent_sides",
+                margin_mode="cross",
+                exchange_instrument_id=request.exchange_instrument_id,
+                mark_price=Decimal("99.5"),
+                configured_leverage=self.configured_leverage,
+                total_wallet_balance=Decimal(1000),
+                total_margin_balance=Decimal(1000),
+                total_initial_margin=Decimal(0),
+                total_maintenance_margin=sum(
+                    (
+                        position.current_maintenance_margin
+                        for position in self.positions
+                    ),
+                    Decimal(0),
+                ),
+                available_margin=Decimal(900),
+                account_positions=self.positions,
+                observed_at_ms=request.observed_at_ms,
+                valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+            ),
             best_bid_price=Decimal(99),
             best_ask_price=Decimal(100),
-            instrument_facts=(
-                AdmissionInstrumentFacts(
-                    exchange_instrument_id=request.exchange_instrument_id,
-                    mark_price=Decimal("99.5"),
-                    configured_leverage=self.configured_leverage,
-                ),
-            ),
-            positions=self.positions,
             open_orders=self.open_orders,
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
@@ -519,11 +531,13 @@ async def test_readonly_probe_verifies_each_protected_ticket_against_exact_excha
     instrument_id = "binance-usdm:BTCUSDT:perpetual"
     adapter = FakeProbeAdapter(
         positions=(
-            AdmissionPosition(
+            AccountRiskPosition(
                 exchange_instrument_id=instrument_id,
                 position_side="long",
                 quantity=Decimal(1),
                 average_entry_price=Decimal(100),
+                current_unrealized_pnl=Decimal(0),
+                current_maintenance_margin=Decimal(1),
             ),
         ),
         open_orders=(
@@ -603,11 +617,13 @@ async def test_readonly_probe_rejects_a_protected_stop_with_wrong_price(
     instrument_id = "binance-usdm:BTCUSDT:perpetual"
     adapter = FakeProbeAdapter(
         positions=(
-            AdmissionPosition(
+            AccountRiskPosition(
                 exchange_instrument_id=instrument_id,
                 position_side="short",
                 quantity=Decimal(1),
                 average_entry_price=Decimal(100),
+                current_unrealized_pnl=Decimal(0),
+                current_maintenance_margin=Decimal(1),
             ),
         ),
         open_orders=(

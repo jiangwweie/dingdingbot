@@ -24,9 +24,11 @@ from src.trading_kernel.application.select_entry_candidate import (
     SelectEntryCandidateStatus,
     select_entry_candidate,
 )
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskSnapshot,
+    MaintenanceMarginBracket,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
     EntryAdmissionSnapshot,
     canonical_digest,
 )
@@ -463,6 +465,8 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 maintenance_margin_brackets_digest=canonical_digest(
                     _maintenance_brackets()
                 ),
+                notional_coefficient=Decimal(1),
+                notional_coefficient_certified=True,
                 session_and_settlement={},
                 observed_at_ms=1_000,
                 valid_until_ms=10_000,
@@ -481,7 +485,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 max_initial_margin_utilization=Decimal("0.90"),
                 max_leverage=10,
                 supported_margin_mode="cross",
-                min_liquidation_distance_to_stop_distance_ratio=Decimal("2.0"),
+                post_stop_stress_multiple=Decimal("2.0"),
                 max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
                 scope={},
                 updated_at_ms=1_000,
@@ -599,25 +603,27 @@ async def _insert_scope_facts(
 
 def _admission_snapshot() -> EntryAdmissionSnapshot:
     return EntryAdmissionSnapshot(
-        venue_id="binance-usdm",
-        account_id="subaccount-main",
-        position_mode="independent_sides",
-        margin_mode="cross",
-        total_wallet_balance=Decimal(1000),
-        total_margin_balance=Decimal(1000),
-        total_initial_margin=Decimal(0),
-        total_maintenance_margin=Decimal(0),
-        available_margin=Decimal(1000),
+        account_risk_snapshot=AccountRiskSnapshot.create(
+            venue_id="binance-usdm",
+            account_id="subaccount-main",
+            account_risk_mode="standard_usdm_single_asset",
+            settlement_asset="USDT",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            mark_price=Decimal(10000),
+            configured_leverage=1,
+            total_wallet_balance=Decimal(1000),
+            total_margin_balance=Decimal(1000),
+            total_initial_margin=Decimal(0),
+            total_maintenance_margin=Decimal(0),
+            available_margin=Decimal(1000),
+            account_positions=(),
+            observed_at_ms=1_001,
+            valid_until_ms=10_000,
+        ),
         best_bid_price=Decimal("9999.9"),
         best_ask_price=Decimal(10000),
-        instrument_facts=(
-            AdmissionInstrumentFacts(
-                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                mark_price=Decimal(10000),
-                configured_leverage=1,
-            ),
-        ),
-        positions=(),
         open_orders=(),
         observed_at_ms=1_001,
         valid_until_ms=10_000,

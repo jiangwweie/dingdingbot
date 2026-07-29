@@ -10,9 +10,11 @@ from src.trading_kernel.domain.capacity import (
     CapacityPolicy,
     CapacityUsage,
 )
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskSnapshot,
+    MaintenanceMarginBracket,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
     AdmissionOwnership,
     EntryAdmissionSnapshot,
     canonical_digest,
@@ -60,6 +62,11 @@ def test_capacity_claim_freezes_configured_leverage_and_demand_based_margin() ->
     assert claim.planned_stop_risk_budget == Decimal(30)
     assert claim.post_fill_stop_risk_limit == Decimal(33)
     assert claim.reserved_margin == Decimal(240)
+    assert claim.cross_margin_stress_evidence.proof.status == "passed"
+    assert (
+        claim.cross_margin_stress_evidence.proof.proof_digest
+        == claim.to_ticket().claim_stress_proof_digest
+    )
     assert claim.entry_admission_snapshot_digest == snapshot.digest()
     assert claim.account_capacity_domain_key == "binance-usdm:experiment-1"
     assert claim.leverage_domain_key == "binance-usdm:experiment-1:binance-usdm:BTCUSDT:perpetual"
@@ -113,7 +120,7 @@ def _policy() -> CapacityPolicy:
         max_initial_margin_utilization=Decimal("0.90"),
         max_leverage=10,
         supported_margin_mode="cross",
-        min_liquidation_distance_to_stop_distance_ratio=Decimal(2),
+        post_stop_stress_multiple=Decimal(2),
         max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
     )
 
@@ -138,6 +145,8 @@ def _rules() -> CapacityInstrumentRules:
         exchange_max_leverage=10,
         maintenance_margin_brackets=brackets,
         maintenance_margin_brackets_digest=canonical_digest(brackets),
+        notional_coefficient=Decimal(1),
+        notional_coefficient_certified=True,
         projection_version=3,
         observed_at_ms=1_000,
         valid_until_ms=2_000,
@@ -146,25 +155,27 @@ def _rules() -> CapacityInstrumentRules:
 
 def _snapshot() -> EntryAdmissionSnapshot:
     return EntryAdmissionSnapshot(
-        venue_id="binance-usdm",
-        account_id="experiment-1",
-        position_mode="independent_sides",
-        margin_mode="cross",
-        total_wallet_balance=Decimal(1000),
-        total_margin_balance=Decimal(1000),
-        total_initial_margin=Decimal(0),
-        total_maintenance_margin=Decimal(0),
-        available_margin=Decimal(1000),
+        account_risk_snapshot=AccountRiskSnapshot.create(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            account_risk_mode="standard_usdm_single_asset",
+            settlement_asset="USDT",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            mark_price=Decimal(100),
+            configured_leverage=5,
+            total_wallet_balance=Decimal(1000),
+            total_margin_balance=Decimal(1000),
+            total_initial_margin=Decimal(0),
+            total_maintenance_margin=Decimal(0),
+            available_margin=Decimal(1000),
+            account_positions=(),
+            observed_at_ms=1_008,
+            valid_until_ms=1_020,
+        ),
         best_bid_price=Decimal("99.9"),
         best_ask_price=Decimal(100),
-        instrument_facts=(
-            AdmissionInstrumentFacts(
-                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                mark_price=Decimal(100),
-                configured_leverage=5,
-            ),
-        ),
-        positions=(),
         open_orders=(),
         observed_at_ms=1_008,
         valid_until_ms=1_020,

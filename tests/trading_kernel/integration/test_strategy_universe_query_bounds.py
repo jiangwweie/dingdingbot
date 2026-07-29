@@ -62,8 +62,8 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-13-query-bounds"
-SCHEMA_REVISION: Literal["0002_crypto_strategy_universe"] = (
-    "0002_crypto_strategy_universe"
+SCHEMA_REVISION: Literal["0003_cross_margin_stop_stress"] = (
+    "0003_cross_margin_stop_stress"
 )
 ACTIVE_MEMBERS = tuple(
     f"binance-usdm:{symbol}USDT:perpetual"

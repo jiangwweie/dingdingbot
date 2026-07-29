@@ -11,7 +11,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from src.trading_kernel.domain.capacity_sizing import MaintenanceMarginBracket
+from src.trading_kernel.domain.cross_margin_stress import (
+    CrossMarginStressEvidence,
+    CrossMarginStressStatus,
+    MaintenanceMarginBracket,
+)
 from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
 
@@ -41,7 +45,7 @@ class CapacityPolicy(BaseModel):
     max_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
-    min_liquidation_distance_to_stop_distance_ratio: Decimal
+    post_stop_stress_multiple: Decimal
     max_post_fill_stop_risk_overrun_fraction: Decimal
 
     @field_validator("owner_policy_id", mode="before")
@@ -70,7 +74,7 @@ class CapacityPolicy(BaseModel):
         return value
 
     @field_validator(
-        "min_liquidation_distance_to_stop_distance_ratio",
+        "post_stop_stress_multiple",
     )
     @classmethod
     def _require_positive_decimal(cls, value: Decimal) -> Decimal:
@@ -120,6 +124,8 @@ class CapacityInstrumentRules(BaseModel):
     exchange_max_leverage: int
     maintenance_margin_brackets: tuple[MaintenanceMarginBracket, ...]
     maintenance_margin_brackets_digest: str
+    notional_coefficient: Decimal
+    notional_coefficient_certified: bool
     projection_version: int
     observed_at_ms: int
     valid_until_ms: int
@@ -129,6 +135,7 @@ class CapacityInstrumentRules(BaseModel):
         "price_tick",
         "min_quantity",
         "min_notional",
+        "notional_coefficient",
     )
     @classmethod
     def _require_positive_rule(cls, value: Decimal) -> Decimal:
@@ -184,7 +191,7 @@ class CapacityClaim(BaseModel):
     max_post_fill_stop_risk_overrun_fraction: Decimal
     post_fill_stop_risk_limit: Decimal
     max_initial_margin_utilization: Decimal
-    min_liquidation_distance_to_stop_distance_ratio: Decimal
+    post_stop_stress_multiple: Decimal
     ticket_margin_budget: Decimal
     required_leverage: int
     selected_leverage: int
@@ -192,10 +199,7 @@ class CapacityClaim(BaseModel):
     leverage_change_required: bool
     exchange_max_leverage: int
     reserved_margin: Decimal
-    maintenance_margin_bracket_id: str
-    projected_liquidation_price: Decimal
-    projected_liquidation_distance: Decimal
-    projected_liquidation_distance_to_stop_distance_ratio: Decimal
+    cross_margin_stress_evidence: CrossMarginStressEvidence
     created_at_ms: int
     expires_at_ms: int
     entry_reference_price: Decimal
@@ -250,12 +254,9 @@ class CapacityClaim(BaseModel):
         "planned_stop_risk_budget",
         "post_fill_stop_risk_limit",
         "max_initial_margin_utilization",
-        "min_liquidation_distance_to_stop_distance_ratio",
+        "post_stop_stress_multiple",
         "ticket_margin_budget",
         "reserved_margin",
-        "projected_liquidation_price",
-        "projected_liquidation_distance",
-        "projected_liquidation_distance_to_stop_distance_ratio",
     )
     @classmethod
     def _require_positive_financial(cls, value: Decimal) -> Decimal:
@@ -331,11 +332,55 @@ class CapacityClaim(BaseModel):
             raise ValueError("CapacityClaim stop risk exceeds its planned budget")
         if self.post_fill_stop_risk_limit < self.planned_stop_risk_budget:
             raise ValueError("CapacityClaim post-fill limit undercuts planned risk")
+        evidence = self.cross_margin_stress_evidence
+        if evidence.proof.status is not CrossMarginStressStatus.PASSED:
+            raise ValueError("CapacityClaim requires a passed stress proof")
         if (
-            self.projected_liquidation_distance_to_stop_distance_ratio
-            < self.min_liquidation_distance_to_stop_distance_ratio
+            evidence.request.post_stop_stress_multiple
+            != self.post_stop_stress_multiple
         ):
-            raise ValueError("CapacityClaim liquidation proof is below policy")
+            raise ValueError("CapacityClaim stress proof differs from policy")
+        if (
+            evidence.request.evaluated_side
+            != self.ticket_identity.netting_domain.position_side
+        ):
+            raise ValueError("CapacityClaim stress proof differs from Ticket Side")
+        if (
+            evidence.request.account_snapshot.exchange_instrument_id
+            != self.ticket_identity.netting_domain.exchange_instrument_id
+        ):
+            raise ValueError("CapacityClaim stress proof differs from instrument")
+        account = evidence.request.account_snapshot
+        if (
+            account.total_wallet_balance != self.total_wallet_balance_at_claim
+            or account.total_margin_balance != self.total_margin_balance_at_claim
+            or account.total_initial_margin != self.total_initial_margin_at_claim
+            or account.total_maintenance_margin
+            != self.total_maintenance_margin_at_claim
+            or account.available_margin != self.available_margin_at_claim
+            or account.mark_price != self.mark_price_at_claim
+            or account.configured_leverage
+            != self.configured_leverage_at_claim
+            or evidence.request.reference_entry_price
+            != self.entry_reference_price
+            or evidence.request.initial_stop_price != self.initial_stop_price
+        ):
+            raise ValueError("CapacityClaim stress proof differs from Claim facts")
+        target = next(
+            (
+                position
+                for position in evidence.request.projected_instrument_positions
+                if position.position_side
+                == self.ticket_identity.netting_domain.position_side
+            ),
+            None,
+        )
+        if (
+            target is None
+            or target.quantity != self.quantity
+            or target.average_entry_price != self.entry_reference_price
+        ):
+            raise ValueError("CapacityClaim stress projection differs from sizing")
         expected_digest = build_capacity_claim_digest(self)
         if expected_digest != self.decision_digest:
             raise ValueError("CapacityClaim decision digest differs from its payload")
@@ -368,12 +413,12 @@ class CapacityClaim(BaseModel):
             reserved_margin=self.reserved_margin,
             risk_reservation_basis="planned_stop_distance",
             margin_mode=self.margin_mode_at_claim,
-            min_liquidation_distance_to_stop_distance_ratio=(
-                self.min_liquidation_distance_to_stop_distance_ratio
+            cross_margin_stress_model_id=(
+                self.cross_margin_stress_evidence.proof.model_id
             ),
-            projected_liquidation_price=self.projected_liquidation_price,
-            projected_liquidation_distance_to_stop_distance_ratio=(
-                self.projected_liquidation_distance_to_stop_distance_ratio
+            post_stop_stress_multiple=self.post_stop_stress_multiple,
+            claim_stress_proof_digest=(
+                self.cross_margin_stress_evidence.proof.proof_digest
             ),
             risk_at_stop=self.risk_at_stop,
             entry_order_type=self.entry_order_type,
@@ -428,7 +473,7 @@ def freeze_capacity_claim(
     max_post_fill_stop_risk_overrun_fraction: Decimal,
     post_fill_stop_risk_limit: Decimal,
     max_initial_margin_utilization: Decimal,
-    min_liquidation_distance_to_stop_distance_ratio: Decimal,
+    post_stop_stress_multiple: Decimal,
     ticket_margin_budget: Decimal,
     required_leverage: int,
     selected_leverage: int,
@@ -436,10 +481,7 @@ def freeze_capacity_claim(
     leverage_change_required: bool,
     exchange_max_leverage: int,
     reserved_margin: Decimal,
-    maintenance_margin_bracket_id: str,
-    projected_liquidation_price: Decimal,
-    projected_liquidation_distance: Decimal,
-    projected_liquidation_distance_to_stop_distance_ratio: Decimal,
+    cross_margin_stress_evidence: CrossMarginStressEvidence,
     created_at_ms: int,
     expires_at_ms: int,
     entry_reference_price: Decimal,
@@ -485,9 +527,7 @@ def freeze_capacity_claim(
         ),
         "post_fill_stop_risk_limit": post_fill_stop_risk_limit,
         "max_initial_margin_utilization": max_initial_margin_utilization,
-        "min_liquidation_distance_to_stop_distance_ratio": (
-            min_liquidation_distance_to_stop_distance_ratio
-        ),
+        "post_stop_stress_multiple": post_stop_stress_multiple,
         "ticket_margin_budget": ticket_margin_budget,
         "required_leverage": required_leverage,
         "selected_leverage": selected_leverage,
@@ -495,12 +535,7 @@ def freeze_capacity_claim(
         "leverage_change_required": leverage_change_required,
         "exchange_max_leverage": exchange_max_leverage,
         "reserved_margin": reserved_margin,
-        "maintenance_margin_bracket_id": maintenance_margin_bracket_id,
-        "projected_liquidation_price": projected_liquidation_price,
-        "projected_liquidation_distance": projected_liquidation_distance,
-        "projected_liquidation_distance_to_stop_distance_ratio": (
-            projected_liquidation_distance_to_stop_distance_ratio
-        ),
+        "cross_margin_stress_evidence": cross_margin_stress_evidence,
         "created_at_ms": created_at_ms,
         "expires_at_ms": expires_at_ms,
         "entry_reference_price": entry_reference_price,
@@ -514,10 +549,7 @@ def freeze_capacity_claim(
         "take_profit_quantities": take_profit_quantities,
         "decision_digest": "sha256:" + "0" * 64,
     }
-    _normalize_claim_decimals_for_storage(
-        payload,
-        position_side=ticket_identity.netting_domain.position_side,
-    )
+    _normalize_claim_decimals_for_storage(payload)
     provisional = CapacityClaim.model_construct(**payload)
     decision_digest = build_capacity_claim_digest(provisional)
     return CapacityClaim.model_validate(
@@ -568,8 +600,6 @@ def _canonicalize(value: object) -> object:
 
 def _normalize_claim_decimals_for_storage(
     payload: dict[str, Any],
-    *,
-    position_side: Literal["long", "short"],
 ) -> None:
     """Freeze Claim arithmetic at the exact NUMERIC(38, 18) storage boundary."""
 
@@ -579,11 +609,9 @@ def _normalize_claim_decimals_for_storage(
         "available_margin_at_claim",
         "ticket_margin_budget",
         "max_initial_margin_utilization",
-        "min_liquidation_distance_to_stop_distance_ratio",
+        "post_stop_stress_multiple",
         "max_post_fill_stop_risk_overrun_fraction",
         "planned_stop_risk_fraction",
-        "projected_liquidation_distance",
-        "projected_liquidation_distance_to_stop_distance_ratio",
         "quantity",
     }
     ceiling_fields = {
@@ -616,10 +644,6 @@ def _normalize_claim_decimals_for_storage(
     payload["initial_stop_price"] = _quantize_storage_decimal(
         payload["initial_stop_price"],
         rounding=ROUND_FLOOR,
-    )
-    payload["projected_liquidation_price"] = _quantize_storage_decimal(
-        payload["projected_liquidation_price"],
-        rounding=(ROUND_CEILING if position_side == "long" else ROUND_FLOOR),
     )
     payload["entry_limit_price"] = (
         None

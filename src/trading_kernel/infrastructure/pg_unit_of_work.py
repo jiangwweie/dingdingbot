@@ -59,10 +59,7 @@ from src.trading_kernel.domain.effects import (
     ResolveIncident,
     ResolveTicketIncidentsAtClosure,
 )
-from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionInstrumentFacts,
-    bound_admission_instrument_facts_digest,
-)
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.events import TicketIssued, TradeEvent
 from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
@@ -597,16 +594,19 @@ def _entry_command(
 def _initial_leverage_fact_digest(claim: CapacityClaim) -> str:
     """Freeze the pre-mutation exact instrument leverage fact from admission."""
 
-    instrument_facts = AdmissionInstrumentFacts(
-        exchange_instrument_id=(
-            claim.ticket_identity.netting_domain.exchange_instrument_id
-        ),
-        mark_price=claim.mark_price_at_claim,
-        configured_leverage=claim.configured_leverage_at_claim,
-    )
-    return bound_admission_instrument_facts_digest(
-        entry_admission_snapshot_digest=claim.entry_admission_snapshot_digest,
-        instrument_facts=instrument_facts,
+    return canonical_digest(
+        {
+            "entry_admission_snapshot_digest": (
+                claim.entry_admission_snapshot_digest
+            ),
+            "instrument_facts": {
+                "exchange_instrument_id": (
+                    claim.ticket_identity.netting_domain.exchange_instrument_id
+                ),
+                "mark_price": claim.mark_price_at_claim,
+                "configured_leverage": claim.configured_leverage_at_claim,
+            },
+        }
     )
 
 
