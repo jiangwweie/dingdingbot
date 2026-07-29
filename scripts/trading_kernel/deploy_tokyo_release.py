@@ -60,7 +60,7 @@ class DeploymentPlan:
     expected_configured_leverage: int
     enable_entry: bool
     protected_ticket_ids: tuple[str, ...] = ()
-    closure_ticket_id: str | None = None
+    closure_ticket_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _COMMIT.fullmatch(self.target_commit):
@@ -80,11 +80,13 @@ class DeploymentPlan:
             raise ValueError("protected Ticket identities must be distinct")
         if self.protected_ticket_ids and self.enable_entry:
             raise ValueError("protected handover must keep ENTRY fenced")
-        if self.closure_ticket_id is not None and not self.closure_ticket_id.strip():
-            raise ValueError("closure-only Ticket identity must be non-blank")
-        if self.closure_ticket_id is not None and self.protected_ticket_ids:
+        if any(not ticket_id.strip() for ticket_id in self.closure_ticket_ids):
+            raise ValueError("closure-only Ticket identities must be non-blank")
+        if len(set(self.closure_ticket_ids)) != len(self.closure_ticket_ids):
+            raise ValueError("closure-only Ticket identities must be distinct")
+        if self.closure_ticket_ids and self.protected_ticket_ids:
             raise ValueError("closure-only and protected handover are mutually exclusive")
-        if self.closure_ticket_id is not None and self.enable_entry:
+        if self.closure_ticket_ids and self.enable_entry:
             raise ValueError("closure-only handover must keep ENTRY fenced")
 
 
@@ -108,7 +110,7 @@ class TokyoReleaseBackend(Protocol):
     def certify_closure(
         self,
         release: str,
-        ticket_id: str,
+        ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]: ...
 
     def probe_exchange(self, release: str) -> Mapping[str, object]: ...
@@ -147,7 +149,7 @@ class TokyoReleaseBackend(Protocol):
         release: str,
         commit: str,
         schema_revision: str,
-        ticket_id: str,
+        ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]: ...
 
     def activate_release(
@@ -202,7 +204,7 @@ def deploy_tokyo_release(
                 + ",".join(sorted(active_after_stop))
             )
 
-        if plan.closure_ticket_id is not None:
+        if plan.closure_ticket_ids:
             _read_release_facts(backend, plan)
 
         deployment_identity = (
@@ -210,9 +212,9 @@ def deploy_tokyo_release(
                 plan.target_release,
                 plan.target_commit,
                 plan.schema_revision,
-                plan.closure_ticket_id,
+                plan.closure_ticket_ids,
             )
-            if plan.closure_ticket_id is not None
+            if plan.closure_ticket_ids
             else backend.deploy_protected_identity(
                 plan.target_release,
                 plan.target_commit,
@@ -256,7 +258,7 @@ def deploy_tokyo_release(
         if plan.enable_entry:
             backend.start_services((ENTRY_SERVICE,))
         if (
-            plan.closure_ticket_id is not None
+            plan.closure_ticket_ids
             and not backend.entry_is_inactive_disabled_and_fenced()
         ):
             raise DeploymentBlocked("closure-only handover did not retain the ENTRY fence")
@@ -287,10 +289,10 @@ def _read_release_facts(
     backend: TokyoReleaseBackend,
     plan: DeploymentPlan,
 ) -> tuple[Mapping[str, object], Mapping[str, object], dict[str, str]]:
-    if plan.closure_ticket_id is not None:
+    if plan.closure_ticket_ids:
         certification = backend.certify_closure(
             plan.target_release,
-            plan.closure_ticket_id,
+            plan.closure_ticket_ids,
         )
         probe = backend.probe_exchange(plan.target_release)
         return (
@@ -300,7 +302,7 @@ def _read_release_facts(
                 certification,
                 probe,
                 expected_leverage=plan.expected_configured_leverage,
-                closure_ticket_id=plan.closure_ticket_id,
+                closure_ticket_ids=plan.closure_ticket_ids,
             ),
         )
     if plan.protected_ticket_ids:
@@ -390,7 +392,7 @@ def _require_closure_release_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
-    closure_ticket_id: str,
+    closure_ticket_ids: tuple[str, ...],
 ) -> dict[str, str]:
     if certification.get("status") != "pass":
         raise DeploymentBlocked("database closure certification failed")
@@ -418,40 +420,46 @@ def _require_closure_release_facts(
         or not _SEED_IDENTITY.fullmatch(identity["seed_identity"])
     ):
         raise DeploymentBlocked("database runtime identity is invalid")
-    closure_ticket = certification.get("closure_ticket")
-    if not isinstance(closure_ticket, Mapping):
+    closure_tickets = certification.get("closure_tickets")
+    if not isinstance(closure_tickets, list):
         raise DeploymentBlocked("exact closure Ticket facts are missing")
-    if str(closure_ticket.get("ticket_id", "")) != closure_ticket_id:
-        raise DeploymentBlocked("exact closure Ticket identity differs")
-    if str(closure_ticket.get("aggregate_status", "")) not in {
-        "settlement_pending",
-        "review_pending",
-    }:
-        raise DeploymentBlocked("closure Ticket is not pending Settlement or Review")
-    try:
-        quantities_are_flat = all(
-            Decimal(str(closure_ticket.get(key, "-1"))) == 0
-            for key in ("position_quantity", "protected_quantity")
-        )
-    except (InvalidOperation, ValueError):
-        quantities_are_flat = False
-    if not quantities_are_flat:
-        raise DeploymentBlocked("closure Ticket still has position or protection")
-    if any(
-        int(str(closure_ticket.get(key, -1))) != 0
-        for key in (
-            "owned_order_residue_count",
-            "unresolved_command_count",
-            "open_incident_count",
-        )
-    ):
-        raise DeploymentBlocked("closure Ticket has unresolved runtime residue")
-    if (
-        closure_ticket.get("budget_reservation_status") != "released"
-        or closure_ticket.get("account_capacity_released") is not True
-        or closure_ticket.get("netting_domain_released") is not True
-    ):
-        raise DeploymentBlocked("closure Ticket authority has not been released")
+    closure_by_id = {
+        str(ticket.get("ticket_id", "")): ticket
+        for ticket in closure_tickets
+        if isinstance(ticket, Mapping)
+    }
+    if set(closure_by_id) != set(closure_ticket_ids):
+        raise DeploymentBlocked("exact closure Ticket identities differ")
+    for closure_ticket in closure_by_id.values():
+        if str(closure_ticket.get("aggregate_status", "")) not in {
+            "settlement_pending",
+            "review_pending",
+        }:
+            raise DeploymentBlocked("closure Ticket is not pending Settlement or Review")
+        try:
+            quantities_are_flat = all(
+                Decimal(str(closure_ticket.get(key, "-1"))) == 0
+                for key in ("position_quantity", "protected_quantity")
+            )
+        except (InvalidOperation, ValueError):
+            quantities_are_flat = False
+        if not quantities_are_flat:
+            raise DeploymentBlocked("closure Ticket still has position or protection")
+        if any(
+            int(str(closure_ticket.get(key, -1))) != 0
+            for key in (
+                "owned_order_residue_count",
+                "unresolved_command_count",
+                "open_incident_count",
+            )
+        ):
+            raise DeploymentBlocked("closure Ticket has unresolved runtime residue")
+        if (
+            closure_ticket.get("budget_reservation_status") != "released"
+            or closure_ticket.get("account_capacity_released") is not True
+            or closure_ticket.get("netting_domain_released") is not True
+        ):
+            raise DeploymentBlocked("closure Ticket authority has not been released")
     _require_flat_exchange_facts(probe, expected_leverage=expected_leverage)
     return identity
 
@@ -677,13 +685,16 @@ class SshTokyoReleaseBackend:
     def certify_closure(
         self,
         release: str,
-        ticket_id: str,
+        ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         return self._release_json(
             release,
             "scripts/trading_kernel/certify_readonly.py",
-            "--closure-ticket-id",
-            ticket_id,
+            *(
+                argument
+                for ticket_id in ticket_ids
+                for argument in ("--closure-ticket-id", ticket_id)
+            ),
         )
 
     def probe_exchange(self, release: str) -> Mapping[str, object]:
@@ -804,7 +815,7 @@ class SshTokyoReleaseBackend:
         release: str,
         commit: str,
         schema_revision: str,
-        ticket_id: str,
+        ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         return self._release_json(
             release,
@@ -814,8 +825,11 @@ class SshTokyoReleaseBackend:
             commit,
             "--schema-revision",
             schema_revision,
-            "--closure-ticket-id",
-            ticket_id,
+            *(
+                argument
+                for ticket_id in ticket_ids
+                for argument in ("--closure-ticket-id", ticket_id)
+            ),
         )
 
     def activate_release(
@@ -1036,7 +1050,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--closure-ticket-id",
-        help="Exact zero-exposure pending Ticket allowed across one closure-only handover.",
+        action="append",
+        default=[],
+        help=(
+            "Exact zero-exposure pending Ticket allowed across one closure-only "
+            "handover; repeat for the complete set."
+        ),
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -1070,7 +1089,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_configured_leverage=EXPECTED_CONFIGURED_LEVERAGE,
         enable_entry=args.enable_entry,
         protected_ticket_ids=tuple(args.protected_ticket_id),
-        closure_ticket_id=args.closure_ticket_id,
+        closure_ticket_ids=tuple(args.closure_ticket_id),
     )
     backend = SshTokyoReleaseBackend(
         target=args.target,

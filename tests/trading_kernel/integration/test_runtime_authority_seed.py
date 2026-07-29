@@ -355,7 +355,7 @@ async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
 
 
 @pytest.mark.asyncio
-async def test_closure_identity_rotates_only_one_exact_released_pending_ticket(
+async def test_closure_identity_rotates_only_the_exact_released_pending_ticket_set(
     runtime_seed_engine: AsyncEngine,
 ) -> None:
     runtime_seed = _runtime_seed_module()
@@ -367,7 +367,8 @@ async def test_closure_identity_rotates_only_one_exact_released_pending_ticket(
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
         await runtime_seed.deploy_runtime_identity(uow, initial)
-    await _insert_released_pending_closure_ticket(runtime_seed_engine)
+    ticket_ids = ("ticket:closure-a", "ticket:closure-b")
+    await _insert_released_pending_closure_tickets(runtime_seed_engine, ticket_ids)
 
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
         result = await runtime_seed.deploy_closure_identity(
@@ -378,7 +379,7 @@ async def test_closure_identity_rotates_only_one_exact_released_pending_ticket(
                     "seeded_at_ms": 1_800_000_000_100,
                 }
             ),
-            closure_ticket_id="ticket:closure",
+            closure_ticket_ids=ticket_ids,
         )
 
     assert result.runtime_commit == "b" * 40
@@ -397,31 +398,35 @@ async def test_readonly_certification_emits_exact_pending_closure_manifest(
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
         await runtime_seed.deploy_runtime_identity(uow, request)
-    await _insert_released_pending_closure_ticket(runtime_seed_engine)
+    ticket_ids = ("ticket:closure-a", "ticket:closure-b")
+    await _insert_released_pending_closure_tickets(runtime_seed_engine, ticket_ids)
 
     payload = await _certify(
         runtime_seed_engine.url.render_as_string(hide_password=False),
         require_flat=False,
-        closure_ticket_id="ticket:closure",
+        closure_ticket_ids=ticket_ids,
     )
 
     assert payload["status"] == "pass"
-    assert payload["closure_ticket"] == {
-        "ticket_id": "ticket:closure",
-        "aggregate_status": "settlement_pending",
-        "aggregate_version": 7,
-        "last_event_sequence": 7,
-        "netting_domain_key": "closure-domain",
-        "position_quantity": "0",
-        "protected_quantity": "0",
-        "owned_order_residue_count": 0,
-        "unresolved_command_count": 0,
-        "open_incident_count": 0,
-        "budget_reservation_status": "released",
-        "account_capacity_released": True,
-        "netting_domain_released": True,
-        "review_presence": False,
-    }
+    assert payload["closure_tickets"] == [
+        {
+            "ticket_id": ticket_id,
+            "aggregate_status": "settlement_pending",
+            "aggregate_version": 7,
+            "last_event_sequence": 7,
+            "netting_domain_key": f"closure-domain:{index}",
+            "position_quantity": "0",
+            "protected_quantity": "0",
+            "owned_order_residue_count": 0,
+            "unresolved_command_count": 0,
+            "open_incident_count": 0,
+            "budget_reservation_status": "released",
+            "account_capacity_released": True,
+            "netting_domain_released": True,
+            "review_presence": False,
+        }
+        for index, ticket_id in enumerate(ticket_ids, start=1)
+    ]
 
 
 @pytest.mark.asyncio
@@ -883,7 +888,10 @@ async def _insert_terminal_reviewed_ticket(engine: AsyncEngine) -> None:
         )
 
 
-async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
+async def _insert_released_pending_closure_tickets(
+    engine: AsyncEngine,
+    ticket_ids: tuple[str, ...],
+) -> None:
     async with engine.begin() as connection:
         scope = (
             await connection.execute(
@@ -893,11 +901,12 @@ async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
             )
         ).mappings().first()
         assert scope is not None
-        await connection.execute(
-            sa.insert(trade_tickets).values(
-                ticket_id="ticket:closure",
-                exposure_episode_id="exposure:closure",
-                signal_event_id="signal:closure",
+        for index, ticket_id in enumerate(ticket_ids, start=1):
+            await connection.execute(
+                sa.insert(trade_tickets).values(
+                ticket_id=ticket_id,
+                exposure_episode_id=f"exposure:closure:{index}",
+                signal_event_id=f"signal:closure:{index}",
                 strategy_group_id=scope["strategy_group_id"],
                 strategy_version_id=scope["strategy_version_id"],
                 event_spec_id=scope["event_spec_id"],
@@ -910,12 +919,12 @@ async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
                 venue_id="binance-usdm",
                 exchange_instrument_id=scope["exchange_instrument_id"],
                 position_side=scope["position_side"],
-                netting_domain_key="closure-domain",
+                netting_domain_key=f"closure-domain:{index}",
                 active_netting_domain_key=None,
                 entry_reference_price=Decimal("100"),
                 quantity=Decimal("0.1"),
                 notional=Decimal("10"),
-                capacity_claim_id="claim:closure",
+                capacity_claim_id=f"claim:closure:{index}",
                 planned_stop_risk_budget=Decimal("1"),
                 post_fill_stop_risk_limit=Decimal("1.1"),
                 selected_leverage=5,
@@ -938,11 +947,11 @@ async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
                 created_at_ms=1_800_000_000_010,
                 expires_at_ms=1_800_000_001_010,
                 terminal_at_ms=None,
+                )
             )
-        )
-        await connection.execute(
-            sa.insert(trade_aggregates).values(
-                ticket_id="ticket:closure",
+            await connection.execute(
+                sa.insert(trade_aggregates).values(
+                ticket_id=ticket_id,
                 status="settlement_pending",
                 version=7,
                 last_event_sequence=7,
@@ -956,7 +965,7 @@ async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
                 post_fill_risk_status="within_limit",
                 post_fill_disposition="closed",
                 protected_qty=Decimal("0"),
-                entry_exchange_order_id="entry:closure",
+                entry_exchange_order_id=f"entry:closure:{index}",
                 initial_stop_exchange_order_id=None,
                 active_stop_exchange_order_id=None,
                 active_stop_price=None,
@@ -969,17 +978,17 @@ async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
                 pending_stop_watermark_ms=None,
                 runner_stop_watermark_ms=None,
                 pending_cancel_exchange_order_id=None,
-                exit_exchange_order_id="exit:closure",
+                exit_exchange_order_id=f"exit:closure:{index}",
                 review_id=None,
                 lifecycle_due_at_ms=None,
                 reconciliation_due_at_ms=1_800_000_000_010,
                 updated_at_ms=1_800_000_000_010,
+                )
             )
-        )
-        await connection.execute(
-            sa.insert(budget_reservations).values(
-                budget_reservation_id="reservation:closure",
-                ticket_id="ticket:closure",
+            await connection.execute(
+                sa.insert(budget_reservations).values(
+                budget_reservation_id=f"reservation:closure:{index}",
+                ticket_id=ticket_id,
                 owner_policy_id="policy-main",
                 venue_id="binance-usdm",
                 account_id="subaccount-main",
@@ -991,8 +1000,8 @@ async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
                 status="released",
                 created_at_ms=1_800_000_000_010,
                 released_at_ms=1_800_000_000_020,
+                )
             )
-        )
 
 
 async def _insert_protected_tickets(

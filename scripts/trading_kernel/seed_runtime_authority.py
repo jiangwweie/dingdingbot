@@ -123,9 +123,13 @@ def _parser() -> argparse.ArgumentParser:
 
     closure = subparsers.add_parser(
         "deploy-closure-identity",
-        help="rotate identity only for one exact zero-exposure pending closure Ticket",
+        help="rotate identity only for an exact zero-exposure pending closure set",
     )
-    closure.add_argument("--closure-ticket-id", required=True)
+    closure.add_argument(
+        "--closure-ticket-id",
+        action="append",
+        required=True,
+    )
     closure.add_argument(
         "--account-id",
         default=os.getenv("TRADING_KERNEL_ACCOUNT_ID", ""),
@@ -219,7 +223,7 @@ async def _run(args: argparse.Namespace) -> int:
                         schema_revision=args.schema_revision,
                         seeded_at_ms=now_ms,
                     ),
-                    closure_ticket_id=args.closure_ticket_id,
+                    closure_ticket_ids=tuple(args.closure_ticket_id),
                 )
             elif args.action == "arm-acceptance":
                 result = await arm_acceptance_policy(

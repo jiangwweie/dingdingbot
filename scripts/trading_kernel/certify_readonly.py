@@ -96,11 +96,7 @@ def _protected_handover_tickets(
     return tickets
 
 
-def _closure_ticket_manifest(
-    row: dict[str, object] | None,
-) -> dict[str, object] | None:
-    if row is None:
-        return None
+def _closure_ticket_manifest(row: dict[str, object]) -> dict[str, object]:
     order_residue_count = sum(
         row[key] is not None
         for key in (
@@ -147,7 +143,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--closure-ticket-id",
-        help="Exact zero-exposure Settlement/Review pending Ticket for closure-only certification.",
+        action="append",
+        help="Exact zero-exposure Settlement/Review pending Ticket; repeat for the full closure set.",
     )
     return parser
 
@@ -156,16 +153,20 @@ async def _certify(
     database_url: str,
     *,
     require_flat: bool,
-    closure_ticket_id: str | None = None,
+    closure_ticket_ids: tuple[str, ...] = (),
 ) -> dict[str, object]:
     if not database_url.startswith("postgresql+asyncpg://"):
         raise ValueError("database URL must use postgresql+asyncpg")
-    normalized_closure_ticket_id = (
-        None if closure_ticket_id is None else closure_ticket_id.strip()
+    normalized_closure_ticket_ids = tuple(
+        ticket_id.strip() for ticket_id in closure_ticket_ids
     )
-    if closure_ticket_id is not None and not normalized_closure_ticket_id:
-        raise ValueError("closure Ticket identity must be non-blank")
-    if require_flat and normalized_closure_ticket_id is not None:
+    if any(not ticket_id for ticket_id in normalized_closure_ticket_ids):
+        raise ValueError("closure Ticket identities must be non-blank")
+    if len(set(normalized_closure_ticket_ids)) != len(
+        normalized_closure_ticket_ids
+    ):
+        raise ValueError("closure Ticket identities must be distinct")
+    if require_flat and normalized_closure_ticket_ids:
         raise ValueError("flat and closure-only certification are mutually exclusive")
     engine = create_async_engine(database_url)
     try:
@@ -414,22 +415,25 @@ async def _certify(
                     )
                 )
             ).mappings().all()
-            closure_ticket_row = None
-            closure_active_ticket_count = 0
-            if normalized_closure_ticket_id is not None:
-                closure_active_ticket_count = int(
-                    (
+            closure_ticket_rows: list[dict[str, object]] = []
+            active_ticket_ids: tuple[str, ...] = ()
+            if normalized_closure_ticket_ids:
+                active_ticket_ids = tuple(
+                    str(ticket_id)
+                    for ticket_id in (
                         await connection.execute(
                             text(
-                                "SELECT count(*) FROM brc_trade_tickets "
-                                "WHERE terminal_at_ms IS NULL"
+                                "SELECT ticket_id FROM brc_trade_tickets "
+                                "WHERE terminal_at_ms IS NULL ORDER BY ticket_id"
                             )
                         )
-                    ).scalar_one()
+                    ).scalars()
                 )
-                closure_ticket_row = (
-                    await connection.execute(
-                        text(
+                closure_ticket_rows = [
+                    dict(row)
+                    for row in (
+                        await connection.execute(
+                            text(
                             """
                             SELECT ticket.ticket_id,
                                    ticket.netting_domain_key,
@@ -477,13 +481,15 @@ async def _certify(
                                 ON aggregate_current.ticket_id = ticket.ticket_id
                               LEFT JOIN brc_budget_reservations reservation
                                 ON reservation.ticket_id = ticket.ticket_id
-                             WHERE ticket.ticket_id = :ticket_id
+                             WHERE ticket.ticket_id = ANY(:ticket_ids)
                                AND ticket.terminal_at_ms IS NULL
-                            """
-                        ),
-                        {"ticket_id": normalized_closure_ticket_id},
-                    )
-                ).mappings().one_or_none()
+                             ORDER BY ticket.ticket_id
+                                """
+                            ),
+                            {"ticket_ids": list(normalized_closure_ticket_ids)},
+                        )
+                    ).mappings()
+                ]
             await connection.rollback()
     finally:
         await engine.dispose()
@@ -519,7 +525,7 @@ async def _certify(
     )
     protected_tickets = (
         []
-        if normalized_closure_ticket_id is not None
+        if normalized_closure_ticket_ids
         else _protected_handover_tickets(
             [dict(row) for row in protected_ticket_rows]
         )
@@ -536,9 +542,9 @@ async def _certify(
             for key, value in owner_policy_row.items()
         }
     )
-    closure_ticket = _closure_ticket_manifest(
-        None if closure_ticket_row is None else dict(closure_ticket_row),
-    )
+    closure_tickets = [
+        _closure_ticket_manifest(row) for row in closure_ticket_rows
+    ]
     policy_is_dynamic = owner_policy_row is not None and all(
         (
             owner_policy_row["owner_policy_id"] == OWNER_POLICY_ID,
@@ -570,21 +576,24 @@ async def _certify(
         and isinstance(capabilities["exchange_commands"], bool)
     )
     closure_is_valid = (
-        normalized_closure_ticket_id is None
+        not normalized_closure_ticket_ids
         or (
-            closure_active_ticket_count == 1
-            and closure_ticket is not None
-            and closure_ticket["ticket_id"] == normalized_closure_ticket_id
-            and closure_ticket["aggregate_status"]
-            in {"settlement_pending", "review_pending"}
-            and closure_ticket["position_quantity"] == "0"
-            and closure_ticket["protected_quantity"] == "0"
-            and closure_ticket["owned_order_residue_count"] == 0
-            and closure_ticket["unresolved_command_count"] == 0
-            and closure_ticket["open_incident_count"] == 0
-            and closure_ticket["budget_reservation_status"] == "released"
-            and closure_ticket["account_capacity_released"] is True
-            and closure_ticket["netting_domain_released"] is True
+            set(active_ticket_ids) == set(normalized_closure_ticket_ids)
+            and len(closure_tickets) == len(normalized_closure_ticket_ids)
+            and all(
+                ticket["aggregate_status"]
+                in {"settlement_pending", "review_pending"}
+                and ticket["position_quantity"] == "0"
+                and ticket["protected_quantity"] == "0"
+                and ticket["owned_order_residue_count"] == 0
+                and ticket["unresolved_command_count"] == 0
+                and ticket["open_incident_count"] == 0
+                and ticket["budget_reservation_status"] == "released"
+                and ticket["account_capacity_released"] is True
+                and ticket["netting_domain_released"] is True
+                and ticket["review_presence"] is False
+                for ticket in closure_tickets
+            )
         )
     )
     passed = (
@@ -622,9 +631,9 @@ async def _certify(
         "active_counts": active_counts,
         "owner_projection": owner_projection,
         "protected_tickets": protected_tickets,
-        "closure_ticket": closure_ticket,
+        "closure_tickets": closure_tickets,
         "require_flat": require_flat,
-        "closure_ticket_id": normalized_closure_ticket_id,
+        "closure_ticket_ids": normalized_closure_ticket_ids,
         "checks": checks,
     }
 
@@ -635,7 +644,7 @@ def main(argv: list[str] | None = None) -> int:
         _certify(
             str(args.database_url or "").strip(),
             require_flat=args.require_flat,
-            closure_ticket_id=args.closure_ticket_id,
+            closure_ticket_ids=tuple(args.closure_ticket_id or ()),
         )
     )
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))

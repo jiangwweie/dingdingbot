@@ -160,27 +160,28 @@ def test_protected_release_forbids_enabling_entry() -> None:
         )
 
 
-def test_closure_only_release_requires_one_exact_ticket_and_keeps_entry_fenced() -> None:
+def test_closure_only_release_requires_exact_ticket_set_and_keeps_entry_fenced() -> None:
+    ticket_ids = ("ticket:btc-settlement", "ticket:sol-review")
     plan = _plan(
         enable_entry=False,
-        closure_ticket_id="ticket:btc-settlement",
+        closure_ticket_ids=ticket_ids,
     )
 
-    assert plan.closure_ticket_id == "ticket:btc-settlement"
+    assert plan.closure_ticket_ids == ticket_ids
     with pytest.raises(ValueError, match="closure-only"):
         _plan(
             enable_entry=True,
-            closure_ticket_id="ticket:btc-settlement",
+            closure_ticket_ids=ticket_ids,
         )
 
 
-def test_closure_only_release_recovers_only_the_exact_pending_ticket() -> None:
-    ticket_id = "ticket:btc-settlement"
-    backend = FakeDeploymentBackend(closure_ticket_id=ticket_id)
+def test_closure_only_release_recovers_only_the_exact_pending_ticket_set() -> None:
+    ticket_ids = ("ticket:btc-settlement", "ticket:sol-review")
+    backend = FakeDeploymentBackend(closure_ticket_ids=ticket_ids)
 
     result = deploy_tokyo_release(
         backend,
-        _plan(enable_entry=False, closure_ticket_id=ticket_id),
+        _plan(enable_entry=False, closure_ticket_ids=ticket_ids),
     )
 
     assert result.status == "pass"
@@ -188,21 +189,21 @@ def test_closure_only_release_recovers_only_the_exact_pending_ticket() -> None:
     assert backend.calls == [
         ("read_current_release",),
         ("install_release", TARGET_COMMIT, TARGET_RELEASE),
-        ("certify_closure", TARGET_RELEASE, ticket_id),
+        ("certify_closure", TARGET_RELEASE, ticket_ids),
         ("probe_exchange", TARGET_RELEASE),
         ("read_release_marker", CURRENT_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", CURRENT_RELEASE, ".brc-schema-revision"),
         ("stop_services", ALL_SERVICES),
         ("fence_entry",),
         ("services_active", ALL_SERVICES),
-        ("certify_closure", TARGET_RELEASE, ticket_id),
+        ("certify_closure", TARGET_RELEASE, ticket_ids),
         ("probe_exchange", TARGET_RELEASE),
         (
             "deploy_closure_identity",
             TARGET_RELEASE,
             TARGET_COMMIT,
             "0001_initial",
-            ticket_id,
+            ticket_ids,
         ),
         (
             "activate_release",
@@ -211,7 +212,7 @@ def test_closure_only_release_recovers_only_the_exact_pending_ticket() -> None:
             "0001_initial",
             SEED_IDENTITY,
         ),
-        ("certify_closure", TARGET_RELEASE, ticket_id),
+        ("certify_closure", TARGET_RELEASE, ticket_ids),
         ("probe_exchange", TARGET_RELEASE),
         ("read_current_release",),
         ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
@@ -266,7 +267,7 @@ def _plan(
     *,
     enable_entry: bool,
     protected_ticket_ids: tuple[str, ...] = (),
-    closure_ticket_id: str | None = None,
+    closure_ticket_ids: tuple[str, ...] = (),
 ) -> DeploymentPlan:
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
@@ -275,7 +276,7 @@ def _plan(
         expected_configured_leverage=5,
         enable_entry=enable_entry,
         protected_ticket_ids=protected_ticket_ids,
-        closure_ticket_id=closure_ticket_id,
+        closure_ticket_ids=closure_ticket_ids,
     )
 
 
@@ -286,14 +287,14 @@ class FakeDeploymentBackend:
         configured_leverage: int = 5,
         active_ticket_count: int = 0,
         protected_ticket_ids: tuple[str, ...] = (),
-        closure_ticket_id: str | None = None,
+        closure_ticket_ids: tuple[str, ...] = (),
         open_order_domain_count: int | None = None,
         include_exact_protected_facts: bool = True,
         fail_at: str | None = None,
     ) -> None:
         self.configured_leverage = configured_leverage
         self.protected_ticket_ids = protected_ticket_ids
-        self.closure_ticket_id = closure_ticket_id
+        self.closure_ticket_ids = closure_ticket_ids
         self.active_ticket_count = (
             len(protected_ticket_ids)
             if protected_ticket_ids
@@ -362,9 +363,9 @@ class FakeDeploymentBackend:
     def certify_closure(
         self,
         release: str,
-        ticket_id: str,
+        ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
-        self.calls.append(("certify_closure", release, ticket_id))
+        self.calls.append(("certify_closure", release, ticket_ids))
         return {
             "status": "pass",
             "runtime_identity": {
@@ -378,19 +379,22 @@ class FakeDeploymentBackend:
                 "positions": 0,
                 "incidents": 0,
             },
-            "closure_ticket": {
-                "ticket_id": ticket_id,
-                "aggregate_status": "settlement_pending",
-                "position_quantity": "0",
-                "protected_quantity": "0",
-                "owned_order_residue_count": 0,
-                "unresolved_command_count": 0,
-                "open_incident_count": 0,
-                "budget_reservation_status": "released",
-                "account_capacity_released": True,
-                "netting_domain_released": True,
-                "review_presence": False,
-            },
+            "closure_tickets": [
+                {
+                    "ticket_id": ticket_id,
+                    "aggregate_status": "settlement_pending",
+                    "position_quantity": "0",
+                    "protected_quantity": "0",
+                    "owned_order_residue_count": 0,
+                    "unresolved_command_count": 0,
+                    "open_incident_count": 0,
+                    "budget_reservation_status": "released",
+                    "account_capacity_released": True,
+                    "netting_domain_released": True,
+                    "review_presence": False,
+                }
+                for ticket_id in ticket_ids
+            ],
         }
 
     def probe_exchange(self, release: str) -> Mapping[str, object]:
@@ -525,7 +529,7 @@ class FakeDeploymentBackend:
         release: str,
         commit: str,
         schema_revision: str,
-        ticket_id: str,
+        ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         self.calls.append(
             (
@@ -533,7 +537,7 @@ class FakeDeploymentBackend:
                 release,
                 commit,
                 schema_revision,
-                ticket_id,
+                ticket_ids,
             )
         )
         self.runtime_commit = commit
