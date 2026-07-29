@@ -1,14 +1,19 @@
 ---
 title: Crypto Strategy Universe General Capability Test Cases
-status: IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY
+status: SUPERSEDED_BY_STRUCTURAL_OPERABILITY_REPAIR
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-28
 revision: 3
 design: 2026-07-28-crypto-strategy-universe-design.md
 plan: ../plans/2026-07-28-crypto-strategy-universe-implementation.md
+superseded_by: 2026-07-29-strategy-universe-operability-repair-test-cases.md
 ---
 
 # Crypto Strategy Universe General Capability Test Cases
+
+> **Superseded:** 本文档只保留为历史测试来源。新的 RED/GREEN 和发布验收必须
+> 遵循 `2026-07-29-strategy-universe-operability-repair-test-cases.md`；与新规格
+> 冲突的旧测试应删除或重写。
 
 ## 当前状态
 
@@ -420,8 +425,5 @@ green、SQLite、手工 SQL 截图或生成报告替代。
 
 ## 通过定义
 
-本测试规格只有在所有适用用例均有自动化实现、完整 suite 通过、失败注入
-恢复可重复、查询与调用上界被执行性断言覆盖时，才可从
-`IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY` 的实施中状态进入本地已验收状态。
-
-生产播种和 Tokyo 部署仍需独立 Owner 确认，不能由本地测试通过自动授权。
+本文档已被 2026-07-29 结构性修复测试规格替代，不再定义新的通过状态。历史
+用例只有在与新语义一致时才可复用；冲突用例必须删除或重写。

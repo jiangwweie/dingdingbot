@@ -1,7 +1,7 @@
 ---
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
-last_verified: 2026-07-22
+last_verified: 2026-07-29
 ---
 
 # AI Agent Constraints
@@ -15,6 +15,10 @@ real-funds terminal lifecycle.
 ## Required Engineering Posture
 
 - Prefer deletion and clean replacement over compatibility.
+- Delete or rewrite code, tests, migrations, fixtures, and deployment branches
+  whose semantics are wrong or retired. Historical behavior is not a reason to
+  add compatibility debt, preserve misleading names, or weaken current
+  invariants.
 - Do not patch around missing invariants; close the problem class in the shared
   kernel.
 - Do not preserve tests whose expected behavior conflicts with accepted current
@@ -23,6 +27,21 @@ real-funds terminal lifecycle.
   deployment units.
 - Do not claim a full chain from downstream fixtures that bypass the real
   producer boundary.
+
+## Local-First Failure Discovery
+
+- Prefer exposing defects in local automated verification rather than on the
+  Tokyo server.
+- Time, concurrency, lease, migration, worker-cadence, deployment-gate, and
+  restart behavior must be exercised with production-shaped local tests, not
+  synchronized fixtures that remove the real failure condition.
+- PostgreSQL behavior uses disposable PostgreSQL; clean-rebuild deployment is
+  rehearsed locally from an empty database through schema, seed, Universe
+  installation, worker progression, certification, and Entry promotion.
+- Recording exchange fakes must prove the exact read and mutation boundary.
+  Local certification and warming tests perform zero exchange mutation.
+- A server deployment verifies current external facts; it is not the primary
+  environment for discovering deterministic program defects.
 
 ## Core Boundaries
 
@@ -71,4 +90,5 @@ Completion requires current evidence for:
 7. crash-safe and resume-safe destructive cutover;
 8. exact Tokyo commit/schema identity;
 9. one terminal controlled real-funds Ticket;
-10. final requirement-by-requirement audit.
+10. a production-shaped local clean-rebuild rehearsal;
+11. final requirement-by-requirement audit.

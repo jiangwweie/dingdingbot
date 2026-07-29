@@ -1,4 +1,14 @@
+---
+status: SUPERSEDED_BY_STRUCTURAL_OPERABILITY_REPAIR
+authority: NOT_CURRENT_AUTHORITY
+superseded_by: 2026-07-29-strategy-universe-stop-rebuild-deployment-plan.md
+---
+
 # Crypto Strategy Universe General Capability Implementation Plan
+
+> **Superseded:** 本计划只保留为历史实施来源。后续实现与东京发布使用
+> `2026-07-29-strategy-universe-operability-repair-design.md`、对应测试规格和
+> `2026-07-29-strategy-universe-stop-rebuild-deployment-plan.md`。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:test-driven-development` for every task and

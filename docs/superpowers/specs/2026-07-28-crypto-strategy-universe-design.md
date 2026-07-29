@@ -1,12 +1,17 @@
 ---
 title: Crypto Strategy Universe General Capability Design
-status: IMPLEMENTATION_AUTHORIZED_LOCAL_ONLY
+status: SUPERSEDED_BY_STRUCTURAL_OPERABILITY_REPAIR
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-28
 revision: 3
+superseded_by: 2026-07-29-strategy-universe-operability-repair-design.md
 ---
 
 # Crypto Strategy Universe General Capability Design
+
+> **Superseded:** 本文档只保留为历史设计来源。新的实现、测试和部署必须遵循
+> `2026-07-29-strategy-universe-operability-repair-design.md`，不得继续实现本文
+> 已被替换的时间、迁移和部署语义。
 
 ## 决策门
 
