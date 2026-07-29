@@ -1499,6 +1499,122 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
 
 
 @pytest.mark.asyncio
+async def test_ccxt_adapter_uses_premium_index_mark_for_flat_zero_mark_position_risk() -> None:
+    exchange = AdmissionSnapshotExchange()
+    premium_index_calls: list[dict[str, object]] = []
+
+    async def flat_zero_mark_position_risk(params):
+        exchange.position_risk_calls.append(dict(params))
+        assert params == {"symbol": "SOLUSDT"}
+        return [
+            {
+                "symbol": "SOLUSDT",
+                "positionAmt": "0.000",
+                "markPrice": "0.00000000",
+                "leverage": "4",
+                "marginType": "cross",
+                "positionSide": "LONG",
+            },
+            {
+                "symbol": "SOLUSDT",
+                "positionAmt": "0.000",
+                "markPrice": "0.00000000",
+                "leverage": "4",
+                "marginType": "cross",
+                "positionSide": "SHORT",
+            },
+        ]
+
+    async def premium_index(params):
+        premium_index_calls.append(dict(params))
+        assert params == {"symbol": "SOLUSDT"}
+        return {"symbol": "SOLUSDT", "markPrice": "100.25"}
+
+    original_account = exchange.fapiPrivateV2GetAccount
+
+    async def flat_target_account(params):
+        account = await original_account(params)
+        account["positions"] = [
+            row for row in account["positions"] if row["symbol"] != "SOLUSDT"
+        ]
+        return account
+
+    exchange.fapiPrivateV2GetPositionRisk = flat_zero_mark_position_risk
+    exchange.fapiPublicGetPremiumIndex = premium_index
+    exchange.fapiPrivateV2GetAccount = flat_target_account
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        clock_ms=lambda: 2_000,
+    )
+
+    snapshot = await adapter.read_account_risk_snapshot(
+        AccountRiskSnapshotRequest(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:SOLUSDT:perpetual",
+            observed_at_ms=2_000,
+            valid_for_ms=5_000,
+        )
+    )
+
+    assert snapshot.mark_price == Decimal("100.25")
+    assert snapshot.configured_leverage == 4
+    assert exchange.position_risk_calls == [{"symbol": "SOLUSDT"}]
+    assert premium_index_calls == [{"symbol": "SOLUSDT"}]
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_rejects_premium_index_mark_for_different_symbol() -> None:
+    exchange = AdmissionSnapshotExchange()
+
+    async def flat_zero_mark_position_risk(params):
+        assert params == {"symbol": "SOLUSDT"}
+        return [
+            {
+                "symbol": "SOLUSDT",
+                "positionAmt": "0.000",
+                "markPrice": "0.00000000",
+                "leverage": "4",
+                "marginType": "cross",
+                "positionSide": position_side,
+            }
+            for position_side in ("LONG", "SHORT")
+        ]
+
+    async def premium_index(params):
+        assert params == {"symbol": "SOLUSDT"}
+        return {"symbol": "BTCUSDT", "markPrice": "100.25"}
+
+    original_account = exchange.fapiPrivateV2GetAccount
+
+    async def flat_target_account(params):
+        account = await original_account(params)
+        account["positions"] = [
+            row for row in account["positions"] if row["symbol"] != "SOLUSDT"
+        ]
+        return account
+
+    exchange.fapiPrivateV2GetPositionRisk = flat_zero_mark_position_risk
+    exchange.fapiPublicGetPremiumIndex = premium_index
+    exchange.fapiPrivateV2GetAccount = flat_target_account
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        clock_ms=lambda: 2_000,
+    )
+
+    with pytest.raises(RuntimeError, match="premium-index symbol"):
+        await adapter.read_account_risk_snapshot(
+            AccountRiskSnapshotRequest(
+                venue_id="binance-usdm",
+                account_id="experiment-1",
+                exchange_instrument_id="binance-usdm:SOLUSDT:perpetual",
+                observed_at_ms=2_000,
+                valid_for_ms=5_000,
+            )
+        )
+
+
+@pytest.mark.asyncio
 async def test_ccxt_adapter_reads_typed_leverage_and_maintenance_rules() -> None:
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): InstrumentRulesExchange()},

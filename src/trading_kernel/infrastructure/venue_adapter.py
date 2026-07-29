@@ -139,6 +139,8 @@ class _CcxtExchange(Protocol):
 
     def fapiPrivateV2GetPositionRisk(self, params: Mapping[str, object]) -> object: ...
 
+    def fapiPublicGetPremiumIndex(self, params: Mapping[str, object]) -> object: ...
+
     def fapiPrivateV2GetAccount(self, params: Mapping[str, object]) -> object: ...
 
     def fetch_my_trades(
@@ -371,6 +373,7 @@ class CcxtVenueAdapter:
                 _read_binance_usdm_admission_target_positions(
                     exchange=exchange,
                     symbol=symbol,
+                    require_mark_price=True,
                 ),
             )
         )
@@ -1737,6 +1740,7 @@ async def _read_binance_usdm_admission_target_positions(
     *,
     exchange: _CcxtExchange,
     symbol: str,
+    require_mark_price: bool = False,
 ) -> list[object]:
     """Read the requested Binance symbol, including its zero long/short sides."""
 
@@ -1748,12 +1752,15 @@ async def _read_binance_usdm_admission_target_positions(
         ),
         name="admission requested-instrument position risk",
     )
-    normalized_rows: list[object] = []
+    exact_rows: list[Mapping[str, object]] = []
     position_sides: set[str] = set()
     for row in rows:
-        raw = _require_mapping(
-            row,
-            name="admission requested-instrument position risk row",
+        raw = cast(
+            Mapping[str, object],
+            _require_mapping(
+                row,
+                name="admission requested-instrument position risk row",
+            ),
         )
         if str(raw.get("symbol") or "").strip() != market_id:
             continue
@@ -1763,19 +1770,60 @@ async def _read_binance_usdm_admission_target_positions(
                 "venue admission requested-instrument position side is invalid"
             )
         position_sides.add(position_side)
-        normalized_rows.append(
-            {
-                "symbol": symbol,
-                "contracts": raw.get("positionAmt"),
-                "entryPrice": raw.get("entryPrice"),
-                "info": dict(raw),
-            }
-        )
-    if len(normalized_rows) != 2 or position_sides != {"LONG", "SHORT"}:
+        exact_rows.append(raw)
+    if len(exact_rows) != 2 or position_sides != {"LONG", "SHORT"}:
         raise RuntimeError(
             "venue admission snapshot lacks requested instrument position sides"
         )
+    flat_mark_price = (
+        await _read_flat_position_risk_mark_price(
+            exchange=exchange,
+            market_id=market_id,
+            rows=tuple(exact_rows),
+        )
+        if require_mark_price
+        else None
+    )
+    normalized_rows: list[object] = []
+    for exact_row in exact_rows:
+        info = dict(exact_row)
+        if flat_mark_price is not None:
+            info["markPrice"] = str(flat_mark_price)
+        normalized_rows.append(
+            {
+                "symbol": symbol,
+                "contracts": exact_row.get("positionAmt"),
+                "entryPrice": exact_row.get("entryPrice"),
+                "info": info,
+            }
+        )
     return normalized_rows
+
+
+async def _read_flat_position_risk_mark_price(
+    *,
+    exchange: _CcxtExchange,
+    market_id: str,
+    rows: tuple[Mapping[str, object], ...],
+) -> Decimal | None:
+    position_amounts = tuple(
+        Decimal(str(row.get("positionAmt") or "0")) for row in rows
+    )
+    mark_prices = tuple(Decimal(str(row.get("markPrice") or "0")) for row in rows)
+    if any(amount != 0 for amount in position_amounts) or any(
+        mark_price != 0 for mark_price in mark_prices
+    ):
+        return None
+    premium_index = getattr(exchange, "fapiPublicGetPremiumIndex", None)
+    if not callable(premium_index):
+        raise TypeError("Binance venue lacks USD-M premium-index readonly lookup")
+    result = _require_mapping(
+        await _call_raw_exchange(premium_index, {"symbol": market_id}),
+        name="admission premium-index mark",
+    )
+    if str(result.get("symbol") or "").strip() != market_id:
+        raise RuntimeError("venue admission premium-index symbol differs from request")
+    return Decimal(str(result.get("markPrice") or "0"))
 
 
 def _venue_row_symbol(value: object, *, row_kind: str) -> str:
