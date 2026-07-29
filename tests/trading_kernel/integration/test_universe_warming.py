@@ -278,6 +278,89 @@ async def test_all_warming_members_become_ready_without_signal_chain(
 
 
 @pytest.mark.asyncio
+async def test_warming_after_install_can_use_fresh_last_closed_bar(
+    warming_engine: AsyncEngine,
+) -> None:
+    """Catches readiness time incorrectly using the pre-install bar close."""
+
+    scope = (await _warming_scopes(warming_engine))[0]
+    installed_after_close_ms = NOW_MS + 30_000
+    attempted_at_ms = NOW_MS + 60_000
+    async with warming_engine.begin() as connection:
+        await connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id
+                == scope["runtime_scope_id"]
+            )
+            .values(updated_at_ms=installed_after_close_ms)
+        )
+
+    result = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        _triggering_source(
+            warming_engine,
+            (scope["exchange_instrument_id"],),
+        ),
+        ObservationRequest(
+            runtime_scope_id=scope["runtime_scope_id"],
+            runtime_commit=RUNTIME_COMMIT,
+            schema_revision=SCHEMA_REVISION,
+            trigger_candle_close_time_ms=NOW_MS,
+            attempted_at_ms=attempted_at_ms,
+        ),
+    )
+
+    assert result.status is ObservationStatus.WARMED
+    persisted = await _persisted_scope(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    assert persisted["warm_ready_at_ms"] == attempted_at_ms
+    assert persisted["updated_at_ms"] == attempted_at_ms
+
+
+@pytest.mark.asyncio
+async def test_warming_failure_after_install_records_attempt_time(
+    warming_engine: AsyncEngine,
+) -> None:
+    """Catches blockers incorrectly using the pre-install bar close time."""
+
+    scope = (await _warming_scopes(warming_engine))[0]
+    installed_after_close_ms = NOW_MS + 30_000
+    attempted_at_ms = NOW_MS + 60_000
+    async with warming_engine.begin() as connection:
+        await connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id
+                == scope["runtime_scope_id"]
+            )
+            .values(updated_at_ms=installed_after_close_ms)
+        )
+
+    result = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(warming_engine),
+        TypedMarketFake(warming_engine, {}),
+        ObservationRequest(
+            runtime_scope_id=scope["runtime_scope_id"],
+            runtime_commit=RUNTIME_COMMIT,
+            schema_revision=SCHEMA_REVISION,
+            trigger_candle_close_time_ms=NOW_MS,
+            attempted_at_ms=attempted_at_ms,
+        ),
+    )
+
+    assert result.status is ObservationStatus.INVALID
+    persisted = await _persisted_scope(
+        warming_engine,
+        scope["runtime_scope_id"],
+    )
+    assert persisted["warm_ready_at_ms"] is None
+    assert persisted["updated_at_ms"] == attempted_at_ms
+
+
+@pytest.mark.asyncio
 async def test_last_warm_success_auto_activates_fully_certified_universe(
     warming_engine: AsyncEngine,
 ) -> None:
@@ -1243,7 +1326,7 @@ async def test_crashed_warming_claim_is_recovered_after_lease_expiry(
         ).mappings().one()
     assert persisted["lease_owner"] is None
     assert persisted["lease_expires_at_ms"] is None
-    assert persisted["warm_ready_at_ms"] == NOW_MS
+    assert persisted["warm_ready_at_ms"] == NOW_MS + 60_000
 
 
 @pytest.mark.asyncio

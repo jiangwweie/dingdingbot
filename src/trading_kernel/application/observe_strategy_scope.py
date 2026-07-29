@@ -207,6 +207,11 @@ async def observe_strategy_scope(
                 event_spec_id=scope.event_spec_id,
                 reason="scope_or_policy_mismatch",
             )
+        projection_updated_at_ms = (
+            attempted_at_ms
+            if scope.lifecycle_state == "warming"
+            else request.trigger_candle_close_time_ms
+        )
         if not _scope_observation_permissions_are_valid(scope):
             if scope.lifecycle_state == "warming":
                 await _save_observation_blocker(
@@ -214,7 +219,7 @@ async def observe_strategy_scope(
                     scope=scope,
                     blocker="scope_or_policy_mismatch",
                     detector_reason="scope_or_policy_mismatch",
-                    updated_at_ms=request.trigger_candle_close_time_ms,
+                    updated_at_ms=projection_updated_at_ms,
                 )
             return _invalid_observation(
                 request,
@@ -229,7 +234,7 @@ async def observe_strategy_scope(
                     scope=scope,
                     blocker="registry_event_unavailable",
                     detector_reason="registry_event_unavailable",
-                    updated_at_ms=request.trigger_candle_close_time_ms,
+                    updated_at_ms=projection_updated_at_ms,
                 )
             return _invalid_observation(
                 request,
@@ -249,7 +254,7 @@ async def observe_strategy_scope(
                 scope=scope,
                 blocker="universe_identity_inconsistent",
                 detector_reason="universe_identity_inconsistent",
-                updated_at_ms=request.trigger_candle_close_time_ms,
+                updated_at_ms=projection_updated_at_ms,
             )
             return _invalid_observation(
                 request,
@@ -271,7 +276,7 @@ async def observe_strategy_scope(
                 scope=scope,
                 blocker="universe_identity_inconsistent",
                 detector_reason="universe_identity_inconsistent",
-                updated_at_ms=request.trigger_candle_close_time_ms,
+                updated_at_ms=projection_updated_at_ms,
             )
             return _invalid_observation(
                 request,
@@ -286,7 +291,7 @@ async def observe_strategy_scope(
                     scope=scope,
                     blocker="registry_scope_mismatch",
                     detector_reason="registry_scope_mismatch",
-                    updated_at_ms=request.trigger_candle_close_time_ms,
+                    updated_at_ms=projection_updated_at_ms,
                 )
             return _invalid_observation(
                 request,
@@ -323,9 +328,7 @@ async def observe_strategy_scope(
                             scope=scope,
                             blocker="observation_unavailable",
                             detector_reason="market_snapshot_unavailable",
-                            updated_at_ms=(
-                                request.trigger_candle_close_time_ms
-                            ),
+                            updated_at_ms=projection_updated_at_ms,
                         )
                         return _invalid_observation(
                             request,
@@ -340,7 +343,7 @@ async def observe_strategy_scope(
                     scope=scope,
                     blocker="comparative_projection_invalid",
                     detector_reason="comparative_projection_invalid",
-                    updated_at_ms=request.trigger_candle_close_time_ms,
+                    updated_at_ms=projection_updated_at_ms,
                 )
                 return _invalid_observation(
                     request,
@@ -384,7 +387,7 @@ async def observe_strategy_scope(
                 scope=scope,
                 blocker="comparative_projection_invalid",
                 detector_reason="comparative_projection_invalid",
-                updated_at_ms=request.trigger_candle_close_time_ms,
+                updated_at_ms=projection_updated_at_ms,
             )
         return _invalid_observation(
             request,
@@ -398,7 +401,7 @@ async def observe_strategy_scope(
                 scope=scope,
                 blocker="observation_unavailable",
                 detector_reason="market_snapshot_unavailable",
-                updated_at_ms=request.trigger_candle_close_time_ms,
+                updated_at_ms=projection_updated_at_ms,
             )
         return _invalid_observation(
             request,
@@ -418,7 +421,7 @@ async def observe_strategy_scope(
                     scope=scope,
                     blocker="warm_facts_invalid",
                     detector_reason="warm_facts_invalid",
-                    updated_at_ms=request.trigger_candle_close_time_ms,
+                    updated_at_ms=projection_updated_at_ms,
                 )
             return _invalid_observation(
                 request,
@@ -432,7 +435,7 @@ async def observe_strategy_scope(
                 scope=scope,
                 blocker="observation_unavailable",
                 detector_reason=detector_result.reason_code,
-                updated_at_ms=request.trigger_candle_close_time_ms,
+                updated_at_ms=projection_updated_at_ms,
             )
             return ObservationResult(
                 status=ObservationStatus.INVALID,
@@ -457,7 +460,7 @@ async def observe_strategy_scope(
                     scope=scope,
                     facts=persisted_facts,
                     expected_fact_definition_ids=expected_fact_ids,
-                    ready_at_ms=request.trigger_candle_close_time_ms,
+                    ready_at_ms=projection_updated_at_ms,
                 )
             except ValueError:
                 await _save_observation_blocker(
@@ -465,7 +468,7 @@ async def observe_strategy_scope(
                     scope=scope,
                     blocker="warm_facts_invalid",
                     detector_reason="warm_facts_invalid",
-                    updated_at_ms=request.trigger_candle_close_time_ms,
+                    updated_at_ms=projection_updated_at_ms,
                 )
                 return _invalid_observation(
                     request,
