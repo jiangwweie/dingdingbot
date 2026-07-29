@@ -443,7 +443,7 @@ async def _run_reconciliation_worker_once_core(
                         expected_entry_quantity=executed_entry_quantity,
                         entry_order_reference=entry_order_reference,
                         exit_order_references=exit_order_references,
-                        entry_time_ms=entry_time_ms,
+                        entry_time_ms=review.ticket.created_at_ms,
                         exit_time_ms=exit_time_ms,
                         funding_attribution_exact=not overlapping_exposure,
                         observed_at_ms=request.now_ms,

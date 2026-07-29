@@ -230,6 +230,7 @@ async def test_review_worker_does_not_write_a_thin_review_when_facts_are_missing
     assert result.detail == "review_economics:RuntimeError"
     assert state.aggregates.scheduled_due_at_ms == 35_000
     assert len(source.requests) == 1
+    assert source.requests[0].entry_time_ms == state.aggregate.ticket.created_at_ms
 
 
 @pytest.mark.asyncio
