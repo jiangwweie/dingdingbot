@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
 
 import pytest
@@ -79,12 +80,22 @@ from tests.trading_kernel.integration.universe_activation_support import (
 )
 from tests.trading_kernel.integration.universe_certification_support import (
     NOW_MS,
+    NoTicketPositionSource,
+    NoTicketVenueTruth,
     RecordingReadonlyCertificationSource,
     worker_request,
 )
 from tests.trading_kernel.integration.universe_certification_support import (
     certification_engine as _certification_engine,  # noqa: F401
 )
+
+
+def _certification_unavailable_count(payload: Mapping[str, object]) -> int:
+    strategy_universe = payload.get("strategy_universe")
+    assert isinstance(strategy_universe, Mapping)
+    count = strategy_universe.get("temporarily_unavailable_certification_count")
+    assert isinstance(count, int)
+    return count
 
 
 @pytest.mark.asyncio
@@ -99,8 +110,8 @@ async def test_network_timeout_is_retryable_and_readonly_visible(
     )
     result = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(_certification_engine),
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         worker_request(NOW_MS),
         instrument_certification_source=source,
     )
@@ -112,9 +123,7 @@ async def test_network_timeout_is_retryable_and_readonly_visible(
     assert result.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
     assert result.detail == "temporarily_unavailable"
     assert payload["status"] == "pass"
-    assert payload["strategy_universe"][
-        "temporarily_unavailable_certification_count"
-    ] == 1
+    assert _certification_unavailable_count(payload) == 1
 
 
 @pytest.mark.asyncio
@@ -129,8 +138,8 @@ async def test_readonly_timeout_count_excludes_retired_and_other_profile_facts(
     )
     await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(_certification_engine),
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         worker_request(NOW_MS),
         instrument_certification_source=source,
     )
@@ -170,9 +179,7 @@ async def test_readonly_timeout_count_excludes_retired_and_other_profile_facts(
         _certification_engine.url.render_as_string(hide_password=False),
         require_flat=True,
     )
-    assert current["strategy_universe"][
-        "temporarily_unavailable_certification_count"
-    ] == 1
+    assert _certification_unavailable_count(current) == 1
 
     async with _certification_engine.begin() as connection:
         await connection.execute(
@@ -195,9 +202,7 @@ async def test_readonly_timeout_count_excludes_retired_and_other_profile_facts(
         _certification_engine.url.render_as_string(hide_password=False),
         require_flat=True,
     )
-    assert retired["strategy_universe"][
-        "temporarily_unavailable_certification_count"
-    ] == 0
+    assert _certification_unavailable_count(retired) == 0
 
 
 @pytest.mark.asyncio
@@ -223,8 +228,8 @@ async def test_worker_crash_claim_is_reclaimed_after_lease_expiry_without_signal
     source = RecordingReadonlyCertificationSource(_certification_engine)
     recovered = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(_certification_engine),
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         worker_request(NOW_MS + 60_000),
         instrument_certification_source=source,
     )
@@ -515,6 +520,8 @@ async def test_official_activation_rolls_back_while_entry_lane_is_claimed(
         _activation_engine,
         event_spec_id=ticket.identity.runtime.event_spec_id,
     )
+    scope_projections = before["scope_projections"]
+    assert isinstance(scope_projections, tuple)
     assert all(
         {
             "next_observation_due_at_ms",
@@ -523,7 +530,7 @@ async def test_official_activation_rolls_back_while_entry_lane_is_claimed(
             "observation_generation",
             "updated_at_ms",
         }.issubset(scope)
-        for scope in before["scope_projections"]
+        for scope in scope_projections
     )
 
     with pytest.raises(DBAPIError) as activation_error:
@@ -620,13 +627,13 @@ async def _ticket_for_active_universe(
                 )
             )
         )
-        policy_version = int(
-            await connection.scalar(
-                sa.select(owner_policy_current.c.policy_version).where(
-                    owner_policy_current.c.owner_policy_id == scope["owner_policy_id"]
-                )
+        policy_version_value = await connection.scalar(
+            sa.select(owner_policy_current.c.policy_version).where(
+                owner_policy_current.c.owner_policy_id == scope["owner_policy_id"]
             )
         )
+        assert policy_version_value is not None
+        policy_version = int(policy_version_value)
 
     original = _registered_sor_long_ticket()
     domain = original.identity.netting_domain.model_copy(

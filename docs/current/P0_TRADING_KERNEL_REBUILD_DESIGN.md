@@ -58,7 +58,7 @@ src/trading_kernel/infrastructure PostgreSQL and venue adapters
 src/trading_kernel/interfaces     bounded runtime and readonly surfaces
 ```
 
-The tracked database head is `0002_crypto_strategy_universe`. PostgreSQL owns
+The tracked database head is `0001_trading_kernel_baseline_v2`. PostgreSQL owns
 current runtime truth and append-only lifecycle facts. Exchange readonly facts
 own external truth. Repository documents and generated output never own
 production decisions.

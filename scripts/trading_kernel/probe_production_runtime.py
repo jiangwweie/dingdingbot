@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 import time
 from collections.abc import Mapping
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -88,6 +91,7 @@ class ProductionRuntimeProbe(BaseModel):
     total_wallet_balance: Decimal
     available_margin: Decimal
     rules: tuple[InstrumentRuleProbe, ...]
+    probe_manifest: tuple[str, ...]
     protected_tickets: tuple[ProtectedHandoverTicketProbe, ...] = ()
     observed_at_ms: int
 
@@ -95,12 +99,6 @@ class ProductionRuntimeProbe(BaseModel):
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--now-ms", type=int)
-    parser.add_argument(
-        "--exchange-instrument-id",
-        action="append",
-        default=[],
-        help="Canonical active Universe instrument identity to probe.",
-    )
     parser.add_argument("--validity-ms", type=int, default=5_000)
     parser.add_argument(
         "--protected-ticket-json",
@@ -206,9 +204,46 @@ async def probe_production_runtime(
         total_wallet_balance=account_risk.total_wallet_balance,
         available_margin=account_risk.available_margin,
         rules=tuple(rule_rows),
+        probe_manifest=instruments,
         protected_tickets=protected_tickets,
         observed_at_ms=now_ms,
     )
+
+
+async def load_database_probe_manifest(
+    database_url: str,
+) -> tuple[str, ...]:
+    """Read the complete bounded release probe scope from PostgreSQL authority."""
+
+    normalized = database_url.strip()
+    if not normalized.startswith("postgresql+asyncpg://"):
+        raise ValueError("probe manifest requires postgresql+asyncpg runtime URL")
+    engine = create_async_engine(normalized)
+    try:
+        async with engine.connect() as connection:
+            rows = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT exchange_instrument_id
+                        FROM (
+                            SELECT exchange_instrument_id
+                            FROM brc_runtime_scopes_current
+                            WHERE lifecycle_state IN ('active', 'warming')
+                            UNION
+                            SELECT exchange_instrument_id
+                            FROM brc_trade_tickets
+                            WHERE terminal_at_ms IS NULL
+                        ) AS manifest
+                        ORDER BY exchange_instrument_id
+                        LIMIT 71
+                        """
+                    )
+                )
+            ).scalars().all()
+    finally:
+        await engine.dispose()
+    return _canonical_active_universe_instrument_ids(tuple(str(row) for row in rows))
 
 
 def _canonical_active_universe_instrument_ids(
@@ -339,7 +374,9 @@ async def _run(args: argparse.Namespace) -> int:
             settings,
             now_ms=args.now_ms or int(time.time() * 1_000),
             validity_ms=args.validity_ms,
-            exchange_instrument_ids=tuple(args.exchange_instrument_id),
+            exchange_instrument_ids=await load_database_probe_manifest(
+                os.getenv("TRADING_KERNEL_DATABASE_URL", "")
+            ),
             expected_protected_tickets=expected_protected_tickets,
         )
         print(result.model_dump_json())

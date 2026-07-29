@@ -15,6 +15,7 @@ from src.trading_kernel.application.reconcile_ticket import (
     reconcile_ticket,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.commands import OrderCommandPayload
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.ticket import build_ticket_id
@@ -39,6 +40,9 @@ from tests.trading_kernel.integration.test_command_dispatch import (
 )
 from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
     _registered_sor_long_ticket,
+)
+from tests.trading_kernel.integration.universe_certification_support import (
+    NoTicketVenueTruth,
 )
 
 dispatch_engine = dispatch_fixture.dispatch_engine
@@ -214,6 +218,7 @@ async def _assert_active_protection_is_unchanged(
         for command in commands
         if command.venue_client_order_id == expected_stop.venue_client_order_id
     )
+    assert isinstance(active_command.payload, OrderCommandPayload)
     assert active_command.payload.quantity == aggregate.position_qty
     assert len(commands) == (3 if status is AggregateStatus.POSITION_PROTECTED else 5)
 
@@ -272,42 +277,44 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
     request = ReconciliationWorkerRequest(
         worker_id="reconciliation-fairness-full-chain",
         runtime_commit="kernel-test-head",
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         now_ms=33_600,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
         idle_poll_interval_ms=2_000,
-        closure_starvation_limit_ms=30_000,
     )
-
-    closure = await run_reconciliation_worker_once(
-        lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        object(),
-        source,
-        request,
-    )
-    assert closure.status is ReconciliationWorkerStatus.SETTLED
-    assert closure.ticket_id == btc_ticket.identity.ticket_id
-    assert source.requests == []
 
     protected = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        object(),
+        NoTicketVenueTruth(),
         source,
-        request.model_copy(update={"now_ms": 33_601}),
+        request,
     )
     assert protected.status is ReconciliationWorkerStatus.POSITION_RECONCILED
     assert protected.ticket_id in {
         sol_ticket.identity.ticket_id,
         avax_ticket.identity.ticket_id,
     }
+
     other_protected = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        object(),
+        NoTicketVenueTruth(),
+        source,
+        request.model_copy(update={"now_ms": 33_601}),
+    )
+    assert other_protected.status is ReconciliationWorkerStatus.POSITION_RECONCILED
+    assert other_protected.ticket_id in {
+        sol_ticket.identity.ticket_id,
+        avax_ticket.identity.ticket_id,
+    }
+    closure = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        NoTicketVenueTruth(),
         source,
         request.model_copy(update={"now_ms": 33_602}),
     )
-    assert other_protected.status is ReconciliationWorkerStatus.POSITION_RECONCILED
+    assert closure.status is ReconciliationWorkerStatus.SETTLED
+    assert closure.ticket_id == btc_ticket.identity.ticket_id
     assert {
         protected.ticket_id,
         other_protected.ticket_id,

@@ -5,8 +5,10 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 import asyncpg
@@ -24,6 +26,7 @@ from src.trading_kernel.application.issue_ticket import (
 from src.trading_kernel.domain.capacity import freeze_capacity_claim
 from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
+    OrderCommandPayload,
     SetLeverageCommandPayload,
 )
 from src.trading_kernel.domain.cross_margin_stress import (
@@ -65,7 +68,7 @@ SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 
 
 @pytest_asyncio.fixture
-async def issue_engine() -> AsyncEngine:
+async def issue_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -166,6 +169,7 @@ async def test_issue_ticket_prepares_only_entry_when_leverage_already_matches(
     assert [(command.kind, command.generation) for command in commands] == [
         (ExchangeCommandKind.ENTRY, 1)
     ]
+    assert isinstance(commands[0].payload, OrderCommandPayload)
     assert commands[0].payload.leverage_verification_digest == (
         _expected_leverage_fact_digest(
             claim=_issue_request(
@@ -180,6 +184,7 @@ async def test_issue_ticket_prepares_only_entry_when_leverage_already_matches(
 @pytest.mark.asyncio
 async def test_scope_drift_after_lane_and_account_lock_leaves_no_durable_entry_state(
     issue_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ticket = _ticket()
     await _seed_policy(issue_engine)
@@ -202,7 +207,11 @@ async def test_scope_drift_after_lane_and_account_lock_leaves_no_durable_entry_s
                 )
             return exposure
 
-        uow.entry_admission.get_account_exposure = drift_scope_after_account_lock
+        monkeypatch.setattr(
+            uow.entry_admission,
+            "get_account_exposure",
+            drift_scope_after_account_lock,
+        )
         result = await issue_ticket(
             uow,
             _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
@@ -307,6 +316,7 @@ async def test_retired_strategy_version_blocks_ticket_issuance_before_durable_st
 @pytest.mark.asyncio
 async def test_exact_account_incident_drift_after_lane_and_account_lock_leaves_no_durable_entry_state(
     issue_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ticket = _ticket()
     await _seed_policy(issue_engine)
@@ -336,7 +346,11 @@ async def test_exact_account_incident_drift_after_lane_and_account_lock_leaves_n
                 )
             return exposure
 
-        uow.entry_admission.get_account_exposure = open_incident_after_account_lock
+        monkeypatch.setattr(
+            uow.entry_admission,
+            "get_account_exposure",
+            open_incident_after_account_lock,
+        )
         result = await issue_ticket(
             uow,
             _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
@@ -600,7 +614,8 @@ async def _seed_policy(
                 observation_enabled=True,
                 entry_enabled=True,
                 scope_version=4,
-                warm_ready_at_ms=900,
+                warm_closed_bar_time_ms=900,
+                warm_completed_at_ms=900,
                 warm_readiness_digest=_ticket().universe_semantic_digest,
                 warm_valid_until_ms=2_000,
                 updated_at_ms=1_000,
@@ -624,7 +639,8 @@ async def _seed_policy(
                 observation_enabled=True,
                 entry_enabled=True,
                 scope_version=4,
-                warm_ready_at_ms=900,
+                warm_closed_bar_time_ms=900,
+                warm_completed_at_ms=900,
                 warm_readiness_digest=_ticket().universe_semantic_digest,
                 warm_valid_until_ms=2_000,
                 updated_at_ms=1_000,
@@ -701,7 +717,7 @@ def _ticket_for_signal(
     signal_event_id: str,
     exposure_episode_id: str,
     *,
-    position_side: str,
+    position_side: Literal["long", "short"],
 ):
     original = _identity()
     runtime = (
@@ -924,7 +940,8 @@ async def _seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:
         "observation_enabled": True,
         "entry_enabled": True,
         "scope_version": ticket.runtime_scope_version,
-        "warm_ready_at_ms": ticket.created_at_ms,
+        "warm_closed_bar_time_ms": ticket.created_at_ms,
+        "warm_completed_at_ms": ticket.created_at_ms,
         "warm_readiness_digest": ticket.universe_semantic_digest,
         "warm_valid_until_ms": ticket.expires_at_ms,
         "updated_at_ms": ticket.created_at_ms,

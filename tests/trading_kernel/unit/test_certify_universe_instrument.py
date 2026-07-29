@@ -14,6 +14,7 @@ from src.trading_kernel.application.certify_universe_instrument import (
 from src.trading_kernel.application.ports import (
     InstrumentCertificationTarget,
     MonitorOwnerStatus,
+    MonitorStateRecord,
 )
 from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
@@ -27,15 +28,19 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerStatus,
     run_reconciliation_worker_once,
 )
+from tests.trading_kernel.integration.universe_certification_support import (
+    NoTicketPositionSource,
+    NoTicketVenueTruth,
+)
 
 
 class _State:
     def __init__(self, *, existing_monitor: bool = False) -> None:
         self.active_transactions = 0
         self.existing_monitor = existing_monitor
-        self.persisted = []
-        self.rules = []
-        self.monitors = []
+        self.persisted: list[dict[str, object]] = []
+        self.rules: list[dict[str, object]] = []
+        self.monitors: list[MonitorStateRecord] = []
 
     def factory(self):
         return _UnitOfWork(self)
@@ -48,6 +53,8 @@ class _UnitOfWork:
         self.strategy_universes = _UniverseRepository(state)
         self.signals = _RulesRepository(state)
         self.monitors = _MonitorRepository(state)
+        self.exchange_commands = _NoUnknownCommands()
+        self.aggregates = _SafetyAggregateRepository()
 
     async def __aenter__(self):
         self.state.active_transactions += 1
@@ -62,6 +69,17 @@ class _OwnershipRepository:
     async def read_admission_ownership(self, **kwargs):
         del kwargs
         return AdmissionOwnership()
+
+
+class _NoUnknownCommands:
+    async def get_one_unknown(self):
+        return None
+
+
+class _SafetyAggregateRepository:
+    async def claim_next_critical_reconciliation_work(self, *, now_ms):
+        del now_ms
+        return object()
 
 
 class _UniverseRepository:
@@ -105,7 +123,7 @@ class _ReadonlySource:
         self.state = state
         self.changes = changes or {}
         self.error = error
-        self.requests = []
+        self.requests: list[object] = []
 
     async def read_instrument_certification(self, request):
         assert self.state.active_transactions == 0
@@ -336,12 +354,12 @@ async def test_ticket_safety_result_preempts_due_instrument_certification(
     )
     result = await run_reconciliation_worker_once(
         state.factory,
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker",
             runtime_commit="commit:test",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=1_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,

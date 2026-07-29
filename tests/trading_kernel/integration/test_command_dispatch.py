@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -26,6 +27,7 @@ from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue
 from src.trading_kernel.application.ports import (
     VenueCommandRequest,
     VenueMutationFailure,
+    VenueSetLeverageRequest,
 )
 from src.trading_kernel.application.reconcile_ticket import (
     ExitTicketRequest,
@@ -34,6 +36,7 @@ from src.trading_kernel.application.reconcile_ticket import (
     request_exit,
 )
 from src.trading_kernel.application.runtime_facts import (
+    AccountRiskSnapshotRequest,
     EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
     InstrumentRulesRequest,
@@ -88,7 +91,7 @@ def _raw_liquidation_observation(ticket, average_fill_price: Decimal) -> Decimal
 
 
 @pytest_asyncio.fixture
-async def dispatch_engine() -> AsyncEngine:
+async def dispatch_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -131,6 +134,15 @@ class AcceptingVenue:
             exchange_order_id=exchange_order_id,
         )
 
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "4" * 64,
+        )
+
 
 class RejectingVenue:
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
@@ -138,6 +150,15 @@ class RejectingVenue:
             status=ExchangeCommandStatus.REJECTED,
             observed_at_ms=2_000,
             reason="insufficient_margin",
+        )
+
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "4" * 64,
         )
 
 
@@ -148,6 +169,16 @@ class SlowVenue:
             status=ExchangeCommandStatus.ACCEPTED,
             observed_at_ms=2_000,
             exchange_order_id="late-order",
+        )
+
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
+        await asyncio.sleep(0.1)
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "4" * 64,
         )
 
 
@@ -163,13 +194,22 @@ class CountingVenue:
             exchange_order_id="unexpected-order",
         )
 
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
+        raise AssertionError(
+            f"unexpected set leverage for {request.exchange_instrument_id}"
+        )
+
 
 class CountingEntryVenue(CountingVenue):
     def __init__(self) -> None:
         super().__init__()
         self.leverage_calls = 0
 
-    async def set_leverage(self, request) -> SetLeverageCommandResult:
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
         self.leverage_calls += 1
         return SetLeverageCommandResult(
             exchange_configured_leverage=request.payload.desired_leverage,
@@ -221,30 +261,58 @@ class PreflightFacts:
         self, request: EntryAdmissionSnapshotRequest
     ) -> EntryAdmissionSnapshot:
         return EntryAdmissionSnapshot(
-            account_risk_snapshot=AccountRiskSnapshot.create(
+            account_risk_snapshot=self._account_risk_snapshot(
                 venue_id=request.venue_id,
                 account_id=request.account_id,
-                account_risk_mode="standard_usdm_single_asset",
-                settlement_asset="USDT",
-                position_mode="independent_sides",
-                margin_mode="cross",
                 exchange_instrument_id=request.exchange_instrument_id,
-                mark_price=Decimal(60000),
-                configured_leverage=self._configured_leverage,
-                total_wallet_balance=Decimal(100),
-                total_margin_balance=Decimal(100),
-                total_initial_margin=Decimal(10),
-                total_maintenance_margin=Decimal(1),
-                available_margin=Decimal(90),
-                account_positions=(),
                 observed_at_ms=request.observed_at_ms,
-                valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+                valid_for_ms=request.valid_for_ms,
             ),
             best_bid_price=Decimal(59999),
             best_ask_price=Decimal(60000),
             open_orders=(),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_account_risk_snapshot(
+        self, request: AccountRiskSnapshotRequest
+    ) -> AccountRiskSnapshot:
+        return self._account_risk_snapshot(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+            observed_at_ms=request.observed_at_ms,
+            valid_for_ms=request.valid_for_ms,
+        )
+
+    def _account_risk_snapshot(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+        exchange_instrument_id: str,
+        observed_at_ms: int,
+        valid_for_ms: int,
+    ) -> AccountRiskSnapshot:
+        return AccountRiskSnapshot.create(
+            venue_id=venue_id,
+            account_id=account_id,
+            account_risk_mode="standard_usdm_single_asset",
+            settlement_asset="USDT",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            exchange_instrument_id=exchange_instrument_id,
+            mark_price=Decimal(60000),
+            configured_leverage=self._configured_leverage,
+            total_wallet_balance=Decimal(100),
+            total_margin_balance=Decimal(100),
+            total_initial_margin=Decimal(10),
+            total_maintenance_margin=Decimal(1),
+            available_margin=Decimal(90),
+            account_positions=(),
+            observed_at_ms=observed_at_ms,
+            valid_until_ms=observed_at_ms + valid_for_ms,
         )
 
     async def read_instrument_rules(
@@ -288,6 +356,15 @@ class KindAwareAcceptingVenue:
             exchange_order_id=exchange_order_id,
         )
 
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "4" * 64,
+        )
+
 
 class CountingKindAwareAcceptingVenue(KindAwareAcceptingVenue):
     def __init__(self) -> None:
@@ -302,7 +379,9 @@ class LeverageThenEntryVenue:
     def __init__(self) -> None:
         self.mutations: list[str] = []
 
-    async def set_leverage(self, request):
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
         self.mutations.append("set_leverage")
         return SetLeverageCommandResult(
             exchange_configured_leverage=request.payload.desired_leverage,
@@ -320,7 +399,9 @@ class LeverageThenEntryVenue:
 
 
 class LeverageReadbackMismatchVenue(LeverageThenEntryVenue):
-    async def set_leverage(self, request):
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
         self.mutations.append("set_leverage")
         return SetLeverageCommandResult(
             exchange_configured_leverage=request.payload.desired_leverage - 1,
@@ -330,7 +411,9 @@ class LeverageReadbackMismatchVenue(LeverageThenEntryVenue):
 
 
 class CodedLeverageFailureVenue:
-    async def set_leverage(self, request):
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
         del request
         raise VenueMutationFailure("exchange_code_-4164")
 
@@ -358,7 +441,7 @@ async def test_entry_without_action_time_facts_is_rejected_before_venue(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=None,
@@ -393,7 +476,7 @@ async def test_set_leverage_without_action_time_facts_is_rejected_before_venue(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=None,
@@ -433,7 +516,7 @@ async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -487,7 +570,7 @@ async def test_retired_strategy_version_before_entry_preflight_causes_zero_venue
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -520,7 +603,7 @@ async def test_universe_pointer_switch_after_preflight_is_fenced_by_claimed_entr
                 lease_until_ms=6_100,
                 timeout_seconds=1,
                 runtime_commit="kernel-test-head",
-                schema_revision="0003_cross_margin_stop_stress",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 admission_snapshot_validity_ms=1_000,
             ),
             entry_facts_source=PreflightFacts(),
@@ -696,7 +779,7 @@ async def test_confirmed_leverage_creates_first_entry_command_in_later_transacti
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -736,7 +819,7 @@ async def test_leverage_readback_mismatch_becomes_unknown_without_entry_or_resen
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -774,7 +857,7 @@ async def test_coded_leverage_failure_persists_sanitized_reason(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -1110,7 +1193,7 @@ async def _dispatch_for_ticket(
             lease_until_ms=7_200,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1175,7 +1258,7 @@ async def test_dispatch_claims_then_calls_venue_outside_transaction_and_records_
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1228,7 +1311,7 @@ async def test_authoritative_entry_rejection_releases_lane_and_budget_without_re
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1288,7 +1371,7 @@ async def test_timeout_becomes_unknown_outcome_incident_and_is_never_redispatche
             lease_until_ms=6_100,
             timeout_seconds=0.01,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1386,7 +1469,7 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1399,7 +1482,7 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price="60000",
+                    average_entry_price=Decimal(60000),
                     venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, Decimal(60000)
                     ),
@@ -1457,7 +1540,7 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1470,7 +1553,7 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price="60000",
+                    average_entry_price=Decimal(60000),
                     venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, Decimal(60000)
                     ),
@@ -1530,7 +1613,7 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1543,7 +1626,7 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price="60000",
+                    average_entry_price=Decimal(60000),
                     venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, Decimal(60000)
                     ),
@@ -1664,7 +1747,7 @@ async def test_cancel_rejection_is_persisted_and_blocks_settlement(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -1772,7 +1855,7 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=3_400,
@@ -1802,7 +1885,7 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=3_500,
@@ -1820,7 +1903,7 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=3_600,
@@ -1863,7 +1946,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0003_cross_margin_stop_stress",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -1872,7 +1955,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 set_={
                     "enabled": True,
                     "certified_commit": "kernel-test-head",
-                    "schema_revision": "0003_cross_margin_stop_stress",
+                    "schema_revision": "0001_trading_kernel_baseline_v2",
                     "certification": {},
                     "updated_at_ms": 1_000,
                 },
@@ -1901,7 +1984,7 @@ async def _reach_cancel_pending(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1914,7 +1997,7 @@ async def _reach_cancel_pending(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price="60000",
+                    average_entry_price=Decimal(60000),
                     venue_reported_liquidation_price=_raw_liquidation_observation(
                         ticket, Decimal(60000)
                     ),
@@ -1959,7 +2042,7 @@ async def _reach_cancel_pending(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     observed_at_ms=3_200,
                 ),

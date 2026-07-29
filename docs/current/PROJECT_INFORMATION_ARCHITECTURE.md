@@ -50,10 +50,11 @@ acceptance-stage name.
 
 ## Current Runtime Authority
 
-The only production execution package is `src/trading_kernel`. The tracked
-schema head is `0002_crypto_strategy_universe`; its forward migration extends
-the rebuilt Kernel with versioned Universe authority. The deployed schema
-identity remains a volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.
+The only production execution package is `src/trading_kernel`. The local repair
+candidate schema head is `0001_trading_kernel_baseline_v2`. It replaces the
+retired evolution chain only through the approved destructive empty-schema
+rebuild; it is not an in-place forward migration. The deployed schema identity
+remains a volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.
 
 Strategy semantics live in the Registry, while concrete instrument membership,
 certification, warming, current activation, and frozen Signal/Ticket lineage

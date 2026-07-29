@@ -360,7 +360,9 @@ async def test_authenticated_factory_routes_registry_independent_rules_and_close
     assert created[0].config["apiKey"] == "api-key-sensitive"
     assert created[0].config["secret"] == "api-secret-sensitive"
     assert created[0].config["timeout"] == 7_500
-    assert created[0].config["options"]["warnOnFetchOpenOrdersWithoutSymbol"] is False
+    options = created[0].config["options"]
+    assert isinstance(options, dict)
+    assert options["warnOnFetchOpenOrdersWithoutSymbol"] is False
     assert created[0].market_symbols == ["OP/USDT:USDT"]
     assert created[0].bracket_market_ids == ["OPUSDT"]
     assert rules.quantity_step == Decimal("0.001")
@@ -396,7 +398,7 @@ async def test_command_worker_closes_factory_resource(
             worker_role="entry",
             worker_id="entry-1",
             runtime_commit="commit-1",
-            schema_revision="0001_initial",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=1_000,
             lease_ms=30_000,
             timeout_seconds=10.0,
@@ -460,7 +462,7 @@ async def test_command_worker_long_running_mode_reuses_factory_resource(
             worker_role="entry",
             worker_id="entry-1",
             runtime_commit="commit-1",
-            schema_revision="0001_initial",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=None,
             lease_ms=30_000,
             timeout_seconds=10.0,

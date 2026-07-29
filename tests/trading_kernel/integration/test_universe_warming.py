@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Mapping
 from hashlib import sha256
+from typing import Literal, TypedDict
 from uuid import uuid4
 
 import asyncpg
@@ -29,9 +30,17 @@ from src.trading_kernel.application.observe_strategy_scope import (
     build_warm_readiness,
     observe_strategy_scope,
 )
-from src.trading_kernel.application.ports import WarmReadiness
+from src.trading_kernel.application.ports import (
+    LeverageTruthRequest,
+    LeverageTruthSnapshot,
+    VenueTruthRequest,
+    WarmReadiness,
+)
+from src.trading_kernel.application.runtime_facts import PositionSnapshotRequest
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
 from src.trading_kernel.infrastructure.pg_models import (
     event_specs,
     exchange_commands,
@@ -86,7 +95,9 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-8-test"
-SCHEMA_REVISION = "0003_cross_margin_stop_stress"
+SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
+    "0001_trading_kernel_baseline_v2"
+)
 CONTRACT = next(
     item
     for item in registered_strategy_contracts()
@@ -101,7 +112,7 @@ MEMBERS = (BTC, ETH)
 
 
 @pytest_asyncio.fixture
-async def warming_engine(request) -> AsyncEngine:
+async def warming_engine(request: pytest.FixtureRequest) -> AsyncGenerator[AsyncEngine, None]:
     contract, members = getattr(request, "param", (CONTRACT, MEMBERS))
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
@@ -195,6 +206,34 @@ class BlockingMarketFake:
         )
 
 
+class NoTicketVenueTruth:
+    async def lookup_command_truth(
+        self, request: VenueTruthRequest
+    ) -> VenueTruthSnapshot:
+        del request
+        raise AssertionError("certification-only cadence must not read order truth")
+
+    async def read_configured_leverage(
+        self, request: LeverageTruthRequest
+    ) -> LeverageTruthSnapshot:
+        del request
+        raise AssertionError("certification-only cadence must not read leverage truth")
+
+
+class NoTicketPositionSource:
+    async def read_position_snapshot(
+        self, request: PositionSnapshotRequest
+    ) -> PositionSnapshot:
+        del request
+        raise AssertionError("certification-only cadence must not read position")
+
+
+class WarmingProjectionState(TypedDict):
+    scope: dict[str, object]
+    readiness: dict[str, object]
+    facts: tuple[dict[str, object], ...]
+
+
 @pytest.mark.asyncio
 async def test_all_warming_members_become_ready_without_signal_chain(
     warming_engine: AsyncEngine,
@@ -233,7 +272,7 @@ async def test_all_warming_members_become_ready_without_signal_chain(
                     runtime_scopes_current.c.universe_version_id,
                     runtime_scopes_current.c.universe_semantic_digest,
                     runtime_scopes_current.c.entry_enabled,
-                    runtime_scopes_current.c.warm_ready_at_ms,
+                    runtime_scopes_current.c.warm_closed_bar_time_ms,
                     runtime_scopes_current.c.warm_readiness_digest,
                     runtime_scopes_current.c.warm_valid_until_ms,
                 ).order_by(runtime_scopes_current.c.exchange_instrument_id)
@@ -264,7 +303,7 @@ async def test_all_warming_members_become_ready_without_signal_chain(
     assert len({row["universe_version_id"] for row in ready_rows}) == 1
     assert len({row["universe_semantic_digest"] for row in ready_rows}) == 1
     assert all(row["entry_enabled"] is False for row in ready_rows)
-    assert all(row["warm_ready_at_ms"] == NOW_MS for row in ready_rows)
+    assert all(row["warm_closed_bar_time_ms"] == NOW_MS for row in ready_rows)
     assert all(
         str(row["warm_readiness_digest"]).startswith("sha256:")
         for row in ready_rows
@@ -316,7 +355,8 @@ async def test_warming_after_install_can_use_fresh_last_closed_bar(
         warming_engine,
         scope["runtime_scope_id"],
     )
-    assert persisted["warm_ready_at_ms"] == attempted_at_ms
+    assert persisted["warm_closed_bar_time_ms"] == NOW_MS
+    assert persisted["warm_completed_at_ms"] == attempted_at_ms
     assert persisted["updated_at_ms"] == attempted_at_ms
 
 
@@ -356,7 +396,7 @@ async def test_warming_failure_after_install_records_attempt_time(
         warming_engine,
         scope["runtime_scope_id"],
     )
-    assert persisted["warm_ready_at_ms"] is None
+    assert persisted["warm_closed_bar_time_ms"] is None
     assert persisted["updated_at_ms"] == attempted_at_ms
 
 
@@ -380,8 +420,8 @@ async def test_last_warm_success_auto_activates_fully_certified_universe(
     for _ in MEMBERS:
         result = await run_reconciliation_worker_once(
             lambda: PostgresKernelUnitOfWork(warming_engine),
-            object(),
-            object(),
+            NoTicketVenueTruth(),
+            NoTicketPositionSource(),
             certification_worker_request(NOW_MS).model_copy(
                 update={"runtime_commit": RUNTIME_COMMIT}
             ),
@@ -679,7 +719,7 @@ async def test_observation_activation_failure_preserves_schedule_and_next_tick_r
         )
     assert len(warming_scopes) == len(MEMBERS)
     assert all(
-        scope["warm_ready_at_ms"] == NOW_MS
+        scope["warm_closed_bar_time_ms"] == NOW_MS
         for scope in warming_scopes
     )
     assert all(scope["lease_owner"] is None for scope in warming_scopes)
@@ -715,8 +755,8 @@ async def test_observation_activation_failure_preserves_schedule_and_next_tick_r
 
     recovered = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(warming_engine),
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         certification_worker_request(NOW_MS + 1).model_copy(
             update={"runtime_commit": RUNTIME_COMMIT}
         ),
@@ -907,8 +947,8 @@ async def test_warm_readiness_cannot_be_saved_for_changed_version_or_digest(
         universe_version_id=wrong_version_id,
         universe_semantic_digest=wrong_digest,
         fact_digest=_fact_digest(facts),
-        ready_at_ms=NOW_MS,
-        valid_until_ms=min(item.valid_until_ms for item in facts),
+        warm_closed_bar_time_ms=NOW_MS,
+        warm_valid_until_ms=min(item.valid_until_ms for item in facts),
     )
     changed = WarmReadiness(
         runtime_scope_id=scope.runtime_scope_id,
@@ -919,8 +959,9 @@ async def test_warm_readiness_cannot_be_saved_for_changed_version_or_digest(
         universe_version_id=wrong_version_id,
         universe_semantic_digest=wrong_digest,
         fact_digest=_fact_digest(facts),
-        ready_at_ms=NOW_MS,
-        valid_until_ms=min(item.valid_until_ms for item in facts),
+        warm_closed_bar_time_ms=NOW_MS,
+        warm_completed_at_ms=NOW_MS,
+        warm_valid_until_ms=min(item.valid_until_ms for item in facts),
         readiness_digest=readiness_digest,
     )
 
@@ -972,7 +1013,8 @@ async def test_old_warm_success_cannot_resurrect_after_later_invalid_clear(
             item.fact_definition_id
             for item in (*CONTRACT.required_facts, *CONTRACT.disable_facts)
         ),
-        ready_at_ms=NOW_MS,
+        warm_closed_bar_time_ms=NOW_MS,
+        warm_completed_at_ms=NOW_MS,
     )
 
     later_invalid = await observe_strategy_scope(
@@ -991,7 +1033,7 @@ async def test_old_warm_success_cannot_resurrect_after_later_invalid_clear(
         async with PostgresKernelUnitOfWork(warming_engine) as uow:
             await uow.signals.save_warm_readiness(old_success)
     persisted = await _persisted_scope(warming_engine, scope.runtime_scope_id)
-    assert persisted["warm_ready_at_ms"] is None
+    assert persisted["warm_closed_bar_time_ms"] is None
     assert persisted["warm_readiness_digest"] is None
     assert persisted["warm_valid_until_ms"] is None
     assert persisted["updated_at_ms"] == NOW_MS + 900_000
@@ -1039,7 +1081,7 @@ async def test_old_warm_failure_cannot_clear_a_newer_success(
                 updated_at_ms=NOW_MS,
             )
     after = await _persisted_scope(warming_engine, scope["runtime_scope_id"])
-    assert after["warm_ready_at_ms"] == later_ms
+    assert after["warm_closed_bar_time_ms"] == later_ms
     assert after["warm_readiness_digest"] == before["warm_readiness_digest"]
     assert after["warm_valid_until_ms"] == before["warm_valid_until_ms"]
     assert after["updated_at_ms"] == later_ms
@@ -1100,7 +1142,7 @@ async def test_same_bar_old_success_cannot_resurrect_after_new_invalid(
         scope["runtime_scope_id"],
     )
     assert after_old == after_newer
-    assert after_old["scope"]["warm_ready_at_ms"] is None
+    assert after_old["scope"]["warm_closed_bar_time_ms"] is None
     assert after_old["readiness"]["readiness_state"] == "blocked"
 
 
@@ -1154,7 +1196,7 @@ async def test_same_bar_old_failure_cannot_clear_new_success(
         scope["runtime_scope_id"],
     )
     assert after_old == after_newer
-    assert after_old["scope"]["warm_ready_at_ms"] == NOW_MS
+    assert after_old["scope"]["warm_closed_bar_time_ms"] == NOW_MS
     assert after_old["readiness"]["readiness_state"] == "warm_ready"
 
 
@@ -1197,7 +1239,7 @@ async def test_identified_warming_scope_drift_clears_prior_readiness(
         else:
             await connection.exec_driver_sql(
                 "ALTER TABLE brc_runtime_scopes_current "
-                "DROP CONSTRAINT ck_brc_runtime_scope_lifecycle_permissions"
+                "DROP CONSTRAINT ck_brc_runtime_scopes_current_lifecycle_permissions_valid"
             )
             await connection.execute(
                 sa.update(runtime_scopes_current)
@@ -1326,7 +1368,8 @@ async def test_crashed_warming_claim_is_recovered_after_lease_expiry(
         ).mappings().one()
     assert persisted["lease_owner"] is None
     assert persisted["lease_expires_at_ms"] is None
-    assert persisted["warm_ready_at_ms"] == NOW_MS + 60_000
+    assert persisted["warm_closed_bar_time_ms"] == NOW_MS
+    assert persisted["warm_completed_at_ms"] == NOW_MS + 60_000
 
 
 @pytest.mark.asyncio
@@ -1445,7 +1488,7 @@ def _shifted_triggering_source(
 
 async def _observe(
     engine: AsyncEngine,
-    source: TypedMarketFake,
+    source: TypedMarketFake | BlockingMarketFake,
     runtime_scope_id: str,
 ):
     return await observe_strategy_scope(
@@ -1480,7 +1523,7 @@ async def _warm_ready_count(engine: AsyncEngine) -> int:
                 .select_from(runtime_scopes_current)
                 .where(
                     runtime_scopes_current.c.lifecycle_state == "warming",
-                    runtime_scopes_current.c.warm_ready_at_ms.is_not(None),
+                    runtime_scopes_current.c.warm_closed_bar_time_ms.is_not(None),
                     runtime_scopes_current.c.warm_valid_until_ms > NOW_MS,
                 )
             )
@@ -1496,7 +1539,7 @@ async def _scope_is_warm_ready(
         row = (
             await connection.execute(
                 sa.select(
-                    runtime_scopes_current.c.warm_ready_at_ms,
+                    runtime_scopes_current.c.warm_closed_bar_time_ms,
                     runtime_scopes_current.c.warm_readiness_digest,
                     runtime_scopes_current.c.warm_valid_until_ms,
                 ).where(
@@ -1525,7 +1568,7 @@ async def _persisted_scope(
 async def _warming_projection_state(
     engine: AsyncEngine,
     runtime_scope_id: str,
-) -> dict[str, object]:
+) -> WarmingProjectionState:
     async with engine.connect() as connection:
         scope = (
             await connection.execute(
@@ -1583,8 +1626,8 @@ async def _prepare_certified_universe_with_one_warm_scope(
     for _ in MEMBERS:
         result = await run_reconciliation_worker_once(
             lambda: PostgresKernelUnitOfWork(engine),
-            object(),
-            object(),
+            NoTicketVenueTruth(),
+            NoTicketPositionSource(),
             certification_worker_request(NOW_MS).model_copy(
                 update={"runtime_commit": RUNTIME_COMMIT}
             ),

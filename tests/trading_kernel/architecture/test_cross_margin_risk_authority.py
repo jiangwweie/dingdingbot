@@ -179,6 +179,7 @@ def test_stop_stress_uses_existing_reconciliation_topology() -> None:
         KERNEL_ROOT / "interfaces/reconciliation_worker.py"
     ).read_text(encoding="utf-8")
     assert "AggregateStatus.POST_FILL_RISK_PENDING" in reconciliation_source
-    assert "get_next_reconciliation_work" in reconciliation_source
+    assert "claim_next_critical_reconciliation_work" in reconciliation_source
+    assert "claim_next_routine_reconciliation_work" in reconciliation_source
     assert "post_fill_queue" not in reconciliation_source
     assert "post_fill_selector" not in reconciliation_source

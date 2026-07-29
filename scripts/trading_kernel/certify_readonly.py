@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -18,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_models import metadata
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     DYNAMIC_POLICY,
@@ -25,7 +27,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
 )
 
 SCHEMA = "brc.trading_kernel.readonly_certification.v1"
-EXPECTED_ALEMBIC_REVISION = "0003_cross_margin_stop_stress"
+EXPECTED_ALEMBIC_REVISION = "0001_trading_kernel_baseline_v2"
 LEGACY_EXECUTION_TABLES = (
     "brc_runtime_execution_tickets",
     "brc_runtime_execution_orders",
@@ -155,6 +157,7 @@ async def _certify(
     *,
     require_flat: bool,
     closure_ticket_id: str | None = None,
+    now_ms: int | None = None,
 ) -> dict[str, object]:
     if not database_url.startswith("postgresql+asyncpg://"):
         raise ValueError("database URL must use postgresql+asyncpg")
@@ -165,6 +168,9 @@ async def _certify(
         raise ValueError("closure Ticket identity must be non-blank")
     if require_flat and normalized_closure_ticket_id is not None:
         raise ValueError("flat and closure-only certification are mutually exclusive")
+    effective_now_ms = int(time.time() * 1_000) if now_ms is None else now_ms
+    if effective_now_ms <= 0:
+        raise ValueError("certification time must be positive")
     engine = create_async_engine(database_url)
     try:
         async with engine.connect() as connection:
@@ -351,12 +357,45 @@ async def _certify(
                                max_leverage,
                                supported_margin_mode,
                                post_stop_stress_multiple,
-                               max_post_fill_stop_risk_overrun_fraction
+                               max_post_fill_stop_risk_overrun_fraction,
+                               scope
                           FROM brc_owner_policy_current
                         """
                     )
                 )
             ).mappings().one_or_none()
+            entry_gate_counts = (
+                await connection.execute(
+                    text(
+                        """
+                        WITH active_members AS (
+                            SELECT DISTINCT scope.runtime_profile_id,
+                                   scope.exchange_instrument_id
+                              FROM brc_runtime_scopes_current scope
+                              JOIN brc_strategy_universe_current current
+                                ON current.universe_version_id = scope.universe_version_id
+                             WHERE scope.lifecycle_state = 'active'
+                        )
+                        SELECT
+                            (SELECT count(*) FROM brc_strategy_universe_current),
+                            (SELECT count(*) FROM brc_runtime_scopes_current
+                              WHERE lifecycle_state = 'active'),
+                            (SELECT count(*) FROM brc_runtime_scopes_current
+                              WHERE lifecycle_state = 'warming'),
+                            (SELECT count(*) FROM active_members),
+                            (SELECT count(*)
+                               FROM active_members member
+                               JOIN brc_instrument_certification_current certification
+                                 ON certification.runtime_profile_id = member.runtime_profile_id
+                                AND certification.exchange_instrument_id = member.exchange_instrument_id
+                              WHERE certification.status = 'eligible'
+                                AND certification.blocker_code IS NULL
+                                AND certification.valid_until_ms > :now_ms)
+                        """
+                    ),
+                    {"now_ms": effective_now_ms},
+                )
+            ).one()
             integrity_orphans = int(
                 (
                     await connection.execute(
@@ -650,6 +689,7 @@ async def _certify(
                 else value
             )
             for key, value in owner_policy_row.items()
+            if key != "scope"
         }
     )
     closure_ticket = _closure_ticket_manifest(
@@ -685,6 +725,58 @@ async def _certify(
         and capabilities["strategy_signal_ingest"] is True
         and isinstance(capabilities["exchange_commands"], bool)
     )
+    database_integrity_pass = (
+        revision == EXPECTED_ALEMBIC_REVISION
+        and runtime_identity.get("schema_revision") == EXPECTED_ALEMBIC_REVISION
+        and set(runtime_identity)
+        == {"runtime_commit", "schema_revision", "seed_identity"}
+        and actual_tables == expected_tables
+        and strategy_universe["integrity_violation_count"] == 0
+        and capabilities_are_current
+        and policy_is_dynamic
+        and integrity_orphans == 0
+        and legacy_execution_tables == 0
+        and unresolved_commands == 0
+        and open_incidents == 0
+    )
+    expected_event_spec_ids = tuple(
+        sorted(contract.event_spec_id for contract in registered_strategy_contracts())
+    )
+    policy_scope = None if owner_policy_row is None else owner_policy_row["scope"]
+    policy_events = (
+        ()
+        if not isinstance(policy_scope, dict)
+        or not isinstance(policy_scope.get("allowed_event_spec_ids"), list)
+        else tuple(sorted(str(value) for value in policy_scope["allowed_event_spec_ids"]))
+    )
+    active_current_count = int(entry_gate_counts[0])
+    active_scope_count = int(entry_gate_counts[1])
+    warming_scope_count = int(entry_gate_counts[2])
+    active_member_count = int(entry_gate_counts[3])
+    eligible_fresh_certification_count = int(entry_gate_counts[4])
+    universe_bootstrap_pass = (
+        database_integrity_pass
+        and active_current_count == 6
+        and active_scope_count == 42
+        and warming_scope_count == 0
+        and active_member_count == 7
+        and eligible_fresh_certification_count == 7
+        and policy_events == expected_event_spec_ids
+    )
+    flatness_pass = (
+        non_flat_positions == 0
+        and active_ticket_domains == 0
+        and unresolved_commands == 0
+        and open_incidents == 0
+        and active_budget_reservations == 0
+    )
+    entry_promotion_pass = (
+        universe_bootstrap_pass
+        and flatness_pass
+        and owner_policy_row is not None
+        and owner_policy_row["new_entry_submit_enabled"] is False
+        and capabilities.get("exchange_commands") is False
+    )
     closure_is_valid = (
         normalized_closure_ticket_id is None
         or (
@@ -704,21 +796,7 @@ async def _certify(
         )
     )
     passed = (
-        revision == EXPECTED_ALEMBIC_REVISION
-        and runtime_identity.get("schema_revision") == EXPECTED_ALEMBIC_REVISION
-        and set(runtime_identity) == {
-            "runtime_commit",
-            "schema_revision",
-            "seed_identity",
-        }
-        and actual_tables == expected_tables
-        and strategy_universe["integrity_violation_count"] == 0
-        and capabilities_are_current
-        and policy_is_dynamic
-        and integrity_orphans == 0
-        and legacy_execution_tables == 0
-        and unresolved_commands == 0
-        and open_incidents == 0
+        database_integrity_pass
         and closure_is_valid
         and (
             not require_flat
@@ -733,6 +811,17 @@ async def _certify(
         "table_allowlist": table_allowlist,
         "runtime_scope_count": runtime_scope_count,
         "strategy_universe": strategy_universe,
+        "database_integrity_pass": database_integrity_pass,
+        "flatness_pass": flatness_pass,
+        "universe_bootstrap_pass": universe_bootstrap_pass,
+        "entry_promotion_pass": entry_promotion_pass,
+        "entry_promotion_counts": {
+            "active_current_universes": active_current_count,
+            "active_scopes": active_scope_count,
+            "warming_scopes": warming_scope_count,
+            "active_instruments": active_member_count,
+            "eligible_fresh_certifications": eligible_fresh_certification_count,
+        },
         "capabilities": capabilities,
         "owner_policy": owner_policy,
         "release_counts": release_counts,

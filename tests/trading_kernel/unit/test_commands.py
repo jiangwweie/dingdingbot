@@ -176,6 +176,7 @@ def test_cancel_command_requires_exact_exchange_order_identity() -> None:
         deadline_at_ms=12_000,
     )
 
+    assert isinstance(command.payload, CancelCommandPayload)
     assert command.payload.exchange_order_id == "stop-order-1"
     assert command.payload.order_namespace == "conditional"
     assert command.payload.purpose == "runner_old_stop"
@@ -189,12 +190,18 @@ def test_cancel_command_requires_exact_exchange_order_identity() -> None:
         )
 
     with pytest.raises(ValidationError):
-        CancelCommandPayload(exchange_order_id=" ")
+        CancelCommandPayload(
+            exchange_order_id=" ",
+            order_namespace="regular",
+            purpose="reconciliation_cleanup",
+        )
 
     with pytest.raises(ValidationError):
-        CancelCommandPayload(
-            exchange_order_id="stop-order-1",
-            order_namespace="conditional",
+        CancelCommandPayload.model_validate(
+            {
+                "exchange_order_id": "stop-order-1",
+                "order_namespace": "conditional",
+            }
         )
 
     with pytest.raises(ValidationError):
@@ -277,6 +284,7 @@ def test_set_leverage_generation_is_exactly_one_and_has_no_order_identity() -> N
 
     assert command.kind is ExchangeCommandKind.SET_LEVERAGE
     assert command.venue_client_order_id is None
+    assert isinstance(command.payload, SetLeverageCommandPayload)
     assert command.payload.desired_leverage == 5
 
     with pytest.raises(

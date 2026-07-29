@@ -47,18 +47,22 @@ async def test_replacement_keeps_one_active_universe_and_readonly_bounded(
             ),
         )
     after = await _certify(database_url, require_flat=True)
+    before_universe = before["strategy_universe"]
+    after_universe = after["strategy_universe"]
+    assert isinstance(before_universe, dict)
+    assert isinstance(after_universe, dict)
 
     assert activated.status is UniverseActivationStatus.ACTIVATED
     assert activated.previous_universe_version_id == old_version_id
     assert before["status"] == "pass"
-    assert before["strategy_universe"]["scope_lifecycle_counts"] == {
+    assert before_universe["scope_lifecycle_counts"] == {
         "active": 2,
         "warming": 2,
         "retired": 0,
     }
     assert after["status"] == "pass"
-    assert after["strategy_universe"]["current_count"] == 1
-    assert after["strategy_universe"]["scope_lifecycle_counts"] == {
+    assert after_universe["current_count"] == 1
+    assert after_universe["scope_lifecycle_counts"] == {
         "active": 2,
         "warming": 0,
         "retired": 2,

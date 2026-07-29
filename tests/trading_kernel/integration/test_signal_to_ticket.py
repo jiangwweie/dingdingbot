@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from decimal import Decimal
+from typing import Literal
 from uuid import uuid4
 
 import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.ingest_signal import (
@@ -63,7 +66,7 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 
 
 @pytest_asyncio.fixture(name="issue_engine")
-async def signal_engine() -> AsyncEngine:
+async def signal_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -97,7 +100,7 @@ async def test_ingest_persists_signal_and_fact_lineage_without_ticket_terms(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=1_001,
             ),
         )
@@ -167,7 +170,7 @@ async def test_signal_ingest_does_not_consume_action_time_capital_authority(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=1_001,
             ),
         )
@@ -186,7 +189,7 @@ async def test_duplicate_strategy_signal_is_exactly_idempotent(
     request = IngestSignalRequest(
         signal=signal,
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0001_trading_kernel_baseline_v2",
         now_ms=1_001,
     )
 
@@ -296,7 +299,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit=runtime_commit,
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=now_ms,
             ),
         )
@@ -319,7 +322,7 @@ async def test_expired_candidate_is_terminally_blocked(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=1_001,
             ),
         )
@@ -333,7 +336,7 @@ async def test_expired_candidate_is_terminally_blocked(
                 admission_snapshot=_admission_snapshot(),
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=signal.expires_at_ms,
             ),
         )
@@ -366,7 +369,7 @@ def _signal(
     *,
     signal_event_id: str = "signal-live-1",
     runtime_scope_id: str = "scope-sor-btc-long",
-    position_side: str = "long",
+    position_side: Literal["long", "short"] = "long",
     exchange_instrument_id: str = "binance-usdm:BTCUSDT:perpetual",
     occurred_at_ms: int = 1_000,
 ) -> StrategySignal:
@@ -518,7 +521,8 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 observation_enabled=True,
                 entry_enabled=True,
                 scope_version=4,
-                warm_ready_at_ms=900,
+                warm_closed_bar_time_ms=900,
+                warm_completed_at_ms=900,
                 warm_readiness_digest="sha256:" + "a" * 64,
                 warm_valid_until_ms=10_000,
                 updated_at_ms=1_000,
@@ -534,16 +538,26 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 certification={},
                 updated_at_ms=1_000,
             )
         )
 
 
-def _signal_facts(*, position_side: str) -> tuple[SignalFactSnapshot, ...]:
+def _signal_facts(
+    *, position_side: Literal["long", "short"]
+) -> tuple[SignalFactSnapshot, ...]:
     if position_side == "long":
-        values: tuple[tuple[str, str, object, bool], ...] = (
+        values: tuple[
+            tuple[
+                str,
+                Literal["condition", "protection_reference", "disable"],
+                JsonValue,
+                bool,
+            ],
+            ...,
+        ] = (
             ("fact:opening_range_defined:v1", "condition", True, True),
             ("fact:breakout_confirmed:v1", "condition", True, True),
             (
@@ -582,7 +596,7 @@ async def _insert_scope_facts(
     connection: AsyncConnection,
     *,
     runtime_scope_id: str,
-    position_side: str,
+    position_side: Literal["long", "short"],
 ) -> None:
     for fact in _signal_facts(position_side=position_side):
         await connection.execute(

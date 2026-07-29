@@ -60,7 +60,7 @@ class RuntimeAuthoritySeedRequest(BaseModel):
 
     account_id: str
     runtime_commit: str
-    schema_revision: Literal["0003_cross_margin_stop_stress"]
+    schema_revision: Literal["0001_trading_kernel_baseline_v2"]
     seeded_at_ms: int
 
     @field_validator("account_id", "runtime_commit", mode="before")
@@ -144,7 +144,7 @@ class RuntimeDeploymentIdentityResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     runtime_commit: str
-    schema_revision: Literal["0003_cross_margin_stop_stress"]
+    schema_revision: Literal["0001_trading_kernel_baseline_v2"]
     runtime_seed_semantic_hash: str
     refreshed_existing_authority: bool
 

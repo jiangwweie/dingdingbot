@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
@@ -98,7 +99,7 @@ def test_runtime_authority_seed_cli_is_runnable_outside_repo(
 
 
 @pytest_asyncio.fixture
-async def runtime_seed_engine() -> AsyncEngine:
+async def runtime_seed_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -127,7 +128,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
 
@@ -229,7 +230,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
             ).mappings()
         }
         assert metadata_rows["runtime_commit"] == "commit-acceptance"
-        assert metadata_rows["schema_revision"] == "0003_cross_margin_stop_stress"
+        assert metadata_rows["schema_revision"] == "0001_trading_kernel_baseline_v2"
         assert metadata_rows["registry_semantic_hash"].startswith("sha256:")
         assert metadata_rows["seed_identity"].startswith("sha256:")
 
@@ -242,7 +243,7 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -308,7 +309,7 @@ async def test_recovery_identity_refuses_a_runtime_without_one_unknown_leverage_
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -339,7 +340,7 @@ async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -382,7 +383,7 @@ async def test_closure_identity_rotates_only_one_exact_released_pending_ticket(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -412,7 +413,7 @@ async def test_readonly_certification_emits_exact_pending_closure_manifest(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -452,7 +453,7 @@ async def test_protected_identity_refuses_extra_activity_and_open_incidents(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -559,7 +560,7 @@ async def test_protected_identity_rotates_a_complete_runner_ticket(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -595,7 +596,7 @@ async def test_readonly_certification_emits_exact_protected_ticket_manifest(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -628,7 +629,7 @@ async def test_protected_identity_refuses_missing_active_budget_reservation(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -665,7 +666,7 @@ async def test_protected_identity_refuses_unrelated_active_budget_reservation(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -725,7 +726,7 @@ async def test_protected_identity_refuses_mismatched_account_exposure_totals(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -763,7 +764,7 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     seed_request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -890,7 +891,8 @@ async def _insert_ticket_universe(connection: AsyncConnection) -> None:
             observation_enabled=True,
             entry_enabled=True,
             scope_version=1,
-            warm_ready_at_ms=1_800_000_000_002,
+            warm_closed_bar_time_ms=1_800_000_000_002,
+            warm_completed_at_ms=1_800_000_000_002,
             warm_readiness_digest="sha256:" + "4" * 64,
             warm_valid_until_ms=1_800_000_060_002,
             next_observation_due_at_ms=1_800_000_000_002,

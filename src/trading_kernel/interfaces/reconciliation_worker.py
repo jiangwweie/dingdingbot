@@ -60,6 +60,7 @@ from src.trading_kernel.domain.aggregate import (
     AggregateStatus,
     TradeAggregate,
 )
+from src.trading_kernel.domain.commands import ExchangeCommand
 from src.trading_kernel.domain.events import (
     EntryFilled,
     EntryPartiallyFilled,
@@ -78,86 +79,8 @@ from src.trading_kernel.domain.review import (
     ReviewEconomicsUnavailable,
     calculate_review_economics,
 )
-from src.trading_kernel.domain.venue_truth import UnknownRecoveryStatus
 
 _POSITION_RECONCILIATION_STATUSES = RECONCILIATION_POSITION_STATUSES
-
-
-class ReconciliationWorkKind(StrEnum):
-    POSITION = "position"
-    SETTLEMENT = "settlement"
-    REVIEW = "review"
-
-
-class ReconciliationWorkItem(BaseModel):
-    """One bounded Reconciliation action selected outside venue I/O."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    ticket_id: str
-    kind: ReconciliationWorkKind
-    status: AggregateStatus
-    due_at_ms: int
-    status_entered_at_ms: int
-
-    @field_validator("ticket_id", mode="before")
-    @classmethod
-    def _require_ticket_id(cls, value: object) -> str:
-        normalized = str(value or "").strip()
-        if not normalized:
-            raise ValueError("reconciliation work requires Ticket identity")
-        return normalized
-
-    @model_validator(mode="after")
-    def _validate_kind_and_window(self) -> ReconciliationWorkItem:
-        if self.due_at_ms <= 0 or self.status_entered_at_ms <= 0:
-            raise ValueError("reconciliation work times must be positive")
-        if self.kind is ReconciliationWorkKind.POSITION:
-            if self.status not in _POSITION_RECONCILIATION_STATUSES:
-                raise ValueError("position work requires a position reconciliation status")
-        elif self.kind is ReconciliationWorkKind.SETTLEMENT:
-            if self.status is not AggregateStatus.SETTLEMENT_PENDING:
-                raise ValueError("settlement work requires SETTLEMENT_PENDING")
-        elif self.status is not AggregateStatus.REVIEW_PENDING:
-            raise ValueError("review work requires REVIEW_PENDING")
-        return self
-
-
-def select_reconciliation_work(
-    *,
-    now_ms: int,
-    closure_starvation_limit_ms: int,
-    position: ReconciliationWorkItem | None,
-    closures: tuple[ReconciliationWorkItem, ...],
-) -> ReconciliationWorkItem | None:
-    """Select one due item while bounding closure starvation behind positions."""
-
-    if now_ms <= 0 or closure_starvation_limit_ms <= 0:
-        raise ValueError("reconciliation selector windows must be positive")
-    if position is not None and position.kind is not ReconciliationWorkKind.POSITION:
-        raise ValueError("position candidate must use position work kind")
-    if any(
-        item.kind not in {ReconciliationWorkKind.SETTLEMENT, ReconciliationWorkKind.REVIEW}
-        for item in closures
-    ):
-        raise ValueError("closure candidates must use settlement or review work kinds")
-
-    due_position = position if position is not None and position.due_at_ms <= now_ms else None
-    due_closures = tuple(item for item in closures if item.due_at_ms <= now_ms)
-    oldest_closure = min(
-        due_closures,
-        key=lambda item: (item.status_entered_at_ms, item.due_at_ms, item.ticket_id),
-        default=None,
-    )
-    if (
-        oldest_closure is not None
-        and now_ms - oldest_closure.status_entered_at_ms
-        >= closure_starvation_limit_ms
-    ):
-        return oldest_closure
-    if due_position is not None:
-        return due_position
-    return oldest_closure
 
 
 class ReconciliationWorkerStatus(StrEnum):
@@ -181,10 +104,10 @@ class ReconciliationWorkerRequest(BaseModel):
     timeout_seconds: float
     unknown_visibility_grace_ms: int
     idle_poll_interval_ms: int
-    closure_starvation_limit_ms: int = 30_000
     closure_retry_interval_ms: int = 30_000
     review_economics_visibility_grace_ms: int = 300_000
     certification_lease_ms: int = 60_000
+    certification_max_wait_ms: int = 60_000
     certification_valid_for_ms: int = 60_000
     certification_eligible_check_interval_ms: int = 60_000
     certification_owner_action_check_interval_ms: int = 300_000
@@ -205,10 +128,10 @@ class ReconciliationWorkerRequest(BaseModel):
             or self.timeout_seconds <= 0
             or self.unknown_visibility_grace_ms <= 0
             or self.idle_poll_interval_ms <= 0
-            or self.closure_starvation_limit_ms <= 0
             or self.closure_retry_interval_ms <= 0
             or self.review_economics_visibility_grace_ms <= 0
             or self.certification_lease_ms <= 0
+            or self.certification_max_wait_ms <= 0
             or self.certification_valid_for_ms <= 0
             or self.certification_eligible_check_interval_ms <= 0
             or self.certification_owner_action_check_interval_ms <= 0
@@ -241,28 +164,76 @@ async def run_reconciliation_worker_once(
     fee_discount_capability_source: FeeDiscountCapabilitySource | None = None,
     instrument_certification_source: InstrumentCertificationSource | None = None,
 ) -> ReconciliationWorkerResult:
-    """Advance one safety work item, then record optional BNB cost capability."""
+    """Advance exactly one critical, overdue-certification, or routine action."""
 
-    result = await _run_reconciliation_worker_once_core(
-        uow_factory,
-        venue_truth,
-        position_source,
-        request,
-        account_risk_source=account_risk_source,
-        instrument_rules_source=instrument_rules_source,
-        review_economics_source=review_economics_source,
-    )
-    if (
-        result.status is ReconciliationWorkerStatus.NO_WORK
-        and instrument_certification_source is not None
-    ):
-        certification_result = await _certify_one_due_instrument(
+    async with uow_factory() as uow:
+        unknown = await uow.exchange_commands.get_one_unknown()
+    if unknown is not None:
+        return await _run_reconciliation_worker_once_core(
+            uow_factory,
+            venue_truth,
+            position_source,
+            request,
+            unknown=unknown,
+            aggregate=None,
+            account_risk_source=account_risk_source,
+            instrument_rules_source=instrument_rules_source,
+            review_economics_source=review_economics_source,
+        )
+
+    async with uow_factory() as uow:
+        critical = await uow.aggregates.claim_next_critical_reconciliation_work(
+            now_ms=request.now_ms,
+        )
+    if critical is not None:
+        return await _run_reconciliation_worker_once_core(
+            uow_factory,
+            venue_truth,
+            position_source,
+            request,
+            unknown=None,
+            aggregate=critical,
+            account_risk_source=account_risk_source,
+            instrument_rules_source=instrument_rules_source,
+            review_economics_source=review_economics_source,
+        )
+
+    if instrument_certification_source is not None:
+        overdue = await _certify_one_due_instrument(
+            uow_factory,
+            source=instrument_certification_source,
+            request=request,
+            overdue_before_ms=request.now_ms - request.certification_max_wait_ms,
+        )
+        if overdue is not None:
+            return overdue
+
+    async with uow_factory() as uow:
+        routine = await uow.aggregates.claim_next_routine_reconciliation_work(
+            now_ms=request.now_ms,
+        )
+    if routine is not None:
+        return await _run_reconciliation_worker_once_core(
+            uow_factory,
+            venue_truth,
+            position_source,
+            request,
+            unknown=None,
+            aggregate=routine,
+            account_risk_source=account_risk_source,
+            instrument_rules_source=instrument_rules_source,
+            review_economics_source=review_economics_source,
+        )
+
+    if instrument_certification_source is not None:
+        certification = await _certify_one_due_instrument(
             uow_factory,
             source=instrument_certification_source,
             request=request,
         )
-        if certification_result is not None:
-            result = certification_result
+        if certification is not None:
+            return certification
+
     if fee_discount_capability_source is not None:
         await _observe_fee_discount_capability(
             uow_factory,
@@ -270,7 +241,7 @@ async def run_reconciliation_worker_once(
             now_ms=request.now_ms,
             timeout_seconds=request.timeout_seconds,
         )
-    return result
+    return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.NO_WORK)
 
 
 async def _certify_one_due_instrument(
@@ -278,12 +249,14 @@ async def _certify_one_due_instrument(
     *,
     source: InstrumentCertificationSource,
     request: ReconciliationWorkerRequest,
+    overdue_before_ms: int | None = None,
 ) -> ReconciliationWorkerResult | None:
     async with uow_factory() as uow:
         target = await uow.strategy_universes.claim_due_instrument_certification(
             worker_id=request.worker_id,
             now_ms=request.now_ms,
             lease_until_ms=request.now_ms + request.certification_lease_ms,
+            overdue_before_ms=overdue_before_ms,
         )
     if target is None:
         return None
@@ -329,6 +302,8 @@ async def _run_reconciliation_worker_once_core(
     position_source: PositionSnapshotSource,
     request: ReconciliationWorkerRequest,
     *,
+    unknown: ExchangeCommand | None,
+    aggregate: TradeAggregate | None,
     account_risk_source: AccountRiskSnapshotSource | None = None,
     instrument_rules_source: InstrumentRulesSource | None = None,
     review_economics_source: ReviewEconomicsSource | None = None,
@@ -338,8 +313,6 @@ async def _run_reconciliation_worker_once_core(
     review: TradeAggregate | None = None
     entry_order_reference: TicketOrderReference | None = None
     exit_order_references: tuple[TicketOrderReference, ...] = ()
-    async with uow_factory() as uow:
-        unknown = await uow.exchange_commands.get_one_unknown()
     if unknown is not None:
         if not await _runtime_writer_is_certified(uow_factory, request):
             return _runtime_fenced_result(ticket_id=unknown.ticket_identity.ticket_id)
@@ -361,18 +334,7 @@ async def _run_reconciliation_worker_once_core(
             command_id=unknown.command_id,
             detail=decision.status.value,
         )
-        if decision.status not in {
-            UnknownRecoveryStatus.PENDING_VISIBILITY,
-            UnknownRecoveryStatus.LOOKUP_FAILED,
-        }:
-            return recovered_result
-        pending_unknown_result = recovered_result
-
-    async with uow_factory() as uow:
-        aggregate = await uow.aggregates.get_next_reconciliation_work(
-            now_ms=request.now_ms,
-            closure_starvation_limit_ms=request.closure_starvation_limit_ms,
-        )
+        return recovered_result
     if (
         aggregate is not None
         and aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING

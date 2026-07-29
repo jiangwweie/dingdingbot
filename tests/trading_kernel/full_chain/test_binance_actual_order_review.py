@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
+from typing import NotRequired, TypedDict
 
 import pytest
+from pydantic import JsonValue
 
 from src.trading_kernel.application.reconcile_ticket import (
     ReconcileTicketRequest,
@@ -11,6 +14,7 @@ from src.trading_kernel.application.reconcile_ticket import (
 from src.trading_kernel.application.runtime_facts import ReviewEconomicsRequest
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind
+from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
@@ -30,6 +34,10 @@ from tests.trading_kernel.integration.test_command_dispatch import (
 from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
     _registered_sor_long_ticket,
 )
+from tests.trading_kernel.integration.universe_certification_support import (
+    NoTicketVenueTruth,
+)
+from tests.trading_kernel.unit.test_venue_adapter import FakeAsyncExchange
 
 dispatch_engine = dispatch_fixture.dispatch_engine
 
@@ -39,16 +47,34 @@ class _FlatPositionSource:
         raise AssertionError(f"closure work must not read position: {request.ticket_id}")
 
 
-class _RunnerTradesExchange:
+class _TradeInfo(TypedDict):
+    positionSide: str
+    commission: str
+    commissionAsset: NotRequired[str]
+
+
+class _TradeRow(TypedDict):
+    id: str
+    orderId: str
+    amount: str
+    price: str
+    fee: dict[str, str]
+    timestamp: int
+    realizedPnl: str
+    info: _TradeInfo
+
+
+class _RunnerTradesExchange(FakeAsyncExchange):
     """Official Binance-shaped review rows: only trade/order identity is usable."""
 
     def __init__(self, *, fee_mode: str, review_fault: str | None = None) -> None:
+        super().__init__()
         self.fee_mode = fee_mode
         self.review_fault = review_fault
-        self.references = ()
+        self.references: tuple[TicketOrderReference, ...] = ()
         self.trade_calls: list[dict[str, object]] = []
         self.index_calls: list[dict[str, object]] = []
-        self.returned_trade_rows: list[dict[str, object]] = []
+        self.returned_trade_rows: list[_TradeRow] = []
 
     def bind(self, request: ReviewEconomicsRequest) -> None:
         self.references = (
@@ -56,7 +82,14 @@ class _RunnerTradesExchange:
             *request.exit_order_references,
         )
 
-    async def fetch_my_trades(self, symbol, since, limit, params):
+    async def fetch_my_trades(
+        self,
+        symbol: str,
+        since: object,
+        limit: int,
+        params: Mapping[str, object],
+    ) -> object:
+        del since
         assert symbol == "BTC/USDT:USDT"
         assert limit == 100
         self.trade_calls.append(dict(params))
@@ -74,7 +107,7 @@ class _RunnerTradesExchange:
         assert order_id not in references
         raise AssertionError(f"unexpected Binance orderId lookup: {order_id}")
 
-    async def fapiPrivateGetAlgoOrder(self, params):
+    async def fapiPrivateGetAlgoOrder(self, params: Mapping[str, object]) -> object:
         assert set(params) == {"algoId"}
         submitted_id = str(params["algoId"])
         reference = next(
@@ -104,15 +137,22 @@ class _RunnerTradesExchange:
             "status": "CANCELED",
         }
 
-    async def fapiPrivateGetIncome(self, params):
+    async def fapiPrivateGetIncome(self, params: Mapping[str, object]) -> object:
         assert params["symbol"] == "BTCUSDT"
         return []
 
-    async def fapiPublicGetPremiumIndex(self, params):
+    async def fapiPublicGetPremiumIndex(self, params: Mapping[str, object]) -> object:
         self.index_calls.append(dict(params))
         return {"symbol": "BNBUSDT", "indexPrice": "600", "time": 4_000}
 
-    def _fill(self, trade_id, order_id, quantity, price, timestamp):
+    def _fill(
+        self,
+        trade_id: str,
+        order_id: str,
+        quantity: str,
+        price: str,
+        timestamp: int,
+    ) -> _TradeRow:
         fee_asset = "USDT"
         fee_amount = "0.010"
         if self.fee_mode == "bnb" or self.fee_mode == "mixed" and trade_id != "entry-trade":
@@ -132,7 +172,7 @@ class _RunnerTradesExchange:
             },
         }
 
-    def _review_rows(self, rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    def _review_rows(self, rows: list[_TradeRow]) -> list[_TradeRow]:
         if self.review_fault == "missing_commission_asset":
             for row in rows:
                 row["info"].pop("commissionAsset")
@@ -228,7 +268,7 @@ def _review_worker_request(*, now_ms: int) -> ReconciliationWorkerRequest:
     return ReconciliationWorkerRequest(
         worker_id="reconciliation-full-chain",
         runtime_commit="kernel-test-head",
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         now_ms=now_ms,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -252,7 +292,7 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
 
     settled = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        object(),
+        NoTicketVenueTruth(),
         _FlatPositionSource(),
         request,
         review_economics_source=source,
@@ -260,7 +300,7 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
     assert settled.status is ReconciliationWorkerStatus.SETTLED
     reviewed = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        object(),
+        NoTicketVenueTruth(),
         _FlatPositionSource(),
         request.model_copy(update={"now_ms": 70_000}),
         review_economics_source=source,
@@ -291,7 +331,8 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
     assert Decimal(str(review.metrics["planned_r_multiple"])) == (
         net / ticket.risk_at_stop
     )
-    assert {row["exchange_order_id"] for row in review.metrics["order_attribution"]} == {
+    attribution_rows = _attribution_rows(review.metrics)
+    assert {row["exchange_order_id"] for row in attribution_rows} == {
         "venue-entry-1",
         "venue-take_profit-1",
         "1085699838084",
@@ -303,19 +344,17 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
     ]
     assert all("clientOrderId" not in row for row in exchange.returned_trade_rows)
     assert str(review.metrics["order_attribution_digest"]).startswith("sha256:")
-    native_assets = {
-        row["fee"]["native"]["asset"] for row in review.metrics["order_attribution"]
-    }
+    native_assets = {_native_fee_asset(row) for row in attribution_rows}
     assert native_assets == (
         {"USDT"} if fee_mode == "usdt" else {"BNB"}
         if fee_mode == "bnb" else {"USDT", "BNB"}
     )
     assert all(
-        row["fee"]["evidence"]["method"] == "native_usdt"
-        if row["fee"]["native"]["asset"] == "USDT"
-        else row["fee"]["evidence"]["method"]
+        _fee_evidence_method(row) == "native_usdt"
+        if _native_fee_asset(row) == "USDT"
+        else _fee_evidence_method(row)
         == "binance_usdm_bnbusdt_review_index_snapshot"
-        for row in review.metrics["order_attribution"]
+        for row in attribution_rows
     )
     assert exchange.index_calls == ([] if fee_mode == "usdt" else [{"symbol": "BNBUSDT"}])
 
@@ -342,7 +381,7 @@ async def test_review_attribution_contradiction_keeps_ticket_pending(
 
     settled = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        object(),
+        NoTicketVenueTruth(),
         _FlatPositionSource(),
         _review_worker_request(now_ms=40_000),
         review_economics_source=source,
@@ -350,7 +389,7 @@ async def test_review_attribution_contradiction_keeps_ticket_pending(
     assert settled.status is ReconciliationWorkerStatus.SETTLED
     unavailable = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        object(),
+        NoTicketVenueTruth(),
         _FlatPositionSource(),
         _review_worker_request(now_ms=70_000),
         review_economics_source=source,
@@ -365,3 +404,39 @@ async def test_review_attribution_contradiction_keeps_ticket_pending(
     assert aggregate is not None and aggregate.status is AggregateStatus.REVIEW_PENDING
     assert [type(event).__name__ for event in events].count("ReviewRecorded") == 0
     assert review is None
+
+
+def _attribution_rows(
+    metrics: Mapping[str, JsonValue],
+) -> tuple[Mapping[str, JsonValue], ...]:
+    raw_rows = metrics["order_attribution"]
+    assert isinstance(raw_rows, list)
+    rows: list[Mapping[str, JsonValue]] = []
+    for raw_row in raw_rows:
+        assert isinstance(raw_row, dict)
+        rows.append(raw_row)
+    return tuple(rows)
+
+
+def _native_fee_asset(row: Mapping[str, JsonValue]) -> str:
+    fee = _fee_mapping(row)
+    native = fee["native"]
+    assert isinstance(native, dict)
+    asset = native["asset"]
+    assert isinstance(asset, str)
+    return asset
+
+
+def _fee_evidence_method(row: Mapping[str, JsonValue]) -> str:
+    fee = _fee_mapping(row)
+    evidence = fee["evidence"]
+    assert isinstance(evidence, dict)
+    method = evidence["method"]
+    assert isinstance(method, str)
+    return method
+
+
+def _fee_mapping(row: Mapping[str, JsonValue]) -> Mapping[str, JsonValue]:
+    fee = row["fee"]
+    assert isinstance(fee, dict)
+    return fee

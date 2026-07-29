@@ -44,7 +44,7 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=1_002,
             ),
         )
@@ -67,7 +67,7 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
                 admission_snapshot=_admission_snapshot(),
                 claim_owner="entry-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=1_004,
             ),
         )
@@ -105,7 +105,7 @@ async def test_capacity_refusal_persists_no_partial_issuance(issue_engine) -> No
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=1_002,
             ),
         )
@@ -129,7 +129,7 @@ async def test_capacity_refusal_persists_no_partial_issuance(issue_engine) -> No
                 admission_snapshot=stale,
                 claim_owner="entry-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=1_004,
             ),
         )

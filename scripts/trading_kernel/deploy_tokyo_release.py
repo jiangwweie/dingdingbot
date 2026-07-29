@@ -20,12 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.trading_kernel.domain.instrument_identity import (
-    parse_binance_usdm_instrument_id,
-    to_exchange_instrument_id,
-)
-
-SCHEMA_REVISION = "0003_cross_margin_stop_stress"
+SCHEMA_REVISION = "0001_trading_kernel_baseline_v2"
 EXPECTED_CONFIGURED_LEVERAGE = 5
 RELEASE_ROOT = "/opt/brc/releases"
 CURRENT_RELEASE = "/opt/brc/current"
@@ -63,7 +58,6 @@ class DeploymentPlan:
     schema_revision: str
     expected_configured_leverage: int
     enable_entry: bool
-    exchange_instrument_ids: tuple[str, ...]
     protected_ticket_ids: tuple[str, ...] = ()
     closure_ticket_id: str | None = None
 
@@ -79,31 +73,6 @@ class DeploymentPlan:
             raise ValueError("regular deployment cannot change schema revision")
         if self.expected_configured_leverage != EXPECTED_CONFIGURED_LEVERAGE:
             raise ValueError("production configured leverage must remain fixed at 5x")
-        normalized_instruments = tuple(
-            sorted(item.strip() for item in self.exchange_instrument_ids)
-        )
-        if not normalized_instruments:
-            raise ValueError("deployment probe instruments must be non-empty")
-        if len(set(normalized_instruments)) != len(normalized_instruments):
-            raise ValueError("deployment probe instruments must be distinct")
-        for instrument_id in normalized_instruments:
-            try:
-                canonical = to_exchange_instrument_id(
-                    parse_binance_usdm_instrument_id(instrument_id)
-                )
-            except ValueError as exc:
-                raise ValueError(
-                    "deployment probe instrument must be canonical Binance USD-M perpetual"
-                ) from exc
-            if canonical != instrument_id:
-                raise ValueError(
-                    "deployment probe instrument must be canonical Binance USD-M perpetual"
-                )
-        object.__setattr__(
-            self,
-            "exchange_instrument_ids",
-            normalized_instruments,
-        )
         if any(not ticket_id.strip() for ticket_id in self.protected_ticket_ids):
             raise ValueError("protected Ticket identities must be non-blank")
         if len(set(self.protected_ticket_ids)) != len(self.protected_ticket_ids):
@@ -141,17 +110,12 @@ class TokyoReleaseBackend(Protocol):
         ticket_id: str,
     ) -> Mapping[str, object]: ...
 
-    def probe_exchange(
-        self,
-        release: str,
-        exchange_instrument_ids: tuple[str, ...],
-    ) -> Mapping[str, object]: ...
+    def probe_exchange(self, release: str) -> Mapping[str, object]: ...
 
     def probe_protected_exchange(
         self,
         release: str,
         protected_tickets: list[object],
-        exchange_instrument_ids: tuple[str, ...],
     ) -> Mapping[str, object]: ...
 
     def read_release_marker(self, release: str, marker: str) -> str: ...
@@ -194,6 +158,8 @@ class TokyoReleaseBackend(Protocol):
     ) -> None: ...
 
     def start_services(self, services: tuple[str, ...]) -> None: ...
+
+    def unfence_entry(self) -> None: ...
 
     def fence_entry(self) -> None: ...
 
@@ -290,6 +256,10 @@ def deploy_tokyo_release(
         backend.start_services(SAFETY_SERVICES)
         if plan.enable_entry:
             backend.start_services((ENTRY_SERVICE,))
+            active_before_unfence = backend.services_active(ALL_SERVICES)
+            if active_before_unfence != frozenset(ALL_SERVICES):
+                raise DeploymentBlocked("ENTRY did not become active while write-fenced")
+            backend.unfence_entry()
         if (
             plan.closure_ticket_id is not None
             and not backend.entry_is_inactive_disabled_and_fenced()
@@ -327,10 +297,7 @@ def _read_release_facts(
             plan.target_release,
             plan.closure_ticket_id,
         )
-        probe = backend.probe_exchange(
-            plan.target_release,
-            plan.exchange_instrument_ids,
-        )
+        probe = backend.probe_exchange(plan.target_release)
         return (
             certification,
             probe,
@@ -338,7 +305,6 @@ def _read_release_facts(
                 certification,
                 probe,
                 expected_leverage=plan.expected_configured_leverage,
-                expected_instrument_ids=plan.exchange_instrument_ids,
                 closure_ticket_id=plan.closure_ticket_id,
             ),
         )
@@ -347,7 +313,6 @@ def _read_release_facts(
         probe = backend.probe_protected_exchange(
             plan.target_release,
             _require_protected_ticket_rows(certification),
-            plan.exchange_instrument_ids,
         )
         return (
             certification,
@@ -356,15 +321,11 @@ def _read_release_facts(
                 certification,
                 probe,
                 expected_leverage=plan.expected_configured_leverage,
-                expected_instrument_ids=plan.exchange_instrument_ids,
                 protected_ticket_ids=plan.protected_ticket_ids,
             ),
         )
     certification = backend.certify_flat(plan.target_release)
-    probe = backend.probe_exchange(
-        plan.target_release,
-        plan.exchange_instrument_ids,
-    )
+    probe = backend.probe_exchange(plan.target_release)
     return (
         certification,
         probe,
@@ -372,7 +333,6 @@ def _read_release_facts(
             certification,
             probe,
             expected_leverage=plan.expected_configured_leverage,
-            expected_instrument_ids=plan.exchange_instrument_ids,
         ),
     )
 
@@ -382,7 +342,6 @@ def _require_release_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
-    expected_instrument_ids: tuple[str, ...],
 ) -> dict[str, str]:
     if certification.get("status") != "pass":
         raise DeploymentBlocked("database flat certification failed")
@@ -419,7 +378,6 @@ def _require_release_facts(
     _require_probe_rules(
         probe,
         expected_leverage=expected_leverage,
-        expected_instrument_ids=expected_instrument_ids,
     )
     return identity
 
@@ -429,7 +387,6 @@ def _require_closure_release_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
-    expected_instrument_ids: tuple[str, ...],
     closure_ticket_id: str,
 ) -> dict[str, str]:
     if certification.get("status") != "pass":
@@ -495,7 +452,6 @@ def _require_closure_release_facts(
     _require_flat_exchange_facts(
         probe,
         expected_leverage=expected_leverage,
-        expected_instrument_ids=expected_instrument_ids,
     )
     return identity
 
@@ -504,7 +460,6 @@ def _require_flat_exchange_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
-    expected_instrument_ids: tuple[str, ...],
 ) -> None:
     if probe.get("venue_id") != "binance-usdm":
         raise DeploymentBlocked("production venue identity differs from policy")
@@ -519,7 +474,6 @@ def _require_flat_exchange_facts(
     _require_probe_rules(
         probe,
         expected_leverage=expected_leverage,
-        expected_instrument_ids=expected_instrument_ids,
     )
 
 
@@ -528,7 +482,6 @@ def _require_protected_release_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
-    expected_instrument_ids: tuple[str, ...],
     protected_ticket_ids: tuple[str, ...],
 ) -> dict[str, str]:
     protected_ticket_count = len(protected_ticket_ids)
@@ -576,7 +529,6 @@ def _require_protected_release_facts(
     _require_probe_rules(
         probe,
         expected_leverage=expected_leverage,
-        expected_instrument_ids=expected_instrument_ids,
     )
     return identity
 
@@ -585,12 +537,9 @@ def _require_probe_rules(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
-    expected_instrument_ids: tuple[str, ...],
 ) -> None:
     rules = probe.get("rules")
-    if not isinstance(rules, list) or len(rules) != len(
-        expected_instrument_ids
-    ):
+    if not isinstance(rules, list) or not rules:
         raise DeploymentBlocked("production instrument rule set is incomplete")
     if any(not isinstance(rule, Mapping) for rule in rules):
         raise DeploymentBlocked("production instrument rule set is incomplete")
@@ -601,7 +550,17 @@ def _require_probe_rules(
             if isinstance(rule, Mapping)
         )
     )
-    if actual_instrument_ids != expected_instrument_ids:
+    if len(actual_instrument_ids) != len(set(actual_instrument_ids)):
+        raise DeploymentBlocked("production instrument rule identity differs")
+    manifest = probe.get("probe_manifest")
+    if not isinstance(manifest, list):
+        raise DeploymentBlocked("database-derived probe manifest is missing")
+    expected_instrument_ids = tuple(sorted(str(value) for value in manifest))
+    if (
+        not expected_instrument_ids
+        or len(expected_instrument_ids) != len(set(expected_instrument_ids))
+        or actual_instrument_ids != expected_instrument_ids
+    ):
         raise DeploymentBlocked("production instrument rule identity differs")
     configured = {
         int(str(rule.get("configured_leverage", -1)))
@@ -751,22 +710,16 @@ class SshTokyoReleaseBackend:
             ticket_id,
         )
 
-    def probe_exchange(
-        self,
-        release: str,
-        exchange_instrument_ids: tuple[str, ...],
-    ) -> Mapping[str, object]:
+    def probe_exchange(self, release: str) -> Mapping[str, object]:
         return self._release_json(
             release,
             "scripts/trading_kernel/probe_production_runtime.py",
-            *_probe_instrument_arguments(exchange_instrument_ids),
         )
 
     def probe_protected_exchange(
         self,
         release: str,
         protected_tickets: list[object],
-        exchange_instrument_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         encoded_rows: list[str] = []
         for row in protected_tickets:
@@ -783,7 +736,6 @@ class SshTokyoReleaseBackend:
         return self._release_json(
             release,
             "scripts/trading_kernel/probe_production_runtime.py",
-            *_probe_instrument_arguments(exchange_instrument_ids),
             *(argument for row in encoded_rows for argument in ("--protected-ticket-json", row)),
         )
 
@@ -947,11 +899,12 @@ class SshTokyoReleaseBackend:
         self._remote(("sudo", "systemctl", "daemon-reload"))
 
     def start_services(self, services: tuple[str, ...]) -> None:
-        if ENTRY_SERVICE in services:
-            if services != (ENTRY_SERVICE,):
-                raise ValueError("ENTRY must be started as the final isolated phase")
-            self._remote(("sudo", "rm", "-f", WRITE_FENCE))
+        if ENTRY_SERVICE in services and services != (ENTRY_SERVICE,):
+            raise ValueError("ENTRY must be started as the final isolated phase")
         self._remote(("sudo", "systemctl", "enable", "--now", *services))
+
+    def unfence_entry(self) -> None:
+        self._remote(("sudo", "rm", "-f", WRITE_FENCE))
 
     def fence_entry(self) -> None:
         self._remote(
@@ -1081,16 +1034,6 @@ class SshTokyoReleaseBackend:
         )
 
 
-def _probe_instrument_arguments(
-    exchange_instrument_ids: tuple[str, ...],
-) -> tuple[str, ...]:
-    return tuple(
-        argument
-        for instrument_id in exchange_instrument_ids
-        for argument in ("--exchange-instrument-id", instrument_id)
-    )
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1106,12 +1049,6 @@ def _parser() -> argparse.ArgumentParser:
         "--enable-entry",
         action="store_true",
         help="Enable ENTRY only after all target postflight checks pass.",
-    )
-    parser.add_argument(
-        "--exchange-instrument-id",
-        action="append",
-        default=[],
-        help="Exact canonical active Universe instrument to probe; repeat per instrument.",
     )
     parser.add_argument(
         "--protected-ticket-id",
@@ -1157,7 +1094,6 @@ def main(argv: list[str] | None = None) -> int:
         schema_revision=SCHEMA_REVISION,
         expected_configured_leverage=EXPECTED_CONFIGURED_LEVERAGE,
         enable_entry=args.enable_entry,
-        exchange_instrument_ids=tuple(args.exchange_instrument_id),
         protected_ticket_ids=tuple(args.protected_ticket_id),
         closure_ticket_id=args.closure_ticket_id,
     )

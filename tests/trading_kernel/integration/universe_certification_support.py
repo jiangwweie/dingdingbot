@@ -4,8 +4,10 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 import asyncpg
@@ -14,18 +16,29 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.certify_universe_instrument import (
+    InstrumentCertificationReadRequest,
     InstrumentCertificationSnapshot,
 )
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     install_strategy_universe,
 )
-from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
+from src.trading_kernel.application.ports import (
+    LeverageTruthRequest,
+    LeverageTruthSnapshot,
+    VenueTruthRequest,
+)
+from src.trading_kernel.application.runtime_facts import (
+    InstrumentRulesFacts,
+    PositionSnapshotRequest,
+)
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertificationFacts,
 )
+from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
@@ -49,11 +62,13 @@ MEMBERS = (
 )
 NOW_MS = 1_800_000_010_000
 RUNTIME_COMMIT = "task-7-test"
-SCHEMA_REVISION = "0003_cross_margin_stop_stress"
+SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
+    "0001_trading_kernel_baseline_v2"
+)
 
 
 @pytest_asyncio.fixture
-async def certification_engine() -> AsyncEngine:
+async def certification_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -116,10 +131,12 @@ class RecordingReadonlyCertificationSource:
         self.engine = engine
         self.changes = changes or {}
         self.error = error
-        self.requests = []
+        self.requests: list[InstrumentCertificationReadRequest] = []
         self.mutation_calls: list[str] = []
 
-    async def read_instrument_certification(self, request):
+    async def read_instrument_certification(
+        self, request: InstrumentCertificationReadRequest
+    ) -> InstrumentCertificationSnapshot:
         self.requests.append(request)
         async with self.engine.connect() as connection:
             idle_in_transaction = int(
@@ -195,6 +212,42 @@ class RecordingReadonlyCertificationSource:
         del args, kwargs
         self.mutation_calls.append("set_position_mode")
         raise AssertionError("certification must remain readonly")
+
+
+class NoTicketVenueTruth:
+    """Strict fake proving certification cadence does not inspect Tickets."""
+
+    async def lookup_command_truth(
+        self, request: VenueTruthRequest
+    ) -> VenueTruthSnapshot:
+        del request
+        raise AssertionError("certification-only cadence must not read order truth")
+
+    async def read_configured_leverage(
+        self, request: LeverageTruthRequest
+    ) -> LeverageTruthSnapshot:
+        del request
+        raise AssertionError("certification-only cadence must not read leverage truth")
+
+
+class NoTicketPositionSource:
+    """Strict fake proving certification cadence does not inspect positions."""
+
+    async def read_position_snapshot(
+        self, request: PositionSnapshotRequest
+    ) -> PositionSnapshot:
+        del request
+        raise AssertionError("certification-only cadence must not read position")
+
+
+class NoInstrumentCertificationSource:
+    """Strict fake for a cadence whose certification selector is monkeypatched."""
+
+    async def read_instrument_certification(
+        self, request: InstrumentCertificationReadRequest
+    ) -> InstrumentCertificationSnapshot:
+        del request
+        raise AssertionError("monkeypatched certification selector must own this test")
 
 
 def worker_request(now_ms: int):

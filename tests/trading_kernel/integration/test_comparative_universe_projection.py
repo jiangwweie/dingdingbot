@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import asyncpg
@@ -55,7 +56,7 @@ MEMBERS = tuple(sorted((ETH, OP, SOL)))
 
 
 @pytest_asyncio.fixture
-async def projection_engine() -> AsyncEngine:
+async def projection_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -71,7 +72,7 @@ async def projection_engine() -> AsyncEngine:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-projection-test",
                     runtime_commit="task-9-test",
-                    schema_revision="0003_cross_margin_stop_stress",
+                    schema_revision="0001_trading_kernel_baseline_v2",
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
             )

@@ -12,16 +12,6 @@ from scripts.trading_kernel.verify_flat_cutover import (
     CutoverPlan,
 )
 
-TARGET_EXCHANGE_INSTRUMENT_IDS = (
-    "binance-usdm:ADAUSDT:perpetual",
-    "binance-usdm:BNBUSDT:perpetual",
-    "binance-usdm:BTCUSDT:perpetual",
-    "binance-usdm:DOGEUSDT:perpetual",
-    "binance-usdm:ETHUSDT:perpetual",
-    "binance-usdm:SOLUSDT:perpetual",
-    "binance-usdm:XRPUSDT:perpetual",
-)
-
 
 def _production_adapter_module() -> ModuleType:
     try:
@@ -385,16 +375,7 @@ async def test_preconditions_probe_uses_exact_cutover_instrument_authority(
 
     await system.inspect_preconditions(plan, old_units=frozenset(), new_units=frozenset())
 
-    assert probe_calls == [
-        (
-            "scripts/trading_kernel/probe_production_runtime.py",
-            *(
-                argument
-                for instrument_id in TARGET_EXCHANGE_INSTRUMENT_IDS
-                for argument in ("--exchange-instrument-id", instrument_id)
-            ),
-        )
-    ]
+    assert probe_calls == [("scripts/trading_kernel/probe_production_runtime.py",)]
 
 
 @pytest.mark.asyncio
@@ -439,15 +420,10 @@ async def test_readonly_certification_probe_uses_exact_cutover_instrument_author
 
     await system.certify_readonly(plan)
 
-    expected_probe_args = tuple(
-        argument
-        for instrument_id in TARGET_EXCHANGE_INSTRUMENT_IDS
-        for argument in ("--exchange-instrument-id", instrument_id)
-    )
     assert calls == [
         ("scripts/trading_kernel/verify_schema.py",),
         ("scripts/trading_kernel/certify_readonly.py", "--require-flat"),
-        ("scripts/trading_kernel/probe_production_runtime.py", *expected_probe_args),
+        ("scripts/trading_kernel/probe_production_runtime.py",),
     ]
 
 
@@ -722,10 +698,9 @@ def _plan() -> CutoverPlan:
         runtime_profile_id="tiny-live-v1",
         application_schema="public",
         target_commit="a" * 40,
-        target_schema_revision="0003_cross_margin_stop_stress",
+        target_schema_revision="0001_trading_kernel_baseline_v2",
         target_seed_identity="sha256:" + "b" * 64,
         target_release_id="brc-trading-kernel-aaaaaaaaaaaa",
-        exchange_instrument_ids=TARGET_EXCHANGE_INSTRUMENT_IDS,
     )
 
 

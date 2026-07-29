@@ -18,7 +18,7 @@ FACT_IDS = (
 )
 
 
-def test_warm_readiness_digest_is_bound_to_universe_version_and_digest() -> None:
+def test_warm_readiness_keeps_market_identity_separate_from_completion_time() -> None:
     assert hasattr(observation, "build_warm_readiness")
     build_warm_readiness = observation.build_warm_readiness
     facts = _facts()
@@ -27,30 +27,43 @@ def test_warm_readiness_digest_is_bound_to_universe_version_and_digest() -> None
         scope=_scope(),
         facts=facts,
         expected_fact_definition_ids=FACT_IDS,
-        ready_at_ms=NOW_MS,
+        warm_closed_bar_time_ms=NOW_MS,
+        warm_completed_at_ms=NOW_MS + 5_000,
     )
     changed_version = build_warm_readiness(
         scope=_scope(universe_version_id="universe-version-b"),
         facts=facts,
         expected_fact_definition_ids=FACT_IDS,
-        ready_at_ms=NOW_MS,
+        warm_closed_bar_time_ms=NOW_MS,
+        warm_completed_at_ms=NOW_MS + 10_000,
     )
     changed_digest = build_warm_readiness(
         scope=_scope(universe_semantic_digest=OTHER_UNIVERSE_DIGEST),
         facts=facts,
         expected_fact_definition_ids=FACT_IDS,
-        ready_at_ms=NOW_MS,
+        warm_closed_bar_time_ms=NOW_MS,
+        warm_completed_at_ms=NOW_MS + 15_000,
     )
 
     assert first.runtime_scope_id == "scope-warming-btc"
     assert first.universe_version_id == "universe-version-a"
     assert first.universe_semantic_digest == UNIVERSE_DIGEST
-    assert first.ready_at_ms == NOW_MS
-    assert first.valid_until_ms == NOW_MS + 900_000
+    assert first.warm_closed_bar_time_ms == NOW_MS
+    assert first.warm_completed_at_ms == NOW_MS + 5_000
+    assert first.warm_valid_until_ms == NOW_MS + 900_000
     assert first.readiness_digest.startswith("sha256:")
     assert len(first.readiness_digest) == 71
     assert changed_version.readiness_digest != first.readiness_digest
     assert changed_digest.readiness_digest != first.readiness_digest
+
+    later_completion = build_warm_readiness(
+        scope=_scope(),
+        facts=facts,
+        expected_fact_definition_ids=FACT_IDS,
+        warm_closed_bar_time_ms=NOW_MS,
+        warm_completed_at_ms=NOW_MS + 30_000,
+    )
+    assert later_completion.readiness_digest == first.readiness_digest
 
 
 @pytest.mark.parametrize(
@@ -103,7 +116,8 @@ def test_warm_readiness_rejects_incomplete_stale_or_inconsistent_facts(
             scope=_scope(),
             facts=facts(),
             expected_fact_definition_ids=FACT_IDS,
-            ready_at_ms=NOW_MS,
+            warm_closed_bar_time_ms=NOW_MS,
+            warm_completed_at_ms=NOW_MS + 5_000,
         )
 
 

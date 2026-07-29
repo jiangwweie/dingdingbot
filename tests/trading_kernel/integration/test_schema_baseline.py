@@ -111,10 +111,15 @@ def test_strategy_universe_metadata_has_forward_only_authority_shape() -> None:
         "entry_enabled",
         "universe_version_id",
         "universe_semantic_digest",
-        "warm_ready_at_ms",
+        "warm_closed_bar_time_ms",
+        "warm_completed_at_ms",
         "warm_readiness_digest",
         "warm_valid_until_ms",
     }.issubset(scopes.c.keys())
+    assert {
+        "abandoned_at_ms",
+        "abandon_reason_code",
+    }.issubset(versions.c.keys())
     assert (
         "universe_version_id",
         "event_spec_id",

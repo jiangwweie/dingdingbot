@@ -62,8 +62,8 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-13-query-bounds"
-SCHEMA_REVISION: Literal["0003_cross_margin_stop_stress"] = (
-    "0003_cross_margin_stop_stress"
+SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
+    "0001_trading_kernel_baseline_v2"
 )
 ACTIVE_MEMBERS = tuple(
     f"binance-usdm:{symbol}USDT:perpetual"
@@ -172,7 +172,7 @@ async def test_observation_selector_claims_one_from_real_70_scope_lifecycle(
                 .select_from(runtime_scopes_current)
                 .where(
                     runtime_scopes_current.c.lifecycle_state == "active",
-                    runtime_scopes_current.c.warm_ready_at_ms.is_(None),
+                    runtime_scopes_current.c.warm_closed_bar_time_ms.is_(None),
                 )
             )
             or 0

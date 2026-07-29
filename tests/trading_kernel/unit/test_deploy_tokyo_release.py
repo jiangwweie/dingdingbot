@@ -31,48 +31,38 @@ TARGET_EXCHANGE_INSTRUMENT_IDS = (
 )
 
 
-def test_regular_plan_freezes_current_schema_and_probe_instruments() -> None:
+def test_regular_plan_freezes_current_schema_without_operator_probe_scope() -> None:
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         expected_configured_leverage=5,
         enable_entry=False,
-        exchange_instrument_ids=TARGET_EXCHANGE_INSTRUMENT_IDS,
     )
 
-    assert plan.schema_revision == "0003_cross_margin_stop_stress"
-    assert plan.exchange_instrument_ids == TARGET_EXCHANGE_INSTRUMENT_IDS
+    assert plan.schema_revision == "0001_trading_kernel_baseline_v2"
+    assert "exchange_instrument_ids" not in plan.__dataclass_fields__
 
 
-def test_regular_release_passes_exact_probe_instruments() -> None:
+def test_regular_release_uses_database_derived_probe_manifest() -> None:
     backend = FakeDeploymentBackend()
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         expected_configured_leverage=5,
         enable_entry=False,
-        exchange_instrument_ids=TARGET_EXCHANGE_INSTRUMENT_IDS,
     )
 
     deploy_tokyo_release(backend, plan)
 
     assert [call for call in backend.calls if call[0] == "probe_exchange"] == [
-        (
-            "probe_exchange",
-            TARGET_RELEASE,
-            TARGET_EXCHANGE_INSTRUMENT_IDS,
-        ),
-        (
-            "probe_exchange",
-            TARGET_RELEASE,
-            TARGET_EXCHANGE_INSTRUMENT_IDS,
-        ),
+        ("probe_exchange", TARGET_RELEASE),
+        ("probe_exchange", TARGET_RELEASE),
     ]
 
 
-def test_ssh_probe_exchange_passes_exact_instrument_arguments(
+def test_ssh_probe_exchange_has_no_operator_instrument_arguments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = SshTokyoReleaseBackend(
@@ -92,22 +82,12 @@ def test_ssh_probe_exchange_passes_exact_instrument_arguments(
 
     monkeypatch.setattr(backend, "_release_json", release_json)
 
-    backend.probe_exchange(TARGET_RELEASE, TARGET_EXCHANGE_INSTRUMENT_IDS)
+    backend.probe_exchange(TARGET_RELEASE)
 
-    assert calls == [
-        (
-            TARGET_RELEASE,
-            "scripts/trading_kernel/probe_production_runtime.py",
-            *(
-                argument
-                for instrument_id in TARGET_EXCHANGE_INSTRUMENT_IDS
-                for argument in ("--exchange-instrument-id", instrument_id)
-            ),
-        )
-    ]
+    assert calls == [(TARGET_RELEASE, "scripts/trading_kernel/probe_production_runtime.py")]
 
 
-def test_ssh_protected_probe_passes_instruments_before_ticket_manifest(
+def test_ssh_protected_probe_passes_only_ticket_manifest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = SshTokyoReleaseBackend(
@@ -130,24 +110,13 @@ def test_ssh_protected_probe_passes_instruments_before_ticket_manifest(
     backend.probe_protected_exchange(
         TARGET_RELEASE,
         [{"ticket_id": "ticket:btc"}],
-        TARGET_EXCHANGE_INSTRUMENT_IDS,
     )
 
-    expected_instrument_args = tuple(
-        argument
-        for instrument_id in TARGET_EXCHANGE_INSTRUMENT_IDS
-        for argument in ("--exchange-instrument-id", instrument_id)
-    )
     assert calls[0][0:2] == (
         TARGET_RELEASE,
         "scripts/trading_kernel/probe_production_runtime.py",
     )
-    assert calls[0][2 : 2 + len(expected_instrument_args)] == (
-        expected_instrument_args
-    )
-    assert calls[0][2 + len(expected_instrument_args)] == (
-        "--protected-ticket-json"
-    )
+    assert calls[0][2] == "--protected-ticket-json"
 
 
 def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
@@ -162,11 +131,7 @@ def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
         ("read_current_release",),
         ("install_release", TARGET_COMMIT, TARGET_RELEASE),
         ("certify_flat", TARGET_RELEASE),
-        (
-            "probe_exchange",
-            TARGET_RELEASE,
-            TARGET_EXCHANGE_INSTRUMENT_IDS,
-        ),
+        ("probe_exchange", TARGET_RELEASE),
         ("read_release_marker", CURRENT_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", CURRENT_RELEASE, ".brc-schema-revision"),
         ("stop_services", ALL_SERVICES),
@@ -176,27 +141,25 @@ def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
             "deploy_identity",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
         ),
         (
             "activate_release",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
             SEED_IDENTITY,
         ),
         ("certify_flat", TARGET_RELEASE),
-        (
-            "probe_exchange",
-            TARGET_RELEASE,
-            TARGET_EXCHANGE_INSTRUMENT_IDS,
-        ),
+        ("probe_exchange", TARGET_RELEASE),
         ("read_current_release",),
         ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
         ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
         ("start_services", SAFETY_SERVICES),
         ("start_services", (ENTRY_SERVICE,)),
+        ("services_active", ALL_SERVICES),
+        ("unfence_entry",),
         ("services_active", ALL_SERVICES),
     ]
 
@@ -212,7 +175,7 @@ def test_preflight_leverage_drift_blocks_before_any_service_stop() -> None:
     assert not any(call[0] == "activate_release" for call in backend.calls)
 
 
-def test_preflight_rule_identity_drift_blocks_before_service_stop() -> None:
+def test_database_derived_probe_rejects_rule_scope_that_differs_from_postgresql() -> None:
     backend = FakeDeploymentBackend(
         rule_instrument_ids=(
             *TARGET_EXCHANGE_INSTRUMENT_IDS[:-1],
@@ -220,10 +183,8 @@ def test_preflight_rule_identity_drift_blocks_before_service_stop() -> None:
         )
     )
 
-    with pytest.raises(DeploymentBlocked, match="instrument rule identity"):
+    with pytest.raises(DeploymentBlocked, match="rule identity"):
         deploy_tokyo_release(backend, _plan(enable_entry=False))
-
-    assert not any(call[0] == "stop_services" for call in backend.calls)
 
 
 def test_post_stop_failure_fences_entry_and_restores_safety_workers() -> None:
@@ -258,7 +219,6 @@ def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
             "probe_protected_exchange",
             TARGET_RELEASE,
             ticket_ids,
-            TARGET_EXCHANGE_INSTRUMENT_IDS,
         ),
         ("read_release_marker", CURRENT_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", CURRENT_RELEASE, ".brc-schema-revision"),
@@ -269,14 +229,14 @@ def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
             "deploy_protected_identity",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
             ticket_ids,
         ),
         (
             "activate_release",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
             SEED_IDENTITY,
         ),
         ("certify_protected", TARGET_RELEASE),
@@ -284,7 +244,6 @@ def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
             "probe_protected_exchange",
             TARGET_RELEASE,
             ticket_ids,
-            TARGET_EXCHANGE_INSTRUMENT_IDS,
         ),
         ("read_current_release",),
         ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
@@ -351,42 +310,30 @@ def test_closure_only_release_recovers_only_the_exact_pending_ticket() -> None:
         ("read_current_release",),
         ("install_release", TARGET_COMMIT, TARGET_RELEASE),
         ("certify_closure", TARGET_RELEASE, ticket_id),
-        (
-            "probe_exchange",
-            TARGET_RELEASE,
-            TARGET_EXCHANGE_INSTRUMENT_IDS,
-        ),
+        ("probe_exchange", TARGET_RELEASE),
         ("read_release_marker", CURRENT_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", CURRENT_RELEASE, ".brc-schema-revision"),
         ("stop_services", ALL_SERVICES),
         ("fence_entry",),
         ("services_active", ALL_SERVICES),
         ("certify_closure", TARGET_RELEASE, ticket_id),
-        (
-            "probe_exchange",
-            TARGET_RELEASE,
-            TARGET_EXCHANGE_INSTRUMENT_IDS,
-        ),
+        ("probe_exchange", TARGET_RELEASE),
         (
             "deploy_closure_identity",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
             ticket_id,
         ),
         (
             "activate_release",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
             SEED_IDENTITY,
         ),
         ("certify_closure", TARGET_RELEASE, ticket_id),
-        (
-            "probe_exchange",
-            TARGET_RELEASE,
-            TARGET_EXCHANGE_INSTRUMENT_IDS,
-        ),
+        ("probe_exchange", TARGET_RELEASE),
         ("read_current_release",),
         ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
@@ -445,10 +392,9 @@ def _plan(
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         expected_configured_leverage=5,
         enable_entry=enable_entry,
-        exchange_instrument_ids=TARGET_EXCHANGE_INSTRUMENT_IDS,
         protected_ticket_ids=protected_ticket_ids,
         closure_ticket_id=closure_ticket_id,
     )
@@ -465,6 +411,7 @@ class FakeDeploymentBackend:
         open_order_domain_count: int | None = None,
         include_exact_protected_facts: bool = True,
         rule_instrument_ids: tuple[str, ...] = TARGET_EXCHANGE_INSTRUMENT_IDS,
+        probe_manifest: tuple[str, ...] = TARGET_EXCHANGE_INSTRUMENT_IDS,
         fail_at: str | None = None,
     ) -> None:
         self.configured_leverage = configured_leverage
@@ -482,12 +429,14 @@ class FakeDeploymentBackend:
         )
         self.include_exact_protected_facts = include_exact_protected_facts
         self.rule_instrument_ids = rule_instrument_ids
+        self.probe_manifest = probe_manifest
         self.fail_at = fail_at
         self.protected_certification_calls = 0
         self.calls: list[tuple[object, ...]] = []
         self.current_release = CURRENT_RELEASE
         self.runtime_commit = CURRENT_COMMIT
         self.active_services = set(ALL_SERVICES)
+        self.entry_fenced = False
 
     def read_current_release(self) -> str:
         self.calls.append(("read_current_release",))
@@ -499,7 +448,7 @@ class FakeDeploymentBackend:
             "status": "pass",
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
-                "schema_revision": "0003_cross_margin_stop_stress",
+                "schema_revision": "0001_trading_kernel_baseline_v2",
                 "seed_identity": SEED_IDENTITY,
             },
             "active_counts": {
@@ -522,7 +471,7 @@ class FakeDeploymentBackend:
             "status": "pass",
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
-                "schema_revision": "0003_cross_margin_stop_stress",
+                "schema_revision": "0001_trading_kernel_baseline_v2",
                 "seed_identity": SEED_IDENTITY,
             },
             "active_counts": {
@@ -546,7 +495,7 @@ class FakeDeploymentBackend:
             "status": "pass",
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
-                "schema_revision": "0003_cross_margin_stop_stress",
+                "schema_revision": "0001_trading_kernel_baseline_v2",
                 "seed_identity": SEED_IDENTITY,
             },
             "active_counts": {
@@ -570,14 +519,8 @@ class FakeDeploymentBackend:
             },
         }
 
-    def probe_exchange(
-        self,
-        release: str,
-        exchange_instrument_ids: tuple[str, ...],
-    ) -> Mapping[str, object]:
-        self.calls.append(
-            ("probe_exchange", release, exchange_instrument_ids)
-        )
+    def probe_exchange(self, release: str) -> Mapping[str, object]:
+        self.calls.append(("probe_exchange", release))
         return self._probe_payload()
 
     def _probe_payload(self) -> dict[str, object]:
@@ -594,6 +537,7 @@ class FakeDeploymentBackend:
                 }
                 for instrument_id in self.rule_instrument_ids
             ],
+            "probe_manifest": list(self.probe_manifest),
         }
         if self.include_exact_protected_facts:
             payload["protected_tickets"] = self._protected_ticket_facts()
@@ -603,7 +547,6 @@ class FakeDeploymentBackend:
         self,
         release: str,
         protected_tickets: list[object],
-        exchange_instrument_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         self.calls.append(
             (
@@ -614,7 +557,6 @@ class FakeDeploymentBackend:
                     for row in protected_tickets
                     if isinstance(row, Mapping)
                 ),
-                exchange_instrument_ids,
             )
         )
         return self._probe_payload()
@@ -648,7 +590,7 @@ class FakeDeploymentBackend:
         if marker == ".brc-runtime-commit":
             return TARGET_COMMIT if release == TARGET_RELEASE else CURRENT_COMMIT
         if marker == ".brc-schema-revision":
-            return "0003_cross_margin_stop_stress"
+            return "0001_trading_kernel_baseline_v2"
         if marker == ".brc-seed-identity":
             return SEED_IDENTITY
         raise AssertionError(f"unexpected marker: {marker}")
@@ -756,7 +698,12 @@ class FakeDeploymentBackend:
     def fence_entry(self) -> None:
         self.calls.append(("fence_entry",))
         self.active_services.discard(ENTRY_SERVICE)
+        self.entry_fenced = True
+
+    def unfence_entry(self) -> None:
+        self.calls.append(("unfence_entry",))
+        self.entry_fenced = False
 
     def entry_is_inactive_disabled_and_fenced(self) -> bool:
         self.calls.append(("entry_is_inactive_disabled_and_fenced",))
-        return ENTRY_SERVICE not in self.active_services
+        return ENTRY_SERVICE not in self.active_services and self.entry_fenced

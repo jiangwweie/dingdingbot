@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import uuid4
 
@@ -44,7 +45,7 @@ NOW_MS = 1_800_001_000_000
 
 
 @pytest_asyncio.fixture
-async def script_database_url() -> str:
+async def script_database_url() -> AsyncGenerator[str, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -60,7 +61,7 @@ async def script_database_url() -> str:
                 RuntimeAuthoritySeedRequest(
                     account_id="sensitive-account-id",
                     runtime_commit="task-12-local-test",
-                    schema_revision="0003_cross_margin_stop_stress",
+                    schema_revision="0001_trading_kernel_baseline_v2",
                     seeded_at_ms=NOW_MS - 1_000,
                 ),
             )
@@ -206,7 +207,9 @@ async def test_readonly_certification_accepts_only_structurally_consistent_unive
         "temporarily_unavailable_certification_count": 0,
     }
     assert inconsistent["status"] == "fail"
-    assert inconsistent["strategy_universe"]["integrity_violation_count"] == 1
+    inconsistent_universe = inconsistent["strategy_universe"]
+    assert isinstance(inconsistent_universe, dict)
+    assert inconsistent_universe["integrity_violation_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -308,7 +311,8 @@ async def test_read_status_is_readonly_bounded_and_redacts_sensitive_state(
                     == "binance-usdm:SOLUSDT:perpetual"
                 )
                 .values(
-                    warm_ready_at_ms=NOW_MS,
+                    warm_closed_bar_time_ms=NOW_MS,
+                    warm_completed_at_ms=NOW_MS,
                     warm_readiness_digest="sha256:" + ("c" * 64),
                     warm_valid_until_ms=NOW_MS + 300_000,
                 )
@@ -489,7 +493,8 @@ async def test_read_status_displays_active_current_generation(
                     observation_enabled=True,
                     entry_enabled=True,
                     scope_version=2,
-                    warm_ready_at_ms=NOW_MS,
+                    warm_closed_bar_time_ms=NOW_MS,
+                    warm_completed_at_ms=NOW_MS,
                     warm_readiness_digest="sha256:" + ("c" * 64),
                     warm_valid_until_ms=NOW_MS + 300_000,
                     updated_at_ms=NOW_MS + 1,

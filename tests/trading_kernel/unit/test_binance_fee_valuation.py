@@ -12,7 +12,7 @@ from src.trading_kernel.infrastructure.binance_fee_valuation import (
 class _IndexExchange:
     def __init__(self, response) -> None:
         self.response = response
-        self.calls = []
+        self.calls: list[dict[str, object]] = []
 
     async def fapiPublicGetPremiumIndex(self, params):
         self.calls.append(dict(params))

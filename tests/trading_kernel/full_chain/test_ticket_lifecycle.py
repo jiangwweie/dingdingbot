@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -22,7 +23,10 @@ from src.trading_kernel.application.dispatch_exchange_command import (
     dispatch_one_command,
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue_ticket
-from src.trading_kernel.application.ports import VenueCommandRequest
+from src.trading_kernel.application.ports import (
+    VenueCommandRequest,
+    VenueSetLeverageRequest,
+)
 from src.trading_kernel.application.reconcile_ticket import (
     ExitTicketRequest,
     ExitTicketStatus,
@@ -45,6 +49,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
     OrderCommandPayload,
+    SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.ticket import build_ticket_id
@@ -72,7 +77,7 @@ SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 
 
 @pytest_asyncio.fixture
-async def lifecycle_engine() -> AsyncEngine:
+async def lifecycle_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -120,6 +125,15 @@ class LifecycleVenue:
             exchange_order_id=exchange_order_id,
         )
 
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "4" * 64,
+        )
+
 
 class ExitTimeoutVenue(LifecycleVenue):
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
@@ -149,8 +163,8 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price="60000",
-                    venue_reported_liquidation_price="0",
+                    average_entry_price=Decimal(60000),
+                    venue_reported_liquidation_price=Decimal(0),
                     open_orders=(),
                     observed_at_ms=2_100,
                 ),
@@ -194,7 +208,7 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -227,7 +241,7 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -266,7 +280,7 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=3_400,
@@ -301,7 +315,7 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=3_401,
@@ -392,8 +406,8 @@ async def test_external_flat_opens_incident_and_enters_owned_protection_cleanup(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price="60000",
-                    venue_reported_liquidation_price="0",
+                    average_entry_price=Decimal(60000),
+                    venue_reported_liquidation_price=Decimal(0),
                     open_orders=(),
                     observed_at_ms=2_100,
                 ),
@@ -409,7 +423,7 @@ async def test_external_flat_opens_incident_and_enters_owned_protection_cleanup(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -452,7 +466,7 @@ async def test_external_flat_opens_incident_and_enters_owned_protection_cleanup(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -477,7 +491,7 @@ async def test_external_flat_opens_incident_and_enters_owned_protection_cleanup(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=2_700,
@@ -509,8 +523,8 @@ async def test_exit_timeout_is_conserved_as_unknown_and_never_redispatched(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price="60000",
-                    venue_reported_liquidation_price="0",
+                    average_entry_price=Decimal(60000),
+                    venue_reported_liquidation_price=Decimal(0),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -572,7 +586,7 @@ async def test_owned_orphan_order_creates_new_exact_cancel_generation(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -612,7 +626,7 @@ async def test_owned_orphan_order_creates_new_exact_cancel_generation(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -639,7 +653,7 @@ async def test_owned_orphan_order_creates_new_exact_cancel_generation(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=3_600,
@@ -672,7 +686,7 @@ async def test_unowned_open_order_opens_incident_without_creating_cancel(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -695,7 +709,7 @@ async def test_unowned_open_order_opens_incident_without_creating_cancel(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -737,7 +751,7 @@ async def test_protection_residue_blocks_match_without_duplicate_cancel(
 
     snapshot = PositionSnapshot(
         netting_domain=ticket.identity.netting_domain,
-        quantity="0",
+        quantity=Decimal(0),
         average_entry_price=None,
         open_orders=(
             VenueOrderSnapshot(
@@ -937,8 +951,8 @@ async def _protect_ticket(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price="60000",
-                    venue_reported_liquidation_price="0",
+                    average_entry_price=Decimal(60000),
+                    venue_reported_liquidation_price=Decimal(0),
                     observed_at_ms=observed_at_ms,
                 ),
             ),
@@ -977,8 +991,8 @@ async def _reach_reconciliation_pending_after_cancel(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price="60000",
-                    venue_reported_liquidation_price="0",
+                    average_entry_price=Decimal(60000),
+                    venue_reported_liquidation_price=Decimal(0),
                     observed_at_ms=2_100,
                 ),
             ),
@@ -1002,7 +1016,7 @@ async def _reach_reconciliation_pending_after_cancel(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
@@ -1031,7 +1045,7 @@ async def _reach_reconciliation_pending_after_cancel(
                     ticket_id=ticket.identity.ticket_id,
                     snapshot=PositionSnapshot(
                         netting_domain=ticket.identity.netting_domain,
-                        quantity="0",
+                        quantity=Decimal(0),
                         average_entry_price=None,
                         open_orders=(
                             VenueOrderSnapshot(
@@ -1063,7 +1077,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0003_cross_margin_stop_stress",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -1072,7 +1086,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 set_={
                     "enabled": True,
                     "certified_commit": "kernel-test-head",
-                    "schema_revision": "0003_cross_margin_stop_stress",
+                    "schema_revision": "0001_trading_kernel_baseline_v2",
                     "certification": {},
                     "updated_at_ms": 1_000,
                 },
@@ -1102,7 +1116,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

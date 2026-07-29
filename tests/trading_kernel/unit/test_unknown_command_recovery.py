@@ -123,6 +123,7 @@ def test_lookup_failure_remains_unknown() -> None:
 
 def test_visible_cancel_target_waits_until_visibility_deadline() -> None:
     command = _cancel_command()
+    assert isinstance(command.payload, CancelCommandPayload)
     result = decide_unknown_recovery(
         command,
         _truth(
@@ -149,6 +150,7 @@ def test_visible_cancel_target_waits_until_visibility_deadline() -> None:
 
 def test_visible_cancel_target_after_deadline_proves_cancel_was_not_effective() -> None:
     command = _cancel_command()
+    assert isinstance(command.payload, CancelCommandPayload)
     result = decide_unknown_recovery(
         command,
         _truth(
@@ -175,6 +177,7 @@ def test_visible_cancel_target_after_deadline_proves_cancel_was_not_effective() 
 
 def test_terminal_cancel_target_reconciles_as_absent_from_open_orders() -> None:
     command = _cancel_command()
+    assert isinstance(command.payload, CancelCommandPayload)
     result = decide_unknown_recovery(
         command,
         _truth(

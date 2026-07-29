@@ -139,6 +139,8 @@ strategy_universe_versions = sa.Table(
     _time("installed_at_ms"),
     _time("activated_at_ms", nullable=True),
     _time("retired_at_ms", nullable=True),
+    _time("abandoned_at_ms", nullable=True),
+    sa.Column("abandon_reason_code", SHORT_TEXT, nullable=True),
     sa.UniqueConstraint("event_spec_id", "universe_version"),
     sa.UniqueConstraint(
         "universe_version_id",
@@ -157,17 +159,23 @@ strategy_universe_versions = sa.Table(
         name="semantic_digest_valid",
     ),
     sa.CheckConstraint(
-        "lifecycle_state IN ('warming', 'active', 'retired')",
+        "lifecycle_state IN ('warming', 'active', 'retired', 'abandoned')",
         name="lifecycle_state_valid",
     ),
     sa.CheckConstraint(
         "(lifecycle_state = 'warming' "
-        "AND activated_at_ms IS NULL AND retired_at_ms IS NULL) OR "
+        "AND activated_at_ms IS NULL AND retired_at_ms IS NULL "
+        "AND abandoned_at_ms IS NULL AND abandon_reason_code IS NULL) OR "
         "(lifecycle_state = 'active' "
-        "AND activated_at_ms IS NOT NULL AND retired_at_ms IS NULL) OR "
+        "AND activated_at_ms IS NOT NULL AND retired_at_ms IS NULL "
+        "AND abandoned_at_ms IS NULL AND abandon_reason_code IS NULL) OR "
         "(lifecycle_state = 'retired' "
         "AND activated_at_ms IS NOT NULL AND retired_at_ms IS NOT NULL "
-        "AND retired_at_ms >= activated_at_ms)",
+        "AND retired_at_ms >= activated_at_ms "
+        "AND abandoned_at_ms IS NULL AND abandon_reason_code IS NULL) OR "
+        "(lifecycle_state = 'abandoned' "
+        "AND activated_at_ms IS NULL AND retired_at_ms IS NULL "
+        "AND abandoned_at_ms IS NOT NULL AND abandon_reason_code IS NOT NULL)",
         name="lifecycle_timestamps_valid",
     ),
 )
@@ -267,6 +275,7 @@ instrument_certification_current = sa.Table(
     _time("next_check_at_ms"),
     sa.Column("lease_owner", SHORT_TEXT, nullable=True),
     _time("lease_expires_at_ms", nullable=True),
+    _id("lease_universe_version_id", nullable=True),
     sa.Column("projection_version", sa.BigInteger, nullable=False),
     sa.PrimaryKeyConstraint("runtime_profile_id", "exchange_instrument_id"),
     sa.ForeignKeyConstraint(
@@ -300,8 +309,10 @@ instrument_certification_current = sa.Table(
         name="next_check_not_before_observation",
     ),
     sa.CheckConstraint(
-        "(lease_owner IS NULL AND lease_expires_at_ms IS NULL) OR "
-        "(lease_owner IS NOT NULL AND lease_expires_at_ms IS NOT NULL)",
+        "(lease_owner IS NULL AND lease_expires_at_ms IS NULL "
+        "AND lease_universe_version_id IS NULL) OR "
+        "(lease_owner IS NOT NULL AND lease_expires_at_ms IS NOT NULL "
+        "AND lease_universe_version_id IS NOT NULL)",
         name="lease_shape_valid",
     ),
     sa.CheckConstraint(
@@ -491,7 +502,8 @@ runtime_scopes_current = sa.Table(
     sa.Column("observation_enabled", sa.Boolean, nullable=False),
     sa.Column("entry_enabled", sa.Boolean, nullable=False),
     sa.Column("scope_version", sa.Integer, nullable=False),
-    _time("warm_ready_at_ms", nullable=True),
+    _time("warm_closed_bar_time_ms", nullable=True),
+    _time("warm_completed_at_ms", nullable=True),
     sa.Column("warm_readiness_digest", LONG_TEXT, nullable=True),
     _time("warm_valid_until_ms", nullable=True),
     _time("next_observation_due_at_ms", nullable=True),
@@ -539,19 +551,24 @@ runtime_scopes_current = sa.Table(
         "(lifecycle_state = 'active' "
         "AND observation_enabled AND entry_enabled) OR "
         "(lifecycle_state = 'retired' "
+        "AND NOT observation_enabled AND NOT entry_enabled) OR "
+        "(lifecycle_state = 'abandoned' "
         "AND NOT observation_enabled AND NOT entry_enabled)",
         name="lifecycle_permissions_valid",
     ),
     sa.CheckConstraint(
-        "(warm_ready_at_ms IS NULL AND warm_readiness_digest IS NULL "
+        "(warm_closed_bar_time_ms IS NULL AND warm_completed_at_ms IS NULL "
+        "AND warm_readiness_digest IS NULL "
         "AND warm_valid_until_ms IS NULL) OR "
-        "(warm_ready_at_ms IS NOT NULL AND warm_readiness_digest IS NOT NULL "
+        "(warm_closed_bar_time_ms IS NOT NULL AND warm_completed_at_ms IS NOT NULL "
+        "AND warm_readiness_digest IS NOT NULL "
         "AND warm_valid_until_ms IS NOT NULL "
-        "AND warm_valid_until_ms > warm_ready_at_ms)",
+        "AND warm_completed_at_ms >= warm_closed_bar_time_ms "
+        "AND warm_valid_until_ms > warm_completed_at_ms)",
         name="warm_readiness_shape_valid",
     ),
     sa.CheckConstraint(
-        "lifecycle_state <> 'active' OR warm_ready_at_ms IS NOT NULL",
+        "lifecycle_state <> 'active' OR warm_closed_bar_time_ms IS NOT NULL",
         name="active_requires_warm_readiness",
     ),
     sa.CheckConstraint(

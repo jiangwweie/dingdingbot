@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 import pytest
 
@@ -48,6 +49,9 @@ from tests.trading_kernel.integration.test_command_dispatch import (
     PreflightFacts,
     _issue,
     _seed_policy,
+)
+from tests.trading_kernel.integration.universe_certification_support import (
+    NoTicketVenueTruth,
 )
 from tests.trading_kernel.unit.test_ticket import _ticket
 
@@ -233,7 +237,7 @@ async def test_raw_liquidation_observation_never_controls_post_fill_decision(
     stress_engine,
     case_name: str,
     raw_liquidation_observation: Decimal | None,
-    raw_observation_status: str,
+    raw_observation_status: Literal["valid", "missing", "invalid"],
     expected_monitor_code: str,
 ) -> None:
     ticket = (
@@ -555,7 +559,7 @@ async def _reach_post_fill_pending(
     ticket,
     *,
     raw_liquidation_observation: Decimal | None = Decimal(0),
-    raw_observation_status: str | None = None,
+    raw_observation_status: Literal["valid", "missing", "invalid"] | None = None,
 ) -> None:
     await _seed_policy(engine)
     await _issue(engine, ticket)
@@ -570,7 +574,7 @@ async def _reach_post_fill_pending(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=TicketPreflightFacts(ticket),
@@ -639,12 +643,12 @@ async def _run_post_fill_worker(
 ):
     return await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(engine),
-        KindAwareAcceptingVenue(),
+        NoTicketVenueTruth(),
         UnusedPositionSource(),
         ReconciliationWorkerRequest(
             worker_id="post-fill-reconciliation",
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=now_ms,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,

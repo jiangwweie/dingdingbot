@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import AsyncGenerator
 from decimal import Decimal
+from typing import Literal
 from uuid import uuid4
 
 import asyncpg
@@ -20,8 +22,11 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
 from src.trading_kernel.application.observe_strategy_scope import ObservationStatus
 from src.trading_kernel.application.ports import (
+    LeverageTruthRequest,
+    LeverageTruthSnapshot,
     MonitorOwnerStatus,
     VenueCommandRequest,
+    VenueSetLeverageRequest,
 )
 from src.trading_kernel.application.project_owner_state import (
     OwnerProjectionRequest,
@@ -41,6 +46,7 @@ from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandResult,
     ExchangeCommandStatus,
+    SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.cross_margin_stress import (
     AccountRiskPosition,
@@ -129,7 +135,7 @@ EVENT_INSTRUMENTS = {
 
 
 @pytest_asyncio.fixture
-async def six_event_engine() -> AsyncEngine:
+async def six_event_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_TEST_DATABASE.fullmatch(database_name)
     assert SAFE_DATABASE.fullmatch(database_name)
@@ -204,7 +210,12 @@ class CertifiedMarketSource:
 
 
 class CertifiedEntryAdmissionFactsSource:
-    def __init__(self, *, reference_price: Decimal, position_side: str) -> None:
+    def __init__(
+        self,
+        *,
+        reference_price: Decimal,
+        position_side: Literal["long", "short"],
+    ) -> None:
         offset = max(reference_price * Decimal("0.0001"), Decimal("0.01"))
         spread = offset / Decimal(2)
         if position_side == "long":
@@ -266,6 +277,30 @@ class CertifiedEntryAdmissionFactsSource:
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
 
+    async def read_account_risk_snapshot(
+        self,
+        request: AccountRiskSnapshotRequest,
+    ) -> AccountRiskSnapshot:
+        return AccountRiskSnapshot.create(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            account_risk_mode="standard_usdm_single_asset",
+            settlement_asset="USDT",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            exchange_instrument_id=request.exchange_instrument_id,
+            mark_price=(self.best_bid + self.best_ask) / Decimal(2),
+            configured_leverage=10,
+            total_wallet_balance=Decimal(1000000),
+            total_margin_balance=Decimal(1000000),
+            total_initial_margin=Decimal(0),
+            total_maintenance_margin=Decimal(0),
+            available_margin=Decimal(1000000),
+            account_positions=(),
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
 
 class CertifiedVenue:
     def __init__(self) -> None:
@@ -290,6 +325,29 @@ class CertifiedVenue:
 
     async def lookup_command_truth(self, request):
         raise AssertionError(f"unexpected unknown command lookup: {request.command_id}")
+
+    async def set_leverage(
+        self, request: VenueSetLeverageRequest
+    ) -> SetLeverageCommandResult:
+        self.last_observed_at_ms += 1
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=self.last_observed_at_ms,
+            leverage_verification_digest="sha256:" + "4" * 64,
+        )
+
+    async def read_configured_leverage(
+        self, request: LeverageTruthRequest
+    ) -> LeverageTruthSnapshot:
+        self.last_observed_at_ms += 1
+        return LeverageTruthSnapshot(
+            exchange_configured_leverage=request.desired_leverage,
+            long_position_quantity=Decimal(0),
+            short_position_quantity=Decimal(0),
+            regular_open_order_ids=(),
+            conditional_open_order_ids=(),
+            observed_at_ms=self.last_observed_at_ms,
+        )
 
 
 class CertifiedPositionSource:
@@ -525,7 +583,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         ObservationWorkerRequest(
             worker_id="observation-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=NOW_MS,
             lease_until_ms=NOW_MS + 30_000,
             timeout_seconds=5,
@@ -560,7 +618,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         EntryWorkerRequest(
             worker_id="entry-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=NOW_MS + 1_000,
             lease_until_ms=NOW_MS + 6_000,
             timeout_seconds=1,
@@ -581,7 +639,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         now_ms=NOW_MS + 2_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -598,7 +656,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     lifecycle_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0003_cross_margin_stop_stress",
+        schema_revision="0001_trading_kernel_baseline_v2",
         now_ms=NOW_MS + 3_000,
         lease_until_ms=NOW_MS + 8_000,
         timeout_seconds=1,
@@ -763,7 +821,7 @@ async def _seed_runtime(
             RuntimeAuthoritySeedRequest(
                 account_id="account-certification",
                 runtime_commit="kernel-test-head",
-                schema_revision="0003_cross_margin_stop_stress",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 seeded_at_ms=warm_now_ms - 10_000,
             ),
         )
@@ -784,12 +842,12 @@ async def _seed_runtime(
 
     certification = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(engine),
-        object(),
-        object(),
+        CertifiedVenue(),
+        CertifiedPositionSource(),
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-universe-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=warm_now_ms,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -811,7 +869,7 @@ async def _seed_runtime(
         ObservationWorkerRequest(
             worker_id="observation-worker-universe-warming",
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=warm_now_ms,
             lease_until_ms=warm_now_ms + 30_000,
             timeout_seconds=5,

@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -22,7 +23,10 @@ from src.trading_kernel.application.dispatch_exchange_command import (
     dispatch_one_command,
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue_ticket
-from src.trading_kernel.application.ports import VenueCommandRequest
+from src.trading_kernel.application.ports import (
+    VenueCommandRequest,
+    VenueSetLeverageRequest,
+)
 from src.trading_kernel.application.reconcile_ticket import (
     ReconcileTicketRequest,
     ReconcileTicketStatus,
@@ -33,6 +37,7 @@ from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandResult,
     ExchangeCommandStatus,
+    SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.infrastructure.pg_models import (
@@ -60,7 +65,7 @@ SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 
 
 @pytest_asyncio.fixture
-async def fault_engine() -> AsyncEngine:
+async def fault_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -95,6 +100,16 @@ class AcceptingFaultVenue:
                 if isinstance(request.payload, CancelCommandPayload)
                 else f"venue-{request.kind.value}-{len(self.calls)}"
             ),
+        )
+
+    async def set_leverage(
+        self,
+        request: VenueSetLeverageRequest,
+    ) -> SetLeverageCommandResult:
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "4" * 64,
         )
 
 
@@ -190,7 +205,7 @@ async def test_partial_fill_cancels_remainder_before_controlled_flatten(
                 ticket_id=ticket.identity.ticket_id,
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
-                    quantity="0",
+                    quantity=Decimal(0),
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=1_500,
@@ -220,7 +235,7 @@ async def test_readonly_certification_prints_json_without_report_files(
             RuntimeAuthoritySeedRequest(
                 account_id="subaccount-main",
                 runtime_commit="a" * 40,
-                schema_revision="0003_cross_margin_stop_stress",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 seeded_at_ms=1_000,
             ),
         )
@@ -246,7 +261,7 @@ async def test_readonly_certification_prints_json_without_report_files(
     payload = json.loads(result.stdout)
     assert payload["schema"] == "brc.trading_kernel.readonly_certification.v1"
     assert payload["status"] == "pass"
-    assert payload["alembic_revision"] == "0003_cross_margin_stop_stress"
+    assert payload["alembic_revision"] == "0001_trading_kernel_baseline_v2"
     assert payload["checks"]["integrity_orphans"] == 0
     assert payload["checks"]["legacy_execution_tables"] == 0
     assert sorted(path.name for path in tmp_path.iterdir()) == before
@@ -277,7 +292,7 @@ async def test_schema_verifier_accepts_only_clean_baseline(
     payload = json.loads(result.stdout)
     assert payload["schema"] == "brc.trading_kernel.schema_verification.v1"
     assert payload["status"] == "pass"
-    assert payload["alembic_revision"] == "0003_cross_margin_stop_stress"
+    assert payload["alembic_revision"] == "0001_trading_kernel_baseline_v2"
     assert payload["missing_tables"] == []
     assert payload["unexpected_tables"] == []
 
@@ -326,7 +341,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -358,7 +373,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0003_cross_margin_stop_stress",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 certification={},
                 updated_at_ms=1_000,
             )

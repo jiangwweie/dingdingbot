@@ -4,7 +4,9 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Literal, TypedDict
 from uuid import uuid4
 
 import asyncpg
@@ -67,13 +69,16 @@ REPLACEMENT_MEMBERS = (
     "binance-usdm:OPUSDT:perpetual",
 )
 NOW_MS = 1_800_000_100_000
+SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
+    "0001_trading_kernel_baseline_v2"
+)
 _READINESS_DIGEST = "sha256:" + ("a" * 64)
 _FACTS_DIGEST = "sha256:" + ("b" * 64)
 _RULES_DIGEST = "sha256:" + ("c" * 64)
 
 
 @pytest_asyncio.fixture
-async def activation_engine() -> AsyncEngine:
+async def activation_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -89,7 +94,7 @@ async def activation_engine() -> AsyncEngine:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-activation-test",
                     runtime_commit="task-10-test",
-                    schema_revision="0003_cross_margin_stop_stress",
+                    schema_revision=SCHEMA_REVISION,
                     seeded_at_ms=NOW_MS - 1_000_000,
                 ),
             )
@@ -129,7 +134,8 @@ async def prepare_active_and_warming(
                 observation_enabled=True,
                 entry_enabled=True,
                 scope_version=2,
-                warm_ready_at_ms=NOW_MS - 800_000,
+                warm_closed_bar_time_ms=NOW_MS - 800_000,
+                warm_completed_at_ms=NOW_MS - 800_000,
                 warm_readiness_digest=_READINESS_DIGEST,
                 warm_valid_until_ms=NOW_MS + 600_000,
                 next_observation_due_at_ms=NOW_MS + 3_600_000,
@@ -182,7 +188,7 @@ async def make_warming_ready(
     engine: AsyncEngine,
     *,
     universe_version_id: str,
-    ready_at_ms: int = NOW_MS - 10_000,
+    warm_closed_bar_time_ms: int = NOW_MS - 10_000,
     valid_until_ms: int = NOW_MS + 60_000,
 ) -> None:
     async with engine.begin() as connection:
@@ -212,7 +218,7 @@ async def make_warming_ready(
                     configured_leverage=5,
                     margin_mode="cross",
                     position_mode="independent_sides",
-                    observed_at_ms=ready_at_ms,
+                    observed_at_ms=warm_closed_bar_time_ms,
                     valid_until_ms=valid_until_ms,
                     next_check_at_ms=valid_until_ms,
                     lease_owner=None,
@@ -235,10 +241,11 @@ async def make_warming_ready(
                 == universe_version_id
             )
             .values(
-                warm_ready_at_ms=ready_at_ms,
+                warm_closed_bar_time_ms=warm_closed_bar_time_ms,
+                warm_completed_at_ms=warm_closed_bar_time_ms,
                 warm_readiness_digest=_READINESS_DIGEST,
                 warm_valid_until_ms=valid_until_ms,
-                updated_at_ms=ready_at_ms,
+                updated_at_ms=warm_closed_bar_time_ms,
             )
         )
 
@@ -284,11 +291,28 @@ async def save_complete_comparative_projection(
         )
 
 
+class _CurrentUniverseSnapshot(TypedDict):
+    event_spec_id: str
+    universe_version_id: str
+    semantic_digest: str
+    lifecycle_state: str
+    activation_generation: int
+    activated_at_ms: int
+
+
+class ActivationSnapshot(TypedDict):
+    current: _CurrentUniverseSnapshot
+    versions: tuple[tuple[str, str, object, object], ...]
+    scopes: tuple[tuple[str, str, str, bool, bool, int], ...]
+    scope_projections: tuple[dict[str, object], ...]
+    side_effect_counts: tuple[int, ...]
+
+
 async def activation_snapshot(
     engine: AsyncEngine,
     *,
     event_spec_id: str,
-) -> dict[str, object]:
+) -> ActivationSnapshot:
     async with engine.connect() as connection:
         current = (
             await connection.execute(
@@ -358,7 +382,14 @@ async def activation_snapshot(
             ).one()
         )
     return {
-        "current": dict(current),
+        "current": {
+            "event_spec_id": str(current["event_spec_id"]),
+            "universe_version_id": str(current["universe_version_id"]),
+            "semantic_digest": str(current["semantic_digest"]),
+            "lifecycle_state": str(current["lifecycle_state"]),
+            "activation_generation": int(current["activation_generation"]),
+            "activated_at_ms": int(current["activated_at_ms"]),
+        },
         "versions": versions,
         "scopes": scopes,
         "scope_projections": tuple(dict(row) for row in scope_rows),

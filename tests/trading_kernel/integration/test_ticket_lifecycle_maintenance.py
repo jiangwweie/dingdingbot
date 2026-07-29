@@ -21,7 +21,7 @@ from src.trading_kernel.application.reconcile_ticket import (
     request_exit,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
-from src.trading_kernel.domain.commands import ExchangeCommandKind
+from src.trading_kernel.domain.commands import ExchangeCommandKind, OrderCommandPayload
 from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
@@ -84,6 +84,7 @@ async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protect
         for item in commands
         if item.kind is ExchangeCommandKind.REPLACE_PROTECTION
     )
+    assert isinstance(replacement.payload, OrderCommandPayload)
     assert replacement.payload.stop_price == Decimal("60080.3")
 
 
@@ -513,7 +514,7 @@ async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

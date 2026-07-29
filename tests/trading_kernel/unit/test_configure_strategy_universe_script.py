@@ -3,14 +3,19 @@ from __future__ import annotations
 import importlib
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
 
 from src.trading_kernel.application.read_strategy_universe_status import (
     StrategyUniverseMemberStatus,
+)
+from src.trading_kernel.domain.instrument_certification import (
+    InstrumentCertificationBlockerCode,
 )
 from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 
@@ -149,7 +154,7 @@ def test_status_member_rejects_noncanonical_certification_blocker() -> None:
             certification_status="owner_action_required",
             warm_ready=False,
             monitor_status="needs_intervention",
-            blocker_code="credential=SECRET",
+            blocker_code=cast(InstrumentCertificationBlockerCode, "credential=SECRET"),
         )
 
 
@@ -168,6 +173,7 @@ async def test_configure_use_case_resolves_authority_then_installs_canonical_mem
     assert callable(configure)
     assert request_type is not None
     assert context_type is not None
+    context_factory = cast(Callable[..., object], context_type)
 
     request = request_type(
         runtime_profile_id="tiny-live-v1",
@@ -208,7 +214,7 @@ async def test_configure_use_case_resolves_authority_then_installs_canonical_mem
         ):
             assert runtime_profile_id == "tiny-live-v1"
             assert event_id == "SOR-LONG"
-            return context_type(
+            return context_factory(
                 event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
                 owner_policy_id="policy-main",
             )

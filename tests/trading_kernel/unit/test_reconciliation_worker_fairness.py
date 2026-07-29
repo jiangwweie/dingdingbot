@@ -5,7 +5,6 @@ from decimal import Decimal
 import pytest
 
 import src.trading_kernel.interfaces.reconciliation_worker as worker_module
-from src.trading_kernel.application.ports import MonitorOwnerStatus
 from src.trading_kernel.application.reconcile_ticket import (
     ReconcileTicketResult,
     ReconcileTicketStatus,
@@ -19,10 +18,12 @@ from src.trading_kernel.domain.venue_truth import (
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
     ReconciliationWorkerStatus,
-    ReconciliationWorkItem,
-    ReconciliationWorkKind,
     run_reconciliation_worker_once,
-    select_reconciliation_work,
+)
+from tests.trading_kernel.integration.universe_certification_support import (
+    NoInstrumentCertificationSource,
+    NoTicketPositionSource,
+    NoTicketVenueTruth,
 )
 from tests.trading_kernel.unit.test_reducer import (
     _reconciliation_pending_aggregate,
@@ -47,8 +48,17 @@ class _AggregateRepository:
         del kwargs
         return self.aggregate if self.aggregate.status in statuses else None
 
-    async def get_next_reconciliation_work(self, **kwargs):
-        del kwargs
+    async def claim_next_critical_reconciliation_work(self, *, now_ms):
+        del now_ms
+        if self.aggregate.status in {
+            worker_module.AggregateStatus.POST_FILL_RISK_PENDING,
+            *worker_module._POSITION_RECONCILIATION_STATUSES,
+        }:
+            return self.aggregate
+        return None
+
+    async def claim_next_routine_reconciliation_work(self, *, now_ms):
+        del now_ms
         return self.aggregate
 
     async def schedule_next_check(self, ticket_id, *, work_kind, due_at_ms):
@@ -83,7 +93,7 @@ class _State:
 class _PositionSource:
     def __init__(self, aggregate):
         self.aggregate = aggregate
-        self.requests = []
+        self.requests: list[object] = []
 
     async def read_position_snapshot(self, request):
         self.requests.append(request)
@@ -97,7 +107,7 @@ class _PositionSource:
 
 class _MonitorRepository:
     def __init__(self) -> None:
-        self.states = []
+        self.states: list[object] = []
 
     async def get(self, monitor_key):
         del monitor_key
@@ -118,7 +128,7 @@ class _FeeDiscountCapabilitySource:
 
 
 @pytest.mark.asyncio
-async def test_pending_unknown_does_not_starve_position_reconciliation(
+async def test_pending_unknown_is_the_only_network_work_in_a_cadence(
     monkeypatch,
 ) -> None:
     state = _State()
@@ -150,12 +160,12 @@ async def test_pending_unknown_does_not_starve_position_reconciliation(
 
     result = await run_reconciliation_worker_once(
         state.factory,
-        object(),
+        NoTicketVenueTruth(),
         position_source,
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-test",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=5_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -163,15 +173,15 @@ async def test_pending_unknown_does_not_starve_position_reconciliation(
         ),
     )
 
-    assert result.status is ReconciliationWorkerStatus.POSITION_RECONCILED
+    assert result.status is ReconciliationWorkerStatus.UNKNOWN_RECOVERED
     assert len(recovery_requests) == 1
-    assert len(position_source.requests) == 1
-    assert len(reconciliation_requests) == 1
-    assert state.aggregates.scheduled_due_at_ms == 7_000
+    assert position_source.requests == []
+    assert reconciliation_requests == []
+    assert state.aggregates.scheduled_due_at_ms is None
 
 
 @pytest.mark.asyncio
-async def test_bnb_capability_monitor_is_warning_only_after_position_reconciliation(
+async def test_bnb_capability_monitor_does_not_add_network_work_to_reconciliation(
     monkeypatch,
 ) -> None:
     state = _State()
@@ -190,12 +200,12 @@ async def test_bnb_capability_monitor_is_warning_only_after_position_reconciliat
 
     result = await run_reconciliation_worker_once(
         state.factory,
-        object(),
+        NoTicketVenueTruth(),
         _PositionSource(state.aggregates.aggregate),
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-test",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=5_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -205,60 +215,7 @@ async def test_bnb_capability_monitor_is_warning_only_after_position_reconciliat
     )
 
     assert result.status is ReconciliationWorkerStatus.POSITION_RECONCILED
-    assert state.monitors.states[0].monitor_key == "account:binance-usdm:bnb-fee-capability"
-    assert state.monitors.states[0].owner_status is MonitorOwnerStatus.RUNNING
-
-
-def test_overdue_closure_preempts_due_position_reconciliation() -> None:
-    position = ReconciliationWorkItem(
-        ticket_id="ticket-position",
-        kind=ReconciliationWorkKind.POSITION,
-        status=worker_module.AggregateStatus.POSITION_PROTECTED,
-        due_at_ms=31_000,
-        status_entered_at_ms=1_000,
-    )
-    settlement = ReconciliationWorkItem(
-        ticket_id="ticket-settlement",
-        kind=ReconciliationWorkKind.SETTLEMENT,
-        status=worker_module.AggregateStatus.SETTLEMENT_PENDING,
-        due_at_ms=1_000,
-        status_entered_at_ms=1_000,
-    )
-
-    selected = select_reconciliation_work(
-        now_ms=31_000,
-        closure_starvation_limit_ms=30_000,
-        position=position,
-        closures=(settlement,),
-    )
-
-    assert selected == settlement
-
-
-def test_not_yet_overdue_closure_preserves_position_priority() -> None:
-    position = ReconciliationWorkItem(
-        ticket_id="ticket-position",
-        kind=ReconciliationWorkKind.POSITION,
-        status=worker_module.AggregateStatus.POSITION_PROTECTED,
-        due_at_ms=30_999,
-        status_entered_at_ms=1_000,
-    )
-    review = ReconciliationWorkItem(
-        ticket_id="ticket-review",
-        kind=ReconciliationWorkKind.REVIEW,
-        status=worker_module.AggregateStatus.REVIEW_PENDING,
-        due_at_ms=1_000,
-        status_entered_at_ms=1_000,
-    )
-
-    selected = select_reconciliation_work(
-        now_ms=30_999,
-        closure_starvation_limit_ms=30_000,
-        position=position,
-        closures=(review,),
-    )
-
-    assert selected == position
+    assert state.monitors.states == []
 
 
 class _AgeAwareAggregateRepository:
@@ -271,8 +228,12 @@ class _AgeAwareAggregateRepository:
             update={"status": worker_module.AggregateStatus.SETTLEMENT_PENDING}
         )
 
-    async def get_next_reconciliation_work(self, **kwargs):
-        assert kwargs["closure_starvation_limit_ms"] == 30_000
+    async def claim_next_critical_reconciliation_work(self, *, now_ms):
+        del now_ms
+        return self.position
+
+    async def claim_next_routine_reconciliation_work(self, *, now_ms):
+        del now_ms
         return self.settlement
 
     async def get_next_for_statuses(self, statuses, **kwargs):
@@ -284,7 +245,8 @@ class _AgeAwareAggregateRepository:
         return None
 
     async def schedule_next_check(self, *args, **kwargs):
-        raise AssertionError("overdue closure must not schedule position work")
+        assert args == (self.position.identity.ticket_id,)
+        assert kwargs["work_kind"] == "reconciliation"
 
 
 class _AgeAwareState:
@@ -300,14 +262,98 @@ async def _no_unknown(_self):
     return None
 
 
-class _UnexpectedPositionSource:
-    async def read_position_snapshot(self, request):
-        del request
-        raise AssertionError("overdue closure must preempt position reconciliation")
+class _RoutineOnlyAggregateRepository:
+    def __init__(self) -> None:
+        self.aggregate = _reconciliation_pending_aggregate().model_copy(
+            update={"status": worker_module.AggregateStatus.SETTLEMENT_PENDING}
+        )
+
+    async def claim_next_critical_reconciliation_work(self, *, now_ms):
+        del now_ms
+
+    async def claim_next_routine_reconciliation_work(self, *, now_ms):
+        del now_ms
+        return self.aggregate
+
+
+class _RoutineOnlyState:
+    def __init__(self) -> None:
+        self.aggregates = _RoutineOnlyAggregateRepository()
+        self.commands = type("Commands", (), {"get_one_unknown": _no_unknown})()
+
+    def factory(self):
+        return _UnitOfWork(self)
 
 
 @pytest.mark.asyncio
-async def test_worker_settles_overdue_closure_before_due_position(
+async def test_overdue_certification_preempts_continuous_routine_work_within_60_seconds(
+    monkeypatch,
+) -> None:
+    """Virtual cadence catches the historical routine-reconciliation starvation bug."""
+
+    state = _RoutineOnlyState()
+    selected: list[tuple[int, int | None]] = []
+    routine_calls: list[int] = []
+
+    async def certify(*args, request, overdue_before_ms=None, **kwargs):
+        del args, kwargs
+        selected.append((request.now_ms, overdue_before_ms))
+        if overdue_before_ms is not None and request.now_ms >= 65_000:
+            return worker_module.ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED,
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            )
+        return None
+
+    async def run_routine(*args, **kwargs):
+        request = args[3]
+        del kwargs
+        routine_calls.append(request.now_ms)
+        return worker_module.ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.SETTLED,
+            ticket_id="ticket:routine",
+        )
+
+    monkeypatch.setattr(worker_module, "_certify_one_due_instrument", certify)
+    monkeypatch.setattr(worker_module, "_run_reconciliation_worker_once_core", run_routine)
+    source = NoInstrumentCertificationSource()
+    for now_ms in range(5_000, 70_000, 5_000):
+        result = await run_reconciliation_worker_once(
+            state.factory,
+            NoTicketVenueTruth(),
+            NoTicketPositionSource(),
+            ReconciliationWorkerRequest(
+                worker_id="reconciliation-worker-test",
+                runtime_commit="kernel-test-head",
+                schema_revision="0001_trading_kernel_baseline_v2",
+                now_ms=now_ms,
+                timeout_seconds=1,
+                unknown_visibility_grace_ms=30_000,
+                idle_poll_interval_ms=2_000,
+            ),
+            instrument_certification_source=source,
+        )
+        if result.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED:
+            break
+
+    assert result.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+    assert result.exchange_instrument_id == "binance-usdm:BTCUSDT:perpetual"
+    assert selected[-1] == (65_000, 5_000)
+    assert routine_calls == list(range(5_000, 65_000, 5_000))
+
+
+class _PositionSafetySource:
+    async def read_position_snapshot(self, request):
+        return PositionSnapshot(
+            netting_domain=request.netting_domain,
+            quantity=Decimal(0),
+            average_entry_price=None,
+            observed_at_ms=request.observed_at_ms,
+        )
+
+
+@pytest.mark.asyncio
+async def test_worker_prioritizes_position_safety_before_routine_closure(
     monkeypatch,
 ) -> None:
     state = _AgeAwareState()
@@ -320,17 +366,22 @@ async def test_worker_settles_overdue_closure_before_due_position(
     async def settle(_uow, request):
         settled.append(request.ticket_id)
 
+    async def reconcile(*args, **kwargs):
+        del args, kwargs
+        return ReconcileTicketResult(status=ReconcileTicketStatus.MATCHED)
+
     monkeypatch.setattr(worker_module, "_runtime_writer_is_certified", certified)
     monkeypatch.setattr(worker_module, "settle_ticket", settle)
+    monkeypatch.setattr(worker_module, "reconcile_ticket", reconcile)
 
     result = await run_reconciliation_worker_once(
         state.factory,
-        object(),
-        _UnexpectedPositionSource(),
+        NoTicketVenueTruth(),
+        _PositionSafetySource(),
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-test",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=31_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -338,5 +389,5 @@ async def test_worker_settles_overdue_closure_before_due_position(
         ),
     )
 
-    assert result.status is ReconciliationWorkerStatus.SETTLED
-    assert settled == [state.aggregates.settlement.identity.ticket_id]
+    assert result.status is ReconciliationWorkerStatus.POSITION_RECONCILED
+    assert settled == []

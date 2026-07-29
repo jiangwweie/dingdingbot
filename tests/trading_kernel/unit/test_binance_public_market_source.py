@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from collections.abc import Callable
+from typing import cast
 
 import pytest
 
@@ -26,6 +28,9 @@ class FakeExchange:
         self.calls.append((symbol, timeframe, int(limit or 0)))
         return self.rows
 
+    async def close(self) -> None:
+        return None
+
 
 class SlowExchange:
     async def fetch_ohlcv(
@@ -38,6 +43,9 @@ class SlowExchange:
         await asyncio.sleep(0.05)
         return []
 
+    async def close(self) -> None:
+        return None
+
 
 def test_public_market_source_rejects_retired_venue_symbol_map() -> None:
     assert "venue_symbols" not in inspect.signature(
@@ -45,7 +53,7 @@ def test_public_market_source_rejects_retired_venue_symbol_map() -> None:
     ).parameters
 
     with pytest.raises(TypeError, match="venue_symbols"):
-        CcxtBinancePublicMarketSource(
+        cast(Callable[..., CcxtBinancePublicMarketSource], CcxtBinancePublicMarketSource)(
             exchange=FakeExchange([]),
             venue_symbols={},
             timeout_seconds=1,

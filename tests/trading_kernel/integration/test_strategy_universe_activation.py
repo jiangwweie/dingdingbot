@@ -175,7 +175,8 @@ async def test_incomplete_or_stale_readiness_keeps_old_universe_fully_active(
                     == REPLACEMENT_MEMBERS[0],
                 )
                 .values(
-                    warm_ready_at_ms=None,
+                    warm_closed_bar_time_ms=None,
+                    warm_completed_at_ms=None,
                     warm_readiness_digest=None,
                     warm_valid_until_ms=None,
                 )

@@ -420,12 +420,12 @@ async def test_postgres_enforces_runtime_scope_permissions_and_lineage() -> None
                         exchange_instrument_id, position_side,
                         universe_version_id, universe_semantic_digest,
                         lifecycle_state, observation_enabled, entry_enabled,
-                        scope_version, warm_ready_at_ms, warm_readiness_digest,
+                        scope_version, warm_closed_bar_time_ms, warm_completed_at_ms, warm_readiness_digest,
                         warm_valid_until_ms, updated_at_ms
                     ) VALUES (
                         'scope-active', 'sg-a', 'sv-a', 'event-a', 'profile-b',
                         'policy-a', 'binance-usdm:T00USDT:perpetual', 'long',
-                        'uni-a', $1, 'active', true, true, 1, 1000, $2,
+                        'uni-a', $1, 'active', true, true, 1, 1000, 1000, $2,
                         2000, 1000
                     )
                     """,

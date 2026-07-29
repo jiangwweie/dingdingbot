@@ -6,6 +6,7 @@ import pytest
 
 from src.trading_kernel.domain.commands import ExchangeCommandKind
 from src.trading_kernel.domain.order_attribution import (
+    ConditionalOrderExpectation,
     OrderNamespace,
     OrderRole,
     TicketOrderReference,
@@ -18,7 +19,7 @@ from src.trading_kernel.infrastructure.binance_order_attribution import (
 class _AlgoExchange:
     def __init__(self, response) -> None:
         self.response = response
-        self.calls = []
+        self.calls: list[dict[str, object]] = []
 
     async def fapiPrivateGetAlgoOrder(self, params):
         self.calls.append(dict(params))
@@ -26,23 +27,30 @@ class _AlgoExchange:
 
 
 def _reference(*, namespace: OrderNamespace) -> TicketOrderReference:
-    values = {
-        "command_id": "command:runner",
-        "command_kind": ExchangeCommandKind.INITIAL_STOP,
-        "role": OrderRole.EXIT,
-        "namespace": namespace,
-        "venue_client_order_id": "brc-runner",
-        "submitted_exchange_order_id": "4000001795783472",
-    }
     if namespace is OrderNamespace.CONDITIONAL:
-        values["conditional_expectation"] = {
-            "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
-            "position_side": "long",
-            "side": "sell",
-            "order_type": "stop_market",
-            "quantity": Decimal("0.0005"),
-        }
-    return TicketOrderReference(**values)
+        return TicketOrderReference(
+            command_id="command:runner",
+            command_kind=ExchangeCommandKind.INITIAL_STOP,
+            role=OrderRole.EXIT,
+            namespace=namespace,
+            venue_client_order_id="brc-runner",
+            submitted_exchange_order_id="4000001795783472",
+            conditional_expectation=ConditionalOrderExpectation(
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                position_side="long",
+                side="sell",
+                order_type="stop_market",
+                quantity=Decimal("0.0005"),
+            ),
+        )
+    return TicketOrderReference(
+        command_id="command:runner",
+        command_kind=ExchangeCommandKind.INITIAL_STOP,
+        role=OrderRole.EXIT,
+        namespace=namespace,
+        venue_client_order_id="brc-runner",
+        submitted_exchange_order_id="4000001795783472",
+    )
 
 
 @pytest.mark.asyncio

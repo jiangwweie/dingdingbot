@@ -47,7 +47,7 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| Clean PostgreSQL schema head | Complete locally | `0002_crypto_strategy_universe`, clean rebuild and downgrade/upgrade certification |
+| Clean PostgreSQL schema head | Complete locally | `0001_trading_kernel_baseline_v2`, clean rebuild and downgrade/upgrade certification |
 | Six Strategy Events | Complete | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, BRF2-SHORT |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, deterministic identity, Live/Replay parity |
 | Arbitration and CapacityClaim | Complete | Deterministic priority, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
@@ -60,6 +60,28 @@ settle, and review concurrently.
 
 Exact production identity, certification, runtime state, and remaining progress
 belong only to `MAIN_CONTROL_ROADMAP.md`.
+
+## StrategyUniverse Repair Test Specification
+
+The repair is accepted locally only when every behavior below has direct,
+automated evidence. These are release predicates, not runtime inputs and not a
+substitute for action-time Tokyo readonly facts.
+
+| Boundary | Required local evidence | Rejected outcome |
+| --- | --- | --- |
+| Clean baseline | Disposable PostgreSQL rebuilds from an empty schema using only `0001_trading_kernel_baseline_v2`; no retired migration, table, reader, or compatibility path remains | An incremental upgrade or an old-schema fallback is accepted |
+| Batch bootstrap | The six Registry Events receive the approved fixed initial member set in one bounded run; no operator configures members one Event at a time | A second Warming Universe is required for every Event or member |
+| Warming and readiness | Warming performs readonly market/account certification, produces zero StrategySignal, preserves observation time separately from certification time, and activates only after every member passes | Warming can submit an order, stale evidence activates, or a failed member becomes eligible |
+| Concurrency and recovery | One global Warming slot is enforced; the official `abandon_strategy_universe.py` CLI permanently abandons one exact Warming Universe with an audited reason so the slot is released | A failed Warming state blocks all later deployment work, is changed by direct SQL, or can be silently reused |
+| Active scope lineage | Only the current Active pointer is eligible; Signal, Claim, and Ticket freeze Universe identity and digest; a replacement does not rewrite exposure already in progress | Registry defaults or a later Universe changes an existing Ticket's scope |
+| Entry promotion | Safety workers start while Entry stays fenced; postflight verifies the exact Active Universe, profile, policy, schema, and runtime identity before the final unfence; retry is idempotent only for that exact state | Universe configuration or worker startup implicitly permits ENTRY |
+| Exchange boundary | Recording fakes prove local bootstrap, Warming, and promotion make zero exchange mutations; full-chain fault tests retain durable-command, unknown-outcome, partial-fill, and Netting Domain protections | A fixture bypasses the real producer boundary or hides an exchange write |
+
+The release candidate must run focused tests first, then the complete
+unit/integration/full-chain/architecture suite, Ruff, repository-wide Mypy,
+the production file-I/O audit, and `git diff --check`. A server deployment
+only verifies current external facts and must not be used to discover a
+deterministic defect already reproducible locally.
 
 ## Deployment Implementation
 

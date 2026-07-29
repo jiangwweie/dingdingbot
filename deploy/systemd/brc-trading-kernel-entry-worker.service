@@ -3,7 +3,6 @@ Description=BRC trading kernel persistent ENTRY worker
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/etc/brc/trading-kernel.env
-ConditionPathExists=!/etc/brc/trading-kernel.write-fenced
 
 [Service]
 Type=simple
@@ -14,17 +13,7 @@ EnvironmentFile=/etc/brc/trading-kernel.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
 Slice=brc-trading-kernel.slice
-ExecStart=/opt/brc/current/.venv/bin/python scripts/trading_kernel/run_command_worker_once.py \
-    --venue-factory ${TRADING_KERNEL_VENUE_FACTORY} \
-    --worker-role entry \
-    --worker-id ${TRADING_KERNEL_ENTRY_WORKER_ID} \
-    --runtime-commit ${TRADING_KERNEL_RUNTIME_COMMIT} \
-    --schema-revision ${TRADING_KERNEL_SCHEMA_REVISION} \
-    --lease-ms ${TRADING_KERNEL_LEASE_MS} \
-    --timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS} \
-    --action-fact-validity-ms ${TRADING_KERNEL_ACTION_FACT_VALIDITY_MS} \
-    --run-forever \
-    --poll-interval-ms 2000
+ExecStart=/bin/sh -c 'while test -e /etc/brc/trading-kernel.write-fenced; do sleep 1; done; exec /opt/brc/current/.venv/bin/python scripts/trading_kernel/run_command_worker_once.py --venue-factory ${TRADING_KERNEL_VENUE_FACTORY} --worker-role entry --worker-id ${TRADING_KERNEL_ENTRY_WORKER_ID} --runtime-commit ${TRADING_KERNEL_RUNTIME_COMMIT} --schema-revision ${TRADING_KERNEL_SCHEMA_REVISION} --lease-ms ${TRADING_KERNEL_LEASE_MS} --timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS} --action-fact-validity-ms ${TRADING_KERNEL_ACTION_FACT_VALIDITY_MS} --run-forever --poll-interval-ms 2000'
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=20

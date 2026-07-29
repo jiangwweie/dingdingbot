@@ -14,6 +14,8 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
 from tests.trading_kernel.integration.universe_certification_support import (
     MEMBERS,
     NOW_MS,
+    NoTicketPositionSource,
+    NoTicketVenueTruth,
     RecordingReadonlyCertificationSource,
     worker_request,
 )
@@ -32,8 +34,8 @@ async def test_worker_claims_one_target_and_reads_after_claim_transaction_commit
 
     result = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(_certification_engine),
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         worker_request(NOW_MS),
         instrument_certification_source=source,
     )
@@ -94,13 +96,15 @@ async def test_last_eligible_certification_auto_activates_fully_warmed_universe(
         await connection.execute(
             sa.text(
                 "UPDATE brc_runtime_scopes_current "
-                "SET warm_ready_at_ms = :ready_at_ms, "
+                "SET warm_closed_bar_time_ms = :warm_closed_bar_time_ms, "
+                "warm_completed_at_ms = :warm_completed_at_ms, "
                 "warm_readiness_digest = :digest, "
                 "warm_valid_until_ms = :valid_until_ms "
                 "WHERE lifecycle_state = 'warming'"
             ),
             {
-                "ready_at_ms": NOW_MS - 1,
+                "warm_closed_bar_time_ms": NOW_MS - 1,
+                "warm_completed_at_ms": NOW_MS - 1,
                 "digest": "sha256:" + ("d" * 64),
                 "valid_until_ms": NOW_MS + 60_000,
             },
@@ -109,8 +113,8 @@ async def test_last_eligible_certification_auto_activates_fully_warmed_universe(
 
     first = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(_certification_engine),
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         worker_request(NOW_MS),
         instrument_certification_source=source,
     )
@@ -134,8 +138,8 @@ async def test_last_eligible_certification_auto_activates_fully_warmed_universe(
 
     second = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(_certification_engine),
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         worker_request(NOW_MS),
         instrument_certification_source=source,
     )
@@ -194,8 +198,8 @@ async def test_transient_failure_releases_lease_for_bounded_retry(
 
     result = await run_reconciliation_worker_once(
         lambda: PostgresKernelUnitOfWork(_certification_engine),
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         worker_request(NOW_MS),
         instrument_certification_source=source,
     )

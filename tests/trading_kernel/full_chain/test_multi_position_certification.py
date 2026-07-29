@@ -4,8 +4,10 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 import asyncpg
@@ -20,7 +22,10 @@ from src.trading_kernel.application.dispatch_exchange_command import (
     dispatch_one_command,
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue_ticket
-from src.trading_kernel.application.ports import VenueCommandRequest
+from src.trading_kernel.application.ports import (
+    VenueCommandRequest,
+    VenueSetLeverageRequest,
+)
 from src.trading_kernel.application.reconcile_ticket import (
     ReconcileTicketRequest,
     ReconcileTicketStatus,
@@ -30,6 +35,7 @@ from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
+    SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot
@@ -59,7 +65,7 @@ SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 
 
 @pytest_asyncio.fixture
-async def certification_engine() -> AsyncEngine:
+async def certification_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -92,6 +98,16 @@ class MultiPositionVenue:
             exchange_order_id=(
                 f"venue-{request.kind.value}-{request.position_side}-{len(self.calls)}"
             ),
+        )
+
+    async def set_leverage(
+        self,
+        request: VenueSetLeverageRequest,
+    ) -> SetLeverageCommandResult:
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=2_000,
+            leverage_verification_digest="sha256:" + "4" * 64,
         )
 
 
@@ -389,7 +405,7 @@ async def _protect(
                 snapshot=PositionSnapshot(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
-                    average_entry_price="60000",
+                    average_entry_price=Decimal(60000),
                     venue_reported_liquidation_price=Decimal(0),
                     observed_at_ms=fill_observed_at_ms,
                 ),
@@ -426,7 +442,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision="0003_cross_margin_stop_stress" if entry else None,
+            schema_revision="0001_trading_kernel_baseline_v2" if entry else None,
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
@@ -441,7 +457,7 @@ def _ticket_for_domain(
     signal_event_id: str,
     exposure_episode_id: str,
     exchange_instrument_id: str,
-    position_side: str,
+    position_side: Literal["long", "short"],
     runtime_scope_id: str,
     runtime=None,
 ):
@@ -512,7 +528,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0003_cross_margin_stop_stress",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 certification={},
                 updated_at_ms=1_000,
             )

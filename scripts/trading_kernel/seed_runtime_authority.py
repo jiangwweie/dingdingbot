@@ -58,7 +58,7 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv(
             "TRADING_KERNEL_SCHEMA_REVISION",
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
         ),
     )
     seed.add_argument("--now-ms", type=int)
@@ -79,7 +79,7 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv(
             "TRADING_KERNEL_SCHEMA_REVISION",
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
         ),
     )
     deploy.add_argument("--now-ms", type=int)
@@ -101,7 +101,7 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv(
             "TRADING_KERNEL_SCHEMA_REVISION",
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
         ),
     )
     recovery.add_argument("--now-ms", type=int)
@@ -127,7 +127,7 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv(
             "TRADING_KERNEL_SCHEMA_REVISION",
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
         ),
     )
     protected.add_argument("--now-ms", type=int)
@@ -149,7 +149,7 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv(
             "TRADING_KERNEL_SCHEMA_REVISION",
-            "0003_cross_margin_stop_stress",
+            "0001_trading_kernel_baseline_v2",
         ),
     )
     closure.add_argument("--now-ms", type=int)

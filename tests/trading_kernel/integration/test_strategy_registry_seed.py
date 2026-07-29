@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import uuid4
 
@@ -65,7 +66,7 @@ def test_strategy_registry_seed_cli_is_runnable_outside_repo(
 
 
 @pytest_asyncio.fixture
-async def registry_engine() -> AsyncEngine:
+async def registry_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)

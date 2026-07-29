@@ -54,12 +54,12 @@ the three safety workers for fix-forward recovery.
 
 ## StrategyUniverse Deployment Gate
 
-The versioned StrategyUniverse release is a **flat-only forward migration**.
+The versioned StrategyUniverse release is a **flat-only destructive rebuild**.
 It is not activated by a local test pass or by all positions becoming flat
-without an Owner release confirmation. Before its `0002_crypto_strategy_universe`
-migration, configuration, or Entry enablement, all Ticket, position, order,
-Incident, Settlement and Review projections must be terminal and exchange
-truth must be flat.
+without an Owner release confirmation. Before its
+`0001_trading_kernel_baseline_v2` rebuild, configuration, or Entry enablement,
+all Ticket, position, order, Incident, Settlement and Review projections must
+be terminal and exchange truth must be flat.
 
 After the target code and schema pass readonly certification, the Owner fixes
 each Event's final **1..10** canonical USDT-perpetual members. The official
@@ -69,6 +69,44 @@ pointer. Entry remains fenced until those safety workers and the exact active
 Universe/current/profile/policy identities pass postflight. `--enable-entry`
 is still an explicit final deployment action; neither configuration nor
 activation can enable it.
+
+### Bounded Rebuild Procedure
+
+For a small-capital, flat personal runtime, the approved path is a stopped
+rebuild rather than a long sequential Warming procedure:
+
+1. Use the official Lifecycle path to make each exact named Ticket terminal,
+   then verify exchange flatness, no open orders, no unresolved command, no
+   open Incident, and released budget/Netting Domain state.
+2. Fence Entry and stop all four BRC workers. Confirm no old writer can mutate
+   the account before schema deletion.
+3. Rebuild only BRC PostgreSQL state from the committed clean baseline and
+   deterministic Registry/Policy/Capability seeds. Do not alter credentials,
+   funds, account mode, leverage, or exchange trading scope.
+4. Stage one exact committed release; start Observation, Lifecycle, and
+   Reconciliation while the Entry fence remains present.
+5. Run the official batch bootstrap once. It serially installs and awaits all
+   six Warming Universes because PostgreSQL permits only one Warming Universe
+   at a time; the resident workers perform the required readonly certification
+   and activation work between Events. The deployment never waits for a
+   separate multi-hour operator sequence per Event.
+6. Repeat readonly postflight for exact commit, clean schema, seed, account
+   mode, runtime profile, policy, active Universe pointers, exchange flatness,
+   worker health, and zero unresolved runtime state.
+7. Only an explicit `--enable-entry` after all postflight gates can remove the
+   fence. If any step fails, keep Entry fenced and retain the three safety
+   workers for diagnosis or controlled exit.
+
+This is a forward-only fix path. Reintroducing the retired schema evolution
+chain, a compatibility reader, or an old writer is not a rollback.
+
+If batch bootstrap reports an exact Warming timeout or a terminal
+certification blocker, Entry remains fenced. Inspect the bounded Universe
+status, then use `abandon_strategy_universe.py` with that exact
+`universe_version_id` and a stable reason code. The command changes only the
+target PostgreSQL Warming state, records the reason, releases its certification
+lease, and performs no exchange mutation. Restart the batch after the cause is
+corrected; direct SQL and anonymous slot clearing are forbidden.
 
 ## Destructive Rebuild Decision
 

@@ -13,6 +13,7 @@ from src.trading_kernel.domain.fee_valuation import (
 )
 from src.trading_kernel.domain.order_attribution import (
     AttributedTradeFill,
+    ConditionalOrderExpectation,
     OrderNamespace,
     OrderRole,
     ResolvedOrderIdentity,
@@ -22,23 +23,30 @@ from src.trading_kernel.domain.order_attribution import (
 
 
 def _reference(*, namespace: OrderNamespace = OrderNamespace.REGULAR) -> TicketOrderReference:
-    values = {
-        "command_id": "command:entry",
-        "command_kind": ExchangeCommandKind.ENTRY,
-        "role": OrderRole.ENTRY,
-        "namespace": namespace,
-        "venue_client_order_id": "brc-entry",
-        "submitted_exchange_order_id": "12345",
-    }
     if namespace is OrderNamespace.CONDITIONAL:
-        values["conditional_expectation"] = {
-            "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
-            "position_side": "long",
-            "side": "sell",
-            "order_type": "stop_market",
-            "quantity": Decimal("0.01"),
-        }
-    return TicketOrderReference(**values)
+        return TicketOrderReference(
+            command_id="command:entry",
+            command_kind=ExchangeCommandKind.ENTRY,
+            role=OrderRole.ENTRY,
+            namespace=namespace,
+            venue_client_order_id="brc-entry",
+            submitted_exchange_order_id="12345",
+            conditional_expectation=ConditionalOrderExpectation(
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                position_side="long",
+                side="sell",
+                order_type="stop_market",
+                quantity=Decimal("0.01"),
+            ),
+        )
+    return TicketOrderReference(
+        command_id="command:entry",
+        command_kind=ExchangeCommandKind.ENTRY,
+        role=OrderRole.ENTRY,
+        namespace=namespace,
+        venue_client_order_id="brc-entry",
+        submitted_exchange_order_id="12345",
+    )
 
 
 def _fee() -> ValuedFee:

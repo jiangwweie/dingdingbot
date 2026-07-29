@@ -259,49 +259,63 @@ class PostgresAggregateRepository:
         ticket_id = result.scalar_one_or_none()
         return None if ticket_id is None else await self.get(str(ticket_id))
 
-    async def get_next_reconciliation_work(
+    async def claim_next_critical_reconciliation_work(
         self,
         *,
         now_ms: int,
-        closure_starvation_limit_ms: int,
     ) -> TradeAggregate | None:
-        if now_ms <= 0 or closure_starvation_limit_ms <= 0:
-            raise ValueError("reconciliation selector windows must be positive")
+        """Select one due safety action; the caller performs venue I/O after commit."""
+
+        if now_ms <= 0:
+            raise ValueError("reconciliation selector requires positive now_ms")
         due_at = sa.func.coalesce(
             trade_aggregates.c.reconciliation_due_at_ms,
             trade_aggregates.c.updated_at_ms,
         )
-        position_statuses = tuple(
-            status.value for status in RECONCILIATION_POSITION_STATUSES
-        )
-        closure_statuses = (
-            AggregateStatus.SETTLEMENT_PENDING.value,
-            AggregateStatus.REVIEW_PENDING.value,
-        )
-        is_position = trade_aggregates.c.status.in_(position_statuses)
-        is_overdue_closure = sa.and_(
-            trade_aggregates.c.status.in_(closure_statuses),
-            trade_aggregates.c.updated_at_ms <= now_ms - closure_starvation_limit_ms,
-        )
-        priority = sa.case(
-            (is_overdue_closure, 0),
-            (is_position, 1),
-            else_=2,
+        critical_statuses = (
+            AggregateStatus.POST_FILL_RISK_PENDING.value,
+            *(status.value for status in RECONCILIATION_POSITION_STATUSES),
         )
         result = await self._connection.execute(
             sa.select(trade_aggregates.c.ticket_id)
             .where(
-                trade_aggregates.c.status.in_((*position_statuses, *closure_statuses)),
+                trade_aggregates.c.status.in_(critical_statuses),
                 due_at <= now_ms,
             )
             .order_by(
-                priority,
-                sa.case(
-                    (is_position, due_at),
-                    else_=trade_aggregates.c.updated_at_ms,
-                ),
+                due_at,
                 trade_aggregates.c.ticket_id,
             )
+            .with_for_update(skip_locked=True, of=trade_aggregates)
+            .limit(1)
+        )
+        ticket_id = result.scalar_one_or_none()
+        return None if ticket_id is None else await self.get(str(ticket_id))
+
+    async def claim_next_routine_reconciliation_work(
+        self,
+        *,
+        now_ms: int,
+    ) -> TradeAggregate | None:
+        """Select one due closure action after safety and overdue certification."""
+
+        if now_ms <= 0:
+            raise ValueError("reconciliation selector requires positive now_ms")
+        due_at = sa.func.coalesce(
+            trade_aggregates.c.reconciliation_due_at_ms,
+            trade_aggregates.c.updated_at_ms,
+        )
+        routine_statuses = (
+            AggregateStatus.SETTLEMENT_PENDING.value,
+            AggregateStatus.REVIEW_PENDING.value,
+        )
+        result = await self._connection.execute(
+            sa.select(trade_aggregates.c.ticket_id)
+            .where(
+                trade_aggregates.c.status.in_(routine_statuses),
+                due_at <= now_ms,
+            )
+            .order_by(due_at, trade_aggregates.c.ticket_id)
             .with_for_update(skip_locked=True, of=trade_aggregates)
             .limit(1)
         )
@@ -501,10 +515,13 @@ class PostgresExchangeCommandRepository:
                 namespace = OrderNamespace.CONDITIONAL
                 conditional_expectation: ConditionalOrderExpectation | None = (
                     ConditionalOrderExpectation(
-                    exchange_instrument_id=str(ticket_row["exchange_instrument_id"]),
+                        exchange_instrument_id=str(ticket_row["exchange_instrument_id"]),
                         position_side=_position_side(ticket_row["position_side"]),
                         side=payload.side,
-                        order_type=payload.order_type,
+                        order_type=cast(
+                            Literal["stop_market", "take_profit_market"],
+                            payload.order_type,
+                        ),
                         quantity=payload.quantity,
                     )
                 )

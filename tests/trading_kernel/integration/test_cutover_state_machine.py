@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal, cast
 from uuid import uuid4
 
 import asyncpg
@@ -49,19 +51,11 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-TARGET_EXCHANGE_INSTRUMENT_IDS = (
-    "binance-usdm:ADAUSDT:perpetual",
-    "binance-usdm:BNBUSDT:perpetual",
-    "binance-usdm:BTCUSDT:perpetual",
-    "binance-usdm:DOGEUSDT:perpetual",
-    "binance-usdm:ETHUSDT:perpetual",
-    "binance-usdm:SOLUSDT:perpetual",
-    "binance-usdm:XRPUSDT:perpetual",
+BASELINE_SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
+    "0001_trading_kernel_baseline_v2"
 )
-
-
 @pytest_asyncio.fixture
-async def journal_database_url() -> str:
+async def journal_database_url() -> AsyncGenerator[str, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -82,9 +76,9 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
     plan = _plan()
 
     assert plan.target_commit == "a" * 40
-    assert plan.target_schema_revision == "0003_cross_margin_stop_stress"
+    assert plan.target_schema_revision == "0001_trading_kernel_baseline_v2"
     assert plan.target_seed_identity.startswith("sha256:")
-    assert plan.exchange_instrument_ids == TARGET_EXCHANGE_INSTRUMENT_IDS
+    assert "exchange_instrument_ids" not in CutoverPlan.model_fields
     assert CUTOVER_PHASES == (
         CutoverPhase.PLAN_IDENTITIES,
         CutoverPhase.FENCE_EXCHANGE_WRITES,
@@ -105,23 +99,9 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
         _plan(target_seed_identity="sha256:not-a-digest")
 
 
-@pytest.mark.parametrize(
-    "exchange_instrument_ids",
-    [
-        (),
-        (
-            "binance-usdm:BTCUSDT:perpetual",
-            "binance-usdm:BTCUSDT:perpetual",
-        ),
-        ("BTCUSDT",),
-        ("binance-usdm:BTCUSDT:spot",),
-    ],
-)
-def test_cutover_plan_rejects_invalid_probe_instrument_authority(
-    exchange_instrument_ids: tuple[str, ...],
-) -> None:
+def test_cutover_plan_rejects_the_retired_operator_probe_scope() -> None:
     with pytest.raises(ValidationError):
-        _plan(exchange_instrument_ids=exchange_instrument_ids)
+        _plan(exchange_instrument_ids=("binance-usdm:BTCUSDT:perpetual",))
 
 
 @pytest.mark.asyncio
@@ -262,11 +242,6 @@ async def test_journal_rejects_same_cutover_id_with_changed_plan_identity(
         {"target_commit": "c" * 40},
         {"target_seed_identity": "sha256:" + "d" * 64},
         {"target_release_id": "wrong-release"},
-        {
-            "exchange_instrument_ids": (
-                "binance-usdm:BTCUSDT:perpetual",
-            )
-        },
     )
     journal = PostgresCutoverJournal(journal_database_url)
     try:
@@ -346,16 +321,17 @@ async def test_disposable_postgres_rehearsal_rebuilds_clean_schema_and_seeds_aut
                     )
                 )
             ).scalar_one()
-            capabilities = dict(
-                (
-                    await connection.execute(
-                        sa.select(
-                            runtime_capabilities_current.c.capability_key,
-                            runtime_capabilities_current.c.enabled,
-                        )
+            capability_rows = (
+                await connection.execute(
+                    sa.select(
+                        runtime_capabilities_current.c.capability_key,
+                        runtime_capabilities_current.c.enabled,
                     )
-                ).all()
-            )
+                )
+            ).all()
+            capabilities: dict[str, bool] = {
+                str(row[0]): bool(row[1]) for row in capability_rows
+            }
     finally:
         await adapter.close()
         await journal.close()
@@ -401,10 +377,8 @@ def test_systemd_runtime_workers_are_four_explicit_bounded_roles() -> None:
         assert "--poll-interval-ms 2000" in service
         assert "--timeout-seconds ${TRADING_KERNEL_TIMEOUT_SECONDS}" in service
         if role == "entry":
-            assert (
-                "ConditionPathExists=!/etc/brc/trading-kernel.write-fenced"
-                in service
-            )
+            assert "ConditionPathExists=!/etc/brc/trading-kernel.write-fenced" not in service
+            assert "while test -e /etc/brc/trading-kernel.write-fenced" in service
             assert "--runtime-commit ${TRADING_KERNEL_RUNTIME_COMMIT}" in service
             assert "--schema-revision ${TRADING_KERNEL_SCHEMA_REVISION}" in service
             assert (
@@ -462,7 +436,10 @@ async def test_readonly_certification_reports_exact_runtime_authority(
                 RuntimeAuthoritySeedRequest(
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
-                    schema_revision=plan.target_schema_revision,
+                    schema_revision=cast(
+                        Literal["0001_trading_kernel_baseline_v2"],
+                        plan.target_schema_revision,
+                    ),
                     seeded_at_ms=1_000,
                 ),
             )
@@ -511,6 +488,10 @@ async def test_readonly_certification_reports_exact_runtime_authority(
         "incidents": 0,
     }
     assert payload["owner_projection"] is None
+    assert payload["database_integrity_pass"] is True
+    assert payload["flatness_pass"] is True
+    assert payload["universe_bootstrap_pass"] is False
+    assert payload["entry_promotion_pass"] is False
 
 
 @pytest.mark.asyncio
@@ -527,7 +508,10 @@ async def test_readonly_certification_accepts_enabled_exchange_commands_under_co
                 RuntimeAuthoritySeedRequest(
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
-                    schema_revision=plan.target_schema_revision,
+                    schema_revision=cast(
+                        Literal["0001_trading_kernel_baseline_v2"],
+                        plan.target_schema_revision,
+                    ),
                     seeded_at_ms=1_000,
                 ),
             )
@@ -549,7 +533,9 @@ async def test_readonly_certification_accepts_enabled_exchange_commands_under_co
         "exchange_commands": True,
         "strategy_signal_ingest": True,
     }
-    assert payload["owner_policy"]["new_entry_submit_enabled"] is False
+    owner_policy = payload["owner_policy"]
+    assert isinstance(owner_policy, Mapping)
+    assert owner_policy["new_entry_submit_enabled"] is False
 
 
 def test_readonly_certification_cli_loads_outside_repository(
@@ -637,7 +623,6 @@ class MemoryCutoverJournal:
             plan.target_schema_revision,
             plan.target_seed_identity,
             plan.target_release_id,
-            *plan.exchange_instrument_ids,
         )
         if self.identities is not None and self.identities != identity:
             raise CutoverBlocked(("cutover_identity_conflict",))
@@ -693,7 +678,7 @@ class LocalPostgresCutoverAdapter:
         self.plan = plan
         self.engine: AsyncEngine = create_async_engine(database_url)
         self.writes_fenced = False
-        self.runtime_writers = ("runtime-writer",)
+        self.runtime_writers: tuple[str, ...] = ("runtime-writer",)
         self.release_deployed = False
         self.readonly_certified = False
         self.observation_enabled = False
@@ -804,7 +789,10 @@ class LocalPostgresCutoverAdapter:
                 RuntimeAuthoritySeedRequest(
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
-                    schema_revision=plan.target_schema_revision,
+                    schema_revision=cast(
+                        Literal["0001_trading_kernel_baseline_v2"],
+                        plan.target_schema_revision,
+                    ),
                     seeded_at_ms=1_000,
                 ),
             )
@@ -857,7 +845,7 @@ class LocalPostgresCutoverAdapter:
 
 def _plan(**changes: object) -> CutoverPlan:
     runtime_commit = "a" * 40
-    schema_revision = "0003_cross_margin_stop_stress"
+    schema_revision = BASELINE_SCHEMA_REVISION
     seed_identity = build_runtime_seed_identity(
         RuntimeAuthoritySeedRequest(
             account_id="subaccount-main",
@@ -878,7 +866,6 @@ def _plan(**changes: object) -> CutoverPlan:
         "target_schema_revision": schema_revision,
         "target_seed_identity": seed_identity,
         "target_release_id": "release-aaaaaaaaaaaa",
-        "exchange_instrument_ids": TARGET_EXCHANGE_INSTRUMENT_IDS,
     }
     values.update(changes)
     return CutoverPlan.model_validate(values)

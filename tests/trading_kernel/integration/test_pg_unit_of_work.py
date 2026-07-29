@@ -5,8 +5,10 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 import asyncpg
@@ -24,6 +26,7 @@ from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandStatus,
+    OrderCommandPayload,
 )
 from src.trading_kernel.domain.events import ReconciliationMatched, TicketIssued
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
@@ -53,7 +56,7 @@ SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 
 
 @pytest_asyncio.fixture
-async def kernel_engine() -> AsyncEngine:
+async def kernel_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -108,6 +111,7 @@ async def test_reduction_commits_ticket_aggregate_event_and_command_atomically(
     assert len(commands) == 1
     assert commands[0].kind is ExchangeCommandKind.ENTRY
     assert commands[0].status is ExchangeCommandStatus.PREPARED
+    assert isinstance(commands[0].payload, OrderCommandPayload)
     assert commands[0].payload.quantity == ticket.quantity
 
 
@@ -416,7 +420,7 @@ def _ticket_for_signal(
     signal_event_id: str,
     exposure_episode_id: str,
     *,
-    position_side: str,
+    position_side: Literal["long", "short"],
 ):
     original = _identity()
     domain = NettingDomain(

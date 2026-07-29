@@ -35,6 +35,10 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerStatus,
     run_reconciliation_worker_once,
 )
+from tests.trading_kernel.integration.universe_certification_support import (
+    NoTicketPositionSource,
+    NoTicketVenueTruth,
+)
 from tests.trading_kernel.unit.test_ticket import _ticket
 
 
@@ -47,8 +51,11 @@ class _AggregateRepository:
         del kwargs
         return self.aggregate if self.aggregate.status in statuses else None
 
-    async def get_next_reconciliation_work(self, **kwargs):
-        del kwargs
+    async def claim_next_critical_reconciliation_work(self, *, now_ms):
+        del now_ms
+
+    async def claim_next_routine_reconciliation_work(self, *, now_ms):
+        del now_ms
         return self.aggregate
 
     async def schedule_next_check(self, ticket_id, *, work_kind, due_at_ms):
@@ -112,13 +119,13 @@ class _SignalRepository:
             capability_key="exchange_commands",
             enabled=True,
             certified_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0001_trading_kernel_baseline_v2",
         )
 
 
 class _IncidentRepository:
     def __init__(self) -> None:
-        self.created = []
+        self.created: list[object] = []
 
     async def add(self, incident) -> None:
         self.created.append(incident)
@@ -218,8 +225,8 @@ async def test_review_worker_does_not_write_a_thin_review_when_facts_are_missing
 
     result = await run_reconciliation_worker_once(
         state.factory,
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         _request(),
         review_economics_source=source,
     )
@@ -237,8 +244,8 @@ async def test_review_worker_disables_funding_attribution_when_ticket_windows_ov
 
     await run_reconciliation_worker_once(
         state.factory,
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         _request(),
         review_economics_source=source,
     )
@@ -260,8 +267,8 @@ async def test_external_flat_review_records_explicit_unavailable_economics_after
     monkeypatch.setattr(worker_module, "record_trade_review", record_review)
     result = await run_reconciliation_worker_once(
         state.factory,
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         _request().model_copy(update={"now_ms": 303_000}),
         review_economics_source=source,
     )
@@ -289,8 +296,8 @@ async def test_external_flat_review_does_not_require_exit_command_after_grace(
     monkeypatch.setattr(worker_module, "record_trade_review", record_review)
     result = await run_reconciliation_worker_once(
         state.factory,
-        object(),
-        object(),
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
         _request().model_copy(update={"now_ms": 303_000}),
     )
 
@@ -302,7 +309,7 @@ def _request() -> ReconciliationWorkerRequest:
     return ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-test",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0001_trading_kernel_baseline_v2",
         now_ms=5_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
@@ -24,7 +25,7 @@ from src.trading_kernel.domain.cross_margin_stress import (
     ],
 )
 def test_passes_symmetric_single_position_stop_stress(
-    side: str,
+    side: Literal["long", "short"],
     stop_price: Decimal,
     expected_stress: Decimal,
     expected_minimum: Decimal,
@@ -82,7 +83,7 @@ def test_fails_when_stress_surplus_is_negative_or_zero(
     ],
 )
 def test_fails_when_mark_is_already_beyond_initial_stop(
-    side: str,
+    side: Literal["long", "short"],
     mark_price: Decimal,
     stop_price: Decimal,
 ) -> None:

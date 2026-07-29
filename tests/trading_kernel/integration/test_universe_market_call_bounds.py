@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from collections.abc import AsyncGenerator
+from typing import Literal
 from uuid import uuid4
 
 import asyncpg
@@ -58,7 +60,9 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-9-test"
-SCHEMA_REVISION = "0003_cross_margin_stop_stress"
+SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
+    "0001_trading_kernel_baseline_v2"
+)
 MPG_CONTRACT = next(
     contract
     for contract in registered_strategy_contracts()
@@ -95,7 +99,7 @@ TEN_MEMBERS = tuple(
 
 
 @pytest_asyncio.fixture
-async def comparative_engine(request) -> AsyncEngine:
+async def comparative_engine(request) -> AsyncGenerator[AsyncEngine, None]:
     contract, members = getattr(
         request,
         "param",
@@ -346,7 +350,7 @@ async def test_incomplete_or_mixed_close_projection_fails_all_scopes_closed(
         assert await connection.scalar(
             sa.select(sa.func.count())
             .select_from(runtime_scopes_current)
-            .where(runtime_scopes_current.c.warm_ready_at_ms.is_not(None))
+            .where(runtime_scopes_current.c.warm_closed_bar_time_ms.is_not(None))
         ) == 0
 
 
@@ -545,7 +549,7 @@ async def test_projection_member_digest_drift_is_not_consumed(
         ).mappings().one()
         assert projection["member_set_digest"] == corrupted_digest
         assert projection["projection_version"] == 1
-        assert second_scope["warm_ready_at_ms"] is None
+        assert second_scope["warm_closed_bar_time_ms"] is None
         assert second_scope["warm_readiness_digest"] is None
         assert second_scope["warm_valid_until_ms"] is None
         assert (

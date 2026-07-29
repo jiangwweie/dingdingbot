@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable, Mapping
 from decimal import Decimal
+from typing import Literal, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -43,6 +45,7 @@ from src.trading_kernel.domain.instrument_certification import (
     classify_instrument_certification,
 )
 from src.trading_kernel.domain.order_attribution import (
+    ConditionalOrderExpectation,
     OrderNamespace,
     OrderRole,
     TicketOrderReference,
@@ -68,6 +71,94 @@ class FakeAsyncExchange:
             "clientOrderId": params["newClientOrderId"],
         }
 
+    def load_markets(self, reload: bool = False) -> object:
+        del reload
+        return {}
+
+    def market(self, symbol: str) -> Mapping[str, object]:
+        raise AssertionError(f"unexpected market lookup for {symbol}")
+
+    async def set_leverage(
+        self, leverage: int, symbol: str, params: Mapping[str, object]
+    ) -> object:
+        del leverage, symbol, params
+        raise AssertionError("unexpected leverage mutation")
+
+    async def cancel_order(
+        self, order_id: str, symbol: str, params: Mapping[str, object]
+    ) -> object:
+        del order_id, symbol, params
+        raise AssertionError("unexpected order cancellation")
+
+    async def fetch_order(
+        self, order_id: object, symbol: str, params: Mapping[str, object]
+    ) -> object:
+        del order_id, symbol, params
+        raise AssertionError("unexpected order lookup")
+
+    async def fetch_positions(
+        self, symbols: list[str], params: Mapping[str, object]
+    ) -> object:
+        del symbols, params
+        raise AssertionError("unexpected position lookup")
+
+    async def fapiPrivateV2GetPositionRisk(
+        self, params: Mapping[str, object]
+    ) -> object:
+        del params
+        raise AssertionError("unexpected position-risk lookup")
+
+    async def fapiPublicGetPremiumIndex(self, params: Mapping[str, object]) -> object:
+        del params
+        raise AssertionError("unexpected premium-index lookup")
+
+    async def fapiPrivateV2GetAccount(self, params: Mapping[str, object]) -> object:
+        del params
+        raise AssertionError("unexpected account lookup")
+
+    async def fetch_my_trades(
+        self,
+        symbol: str,
+        since: object,
+        limit: int,
+        params: Mapping[str, object],
+    ) -> object:
+        del symbol, since, limit, params
+        raise AssertionError("unexpected trade lookup")
+
+    async def fetch_open_orders(
+        self,
+        symbol: str | None,
+        since: object,
+        limit: int,
+        params: Mapping[str, object],
+    ) -> object:
+        del symbol, since, limit, params
+        raise AssertionError("unexpected open-order lookup")
+
+    async def fetch_order_book(self, symbol: str, limit: int) -> object:
+        del symbol, limit
+        raise AssertionError("unexpected order-book lookup")
+
+    async def fetch_balance(self, params: Mapping[str, object]) -> object:
+        del params
+        raise AssertionError("unexpected balance lookup")
+
+    async def fetch_position_mode(
+        self, symbol: str, params: Mapping[str, object]
+    ) -> object:
+        del symbol, params
+        raise AssertionError("unexpected position-mode lookup")
+
+    async def fetch_ohlcv(
+        self, symbol: str, timeframe: str, since: object, limit: int
+    ) -> object:
+        del symbol, timeframe, since, limit
+        raise AssertionError("unexpected candle lookup")
+
+    async def close(self) -> object:
+        return None
+
 
 class InsufficientFunds(Exception):
     pass
@@ -81,7 +172,7 @@ def test_ccxt_adapter_rejects_retired_venue_symbol_map() -> None:
     assert "venue_symbols" not in inspect.signature(CcxtVenueAdapter).parameters
 
     with pytest.raises(TypeError, match="venue_symbols"):
-        CcxtVenueAdapter(
+        cast(Callable[..., CcxtVenueAdapter], CcxtVenueAdapter)(
             exchanges={},
             venue_symbols={},
             clock_ms=lambda: 2_000,
@@ -196,17 +287,17 @@ def test_position_details_distinguishes_invalid_from_missing_observation() -> No
     assert invalid_status == "invalid"
 
 
-class RejectingExchange:
+class RejectingExchange(FakeAsyncExchange):
     async def create_order(self, *args, **kwargs):
         raise InsufficientFunds("sensitive venue message")
 
 
-class TimingOutExchange:
+class TimingOutExchange(FakeAsyncExchange):
     async def create_order(self, *args, **kwargs):
         raise TimeoutError("network outcome unknown")
 
 
-class CancelExchange:
+class CancelExchange(FakeAsyncExchange):
     def __init__(self) -> None:
         self.cancel_call = None
 
@@ -222,7 +313,7 @@ class CancelExchange:
         }
 
 
-class ConditionalCancelExchange:
+class ConditionalCancelExchange(FakeAsyncExchange):
     def __init__(self) -> None:
         self.cancel_calls: list[tuple[object, object, object]] = []
 
@@ -237,17 +328,17 @@ class ConditionalCancelExchange:
         }
 
 
-class RejectingCancelExchange:
+class RejectingCancelExchange(FakeAsyncExchange):
     async def cancel_order(self, *args, **kwargs):
         raise InsufficientFunds("sensitive venue message")
 
 
-class TimingOutCancelExchange:
+class TimingOutCancelExchange(FakeAsyncExchange):
     async def cancel_order(self, *args, **kwargs):
         raise TimeoutError("network outcome unknown")
 
 
-class LeverageMutationExchange:
+class LeverageMutationExchange(FakeAsyncExchange):
     def __init__(self) -> None:
         self.set_call = None
         self.position_risk_calls: list[dict[str, object]] = []
@@ -392,7 +483,7 @@ class CancelTruthExchange(TruthExchange):
         return []
 
 
-class ActionFactsExchange:
+class ActionFactsExchange(FakeAsyncExchange):
     async def fetch_ticker(self, symbol):
         return {"symbol": symbol, "last": "60000"}
 
@@ -464,14 +555,14 @@ class OneWayActionFactsExchange(ActionFactsExchange):
         return {"hedged": False}
 
 
-class AdmissionSnapshotExchange:
+class AdmissionSnapshotExchange(FakeAsyncExchange):
     def __init__(self) -> None:
         self.markets_loaded = False
         self.position_calls: list[tuple[list[str], dict[str, object]]] = []
         self.position_risk_calls: list[dict[str, object]] = []
         self.order_calls: list[tuple[str | None, dict[str, object]]] = []
 
-    async def load_markets(self, reload):
+    def load_markets(self, reload: bool = False) -> object:
         assert reload is False
         self.markets_loaded = True
         return {}
@@ -605,11 +696,11 @@ class AdmissionSnapshotExchange:
         ]
 
 
-class InstrumentRulesExchange:
+class InstrumentRulesExchange(FakeAsyncExchange):
     def __init__(self) -> None:
         self.loaded = False
 
-    async def load_markets(self, reload):
+    def load_markets(self, reload: bool = False) -> object:
         assert reload is False
         self.loaded = True
         return {}
@@ -787,7 +878,7 @@ class TransientCertificationExchange(InstrumentCertificationExchange):
         raise RequestTimeout("venue request timed out")
 
 
-class LifecycleFactsExchange:
+class LifecycleFactsExchange(FakeAsyncExchange):
     def __init__(self) -> None:
         self.tp1_order_calls: list[tuple[object, str, dict[str, object]]] = []
 
@@ -898,7 +989,7 @@ class BnbLifecycleFactsExchange(LifecycleFactsExchange):
             row["info"]["commissionAsset"] = "BNB"
         return rows
 
-class ReviewEconomicsExchange:
+class ReviewEconomicsExchange(FakeAsyncExchange):
     def __init__(self, *, include_fee: bool = True) -> None:
         self.include_fee = include_fee
         self.trade_calls: list[tuple[str, int | None, int, dict[str, object]]] = []
@@ -1052,7 +1143,7 @@ class InvalidRawFeeReviewEconomicsExchange(ReviewEconomicsExchange):
         return rows
 
 
-class FeeDiscountCapabilityExchange:
+class FeeDiscountCapabilityExchange(FakeAsyncExchange):
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
@@ -1390,7 +1481,9 @@ async def test_ccxt_adapter_derives_account_wide_binance_instrument_ids_without_
 
 
 @pytest.mark.asyncio
-async def test_ccxt_adapter_rejects_non_usdt_account_wide_symbol_without_fabricating_identity() -> None:
+async def test_ccxt_adapter_rejects_non_usdt_account_wide_symbol_without_fabricating_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     exchange = AdmissionSnapshotExchange()
 
     async def malformed_account(params):
@@ -1414,7 +1507,7 @@ async def test_ccxt_adapter_rejects_non_usdt_account_wide_symbol_without_fabrica
             ],
         }
 
-    exchange.fapiPrivateV2GetAccount = malformed_account
+    monkeypatch.setattr(exchange, "fapiPrivateV2GetAccount", malformed_account)
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
         clock_ms=lambda: 2_000,
@@ -1433,7 +1526,9 @@ async def test_ccxt_adapter_rejects_non_usdt_account_wide_symbol_without_fabrica
 
 
 @pytest.mark.asyncio
-async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk() -> None:
+async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     exchange = AdmissionSnapshotExchange()
 
     async def flat_target_position_risk(params):
@@ -1469,8 +1564,10 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
         ]
         return account
 
-    exchange.fapiPrivateV2GetPositionRisk = flat_target_position_risk
-    exchange.fapiPrivateV2GetAccount = flat_target_account
+    monkeypatch.setattr(
+        exchange, "fapiPrivateV2GetPositionRisk", flat_target_position_risk
+    )
+    monkeypatch.setattr(exchange, "fapiPrivateV2GetAccount", flat_target_account)
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
         settlement_assets={
@@ -1499,7 +1596,9 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
 
 
 @pytest.mark.asyncio
-async def test_ccxt_adapter_uses_premium_index_mark_for_flat_zero_mark_position_risk() -> None:
+async def test_ccxt_adapter_uses_premium_index_mark_for_flat_zero_mark_position_risk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     exchange = AdmissionSnapshotExchange()
     premium_index_calls: list[dict[str, object]] = []
 
@@ -1539,9 +1638,11 @@ async def test_ccxt_adapter_uses_premium_index_mark_for_flat_zero_mark_position_
         ]
         return account
 
-    exchange.fapiPrivateV2GetPositionRisk = flat_zero_mark_position_risk
-    exchange.fapiPublicGetPremiumIndex = premium_index
-    exchange.fapiPrivateV2GetAccount = flat_target_account
+    monkeypatch.setattr(
+        exchange, "fapiPrivateV2GetPositionRisk", flat_zero_mark_position_risk
+    )
+    monkeypatch.setattr(exchange, "fapiPublicGetPremiumIndex", premium_index)
+    monkeypatch.setattr(exchange, "fapiPrivateV2GetAccount", flat_target_account)
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
         clock_ms=lambda: 2_000,
@@ -1564,7 +1665,9 @@ async def test_ccxt_adapter_uses_premium_index_mark_for_flat_zero_mark_position_
 
 
 @pytest.mark.asyncio
-async def test_ccxt_adapter_rejects_premium_index_mark_for_different_symbol() -> None:
+async def test_ccxt_adapter_rejects_premium_index_mark_for_different_symbol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     exchange = AdmissionSnapshotExchange()
 
     async def flat_zero_mark_position_risk(params):
@@ -1594,9 +1697,11 @@ async def test_ccxt_adapter_rejects_premium_index_mark_for_different_symbol() ->
         ]
         return account
 
-    exchange.fapiPrivateV2GetPositionRisk = flat_zero_mark_position_risk
-    exchange.fapiPublicGetPremiumIndex = premium_index
-    exchange.fapiPrivateV2GetAccount = flat_target_account
+    monkeypatch.setattr(
+        exchange, "fapiPrivateV2GetPositionRisk", flat_zero_mark_position_risk
+    )
+    monkeypatch.setattr(exchange, "fapiPublicGetPremiumIndex", premium_index)
+    monkeypatch.setattr(exchange, "fapiPrivateV2GetAccount", flat_target_account)
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
         clock_ms=lambda: 2_000,
@@ -2446,8 +2551,10 @@ def _cancel_adapter(exchange) -> CcxtVenueAdapter:
 
 def _cancel_request(
     *,
-    order_namespace: str = "regular",
-    purpose: str = "reconciliation_cleanup",
+    order_namespace: Literal["regular", "conditional"] = "regular",
+    purpose: Literal[
+        "entry_remainder", "reconciliation_cleanup", "runner_old_stop"
+    ] = "reconciliation_cleanup",
 ) -> VenueCommandRequest:
     return VenueCommandRequest(
         command_id="command:cancel-stop-1",
@@ -2468,6 +2575,7 @@ def _cancel_request(
 
 def _truth_request() -> VenueTruthRequest:
     request = _request()
+    assert request.venue_client_order_id is not None
     return VenueTruthRequest(
         command_id=request.command_id,
         kind=request.kind,
@@ -2483,13 +2591,16 @@ def _truth_request() -> VenueTruthRequest:
 
 def _cancel_truth_request(
     *,
-    order_namespace: str = "regular",
-    purpose: str = "reconciliation_cleanup",
+    order_namespace: Literal["regular", "conditional"] = "regular",
+    purpose: Literal[
+        "entry_remainder", "reconciliation_cleanup", "runner_old_stop"
+    ] = "reconciliation_cleanup",
 ) -> VenueTruthRequest:
     request = _cancel_request(
         order_namespace=order_namespace,
         purpose=purpose,
     )
+    assert request.venue_client_order_id is not None
     return VenueTruthRequest(
         command_id=request.command_id,
         kind=request.kind,
@@ -2530,13 +2641,13 @@ def _review_request() -> ReviewEconomicsRequest:
                 namespace=OrderNamespace.CONDITIONAL,
                 venue_client_order_id="brc-runner-1",
                 submitted_exchange_order_id="venue-runner-algo-1",
-                conditional_expectation={
-                    "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
-                    "position_side": "long",
-                    "side": "sell",
-                    "order_type": "stop_market",
-                    "quantity": Decimal("0.5"),
-                },
+                conditional_expectation=ConditionalOrderExpectation(
+                    exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                    position_side="long",
+                    side="sell",
+                    order_type="stop_market",
+                    quantity=Decimal("0.5"),
+                ),
             ),
         ),
         entry_time_ms=1_000,

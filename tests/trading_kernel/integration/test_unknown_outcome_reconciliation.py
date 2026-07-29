@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 import pytest
 
@@ -79,6 +80,12 @@ class StaticTruthPort:
         self.requests.append(request)
         return self.truth
 
+    async def read_configured_leverage(
+        self, request: LeverageTruthRequest
+    ) -> LeverageTruthSnapshot:
+        del request
+        raise AssertionError("order-truth test must not read leverage truth")
+
 
 class StaticLeverageTruthPort:
     def __init__(self, truth: LeverageTruthSnapshot) -> None:
@@ -91,6 +98,12 @@ class StaticLeverageTruthPort:
     ) -> LeverageTruthSnapshot:
         self.requests.append(request)
         return self.truth
+
+    async def lookup_command_truth(
+        self, request: VenueTruthRequest
+    ) -> VenueTruthSnapshot:
+        del request
+        raise AssertionError("leverage-truth test must not read order truth")
 
 
 class UnknownLeverageVenue:
@@ -115,7 +128,7 @@ async def _unknown_leverage_command(dispatch_engine, ticket):
             lease_until_ms=6_100,
             timeout_seconds=0.001,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -995,7 +1008,7 @@ async def _make_unknown_entry(engine):
             lease_until_ms=1_200,
             timeout_seconds=0.01,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1047,7 +1060,7 @@ async def _make_unknown_initial_stop(engine):
 async def _make_unknown_tp1(
     engine,
     *,
-    position_side: str,
+    position_side: Literal["long", "short"],
     seed_policy: bool,
 ):
     ticket = _ticket_for_signal(
@@ -1098,7 +1111,7 @@ async def _make_unknown_tp1(
 async def _make_unknown_replacement(
     engine,
     *,
-    position_side: str,
+    position_side: Literal["long", "short"],
     seed_policy: bool,
 ):
     ticket = _ticket_for_signal(
@@ -1275,7 +1288,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=timeout_seconds,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision="0003_cross_margin_stop_stress" if entry else None,
+            schema_revision="0001_trading_kernel_baseline_v2" if entry else None,
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
@@ -1318,6 +1331,7 @@ def _visible_truth(
     exchange_order_id: str,
 ) -> VenueTruthSnapshot:
     assert isinstance(command.payload, OrderCommandPayload)
+    assert command.venue_client_order_id is not None
     return VenueTruthSnapshot(
         lookup_status=VenueLookupStatus.VISIBLE,
         order=VenueOrderTruth(

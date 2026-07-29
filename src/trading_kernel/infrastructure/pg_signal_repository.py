@@ -505,13 +505,14 @@ class PostgresSignalRepository:
                 runtime_scopes_current.c.observation_enabled.is_(True),
                 runtime_scopes_current.c.entry_enabled.is_(False),
                 runtime_scopes_current.c.updated_at_ms
-                <= readiness.ready_at_ms,
+                <= readiness.warm_completed_at_ms,
             )
             .values(
-                warm_ready_at_ms=readiness.ready_at_ms,
+                warm_closed_bar_time_ms=readiness.warm_closed_bar_time_ms,
+                warm_completed_at_ms=readiness.warm_completed_at_ms,
                 warm_readiness_digest=readiness.readiness_digest,
-                warm_valid_until_ms=readiness.valid_until_ms,
-                updated_at_ms=readiness.ready_at_ms,
+                warm_valid_until_ms=readiness.warm_valid_until_ms,
+                updated_at_ms=readiness.warm_completed_at_ms,
             )
         )
         if result.rowcount != 1:
@@ -528,9 +529,11 @@ class PostgresSignalRepository:
                     readiness.universe_semantic_digest
                 ),
                 "warm_readiness_digest": readiness.readiness_digest,
-                "warm_valid_until_ms": readiness.valid_until_ms,
+                "warm_closed_bar_time_ms": readiness.warm_closed_bar_time_ms,
+                "warm_completed_at_ms": readiness.warm_completed_at_ms,
+                "warm_valid_until_ms": readiness.warm_valid_until_ms,
             },
-            updated_at_ms=readiness.ready_at_ms,
+            updated_at_ms=readiness.warm_completed_at_ms,
         )
 
     async def clear_warm_readiness(
@@ -564,7 +567,8 @@ class PostgresSignalRepository:
                 runtime_scopes_current.c.updated_at_ms <= updated_at_ms,
             )
             .values(
-                warm_ready_at_ms=None,
+                warm_closed_bar_time_ms=None,
+                warm_completed_at_ms=None,
                 warm_readiness_digest=None,
                 warm_valid_until_ms=None,
                 updated_at_ms=updated_at_ms,

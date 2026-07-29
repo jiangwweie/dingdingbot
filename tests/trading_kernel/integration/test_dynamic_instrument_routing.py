@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
 
 import pytest
@@ -69,14 +70,16 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _ticket_for_signal,
 )
 from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.unit.test_venue_adapter import FakeAsyncExchange
 
 _DYNAMIC_INSTRUMENT_ID = "binance-usdm:OPUSDT:perpetual"
 _DYNAMIC_CCXT_SYMBOL = "OP/USDT:USDT"
 pytest_plugins = ("tests.trading_kernel.integration.test_command_dispatch",)
 
 
-class RecordingBinanceExchange:
+class RecordingBinanceExchange(FakeAsyncExchange):
     def __init__(self) -> None:
+        super().__init__()
         self.ohlcv_symbols: list[str] = []
         self.created_symbols: list[str] = []
         self.created_order_types: list[str] = []
@@ -100,7 +103,7 @@ class RecordingBinanceExchange:
         side: str,
         amount: object,
         price: object,
-        params: dict[str, object],
+        params: Mapping[str, object],
     ) -> dict[str, object]:
         del side, amount, price, params
         self.created_symbols.append(symbol)
@@ -114,7 +117,7 @@ class RecordingBinanceExchange:
         self,
         order_id: object,
         symbol: str,
-        params: dict[str, object],
+        params: Mapping[str, object],
     ) -> dict[str, object]:
         del order_id
         self.truth_symbols.append(symbol)
@@ -132,7 +135,7 @@ class RecordingBinanceExchange:
     async def fetch_positions(
         self,
         symbols: list[str],
-        params: dict[str, object],
+        params: Mapping[str, object],
     ) -> list[object]:
         del symbols, params
         return []
@@ -142,7 +145,7 @@ class RecordingBinanceExchange:
         symbol: str,
         since: object,
         limit: int,
-        params: dict[str, object],
+        params: Mapping[str, object],
     ) -> list[object]:
         del symbol, since, limit, params
         return []
@@ -152,7 +155,7 @@ class RecordingBinanceExchange:
         symbol: str | None,
         since: object,
         limit: int,
-        params: dict[str, object],
+        params: Mapping[str, object],
     ) -> list[object]:
         del symbol, since, limit, params
         return []
@@ -370,7 +373,7 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_cross_margin_stop_stress",
+            schema_revision="0001_trading_kernel_baseline_v2",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

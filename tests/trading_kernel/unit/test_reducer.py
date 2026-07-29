@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 import pytest
 
@@ -166,7 +167,7 @@ def _post_fill_stress_event(aggregate, *, passed: bool = True):
             ),
         )
     )
-    expected_status = "passed" if passed else "failed"
+    expected_status: Literal["passed", "failed"] = "passed" if passed else "failed"
     assert evidence.proof.status.value == expected_status
     return PostFillStressAssessed(
         event_id=f"event-stress-{aggregate.last_event_sequence + 1}",

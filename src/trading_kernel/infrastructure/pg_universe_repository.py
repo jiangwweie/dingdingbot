@@ -13,6 +13,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from src.trading_kernel.application.abandon_strategy_universe import (
+    AbandonStrategyUniverseRequest,
+)
 from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationReadiness,
     UniverseActivationRequest,
@@ -363,7 +366,8 @@ class PostgresStrategyUniverseRepository:
                 strategy_universe_members.c.exchange_instrument_id,
                 certification.c.status.label("certification_status"),
                 certification.c.blocker_code,
-                runtime_scopes_current.c.warm_ready_at_ms,
+                runtime_scopes_current.c.warm_closed_bar_time_ms,
+                runtime_scopes_current.c.warm_completed_at_ms,
                 runtime_scopes_current.c.warm_readiness_digest,
                 runtime_scopes_current.c.warm_valid_until_ms,
                 monitor_current.c.owner_status.label("monitor_status"),
@@ -485,7 +489,8 @@ class PostgresStrategyUniverseRepository:
                                 )
                             ),
                             warm_ready=(
-                                row["warm_ready_at_ms"] is not None
+                                row["warm_closed_bar_time_ms"] is not None
+                                and row["warm_completed_at_ms"] is not None
                                 and row["warm_readiness_digest"] is not None
                                 and row["warm_valid_until_ms"] is not None
                             ),
@@ -745,6 +750,109 @@ class PostgresStrategyUniverseRepository:
             activated_at_ms=request.attempted_at_ms,
         )
 
+    async def abandon(self, request: AbandonStrategyUniverseRequest) -> None:
+        """Atomically make one exact Warming Universe permanently ineligible."""
+
+        await self._lock_installs()
+        target = (
+            await self._connection.execute(
+                sa.select(strategy_universe_versions)
+                .where(
+                    strategy_universe_versions.c.universe_version_id
+                    == request.universe_version_id
+                )
+                .with_for_update(of=strategy_universe_versions)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if target is None:
+            raise UniverseInstallConflict("UNIVERSE_ABANDON_TARGET_NOT_FOUND")
+        if target["lifecycle_state"] != "warming":
+            raise UniverseInstallConflict("UNIVERSE_NOT_WARMING")
+        current = (
+            await self._connection.execute(
+                sa.select(strategy_universe_current.c.universe_version_id)
+                .where(
+                    strategy_universe_current.c.universe_version_id
+                    == request.universe_version_id
+                )
+                .with_for_update(of=strategy_universe_current)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if current is not None:
+            raise UniverseInstallConflict("CURRENT_UNIVERSE_IDENTITY_CONFLICT")
+
+        scope_update = await self._connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.universe_version_id
+                == request.universe_version_id,
+                runtime_scopes_current.c.lifecycle_state == "warming",
+            )
+            .values(
+                lifecycle_state="abandoned",
+                observation_enabled=False,
+                entry_enabled=False,
+                scope_version=runtime_scopes_current.c.scope_version + 1,
+                warm_closed_bar_time_ms=None,
+                warm_completed_at_ms=None,
+                warm_readiness_digest=None,
+                warm_valid_until_ms=None,
+                next_observation_due_at_ms=None,
+                lease_owner=None,
+                lease_expires_at_ms=None,
+                observation_generation=(
+                    runtime_scopes_current.c.observation_generation + 1
+                ),
+                updated_at_ms=request.attempted_at_ms,
+            )
+        )
+        if scope_update.rowcount <= 0:
+            raise UniverseInstallConflict("WARMING_SCOPE_IDENTITY_CONFLICT")
+        await self._connection.execute(
+            sa.update(instrument_certification_current)
+            .where(
+                instrument_certification_current.c.lease_universe_version_id
+                == request.universe_version_id
+            )
+            .values(
+                lease_owner=None,
+                lease_expires_at_ms=None,
+                lease_universe_version_id=None,
+            )
+        )
+        await self._connection.execute(
+            sa.update(monitor_current)
+            .where(
+                monitor_current.c.monitor_key.like(
+                    f"strategy-universe:{request.universe_version_id}:%"
+                )
+            )
+            .values(
+                owner_status="completed",
+                summary="strategy universe abandoned",
+                intervention="none",
+                updated_at_ms=request.attempted_at_ms,
+                projection_version=monitor_current.c.projection_version + 1,
+            )
+        )
+        result = await self._connection.execute(
+            sa.update(strategy_universe_versions)
+            .where(
+                strategy_universe_versions.c.universe_version_id
+                == request.universe_version_id,
+                strategy_universe_versions.c.lifecycle_state == "warming",
+            )
+            .values(
+                lifecycle_state="abandoned",
+                abandoned_at_ms=request.attempted_at_ms,
+                abandon_reason_code=request.reason_code,
+            )
+        )
+        if result.rowcount != 1:
+            raise UniverseInstallConflict("UNIVERSE_ABANDON_CONFLICT")
+
     async def _current_universe_identity_is_complete(
         self,
         current: RowMapping,
@@ -971,7 +1079,8 @@ class PostgresStrategyUniverseRepository:
             )
         )
         warm_readiness_is_complete = bool(scopes) and all(
-            scope["warm_ready_at_ms"] is not None
+            scope["warm_closed_bar_time_ms"] is not None
+            and scope["warm_completed_at_ms"] is not None
             and scope["warm_readiness_digest"] is not None
             and scope["warm_valid_until_ms"] is not None
             for scope in scopes
@@ -979,7 +1088,7 @@ class PostgresStrategyUniverseRepository:
         warm_readiness_is_fresh = (
             warm_readiness_is_complete
             and all(
-                int(scope["warm_ready_at_ms"])
+                int(scope["warm_completed_at_ms"])
                 <= attempted_at_ms
                 < int(scope["warm_valid_until_ms"])
                 for scope in scopes
@@ -994,7 +1103,7 @@ class PostgresStrategyUniverseRepository:
             and warm_readiness_is_fresh
         ):
             warm_close_times = {
-                int(scope["warm_ready_at_ms"]) for scope in scopes
+                int(scope["warm_closed_bar_time_ms"]) for scope in scopes
             }
             if len(warm_close_times) == 1:
                 closed_bar_time_ms = next(iter(warm_close_times))
@@ -1364,11 +1473,14 @@ class PostgresStrategyUniverseRepository:
         worker_id: str,
         now_ms: int,
         lease_until_ms: int,
+        overdue_before_ms: int | None = None,
     ) -> InstrumentCertificationTarget | None:
         if not worker_id.strip():
             raise ValueError("certification claim worker must be non-blank")
         if now_ms <= 0 or lease_until_ms <= now_ms:
             raise ValueError("certification claim lease must be future-dated")
+        if overdue_before_ms is not None and overdue_before_ms <= 0:
+            raise ValueError("certification overdue boundary must be positive")
         certification = instrument_certification_current
         row = (
             await self._connection.execute(
@@ -1419,6 +1531,17 @@ class PostgresStrategyUniverseRepository:
                                 certification.c.lease_expires_at_ms <= now_ms,
                             ),
                         ),
+                    ),
+                    *(
+                        (
+                            sa.func.coalesce(
+                                certification.c.observed_at_ms,
+                                strategy_universe_versions.c.installed_at_ms,
+                            )
+                            <= overdue_before_ms,
+                        )
+                        if overdue_before_ms is not None
+                        else ()
                     ),
                 )
                 .order_by(
@@ -1478,6 +1601,7 @@ class PostgresStrategyUniverseRepository:
                     next_check_at_ms=now_ms,
                     lease_owner=worker_id,
                     lease_expires_at_ms=lease_until_ms,
+                    lease_universe_version_id=str(row["universe_version_id"]),
                     projection_version=1,
                 )
             )
@@ -1497,6 +1621,7 @@ class PostgresStrategyUniverseRepository:
                 .values(
                     lease_owner=worker_id,
                     lease_expires_at_ms=lease_until_ms,
+                    lease_universe_version_id=str(row["universe_version_id"]),
                 )
             )
         return InstrumentCertificationTarget(
@@ -1535,6 +1660,8 @@ class PostgresStrategyUniverseRepository:
                 == target.lease_owner,
                 instrument_certification_current.c.lease_expires_at_ms
                 == target.lease_expires_at_ms,
+                instrument_certification_current.c.lease_universe_version_id
+                == target.universe_version_id,
             )
             .values(
                 status=certification.status,
@@ -1549,6 +1676,7 @@ class PostgresStrategyUniverseRepository:
                 next_check_at_ms=next_check_at_ms,
                 lease_owner=None,
                 lease_expires_at_ms=None,
+                lease_universe_version_id=None,
                 projection_version=(
                     instrument_certification_current.c.projection_version + 1
                 ),
@@ -2001,7 +2129,8 @@ def _warming_scope_values(
         "observation_enabled": True,
         "entry_enabled": False,
         "scope_version": 1,
-        "warm_ready_at_ms": None,
+        "warm_closed_bar_time_ms": None,
+        "warm_completed_at_ms": None,
         "warm_readiness_digest": None,
         "warm_valid_until_ms": None,
         "next_observation_due_at_ms": request.installed_at_ms,

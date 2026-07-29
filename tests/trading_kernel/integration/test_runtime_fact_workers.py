@@ -12,7 +12,15 @@ from src.trading_kernel.application.ingest_signal import (
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
+from src.trading_kernel.application.ports import (
+    LeverageTruthRequest,
+    LeverageTruthSnapshot,
+    VenueCommandRequest,
+    VenueSetLeverageRequest,
+    VenueTruthRequest,
+)
 from src.trading_kernel.application.runtime_facts import (
+    AccountRiskSnapshotRequest,
     EntryAdmissionSnapshotRequest,
     InstrumentRulesFacts,
     InstrumentRulesRequest,
@@ -24,6 +32,7 @@ from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
     ExchangeCommandStatus,
+    SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.cross_margin_stress import (
     AccountRiskSnapshot,
@@ -38,6 +47,7 @@ from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
 from src.trading_kernel.infrastructure.pg_models import (
     owner_policy_current,
     runtime_capabilities_current,
@@ -131,6 +141,30 @@ class FakeEntryAdmissionFactsSource:
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
 
+    async def read_account_risk_snapshot(
+        self,
+        request: AccountRiskSnapshotRequest,
+    ) -> AccountRiskSnapshot:
+        return AccountRiskSnapshot.create(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            account_risk_mode="standard_usdm_single_asset",
+            settlement_asset="USDT",
+            position_mode="independent_sides",
+            margin_mode="cross",
+            exchange_instrument_id=request.exchange_instrument_id,
+            mark_price=Decimal(10000),
+            configured_leverage=10,
+            total_wallet_balance=Decimal(1000),
+            total_margin_balance=Decimal(1000),
+            total_initial_margin=Decimal(0),
+            total_maintenance_margin=Decimal(0),
+            available_margin=Decimal(1000),
+            account_positions=(),
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
 
 def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
     return (
@@ -149,7 +183,7 @@ class RecordingAcceptingVenue:
         self.command_kinds: list[str] = []
         self.observed_at_ms = 1_005
 
-    async def execute(self, request):
+    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
         self.command_kinds.append(request.kind.value)
         self.observed_at_ms += 1
         return ExchangeCommandResult(
@@ -160,6 +194,38 @@ class RecordingAcceptingVenue:
                 if hasattr(request.payload, "exchange_order_id")
                 else f"venue-{request.kind.value}-{len(self.command_kinds)}"
             ),
+        )
+
+    async def set_leverage(
+        self,
+        request: VenueSetLeverageRequest,
+    ) -> SetLeverageCommandResult:
+        self.command_kinds.append("set_leverage")
+        self.observed_at_ms += 1
+        return SetLeverageCommandResult(
+            exchange_configured_leverage=request.payload.desired_leverage,
+            leverage_verified_at_ms=self.observed_at_ms,
+            leverage_verification_digest="sha256:" + "4" * 64,
+        )
+
+    async def lookup_command_truth(
+        self,
+        request: VenueTruthRequest,
+    ) -> VenueTruthSnapshot:
+        del request
+        raise AssertionError("runtime-fact worker test did not prepare unknown truth")
+
+    async def read_configured_leverage(
+        self,
+        request: LeverageTruthRequest,
+    ) -> LeverageTruthSnapshot:
+        return LeverageTruthSnapshot(
+            exchange_configured_leverage=request.desired_leverage,
+            long_position_quantity=Decimal(0),
+            short_position_quantity=Decimal(0),
+            regular_open_order_ids=(),
+            conditional_open_order_ids=(),
+            observed_at_ms=self.observed_at_ms,
         )
 
 
@@ -214,7 +280,7 @@ async def _enable_exchange_commands(engine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -232,7 +298,7 @@ async def test_expected_readonly_command_fence_resolves_prior_identity_incident(
                 capability_key="exchange_commands",
                 enabled=False,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -242,14 +308,14 @@ async def test_expected_readonly_command_fence_resolves_prior_identity_incident(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         worker_id="lifecycle-worker-1",
         runtime_commit="wrong-commit",
-        schema_revision="0001_initial",
+        schema_revision="0001_trading_kernel_baseline_v2",
         observed_at_ms=1_001,
     )
     readonly = await runtime_writer_is_certified(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         worker_id="lifecycle-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0001_trading_kernel_baseline_v2",
         observed_at_ms=1_002,
     )
 
@@ -387,13 +453,12 @@ async def test_reconciliation_selector_prioritizes_overdue_closure_over_due_posi
         )
 
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
-        selected = await uow.aggregates.get_next_reconciliation_work(
+        selected = await uow.aggregates.claim_next_critical_reconciliation_work(
             now_ms=31_000,
-            closure_starvation_limit_ms=30_000,
         )
 
     assert selected is not None
-    assert selected.identity.ticket_id == closure_ticket.identity.ticket_id
+    assert selected.identity.ticket_id == position_ticket.identity.ticket_id
 
 
 @pytest.mark.asyncio
@@ -409,7 +474,7 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=1_002,
             ),
         )
@@ -423,7 +488,7 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
@@ -465,7 +530,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=1_002,
             ),
         )
@@ -476,7 +541,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
@@ -496,7 +561,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0001_trading_kernel_baseline_v2",
         now_ms=1_006,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -547,7 +612,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
+                schema_revision="0001_trading_kernel_baseline_v2",
                 now_ms=1_002,
             ),
         )
@@ -559,7 +624,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
@@ -587,7 +652,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_initial",
+            schema_revision="0001_trading_kernel_baseline_v2",
             now_ms=1_007,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -610,7 +675,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     worker_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_initial",
+        schema_revision="0001_trading_kernel_baseline_v2",
         now_ms=1_008,
         lease_until_ms=6_008,
         timeout_seconds=1,

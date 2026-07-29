@@ -116,7 +116,8 @@ def build_warm_readiness(
     scope: RuntimeScopeSnapshot,
     facts: tuple[SignalFactSnapshot, ...],
     expected_fact_definition_ids: tuple[str, ...],
-    ready_at_ms: int,
+    warm_closed_bar_time_ms: int,
+    warm_completed_at_ms: int,
 ) -> WarmReadiness:
     """Bind one complete, fresh typed Fact bundle to one Warming scope."""
 
@@ -126,8 +127,10 @@ def build_warm_readiness(
         or scope.entry_enabled
     ):
         raise ValueError("warm readiness requires a warming-only scope")
-    if ready_at_ms <= 0:
-        raise ValueError("warm readiness time must be positive")
+    if warm_closed_bar_time_ms <= 0 or warm_completed_at_ms <= 0:
+        raise ValueError("warm readiness times must be positive")
+    if warm_completed_at_ms < warm_closed_bar_time_ms:
+        raise ValueError("warm readiness cannot complete before its market bar")
     expected = tuple(sorted(expected_fact_definition_ids))
     actual = tuple(sorted(item.fact_definition_id for item in facts))
     if (
@@ -138,8 +141,8 @@ def build_warm_readiness(
     ):
         raise ValueError("warm readiness requires the exact Registry Fact set")
     if any(
-        fact.observed_at_ms > ready_at_ms
-        or fact.valid_until_ms <= ready_at_ms
+        fact.observed_at_ms != warm_closed_bar_time_ms
+        or fact.valid_until_ms <= warm_completed_at_ms
         for fact in facts
     ):
         raise ValueError("warm readiness facts are stale or future-dated")
@@ -155,8 +158,8 @@ def build_warm_readiness(
         universe_version_id=scope.universe_version_id,
         universe_semantic_digest=scope.universe_semantic_digest,
         fact_digest=fact_digest,
-        ready_at_ms=ready_at_ms,
-        valid_until_ms=valid_until_ms,
+        warm_closed_bar_time_ms=warm_closed_bar_time_ms,
+        warm_valid_until_ms=valid_until_ms,
     )
     return WarmReadiness(
         runtime_scope_id=scope.runtime_scope_id,
@@ -167,8 +170,9 @@ def build_warm_readiness(
         universe_version_id=scope.universe_version_id,
         universe_semantic_digest=scope.universe_semantic_digest,
         fact_digest=fact_digest,
-        ready_at_ms=ready_at_ms,
-        valid_until_ms=valid_until_ms,
+        warm_closed_bar_time_ms=warm_closed_bar_time_ms,
+        warm_completed_at_ms=warm_completed_at_ms,
+        warm_valid_until_ms=valid_until_ms,
         readiness_digest=readiness_digest,
     )
 
@@ -460,7 +464,8 @@ async def observe_strategy_scope(
                     scope=scope,
                     facts=persisted_facts,
                     expected_fact_definition_ids=expected_fact_ids,
-                    ready_at_ms=projection_updated_at_ms,
+                    warm_closed_bar_time_ms=request.trigger_candle_close_time_ms,
+                    warm_completed_at_ms=attempted_at_ms,
                 )
             except ValueError:
                 await _save_observation_blocker(

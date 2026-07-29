@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,6 +17,10 @@ import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.trading_kernel.application.abandon_strategy_universe import (
+    AbandonStrategyUniverseRequest,
+    abandon_strategy_universe,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     UniverseInstallStatus,
@@ -49,7 +54,7 @@ MEMBERS = (
 
 
 @pytest_asyncio.fixture
-async def universe_engine() -> AsyncEngine:
+async def universe_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -65,7 +70,7 @@ async def universe_engine() -> AsyncEngine:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-universe-test",
                     runtime_commit="task-5-test",
-                    schema_revision="0003_cross_margin_stop_stress",
+                    schema_revision="0001_trading_kernel_baseline_v2",
                     seeded_at_ms=1_800_000_000_000,
                 ),
             )
@@ -93,6 +98,7 @@ async def test_install_inserts_one_complete_warming_universe_and_reads_sorted(
         result = await install_strategy_universe(uow, request)
     async with PostgresKernelUnitOfWork(universe_engine) as uow:
         current = await uow.strategy_universes.get_current(CONTRACT.event_spec_id)
+        assert result.universe is not None
         members = await uow.strategy_universes.get_members(
             result.universe.universe_version_id
         )
@@ -161,6 +167,59 @@ async def test_install_inserts_one_complete_warming_universe_and_reads_sorted(
         (MEMBERS[0], "warming", True, False),
         (MEMBERS[1], "warming", True, False),
     )
+
+
+@pytest.mark.asyncio
+async def test_abandon_exact_warming_universe_releases_the_global_slot(
+    universe_engine: AsyncEngine,
+) -> None:
+    async with PostgresKernelUnitOfWork(universe_engine) as uow:
+        installed = await install_strategy_universe(uow, _request(MEMBERS))
+    assert installed.universe is not None
+
+    async with PostgresKernelUnitOfWork(universe_engine) as uow:
+        await abandon_strategy_universe(
+            uow,
+            AbandonStrategyUniverseRequest(
+                universe_version_id=installed.universe.universe_version_id,
+                reason_code="market_identity_conflict",
+                attempted_at_ms=1_800_000_000_100,
+            ),
+        )
+    async with universe_engine.connect() as connection:
+        version = (
+            await connection.execute(
+                sa.text(
+                    "SELECT lifecycle_state, activated_at_ms, abandoned_at_ms, "
+                    "abandon_reason_code FROM brc_strategy_universe_versions"
+                )
+            )
+        ).one()
+        scopes = (
+            await connection.execute(
+                sa.text(
+                    "SELECT lifecycle_state, observation_enabled, entry_enabled, "
+                    "lease_owner FROM brc_runtime_scopes_current"
+                )
+            )
+        ).all()
+
+    assert version == (
+        "abandoned",
+        None,
+        1_800_000_000_100,
+        "market_identity_conflict",
+    )
+    assert scopes == [("abandoned", False, False, None)] * len(MEMBERS)
+
+    async with PostgresKernelUnitOfWork(universe_engine) as uow:
+        replacement = await install_strategy_universe(
+            uow,
+            _request(MEMBERS, installed_at_ms=1_800_000_000_200),
+        )
+    assert replacement.status is UniverseInstallStatus.INSTALLED
+    assert replacement.universe is not None
+    assert replacement.universe.universe_version == 2
 
 
 @pytest.mark.asyncio
@@ -648,7 +707,8 @@ async def _make_active(
                 SET lifecycle_state = 'active',
                     observation_enabled = true,
                     entry_enabled = true,
-                    warm_ready_at_ms = 1800000000010,
+                    warm_closed_bar_time_ms = 1800000000010,
+                    warm_completed_at_ms = 1800000000010,
                     warm_readiness_digest = :digest,
                     warm_valid_until_ms = 1800000060010,
                     updated_at_ms = 1800000000010

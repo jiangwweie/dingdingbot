@@ -19,6 +19,9 @@ from pydantic import (
     model_validator,
 )
 
+from src.trading_kernel.application.abandon_strategy_universe import (
+    AbandonStrategyUniverseRequest,
+)
 from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationRequest,
     UniverseActivationResult,
@@ -240,12 +243,13 @@ class RuntimeScopeSnapshot(BaseModel):
     position_side: Literal["long", "short"]
     universe_version_id: str
     universe_semantic_digest: str
-    lifecycle_state: Literal["warming", "active", "retired"]
+    lifecycle_state: Literal["warming", "active", "retired", "abandoned"]
     observation_enabled: bool
     entry_enabled: bool
     scope_version: int
     observation_generation: int
-    warm_ready_at_ms: int | None = None
+    warm_closed_bar_time_ms: int | None = None
+    warm_completed_at_ms: int | None = None
     warm_readiness_digest: str | None = None
     warm_valid_until_ms: int | None = None
 
@@ -270,8 +274,9 @@ class WarmReadiness(BaseModel):
     universe_version_id: str
     universe_semantic_digest: str
     fact_digest: str
-    ready_at_ms: int
-    valid_until_ms: int
+    warm_closed_bar_time_ms: int
+    warm_completed_at_ms: int
+    warm_valid_until_ms: int
     readiness_digest: str
 
     @classmethod
@@ -286,21 +291,21 @@ class WarmReadiness(BaseModel):
         universe_version_id: str,
         universe_semantic_digest: str,
         fact_digest: str,
-        ready_at_ms: int,
-        valid_until_ms: int,
+        warm_closed_bar_time_ms: int,
+        warm_valid_until_ms: int,
     ) -> str:
         canonical = json.dumps(
             {
                 "event_spec_id": event_spec_id,
                 "exchange_instrument_id": exchange_instrument_id,
                 "fact_digest": fact_digest,
-                "ready_at_ms": ready_at_ms,
+                "warm_closed_bar_time_ms": warm_closed_bar_time_ms,
                 "runtime_scope_id": runtime_scope_id,
                 "scope_version": scope_version,
                 "observation_generation": observation_generation,
                 "universe_semantic_digest": universe_semantic_digest,
                 "universe_version_id": universe_version_id,
-                "valid_until_ms": valid_until_ms,
+                "warm_valid_until_ms": warm_valid_until_ms,
             },
             separators=(",", ":"),
             sort_keys=True,
@@ -327,8 +332,9 @@ class WarmReadiness(BaseModel):
         if (
             self.scope_version <= 0
             or self.observation_generation <= 0
-            or self.ready_at_ms <= 0
-            or self.valid_until_ms <= self.ready_at_ms
+            or self.warm_closed_bar_time_ms <= 0
+            or self.warm_completed_at_ms < self.warm_closed_bar_time_ms
+            or self.warm_valid_until_ms <= self.warm_completed_at_ms
         ):
             raise ValueError("warm readiness version and time window are invalid")
         expected = self.digest_for(
@@ -340,8 +346,8 @@ class WarmReadiness(BaseModel):
             universe_version_id=self.universe_version_id,
             universe_semantic_digest=self.universe_semantic_digest,
             fact_digest=self.fact_digest,
-            ready_at_ms=self.ready_at_ms,
-            valid_until_ms=self.valid_until_ms,
+            warm_closed_bar_time_ms=self.warm_closed_bar_time_ms,
+            warm_valid_until_ms=self.warm_valid_until_ms,
         )
         if self.readiness_digest != expected:
             raise ValueError("warm readiness digest differs from bound inputs")
@@ -503,11 +509,16 @@ class AggregateRepository(Protocol):
         now_ms: int | None = None,
     ) -> TradeAggregate | None: ...
 
-    async def get_next_reconciliation_work(
+    async def claim_next_critical_reconciliation_work(
         self,
         *,
         now_ms: int,
-        closure_starvation_limit_ms: int,
+    ) -> TradeAggregate | None: ...
+
+    async def claim_next_routine_reconciliation_work(
+        self,
+        *,
+        now_ms: int,
     ) -> TradeAggregate | None: ...
 
     async def schedule_next_check(
@@ -1003,6 +1014,11 @@ class StrategyUniverseRepository(Protocol):
         request: UniverseActivationRequest,
     ) -> UniverseActivationResult: ...
 
+    async def abandon(
+        self,
+        request: AbandonStrategyUniverseRequest,
+    ) -> None: ...
+
     async def get_comparative_projection(
         self,
         *,
@@ -1028,6 +1044,7 @@ class StrategyUniverseRepository(Protocol):
         worker_id: str,
         now_ms: int,
         lease_until_ms: int,
+        overdue_before_ms: int | None = None,
     ) -> InstrumentCertificationTarget | None: ...
 
     async def save_instrument_certification(

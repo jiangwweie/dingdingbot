@@ -20,7 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.trading_kernel.infrastructure.pg_models import metadata
 
 SCHEMA = "brc.trading_kernel.schema_verification.v1"
-EXPECTED_ALEMBIC_REVISION = "0003_cross_margin_stop_stress"
+EXPECTED_ALEMBIC_REVISION = "0001_trading_kernel_baseline_v2"
 
 
 def _parser() -> argparse.ArgumentParser:
