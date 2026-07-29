@@ -7,7 +7,20 @@ from types import ModuleType
 import pytest
 
 from scripts.trading_kernel.cutover_tokyo import CutoverPhase
-from scripts.trading_kernel.verify_flat_cutover import CutoverFacts, CutoverPlan
+from scripts.trading_kernel.verify_flat_cutover import (
+    CutoverFacts,
+    CutoverPlan,
+)
+
+TARGET_EXCHANGE_INSTRUMENT_IDS = (
+    "binance-usdm:ADAUSDT:perpetual",
+    "binance-usdm:BNBUSDT:perpetual",
+    "binance-usdm:BTCUSDT:perpetual",
+    "binance-usdm:DOGEUSDT:perpetual",
+    "binance-usdm:ETHUSDT:perpetual",
+    "binance-usdm:SOLUSDT:perpetual",
+    "binance-usdm:XRPUSDT:perpetual",
+)
 
 
 def _production_adapter_module() -> ModuleType:
@@ -268,6 +281,144 @@ async def test_seed_uses_explicit_plan_identity_not_stale_environment(
             "--schema-revision",
             plan.target_schema_revision,
         )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_preconditions_probe_uses_exact_cutover_instrument_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _production_adapter_module()
+
+    class HostnameRunner(AlwaysMissingRunner):
+        async def run(
+            self,
+            argv: tuple[str, ...],
+            *,
+            check: bool = True,
+        ) -> object:
+            if argv == ("hostname",):
+                return self.module._RemoteResult(
+                    returncode=0,
+                    stdout="VM-0-11-ubuntu",
+                    stderr="",
+                )
+            return await super().run(argv, check=check)
+
+    system = module.SshTokyoSystem(HostnameRunner(module))
+    plan = _plan()
+    probe_calls: list[tuple[str, ...]] = []
+
+    async def release_manifest(release) -> dict[str, str]:
+        del release
+        return {
+            "runtime_commit": plan.target_commit,
+            "schema_revision": plan.target_schema_revision,
+            "seed_identity": plan.target_seed_identity,
+        }
+
+    async def release_json(release, script: str, *args: str) -> dict[str, object]:
+        del release
+        probe_calls.append((script, *args))
+        return {
+            "venue_id": plan.venue_id,
+            "account_id": plan.account_id,
+            "account_position_mode": "independent_sides",
+            "non_flat_domain_count": 0,
+            "open_order_domain_count": 0,
+        }
+
+    async def current_counts() -> dict[str, int]:
+        return {
+            "nonterminal_tickets": 0,
+            "active_budgets": 0,
+            "unresolved_outcomes": 0,
+            "open_incidents": 0,
+        }
+
+    async def active_units(units: frozenset[str]) -> tuple[str, ...]:
+        del units
+        return ()
+
+    async def path_exists(path) -> bool:
+        del path
+        return True
+
+    async def non_quant_digest() -> str:
+        return "sha256:baseline"
+
+    monkeypatch.setattr(system, "_release_manifest", release_manifest)
+    monkeypatch.setattr(system, "_release_json", release_json)
+    monkeypatch.setattr(system, "_current_kernel_counts", current_counts)
+    monkeypatch.setattr(system, "_active_units", active_units)
+    monkeypatch.setattr(system, "_path_exists", path_exists)
+    monkeypatch.setattr(system, "_non_quant_digest", non_quant_digest)
+
+    await system.inspect_preconditions(plan, old_units=frozenset(), new_units=frozenset())
+
+    assert probe_calls == [
+        (
+            "scripts/trading_kernel/probe_production_runtime.py",
+            *(
+                argument
+                for instrument_id in TARGET_EXCHANGE_INSTRUMENT_IDS
+                for argument in ("--exchange-instrument-id", instrument_id)
+            ),
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_readonly_certification_probe_uses_exact_cutover_instrument_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _production_adapter_module()
+    system = module.SshTokyoSystem(RecordingRunner(module))
+    plan = _plan()
+    calls: list[tuple[str, ...]] = []
+
+    async def release_python(
+        release,
+        script: str,
+        *args: str,
+        check: bool = True,
+    ) -> object:
+        del release, check
+        calls.append((script, *args))
+        payload: dict[str, object] = {"status": "pass"}
+        if script.endswith("certify_readonly.py"):
+            payload["runtime_identity"] = {
+                "runtime_commit": plan.target_commit,
+                "schema_revision": plan.target_schema_revision,
+                "seed_identity": plan.target_seed_identity,
+            }
+        if script.endswith("probe_production_runtime.py"):
+            payload.update(
+                {
+                    "venue_id": plan.venue_id,
+                    "account_id": plan.account_id,
+                    "account_position_mode": "independent_sides",
+                }
+            )
+        return module._RemoteResult(
+            returncode=0,
+            stdout=__import__("json").dumps(payload),
+            stderr="",
+        )
+
+    monkeypatch.setattr(system, "_release_python", release_python)
+
+    await system.certify_readonly(plan)
+
+    expected_probe_args = tuple(
+        argument
+        for instrument_id in TARGET_EXCHANGE_INSTRUMENT_IDS
+        for argument in ("--exchange-instrument-id", instrument_id)
+    )
+    assert calls == [
+        ("scripts/trading_kernel/verify_schema.py",),
+        ("scripts/trading_kernel/certify_readonly.py", "--require-flat"),
+        ("scripts/trading_kernel/probe_production_runtime.py", *expected_probe_args),
     ]
 
 
@@ -545,6 +696,7 @@ def _plan() -> CutoverPlan:
         target_schema_revision="0003_cross_margin_stop_stress",
         target_seed_identity="sha256:" + "b" * 64,
         target_release_id="brc-trading-kernel-aaaaaaaaaaaa",
+        exchange_instrument_ids=TARGET_EXCHANGE_INSTRUMENT_IDS,
     )
 
 

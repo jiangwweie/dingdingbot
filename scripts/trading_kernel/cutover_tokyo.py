@@ -109,6 +109,7 @@ class CutoverJournalSnapshot(BaseModel):
     target_schema_revision: str
     target_seed_identity: str
     target_release_id: str
+    exchange_instrument_ids: tuple[str, ...]
     phases: tuple[CutoverPhaseRecord, ...]
 
     def phase_status(self, phase: CutoverPhase) -> str | None:
@@ -195,11 +196,18 @@ class PostgresCutoverJournal:
                         target_schema_revision TEXT NOT NULL,
                         target_seed_identity TEXT NOT NULL,
                         target_release_id TEXT NOT NULL,
+                        exchange_instrument_ids_json TEXT,
                         status TEXT NOT NULL,
                         created_at_ms BIGINT NOT NULL,
                         updated_at_ms BIGINT NOT NULL
                     )
                     """
+                )
+            )
+            await connection.execute(
+                text(
+                    f"ALTER TABLE {OPS_SCHEMA}.cutover_runs "
+                    "ADD COLUMN IF NOT EXISTS exchange_instrument_ids_json TEXT"
                 )
             )
             await connection.execute(
@@ -261,6 +269,7 @@ class PostgresCutoverJournal:
                         target_schema_revision,
                         target_seed_identity,
                         target_release_id,
+                        exchange_instrument_ids_json,
                         status,
                         created_at_ms,
                         updated_at_ms
@@ -276,6 +285,7 @@ class PostgresCutoverJournal:
                         :target_schema_revision,
                         :target_seed_identity,
                         :target_release_id,
+                        :exchange_instrument_ids_json,
                         'running',
                         :now_ms,
                         :now_ms
@@ -295,6 +305,11 @@ class PostgresCutoverJournal:
                     "target_schema_revision": plan.target_schema_revision,
                     "target_seed_identity": plan.target_seed_identity,
                     "target_release_id": plan.target_release_id,
+                    "exchange_instrument_ids_json": json.dumps(
+                        plan.exchange_instrument_ids,
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    ),
                     "now_ms": now_ms,
                 },
             )
@@ -311,7 +326,8 @@ class PostgresCutoverJournal:
                                target_commit,
                                target_schema_revision,
                                target_seed_identity,
-                               target_release_id
+                               target_release_id,
+                               exchange_instrument_ids_json
                           FROM {OPS_SCHEMA}.cutover_runs
                          WHERE cutover_id = :cutover_id
                         """
@@ -330,6 +346,7 @@ class PostgresCutoverJournal:
             str(row["target_schema_revision"]),
             str(row["target_seed_identity"]),
             str(row["target_release_id"]),
+            str(row["exchange_instrument_ids_json"] or ""),
         )
         expected = (
             plan.server_id,
@@ -342,6 +359,11 @@ class PostgresCutoverJournal:
             plan.target_schema_revision,
             plan.target_seed_identity,
             plan.target_release_id,
+            json.dumps(
+                plan.exchange_instrument_ids,
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
         )
         if actual != expected:
             raise CutoverBlocked(("cutover_identity_conflict",))
@@ -534,7 +556,8 @@ class PostgresCutoverJournal:
                                target_commit,
                                target_schema_revision,
                                target_seed_identity,
-                               target_release_id
+                               target_release_id,
+                               exchange_instrument_ids_json
                           FROM {OPS_SCHEMA}.cutover_runs
                          WHERE cutover_id = :cutover_id
                         """
@@ -576,6 +599,9 @@ class PostgresCutoverJournal:
             target_schema_revision=str(run["target_schema_revision"]),
             target_seed_identity=str(run["target_seed_identity"]),
             target_release_id=str(run["target_release_id"]),
+            exchange_instrument_ids=tuple(
+                json.loads(str(run["exchange_instrument_ids_json"] or "[]"))
+            ),
             phases=tuple(
                 CutoverPhaseRecord(
                     phase=CutoverPhase(str(row["phase"])),
@@ -780,6 +806,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-schema-revision", default="0001_initial")
     parser.add_argument("--target-seed-identity", required=True)
     parser.add_argument("--target-release-id", required=True)
+    parser.add_argument(
+        "--exchange-instrument-id",
+        action="append",
+        required=True,
+        help="Exact canonical Binance USD-M perpetual identity to certify.",
+    )
     parser.add_argument("--now-ms", type=int)
     return parser
 

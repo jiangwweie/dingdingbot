@@ -20,7 +20,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-
 _COMMIT_IDENTITY = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_IDENTITY = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SCHEMA_NAME = re.compile(r"^[a-z_][a-z0-9_]*$")
@@ -61,6 +60,7 @@ class CutoverPlan(BaseModel):
     target_schema_revision: str
     target_seed_identity: str
     target_release_id: str
+    exchange_instrument_ids: tuple[str, ...]
 
     @field_validator(
         "cutover_id",
@@ -112,6 +112,38 @@ class CutoverPlan(BaseModel):
         if _SHA256_IDENTITY.fullmatch(normalized) is None:
             raise ValueError("target seed identity must be an exact sha256 identity")
         return normalized
+
+    @field_validator("exchange_instrument_ids", mode="before")
+    @classmethod
+    def _require_exchange_instrument_ids(cls, value: object) -> tuple[str, ...]:
+        if isinstance(value, str) or not isinstance(value, (list, tuple)):
+            raise TypeError("cutover probe instruments must be an explicit sequence")
+        from src.trading_kernel.domain.instrument_identity import (
+            parse_binance_usdm_instrument_id,
+            to_exchange_instrument_id,
+        )
+
+        canonical_ids: list[str] = []
+        for raw_identity in value:
+            normalized = str(raw_identity or "").strip()
+            try:
+                canonical = to_exchange_instrument_id(
+                    parse_binance_usdm_instrument_id(normalized)
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    "cutover probe instruments must be canonical Binance USD-M perpetual identities"
+                ) from exc
+            if normalized != canonical:
+                raise ValueError(
+                    "cutover probe instruments must be canonical Binance USD-M perpetual identities"
+                )
+            canonical_ids.append(canonical)
+        if not canonical_ids:
+            raise ValueError("cutover probe instruments must be non-empty")
+        if len(canonical_ids) != len(set(canonical_ids)):
+            raise ValueError("cutover probe instruments must be distinct")
+        return tuple(sorted(canonical_ids))
 
 
 class CutoverFacts(BaseModel):
@@ -267,6 +299,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-schema-revision", default="0001_initial")
     parser.add_argument("--target-seed-identity", required=True)
     parser.add_argument("--target-release-id", required=True)
+    parser.add_argument(
+        "--exchange-instrument-id",
+        action="append",
+        required=True,
+        help="Exact canonical Binance USD-M perpetual identity to certify.",
+    )
     parser.add_argument("--require-writer-fence", action="store_true")
     return parser
 
@@ -284,6 +322,7 @@ def build_plan_from_args(args: argparse.Namespace) -> CutoverPlan:
         target_schema_revision=args.target_schema_revision,
         target_seed_identity=args.target_seed_identity,
         target_release_id=args.target_release_id,
+        exchange_instrument_ids=tuple(args.exchange_instrument_id),
     )
 
 

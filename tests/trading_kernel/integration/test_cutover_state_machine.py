@@ -49,6 +49,15 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+TARGET_EXCHANGE_INSTRUMENT_IDS = (
+    "binance-usdm:ADAUSDT:perpetual",
+    "binance-usdm:BNBUSDT:perpetual",
+    "binance-usdm:BTCUSDT:perpetual",
+    "binance-usdm:DOGEUSDT:perpetual",
+    "binance-usdm:ETHUSDT:perpetual",
+    "binance-usdm:SOLUSDT:perpetual",
+    "binance-usdm:XRPUSDT:perpetual",
+)
 
 
 @pytest_asyncio.fixture
@@ -75,6 +84,7 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
     assert plan.target_commit == "a" * 40
     assert plan.target_schema_revision == "0003_cross_margin_stop_stress"
     assert plan.target_seed_identity.startswith("sha256:")
+    assert plan.exchange_instrument_ids == TARGET_EXCHANGE_INSTRUMENT_IDS
     assert CUTOVER_PHASES == (
         CutoverPhase.PLAN_IDENTITIES,
         CutoverPhase.FENCE_EXCHANGE_WRITES,
@@ -93,6 +103,25 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
         _plan(target_commit="not-a-commit")
     with pytest.raises(ValidationError):
         _plan(target_seed_identity="sha256:not-a-digest")
+
+
+@pytest.mark.parametrize(
+    "exchange_instrument_ids",
+    [
+        (),
+        (
+            "binance-usdm:BTCUSDT:perpetual",
+            "binance-usdm:BTCUSDT:perpetual",
+        ),
+        ("BTCUSDT",),
+        ("binance-usdm:BTCUSDT:spot",),
+    ],
+)
+def test_cutover_plan_rejects_invalid_probe_instrument_authority(
+    exchange_instrument_ids: tuple[str, ...],
+) -> None:
+    with pytest.raises(ValidationError):
+        _plan(exchange_instrument_ids=exchange_instrument_ids)
 
 
 @pytest.mark.asyncio
@@ -233,6 +262,11 @@ async def test_journal_rejects_same_cutover_id_with_changed_plan_identity(
         {"target_commit": "c" * 40},
         {"target_seed_identity": "sha256:" + "d" * 64},
         {"target_release_id": "wrong-release"},
+        {
+            "exchange_instrument_ids": (
+                "binance-usdm:BTCUSDT:perpetual",
+            )
+        },
     )
     journal = PostgresCutoverJournal(journal_database_url)
     try:
@@ -603,6 +637,7 @@ class MemoryCutoverJournal:
             plan.target_schema_revision,
             plan.target_seed_identity,
             plan.target_release_id,
+            *plan.exchange_instrument_ids,
         )
         if self.identities is not None and self.identities != identity:
             raise CutoverBlocked(("cutover_identity_conflict",))
@@ -843,6 +878,7 @@ def _plan(**changes: object) -> CutoverPlan:
         "target_schema_revision": schema_revision,
         "target_seed_identity": seed_identity,
         "target_release_id": "release-aaaaaaaaaaaa",
+        "exchange_instrument_ids": TARGET_EXCHANGE_INSTRUMENT_IDS,
     }
     values.update(changes)
     return CutoverPlan.model_validate(values)

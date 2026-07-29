@@ -327,6 +327,7 @@ class SshTokyoSystem:
         probe = await self._release_json(
             release,
             "scripts/trading_kernel/probe_production_runtime.py",
+            *_probe_instrument_arguments(plan),
         )
         current_counts = await self._current_kernel_counts()
         active_new = await self._active_units(new_units)
@@ -601,7 +602,10 @@ class SshTokyoSystem:
         for script, args in (
             ("scripts/trading_kernel/verify_schema.py", ()),
             ("scripts/trading_kernel/certify_readonly.py", ("--require-flat",)),
-            ("scripts/trading_kernel/probe_production_runtime.py", ()),
+            (
+                "scripts/trading_kernel/probe_production_runtime.py",
+                _probe_instrument_arguments(plan),
+            ),
         ):
             result = await self._release_python(release, script, *args)
             payload = json.loads(result.stdout)
@@ -865,8 +869,9 @@ class SshTokyoSystem:
         self,
         release: PurePosixPath,
         script: str,
+        *args: str,
     ) -> Mapping[str, object]:
-        result = await self._release_python(release, script)
+        result = await self._release_python(release, script, *args)
         payload = json.loads(result.stdout)
         if not isinstance(payload, Mapping):
             raise TypeError("Tokyo release command did not return a JSON object")
@@ -1020,6 +1025,14 @@ def _require_runtime_identity(
     actual = {key: str(runtime_identity.get(key) or "") for key in expected}
     if actual != expected or set(runtime_identity) != set(expected):
         raise RuntimeError("readonly runtime identity differs from cutover plan")
+
+
+def _probe_instrument_arguments(plan: CutoverPlan) -> tuple[str, ...]:
+    return tuple(
+        argument
+        for instrument_id in plan.exchange_instrument_ids
+        for argument in ("--exchange-instrument-id", instrument_id)
+    )
 
 
 def _snapshot_path(plan: CutoverPlan) -> PurePosixPath:
