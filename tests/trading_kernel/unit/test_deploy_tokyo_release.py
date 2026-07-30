@@ -363,6 +363,45 @@ def test_protected_release_refuses_count_only_exchange_evidence() -> None:
     assert not any(call[0] == "stop_services" for call in backend.calls)
 
 
+def test_protected_release_accepts_missing_and_null_optional_tp1_fill_quantity() -> None:
+    ticket_ids = ("ticket:bnb",)
+    backend = FakeDeploymentBackend(
+        protected_ticket_ids=ticket_ids,
+        certification_omits_tp1_fill_quantity=True,
+        probe_tp1_fill_quantity=None,
+    )
+
+    result = deploy_tokyo_release(
+        backend,
+        _plan(
+            enable_entry=False,
+            protected_ticket_ids=ticket_ids,
+        ),
+    )
+
+    assert result.status == "pass"
+    assert ("stop_services", ALL_SERVICES) in backend.calls
+
+
+def test_protected_release_refuses_non_null_tp1_fill_quantity_difference() -> None:
+    ticket_ids = ("ticket:bnb",)
+    backend = FakeDeploymentBackend(
+        protected_ticket_ids=ticket_ids,
+        probe_tp1_fill_quantity="2",
+    )
+
+    with pytest.raises(DeploymentBlocked, match="exact protected exchange facts differ"):
+        deploy_tokyo_release(
+            backend,
+            _plan(
+                enable_entry=False,
+                protected_ticket_ids=ticket_ids,
+            ),
+        )
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+
+
 def test_failed_protected_postflight_starts_no_mutating_worker() -> None:
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
     backend = FakeDeploymentBackend(
@@ -410,6 +449,8 @@ class FakeDeploymentBackend:
         closure_ticket_id: str | None = None,
         open_order_domain_count: int | None = None,
         include_exact_protected_facts: bool = True,
+        certification_omits_tp1_fill_quantity: bool = False,
+        probe_tp1_fill_quantity: str | None = "1",
         rule_instrument_ids: tuple[str, ...] = TARGET_EXCHANGE_INSTRUMENT_IDS,
         probe_manifest: tuple[str, ...] = TARGET_EXCHANGE_INSTRUMENT_IDS,
         fail_at: str | None = None,
@@ -428,6 +469,10 @@ class FakeDeploymentBackend:
             else open_order_domain_count
         )
         self.include_exact_protected_facts = include_exact_protected_facts
+        self.certification_omits_tp1_fill_quantity = (
+            certification_omits_tp1_fill_quantity
+        )
+        self.probe_tp1_fill_quantity = probe_tp1_fill_quantity
         self.rule_instrument_ids = rule_instrument_ids
         self.probe_manifest = probe_manifest
         self.fail_at = fail_at
@@ -482,7 +527,9 @@ class FakeDeploymentBackend:
             },
         }
         if self.include_exact_protected_facts:
-            payload["protected_tickets"] = self._protected_ticket_facts()
+            payload["protected_tickets"] = self._protected_ticket_facts(
+                omit_tp1_fill_quantity=self.certification_omits_tp1_fill_quantity,
+            )
         return payload
 
     def certify_closure(
@@ -540,7 +587,9 @@ class FakeDeploymentBackend:
             "probe_manifest": list(self.probe_manifest),
         }
         if self.include_exact_protected_facts:
-            payload["protected_tickets"] = self._protected_ticket_facts()
+            payload["protected_tickets"] = self._protected_ticket_facts(
+                recorded_tp1_fill_quantity=self.probe_tp1_fill_quantity,
+            )
         return payload
 
     def probe_protected_exchange(
@@ -561,8 +610,13 @@ class FakeDeploymentBackend:
         )
         return self._probe_payload()
 
-    def _protected_ticket_facts(self) -> list[dict[str, object]]:
-        return [
+    def _protected_ticket_facts(
+        self,
+        *,
+        omit_tp1_fill_quantity: bool = False,
+        recorded_tp1_fill_quantity: str | None = "1",
+    ) -> list[dict[str, object]]:
+        tickets = [
             {
                 "ticket_id": ticket_id,
                 "netting_domain_key": (
@@ -580,10 +634,14 @@ class FakeDeploymentBackend:
                     "reduce_only": True,
                     "stop_price": "101",
                 },
-                "recorded_tp1_fill_quantity": "1",
+                "recorded_tp1_fill_quantity": recorded_tp1_fill_quantity,
             }
             for index, ticket_id in enumerate(self.protected_ticket_ids, start=1)
         ]
+        if omit_tp1_fill_quantity:
+            for ticket in tickets:
+                ticket.pop("recorded_tp1_fill_quantity")
+        return tickets
 
     def read_release_marker(self, release: str, marker: str) -> str:
         self.calls.append(("read_release_marker", release, marker))

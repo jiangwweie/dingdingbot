@@ -617,11 +617,14 @@ def _protected_ticket_facts_by_ticket(
     for row in rows:
         if not isinstance(row, Mapping):
             raise DeploymentBlocked("exact protected exchange facts are invalid")
-        ticket_id = str(row.get("ticket_id", "")).strip()
+        canonical_row = dict(row)
+        if canonical_row.get("recorded_tp1_fill_quantity") is None:
+            canonical_row.pop("recorded_tp1_fill_quantity", None)
+        ticket_id = str(canonical_row.get("ticket_id", "")).strip()
         if not ticket_id or ticket_id in normalized:
             raise DeploymentBlocked("exact protected exchange facts are invalid")
         normalized[ticket_id] = json.dumps(
-            row,
+            canonical_row,
             ensure_ascii=True,
             separators=(",", ":"),
             sort_keys=True,
