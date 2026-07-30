@@ -441,12 +441,23 @@ def evaluate_cross_margin_stress(
             clamped=clamped,
             reason="notional coefficient is not certified",
         )
-    if not _bracket_schedule_is_valid(request.maintenance_margin_brackets):
+    if not _bracket_schedule_is_structurally_valid(
+        request.maintenance_margin_brackets
+    ):
         return _contradictory(
             request,
             stress_price=stress_price,
             clamped=clamped,
             reason="maintenance bracket schedule invalid",
+        )
+
+    points = _evaluation_points(request, stress_price=stress_price)
+    if not _projected_notionals_are_covered(request, points=points):
+        return _contradictory(
+            request,
+            stress_price=stress_price,
+            clamped=clamped,
+            reason="projected notional exceeds certified bracket range",
         )
 
     current_positions = tuple(
@@ -480,7 +491,6 @@ def evaluate_cross_margin_stress(
             reason="instrument maintenance margin exceeds account total",
         )
 
-    points = _evaluation_points(request, stress_price=stress_price)
     surplus_by_price = tuple(
         (
             price,
@@ -539,13 +549,12 @@ def _stress_boundary(
     return (max(Decimal(0), raw_stress_price), raw_stress_price < 0)
 
 
-def _bracket_schedule_is_valid(
+def _bracket_schedule_is_structurally_valid(
     brackets: tuple[MaintenanceMarginBracket, ...],
 ) -> bool:
     if (
         not brackets
         or brackets[0].notional_floor != 0
-        or brackets[-1].notional_cap is not None
         or len({bracket.bracket_id for bracket in brackets}) != len(brackets)
     ):
         return False
@@ -573,6 +582,22 @@ def _bracket_schedule_is_valid(
         if current_margin != previous_margin or current_margin < 0:
             return False
     return True
+
+
+def _projected_notionals_are_covered(
+    request: CrossMarginStressRequest,
+    *,
+    points: tuple[Decimal, ...],
+) -> bool:
+    return all(
+        _bracket_for(
+            request.maintenance_margin_brackets,
+            notional=position.quantity * price,
+        )
+        is not None
+        for price in points
+        for position in request.projected_instrument_positions
+    )
 
 
 def _evaluation_points(
@@ -620,6 +645,8 @@ def _margin_surplus(
             request.maintenance_margin_brackets,
             notional=notional,
         )
+        if bracket is None:
+            raise ValueError("validated maintenance schedule does not cover notional")
         projected_maintenance += (
             notional * bracket.maintenance_margin_rate
             - bracket.maintenance_amount
@@ -636,7 +663,7 @@ def _bracket_for(
     brackets: tuple[MaintenanceMarginBracket, ...],
     *,
     notional: Decimal,
-) -> MaintenanceMarginBracket:
+) -> MaintenanceMarginBracket | None:
     for bracket in brackets:
         if (
             notional >= bracket.notional_floor
@@ -646,7 +673,7 @@ def _bracket_for(
             )
         ):
             return bracket
-    raise ValueError("validated maintenance schedule does not cover notional")
+    return None
 
 
 def _contradictory(

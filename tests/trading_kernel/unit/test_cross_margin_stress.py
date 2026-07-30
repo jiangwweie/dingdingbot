@@ -223,7 +223,7 @@ def test_evaluates_each_bracket_boundary_once() -> None:
                 MaintenanceMarginBracket(
                     bracket_id="tier-2",
                     notional_floor=Decimal(80),
-                    notional_cap=None,
+                    notional_cap=Decimal(200),
                     maintenance_margin_rate=Decimal("0.02"),
                     maintenance_amount=Decimal("0.8"),
                 ),
@@ -235,6 +235,41 @@ def test_evaluates_each_bracket_boundary_once() -> None:
     assert evidence.proof.evaluated_point_count == 4
     assert evidence.proof.minimum_margin_surplus == Decimal("969.30")
     assert evidence.proof.minimum_margin_surplus_price == Decimal(70)
+
+
+def test_rejects_finite_terminal_bracket_outside_stress_coverage() -> None:
+    evidence = evaluate_cross_margin_stress(
+        _request(
+            maintenance_margin_brackets=(
+                MaintenanceMarginBracket(
+                    bracket_id="tier-1",
+                    notional_floor=Decimal(0),
+                    notional_cap=Decimal(80),
+                    maintenance_margin_rate=Decimal("0.01"),
+                    maintenance_amount=Decimal(0),
+                ),
+                MaintenanceMarginBracket(
+                    bracket_id="tier-2",
+                    notional_floor=Decimal(80),
+                    notional_cap=Decimal(200),
+                    maintenance_margin_rate=Decimal("0.02"),
+                    maintenance_amount=Decimal("0.8"),
+                ),
+            ),
+            projected_instrument_positions=(
+                StressPosition(
+                    position_side="long",
+                    quantity=Decimal(3),
+                    average_entry_price=Decimal(100),
+                ),
+            ),
+        )
+    )
+
+    assert evidence.proof.status is CrossMarginStressStatus.FACTS_CONTRADICTORY
+    assert evidence.proof.contradiction_reason == (
+        "projected notional exceeds certified bracket range"
+    )
 
 
 @pytest.mark.parametrize(

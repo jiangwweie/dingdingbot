@@ -350,6 +350,48 @@ async def test_expired_candidate_is_terminally_blocked(
 
 
 @pytest.mark.asyncio
+async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal()
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0001_trading_kernel_baseline_v2",
+                now_ms=1_001,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result = await issue_ready_signal(
+            uow,
+            IssueReadySignalRequest(
+                signal_event_id=signal.signal_event_id,
+                admission_snapshot=_admission_snapshot(),
+                claim_owner="signal-worker-1",
+                runtime_commit="kernel-test-head",
+                schema_revision="0001_trading_kernel_baseline_v2",
+                now_ms=1_002,
+            ),
+        )
+
+    assert result.status is IssueTicketStatus.ISSUED
+    assert result.ticket_id is not None
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        claim = await uow.capacity_claims.get_for_signal(signal.signal_event_id)
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+    assert claim is not None
+    assert readiness is not None
+    assert readiness.readiness_state == "processing"
+    assert readiness.first_blocker is None
+
+
+@pytest.mark.asyncio
 async def test_no_candidate_returns_explicit_idle_result(
     issue_engine: AsyncEngine,
 ) -> None:
@@ -403,7 +445,7 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
         MaintenanceMarginBracket(
             bracket_id="test:1",
             notional_floor=Decimal(0),
-            notional_cap=None,
+            notional_cap=Decimal(20_000),
             maintenance_margin_rate=Decimal("0.005"),
             maintenance_amount=Decimal(0),
         ),
