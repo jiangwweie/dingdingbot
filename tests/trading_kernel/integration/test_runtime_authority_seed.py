@@ -660,6 +660,48 @@ async def test_protected_identity_refuses_missing_active_budget_reservation(
 
 
 @pytest.mark.asyncio
+async def test_protected_identity_accepts_actual_stop_risk_below_planned_budget(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision="0001_trading_kernel_baseline_v2",
+        seeded_at_ms=1_800_000_000_000,
+    )
+    ticket_ids = ("ticket:bnb",)
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    await _insert_protected_tickets(runtime_seed_engine, ticket_ids)
+    async with runtime_seed_engine.begin() as connection:
+        await connection.execute(
+            sa.update(trade_tickets)
+            .where(trade_tickets.c.ticket_id == ticket_ids[0])
+            .values(planned_stop_risk_budget=Decimal("3.3"))
+        )
+        await connection.execute(
+            sa.update(budget_reservations)
+            .where(budget_reservations.c.ticket_id == ticket_ids[0])
+            .values(planned_stop_risk_budget=Decimal("3.3"))
+        )
+
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        result = await runtime_seed.deploy_protected_identity(
+            uow,
+            initial.model_copy(
+                update={
+                    "runtime_commit": "b" * 40,
+                    "seeded_at_ms": 1_800_000_000_100,
+                }
+            ),
+            protected_ticket_ids=ticket_ids,
+        )
+
+    assert result.runtime_commit == "b" * 40
+
+
+@pytest.mark.asyncio
 async def test_protected_identity_refuses_unrelated_active_budget_reservation(
     runtime_seed_engine: AsyncEngine,
 ) -> None:

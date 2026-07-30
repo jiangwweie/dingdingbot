@@ -1243,7 +1243,7 @@ def _require_exact_active_budget_reservations(
             or Decimal(str(reservation["reserved_notional"]))
             != Decimal(str(ticket["notional"]))
             or Decimal(str(reservation["reserved_risk"]))
-            != Decimal(str(ticket["planned_stop_risk_budget"]))
+            != Decimal(str(ticket["risk_at_stop"]))
             or Decimal(str(reservation["reserved_margin"]))
             != Decimal(str(ticket["reserved_margin"]))
             or Decimal(str(reservation["planned_stop_risk_budget"]))

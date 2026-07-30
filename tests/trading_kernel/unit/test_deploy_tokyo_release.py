@@ -402,7 +402,7 @@ def test_protected_release_refuses_non_null_tp1_fill_quantity_difference() -> No
     assert not any(call[0] == "stop_services" for call in backend.calls)
 
 
-def test_failed_protected_postflight_starts_no_mutating_worker() -> None:
+def test_failed_protected_postflight_restores_safety_workers_with_entry_fenced() -> None:
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
     backend = FakeDeploymentBackend(
         protected_ticket_ids=ticket_ids,
@@ -418,8 +418,11 @@ def test_failed_protected_postflight_starts_no_mutating_worker() -> None:
             ),
         )
 
-    assert not any(call[0] == "start_services" for call in backend.calls)
-    assert ("fence_entry",) in backend.calls
+    assert backend.calls[-2:] == [
+        ("fence_entry",),
+        ("start_services", SAFETY_SERVICES),
+    ]
+    assert backend.entry_fenced is True
 
 
 def _plan(

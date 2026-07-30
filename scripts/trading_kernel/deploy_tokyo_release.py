@@ -274,8 +274,7 @@ def deploy_tokyo_release(
     except Exception:
         if services_stopped:
             backend.fence_entry()
-            if not plan.protected_ticket_ids:
-                backend.start_services(SAFETY_SERVICES)
+            backend.start_services(SAFETY_SERVICES)
         raise
 
     return DeploymentResult(
