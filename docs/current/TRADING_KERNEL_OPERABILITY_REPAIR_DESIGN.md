@@ -474,6 +474,18 @@ server-local Promotion 控制脚本可以通过部署 adapter 的固定 allowlis
 4. root 权限不允许绕过 Owner Policy、Capability、Runtime Fence 或 Exchange Command；
 5. 禁止把需要 systemd/fence 权限的脚本以 `brc` 启动后再依赖交互式 sudo。
 
+### 10.5 Pending Batch is independently due
+
+普通 `instrument_certification_current.next_check_at_ms` 只控制持续运行时的刷新 cadence，
+不能阻止 release-scoped pending Batch 收集自己的成员证据：
+
+1. pending Batch member 本身构成立即可执行的 Certification obligation；
+2. selector 与 scheduler 必须把该 obligation 置于普通 fresh certification 之前；
+3. 认证完成后同时更新 current certification 与 exact Batch member；
+4. Batch retry 不等待 current certification 过期，也不篡改旧 completed Batch；
+5. final postflight 发现 Batch stale 时，可由同一 target release 创建新 Batch 并在 bounded
+   时间内重新完成。
+
 ## 11. Performance 与可观测性
 
 ### 11.1 必须观测的指标

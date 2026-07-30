@@ -266,3 +266,76 @@ async def test_transient_read_leaves_batch_member_pending_for_lease_retry(
 
     assert batch_status == "pending"
     assert member_statuses == ["pending", "pending"]
+
+
+@pytest.mark.asyncio
+async def test_pending_batch_members_override_fresh_current_certification_cadence(
+    _certification_engine: AsyncEngine,  # noqa: F811
+) -> None:
+    """A release proof never waits for otherwise-fresh current facts to expire."""
+
+    source = RecordingReadonlyCertificationSource(_certification_engine)
+    for _ in MEMBERS:
+        result = await run_reconciliation_worker_once(
+            lambda: PostgresKernelUnitOfWork(_certification_engine),
+            NoTicketVenueTruth(),
+            NoTicketPositionSource(),
+            worker_request(NOW_MS),
+            instrument_certification_source=source,
+        )
+        assert result.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+
+    retry_now_ms = NOW_MS + 1
+    seed_identity = build_runtime_seed_identity(
+        RuntimeAuthoritySeedRequest(
+            account_id="subaccount-certification-test",
+            runtime_commit=RUNTIME_COMMIT,
+            schema_revision=SCHEMA_REVISION,
+            seeded_at_ms=NOW_MS - 10_000,
+        )
+    )
+    async with PostgresKernelUnitOfWork(_certification_engine) as uow:
+        await start_certification_batch(
+            uow,
+            StartCertificationBatchRequest(
+                certification_batch_id="certification-batch:fresh-current-retry",
+                runtime_profile_id=RUNTIME_PROFILE_ID,
+                target_commit=RUNTIME_COMMIT,
+                target_schema_revision=SCHEMA_REVISION,
+                target_seed_identity=seed_identity,
+                owner_policy_id=OWNER_POLICY_ID,
+                owner_policy_version=1,
+                exchange_instrument_ids=MEMBERS,
+                started_at_ms=retry_now_ms,
+                minimum_valid_until_ms=retry_now_ms + 50_000,
+            ),
+        )
+
+    retry_results = []
+    for _ in MEMBERS:
+        retry_results.append(
+            await run_reconciliation_worker_once(
+                lambda: PostgresKernelUnitOfWork(_certification_engine),
+                NoTicketVenueTruth(),
+                NoTicketPositionSource(),
+                worker_request(retry_now_ms),
+                instrument_certification_source=source,
+            )
+        )
+
+    async with _certification_engine.connect() as connection:
+        batch = (
+            await connection.execute(
+                sa.text(
+                    "SELECT status, completed_at_ms, valid_until_ms "
+                    "FROM brc_instrument_certification_batches "
+                    "WHERE certification_batch_id = "
+                    "'certification-batch:fresh-current-retry'"
+                )
+            )
+        ).one()
+
+    assert [result.status for result in retry_results] == [
+        ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED,
+    ] * len(MEMBERS)
+    assert batch == ("completed", retry_now_ms, retry_now_ms + 600_000)

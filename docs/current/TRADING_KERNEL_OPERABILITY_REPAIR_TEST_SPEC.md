@@ -506,3 +506,9 @@ Tokyo 只读检查必须重新获取：
 2. 不包含 `sudo -u brc`；
 3. 只允许 exact `promote_entry.py` 路径；
 4. 失败仍恢复 fence，且不会因 sudo 权限错误伪装成服务状态 blocker。
+
+### 14.4 Fresh current certification must not starve pending Batch
+
+必须先建立仍 fresh、`next_check_at_ms` 尚未到期的 current certifications，再创建 exact
+pending Batch，并证明 Reconciliation 第一轮仍立即 claim 每个 pending member、完成新 Batch，
+且不等待 current certification cadence 或 valid-until。

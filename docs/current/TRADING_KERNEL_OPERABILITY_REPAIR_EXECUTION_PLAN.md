@@ -679,6 +679,10 @@ python3 scripts/trading_kernel/cutover_tokyo.py \
    移除 fence；业务 worker 仍使用 `brc` 用户；
 13. **TAG/ROADMAP**：验证 immutable tag，并将瞬时证据写入 Main Control Roadmap。
 
+若 final postflight 前 Batch stale，重新进入 **TARGET CERTIFIED** 时，pending Batch member
+必须覆盖普通 certification cadence 成为 immediate due；恢复不得通过延长 timeout 等待旧
+current certification 自然到期。
+
 ### 14.6 超时与耗时边界
 
 以下是基于阶段数量和 bounded readonly calls 的**执行估算**，不是当前生产事实：

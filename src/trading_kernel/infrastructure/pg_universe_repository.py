@@ -1496,6 +1496,48 @@ class PostgresStrategyUniverseRepository:
         if overdue_before_ms is not None and overdue_before_ms <= 0:
             raise ValueError("certification overdue boundary must be positive")
         certification = instrument_certification_current
+        pending_batch_targets = (
+            sa.select(
+                instrument_certification_batches.c.runtime_profile_id.label(
+                    "batch_runtime_profile_id"
+                ),
+                instrument_certification_batch_members.c.exchange_instrument_id,
+                instrument_certification_batches.c.started_at_ms.label(
+                    "batch_started_at_ms"
+                ),
+            )
+            .select_from(
+                instrument_certification_batches.join(
+                    instrument_certification_batch_members,
+                    instrument_certification_batch_members.c.certification_batch_id
+                    == instrument_certification_batches.c.certification_batch_id,
+                )
+            )
+            .where(
+                instrument_certification_batches.c.status == "pending",
+                instrument_certification_batch_members.c.status == "pending",
+            )
+            .subquery()
+        )
+        pending_batch_due = (
+            pending_batch_targets.c.exchange_instrument_id.is_not(None)
+        )
+        regular_due_at = sa.func.coalesce(
+            certification.c.next_check_at_ms,
+            strategy_universe_versions.c.installed_at_ms,
+        )
+        due_at = sa.case(
+            (
+                pending_batch_due,
+                pending_batch_targets.c.batch_started_at_ms,
+            ),
+            else_=regular_due_at,
+        )
+        lease_available = sa.or_(
+            certification.c.runtime_profile_id.is_(None),
+            certification.c.lease_expires_at_ms.is_(None),
+            certification.c.lease_expires_at_ms <= now_ms,
+        )
         row = (
             await self._connection.execute(
                 sa.select(
@@ -1530,6 +1572,15 @@ class PostgresStrategyUniverseRepository:
                             == runtime_scopes_current.c.exchange_instrument_id,
                         ),
                     )
+                    .outerjoin(
+                        pending_batch_targets,
+                        sa.and_(
+                            pending_batch_targets.c.batch_runtime_profile_id
+                            == runtime_scopes_current.c.runtime_profile_id,
+                            pending_batch_targets.c.exchange_instrument_id
+                            == runtime_scopes_current.c.exchange_instrument_id,
+                        ),
+                    )
                 )
                 .where(
                     strategy_universe_versions.c.lifecycle_state.in_(
@@ -1538,21 +1589,13 @@ class PostgresStrategyUniverseRepository:
                     runtime_scopes_current.c.lifecycle_state.in_(("warming", "active")),
                     sa.or_(
                         certification.c.runtime_profile_id.is_(None),
-                        sa.and_(
-                            certification.c.next_check_at_ms <= now_ms,
-                            sa.or_(
-                                certification.c.lease_expires_at_ms.is_(None),
-                                certification.c.lease_expires_at_ms <= now_ms,
-                            ),
-                        ),
+                        pending_batch_due,
+                        certification.c.next_check_at_ms <= now_ms,
                     ),
+                    lease_available,
                     *(
                         (
-                            sa.func.coalesce(
-                                certification.c.observed_at_ms,
-                                strategy_universe_versions.c.installed_at_ms,
-                            )
-                            <= overdue_before_ms,
+                            due_at <= overdue_before_ms,
                         )
                         if overdue_before_ms is not None
                         else ()
@@ -1560,13 +1603,14 @@ class PostgresStrategyUniverseRepository:
                 )
                 .order_by(
                     sa.case(
+                        (pending_batch_due, 0),
                         (
                             strategy_universe_versions.c.lifecycle_state == "warming",
-                            0,
+                            1,
                         ),
-                        else_=1,
+                        else_=2,
                     ),
-                    sa.func.coalesce(certification.c.next_check_at_ms, 0),
+                    due_at,
                     runtime_scopes_current.c.exchange_instrument_id,
                     runtime_scopes_current.c.runtime_profile_id,
                 )
@@ -1656,9 +1700,42 @@ class PostgresStrategyUniverseRepository:
         if now_ms <= 0:
             raise ValueError("certification selection time must be positive")
         certification = instrument_certification_current
-        due_at = sa.func.coalesce(
+        pending_batch_targets = (
+            sa.select(
+                instrument_certification_batches.c.runtime_profile_id.label(
+                    "batch_runtime_profile_id"
+                ),
+                instrument_certification_batch_members.c.exchange_instrument_id,
+                instrument_certification_batches.c.started_at_ms.label(
+                    "batch_started_at_ms"
+                ),
+            )
+            .select_from(
+                instrument_certification_batches.join(
+                    instrument_certification_batch_members,
+                    instrument_certification_batch_members.c.certification_batch_id
+                    == instrument_certification_batches.c.certification_batch_id,
+                )
+            )
+            .where(
+                instrument_certification_batches.c.status == "pending",
+                instrument_certification_batch_members.c.status == "pending",
+            )
+            .subquery()
+        )
+        pending_batch_due = (
+            pending_batch_targets.c.exchange_instrument_id.is_not(None)
+        )
+        regular_due_at = sa.func.coalesce(
             certification.c.next_check_at_ms,
             strategy_universe_versions.c.installed_at_ms,
+        )
+        due_at = sa.case(
+            (
+                pending_batch_due,
+                pending_batch_targets.c.batch_started_at_ms,
+            ),
+            else_=regular_due_at,
         )
         row = (
             await self._connection.execute(
@@ -1687,6 +1764,15 @@ class PostgresStrategyUniverseRepository:
                             == runtime_scopes_current.c.exchange_instrument_id,
                         ),
                     )
+                    .outerjoin(
+                        pending_batch_targets,
+                        sa.and_(
+                            pending_batch_targets.c.batch_runtime_profile_id
+                            == runtime_scopes_current.c.runtime_profile_id,
+                            pending_batch_targets.c.exchange_instrument_id
+                            == runtime_scopes_current.c.exchange_instrument_id,
+                        ),
+                    )
                 )
                 .where(
                     strategy_universe_versions.c.lifecycle_state.in_(
@@ -1697,16 +1783,17 @@ class PostgresStrategyUniverseRepository:
                     ),
                     sa.or_(
                         certification.c.runtime_profile_id.is_(None),
-                        sa.and_(
-                            certification.c.next_check_at_ms <= now_ms,
-                            sa.or_(
-                                certification.c.lease_expires_at_ms.is_(None),
-                                certification.c.lease_expires_at_ms <= now_ms,
-                            ),
-                        ),
+                        pending_batch_due,
+                        certification.c.next_check_at_ms <= now_ms,
+                    ),
+                    sa.or_(
+                        certification.c.runtime_profile_id.is_(None),
+                        certification.c.lease_expires_at_ms.is_(None),
+                        certification.c.lease_expires_at_ms <= now_ms,
                     ),
                 )
                 .order_by(
+                    sa.case((pending_batch_due, 0), else_=1),
                     due_at,
                     runtime_scopes_current.c.exchange_instrument_id,
                     runtime_scopes_current.c.runtime_profile_id,
