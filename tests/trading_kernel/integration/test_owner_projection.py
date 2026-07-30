@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import pytest
+import sqlalchemy as sa
 
 from src.trading_kernel.application.ports import MonitorOwnerStatus
 from src.trading_kernel.application.project_owner_state import (
     OwnerProjectionFacts,
     OwnerProjectionRequest,
     derive_owner_projection,
+    derive_terminal_owner_projection,
+    owner_ticket_monitor_key,
     project_owner_state,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.infrastructure.pg_models import monitor_events
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.interfaces.readonly_api import get_owner_projection
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import _seed_policy
 
@@ -86,7 +91,6 @@ def test_owner_projection_uses_all_documented_product_states(
         facts=facts,
         updated_at_ms=2_000,
     )
-
     assert projection.owner_status is expected
     assert projection.intervention == (
         "需要介入"
@@ -94,6 +98,27 @@ def test_owner_projection_uses_all_documented_product_states(
         else "无需操作"
     )
 
+
+def test_ticket_owner_projection_request_requires_canonical_key() -> None:
+    ticket_id = "ticket-owner-projection"
+
+    request = OwnerProjectionRequest(
+        monitor_key=owner_ticket_monitor_key(ticket_id),
+        owner_policy_id="policy-main",
+        runtime_scope_id="scope-owner-projection",
+        ticket_id=ticket_id,
+        updated_at_ms=2_000,
+    )
+    assert request.monitor_key == f"owner:ticket:{ticket_id}"
+
+    with pytest.raises(ValueError, match="canonical"):
+        OwnerProjectionRequest(
+            monitor_key="scope-owner-projection",
+            owner_policy_id="policy-main",
+            runtime_scope_id="scope-owner-projection",
+            ticket_id=ticket_id,
+            updated_at_ms=2_000,
+        )
 
 @pytest.mark.asyncio
 async def test_owner_projection_reads_pg_authority_and_saves_only_material_change(
@@ -127,3 +152,33 @@ async def test_owner_projection_reads_pg_authority_and_saves_only_material_chang
 
     assert first.owner_status is MonitorOwnerStatus.WAITING_FOR_OPPORTUNITY
     assert repeated.projection_version == first.projection_version
+
+
+@pytest.mark.asyncio
+async def test_readonly_owner_projection_has_no_write_side_effect(
+    owner_projection_engine,
+) -> None:
+    ticket_id = "ticket-readonly-owner-projection"
+    async with PostgresKernelUnitOfWork(owner_projection_engine) as uow:
+        persisted = await uow.monitors.save_if_changed(
+            derive_terminal_owner_projection(
+                ticket_id=ticket_id,
+                updated_at_ms=2_000,
+            )
+        )
+
+    async with owner_projection_engine.connect() as connection:
+        before_count = await connection.scalar(
+            sa.select(sa.func.count()).select_from(monitor_events)
+        )
+    async with PostgresKernelUnitOfWork(owner_projection_engine) as uow:
+        observed = await get_owner_projection(uow, ticket_id)
+        missing = await get_owner_projection(uow, "ticket-missing-owner-projection")
+    async with owner_projection_engine.connect() as connection:
+        after_count = await connection.scalar(
+            sa.select(sa.func.count()).select_from(monitor_events)
+        )
+
+    assert observed == persisted
+    assert missing is None
+    assert after_count == before_count

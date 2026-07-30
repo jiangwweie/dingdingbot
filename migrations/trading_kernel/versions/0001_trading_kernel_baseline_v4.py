@@ -7,9 +7,9 @@ translated in place into this authority model.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from pathlib import Path
-import sys
 
 import sqlalchemy as sa
 from alembic import op
@@ -20,14 +20,14 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.trading_kernel.infrastructure.pg_models import metadata
 
-revision: str = "0001_trading_kernel_baseline_v3"
+revision: str = "0001_trading_kernel_baseline_v4"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Build the complete v3 schema from its one current SQLAlchemy authority."""
+    """Build the complete v4 schema from its one current SQLAlchemy authority."""
     metadata.create_all(op.get_bind(), checkfirst=False)
     _create_universe_member_guards()
     _create_instrument_identity_guard()

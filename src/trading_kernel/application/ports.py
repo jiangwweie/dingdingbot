@@ -141,10 +141,38 @@ class TradeReviewRecord(BaseModel):
 
     review_id: str
     ticket_id: str
+    revision: int = 1
+    supersedes_review_id: str | None = None
     outcome: str
     metrics: dict[str, JsonValue]
     decision_impact: dict[str, JsonValue]
     created_at_ms: int
+
+    @field_validator("review_id", "ticket_id", mode="before")
+    @classmethod
+    def _require_review_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("Review identities must be non-blank")
+        return normalized
+
+    @field_validator("supersedes_review_id", mode="before")
+    @classmethod
+    def _normalize_supersedes_identity(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _validate_revision_chain(self) -> TradeReviewRecord:
+        if self.revision <= 0:
+            raise ValueError("Review revision must be positive")
+        if self.revision == 1 and self.supersedes_review_id is not None:
+            raise ValueError("initial Review must not supersede another Review")
+        if self.revision > 1 and self.supersedes_review_id is None:
+            raise ValueError("later Review revision must supersede its predecessor")
+        if self.review_id == self.supersedes_review_id:
+            raise ValueError("Review revision cannot supersede itself")
+        return self
 
 
 class MonitorOwnerStatus(StrEnum):
@@ -726,6 +754,8 @@ class PositionRepository(Protocol):
 
 class ReviewRepository(Protocol):
     async def add(self, review: TradeReviewRecord) -> None: ...
+
+    async def get(self, review_id: str) -> TradeReviewRecord | None: ...
 
     async def get_for_ticket(self, ticket_id: str) -> TradeReviewRecord | None: ...
 

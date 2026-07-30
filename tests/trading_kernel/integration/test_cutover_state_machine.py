@@ -53,8 +53,8 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-BASELINE_SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v3"] = (
-    "0001_trading_kernel_baseline_v3"
+BASELINE_SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v4"] = (
+    "0001_trading_kernel_baseline_v4"
 )
 @pytest_asyncio.fixture
 async def journal_database_url() -> AsyncGenerator[str, None]:
@@ -78,7 +78,7 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
     plan = _plan()
 
     assert plan.target_commit == "a" * 40
-    assert plan.target_schema_revision == "0001_trading_kernel_baseline_v3"
+    assert plan.target_schema_revision == "0001_trading_kernel_baseline_v4"
     assert plan.target_seed_identity.startswith("sha256:")
     assert "exchange_instrument_ids" not in CutoverPlan.model_fields
     assert CUTOVER_PHASES == (
@@ -453,7 +453,7 @@ async def test_readonly_certification_reports_exact_runtime_authority(
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
                     schema_revision=cast(
-                        Literal["0001_trading_kernel_baseline_v3"],
+                        Literal["0001_trading_kernel_baseline_v4"],
                         plan.target_schema_revision,
                     ),
                     seeded_at_ms=1_000,
@@ -527,7 +527,7 @@ async def test_readonly_certification_accepts_enabled_exchange_commands_under_co
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
                     schema_revision=cast(
-                        Literal["0001_trading_kernel_baseline_v3"],
+                        Literal["0001_trading_kernel_baseline_v4"],
                         plan.target_schema_revision,
                     ),
                     seeded_at_ms=1_000,
@@ -845,7 +845,7 @@ class LocalPostgresCutoverAdapter:
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
                     schema_revision=cast(
-                        Literal["0001_trading_kernel_baseline_v3"],
+                        Literal["0001_trading_kernel_baseline_v4"],
                         plan.target_schema_revision,
                     ),
                     seeded_at_ms=1_000,

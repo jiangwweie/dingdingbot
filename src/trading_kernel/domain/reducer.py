@@ -20,6 +20,7 @@ from src.trading_kernel.domain.effects import (
     PrepareProtectionReplacementCommand,
     PrepareSetLeverageCommand,
     PrepareTakeProfitCommand,
+    ProjectTerminalOwnerState,
     ReleaseBudget,
     ReleaseCapitalAuthorities,
     ReleaseEntryLane,
@@ -74,6 +75,7 @@ from src.trading_kernel.domain.events import (
     ProtectionReplacementRejected,
     ReconciliationMatched,
     ReviewRecorded,
+    ReviewRevised,
     RunnerStopRequested,
     TakeProfitAbsenceConfirmed,
     TakeProfitConfirmed,
@@ -166,6 +168,9 @@ def reduce_event(
             (
                 ReleaseBudget(ticket_id=current.identity.ticket_id),
                 ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+                ProjectTerminalOwnerState(
+                    ticket_id=current.identity.ticket_id
+                ),
             )
         )
         return _transition(
@@ -252,6 +257,9 @@ def reduce_event(
             effects=(
                 ReleaseBudget(ticket_id=current.identity.ticket_id),
                 ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+                ProjectTerminalOwnerState(
+                    ticket_id=current.identity.ticket_id
+                ),
             ),
         )
 
@@ -273,6 +281,9 @@ def reduce_event(
                 ),
                 ReleaseBudget(ticket_id=current.identity.ticket_id),
                 ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+                ProjectTerminalOwnerState(
+                    ticket_id=current.identity.ticket_id
+                ),
             ),
         )
 
@@ -1477,6 +1488,39 @@ def reduce_event(
             event,
             status=AggregateStatus.TERMINAL,
             updates={"review_id": review_id},
+            effects=(
+                ProjectTerminalOwnerState(
+                    ticket_id=current.identity.ticket_id
+                ),
+            ),
+        )
+
+    if isinstance(event, ReviewRevised):
+        _require_status(current, AggregateStatus.TERMINAL)
+        review_id = str(event.review_id or "").strip()
+        supersedes_review_id = str(event.supersedes_review_id or "").strip()
+        if not review_id or not supersedes_review_id:
+            raise InvalidLifecycleTransition(
+                "review revision identities are required"
+            )
+        if current.review_id != supersedes_review_id:
+            raise InvalidLifecycleTransition(
+                "review revision supersedes identity differs from current pointer"
+            )
+        if review_id == supersedes_review_id:
+            raise InvalidLifecycleTransition(
+                "review revision must use a new review identity"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.TERMINAL,
+            updates={"review_id": review_id},
+            effects=(
+                ProjectTerminalOwnerState(
+                    ticket_id=current.identity.ticket_id
+                ),
+            ),
         )
 
     raise InvalidLifecycleTransition(f"unsupported event: {type(event).__name__}")

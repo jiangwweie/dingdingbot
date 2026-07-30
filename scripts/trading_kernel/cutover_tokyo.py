@@ -834,7 +834,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-profile-id", required=True)
     parser.add_argument("--application-schema", default="public")
     parser.add_argument("--target-commit", required=True)
-    parser.add_argument("--target-schema-revision", default="0001_trading_kernel_baseline_v3")
+    parser.add_argument("--target-schema-revision", default="0001_trading_kernel_baseline_v4")
     parser.add_argument("--target-seed-identity", required=True)
     parser.add_argument("--target-release-id", required=True)
     parser.add_argument("--now-ms", type=int)

@@ -22,7 +22,7 @@ def test_operability_repair_removes_the_retired_time_and_migration_generations()
             if path.name != "__init__.py"
         )
     )
-    assert migration_names == ("0001_trading_kernel_baseline_v3.py",)
+    assert migration_names == ("0001_trading_kernel_baseline_v4.py",)
 
     production_sources = (
         REPO_ROOT / "src/trading_kernel",
@@ -57,7 +57,7 @@ def test_reconciliation_certification_is_a_bounded_safety_worker_concern() -> No
     request = ReconciliationWorkerRequest(
         worker_id="architecture-check",
         runtime_commit="commit-check",
-        schema_revision="0001_trading_kernel_baseline_v3",
+        schema_revision="0001_trading_kernel_baseline_v4",
         now_ms=1,
         timeout_seconds=1,
         unknown_visibility_grace_ms=1,

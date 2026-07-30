@@ -1243,11 +1243,30 @@ trade_reviews = sa.Table(
     metadata,
     _id("review_id", primary_key=True),
     _id("ticket_id"),
+    sa.Column("revision", sa.BigInteger, nullable=False),
+    sa.Column("supersedes_review_id", ID, nullable=True),
     sa.Column("outcome", SHORT_TEXT, nullable=False),
     _json("metrics"),
     _json("decision_impact"),
     _time("created_at_ms"),
-    sa.UniqueConstraint("ticket_id"),
+    sa.UniqueConstraint("ticket_id", "review_id"),
+    sa.UniqueConstraint("ticket_id", "revision"),
+    sa.UniqueConstraint("supersedes_review_id"),
+    sa.ForeignKeyConstraint(
+        ("ticket_id", "supersedes_review_id"),
+        ("brc_trade_reviews.ticket_id", "brc_trade_reviews.review_id"),
+    ),
+    sa.CheckConstraint(
+        "(revision = 1 AND supersedes_review_id IS NULL) OR "
+        "(revision > 1 AND supersedes_review_id IS NOT NULL)",
+        name="review_revision_chain_valid",
+    ),
+    sa.CheckConstraint("revision > 0", name="review_revision_positive"),
+)
+sa.Index(
+    "ix_brc_trade_reviews_ticket_revision",
+    trade_reviews.c.ticket_id,
+    trade_reviews.c.revision.desc(),
 )
 
 monitor_current = sa.Table(

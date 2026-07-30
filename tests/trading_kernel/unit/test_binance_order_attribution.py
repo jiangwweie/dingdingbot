@@ -74,9 +74,11 @@ async def test_conditional_order_resolves_actual_order_id_from_exact_algo_identi
             "symbol": "BTCUSDT",
             "side": "SELL",
             "positionSide": "LONG",
-            "type": "STOP_MARKET",
+            "orderType": "STOP_MARKET",
+            "quantity": "0.0005",
             "actualQty": "0.0005",
-            "status": "FINISHED",
+            "algoStatus": "FINISHED",
+            "triggerPrice": "109000.00",
         }
     )
 
@@ -101,9 +103,9 @@ async def test_terminal_untriggered_conditional_order_has_no_trade_order_identit
             "symbol": "BTCUSDT",
             "side": "SELL",
             "positionSide": "LONG",
-            "type": "STOP_MARKET",
-            "actualQty": "0",
-            "status": "CANCELED",
+            "orderType": "STOP_MARKET",
+            "quantity": "0.0005",
+            "algoStatus": "CANCELED",
         }
     )
 
@@ -127,9 +129,10 @@ async def test_conditional_order_rejects_client_algo_identity_contradiction() ->
             "symbol": "BTCUSDT",
             "side": "SELL",
             "positionSide": "LONG",
-            "type": "STOP_MARKET",
+            "orderType": "STOP_MARKET",
+            "quantity": "0.0005",
             "actualQty": "0.0005",
-            "status": "FINISHED",
+            "algoStatus": "FINISHED",
         }
     )
 
@@ -148,7 +151,8 @@ async def test_conditional_order_rejects_client_algo_identity_contradiction() ->
         ("symbol", "ETHUSDT"),
         ("side", "BUY"),
         ("positionSide", "SHORT"),
-        ("type", "TAKE_PROFIT_MARKET"),
+        ("orderType", "TAKE_PROFIT_MARKET"),
+        ("quantity", "0.0004"),
         ("actualQty", "0.0004"),
     ],
 )
@@ -163,13 +167,87 @@ async def test_conditional_order_rejects_frozen_command_payload_contradiction(
         "symbol": "BTCUSDT",
         "side": "SELL",
         "positionSide": "LONG",
-        "type": "STOP_MARKET",
+        "orderType": "STOP_MARKET",
+        "quantity": "0.0005",
         "actualQty": "0.0005",
-        "status": "FINISHED",
+        "algoStatus": "FINISHED",
     }
     response[field] = value
 
     with pytest.raises(RuntimeError, match=field):
+        await resolve_binance_order_identity(
+            exchange=_AlgoExchange(response),
+            reference=_reference(namespace=OrderNamespace.CONDITIONAL),
+            observed_at_ms=10_000,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("algo_status", ["WORKING", "FINISHED", "NEW"])
+async def test_conditional_order_without_actual_identity_must_be_terminal_untriggered(
+    algo_status: str,
+) -> None:
+    response = {
+        "algoId": "4000001795783472",
+        "clientAlgoId": "brc-runner",
+        "actualOrderId": "",
+        "symbol": "BTCUSDT",
+        "side": "SELL",
+        "positionSide": "LONG",
+        "orderType": "STOP_MARKET",
+        "quantity": "0.0005",
+        "algoStatus": algo_status,
+    }
+
+    with pytest.raises(RuntimeError, match="actual order identity"):
+        await resolve_binance_order_identity(
+            exchange=_AlgoExchange(response),
+            reference=_reference(namespace=OrderNamespace.CONDITIONAL),
+            observed_at_ms=10_000,
+        )
+
+
+@pytest.mark.asyncio
+async def test_triggered_conditional_order_requires_actual_quantity() -> None:
+    response = {
+        "algoId": "4000001795783472",
+        "clientAlgoId": "brc-runner",
+        "actualOrderId": "1085699838084",
+        "symbol": "BTCUSDT",
+        "side": "SELL",
+        "positionSide": "LONG",
+        "orderType": "STOP_MARKET",
+        "quantity": "0.0005",
+        "algoStatus": "FINISHED",
+    }
+
+    with pytest.raises(RuntimeError, match="actualQty"):
+        await resolve_binance_order_identity(
+            exchange=_AlgoExchange(response),
+            reference=_reference(namespace=OrderNamespace.CONDITIONAL),
+            observed_at_ms=10_000,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("actual_quantity", ["0.0001", "-1", "NaN", "Infinity"])
+async def test_terminal_untriggered_conditional_order_rejects_nonzero_or_invalid_actual_quantity(
+    actual_quantity: str,
+) -> None:
+    response = {
+        "algoId": "4000001795783472",
+        "clientAlgoId": "brc-runner",
+        "actualOrderId": "",
+        "symbol": "BTCUSDT",
+        "side": "SELL",
+        "positionSide": "LONG",
+        "orderType": "STOP_MARKET",
+        "quantity": "0.0005",
+        "actualQty": actual_quantity,
+        "algoStatus": "CANCELED",
+    }
+
+    with pytest.raises(RuntimeError, match="actualQty"):
         await resolve_binance_order_identity(
             exchange=_AlgoExchange(response),
             reference=_reference(namespace=OrderNamespace.CONDITIONAL),

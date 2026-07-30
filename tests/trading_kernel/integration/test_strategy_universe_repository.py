@@ -70,7 +70,7 @@ async def universe_engine() -> AsyncGenerator[AsyncEngine, None]:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-universe-test",
                     runtime_commit="task-5-test",
-                    schema_revision="0001_trading_kernel_baseline_v3",
+                    schema_revision="0001_trading_kernel_baseline_v4",
                     seeded_at_ms=1_800_000_000_000,
                 ),
             )

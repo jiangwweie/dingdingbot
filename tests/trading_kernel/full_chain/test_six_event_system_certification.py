@@ -28,10 +28,6 @@ from src.trading_kernel.application.ports import (
     VenueCommandRequest,
     VenueSetLeverageRequest,
 )
-from src.trading_kernel.application.project_owner_state import (
-    OwnerProjectionRequest,
-    project_owner_state,
-)
 from src.trading_kernel.application.runtime_facts import (
     AccountRiskSnapshotRequest,
     EntryAdmissionSnapshotRequest,
@@ -72,7 +68,6 @@ from src.trading_kernel.domain.strategy_registry import (
 from src.trading_kernel.infrastructure.pg_models import runtime_scopes_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
-    OWNER_POLICY_ID,
     RUNTIME_PROFILE_ID,
     ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
@@ -94,6 +89,7 @@ from src.trading_kernel.interfaces.observation_worker import (
     ObservationWorkerStatus,
     run_observation_worker_once,
 )
+from src.trading_kernel.interfaces.readonly_api import get_owner_projection
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
     ReconciliationWorkerStatus,
@@ -583,7 +579,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         ObservationWorkerRequest(
             worker_id="observation-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             now_ms=NOW_MS,
             lease_until_ms=NOW_MS + 30_000,
             timeout_seconds=5,
@@ -618,7 +614,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         EntryWorkerRequest(
             worker_id="entry-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             now_ms=NOW_MS + 1_000,
             lease_until_ms=NOW_MS + 6_000,
             timeout_seconds=1,
@@ -639,7 +635,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v3",
+        schema_revision="0001_trading_kernel_baseline_v4",
         now_ms=NOW_MS + 2_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -656,7 +652,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     lifecycle_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v3",
+        schema_revision="0001_trading_kernel_baseline_v4",
         now_ms=NOW_MS + 3_000,
         lease_until_ms=NOW_MS + 8_000,
         timeout_seconds=1,
@@ -770,15 +766,9 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         commands = await uow.exchange_commands.list_for_ticket(
             ticket.identity.ticket_id
         )
-        owner_state = await project_owner_state(
+        owner_state = await get_owner_projection(
             uow,
-            OwnerProjectionRequest(
-                monitor_key=f"certification:{runtime_scope_id}",
-                owner_policy_id=OWNER_POLICY_ID,
-                runtime_scope_id=runtime_scope_id,
-                ticket_id=ticket.identity.ticket_id,
-                updated_at_ms=NOW_MS + 12_000,
-            ),
+            ticket.identity.ticket_id,
         )
 
     assert aggregate is not None
@@ -796,6 +786,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     assert review.metrics["actual_stop_risk"] is not None
     assert len(review_source.requests) == 1
     assert incident is None
+    assert owner_state is not None
     assert owner_state.owner_status is MonitorOwnerStatus.COMPLETED
     assert [command.kind.value for command in commands] == [
         "entry",
@@ -821,7 +812,7 @@ async def _seed_runtime(
             RuntimeAuthoritySeedRequest(
                 account_id="account-certification",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v3",
+                schema_revision="0001_trading_kernel_baseline_v4",
                 seeded_at_ms=warm_now_ms - 10_000,
             ),
         )
@@ -847,7 +838,7 @@ async def _seed_runtime(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-universe-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             now_ms=warm_now_ms,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -869,7 +860,7 @@ async def _seed_runtime(
         ObservationWorkerRequest(
             worker_id="observation-worker-universe-warming",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             now_ms=warm_now_ms,
             lease_until_ms=warm_now_ms + 30_000,
             timeout_seconds=5,
@@ -886,7 +877,7 @@ async def _seed_runtime(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-active-certification-refresh",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             now_ms=NOW_MS - 1,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,

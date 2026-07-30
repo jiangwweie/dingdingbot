@@ -277,7 +277,7 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
     request = ReconciliationWorkerRequest(
         worker_id="reconciliation-fairness-full-chain",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v3",
+        schema_revision="0001_trading_kernel_baseline_v4",
         now_ms=33_600,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,

@@ -65,14 +65,14 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| Clean PostgreSQL schema head | Complete locally | `0001_trading_kernel_baseline_v3`, empty rebuild and forward-only downgrade rejection certification |
+| Clean PostgreSQL schema head | Complete locally | `0001_trading_kernel_baseline_v4`, empty rebuild and forward-only downgrade rejection certification |
 | Six Strategy Events | Complete | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, BRF2-SHORT |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, deterministic identity, Live/Replay parity |
 | Arbitration and CapacityClaim | Complete | Deterministic priority, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
 | Ticket issuance | Complete | Atomic Claim, budget, domain, Ticket, aggregate, event, and ENTRY command |
 | Venue Truth and recovery | Complete | ENTRY, protection, EXIT, flatten, cancel, timeout and unknown resolution |
 | Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |
-| Reconciliation, Settlement, Review | Complete | Exact Ticket identities and explicit funding availability semantics |
+| Reconciliation, Settlement, Review | Complete | Exact typed Binance order identities, append-only Review revisions, explicit funding availability, and atomic terminal Owner projection |
 | Runtime ownership | Complete | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
 | StrategyUniverse local capability | Complete locally, not deployed | Versioned 1..10 member pools, readonly certification, Warming with zero Signal, automatic atomic activation, frozen Ticket lineage, bounded CLI and PostgreSQL evidence |
 
@@ -87,7 +87,7 @@ substitute for action-time Tokyo readonly facts.
 
 | Boundary | Required local evidence | Rejected outcome |
 | --- | --- | --- |
-| Clean baseline | Disposable PostgreSQL rebuilds from an empty schema using only `0001_trading_kernel_baseline_v3`; no retired migration, table, reader, or compatibility path remains | An incremental upgrade or an old-schema fallback is accepted |
+| Clean baseline | Disposable PostgreSQL rebuilds from an empty schema using only `0001_trading_kernel_baseline_v4`; no retired migration, table, reader, or compatibility path remains | An incremental upgrade or an old-schema fallback is accepted |
 | Batch bootstrap | The six Registry Events receive the approved fixed initial member set in one bounded run; no operator configures members one Event at a time | A second Warming Universe is required for every Event or member |
 | Warming and readiness | Warming performs readonly market/account certification, produces zero StrategySignal, preserves observation time separately from certification time, and activates only after every member passes | Warming can submit an order, stale evidence activates, or a failed member becomes eligible |
 | Concurrency and recovery | One global Warming slot is enforced; the official `abandon_strategy_universe.py` CLI permanently abandons one exact Warming Universe with an audited reason so the slot is released | A failed Warming state blocks all later deployment work, is changed by direct SQL, or can be silently reused |

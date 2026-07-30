@@ -1,9 +1,9 @@
 ---
 title: Binance Review Attribution and Owner Terminal Correctness Design
-status: IMPLEMENTATION_AUTHORIZED
+status: IMPLEMENTED_LOCAL_CANDIDATE
 authority: IMPLEMENTATION_DELTA
 date: 2026-07-30
-revision: 1
+revision: 2
 ---
 
 # Binance Review 归因与 Owner 终态一致性修复设计
@@ -209,7 +209,12 @@ owner:ticket:<ticket_id>
 
 ### 6.2 事务一致性
 
-初次 `record_trade_review()` 的一个 PostgreSQL UoW 必须原子包含：
+所有 terminal reducer 分支都发出唯一的
+`ProjectTerminalOwnerState` effect，包括 leverage authoritative rejection、
+ENTRY authoritative rejection、ENTRY reconciled absent、`ReviewRecorded` 和
+`ReviewRevised`。PostgreSQL UoW 是该 effect 的唯一物化器。
+
+初次 `record_trade_review()` 的一个 PostgreSQL UoW 原子包含：
 
 ```text
 insert TradeReview v1
@@ -274,4 +279,3 @@ Entry fenced/stopped
 ```
 
 如果 action-time 发现持仓、订单或 unresolved command，不执行 clean rebuild。
-

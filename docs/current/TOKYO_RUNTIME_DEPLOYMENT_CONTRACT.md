@@ -57,7 +57,7 @@ the three safety workers for fix-forward recovery.
 The versioned StrategyUniverse release is a **flat-only destructive rebuild**.
 It is not activated by a local test pass or by all positions becoming flat
 without an Owner release confirmation. Before its
-`0001_trading_kernel_baseline_v3` rebuild, configuration, or Entry enablement,
+`0001_trading_kernel_baseline_v4` rebuild, configuration, or Entry enablement,
 all Ticket, position, order, Incident, Settlement and Review projections must
 be terminal and exchange truth must be flat.
 

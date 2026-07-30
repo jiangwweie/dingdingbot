@@ -27,6 +27,9 @@ from src.trading_kernel.application.ports import (
     TicketRepository,
     UnsupportedKernelEffect,
 )
+from src.trading_kernel.application.project_owner_state import (
+    derive_terminal_owner_projection,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.commands import (
@@ -52,6 +55,7 @@ from src.trading_kernel.domain.effects import (
     PrepareProtectionReplacementCommand,
     PrepareSetLeverageCommand,
     PrepareTakeProfitCommand,
+    ProjectTerminalOwnerState,
     ReleaseBudget,
     ReleaseCapitalAuthorities,
     ReleaseEntryLane,
@@ -455,6 +459,14 @@ class PostgresKernelUnitOfWork:
                 await self.tickets.release_active_netting_domain(
                     effect.ticket_id,
                     netting_domain_key=effect.netting_domain_key,
+                )
+                continue
+            if isinstance(effect, ProjectTerminalOwnerState):
+                await self.monitors.save_if_changed(
+                    derive_terminal_owner_projection(
+                        ticket_id=effect.ticket_id,
+                        updated_at_ms=event.occurred_at_ms,
+                    )
                 )
                 continue
             raise UnsupportedKernelEffect(

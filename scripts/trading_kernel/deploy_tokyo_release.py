@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-SCHEMA_REVISION = "0001_trading_kernel_baseline_v3"
+SCHEMA_REVISION = "0001_trading_kernel_baseline_v4"
 EXPECTED_CONFIGURED_LEVERAGE = 5
 RELEASE_ROOT = "/opt/brc/releases"
 CURRENT_RELEASE = "/opt/brc/current"

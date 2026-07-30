@@ -98,9 +98,9 @@ class CutoverPlan(BaseModel):
     @classmethod
     def _require_schema_revision(cls, value: object) -> str:
         normalized = str(value or "").strip()
-        if normalized != "0001_trading_kernel_baseline_v3":
+        if normalized != "0001_trading_kernel_baseline_v4":
             raise ValueError(
-                "target schema revision must be 0001_trading_kernel_baseline_v3"
+                "target schema revision must be 0001_trading_kernel_baseline_v4"
             )
         return normalized
 
@@ -262,7 +262,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-profile-id", required=True)
     parser.add_argument("--application-schema", default="public")
     parser.add_argument("--target-commit", required=True)
-    parser.add_argument("--target-schema-revision", default="0001_trading_kernel_baseline_v3")
+    parser.add_argument("--target-schema-revision", default="0001_trading_kernel_baseline_v4")
     parser.add_argument("--target-seed-identity", required=True)
     parser.add_argument("--target-release-id", required=True)
     parser.add_argument("--require-writer-fence", action="store_true")

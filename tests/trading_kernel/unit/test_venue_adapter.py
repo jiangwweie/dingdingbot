@@ -1071,9 +1071,10 @@ class ReviewEconomicsExchange(FakeAsyncExchange):
             "symbol": "BTCUSDT",
             "side": "SELL",
             "positionSide": "LONG",
-            "type": "STOP_MARKET",
+            "orderType": "STOP_MARKET",
+            "quantity": "0.5",
             "actualQty": "0.5",
-            "status": "FINISHED",
+            "algoStatus": "FINISHED",
         }
 
     async def fapiPrivateGetIncome(self, params):

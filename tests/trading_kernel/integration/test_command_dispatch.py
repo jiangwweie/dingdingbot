@@ -25,9 +25,13 @@ from src.trading_kernel.application.dispatch_exchange_command import (
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue_ticket
 from src.trading_kernel.application.ports import (
+    MonitorOwnerStatus,
     VenueCommandRequest,
     VenueMutationFailure,
     VenueSetLeverageRequest,
+)
+from src.trading_kernel.application.project_owner_state import (
+    owner_ticket_monitor_key,
 )
 from src.trading_kernel.application.reconcile_ticket import (
     ExitTicketRequest,
@@ -441,7 +445,7 @@ async def test_entry_without_action_time_facts_is_rejected_before_venue(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=None,
@@ -453,8 +457,13 @@ async def test_entry_without_action_time_facts_is_rejected_before_venue(
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         command = await uow.exchange_commands.get(result.command_id or "")
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        owner_projection = await uow.monitors.get(
+            owner_ticket_monitor_key(ticket.identity.ticket_id)
+        )
     assert command is not None and command.status is ExchangeCommandStatus.REJECTED
     assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
+    assert owner_projection is not None
+    assert owner_projection.owner_status is MonitorOwnerStatus.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -476,7 +485,7 @@ async def test_set_leverage_without_action_time_facts_is_rejected_before_venue(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=None,
@@ -516,7 +525,7 @@ async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -570,7 +579,7 @@ async def test_retired_strategy_version_before_entry_preflight_causes_zero_venue
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -603,7 +612,7 @@ async def test_universe_pointer_switch_after_preflight_is_fenced_by_claimed_entr
                 lease_until_ms=6_100,
                 timeout_seconds=1,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v3",
+                schema_revision="0001_trading_kernel_baseline_v4",
                 admission_snapshot_validity_ms=1_000,
             ),
             entry_facts_source=PreflightFacts(),
@@ -779,7 +788,7 @@ async def test_confirmed_leverage_creates_first_entry_command_in_later_transacti
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -819,7 +828,7 @@ async def test_leverage_readback_mismatch_becomes_unknown_without_entry_or_resen
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -857,7 +866,7 @@ async def test_coded_leverage_failure_persists_sanitized_reason(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(configured_leverage=4),
@@ -1193,7 +1202,7 @@ async def _dispatch_for_ticket(
             lease_until_ms=7_200,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1258,7 +1267,7 @@ async def test_dispatch_claims_then_calls_venue_outside_transaction_and_records_
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1311,7 +1320,7 @@ async def test_authoritative_entry_rejection_releases_lane_and_budget_without_re
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1371,7 +1380,7 @@ async def test_timeout_becomes_unknown_outcome_incident_and_is_never_redispatche
             lease_until_ms=6_100,
             timeout_seconds=0.01,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1469,7 +1478,7 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1540,7 +1549,7 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1613,7 +1622,7 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1948,7 +1957,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v3",
+                schema_revision="0001_trading_kernel_baseline_v4",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -1957,7 +1966,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 set_={
                     "enabled": True,
                     "certified_commit": "kernel-test-head",
-                    "schema_revision": "0001_trading_kernel_baseline_v3",
+                    "schema_revision": "0001_trading_kernel_baseline_v4",
                     "certification": {},
                     "updated_at_ms": 1_000,
                 },
@@ -1986,7 +1995,7 @@ async def _reach_cancel_pending(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

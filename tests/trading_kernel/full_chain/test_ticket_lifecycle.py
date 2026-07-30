@@ -24,8 +24,12 @@ from src.trading_kernel.application.dispatch_exchange_command import (
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue_ticket
 from src.trading_kernel.application.ports import (
+    MonitorOwnerStatus,
     VenueCommandRequest,
     VenueSetLeverageRequest,
+)
+from src.trading_kernel.application.project_owner_state import (
+    owner_ticket_monitor_key,
 )
 from src.trading_kernel.application.reconcile_ticket import (
     ExitTicketRequest,
@@ -37,9 +41,11 @@ from src.trading_kernel.application.reconcile_ticket import (
 )
 from src.trading_kernel.application.settle_ticket import (
     RecordTradeReviewRequest,
+    ReviseTradeReviewRequest,
     SettleTicketRequest,
     SettleTicketStatus,
     record_trade_review,
+    revise_trade_review,
     settle_ticket,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
@@ -370,6 +376,9 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
             ticket.identity.netting_domain.account_id
         )
         review = await uow.reviews.get_for_ticket(ticket.identity.ticket_id)
+        owner_projection = await uow.monitors.get(
+            owner_ticket_monitor_key(ticket.identity.ticket_id)
+        )
         commands = await uow.exchange_commands.list_for_ticket(
             ticket.identity.ticket_id
         )
@@ -379,6 +388,10 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
     assert reservation is not None and reservation.status == "released"
     assert exposure is not None and exposure.active_ticket_count == 0
     assert review is not None and review.review_id == "review-1"
+    assert review.revision == 1 and review.supersedes_review_id is None
+    assert owner_projection is not None
+    assert owner_projection.owner_status is MonitorOwnerStatus.COMPLETED
+    assert owner_projection.ticket_id == ticket.identity.ticket_id
     assert [command.kind for command in commands] == [
         ExchangeCommandKind.ENTRY,
         ExchangeCommandKind.INITIAL_STOP,
@@ -387,6 +400,48 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
         ExchangeCommandKind.CANCEL_ORDER,
         ExchangeCommandKind.CANCEL_ORDER,
     ]
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        revised = await revise_trade_review(
+            uow,
+            ReviseTradeReviewRequest(
+                ticket_id=ticket.identity.ticket_id,
+                review_id="review-2",
+                supersedes_review_id="review-1",
+                outcome="closed",
+                metrics={"realized_pnl": "1.50"},
+                decision_impact={"strategy_action": "keep"},
+                recorded_at_ms=3_700,
+            ),
+        )
+    assert revised.status is SettleTicketStatus.REVIEW_REVISED
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        revised_aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        initial_review = await uow.reviews.get("review-1")
+        current_review = await uow.reviews.get_for_ticket(
+            ticket.identity.ticket_id
+        )
+        revised_owner_projection = await uow.monitors.get(
+            owner_ticket_monitor_key(ticket.identity.ticket_id)
+        )
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+
+    assert revised_aggregate is not None
+    assert revised_aggregate.status is AggregateStatus.TERMINAL
+    assert revised_aggregate.review_id == "review-2"
+    assert initial_review is not None and initial_review.metrics == {
+        "realized_pnl": "1.25"
+    }
+    assert current_review is not None
+    assert current_review.review_id == "review-2"
+    assert current_review.revision == 2
+    assert current_review.supersedes_review_id == "review-1"
+    assert revised_owner_projection is not None
+    assert revised_owner_projection.owner_status is MonitorOwnerStatus.COMPLETED
+    assert revised_owner_projection.projection_version == 1
+    assert sum(type(event).__name__ == "ReviewRecorded" for event in events) == 1
+    assert sum(type(event).__name__ == "ReviewRevised" for event in events) == 1
 
 
 @pytest.mark.asyncio
@@ -1079,7 +1134,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v3",
+                schema_revision="0001_trading_kernel_baseline_v4",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -1088,7 +1143,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 set_={
                     "enabled": True,
                     "certified_commit": "kernel-test-head",
-                    "schema_revision": "0001_trading_kernel_baseline_v3",
+                    "schema_revision": "0001_trading_kernel_baseline_v4",
                     "certification": {},
                     "updated_at_ms": 1_000,
                 },
@@ -1118,7 +1173,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v3",
+            schema_revision="0001_trading_kernel_baseline_v4",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

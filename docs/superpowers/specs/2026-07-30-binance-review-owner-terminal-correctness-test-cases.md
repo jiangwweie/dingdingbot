@@ -1,9 +1,9 @@
 ---
 title: Binance Review Attribution and Owner Terminal Correctness Test Cases
-status: IMPLEMENTATION_AUTHORIZED
+status: CERTIFIED_LOCAL
 authority: IMPLEMENTATION_DELTA
 date: 2026-07-30
-revision: 1
+revision: 2
 design: 2026-07-30-binance-review-owner-terminal-correctness-design.md
 ---
 
@@ -81,6 +81,8 @@ payload 特例。
 3. Ticket request 使用非 canonical key 拒绝。
 4. terminal projection 始终为 `completed`、`无需操作`。
 5. readonly API 只调用 repository `get`，不调用 `save_if_changed`。
+6. leverage rejection、ENTRY rejection 和 reconciled absence 同样通过 reducer
+   effect 原子物化 canonical completed 投影。
 
 ## 4. PostgreSQL Integration
 
@@ -183,4 +185,3 @@ EntryFilled
 
 任何失败、跳过的关键测试或未完成的 migration rehearsal 都使结论保持
 **禁止部署**。
-

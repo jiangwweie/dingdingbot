@@ -26,6 +26,7 @@ from src.trading_kernel.domain.effects import (
     PrepareProtectionReplacementCommand,
     PrepareSetLeverageCommand,
     PrepareTakeProfitCommand,
+    ProjectTerminalOwnerState,
     ReleaseBudget,
     ReleaseCapitalAuthorities,
     ReleaseEntryLane,
@@ -73,6 +74,7 @@ from src.trading_kernel.domain.events import (
     ProtectionReplacementOutcomeUnknown,
     ReconciliationMatched,
     ReviewRecorded,
+    ReviewRevised,
     TakeProfitAbsenceConfirmed,
     TakeProfitConfirmed,
     TakeProfitFilled,
@@ -268,6 +270,7 @@ def test_leverage_terminal_and_unknown_states_are_explicit() -> None:
     assert rejected.effects == (
         ReleaseBudget(ticket_id=issued.identity.ticket_id),
         ReleaseEntryLane(ticket_id=issued.identity.ticket_id),
+        ProjectTerminalOwnerState(ticket_id=issued.identity.ticket_id),
     )
 
     unknown = reduce_event(
@@ -315,6 +318,7 @@ def test_authoritative_entry_rejection_is_terminal_and_never_retries() -> None:
     assert rejected.effects == (
         ReleaseBudget(ticket_id=issued.identity.ticket_id),
         ReleaseEntryLane(ticket_id=issued.identity.ticket_id),
+        ProjectTerminalOwnerState(ticket_id=issued.identity.ticket_id),
     )
 
     with pytest.raises(InvalidLifecycleTransition):
@@ -1601,7 +1605,105 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
     )
     assert terminal.aggregate.status is AggregateStatus.TERMINAL
     assert terminal.aggregate.review_id == "review-1"
-    assert terminal.effects == ()
+    assert terminal.effects == (
+        ProjectTerminalOwnerState(ticket_id=ticket.identity.ticket_id),
+    )
+
+    revised = reduce_event(
+        terminal.aggregate,
+        ReviewRevised(
+            event_id="event-13",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=terminal.aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_500,
+            review_id="review-2",
+            supersedes_review_id="review-1",
+        ),
+    )
+    assert revised.aggregate.status is AggregateStatus.TERMINAL
+    assert revised.aggregate.review_id == "review-2"
+    assert revised.effects == (
+        ProjectTerminalOwnerState(ticket_id=ticket.identity.ticket_id),
+    )
+
+
+def test_review_revision_requires_terminal_current_pointer() -> None:
+    pending = _reconciliation_pending_aggregate()
+    settled = reduce_event(
+        reduce_event(
+            pending,
+            ReconciliationMatched(
+                event_id="event-review-match",
+                ticket_id=pending.identity.ticket_id,
+                sequence=pending.last_event_sequence + 1,
+                occurred_at_ms=3_000,
+            ),
+        ).aggregate,
+        BudgetSettled(
+            event_id="event-review-settle",
+            ticket_id=pending.identity.ticket_id,
+            sequence=pending.last_event_sequence + 2,
+            occurred_at_ms=3_100,
+        ),
+    ).aggregate
+
+    with pytest.raises(InvalidLifecycleTransition, match="terminal"):
+        reduce_event(
+            settled,
+            ReviewRevised(
+                event_id="event-review-revise",
+                ticket_id=pending.identity.ticket_id,
+                sequence=settled.last_event_sequence + 1,
+                occurred_at_ms=3_200,
+                review_id="review-2",
+                supersedes_review_id="review-1",
+            ),
+        )
+
+
+def test_review_revision_requires_exact_current_review_pointer() -> None:
+    pending = _reconciliation_pending_aggregate()
+    matched = reduce_event(
+        pending,
+        ReconciliationMatched(
+            event_id="event-review-pointer-match",
+            ticket_id=pending.identity.ticket_id,
+            sequence=pending.last_event_sequence + 1,
+            occurred_at_ms=3_000,
+        ),
+    ).aggregate
+    settled = reduce_event(
+        matched,
+        BudgetSettled(
+            event_id="event-review-pointer-settle",
+            ticket_id=pending.identity.ticket_id,
+            sequence=matched.last_event_sequence + 1,
+            occurred_at_ms=3_100,
+        ),
+    ).aggregate
+    aggregate = reduce_event(
+        settled,
+        ReviewRecorded(
+            event_id="event-review-pointer-record",
+            ticket_id=pending.identity.ticket_id,
+            sequence=settled.last_event_sequence + 1,
+            occurred_at_ms=3_150,
+            review_id="review-1",
+        ),
+    ).aggregate
+
+    with pytest.raises(InvalidLifecycleTransition, match="supersedes"):
+        reduce_event(
+            aggregate,
+            ReviewRevised(
+                event_id="event-review-revise",
+                ticket_id=aggregate.identity.ticket_id,
+                sequence=aggregate.last_event_sequence + 1,
+                occurred_at_ms=3_200,
+                review_id="review-2",
+                supersedes_review_id="review-wrong",
+            ),
+        )
 
 
 def _reconciliation_pending_aggregate():

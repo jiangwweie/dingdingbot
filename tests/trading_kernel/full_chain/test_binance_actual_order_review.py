@@ -7,11 +7,21 @@ from typing import NotRequired, TypedDict
 import pytest
 from pydantic import JsonValue
 
+from src.trading_kernel.application.ports import MonitorOwnerStatus
+from src.trading_kernel.application.project_owner_state import (
+    owner_ticket_monitor_key,
+)
 from src.trading_kernel.application.reconcile_ticket import (
     ReconcileTicketRequest,
     reconcile_ticket,
 )
 from src.trading_kernel.application.runtime_facts import ReviewEconomicsRequest
+from src.trading_kernel.application.settle_ticket import (
+    RecordTradeReviewRequest,
+    SettleTicketRequest,
+    record_trade_review,
+    settle_ticket,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind
 from src.trading_kernel.domain.order_attribution import TicketOrderReference
@@ -121,20 +131,20 @@ class _RunnerTradesExchange(FakeAsyncExchange):
             "symbol": expectation.exchange_instrument_id.split(":", 2)[1],
             "side": expectation.side.upper(),
             "positionSide": expectation.position_side.upper(),
-            "type": expectation.order_type.upper(),
+            "orderType": expectation.order_type.upper(),
+            "quantity": str(expectation.quantity),
         }
         if reference.command_kind is ExchangeCommandKind.REPLACE_PROTECTION:
             return {
                 **result,
                 "actualOrderId": "1085699838084",
                 "actualQty": str(expectation.quantity),
-                "status": "FINISHED",
+                "algoStatus": "FINISHED",
             }
         return {
             **result,
             "actualOrderId": "",
-            "actualQty": "0",
-            "status": "CANCELED",
+            "algoStatus": "CANCELED",
         }
 
     async def fapiPrivateGetIncome(self, params: Mapping[str, object]) -> object:
@@ -268,7 +278,7 @@ def _review_worker_request(*, now_ms: int) -> ReconciliationWorkerRequest:
     return ReconciliationWorkerRequest(
         worker_id="reconciliation-full-chain",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v3",
+        schema_revision="0001_trading_kernel_baseline_v4",
         now_ms=now_ms,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -311,10 +321,15 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
         events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
         review = await uow.reviews.get_for_ticket(ticket.identity.ticket_id)
+        owner_projection = await uow.monitors.get(
+            owner_ticket_monitor_key(ticket.identity.ticket_id)
+        )
     assert aggregate is not None and aggregate.status is AggregateStatus.TERMINAL
     assert [type(event).__name__ for event in events].count("BudgetSettled") == 1
     assert [type(event).__name__ for event in events].count("ReviewRecorded") == 1
     assert review is not None
+    assert owner_projection is not None
+    assert owner_projection.owner_status is MonitorOwnerStatus.COMPLETED
     assert review.metrics["economics_completeness"] == "complete"
     assert review.metrics["entry_quantity"] == "0.001"
     assert review.metrics["exit_quantity"] == "0.0010"
@@ -357,6 +372,63 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
         for row in attribution_rows
     )
     assert exchange.index_calls == ([] if fee_mode == "usdt" else [{"symbol": "BNBUSDT"}])
+
+
+@pytest.mark.asyncio
+async def test_owner_projection_failure_rolls_back_review_and_terminal_state(
+    dispatch_engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticket = _registered_sor_long_ticket()
+    await _move_runner_to_review_pending(dispatch_engine, ticket)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await settle_ticket(
+            uow,
+            SettleTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                settled_at_ms=40_000,
+            ),
+        )
+
+    async def _fail_owner_projection(_state):
+        raise RuntimeError("owner projection unavailable")
+
+    with pytest.raises(RuntimeError, match="owner projection unavailable"):
+        async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+            monkeypatch.setattr(
+                uow.monitors,
+                "save_if_changed",
+                _fail_owner_projection,
+            )
+            await record_trade_review(
+                uow,
+                RecordTradeReviewRequest(
+                    ticket_id=ticket.identity.ticket_id,
+                    review_id=f"review:{ticket.identity.ticket_id}",
+                    outcome="terminal_flat",
+                    metrics={"economics_completeness": "complete"},
+                    decision_impact={"status": "recorded"},
+                    recorded_at_ms=50_000,
+                ),
+            )
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        persisted_ticket = await uow.tickets.get(ticket.identity.ticket_id)
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+        review = await uow.reviews.get_for_ticket(ticket.identity.ticket_id)
+        owner_projection = await uow.monitors.get(
+            owner_ticket_monitor_key(ticket.identity.ticket_id)
+        )
+
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.REVIEW_PENDING
+    assert aggregate.review_id is None
+    assert persisted_ticket is not None
+    assert persisted_ticket.status.value == "issued"
+    assert [type(event).__name__ for event in events].count("ReviewRecorded") == 0
+    assert review is None
+    assert owner_projection is None
 
 
 @pytest.mark.asyncio

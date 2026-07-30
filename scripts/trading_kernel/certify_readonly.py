@@ -33,7 +33,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
 )
 
 SCHEMA = "brc.trading_kernel.readonly_certification.v1"
-EXPECTED_ALEMBIC_REVISION = "0001_trading_kernel_baseline_v3"
+EXPECTED_ALEMBIC_REVISION = "0001_trading_kernel_baseline_v4"
 LEGACY_EXECUTION_TABLES = (
     "brc_runtime_execution_tickets",
     "brc_runtime_execution_orders",

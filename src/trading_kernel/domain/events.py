@@ -357,6 +357,11 @@ class ReviewRecorded(_TicketEvent):
     review_id: str
 
 
+class ReviewRevised(_TicketEvent):
+    review_id: str
+    supersedes_review_id: str
+
+
 TradeEvent = (
     TicketIssued
     | LeverageConfirmed
@@ -412,6 +417,7 @@ TradeEvent = (
     | ReconciliationMatched
     | BudgetSettled
     | ReviewRecorded
+    | ReviewRevised
 )
 
 PERSISTED_TRADE_EVENT_MODELS = get_args(TradeEvent)

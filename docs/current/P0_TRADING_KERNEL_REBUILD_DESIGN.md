@@ -48,6 +48,13 @@ create a Ticket, write to the exchange, or mutate lifecycle state.
 11. Partial ENTRY fill is an Incident followed by exact remainder cancellation
     and controlled flatten.
 12. Strategy kill occurs only after exposure is flat and terminal.
+13. Binance raw order responses are consumed only through frozen typed protocol
+    snapshots and exact frozen-command identity validation.
+14. Trade Review facts are append-only revisions; the Aggregate `review_id`
+    points to the sole current effective revision.
+15. Every terminal Ticket transition atomically materializes
+    `owner:ticket:<ticket_id>` as the canonical completed Owner projection.
+16. Readonly interfaces never create, update, or refresh runtime projections.
 
 ## Code And Data Ownership
 
@@ -58,7 +65,7 @@ src/trading_kernel/infrastructure PostgreSQL and venue adapters
 src/trading_kernel/interfaces     bounded runtime and readonly surfaces
 ```
 
-The tracked database head is `0001_trading_kernel_baseline_v3`. PostgreSQL owns
+The tracked database head is `0001_trading_kernel_baseline_v4`. PostgreSQL owns
 current runtime truth and append-only lifecycle facts. Exchange readonly facts
 own external truth. Repository documents and generated output never own
 production decisions.
@@ -116,6 +123,11 @@ after the active operability repair passes its clean-schema deployment.
 ## Transaction And Exchange Model
 
 Each aggregate mutation uses one short PostgreSQL transaction:
+
+Terminal reductions commit the Ticket/Aggregate terminal state, lifecycle
+Event, optional Review revision, and canonical Owner projection in that same
+transaction. A projection failure rolls back the whole reduction; a later
+readonly request is never used as a repair mechanism.
 
 ```text
 lock exact current row

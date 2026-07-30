@@ -2,8 +2,7 @@
 
 from src.trading_kernel.application.ports import KernelUnitOfWork, MonitorStateRecord
 from src.trading_kernel.application.project_owner_state import (
-    OwnerProjectionRequest,
-    project_owner_state,
+    owner_ticket_monitor_key,
 )
 
 
@@ -19,6 +18,6 @@ async def get_monitor_state(
 
 async def get_owner_projection(
     uow: KernelUnitOfWork,
-    request: OwnerProjectionRequest,
-) -> MonitorStateRecord:
-    return await project_owner_state(uow, request)
+    ticket_id: str,
+) -> MonitorStateRecord | None:
+    return await uow.monitors.get(owner_ticket_monitor_key(ticket_id))

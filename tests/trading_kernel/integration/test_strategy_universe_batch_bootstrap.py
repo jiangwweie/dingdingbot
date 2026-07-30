@@ -69,7 +69,7 @@ ADMIN_DSN = os.getenv(
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 RUNTIME_COMMIT = "strategy-universe-rehearsal"
-SCHEMA_REVISION = "0001_trading_kernel_baseline_v3"
+SCHEMA_REVISION = "0001_trading_kernel_baseline_v4"
 
 
 class RecordingWarmMarket:
@@ -122,7 +122,7 @@ async def test_six_event_batch_bootstrap_is_idempotent_and_uses_worker_boundarie
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-batch-bootstrap-test",
                     runtime_commit=RUNTIME_COMMIT,
-                    schema_revision="0001_trading_kernel_baseline_v3",
+                    schema_revision="0001_trading_kernel_baseline_v4",
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
             )

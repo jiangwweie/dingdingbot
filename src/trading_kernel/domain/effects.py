@@ -111,6 +111,10 @@ class ReleaseBudget(_Effect):
     ticket_id: str
 
 
+class ProjectTerminalOwnerState(_Effect):
+    ticket_id: str
+
+
 KernelEffect = (
     PrepareEntryCommand
     | PrepareSetLeverageCommand
@@ -129,4 +133,5 @@ KernelEffect = (
     | ReleaseEntryLane
     | ReleaseCapitalAuthorities
     | ReleaseBudget
+    | ProjectTerminalOwnerState
 )

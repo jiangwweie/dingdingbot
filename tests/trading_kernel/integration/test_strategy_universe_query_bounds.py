@@ -62,8 +62,8 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-13-query-bounds"
-SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v3"] = (
-    "0001_trading_kernel_baseline_v3"
+SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v4"] = (
+    "0001_trading_kernel_baseline_v4"
 )
 ACTIVE_MEMBERS = tuple(
     f"binance-usdm:{symbol}USDT:perpetual"

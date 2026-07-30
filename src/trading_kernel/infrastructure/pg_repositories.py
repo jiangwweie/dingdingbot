@@ -1194,9 +1194,26 @@ class PostgresReviewRepository:
             sa.insert(trade_reviews).values(**review.model_dump(mode="json"))
         )
 
+    async def get(self, review_id: str) -> TradeReviewRecord | None:
+        result = await self._connection.execute(
+            sa.select(trade_reviews).where(
+                trade_reviews.c.review_id == review_id
+            )
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else TradeReviewRecord.model_validate(row)
+
     async def get_for_ticket(self, ticket_id: str) -> TradeReviewRecord | None:
         result = await self._connection.execute(
-            sa.select(trade_reviews).where(trade_reviews.c.ticket_id == ticket_id)
+            sa.select(trade_reviews)
+            .join(
+                trade_aggregates,
+                sa.and_(
+                    trade_aggregates.c.ticket_id == trade_reviews.c.ticket_id,
+                    trade_aggregates.c.review_id == trade_reviews.c.review_id,
+                ),
+            )
+            .where(trade_reviews.c.ticket_id == ticket_id)
         )
         row = result.mappings().one_or_none()
         return None if row is None else TradeReviewRecord.model_validate(row)

@@ -188,7 +188,7 @@ async def _seed_and_bootstrap(database_name: str, database_url: str) -> None:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-entry-promotion-test",
                     runtime_commit=RUNTIME_COMMIT,
-                    schema_revision="0001_trading_kernel_baseline_v3",
+                    schema_revision="0001_trading_kernel_baseline_v4",
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
             )

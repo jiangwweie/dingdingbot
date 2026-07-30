@@ -199,11 +199,13 @@ def test_kernel_schema_has_core_uniqueness_constraints() -> None:
     claims = metadata.tables["brc_capacity_claims"]
     commands = metadata.tables["brc_exchange_commands"]
     events = metadata.tables["brc_trade_events"]
+    reviews = metadata.tables["brc_trade_reviews"]
 
     ticket_uniques = _unique_column_sets(tickets)
     claim_uniques = _unique_column_sets(claims)
     command_uniques = _unique_column_sets(commands)
     event_uniques = _unique_column_sets(events)
+    review_uniques = _unique_column_sets(reviews)
 
     assert ("signal_event_id",) in ticket_uniques
     assert ("active_netting_domain_key",) in ticket_uniques
@@ -214,6 +216,31 @@ def test_kernel_schema_has_core_uniqueness_constraints() -> None:
     assert ("venue_client_order_id",) in command_uniques
     assert ("ticket_id", "command_kind", "generation") in command_uniques
     assert ("ticket_id", "sequence") in event_uniques
+    assert ("ticket_id",) not in review_uniques
+    assert ("ticket_id", "revision") in review_uniques
+    assert ("supersedes_review_id",) in review_uniques
+
+
+def test_trade_review_schema_is_append_only_revision_authority() -> None:
+    reviews = metadata.tables["brc_trade_reviews"]
+    check_sql = {
+        str(constraint.sqltext)
+        for constraint in reviews.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+
+    assert reviews.c.revision.nullable is False
+    assert reviews.c.supersedes_review_id.nullable is True
+    assert len(reviews.c.supersedes_review_id.foreign_keys) == 1
+    assert (
+        "ticket_id",
+        "supersedes_review_id",
+    ) in _foreign_key_column_sets(reviews)
+    assert "revision > 0" in check_sql
+    assert (
+        "(revision = 1 AND supersedes_review_id IS NULL) OR "
+        "(revision > 1 AND supersedes_review_id IS NOT NULL)"
+    ) in check_sql
 
 
 def test_leverage_commands_are_the_only_commands_without_order_identity() -> None:

@@ -84,7 +84,7 @@ def _local_target_manifest(plan: CutoverPlan) -> dict[str, str]:
             account_id=plan.account_id,
             runtime_commit=plan.target_commit,
             schema_revision=cast(
-                Literal["0001_trading_kernel_baseline_v3"],
+                Literal["0001_trading_kernel_baseline_v4"],
                 plan.target_schema_revision,
             ),
             seeded_at_ms=1,

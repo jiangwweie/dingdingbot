@@ -63,6 +63,15 @@ class OwnerProjectionRequest(BaseModel):
             raise ValueError("Owner projection time must be positive")
         return value
 
+    @model_validator(mode="after")
+    def _require_canonical_ticket_key(self) -> OwnerProjectionRequest:
+        if (
+            self.ticket_id is not None
+            and self.monitor_key != owner_ticket_monitor_key(self.ticket_id)
+        ):
+            raise ValueError("Ticket Owner projection key must be canonical")
+        return self
+
 
 _INTERVENTION_BLOCKERS = {
     "account_mode_invalid",
@@ -79,6 +88,28 @@ def instrument_certification_monitor_key(
     return (
         f"strategy-universe:{target.universe_version_id}:"
         f"{target.exchange_instrument_id}"
+    )
+
+
+def owner_ticket_monitor_key(ticket_id: str) -> str:
+    normalized = str(ticket_id or "").strip()
+    if not normalized:
+        raise ValueError("Ticket identity must be non-blank")
+    return f"owner:ticket:{normalized}"
+
+
+def derive_terminal_owner_projection(
+    *,
+    ticket_id: str,
+    updated_at_ms: int,
+) -> MonitorStateRecord:
+    return MonitorStateRecord(
+        monitor_key=owner_ticket_monitor_key(ticket_id),
+        owner_status=MonitorOwnerStatus.COMPLETED,
+        summary="本次交易已完成",
+        intervention="无需操作",
+        ticket_id=ticket_id,
+        updated_at_ms=updated_at_ms,
     )
 
 
@@ -126,6 +157,7 @@ def derive_owner_projection(
         status = MonitorOwnerStatus.PAUSED
         summary = "策略已暂停"
     elif facts.aggregate_status in {
+        AggregateStatus.LEVERAGE_REJECTED,
         AggregateStatus.TERMINAL,
         AggregateStatus.ENTRY_REJECTED,
         AggregateStatus.ENTRY_RECONCILED_ABSENT,

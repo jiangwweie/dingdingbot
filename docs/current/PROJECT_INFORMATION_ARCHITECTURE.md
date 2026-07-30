@@ -63,7 +63,7 @@ contract; completed task-card material may then be retired from `docs/current`.
 ## Current Runtime Authority
 
 The only production execution package is `src/trading_kernel`. The local repair
-candidate schema head is `0001_trading_kernel_baseline_v3`. It replaces the
+candidate schema head is `0001_trading_kernel_baseline_v4`. It replaces the
 retired evolution chain only through the approved destructive empty-schema
 rebuild; it is not an in-place forward migration. The deployed schema identity
 remains a volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.
@@ -80,7 +80,10 @@ read by exact key from PostgreSQL and reconciled against exchange facts.
 ## Retention
 
 - Current projections are upserted.
-- Trade Events and Exchange Commands are append-only.
+- Trade Events, Exchange Commands, and Trade Review revisions are append-only;
+  the Aggregate owns the current effective Review pointer.
+- Ticket Owner state uses the canonical `owner:ticket:<ticket_id>` projection;
+  readonly access never materializes or refreshes it.
 - Healthy no-signal and reconciliation ticks do not create report files.
 - Manual exports are bounded, display-only, and disposable.
 - Retired program generations are deleted rather than preserved as current
