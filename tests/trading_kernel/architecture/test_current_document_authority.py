@@ -73,9 +73,6 @@ RUNTIME_MODEL_DOCUMENTS = (
     "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
 )
 
-CURRENT_PRODUCTION_COMMIT = "8b8bddc8"
-CURRENT_PRODUCTION_TAG = "tokyo-runtime-2026.07.30.3"
-CURRENT_LOCAL_CERTIFICATION = "765 passed"
 CURRENT_ACCEPTANCE_STAGE = "Current live acceptance"
 RETIRED_ACCEPTANCE_TICKET = "ticket:c1ebc24a178a3ae4d87978e2fa1204ae"
 RESIDENT_WORKER_NAMES = (
@@ -207,13 +204,34 @@ def test_retired_capacity_semantics_are_absent_from_current_execution(
 
 def test_runtime_state_document_matches_the_deployed_kernel() -> None:
     source = (REPO_ROOT / CURRENT_RUNTIME_STATE_DOCUMENT).read_text(encoding="utf-8")
-    required_markers = (
-        CURRENT_PRODUCTION_COMMIT,
-        CURRENT_PRODUCTION_TAG,
-        CURRENT_LOCAL_CERTIFICATION,
-        CURRENT_ACCEPTANCE_STAGE,
-        *RESIDENT_WORKER_NAMES,
+    commit_match = re.search(
+        r"\| Production commit \| `([0-9a-f]{40})` \|",
+        source,
     )
+    tag_match = re.search(
+        r"\| Production tag \| `(tokyo-runtime-\d{4}\.\d{2}\.\d{2}\.\d+)`",
+        source,
+    )
+    certification_match = re.search(
+        r"\| Production-commit certification \| `(\d+ passed)`;",
+        source,
+    )
+    assert commit_match is not None
+    assert tag_match is not None
+    assert certification_match is not None
+
+    production_commit = commit_match.group(1)
+    production_tag = tag_match.group(1)
+    resolved_tag = subprocess.run(
+        ("git", "rev-parse", f"{production_tag}^{{}}"),
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    assert resolved_tag == production_commit
+    required_markers = (CURRENT_ACCEPTANCE_STAGE, *RESIDENT_WORKER_NAMES)
 
     missing = [marker for marker in required_markers if marker not in source]
 
@@ -223,6 +241,7 @@ def test_runtime_state_document_matches_the_deployed_kernel() -> None:
     )
     assert "303 passed" not in source
     assert "407 passed" not in source
+    assert "765 passed" not in source
     assert "no Tokyo mutation claimed" not in source
     assert RETIRED_ACCEPTANCE_TICKET not in source
 

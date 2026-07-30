@@ -29,27 +29,28 @@ different Netting Domains progress concurrently.
 
 | Area | Verified state |
 | --- | --- |
-| Branch | `codex/strategy-universe-operability-repair-20260729` |
-| Production commit | `8b8bddc818aa6bc961336390fccde6c10f3d7837` |
-| Production tag | `tokyo-runtime-2026.07.30.3`; annotated, immutable, and verified on `origin` |
-| Production-commit certification | `765 passed`; Ruff, Mypy (89 source files), runtime file-I/O audit and diff checks pass |
-| Local clean-rebuild rehearsal | Empty PostgreSQL baseline, six-Event bootstrap, Entry-promotion rehearsal and repeatability all completed without Tokyo or exchange mutation |
-| Runtime ownership | Observation, Lifecycle and Reconciliation are active at zero restarts; Entry is disabled and write-fenced during protected-Ticket handover |
+| Branch | `codex/review-owner-terminal-repair-20260730` |
+| Production commit | `d2acb3ec596562f00c2291ed8b83b5e740e21167` |
+| Production tag | `tokyo-runtime-2026.07.30.4`; annotated, immutable, and verified on `origin` |
+| Production-commit certification | `834 passed`; Ruff, Mypy (108 source files), compileall, runtime file-I/O audit and diff checks pass |
+| Local clean-rebuild rehearsal | Empty PostgreSQL baseline, operation-owned rebuild, Batch-before-worker, pending-Batch recovery, six-Event bootstrap, root Promotion boundary and repeatability all passed without exchange mutation |
+| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation are active and enabled at zero restarts; Entry fence is absent after completed Promotion |
 | Scheduling model | Long-running systemd services; timer-based Python cold starts are retired and must not return |
-| PostgreSQL | Destructive flat-only cutover completed: `public` was rebuilt from `0001_trading_kernel_baseline_v2`; Registry, Policy, Capability and exact runtime identity match the production commit |
+| PostgreSQL | Cutover `tokyo-v4-batch-priority-20260730-d2acb3ec` completed; `public` was clean-rebuilt from `0001_trading_kernel_baseline_v4`; Registry, Policy, Capability and exact runtime identity match the production commit |
 | StrategyUniverse deployment | Six current Active Universes, 42 Active Scopes and seven approved instruments: BTC, ETH, SOL, BNB, XRP, DOGE and ADA; zero Warming Universe; AVAX excluded |
 | Strategy capability | Six registered Events, deterministic detectors, closed-candle Observation, Live/Replay parity, and real StrategySignal production |
 | Cross-margin bracket coverage | Finite Binance maintenance-margin terminal brackets are accepted only when every candidate stress evaluation point is covered; an out-of-range point remains an explicit fail-closed rejection |
 | Ticket capability | CapacityClaim, immutable Ticket, budget reservation, Netting Domain hold, event, aggregate, and durable ENTRY command commit atomically |
-| Dynamic policy | Three concurrent Tickets; `0.03` planned stop risk; demand-based remaining margin; fixed exchange `5x`; max `10x` safety ceiling; `cross` margin |
+| Dynamic policy | Policy version `2`; three concurrent Tickets; per-Ticket stop risk `0.03`; account stop risk `0.06`; per-Ticket initial margin `0.45`; account initial margin `0.90`; fixed exchange `5x`; max `10x` safety ceiling; `cross` margin |
 | Entry authority | `new_entry_submit_enabled` applies only before ENTRY; existing exposure retains frozen safety authority |
 | Runtime fence | Commit/schema drift records an Incident; an exact but disabled command capability is a controlled readonly fence, not an Incident |
-| Historical runtime/trade facts | Reset after verified exchange-flat state by explicit Owner authorization; the current BNB Ticket, Reservation, position and protection lineage are now PostgreSQL runtime authority |
+| Historical runtime/trade facts | Reset after verified exchange-flat state by explicit Owner authorization; current PostgreSQL has zero Ticket, Budget Reservation, Exchange Command and open Incident |
 | Terminal-recovery repair | Exact cancel namespace/purpose, atomic Ticket-incident closure, and external-flat unavailable Review are deployed in the active Kernel |
-| Current live acceptance | One BNBUSDT long Ticket `ticket:f48f00ecbf90c8ce8335229b42a66cb7` is `position_protected`; its active Budget Reservation, position, Stop and TP1 are exact, with zero Incident and unresolved command |
-| Exchange postflight | Account is `independent_sides` and `cross`; all seven approved instruments are `5x`; one BNB long position domain has the exact full Stop and TP1 protection |
-| Short post-release observation | The protected handover completed at `8b8bddc8`; Lifecycle completed an exchange-fact maintenance read with `no_change`; three safety workers are active at zero restarts and Entry remains fenced pending fresh certification |
-| Full capability | `promote-full` not yet completed |
+| Deployment operability | New operation cannot skip clean rebuild on same revision; Batch is prepared before workers; pending Batch members override normal certification cadence; Promotion uses an allowlisted root control-plane runner while workers remain non-privileged |
+| Current live acceptance | Entry acceptance is armed and awaiting the first natural post-release Ticket; current Ticket, position, order, Command and Incident counts are zero |
+| Exchange postflight | Account is `independent_sides` and `cross`; all seven approved instruments are configured at `5x`; exchange has zero non-flat domain and zero open-order domain |
+| Short post-release observation | All four workers are active/enabled at zero restarts; release identity, Policy v2, Capability, six Universes, 42 Scopes and the seven-member Batch are exact |
+| Full capability | Acceptance authority is armed; `promote-full` remains pending one reviewed natural Ticket closure |
 
 ## Current Performance Snapshot
 
@@ -58,10 +59,10 @@ It verifies release stability, not a full host-capacity benchmark.
 
 | Area | Measured state | Contract interpretation |
 | --- | --- | --- |
-| Worker stability | Observation, Lifecycle and Reconciliation active; restart count zero; Entry disabled | Protected handover safety cadence is healthy while new ENTRY remains fenced |
-| Entry authority | Policy version `2`, command capability enabled, Entry fence present; fresh certification count is `0` | Entry promotion is correctly blocked by the official gate |
-| Internal truth | One protected Ticket and one active Budget Reservation; zero Exchange Command and open Incident | Existing exposure retains frozen lifecycle authority |
-| External truth | One BNB long position with exact Stop and TP1; seven instruments at `5x`, `cross`, independent sides | Protected-handover exchange gate passes |
+| Worker stability | Observation, Entry, Lifecycle and Reconciliation active/enabled; restart count zero | Persistent runtime cadence is healthy immediately after cutover |
+| Entry authority | Policy version `2`, `new_entry_submit_enabled=true`, command capability enabled, Entry fence absent | Official Promotion completed; normal in-scope ENTRY may proceed |
+| Internal truth | Zero Ticket, Budget Reservation, Exchange Command, unresolved outcome and open Incident | Clean runtime is ready for natural acceptance |
+| External truth | Zero position and open-order domain; seven instruments at `5x`, `cross`, independent sides | Flat postflight and exchange identity gates pass |
 | Scheduling | Four persistent services; no timer worker introduced | Matches persistent-worker contract |
 
 The snapshot source is readonly host, systemd, process, filesystem, and Docker
@@ -74,7 +75,7 @@ window; this short deployment observation does not replace it.
 
 | Order | Work | Exit condition |
 | ---: | --- | --- |
-| 1 | Protected lifecycle | A new natural acceptance Ticket reaches terminal state through the official Lifecycle worker |
+| 1 | Natural acceptance | A new in-scope signal creates one Ticket and protected position through the official Entry path |
 | 2 | External truth closure | Exchange is flat and has no residual ENTRY, protection, TP, EXIT, or cancel order |
 | 3 | Internal truth closure | Ticket terminal, budget released, Netting Domain released, Reconciliation matched |
 | 4 | Economics closure | Settlement and Review persist exact realized economics, including explicit funding availability |
@@ -89,8 +90,8 @@ stale or contradictory facts, same-domain occupancy, missing budget or Initial
 Stop, duplicate or unknown command outcome, schema/code mismatch, old-writer
 overlap, or official-path bypass.
 
-The rebuild is not complete merely because Tokyo is deployed or Observation is
-healthy. Completion requires one new natural acceptance Ticket, terminal
-flatness, no residual orders,
-released budget, successful Reconciliation, Settlement, Review, zero Incident,
-certified `promote-full`, and the final requirement audit.
+The production deployment and acceptance arming are complete. The broader
+rebuild program is not final until one new natural acceptance Ticket reaches
+terminal flatness with no residual orders, released budget, successful
+Reconciliation, Settlement, Review, zero Incident, certified `promote-full`,
+and the final requirement audit.
