@@ -81,10 +81,10 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
     assert "exchange_instrument_ids" not in CutoverPlan.model_fields
     assert CUTOVER_PHASES == (
         CutoverPhase.PLAN_IDENTITIES,
+        CutoverPhase.STAGE_EXACT_RELEASE,
         CutoverPhase.FENCE_EXCHANGE_WRITES,
         CutoverPhase.STOP_RUNTIME_WRITERS,
         CutoverPhase.VERIFY_FINAL_FLAT,
-        CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT,
         CutoverPhase.REBUILD_APPLICATION_SCHEMA,
         CutoverPhase.SEED_CURRENT_AUTHORITY,
         CutoverPhase.DEPLOY_EXACT_RELEASE,
@@ -114,6 +114,20 @@ async def test_plan_mode_is_side_effect_free() -> None:
     assert result.status == "pass"
     assert result.blockers == ()
     assert adapter.apply_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_stages_exact_release_before_target_release_preflight() -> None:
+    """The target release must exist before it can safely run its readonly probe."""
+
+    plan = _plan()
+    adapter = TargetReleaseStagingAdapter(_facts(plan))
+    journal = MemoryCutoverJournal()
+
+    result = await run_cutover(adapter, journal, plan, now_ms=1_000)
+
+    assert result.status == "completed"
+    assert adapter.apply_calls[0] is CutoverPhase.STAGE_EXACT_RELEASE
 
 
 @pytest.mark.parametrize(
@@ -177,7 +191,7 @@ def test_each_cutover_precondition_has_an_exact_blocker(
 
 
 @pytest.mark.asyncio
-async def test_final_verification_blocks_before_snapshot_or_schema_destruction() -> None:
+async def test_final_verification_blocks_before_schema_destruction() -> None:
     plan = _plan()
     adapter = FakeCutoverAdapter(
         _facts(plan),
@@ -188,7 +202,6 @@ async def test_final_verification_blocks_before_snapshot_or_schema_destruction()
     with pytest.raises(CutoverBlocked, match="open_orders_present"):
         await run_cutover(adapter, journal, plan, now_ms=1_000)
 
-    assert CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT not in adapter.apply_calls
     assert CutoverPhase.REBUILD_APPLICATION_SCHEMA not in adapter.apply_calls
 
 
@@ -199,7 +212,7 @@ async def test_interrupted_apply_resumes_at_first_unverified_phase(
     plan = _plan()
     adapter = FakeCutoverAdapter(
         _facts(plan),
-        fail_after_effect_once=CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT,
+        fail_after_effect_once=CutoverPhase.FENCE_EXCHANGE_WRITES,
     )
     journal = PostgresCutoverJournal(journal_database_url)
     try:
@@ -209,7 +222,7 @@ async def test_interrupted_apply_resumes_at_first_unverified_phase(
         failed = await journal.load_snapshot(plan.cutover_id)
         assert failed is not None
         assert failed.run_status == "running"
-        assert failed.phase_status(CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT) == "failed"
+        assert failed.phase_status(CutoverPhase.FENCE_EXCHANGE_WRITES) == "failed"
 
         completed = await run_cutover(adapter, journal, plan, now_ms=2_000)
         snapshot = await journal.load_snapshot(plan.cutover_id)
@@ -221,9 +234,7 @@ async def test_interrupted_apply_resumes_at_first_unverified_phase(
     assert snapshot is not None
     assert snapshot.run_status == "completed"
     assert all(record.status == "completed" for record in snapshot.phases)
-    assert adapter.apply_calls.count(
-        CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT
-    ) == 1
+    assert adapter.apply_calls.count(CutoverPhase.FENCE_EXCHANGE_WRITES) == 1
     assert adapter.apply_calls.count(CutoverPhase.REBUILD_APPLICATION_SCHEMA) == 1
 
 
@@ -600,6 +611,15 @@ class FakeCutoverAdapter:
         return phase in self.satisfied
 
 
+class TargetReleaseStagingAdapter(FakeCutoverAdapter):
+    """Model target-release preflight, which is unavailable until staging completes."""
+
+    async def inspect_preconditions(self, plan: CutoverPlan) -> CutoverFacts:
+        if CutoverPhase.STAGE_EXACT_RELEASE not in self.satisfied:
+            raise RuntimeError("target release is not staged")
+        return await super().inspect_preconditions(plan)
+
+
 class MemoryCutoverJournal:
     def __init__(self) -> None:
         self.identities: tuple[str, ...] | None = None
@@ -679,6 +699,7 @@ class LocalPostgresCutoverAdapter:
         self.engine: AsyncEngine = create_async_engine(database_url)
         self.writes_fenced = False
         self.runtime_writers: tuple[str, ...] = ("runtime-writer",)
+        self.release_staged = False
         self.release_deployed = False
         self.readonly_certified = False
         self.observation_enabled = False
@@ -701,18 +722,8 @@ class LocalPostgresCutoverAdapter:
             self.writes_fenced = True
         elif phase is CutoverPhase.STOP_RUNTIME_WRITERS:
             self.runtime_writers = ()
-        elif phase is CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT:
-            async with self.engine.begin() as connection:
-                await connection.execute(
-                    text("CREATE SCHEMA IF NOT EXISTS brc_cutover_backup_test")
-                )
-                await connection.execute(
-                    text(
-                        "CREATE TABLE IF NOT EXISTS "
-                        "brc_cutover_backup_test.legacy_execution_path AS "
-                        "SELECT * FROM public.legacy_execution_path"
-                    )
-                )
+        elif phase is CutoverPhase.STAGE_EXACT_RELEASE:
+            self.release_staged = True
         elif phase is CutoverPhase.REBUILD_APPLICATION_SCHEMA:
             async with self.engine.begin() as connection:
                 await connection.execute(text("DROP SCHEMA public CASCADE"))
@@ -753,10 +764,8 @@ class LocalPostgresCutoverAdapter:
             return self.writes_fenced
         if phase is CutoverPhase.STOP_RUNTIME_WRITERS:
             return not self.runtime_writers
-        if phase is CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT:
-            return await self._relation_exists(
-                "brc_cutover_backup_test.legacy_execution_path"
-            )
+        if phase is CutoverPhase.STAGE_EXACT_RELEASE:
+            return self.release_staged
         if phase is CutoverPhase.REBUILD_APPLICATION_SCHEMA:
             return (
                 await self._relation_exists("public.brc_trade_tickets")

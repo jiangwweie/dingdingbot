@@ -3,7 +3,7 @@ title: StrategyUniverse Operability Structural Repair Test Cases
 status: OWNER_APPROVED_FOR_IMPLEMENTATION
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-29
-revision: 1
+revision: 2
 design: 2026-07-29-strategy-universe-operability-repair-design.md
 deployment_plan: ../plans/2026-07-29-strategy-universe-stop-rebuild-deployment-plan.md
 ---
@@ -336,6 +336,15 @@ PERF-009 不使用真实 wall-clock 基准作为唯一判断；主要断言每 S
 8. REH-* 本地生产形状演练；
 9. PERF-*、ARC-*；
 10. TOK-* 只读现场核对。
+
+### Cutover 发布顺序回归
+
+| ID | 场景 | 必须断言 | 禁止结果 |
+| --- | --- | --- | --- |
+| TOK-CUT-001 | target release 初始不存在 | `STAGE_EXACT_RELEASE` 在其 readonly preflight 前完成并写 exact identity marker | 预检先访问不存在的 release |
+| TOK-CUT-002 | 旧 `0003` schema 仍在 | preflight 使用 committed seven-instrument cutover manifest | 使用新 DB-derived Universe query 预检旧 schema |
+| TOK-CUT-003 | operator 试图指定单个 instrument | parser 拒绝，不存在可缩小范围参数 | 以不完整交易范围获得 flat pass |
+| TOK-CUT-004 | release id 与 SHA 前 12 位不符 | stage 拒绝 | 任意目录接收 Git archive |
 
 ## 本地验证命令
 

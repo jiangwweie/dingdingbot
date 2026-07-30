@@ -521,6 +521,36 @@ async def test_readonly_probe_reports_only_bounded_identity_and_counts(
     assert "credential" not in rendered.lower()
 
 
+def test_cutover_probe_manifest_is_fixed_to_the_committed_first_batch() -> None:
+    probe_module = importlib.import_module(
+        "scripts.trading_kernel.probe_production_runtime"
+    )
+
+    manifest = probe_module.load_cutover_first_batch_probe_manifest()
+
+    assert manifest == (
+        "binance-usdm:ADAUSDT:perpetual",
+        "binance-usdm:BNBUSDT:perpetual",
+        "binance-usdm:BTCUSDT:perpetual",
+        "binance-usdm:DOGEUSDT:perpetual",
+        "binance-usdm:ETHUSDT:perpetual",
+        "binance-usdm:SOLUSDT:perpetual",
+        "binance-usdm:XRPUSDT:perpetual",
+    )
+
+
+def test_cutover_probe_scope_has_no_operator_supplied_instrument_argument() -> None:
+    probe_module = importlib.import_module(
+        "scripts.trading_kernel.probe_production_runtime"
+    )
+
+    parser = probe_module._parser()
+
+    assert parser.parse_args(["--cutover-first-batch"]).cutover_first_batch is True
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--exchange-instrument-id", "binance-usdm:BTCUSDT:perpetual"])
+
+
 @pytest.mark.asyncio
 async def test_readonly_probe_verifies_each_protected_ticket_against_exact_exchange_facts(
     monkeypatch: pytest.MonkeyPatch,

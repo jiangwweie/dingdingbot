@@ -3,7 +3,7 @@ title: StrategyUniverse Stop-and-Rebuild Tokyo Deployment Plan
 status: OWNER_APPROVED_DESIGN_EXECUTION_BLOCKED_UNTIL_IMPLEMENTED
 authority: NOT_CURRENT_AUTHORITY
 date: 2026-07-29
-revision: 1
+revision: 2
 design: ../specs/2026-07-29-strategy-universe-operability-repair-design.md
 test_spec: ../specs/2026-07-29-strategy-universe-operability-repair-test-cases.md
 ---
@@ -151,6 +151,18 @@ binance-usdm:ADAUSDT:perpetual
 7. Stage release 到新的、与 Commit 前 12 位绑定的目录。
 
 该阶段不连接交易所写接口，不修改东京 current release。
+
+### Cutover 状态机顺序
+
+`STAGE_EXACT_RELEASE` 是唯一允许在 action-time 预检之前执行的东京变更。它只做
+本地 **Git commit archive** 到固定 release 目录的上传，并立即写入与计划一致的
+`runtime_commit`、`schema_revision`、`seed_identity` marker；不改 current symlink、
+systemd、数据库、账户或交易所。
+
+随后才由该 staged release 执行预检。旧 `0003` 数据库尚没有新 Universe 结构，故
+预检的交易所范围使用提交内固定的七币首批 manifest；该模式没有操作员传入或缩小
+instrument 列表的参数。新 schema 完成并安装 Universe 后，常规 probe 恢复从
+PostgreSQL current scope 派生完整 manifest。
 
 ## 阶段 1：Action-time 只读确认
 

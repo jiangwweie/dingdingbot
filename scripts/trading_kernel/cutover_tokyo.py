@@ -42,7 +42,7 @@ class CutoverPhase(StrEnum):
     FENCE_EXCHANGE_WRITES = "fence_exchange_writes"
     STOP_RUNTIME_WRITERS = "stop_runtime_writers"
     VERIFY_FINAL_FLAT = "verify_final_flat"
-    CREATE_SHORT_LIVED_SNAPSHOT = "create_short_lived_snapshot"
+    STAGE_EXACT_RELEASE = "stage_exact_release"
     REBUILD_APPLICATION_SCHEMA = "rebuild_application_schema"
     SEED_CURRENT_AUTHORITY = "seed_current_authority"
     DEPLOY_EXACT_RELEASE = "deploy_exact_release"
@@ -54,10 +54,10 @@ class CutoverPhase(StrEnum):
 
 CUTOVER_PHASES = (
     CutoverPhase.PLAN_IDENTITIES,
+    CutoverPhase.STAGE_EXACT_RELEASE,
     CutoverPhase.FENCE_EXCHANGE_WRITES,
     CutoverPhase.STOP_RUNTIME_WRITERS,
     CutoverPhase.VERIFY_FINAL_FLAT,
-    CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT,
     CutoverPhase.REBUILD_APPLICATION_SCHEMA,
     CutoverPhase.SEED_CURRENT_AUTHORITY,
     CutoverPhase.DEPLOY_EXACT_RELEASE,
@@ -630,6 +630,12 @@ async def run_cutover(
                 destructive_started = True
                 break
         if not destructive_started:
+            await _stage_release_before_preflight(
+                adapter,
+                journal,
+                plan,
+                now_ms=now_ms,
+            )
             initial = await plan_cutover(adapter, plan)
             if initial.blockers:
                 raise CutoverBlocked(
@@ -715,6 +721,51 @@ async def run_cutover(
         cutover_id=plan.cutover_id,
         completed_phases=CUTOVER_PHASES,
     )
+
+
+async def _stage_release_before_preflight(
+    adapter: CutoverAdapter,
+    journal: CutoverJournal,
+    plan: CutoverPlan,
+    *,
+    now_ms: int,
+) -> None:
+    """Stage the exact committed code before its readonly preflight can run."""
+
+    phase = CutoverPhase.STAGE_EXACT_RELEASE
+    phase_order = CUTOVER_PHASES.index(phase) + 1
+    if await journal.phase_status(plan.cutover_id, phase) == "completed":
+        if await adapter.phase_satisfied(phase, plan):
+            return
+    elif await adapter.phase_satisfied(phase, plan):
+        await journal.mark_phase_started(
+            plan.cutover_id,
+            phase,
+            phase_order=phase_order,
+            now_ms=now_ms,
+        )
+        await journal.mark_phase_completed(plan.cutover_id, phase, now_ms=now_ms)
+        return
+
+    await journal.mark_phase_started(
+        plan.cutover_id,
+        phase,
+        phase_order=phase_order,
+        now_ms=now_ms,
+    )
+    try:
+        await adapter.apply_phase(phase, plan)
+        if not await adapter.phase_satisfied(phase, plan):
+            raise RuntimeError(f"cutover postcondition failed: {phase.value}")
+    except Exception as exc:
+        await journal.mark_phase_failed(
+            plan.cutover_id,
+            phase,
+            error=str(exc),
+            now_ms=now_ms,
+        )
+        raise
+    await journal.mark_phase_completed(plan.cutover_id, phase, now_ms=now_ms)
 
 
 async def _run_final_verification(

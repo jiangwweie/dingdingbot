@@ -89,6 +89,101 @@ async def test_cutover_phase_actions_preserve_entry_fence_and_runtime_workers() 
 
 
 @pytest.mark.asyncio
+async def test_exact_release_is_staged_before_destructive_rebuild_and_activation() -> None:
+    module = _production_adapter_module()
+    system = FakeTokyoSystem(module, _facts())
+    adapter = module.TokyoCutoverAdapter(system)
+    plan = _plan()
+    await adapter.inspect_preconditions(plan)
+
+    await adapter.apply_phase(CutoverPhase.STAGE_EXACT_RELEASE, plan)
+
+    assert system.actions == [("stage_exact_release", ())]
+
+    await adapter.apply_phase(CutoverPhase.DEPLOY_EXACT_RELEASE, plan)
+
+    assert system.actions == [("stage_exact_release", ()), ("activate_release", ())]
+
+
+@pytest.mark.asyncio
+async def test_staged_release_receives_exact_plan_identity_markers() -> None:
+    module = _production_adapter_module()
+    runner = RecordingRunner(module)
+    system = module.SshTokyoSystem(runner)
+    plan = _plan()
+
+    await system.stage_exact_release(plan)
+
+    assert runner.archives == [
+        (
+            module.REPO_ROOT,
+            plan.target_commit,
+            module._release_path(plan),
+        )
+    ]
+    writes = [command[-2:] for command in runner.commands if command[:3] == ("sudo", "python3", "-c")]
+    assert writes == [
+        (str(module._release_path(plan) / ".brc-runtime-commit"), plan.target_commit),
+        (str(module._release_path(plan) / ".brc-schema-revision"), plan.target_schema_revision),
+        (str(module._release_path(plan) / ".brc-seed-identity"), plan.target_seed_identity),
+        (str(module._release_path(plan) / ".brc-staged-commit"), plan.target_commit),
+    ]
+
+
+def test_target_release_path_must_derive_from_the_exact_commit() -> None:
+    module = _production_adapter_module()
+    plan = _plan().model_copy(update={"target_release_id": "brc-trading-kernel-wrong"})
+
+    with pytest.raises(ValueError, match="derive from exact commit"):
+        module._release_path(plan)
+
+
+@pytest.mark.asyncio
+async def test_staged_release_requires_all_exact_identity_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _production_adapter_module()
+    plan = _plan()
+
+    class StageMarkerRunner(RecordingRunner):
+        async def run(
+            self,
+            argv: tuple[str, ...],
+            *,
+            check: bool = True,
+        ) -> object:
+            if argv[:3] == ("sudo", "cat", str(module._release_path(plan) / ".brc-staged-commit")):
+                return self.module._RemoteResult(
+                    returncode=0,
+                    stdout=plan.target_commit,
+                    stderr="",
+                )
+            return await super().run(argv, check=check)
+
+    system = module.SshTokyoSystem(StageMarkerRunner(module))
+
+    async def exact_manifest(release) -> dict[str, str]:
+        del release
+        return {
+            "runtime_commit": plan.target_commit,
+            "schema_revision": plan.target_schema_revision,
+            "seed_identity": plan.target_seed_identity,
+        }
+
+    monkeypatch.setattr(system, "_release_manifest", exact_manifest)
+
+    assert await system._release_is_staged(module._release_path(plan), plan) is True
+
+    async def wrong_manifest(release) -> dict[str, str]:
+        del release
+        return {"runtime_commit": plan.target_commit}
+
+    monkeypatch.setattr(system, "_release_manifest", wrong_manifest)
+
+    assert await system._release_is_staged(module._release_path(plan), plan) is False
+
+
+@pytest.mark.asyncio
 async def test_initial_file_fence_does_not_require_old_database_capability_freeze() -> None:
     module = _production_adapter_module()
     system = FakeTokyoSystem(module, _facts())
@@ -375,7 +470,12 @@ async def test_preconditions_probe_uses_exact_cutover_instrument_authority(
 
     await system.inspect_preconditions(plan, old_units=frozenset(), new_units=frozenset())
 
-    assert probe_calls == [("scripts/trading_kernel/probe_production_runtime.py",)]
+    assert probe_calls == [
+        (
+            "scripts/trading_kernel/probe_production_runtime.py",
+            "--cutover-first-batch",
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -553,6 +653,7 @@ class RecordingRunner:
     def __init__(self, module: ModuleType) -> None:
         self.module = module
         self.commands: list[tuple[str, ...]] = []
+        self.archives: list[tuple[object, str, object]] = []
 
     async def run(
         self,
@@ -563,6 +664,15 @@ class RecordingRunner:
         del check
         self.commands.append(argv)
         return self.module._RemoteResult(returncode=0, stdout="", stderr="")
+
+    async def upload_git_archive(
+        self,
+        *,
+        repo_root: object,
+        commit: str,
+        destination: object,
+    ) -> None:
+        self.archives.append((repo_root, commit, destination))
 
 
 class FakeTokyoSystem:
@@ -631,13 +741,6 @@ class FakeTokyoSystem:
             update={"runtime_writers_stopped": True}
         )
 
-    async def create_snapshot(self, plan: CutoverPlan) -> None:
-        del plan
-        self.actions.append(("create_snapshot", ()))
-        self.phase_state = self.phase_state.model_copy(
-            update={"snapshot_exists": True}
-        )
-
     async def create_target_database(self, plan: CutoverPlan) -> None:
         del plan
         self.actions.append(("create_target_database", ()))
@@ -650,6 +753,13 @@ class FakeTokyoSystem:
         self.actions.append(("seed_target_authority", ()))
         self.phase_state = self.phase_state.model_copy(
             update={"seed_identity_matches": True}
+        )
+
+    async def stage_exact_release(self, plan: CutoverPlan) -> None:
+        del plan
+        self.actions.append(("stage_exact_release", ()))
+        self.phase_state = self.phase_state.model_copy(
+            update={"release_staged": True}
         )
 
     async def activate_release(self, plan: CutoverPlan) -> None:

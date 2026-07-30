@@ -28,6 +28,10 @@ from src.trading_kernel.application.read_strategy_universe_status import (
     StrategyUniverseStatusRequest,
     read_strategy_universe_status,
 )
+from src.trading_kernel.application.strategy_universe_batch_manifest import (
+    APPROVED_FIRST_BATCH_INSTRUMENT_IDS,
+    APPROVED_UNIVERSE_EVENT_ORDER,
+)
 from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
@@ -35,20 +39,8 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
 
-EVENT_ORDER = (
-    "CPM-LONG",
-    "MPG-LONG",
-    "MI-LONG",
-    "SOR-LONG",
-    "SOR-SHORT",
-    "BRF2-SHORT",
-)
-INITIAL_MEMBERS = tuple(
-    sorted(
-        f"binance-usdm:{symbol}USDT:perpetual"
-        for symbol in ("BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA")
-    )
-)
+EVENT_ORDER = APPROVED_UNIVERSE_EVENT_ORDER
+INITIAL_MEMBERS = APPROVED_FIRST_BATCH_INSTRUMENT_IDS
 
 
 class BootstrapBlocked(RuntimeError):

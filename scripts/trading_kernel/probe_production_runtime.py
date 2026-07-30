@@ -30,6 +30,9 @@ from src.trading_kernel.application.runtime_facts import (
     EntryFactsSource,
     InstrumentRulesRequest,
 )
+from src.trading_kernel.application.strategy_universe_batch_manifest import (
+    APPROVED_FIRST_BATCH_INSTRUMENT_IDS,
+)
 from src.trading_kernel.domain.cross_margin_stress import AccountRiskPosition
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionOrder,
@@ -105,6 +108,14 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Exact readonly protected Ticket manifest row from certification.",
+    )
+    parser.add_argument(
+        "--cutover-first-batch",
+        action="store_true",
+        help=(
+            "Probe the committed seven-instrument first batch before the "
+            "replacement schema exists. This scope cannot be operator-supplied."
+        ),
     )
     return parser
 
@@ -246,6 +257,17 @@ async def load_database_probe_manifest(
     return _canonical_active_universe_instrument_ids(tuple(str(row) for row in rows))
 
 
+def load_cutover_first_batch_probe_manifest() -> tuple[str, ...]:
+    """Return the fixed approved scope needed before the replacement schema exists."""
+
+    instruments = _canonical_active_universe_instrument_ids(
+        APPROVED_FIRST_BATCH_INSTRUMENT_IDS
+    )
+    if len(instruments) != 7 or any("AVAX" in instrument for instrument in instruments):
+        raise RuntimeError("committed first-batch cutover manifest is invalid")
+    return instruments
+
+
 def _canonical_active_universe_instrument_ids(
     exchange_instrument_ids: tuple[str, ...],
 ) -> tuple[str, ...]:
@@ -374,8 +396,12 @@ async def _run(args: argparse.Namespace) -> int:
             settings,
             now_ms=args.now_ms or int(time.time() * 1_000),
             validity_ms=args.validity_ms,
-            exchange_instrument_ids=await load_database_probe_manifest(
-                os.getenv("TRADING_KERNEL_DATABASE_URL", "")
+            exchange_instrument_ids=(
+                load_cutover_first_batch_probe_manifest()
+                if args.cutover_first_batch
+                else await load_database_probe_manifest(
+                    os.getenv("TRADING_KERNEL_DATABASE_URL", "")
+                )
             ),
             expected_protected_tickets=expected_protected_tickets,
         )

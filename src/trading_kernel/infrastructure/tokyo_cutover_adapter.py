@@ -6,9 +6,10 @@ import asyncio
 import json
 import os
 import shlex
+import subprocess
 from collections.abc import Mapping
 from hashlib import sha256
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -46,6 +47,7 @@ CURRENT_RELEASE = PurePosixPath("/opt/brc/current")
 TARGET_DATABASE_CONTAINER = "brc-trading-kernel-pg"
 TARGET_DATABASE_USER = "brc_kernel"
 TARGET_DATABASE_NAME = "brc_trading_kernel"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class TokyoInspection(BaseModel):
@@ -68,9 +70,9 @@ class TokyoPhaseState(BaseModel):
 
     exchange_writes_fenced: bool = False
     runtime_writers_stopped: bool = False
-    snapshot_exists: bool = False
     target_schema_ready: bool = False
     seed_identity_matches: bool = False
+    release_staged: bool = False
     release_active: bool = False
     readonly_certified: bool = False
     observation_enabled: bool = False
@@ -111,11 +113,11 @@ class TokyoSystem(Protocol):
         units: tuple[str, ...],
     ) -> None: ...
 
-    async def create_snapshot(self, plan: CutoverPlan) -> None: ...
-
     async def create_target_database(self, plan: CutoverPlan) -> None: ...
 
     async def seed_target_authority(self, plan: CutoverPlan) -> None: ...
+
+    async def stage_exact_release(self, plan: CutoverPlan) -> None: ...
 
     async def activate_release(self, plan: CutoverPlan) -> None: ...
 
@@ -161,8 +163,9 @@ class TokyoCutoverAdapter:
         )
 
     async def apply_phase(self, phase: CutoverPhase, plan: CutoverPlan) -> None:
-        await self._require_non_quant_baseline(plan)
         phase_value = phase.value
+        if phase_value != CutoverPhase.STAGE_EXACT_RELEASE.value:
+            await self._require_non_quant_baseline(plan)
         if phase_value == CutoverPhase.FENCE_EXCHANGE_WRITES.value:
             if await self.system.read_persisted_non_quant_baseline(plan) is None:
                 baseline = self._non_quant_baseline
@@ -175,12 +178,12 @@ class TokyoCutoverAdapter:
                 plan,
                 tuple(sorted(EXPECTED_NEW_BRC_WRITER_UNITS)),
             )
-        elif phase_value == CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT.value:
-            await self.system.create_snapshot(plan)
         elif phase_value == CutoverPhase.REBUILD_APPLICATION_SCHEMA.value:
             await self.system.create_target_database(plan)
         elif phase_value == CutoverPhase.SEED_CURRENT_AUTHORITY.value:
             await self.system.seed_target_authority(plan)
+        elif phase_value == CutoverPhase.STAGE_EXACT_RELEASE.value:
+            await self.system.stage_exact_release(plan)
         elif phase_value == CutoverPhase.DEPLOY_EXACT_RELEASE.value:
             await self.system.activate_release(plan)
         elif phase_value == CutoverPhase.CERTIFY_SCHEMA_AND_READONLY.value:
@@ -199,7 +202,8 @@ class TokyoCutoverAdapter:
         phase: CutoverPhase,
         plan: CutoverPlan,
     ) -> bool:
-        await self._require_non_quant_baseline(plan)
+        if phase.value != CutoverPhase.STAGE_EXACT_RELEASE.value:
+            await self._require_non_quant_baseline(plan)
         state = await self.system.inspect_phase_state(plan)
         phase_value = phase.value
         if phase_value == CutoverPhase.FENCE_EXCHANGE_WRITES.value:
@@ -209,12 +213,12 @@ class TokyoCutoverAdapter:
             )
         if phase_value == CutoverPhase.STOP_RUNTIME_WRITERS.value:
             return state.runtime_writers_stopped
-        if phase_value == CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT.value:
-            return state.snapshot_exists
         if phase_value == CutoverPhase.REBUILD_APPLICATION_SCHEMA.value:
             return state.target_schema_ready
         if phase_value == CutoverPhase.SEED_CURRENT_AUTHORITY.value:
             return state.seed_identity_matches
+        if phase_value == CutoverPhase.STAGE_EXACT_RELEASE.value:
+            return state.release_staged
         if phase_value == CutoverPhase.DEPLOY_EXACT_RELEASE.value:
             return state.release_active
         if phase_value == CutoverPhase.CERTIFY_SCHEMA_AND_READONLY.value:
@@ -307,6 +311,65 @@ class SshCommandRunner:
             )
         return result
 
+    async def upload_git_archive(
+        self,
+        *,
+        repo_root: Path,
+        commit: str,
+        destination: PurePosixPath,
+    ) -> None:
+        await asyncio.to_thread(
+            self._upload_git_archive,
+            repo_root,
+            commit,
+            destination,
+        )
+
+    def _upload_git_archive(
+        self,
+        repo_root: Path,
+        commit: str,
+        destination: PurePosixPath,
+    ) -> None:
+        archive = subprocess.Popen(
+            ("git", "archive", "--format=tar", commit),
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if archive.stdout is None:
+            raise RuntimeError("git archive stdout pipe is unavailable")
+        remote_command = shlex.join(
+            ("sudo", "tar", "-xf", "-", "-C", str(destination))
+        )
+        ssh = subprocess.Popen(
+            (
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                self._target,
+                "--",
+                remote_command,
+            ),
+            stdin=archive.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        archive.stdout.close()
+        _stdout, ssh_stderr = ssh.communicate(
+            timeout=max(self._timeout_seconds, 120),
+        )
+        archive_stderr = archive.stderr.read() if archive.stderr else b""
+        archive_returncode = archive.wait()
+        if archive_returncode != 0 or ssh.returncode != 0:
+            detail = (archive_stderr + ssh_stderr)[-2_000:].decode(
+                "utf-8",
+                errors="replace",
+            )
+            raise RuntimeError(f"release archive upload failed: {detail}")
+
 
 class SshTokyoSystem:
     """Production SSH implementation; every mutation target is a fixed constant."""
@@ -326,6 +389,7 @@ class SshTokyoSystem:
         probe = await self._release_json(
             release,
             "scripts/trading_kernel/probe_production_runtime.py",
+            "--cutover-first-batch",
         )
         current_counts = await self._current_kernel_counts()
         active_new = await self._active_units(new_units)
@@ -379,11 +443,11 @@ class SshTokyoSystem:
             runtime_writers_stopped=await self._units_stopped_and_disabled(
                 EXPECTED_NEW_BRC_WRITER_UNITS
             ),
-            snapshot_exists=await self._path_exists(_snapshot_path(plan)),
             target_schema_ready=await self._target_schema_ready(release),
             seed_identity_matches=(
                 await self._target_authority_identity_matches(plan)
             ),
+            release_staged=await self._release_is_staged(release, plan),
             release_active=(await self._readlink(CURRENT_RELEASE)) == str(release),
             readonly_certified=await self._readonly_certified(release, plan),
             observation_enabled=all(
@@ -487,50 +551,6 @@ class SshTokyoSystem:
                 check=False,
             )
 
-    async def create_snapshot(self, plan: CutoverPlan) -> None:
-        snapshot = _snapshot_path(plan)
-        container_snapshot = f"/tmp/{plan.cutover_id}.pgdump"
-        await self._runner.run(
-            ("sudo", "install", "-d", "-m", "0700", str(snapshot.parent))
-        )
-        await self._runner.run(
-            (
-                "sudo",
-                "docker",
-                "exec",
-                TARGET_DATABASE_CONTAINER,
-                "pg_dump",
-                "-U",
-                TARGET_DATABASE_USER,
-                "-d",
-                TARGET_DATABASE_NAME,
-                "-Fc",
-                "-f",
-                container_snapshot,
-            )
-        )
-        await self._runner.run(
-            (
-                "sudo",
-                "docker",
-                "cp",
-                f"{TARGET_DATABASE_CONTAINER}:{container_snapshot}",
-                str(snapshot),
-            )
-        )
-        await self._runner.run(
-            (
-                "sudo",
-                "docker",
-                "exec",
-                TARGET_DATABASE_CONTAINER,
-                "rm",
-                "-f",
-                container_snapshot,
-            )
-        )
-        await self._runner.run(("sudo", "chmod", "0600", str(snapshot)))
-
     async def create_target_database(self, plan: CutoverPlan) -> None:
         release = _release_path(plan)
         await self._runner.run(
@@ -574,8 +594,38 @@ class SshTokyoSystem:
         if payload.get("runtime_seed_semantic_hash") != plan.target_seed_identity:
             raise RuntimeError("runtime authority seed identity differs from plan")
 
+    async def stage_exact_release(self, plan: CutoverPlan) -> None:
+        release = _release_path(plan)
+        await self._runner.run(("sudo", "rm", "-rf", str(release)))
+        await self._runner.run(
+            (
+                "sudo",
+                "install",
+                "-d",
+                "-o",
+                "brc",
+                "-g",
+                "brc",
+                "-m",
+                "0755",
+                str(release),
+            )
+        )
+        await self._runner.upload_git_archive(
+            repo_root=REPO_ROOT,
+            commit=plan.target_commit,
+            destination=release,
+        )
+        await self._runner.run(
+            ("sudo", "cp", "-a", f"{CURRENT_RELEASE}/.venv", f"{release}/.venv")
+        )
+        await self._write_release_identity_markers(release, plan)
+        await self._runner.run(("sudo", "chown", "-R", "brc:brc", str(release)))
+
     async def activate_release(self, plan: CutoverPlan) -> None:
         release = _release_path(plan)
+        manifest = await self._release_manifest(release)
+        _require_runtime_identity(manifest, plan)
         await self._install_runtime_identity(plan)
         for unit in sorted(EXPECTED_NEW_BRC_UNITS):
             await self._runner.run(
@@ -696,6 +746,31 @@ class SshTokyoSystem:
             if value.returncode == 0:
                 result[key] = value.stdout
         return result
+
+    async def _write_release_identity_markers(
+        self,
+        release: PurePosixPath,
+        plan: CutoverPlan,
+    ) -> None:
+        for filename, value in (
+            (".brc-runtime-commit", plan.target_commit),
+            (".brc-schema-revision", plan.target_schema_revision),
+            (".brc-seed-identity", plan.target_seed_identity),
+            (".brc-staged-commit", plan.target_commit),
+        ):
+            await self._runner.run(
+                (
+                    "sudo",
+                    "python3",
+                    "-c",
+                    (
+                        "from pathlib import Path; import sys; "
+                        "Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')"
+                    ),
+                    str(release / filename),
+                    value,
+                )
+            )
 
     async def _current_kernel_counts(self) -> dict[str, int]:
         queries = {
@@ -944,6 +1019,26 @@ class SshTokyoSystem:
         )
         return result.stdout if result.returncode == 0 else None
 
+    async def _release_is_staged(
+        self,
+        release: PurePosixPath,
+        plan: CutoverPlan,
+    ) -> bool:
+        marker = await self._runner.run(
+            ("sudo", "cat", str(release / ".brc-staged-commit")),
+            check=False,
+        )
+        if marker.returncode != 0 or marker.stdout != plan.target_commit:
+            return False
+        try:
+            _require_runtime_identity(
+                await self._release_manifest(release),
+                plan,
+            )
+        except RuntimeError:
+            return False
+        return True
+
     async def _container_running(self, container: str) -> bool:
         if container not in MUTABLE_CONTAINERS and container not in PROTECTED_CONTAINERS:
             raise RuntimeError("container inspection target is outside allowlist")
@@ -1006,8 +1101,9 @@ def build_tokyo_cutover_adapter() -> TokyoCutoverAdapter:
 
 
 def _release_path(plan: CutoverPlan) -> PurePosixPath:
-    if "/" in plan.target_release_id or ".." in plan.target_release_id:
-        raise ValueError("target release identity must not contain a path")
+    expected_release_id = f"brc-trading-kernel-{plan.target_commit[:12]}"
+    if plan.target_release_id != expected_release_id:
+        raise ValueError("target release identity must derive from exact commit")
     return RELEASE_ROOT / plan.target_release_id
 
 
@@ -1023,10 +1119,6 @@ def _require_runtime_identity(
     actual = {key: str(runtime_identity.get(key) or "") for key in expected}
     if actual != expected or set(runtime_identity) != set(expected):
         raise RuntimeError("readonly runtime identity differs from cutover plan")
-
-
-def _snapshot_path(plan: CutoverPlan) -> PurePosixPath:
-    return PurePosixPath("/opt/brc/cutover") / plan.cutover_id / "legacy-brc.pgdump"
 
 
 def _non_quant_baseline_path(plan: CutoverPlan) -> PurePosixPath:
