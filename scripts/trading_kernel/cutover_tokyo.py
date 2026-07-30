@@ -681,7 +681,14 @@ async def run_cutover(
                 )
                 continue
 
-            if await adapter.phase_satisfied(phase, plan):
+            operation_effect_required = (
+                phase is CutoverPhase.REBUILD_APPLICATION_SCHEMA
+                and status is None
+            )
+            if (
+                not operation_effect_required
+                and await adapter.phase_satisfied(phase, plan)
+            ):
                 if status != "completed":
                     await journal.mark_phase_started(
                         plan.cutover_id,

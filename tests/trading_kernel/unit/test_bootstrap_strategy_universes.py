@@ -36,3 +36,44 @@ def test_bootstrap_refuses_a_registry_that_no_longer_matches_the_fixed_batch(
 
     with pytest.raises(bootstrap.BootstrapBlocked, match="registry_event_manifest"):
         bootstrap._validate_static_manifest()
+
+
+def test_prepare_only_cli_creates_the_batch_without_running_full_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def prepare(
+        database_url: str,
+        *,
+        runtime_profile_id: str,
+        now_ms,
+    ) -> str:
+        assert now_ms() > 0
+        calls.append((database_url, runtime_profile_id))
+        return "certification-batch:test"
+
+    async def forbidden_bootstrap(*_args, **_kwargs):
+        raise AssertionError("full bootstrap must not run in prepare-only mode")
+
+    monkeypatch.setattr(bootstrap, "prepare_certification_batch", prepare)
+    monkeypatch.setattr(bootstrap, "bootstrap_strategy_universes", forbidden_bootstrap)
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            "postgresql+asyncpg://localhost/test",
+            "--runtime-profile-id",
+            "tiny-live-v1",
+            "--prepare-certification-batch-only",
+        ]
+    )
+
+    assert result == 0
+    assert calls == [
+        ("postgresql+asyncpg://localhost/test", "tiny-live-v1")
+    ]
+    assert capsys.readouterr().out.strip() == (
+        "status=prepared certification_batch_id=certification-batch:test"
+    )

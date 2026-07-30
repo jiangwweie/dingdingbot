@@ -135,6 +135,21 @@ async def test_apply_stages_exact_release_before_target_release_preflight() -> N
     assert adapter.apply_calls[0] is CutoverPhase.STAGE_EXACT_RELEASE
 
 
+@pytest.mark.asyncio
+async def test_new_operation_rebuilds_even_when_schema_postcondition_is_already_true() -> None:
+    """Schema health cannot impersonate this operation's destructive effect."""
+
+    plan = _plan(cutover_id="tokyo-kernel-same-revision-clean-rebuild")
+    adapter = FakeCutoverAdapter(_facts(plan))
+    adapter.satisfied.add(CutoverPhase.REBUILD_APPLICATION_SCHEMA)
+    journal = MemoryCutoverJournal()
+
+    result = await run_cutover(adapter, journal, plan, now_ms=1_000)
+
+    assert result.status == "completed"
+    assert adapter.apply_calls.count(CutoverPhase.REBUILD_APPLICATION_SCHEMA) == 1
+
+
 @pytest.mark.parametrize(
     ("change", "expected"),
     [

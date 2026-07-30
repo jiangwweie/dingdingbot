@@ -440,6 +440,29 @@ identity 和阶段。异常处理不得再无条件启动同一组 services：sc
 worker；target identity 未完成时不能启动 Lifecycle；Entry 在任何不确定状态下必须
 inactive/disabled/fenced。
 
+### 10.3 Operation-owned rebuild 与 Batch-before-worker
+
+`REBUILD_APPLICATION_SCHEMA` 是 **Cutover operation-owned effect**，不能仅因当前 schema
+已经通过同 revision 的结构检查就判定本次阶段完成：
+
+1. 新 `cutover_id` 的 journal 尚无该阶段记录时，必须执行一次 clean rebuild；
+2. 同一 `cutover_id` 已进入该阶段后发生中断，才允许使用 schema postcondition 判断 effect
+   是否已经完成并避免重复删除；
+3. schema health 证明“当前结构可用”，不能替代“本次 operation 已执行 destructive effect”
+   的 journal 事实。
+
+Certification Batch 必须在 Reconciliation 启动前创建：
+
+1. seed 完成后先安装第一个 exact Warming Universe，使 approved instruments 成为数据库
+   事实；
+2. 在 worker 尚未启动时创建 exact pending Batch；
+3. Batch identity 必须绑定 target commit/schema/seed、Policy version 和 manifest；
+4. 随后才启动 Observation、Reconciliation；
+5. Reconciliation 第一轮成员认证必须直接写入该 Batch；
+6. Universe bootstrap 复用第一个 Warming Universe 与 pending Batch，完成六个 Universe
+   Active 与 Batch complete；
+7. 禁止通过等待既有 certification 过期来补齐 Batch 成员。
+
 ## 11. Performance 与可观测性
 
 ### 11.1 必须观测的指标

@@ -49,6 +49,34 @@ def test_readonly_cutover_starts_observation_and_reconciliation_only() -> None:
 
 
 @pytest.mark.asyncio
+async def test_certification_batch_is_prepared_before_readonly_workers_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _production_adapter_module()
+    runner = RecordingRunner(module)
+    system = module.SshTokyoSystem(runner)
+    plan = _plan()
+
+    async def authority_disabled(**_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(system, "_require_entry_authority_disabled", authority_disabled)
+
+    await system.start_readonly_workers(plan)
+
+    prepare_command = runner.commands[0]
+    assert "bootstrap_strategy_universes.py" in prepare_command[-1]
+    assert "--prepare-certification-batch-only" in prepare_command[-1]
+    systemctl_indexes = [
+        index
+        for index, command in enumerate(runner.commands)
+        if "systemctl" in command
+    ]
+    assert systemctl_indexes
+    assert min(systemctl_indexes) > 0
+
+
+@pytest.mark.asyncio
 async def test_non_quant_baseline_drift_blocks_every_mutating_phase() -> None:
     module = _production_adapter_module()
     system = FakeTokyoSystem(module, _facts())

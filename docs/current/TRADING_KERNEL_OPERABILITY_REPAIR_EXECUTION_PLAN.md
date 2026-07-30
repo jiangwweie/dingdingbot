@@ -665,15 +665,18 @@ python3 scripts/trading_kernel/cutover_tokyo.py \
 1. **STAGED**：上传 committed release，校验 markers；
 2. **QUIESCED**：touch Entry fence，停止四 workers，确认无进程；
 3. **FINAL_FLAT**：在 writers 全停后再次读取 PostgreSQL/exchange flat facts；
-4. **REBUILD**：只删除 BRC application schema，保留 ops journal 与非 BRC 数据；
+4. **REBUILD**：新 operation 必须只删除并重建 BRC application schema，保留 ops journal
+   与非 BRC 数据；同 operation 中断恢复才可依据 postcondition 避免重复删除；
 5. **SEED**：安装唯一 baseline，seed Registry/Policy/Capability/runtime identity；
-6. **READONLY START**：启动 Observation 与 Reconciliation；
-7. **TARGET CERTIFIED**：完成 exact Certification Batch 与六 Universe Active pointers；
-8. **LIFECYCLE START**：启动 Lifecycle，执行 flat/no-residue smoke；
-9. **ENTRY FENCED START**：启动 Entry，确认 fence 仍存在且零 mutation；
-10. **FINAL POSTFLIGHT**：重验 commit/schema/seed/policy/batch/account/rules/flatness；
-11. **UNFENCE**：原子 arm authority 后移除 fence；
-12. **TAG/ROADMAP**：验证 immutable tag，并将瞬时证据写入 Main Control Roadmap。
+6. **BATCH PREPARE**：在任何 readonly worker 启动前安装第一个 exact Warming Universe，
+   并创建 exact pending Certification Batch；
+7. **READONLY START**：启动 Observation 与 Reconciliation，使第一轮认证直接归属该 Batch；
+8. **TARGET CERTIFIED**：完成 exact Certification Batch 与六 Universe Active pointers，禁止等待旧认证自然过期；
+9. **LIFECYCLE START**：启动 Lifecycle，执行 flat/no-residue smoke；
+10. **ENTRY FENCED START**：启动 Entry，确认 fence 仍存在且零 mutation；
+11. **FINAL POSTFLIGHT**：重验 commit/schema/seed/policy/batch/account/rules/flatness；
+12. **UNFENCE**：原子 arm authority 后移除 fence；
+13. **TAG/ROADMAP**：验证 immutable tag，并将瞬时证据写入 Main Control Roadmap。
 
 ### 14.6 超时与耗时边界
 

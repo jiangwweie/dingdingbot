@@ -15,6 +15,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+import scripts.trading_kernel.bootstrap_strategy_universes as bootstrap_module
 from scripts.trading_kernel.bootstrap_strategy_universes import (
     INITIAL_MEMBERS,
     BootstrapBlocked,
@@ -101,6 +102,75 @@ class VirtualClock:
     def advance(self, milliseconds: int = 1) -> int:
         self.now += milliseconds
         return self.now
+
+
+@pytest.mark.asyncio
+async def test_prepared_batch_collects_the_first_worker_certification_cycle() -> None:
+    """The exact Batch exists before workers can publish member evidence."""
+
+    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
+    assert SAFE_DATABASE.fullmatch(database_name)
+    admin = await asyncpg.connect(ADMIN_DSN)
+    engine: AsyncEngine | None = None
+    try:
+        await admin.execute(f'CREATE DATABASE "{database_name}"')
+        database_url = _database_url(database_name)
+        _run_alembic(database_url)
+        engine = create_async_engine(database_url)
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id="subaccount-batch-prepare-test",
+                    runtime_commit=RUNTIME_COMMIT,
+                    schema_revision=SCHEMA_REVISION,
+                    seeded_at_ms=NOW_MS - 10_000,
+                ),
+            )
+
+        clock = VirtualClock()
+        prepared_batch_id = await bootstrap_module.prepare_certification_batch(
+            database_url,
+            runtime_profile_id=RUNTIME_PROFILE_ID,
+            now_ms=clock.read,
+        )
+        market = RecordingWarmMarket()
+        certification = RecordingReadonlyCertificationSource(engine)
+
+        results = await bootstrap_strategy_universes(
+            database_url,
+            runtime_profile_id=RUNTIME_PROFILE_ID,
+            now_ms=clock.read,
+            wait_timeout_ms=60_000,
+            poll_interval_ms=1,
+            sleep=_worker_driving_sleep(
+                engine=engine,
+                clock=clock,
+                market=market,
+                certification=certification,
+            ),
+        )
+        completed_batches = await _completed_batch_rows(engine)
+        snapshot = await _snapshot(engine)
+
+        assert tuple(result.event_id for result in results) == tuple(
+            bootstrap_module.EVENT_ORDER
+        )
+        assert results[0].status == "already_warming"
+        assert tuple(result.status for result in results[1:]) == ("installed",) * 5
+        assert len(completed_batches) == 1
+        assert completed_batches[0][0] == prepared_batch_id
+        assert snapshot["active_versions"] == 6
+        assert snapshot["active_scopes"] == 42
+        assert snapshot["completed_certification_batches"] == 1
+        assert snapshot["eligible_certification_batch_members"] == 7
+        assert snapshot["tickets"] == 0
+        assert snapshot["commands"] == 0
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        await _drop_database(admin, database_name)
+        await admin.close()
 
 
 @pytest.mark.asyncio

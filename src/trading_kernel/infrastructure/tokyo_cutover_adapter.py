@@ -974,7 +974,15 @@ class SshTokyoSystem:
                 )
 
     async def start_readonly_workers(self, plan: CutoverPlan) -> None:
-        del plan
+        await self._require_entry_authority_disabled()
+        release = _release_path(plan)
+        await self._release_python(
+            release,
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            plan.runtime_profile_id,
+            "--prepare-certification-batch-only",
+        )
         for unit in READONLY_WORKERS:
             await self._runner.run(
                 ("sudo", "systemctl", "enable", "--now", unit)

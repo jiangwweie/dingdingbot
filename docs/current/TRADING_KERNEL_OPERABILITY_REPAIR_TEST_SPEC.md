@@ -479,3 +479,21 @@ Tokyo 只读检查必须重新获取：
 
 仅有“测试通过”而没有 production-shaped 场景、数据库证据和 exchange boundary 计数，不
 构成本规格的完成证据。
+
+## 14. Cutover 时序竞态回归
+
+### 14.1 Operation-owned clean rebuild
+
+必须证明：新 `cutover_id` 即使面对同 revision 且结构健康的 application schema，也会执行
+一次 `REBUILD_APPLICATION_SCHEMA`；同 operation 在 effect 已发生但 journal 未完成时恢复，
+则依赖 postcondition 收敛而不重复删除。
+
+### 14.2 Batch-before-worker
+
+必须证明：
+
+1. readonly workers 启动前，exact pending Certification Batch 已存在；
+2. worker 第一轮七标的认证全部归属该 Batch；
+3. bootstrap 不创建第二个 Batch，不等待旧 certification 过期；
+4. Batch complete 后仍有六个 Active Universe、42 个 Active Scope、零 Ticket、零 Command；
+5. 调用顺序测试明确约束 `prepare batch -> start Observation/Reconciliation`。

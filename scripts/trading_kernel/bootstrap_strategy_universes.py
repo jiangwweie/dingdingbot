@@ -264,6 +264,48 @@ async def _read_certification_batch_state(
     return str(row[0]), None if row[1] is None else str(row[1])
 
 
+async def prepare_certification_batch(
+    database_url: str,
+    *,
+    runtime_profile_id: str,
+    now_ms: Callable[[], int],
+) -> str:
+    """Create or reuse the exact Batch before readonly workers can certify."""
+
+    if not database_url.startswith("postgresql+asyncpg://"):
+        raise ValueError("database URL must use postgresql+asyncpg")
+    if not runtime_profile_id.strip():
+        raise ValueError("runtime profile identity must be non-blank")
+    _validate_static_manifest()
+    engine = create_async_engine(database_url)
+    try:
+        authority = await _validate_database_authority(
+            engine,
+            runtime_profile_id=runtime_profile_id,
+        )
+        prepared_at_ms = now_ms()
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            prepared = await configure_strategy_universe(
+                uow,
+                UniverseConfigurationRequest(
+                    runtime_profile_id=runtime_profile_id,
+                    event_id=EVENT_ORDER[0],
+                    exchange_instrument_ids=INITIAL_MEMBERS,
+                    installed_at_ms=prepared_at_ms,
+                ),
+            )
+        if prepared.universe is None:
+            raise BootstrapBlocked("warming_universe_slot_occupied")
+        return await _ensure_certification_batch(
+            engine,
+            runtime_profile_id=runtime_profile_id,
+            authority=authority,
+            started_at_ms=prepared_at_ms,
+        )
+    finally:
+        await engine.dispose()
+
+
 async def bootstrap_strategy_universes(
     database_url: str,
     *,
@@ -370,12 +412,29 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-profile-id", required=True)
     parser.add_argument("--wait-timeout-ms", type=int, default=300_000)
     parser.add_argument("--poll-interval-ms", type=int, default=5_000)
+    parser.add_argument(
+        "--prepare-certification-batch-only",
+        action="store_true",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.prepare_certification_batch_only:
+            certification_batch_id = asyncio.run(
+                prepare_certification_batch(
+                    str(args.database_url),
+                    runtime_profile_id=str(args.runtime_profile_id),
+                    now_ms=lambda: int(time.time() * 1_000),
+                )
+            )
+            print(
+                "status=prepared certification_batch_id="
+                + certification_batch_id
+            )
+            return 0
         results = asyncio.run(
             bootstrap_strategy_universes(
                 str(args.database_url),
