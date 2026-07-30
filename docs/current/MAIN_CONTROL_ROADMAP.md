@@ -30,22 +30,23 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Branch | `codex/strategy-universe-operability-repair-20260729` |
-| Production commit | `6d8e0c8f56bd91b37e96db4ea4c819ccf7e65885` |
-| Production tag | `tokyo-runtime-2026.07.30.1`; annotated, immutable, and verified on `origin` |
-| Production-commit certification | `759 passed`; full-repository Ruff, Mypy, runtime file-I/O and diff checks pass |
+| Production commit | `42d099cc10e04546321adef3d966be1741be5e4b` |
+| Production tag | `tokyo-runtime-2026.07.30.2`; annotated, immutable, and verified on `origin` |
+| Production-commit certification | Finite-terminal-bracket domain and PostgreSQL Signal-to-Ticket regressions pass; full-repository Ruff, Mypy, runtime file-I/O and diff checks pass |
 | Local clean-rebuild rehearsal | Empty PostgreSQL baseline, six-Event bootstrap, Entry-promotion rehearsal and repeatability all completed without Tokyo or exchange mutation |
 | Runtime ownership | Observation, Entry, Lifecycle, and Reconciliation are active at zero restarts |
 | Scheduling model | Long-running systemd services; timer-based Python cold starts are retired and must not return |
 | PostgreSQL | Destructive flat-only cutover completed: `public` was rebuilt from `0001_trading_kernel_baseline_v2`; Registry, Policy, Capability and exact runtime identity match the production commit |
 | StrategyUniverse deployment | Six current Active Universes, 42 Active Scopes and seven approved instruments: BTC, ETH, SOL, BNB, XRP, DOGE and ADA; zero Warming Universe; AVAX excluded |
 | Strategy capability | Six registered Events, deterministic detectors, closed-candle Observation, Live/Replay parity, and real StrategySignal production |
+| Cross-margin bracket coverage | Finite Binance maintenance-margin terminal brackets are accepted only when every candidate stress evaluation point is covered; an out-of-range point remains an explicit fail-closed rejection |
 | Ticket capability | CapacityClaim, immutable Ticket, budget reservation, Netting Domain hold, event, aggregate, and durable ENTRY command commit atomically |
 | Dynamic policy | Three concurrent Tickets; `0.03` planned stop risk; demand-based remaining margin; fixed exchange `5x`; max `10x` safety ceiling; `cross` margin |
 | Entry authority | `new_entry_submit_enabled` applies only before ENTRY; existing exposure retains frozen safety authority |
 | Runtime fence | Commit/schema drift records an Incident; an exact but disabled command capability is a controlled readonly fence, not an Incident |
 | Historical runtime/trade facts | Reset after verified exchange-flat state by explicit Owner authorization; no historical Ticket, command, Incident, Review, position, reservation, or observation fact remains as runtime authority |
 | Terminal-recovery repair | Exact cancel namespace/purpose, atomic Ticket-incident closure, and external-flat unavailable Review are deployed in the active Kernel |
-| Current live acceptance | Entry was promoted only after six Active Universes, seven fresh certifications, internal flatness, external flatness and all four healthy Workers. No natural acceptance Ticket has yet occurred |
+| Current live acceptance | Entry was promoted only after six Active Universes, seven fresh certifications, internal flatness, external flatness and all four healthy Workers. The finite-terminal-bracket repair is deployed; no natural acceptance Ticket has yet occurred |
 | Exchange postflight | Account is `independent_sides` and `cross`; all seven approved instruments are `5x`; zero position domains and zero open-order domains |
 | Short post-release observation | Four Workers active at zero restarts; Entry unfenced; zero Ticket, Exchange Command and open Incident |
 | Full capability | `promote-full` not yet completed |
