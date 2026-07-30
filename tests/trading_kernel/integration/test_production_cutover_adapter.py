@@ -77,6 +77,22 @@ async def test_certification_batch_is_prepared_before_readonly_workers_start(
 
 
 @pytest.mark.asyncio
+async def test_entry_promotion_uses_the_narrow_root_operational_runner() -> None:
+    module = _production_adapter_module()
+    runner = RecordingRunner(module)
+    system = module.SshTokyoSystem(runner)
+    plan = _plan()
+
+    await system.unfence_entry(plan)
+
+    assert len(runner.commands) == 1
+    command = runner.commands[0]
+    assert command[:3] == ("sudo", "/bin/bash", "-lc")
+    assert "promote_entry.py" in command[-1]
+    assert "sudo -u brc" not in " ".join(command)
+
+
+@pytest.mark.asyncio
 async def test_non_quant_baseline_drift_blocks_every_mutating_phase() -> None:
     module = _production_adapter_module()
     system = FakeTokyoSystem(module, _facts())
@@ -749,8 +765,9 @@ class RecordingRunner:
         argv: tuple[str, ...],
         *,
         check: bool = True,
+        timeout_seconds: float | None = None,
     ) -> object:
-        del check
+        del check, timeout_seconds
         self.commands.append(argv)
         return self.module._RemoteResult(returncode=0, stdout="", stderr="")
 

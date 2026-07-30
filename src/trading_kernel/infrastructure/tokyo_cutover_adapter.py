@@ -1051,7 +1051,7 @@ class SshTokyoSystem:
 
     async def unfence_entry(self, plan: CutoverPlan) -> None:
         release = _release_path(plan)
-        await self._release_python(
+        await self._release_root_operational_python(
             release,
             "scripts/trading_kernel/promote_entry.py",
             timeout_seconds=120,
@@ -1395,6 +1395,30 @@ class SshTokyoSystem:
         return await self._runner.run(
             runner_args,
             check=check,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def _release_root_operational_python(
+        self,
+        release: PurePosixPath,
+        script: str,
+        *,
+        timeout_seconds: float,
+    ) -> _RemoteResult:
+        if script != "scripts/trading_kernel/promote_entry.py":
+            raise RuntimeError("root operational script is outside allowlist")
+        executable = shlex.join(
+            (
+                str(release / ".venv/bin/python"),
+                str(release / script),
+            )
+        )
+        command = (
+            f"set -a; . {shlex.quote(str(RUNTIME_ENV))}; "
+            f"set +a; exec {executable}"
+        )
+        return await self._runner.run(
+            ("sudo", "/bin/bash", "-lc", command),
             timeout_seconds=timeout_seconds,
         )
 

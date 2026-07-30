@@ -675,7 +675,8 @@ python3 scripts/trading_kernel/cutover_tokyo.py \
 9. **LIFECYCLE START**：启动 Lifecycle，执行 flat/no-residue smoke；
 10. **ENTRY FENCED START**：启动 Entry，确认 fence 仍存在且零 mutation；
 11. **FINAL POSTFLIGHT**：重验 commit/schema/seed/policy/batch/account/rules/flatness；
-12. **UNFENCE**：原子 arm authority 后移除 fence；
+12. **UNFENCE**：通过固定 root operational runner 执行 Promotion，原子 arm authority 后
+   移除 fence；业务 worker 仍使用 `brc` 用户；
 13. **TAG/ROADMAP**：验证 immutable tag，并将瞬时证据写入 Main Control Roadmap。
 
 ### 14.6 超时与耗时边界

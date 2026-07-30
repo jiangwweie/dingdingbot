@@ -497,3 +497,12 @@ Tokyo 只读检查必须重新获取：
 3. bootstrap 不创建第二个 Batch，不等待旧 certification 过期；
 4. Batch complete 后仍有六个 Active Universe、42 个 Active Scope、零 Ticket、零 Command；
 5. 调用顺序测试明确约束 `prepare batch -> start Observation/Reconciliation`。
+
+### 14.3 Promotion privilege boundary
+
+必须证明 Promotion 命令：
+
+1. 通过固定 root operational runner 执行；
+2. 不包含 `sudo -u brc`；
+3. 只允许 exact `promote_entry.py` 路径；
+4. 失败仍恢复 fence，且不会因 sudo 权限错误伪装成服务状态 blocker。

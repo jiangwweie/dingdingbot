@@ -463,6 +463,17 @@ Certification Batch 必须在 Reconciliation 启动前创建：
    Active 与 Batch complete；
 7. 禁止通过等待既有 certification 过期来补齐 Batch 成员。
 
+### 10.4 Promotion privilege boundary
+
+四个 persistent worker 继续使用非特权 `brc` 用户。只有负责 systemd 与 Entry fence 的
+server-local Promotion 控制脚本可以通过部署 adapter 的固定 allowlist 以 root 执行：
+
+1. root 边界只允许 `scripts/trading_kernel/promote_entry.py`；
+2. runtime env 只在服务器本地加载，不输出凭证；
+3. Promotion 内部仍必须先完成 readonly certification、外部状态与 safety worker gate；
+4. root 权限不允许绕过 Owner Policy、Capability、Runtime Fence 或 Exchange Command；
+5. 禁止把需要 systemd/fence 权限的脚本以 `brc` 启动后再依赖交互式 sudo。
+
 ## 11. Performance 与可观测性
 
 ### 11.1 必须观测的指标
