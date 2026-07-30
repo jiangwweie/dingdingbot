@@ -29,15 +29,15 @@ different Netting Domains progress concurrently.
 
 | Area | Verified state |
 | --- | --- |
-| Branch | `codex/trading-kernel-rebuild-20260722` |
-| Production commit | `1365356797b350f00c345b9f6e66915a0ad53097` |
-| Production tag | `tokyo-runtime-2026.07.28.1`; annotated, immutable, and verified on `origin` |
-| Production-commit certification | `427 passed`; architecture checks and production file-I/O audit pass |
-| Local repair-candidate certification | `752 passed` across unit, integration, full-chain and architecture; Ruff, full-repository Mypy, runtime file-I/O and diff checks pass. The empty-PostgreSQL bootstrap and Entry-promotion rehearsal complete without Tokyo or exchange mutation |
-| Runtime ownership | Observation, Lifecycle, and Reconciliation are active at zero restarts; Entry is intentionally fenced during runner-recovery observation |
+| Branch | `codex/strategy-universe-operability-repair-20260729` |
+| Production commit | `6d8e0c8f56bd91b37e96db4ea4c819ccf7e65885` |
+| Production tag | `tokyo-runtime-2026.07.30.1`; annotated, immutable, and verified on `origin` |
+| Production-commit certification | `759 passed`; full-repository Ruff, Mypy, runtime file-I/O and diff checks pass |
+| Local clean-rebuild rehearsal | Empty PostgreSQL baseline, six-Event bootstrap, Entry-promotion rehearsal and repeatability all completed without Tokyo or exchange mutation |
+| Runtime ownership | Observation, Entry, Lifecycle, and Reconciliation are active at zero restarts |
 | Scheduling model | Long-running systemd services; timer-based Python cold starts are retired and must not return |
-| PostgreSQL | Current deployed database identity remains an action-time readonly fact. The local `0001_trading_kernel_baseline_v2` candidate has not modified production schema, Registry, Policy, Capability or runtime data |
-| Local StrategyUniverse repair candidate | The local candidate has disposable-PostgreSQL bootstrap and Entry-promotion rehearsal evidence, but is not deployed, has not configured a production pool, and remains blocked from release by the separate Owner action-time deployment gate |
+| PostgreSQL | Destructive flat-only cutover completed: `public` was rebuilt from `0001_trading_kernel_baseline_v2`; Registry, Policy, Capability and exact runtime identity match the production commit |
+| StrategyUniverse deployment | Six current Active Universes, 42 Active Scopes and seven approved instruments: BTC, ETH, SOL, BNB, XRP, DOGE and ADA; zero Warming Universe; AVAX excluded |
 | Strategy capability | Six registered Events, deterministic detectors, closed-candle Observation, Live/Replay parity, and real StrategySignal production |
 | Ticket capability | CapacityClaim, immutable Ticket, budget reservation, Netting Domain hold, event, aggregate, and durable ENTRY command commit atomically |
 | Dynamic policy | Three concurrent Tickets; `0.03` planned stop risk; demand-based remaining margin; fixed exchange `5x`; max `10x` safety ceiling; `cross` margin |
@@ -45,51 +45,29 @@ different Netting Domains progress concurrently.
 | Runtime fence | Commit/schema drift records an Incident; an exact but disabled command capability is a controlled readonly fence, not an Incident |
 | Historical runtime/trade facts | Reset after verified exchange-flat state by explicit Owner authorization; no historical Ticket, command, Incident, Review, position, reservation, or observation fact remains as runtime authority |
 | Terminal-recovery repair | Exact cancel namespace/purpose, atomic Ticket-incident closure, and external-flat unavailable Review are deployed in the active Kernel |
-| Current live acceptance | AVAXUSDT `SOR-001 / SOR-SHORT` remains `position_protected`; BTCUSDT and SOLUSDT completed TP1 and are `runner_protected`. BTC runner Stop moved from `64624.6` to `63729.5`; SOL runner Stop moved from `75.47` to `74.17`. All three Tickets have zero open Incident and zero unresolved command. One ETHUSDT short ENTRY was authoritatively rejected for `wallet_risk_drift` and created no position |
-| Exchange postflight | Three Netting Domains are non-flat and protected: AVAX retains Stop plus TP1; BTC and SOL retain exact runner Stops after their original full-quantity Stops were cancelled. The other nine domains are flat; all six supported instruments are configured at `5x` |
-| Hourly supervision | Observation, Lifecycle, and Reconciliation are active at zero restarts; Entry is intentionally fenced while the recovered runners are observed, and current capacity remains occupied by the three protected Tickets |
+| Current live acceptance | Entry was promoted only after six Active Universes, seven fresh certifications, internal flatness, external flatness and all four healthy Workers. No natural acceptance Ticket has yet occurred |
+| Exchange postflight | Account is `independent_sides` and `cross`; all seven approved instruments are `5x`; zero position domains and zero open-order domains |
+| Short post-release observation | Four Workers active at zero restarts; Entry unfenced; zero Ticket, Exchange Command and open Incident |
 | Full capability | `promote-full` not yet completed |
-
-## Local Delivery Pending Owner Deployment Gate
-
-The tracked local repair candidate contains `0001_trading_kernel_baseline_v2`:
-versioned unordered member pools, readonly product/account certification,
-Warming with zero Signal, automatic atomic activation, frozen
-Signal/Claim/Ticket Universe lineage, and bounded configuration/status CLI.
-These are local code facts only. They do not supersede the deployed commit,
-schema, live Ticket state, or Entry fence recorded above. The local quality
-gates are green; deployment still requires the separately authorized
-action-time readonly checks.
-
-Production action remains blocked until the flat-release and action-time
-certification predicates in `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` are observed
-and the Owner explicitly confirms deployment. The final member list is not
-seeded by this repository change.
 
 ## Current Performance Snapshot
 
-The following readonly post-release sample was captured on 2026-07-24. It is a
-measured snapshot, not a replacement for the limits in
-`TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
+The following short readonly post-release sample was captured on 2026-07-30.
+It verifies release stability, not a full host-capacity benchmark.
 
 | Area | Measured state | Contract interpretation |
 | --- | --- | --- |
-| Host CPU | 2 vCPU; load average `0.10 / 0.10 / 0.12` | Substantial idle headroom |
-| Host memory | 3.3 GiB total; about 1.8 GiB available; no swap | Above the 1 GiB review boundary; no swap remains a host risk |
-| BRC worker slice | 1 CPU quota; 1 GiB maximum; about 450 MiB current | About 44% of memory limit |
-| Idle worker CPU | About 0.61% of one CPU over a 10-second sample | Indicative headroom; future comparisons must state sample duration |
-| Slice tasks | 6 of 128 | Below the 50% review boundary |
 | Worker stability | Four services active; restart count zero for each | No restart-loop evidence |
-| PostgreSQL container | About 45.6 MiB memory and 0.10% CPU | Small relative to host capacity |
-| Filesystem | 53% used; about 27 GiB available | Below the 80% review boundary |
-| Scheduling | Observation/Reconciliation 5-second polls; Entry/Lifecycle 2-second polls; no BRC timer | Matches persistent-worker contract |
+| Entry authority | Policy version `2`, command capability enabled and fence absent | Promotion completed through official path |
+| Internal truth | Zero Ticket, Exchange Command and open Incident | No residual deployment work |
+| External truth | Zero positions and zero open orders; seven instruments at `5x`, `cross`, independent sides | Current deployment flatness gate passes |
+| Scheduling | Four persistent services; no timer worker introduced | Matches persistent-worker contract |
 
 The snapshot source is readonly host, systemd, process, filesystem, and Docker
 state. It does not authorize a deployment or exchange mutation.
 
-The current host is sufficient for the observed middle/low-frequency workload.
-Performance acceptance must be repeated after runtime, dependency, cadence,
-instrument-scope, or server-size changes.
+The full host-capacity benchmark must be repeated after a representative idle
+window; this short deployment observation does not replace it.
 
 ## Remaining Critical Path
 
