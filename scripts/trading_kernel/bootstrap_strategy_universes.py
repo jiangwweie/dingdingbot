@@ -172,6 +172,7 @@ async def _ensure_certification_batch(
     started_at_ms: int,
 ) -> str:
     manifest_digest = build_certification_manifest_digest(INITIAL_MEMBERS)
+    required_valid_until_ms = started_at_ms + CERTIFICATION_PROMOTION_WINDOW_MS
     async with engine.connect() as connection:
         existing = (
             await connection.execute(
@@ -186,8 +187,11 @@ async def _ensure_certification_batch(
                     "AND owner_policy_id = :owner_policy_id "
                     "AND owner_policy_version = :owner_policy_version "
                     "AND manifest_digest = :manifest_digest "
-                    "AND status IN ('pending','completed') "
-                    "ORDER BY started_at_ms DESC LIMIT 1"
+                    "AND (status = 'pending' OR "
+                    "(status = 'completed' "
+                    "AND valid_until_ms >= :required_valid_until_ms)) "
+                    "ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, "
+                    "started_at_ms DESC LIMIT 1"
                 ),
                 {
                     "runtime_profile_id": runtime_profile_id,
@@ -197,6 +201,7 @@ async def _ensure_certification_batch(
                     "owner_policy_id": authority.owner_policy_id,
                     "owner_policy_version": authority.owner_policy_version,
                     "manifest_digest": manifest_digest,
+                    "required_valid_until_ms": required_valid_until_ms,
                 },
             )
         ).one_or_none()
@@ -214,9 +219,7 @@ async def _ensure_certification_batch(
             }
         )[7:39]
         batch_started_at_ms = started_at_ms
-        minimum_valid_until_ms = (
-            started_at_ms + CERTIFICATION_PROMOTION_WINDOW_MS
-        )
+        minimum_valid_until_ms = required_valid_until_ms
     else:
         batch_id = str(existing[0])
         batch_started_at_ms = int(existing[1])
@@ -238,6 +241,27 @@ async def _ensure_certification_batch(
             ),
         )
     return batch_id
+
+
+async def _read_certification_batch_state(
+    engine: AsyncEngine,
+    *,
+    certification_batch_id: str,
+) -> tuple[str, str | None]:
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT status, blocker_code "
+                    "FROM brc_instrument_certification_batches "
+                    "WHERE certification_batch_id = :certification_batch_id"
+                ),
+                {"certification_batch_id": certification_batch_id},
+            )
+        ).one_or_none()
+    if row is None:
+        raise BootstrapBlocked("certification_batch_missing")
+    return str(row[0]), None if row[1] is None else str(row[1])
 
 
 async def bootstrap_strategy_universes(
@@ -318,6 +342,23 @@ async def bootstrap_strategy_universes(
                     universe_version_id=universe_version_id,
                 )
             )
+        if certification_batch_id is None:
+            raise BootstrapBlocked("certification_batch_missing")
+        while True:
+            batch_status, blocker_code = await _read_certification_batch_state(
+                engine,
+                certification_batch_id=certification_batch_id,
+            )
+            if batch_status == "completed":
+                break
+            if batch_status == "blocked":
+                raise BootstrapBlocked(
+                    "certification_batch_blocked:"
+                    + str(blocker_code or "unknown")
+                )
+            if now_ms() >= deadline_ms:
+                raise BootstrapBlocked("certification_batch_timeout")
+            await sleep(poll_interval_ms / 1_000)
         return tuple(results)
     finally:
         await engine.dispose()

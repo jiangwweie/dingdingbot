@@ -143,7 +143,12 @@ class TokyoSystem(Protocol):
         new_units: frozenset[str],
     ) -> TokyoInspection: ...
 
-    async def inspect_phase_state(self, plan: CutoverPlan) -> TokyoPhaseState: ...
+    async def inspect_phase_state(
+        self,
+        plan: CutoverPlan,
+        *,
+        phase: CutoverPhase | None = None,
+    ) -> TokyoPhaseState: ...
 
     async def read_non_quant_digest(self) -> str: ...
 
@@ -269,7 +274,7 @@ class TokyoCutoverAdapter:
     ) -> bool:
         if phase.value != CutoverPhase.STAGE_EXACT_RELEASE.value:
             await self._require_non_quant_baseline(plan)
-        state = await self.system.inspect_phase_state(plan)
+        state = await self.system.inspect_phase_state(plan, phase=phase)
         phase_value = phase.value
         if phase_value == CutoverPhase.FENCE_EXCHANGE_WRITES.value:
             return (
@@ -513,7 +518,14 @@ class SshTokyoSystem:
             non_quant_digest=await self._non_quant_digest(),
         )
 
-    async def inspect_phase_state(self, plan: CutoverPlan) -> TokyoPhaseState:
+    async def inspect_phase_state(
+        self,
+        plan: CutoverPlan,
+        *,
+        phase: CutoverPhase | None = None,
+    ) -> TokyoPhaseState:
+        if phase is not None:
+            return await self._inspect_requested_phase_state(plan, phase=phase)
         release = _release_path(plan)
         entry_enabled = await self._unit_enabled(ENTRY_WORKER)
         entry_active = await self._unit_active(ENTRY_WORKER)
@@ -570,6 +582,190 @@ class SshTokyoSystem:
             exchange_commands_enabled=exchange_commands_enabled,
             new_entry_submit_enabled=new_entry_submit_enabled,
         )
+
+    async def _inspect_requested_phase_state(
+        self,
+        plan: CutoverPlan,
+        *,
+        phase: CutoverPhase,
+    ) -> TokyoPhaseState:
+        release = _release_path(plan)
+        phase_value = phase.value
+        if phase_value == CutoverPhase.FENCE_EXCHANGE_WRITES.value:
+            fenced, entry_enabled = await asyncio.gather(
+                self._path_exists(WRITE_FENCE),
+                self._unit_enabled(ENTRY_WORKER),
+            )
+            return TokyoPhaseState(
+                exchange_writes_fenced=fenced,
+                entry_worker_enabled=entry_enabled,
+            )
+        if phase_value == CutoverPhase.STOP_RUNTIME_WRITERS.value:
+            return TokyoPhaseState(
+                runtime_writers_stopped=await self._units_stopped_and_disabled(
+                    EXPECTED_NEW_BRC_WRITER_UNITS
+                )
+            )
+        if phase_value == CutoverPhase.REBUILD_APPLICATION_SCHEMA.value:
+            return TokyoPhaseState(
+                target_schema_ready=await self._target_schema_ready(release)
+            )
+        if phase_value == CutoverPhase.SEED_CURRENT_AUTHORITY.value:
+            return TokyoPhaseState(
+                seed_identity_matches=(
+                    await self._target_authority_identity_matches(plan)
+                )
+            )
+        if phase_value == CutoverPhase.STAGE_EXACT_RELEASE.value:
+            return TokyoPhaseState(
+                release_staged=await self._release_is_staged(release, plan)
+            )
+        if phase_value == CutoverPhase.DEPLOY_EXACT_RELEASE.value:
+            return TokyoPhaseState(
+                release_active=(await self._readlink(CURRENT_RELEASE))
+                == str(release)
+            )
+        if phase_value == CutoverPhase.CERTIFY_SCHEMA_AND_READONLY.value:
+            return TokyoPhaseState(
+                readonly_certified=await self._readonly_certified(release, plan)
+            )
+        if phase_value == CutoverPhase.START_READONLY_WORKERS.value:
+            readonly_started, fenced = await asyncio.gather(
+                self._units_enabled_and_active(READONLY_WORKERS),
+                self._path_exists(WRITE_FENCE),
+            )
+            return TokyoPhaseState(
+                readonly_workers_started=readonly_started,
+                exchange_writes_fenced=fenced,
+            )
+        if phase_value == CutoverPhase.COMPLETE_TARGET_CERTIFICATION.value:
+            target_certified, exchange_commands_enabled = await asyncio.gather(
+                self._target_certified(plan),
+                self._target_boolean(
+                    "SELECT enabled FROM brc_runtime_capabilities_current "
+                    "WHERE capability_key = 'exchange_commands'"
+                ),
+            )
+            return TokyoPhaseState(
+                target_certified=target_certified,
+                exchange_commands_enabled=exchange_commands_enabled,
+            )
+        if phase_value == CutoverPhase.START_LIFECYCLE.value:
+            lifecycle_started, fenced = await asyncio.gather(
+                self._unit_enabled_and_active(LIFECYCLE_WORKER),
+                self._path_exists(WRITE_FENCE),
+            )
+            return TokyoPhaseState(
+                lifecycle_started=lifecycle_started,
+                exchange_writes_fenced=fenced,
+            )
+        if phase_value == CutoverPhase.START_ENTRY_FENCED.value:
+            (
+                fenced,
+                entry_enabled,
+                entry_active,
+                exchange_commands_enabled,
+                new_entry_submit_enabled,
+            ) = await asyncio.gather(
+                self._path_exists(WRITE_FENCE),
+                self._unit_enabled(ENTRY_WORKER),
+                self._unit_active(ENTRY_WORKER),
+                self._target_boolean(
+                    "SELECT enabled FROM brc_runtime_capabilities_current "
+                    "WHERE capability_key = 'exchange_commands'"
+                ),
+                self._target_boolean(
+                    "SELECT new_entry_submit_enabled "
+                    "FROM brc_owner_policy_current "
+                    "WHERE owner_policy_id = 'policy-main'"
+                ),
+            )
+            return TokyoPhaseState(
+                exchange_writes_fenced=fenced,
+                entry_worker_enabled=entry_enabled,
+                entry_worker_active=entry_active,
+                exchange_commands_enabled=exchange_commands_enabled,
+                new_entry_submit_enabled=new_entry_submit_enabled,
+            )
+        if phase_value == CutoverPhase.FINAL_POSTFLIGHT.value:
+            (
+                fenced,
+                readonly_workers_started,
+                target_certified,
+                lifecycle_started,
+                entry_enabled,
+                entry_active,
+                exchange_commands_enabled,
+                new_entry_submit_enabled,
+                final_postflight_passed,
+            ) = await asyncio.gather(
+                self._path_exists(WRITE_FENCE),
+                self._units_enabled_and_active(READONLY_WORKERS),
+                self._target_certified(plan),
+                self._unit_enabled_and_active(LIFECYCLE_WORKER),
+                self._unit_enabled(ENTRY_WORKER),
+                self._unit_active(ENTRY_WORKER),
+                self._target_boolean(
+                    "SELECT enabled FROM brc_runtime_capabilities_current "
+                    "WHERE capability_key = 'exchange_commands'"
+                ),
+                self._target_boolean(
+                    "SELECT new_entry_submit_enabled "
+                    "FROM brc_owner_policy_current "
+                    "WHERE owner_policy_id = 'policy-main'"
+                ),
+                self._final_postflight_passes(release, plan),
+            )
+            return TokyoPhaseState(
+                exchange_writes_fenced=fenced,
+                readonly_workers_started=readonly_workers_started,
+                target_certified=target_certified,
+                lifecycle_started=lifecycle_started,
+                entry_worker_enabled=entry_enabled,
+                entry_worker_active=entry_active,
+                final_postflight_passed=bool(
+                    fenced
+                    and readonly_workers_started
+                    and target_certified
+                    and lifecycle_started
+                    and entry_enabled
+                    and entry_active
+                    and not exchange_commands_enabled
+                    and not new_entry_submit_enabled
+                    and final_postflight_passed
+                ),
+                exchange_commands_enabled=exchange_commands_enabled,
+                new_entry_submit_enabled=new_entry_submit_enabled,
+            )
+        if phase_value == CutoverPhase.UNFENCE_ENTRY.value:
+            (
+                fenced,
+                entry_enabled,
+                entry_active,
+                exchange_commands_enabled,
+                new_entry_submit_enabled,
+            ) = await asyncio.gather(
+                self._path_exists(WRITE_FENCE),
+                self._unit_enabled(ENTRY_WORKER),
+                self._unit_active(ENTRY_WORKER),
+                self._target_boolean(
+                    "SELECT enabled FROM brc_runtime_capabilities_current "
+                    "WHERE capability_key = 'exchange_commands'"
+                ),
+                self._target_boolean(
+                    "SELECT new_entry_submit_enabled "
+                    "FROM brc_owner_policy_current "
+                    "WHERE owner_policy_id = 'policy-main'"
+                ),
+            )
+            return TokyoPhaseState(
+                exchange_writes_fenced=fenced,
+                entry_worker_enabled=entry_enabled,
+                entry_worker_active=entry_active,
+                exchange_commands_enabled=exchange_commands_enabled,
+                new_entry_submit_enabled=new_entry_submit_enabled,
+            )
+        raise RuntimeError(f"unsupported production cutover phase: {phase_value}")
 
     async def read_non_quant_digest(self) -> str:
         return await self._non_quant_digest()
@@ -1204,6 +1400,20 @@ class SshTokyoSystem:
             if result.returncode == 0:
                 active.append(unit)
         return tuple(active)
+
+    async def _unit_enabled_and_active(self, unit: str) -> bool:
+        enabled, active = await asyncio.gather(
+            self._unit_enabled(unit),
+            self._unit_active(unit),
+        )
+        return enabled and active
+
+    async def _units_enabled_and_active(self, units: tuple[str, ...]) -> bool:
+        return all(
+            await asyncio.gather(
+                *(self._unit_enabled_and_active(unit) for unit in units)
+            )
+        )
 
     async def _unit_enabled(self, unit: str) -> bool:
         result = await self._runner.run(

@@ -184,6 +184,22 @@ def test_deployment_state_machine_can_resume_with_entry_already_started_fenced()
     assert backend.calls.count("active_fenced") == 2
 
 
+def test_active_fenced_entry_reports_expired_promotion_gate_exactly() -> None:
+    backend = FakePromotionBackend(gate=False)
+    backend.entry_active = True
+
+    with pytest.raises(EntryPromotionBlocked, match="entry_promotion_gate_failed"):
+        promote_entry(backend)
+
+    assert backend.calls == [
+        "preflight",
+        "certification",
+        "active_fenced",
+    ]
+    assert backend.fenced is True
+    assert backend.entry_active is True
+
+
 def test_completed_promotion_is_idempotent_only_for_the_exact_active_state() -> None:
     backend = FakePromotionBackend(armed=True)
     backend.fenced = False

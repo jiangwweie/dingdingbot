@@ -246,6 +246,62 @@ async def test_ssh_system_phase_inspection_returns_typed_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_phase_satisfaction_requests_only_the_current_phase_state() -> None:
+    module = _production_adapter_module()
+    system = FakeTokyoSystem(module, _facts())
+    system.phase_state = system.phase_state.model_copy(
+        update={
+            "exchange_writes_fenced": True,
+            "lifecycle_started": True,
+        }
+    )
+    adapter = module.TokyoCutoverAdapter(system)
+    plan = _plan()
+    await adapter.inspect_preconditions(plan)
+
+    assert await adapter.phase_satisfied(CutoverPhase.START_LIFECYCLE, plan)
+    assert system.inspected_phases == [CutoverPhase.START_LIFECYCLE]
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_phase_inspection_skips_certification_and_exchange_probes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _production_adapter_module()
+    system = module.SshTokyoSystem(RecordingRunner(module))
+
+    async def unit_enabled(unit: str) -> bool:
+        assert unit == module.LIFECYCLE_WORKER
+        return True
+
+    async def unit_active(unit: str) -> bool:
+        assert unit == module.LIFECYCLE_WORKER
+        return True
+
+    async def path_exists(path) -> bool:
+        assert path == module.WRITE_FENCE
+        return True
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("unrelated heavyweight phase probe was called")
+
+    monkeypatch.setattr(system, "_unit_enabled", unit_enabled)
+    monkeypatch.setattr(system, "_unit_active", unit_active)
+    monkeypatch.setattr(system, "_path_exists", path_exists)
+    monkeypatch.setattr(system, "_target_certified", forbidden)
+    monkeypatch.setattr(system, "_final_postflight_passes", forbidden)
+    monkeypatch.setattr(system, "_target_schema_ready", forbidden)
+
+    state = await system.inspect_phase_state(
+        _plan(),
+        phase=CutoverPhase.START_LIFECYCLE,
+    )
+
+    assert state.lifecycle_started is True
+    assert state.exchange_writes_fenced is True
+
+
+@pytest.mark.asyncio
 async def test_static_inactive_service_counts_as_stopped_and_disabled() -> None:
     module = _production_adapter_module()
     system = module.SshTokyoSystem(StaticInactiveUnitRunner(module))
@@ -687,6 +743,7 @@ class FakeTokyoSystem:
         self.non_quant_digest = "sha256:baseline"
         self.persisted_non_quant_digest: str | None = None
         self.actions: list[tuple[str, tuple[str, ...]]] = []
+        self.inspected_phases: list[CutoverPhase | None] = []
         self.phase_state = module.TokyoPhaseState()
 
     async def inspect_preconditions(
@@ -702,8 +759,14 @@ class FakeTokyoSystem:
             non_quant_digest=self.non_quant_digest,
         )
 
-    async def inspect_phase_state(self, plan: CutoverPlan) -> object:
+    async def inspect_phase_state(
+        self,
+        plan: CutoverPlan,
+        *,
+        phase: CutoverPhase | None = None,
+    ) -> object:
         del plan
+        self.inspected_phases.append(phase)
         return self.phase_state
 
     async def read_non_quant_digest(self) -> str:

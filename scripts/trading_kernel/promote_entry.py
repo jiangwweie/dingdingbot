@@ -62,10 +62,7 @@ def promote_entry(backend: EntryPromotionBackend) -> str:
         certification = backend.certification()
         if _authority_is_armed(certification) and backend.entry_is_active():
             return "already_promoted"
-        if (
-            certification.get("entry_promotion_pass") is True
-            and backend.entry_is_active_while_fenced()
-        ):
+        if backend.entry_is_active_while_fenced():
             entry_already_started_fenced = True
         else:
             raise EntryPromotionBlocked(

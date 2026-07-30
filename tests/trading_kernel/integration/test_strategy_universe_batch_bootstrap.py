@@ -248,6 +248,85 @@ async def test_six_event_batch_uses_one_total_wait_budget() -> None:
         await admin.close()
 
 
+@pytest.mark.asyncio
+async def test_expired_completed_batch_is_replaced_and_awaited_without_reinstalling_universes() -> None:
+    """A promotion retry owns a new immutable Batch and waits for worker evidence."""
+
+    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
+    assert SAFE_DATABASE.fullmatch(database_name)
+    admin = await asyncpg.connect(ADMIN_DSN)
+    engine: AsyncEngine | None = None
+    try:
+        await admin.execute(f'CREATE DATABASE "{database_name}"')
+        database_url = _database_url(database_name)
+        _run_alembic(database_url)
+        engine = create_async_engine(database_url)
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id="subaccount-batch-refresh-test",
+                    runtime_commit=RUNTIME_COMMIT,
+                    schema_revision=SCHEMA_REVISION,
+                    seeded_at_ms=NOW_MS - 10_000,
+                ),
+            )
+
+        clock = VirtualClock()
+        market = RecordingWarmMarket()
+        certification = RecordingReadonlyCertificationSource(engine)
+        await bootstrap_strategy_universes(
+            database_url,
+            runtime_profile_id=RUNTIME_PROFILE_ID,
+            now_ms=clock.read,
+            wait_timeout_ms=60_000,
+            poll_interval_ms=1,
+            sleep=_worker_driving_sleep(
+                engine=engine,
+                clock=clock,
+                market=market,
+                certification=certification,
+            ),
+        )
+        first_batches = await _completed_batch_rows(engine)
+        assert len(first_batches) == 1
+        first_market_call_count = len(market.requests)
+        clock.now = first_batches[0][1] + 1
+
+        retried = await bootstrap_strategy_universes(
+            database_url,
+            runtime_profile_id=RUNTIME_PROFILE_ID,
+            now_ms=clock.read,
+            wait_timeout_ms=60_000,
+            poll_interval_ms=1,
+            sleep=_certification_batch_refresh_sleep(
+                engine=engine,
+                clock=clock,
+                certification=certification,
+            ),
+        )
+        refreshed_batches = await _completed_batch_rows(engine)
+        snapshot = await _snapshot(engine)
+
+        assert tuple(result.status for result in retried) == ("already_active",) * 6
+        assert len(refreshed_batches) == 2
+        assert refreshed_batches[0][0] != refreshed_batches[1][0]
+        assert refreshed_batches[1][1] > clock.read()
+        assert snapshot["active_versions"] == 6
+        assert snapshot["warming_versions"] == 0
+        assert snapshot["completed_certification_batches"] == 2
+        assert snapshot["eligible_certification_batch_members"] == 14
+        assert snapshot["tickets"] == 0
+        assert snapshot["commands"] == 0
+        assert len(market.requests) == first_market_call_count
+        assert certification.mutation_calls == []
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        await _drop_database(admin, database_name)
+        await admin.close()
+
+
 def _worker_driving_sleep(
     *,
     engine: AsyncEngine,
@@ -301,6 +380,45 @@ def _worker_driving_sleep(
         )
 
     return sleep
+
+
+def _certification_batch_refresh_sleep(
+    *,
+    engine: AsyncEngine,
+    clock: VirtualClock,
+    certification: RecordingReadonlyCertificationSource,
+) -> Callable[[float], Awaitable[None]]:
+    async def sleep(_delay_seconds: float) -> None:
+        del _delay_seconds
+        for _member in INITIAL_MEMBERS:
+            certification_result = await run_reconciliation_worker_once(
+                lambda: PostgresKernelUnitOfWork(engine),
+                NoTicketVenueTruth(),
+                NoTicketPositionSource(),
+                _reconciliation_request(clock.advance()),
+                instrument_certification_source=certification,
+            )
+            assert certification_result.status in {
+                ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED,
+                ReconciliationWorkerStatus.NO_WORK,
+            }
+
+    return sleep
+
+
+async def _completed_batch_rows(engine: AsyncEngine) -> tuple[tuple[str, int], ...]:
+    async with engine.connect() as connection:
+        rows = (
+            await connection.execute(
+                sa.select(
+                    instrument_certification_batches.c.certification_batch_id,
+                    instrument_certification_batches.c.valid_until_ms,
+                )
+                .where(instrument_certification_batches.c.status == "completed")
+                .order_by(instrument_certification_batches.c.started_at_ms)
+            )
+        ).all()
+    return tuple((str(row[0]), int(row[1])) for row in rows)
 
 
 def _observation_request(now_ms: int) -> ObservationWorkerRequest:
