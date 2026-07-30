@@ -10,12 +10,16 @@ import subprocess
 from collections.abc import Mapping
 from hashlib import sha256
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from scripts.trading_kernel.cutover_tokyo import CutoverPhase
 from scripts.trading_kernel.verify_flat_cutover import CutoverFacts, CutoverPlan
+from src.trading_kernel.infrastructure.runtime_authority_seed import (
+    RuntimeAuthoritySeedRequest,
+    build_runtime_seed_identity,
+)
 
 EXPECTED_NEW_BRC_UNITS = frozenset(
     {
@@ -50,6 +54,49 @@ TARGET_DATABASE_CONTAINER = "brc-trading-kernel-pg"
 TARGET_DATABASE_USER = "brc_kernel"
 TARGET_DATABASE_NAME = "brc_trading_kernel"
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _local_target_manifest(plan: CutoverPlan) -> dict[str, str]:
+    """Verify target code identity locally without requiring a staged release."""
+
+    resolved = subprocess.run(
+        ("git", "rev-parse", "--verify", f"{plan.target_commit}^{{commit}}"),
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if resolved != plan.target_commit:
+        raise RuntimeError("local target commit differs from cutover plan")
+    migration_path = (
+        "migrations/trading_kernel/versions/"
+        f"{plan.target_schema_revision}.py"
+    )
+    subprocess.run(
+        ("git", "cat-file", "-e", f"{plan.target_commit}:{migration_path}"),
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    expected_seed_identity = build_runtime_seed_identity(
+        RuntimeAuthoritySeedRequest(
+            account_id=plan.account_id,
+            runtime_commit=plan.target_commit,
+            schema_revision=cast(
+                Literal["0001_trading_kernel_baseline_v3"],
+                plan.target_schema_revision,
+            ),
+            seeded_at_ms=1,
+        )
+    )
+    if expected_seed_identity != plan.target_seed_identity:
+        raise RuntimeError("local target seed identity differs from cutover plan")
+    return {
+        "runtime_commit": resolved,
+        "schema_revision": plan.target_schema_revision,
+        "seed_identity": expected_seed_identity,
+    }
 
 
 class TokyoInspection(BaseModel):
@@ -421,10 +468,10 @@ class SshTokyoSystem:
         old_units: frozenset[str],
         new_units: frozenset[str],
     ) -> TokyoInspection:
-        release = _release_path(plan)
-        manifest = await self._release_manifest(release)
+        del old_units
+        manifest = await asyncio.to_thread(_local_target_manifest, plan)
         probe = await self._release_json(
-            release,
+            CURRENT_RELEASE,
             "scripts/trading_kernel/probe_production_runtime.py",
             "--cutover-first-batch",
         )
@@ -439,7 +486,8 @@ class SshTokyoSystem:
             database_identity=(
                 TARGET_DATABASE_NAME
                 if await self._path_exists(
-                    release / "deploy/docker/brc-trading-kernel-postgres.compose.yml"
+                    CURRENT_RELEASE
+                    / "deploy/docker/brc-trading-kernel-postgres.compose.yml"
                 )
                 else "target-database-definition-missing"
             ),

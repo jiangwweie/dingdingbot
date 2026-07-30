@@ -426,9 +426,9 @@ async def test_preconditions_probe_uses_exact_cutover_instrument_authority(
     system = module.SshTokyoSystem(HostnameRunner(module))
     plan = _plan()
     probe_calls: list[tuple[str, ...]] = []
+    probe_releases: list[object] = []
 
-    async def release_manifest(release) -> dict[str, str]:
-        del release
+    def local_target_manifest(_plan: CutoverPlan) -> dict[str, str]:
         return {
             "runtime_commit": plan.target_commit,
             "schema_revision": plan.target_schema_revision,
@@ -436,7 +436,7 @@ async def test_preconditions_probe_uses_exact_cutover_instrument_authority(
         }
 
     async def release_json(release, script: str, *args: str) -> dict[str, object]:
-        del release
+        probe_releases.append(release)
         probe_calls.append((script, *args))
         return {
             "venue_id": plan.venue_id,
@@ -465,7 +465,7 @@ async def test_preconditions_probe_uses_exact_cutover_instrument_authority(
     async def non_quant_digest() -> str:
         return "sha256:baseline"
 
-    monkeypatch.setattr(system, "_release_manifest", release_manifest)
+    monkeypatch.setattr(module, "_local_target_manifest", local_target_manifest)
     monkeypatch.setattr(system, "_release_json", release_json)
     monkeypatch.setattr(system, "_current_kernel_counts", current_counts)
     monkeypatch.setattr(system, "_active_units", active_units)
@@ -480,6 +480,7 @@ async def test_preconditions_probe_uses_exact_cutover_instrument_authority(
             "--cutover-first-batch",
         )
     ]
+    assert probe_releases == [module.CURRENT_RELEASE]
 
 
 @pytest.mark.asyncio
