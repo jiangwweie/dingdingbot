@@ -128,7 +128,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
 
@@ -144,8 +144,10 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     assert first.new_entry_submit_enabled is False
     assert first.policy_version == 1
     assert first.max_concurrent_tickets == 3
-    assert first.planned_stop_risk_fraction == Decimal("0.03")
-    assert first.max_initial_margin_utilization == Decimal("0.90")
+    assert first.max_ticket_stop_risk_fraction == Decimal("0.03")
+    assert first.max_gross_stop_risk_fraction == Decimal("0.06")
+    assert first.max_ticket_initial_margin_fraction == Decimal("0.45")
+    assert first.max_gross_initial_margin_utilization == Decimal("0.90")
     assert first.max_leverage == 10
     assert first.supported_margin_mode == "cross"
     assert first.post_stop_stress_multiple == Decimal("2.0")
@@ -165,8 +167,10 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         assert policy["enabled"] is True
         assert policy["new_entry_submit_enabled"] is False
         assert policy["max_concurrent_tickets"] == 3
-        assert Decimal(policy["planned_stop_risk_fraction"]) == Decimal("0.03")
-        assert Decimal(policy["max_initial_margin_utilization"]) == Decimal("0.90")
+        assert Decimal(policy["max_ticket_stop_risk_fraction"]) == Decimal("0.03")
+        assert Decimal(policy["max_gross_stop_risk_fraction"]) == Decimal("0.06")
+        assert Decimal(policy["max_ticket_initial_margin_fraction"]) == Decimal("0.45")
+        assert Decimal(policy["max_gross_initial_margin_utilization"]) == Decimal("0.90")
         assert policy["max_leverage"] == 10
         assert policy["supported_margin_mode"] == "cross"
         assert Decimal(
@@ -230,7 +234,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
             ).mappings()
         }
         assert metadata_rows["runtime_commit"] == "commit-acceptance"
-        assert metadata_rows["schema_revision"] == "0001_trading_kernel_baseline_v2"
+        assert metadata_rows["schema_revision"] == "0001_trading_kernel_baseline_v3"
         assert metadata_rows["registry_semantic_hash"].startswith("sha256:")
         assert metadata_rows["seed_identity"].startswith("sha256:")
 
@@ -243,7 +247,7 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -309,7 +313,7 @@ async def test_recovery_identity_refuses_a_runtime_without_one_unknown_leverage_
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -340,7 +344,7 @@ async def test_protected_identity_rotates_only_the_exact_protected_ticket_set(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -383,7 +387,7 @@ async def test_closure_identity_rotates_only_one_exact_released_pending_ticket(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -413,7 +417,7 @@ async def test_readonly_certification_emits_exact_pending_closure_manifest(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -453,7 +457,7 @@ async def test_protected_identity_refuses_extra_activity_and_open_incidents(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -560,7 +564,7 @@ async def test_protected_identity_rotates_a_complete_runner_ticket(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -596,7 +600,7 @@ async def test_readonly_certification_emits_exact_protected_ticket_manifest(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -630,7 +634,7 @@ async def test_protected_identity_refuses_missing_active_budget_reservation(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -667,7 +671,7 @@ async def test_protected_identity_accepts_actual_stop_risk_below_planned_budget(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:bnb",)
@@ -709,7 +713,7 @@ async def test_protected_identity_refuses_unrelated_active_budget_reservation(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -769,7 +773,7 @@ async def test_protected_identity_refuses_mismatched_account_exposure_totals(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
@@ -807,7 +811,7 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     seed_request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -829,8 +833,10 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     assert armed.policy_version == 2
     assert armed.new_entry_submit_enabled is True
     assert armed.max_concurrent_tickets == 3
-    assert armed.planned_stop_risk_fraction == Decimal("0.03")
-    assert armed.max_initial_margin_utilization == Decimal("0.90")
+    assert armed.max_ticket_stop_risk_fraction == Decimal("0.03")
+    assert armed.max_gross_stop_risk_fraction == Decimal("0.06")
+    assert armed.max_ticket_initial_margin_fraction == Decimal("0.45")
+    assert armed.max_gross_initial_margin_utilization == Decimal("0.90")
     assert armed.max_leverage == 10
     assert armed.model_dump(
         exclude={"policy_version", "new_entry_submit_enabled"}
@@ -863,8 +869,10 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     assert promoted.policy_version == 3
     assert promoted.new_entry_submit_enabled is True
     assert promoted.max_concurrent_tickets == 3
-    assert promoted.planned_stop_risk_fraction == Decimal("0.03")
-    assert promoted.max_initial_margin_utilization == Decimal("0.90")
+    assert promoted.max_ticket_stop_risk_fraction == Decimal("0.03")
+    assert promoted.max_gross_stop_risk_fraction == Decimal("0.06")
+    assert promoted.max_ticket_initial_margin_fraction == Decimal("0.45")
+    assert promoted.max_gross_initial_margin_utilization == Decimal("0.90")
     assert promoted.max_leverage == 10
     assert promoted.supported_margin_mode == "cross"
 
@@ -1131,6 +1139,7 @@ async def _insert_protected_tickets(
         await _insert_ticket_universe(connection)
         total_notional = Decimal(0)
         total_risk = Decimal(0)
+        total_reserved_margin = Decimal(0)
         for index, ticket_id in enumerate(ticket_ids, start=1):
             quantity = Decimal(index)
             is_runner = ticket_id in runner_ticket_ids
@@ -1266,6 +1275,7 @@ async def _insert_protected_tickets(
                 )
             total_notional += notional
             total_risk += risk
+            total_reserved_margin += notional / Decimal(5)
         await connection.execute(
             sa.update(account_exposure_current)
             .where(
@@ -1275,6 +1285,7 @@ async def _insert_protected_tickets(
             .values(
                 gross_notional=total_notional + exposure_notional_delta,
                 gross_risk_at_stop=total_risk + exposure_risk_delta,
+                current_reserved_margin=total_reserved_margin,
                 active_ticket_count=len(ticket_ids),
                 projection_version=5,
                 updated_at_ms=1_800_000_000_030,

@@ -67,7 +67,11 @@ class RecordingPromotionBackend:
             )
         )
 
-    def external_flat_and_rules_match(self) -> bool:
+    def external_state_and_rules_match(
+        self,
+        certification: Mapping[str, object],
+    ) -> bool:
+        del certification
         self.calls.append("external")
         return True
 
@@ -121,7 +125,10 @@ def test_entry_promotion_rehearses_arm_failure_resume_and_idempotence() -> None:
             now_ms=promotion_now_ms,
             fail_start=True,
         )
-        with pytest.raises(EntryPromotionBlocked, match="active_while_fenced"):
+        with pytest.raises(
+            EntryPromotionBlocked,
+            match="entry_not_active_while_fenced",
+        ):
             promote_entry(failed)
 
         armed_after_failure = asyncio.run(
@@ -181,7 +188,7 @@ async def _seed_and_bootstrap(database_name: str, database_url: str) -> None:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-entry-promotion-test",
                     runtime_commit=RUNTIME_COMMIT,
-                    schema_revision="0001_trading_kernel_baseline_v2",
+                    schema_revision="0001_trading_kernel_baseline_v3",
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
             )

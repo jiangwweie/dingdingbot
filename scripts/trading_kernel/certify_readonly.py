@@ -19,6 +19,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.trading_kernel.application.strategy_universe_batch_manifest import (
+    APPROVED_FIRST_BATCH_INSTRUMENT_IDS,
+)
+from src.trading_kernel.domain.instrument_certification import (
+    build_certification_manifest_digest,
+)
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_models import metadata
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
@@ -27,7 +33,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
 )
 
 SCHEMA = "brc.trading_kernel.readonly_certification.v1"
-EXPECTED_ALEMBIC_REVISION = "0001_trading_kernel_baseline_v2"
+EXPECTED_ALEMBIC_REVISION = "0001_trading_kernel_baseline_v3"
 LEGACY_EXECUTION_TABLES = (
     "brc_runtime_execution_tickets",
     "brc_runtime_execution_orders",
@@ -37,8 +43,10 @@ LEGACY_EXECUTION_TABLES = (
 )
 _DECIMAL_POLICY_FIELDS = frozenset(
     {
-        "planned_stop_risk_fraction",
-        "max_initial_margin_utilization",
+        "max_ticket_stop_risk_fraction",
+        "max_gross_stop_risk_fraction",
+        "max_ticket_initial_margin_fraction",
+        "max_gross_initial_margin_utilization",
         "post_stop_stress_multiple",
         "max_post_fill_stop_risk_overrun_fraction",
     }
@@ -47,6 +55,23 @@ _DECIMAL_POLICY_FIELDS = frozenset(
 
 def _canonical_decimal(value: object) -> str:
     return format(Decimal(str(value)).normalize(), "f")
+
+
+def _certification_batch_policy_stage_matches(
+    *,
+    batch_policy_version: int,
+    current_policy_version: int,
+    new_entry_submit_enabled: bool,
+) -> bool:
+    """Accept an exact batch policy or its one authorized ENTRY-arm successor."""
+
+    if batch_policy_version == current_policy_version:
+        return True
+    return bool(
+        batch_policy_version == 1
+        and current_policy_version == 2
+        and new_entry_submit_enabled
+    )
 
 
 def _protected_handover_tickets(
@@ -94,6 +119,44 @@ def _protected_handover_tickets(
             )
         tickets.append(ticket)
     return tickets
+
+
+def _protected_handover_is_valid(
+    rows: list[dict[str, object]],
+    *,
+    active_ticket_count: int,
+) -> bool:
+    if not rows or len(rows) != active_ticket_count:
+        return False
+    for row in rows:
+        status = str(row["aggregate_status"])
+        position_qty = Decimal(str(row["position_qty"]))
+        protected_qty = Decimal(str(row["protected_qty"]))
+        if (
+            status not in {"position_protected", "runner_protected"}
+            or row["active_netting_domain_key"] != row["netting_domain_key"]
+            or row["budget_reservation_status"] != "active"
+            or position_qty <= 0
+            or protected_qty != position_qty
+            or row["active_stop_exchange_order_id"] is None
+            or row["active_stop_price"] is None
+            or int(str(row["unresolved_command_count"])) != 0
+            or int(str(row["open_incident_count"])) != 0
+        ):
+            return False
+        if status == "position_protected":
+            if (
+                row["tp1_exchange_order_id"] is None
+                or Decimal(str(row["tp1_target_qty"])) <= 0
+                or Decimal(str(row["tp1_filled_qty"])) != 0
+            ):
+                return False
+        elif (
+            row["tp1_exchange_order_id"] is not None
+            or Decimal(str(row["tp1_filled_qty"])) <= 0
+        ):
+            return False
+    return True
 
 
 def _closure_ticket_manifest(
@@ -352,8 +415,10 @@ async def _certify(
                                enabled,
                                new_entry_submit_enabled,
                                max_concurrent_tickets,
-                               planned_stop_risk_fraction,
-                               max_initial_margin_utilization,
+                               max_ticket_stop_risk_fraction,
+                               max_gross_stop_risk_fraction,
+                               max_ticket_initial_margin_fraction,
+                               max_gross_initial_margin_utilization,
                                max_leverage,
                                supported_margin_mode,
                                post_stop_stress_multiple,
@@ -396,6 +461,40 @@ async def _certify(
                     {"now_ms": effective_now_ms},
                 )
             ).one()
+            certification_batch_row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT batch.certification_batch_id,
+                               batch.runtime_profile_id,
+                               batch.target_commit,
+                               batch.target_schema_revision,
+                               batch.target_seed_identity,
+                               batch.owner_policy_id,
+                               batch.owner_policy_version,
+                               batch.manifest_digest,
+                               batch.status,
+                               batch.completed_at_ms,
+                               batch.valid_until_ms,
+                               count(member.exchange_instrument_id) AS member_count,
+                               count(*) FILTER (
+                                   WHERE member.status = 'eligible'
+                               ) AS eligible_member_count
+                          FROM brc_instrument_certification_batches batch
+                          JOIN brc_instrument_certification_batch_members member
+                            ON member.certification_batch_id =
+                               batch.certification_batch_id
+                         WHERE batch.status = 'completed'
+                           AND batch.valid_until_ms > :now_ms
+                         GROUP BY batch.certification_batch_id
+                         ORDER BY batch.completed_at_ms DESC,
+                                  batch.certification_batch_id
+                         LIMIT 1
+                        """
+                    ),
+                    {"now_ms": effective_now_ms},
+                )
+            ).mappings().one_or_none()
             integrity_orphans = int(
                 (
                     await connection.execute(
@@ -536,6 +635,7 @@ async def _certify(
                         """
                         SELECT ticket.ticket_id,
                                ticket.netting_domain_key,
+                               ticket.active_netting_domain_key,
                                ticket.exchange_instrument_id,
                                ticket.position_side,
                                ticket.take_profit_prices,
@@ -546,10 +646,25 @@ async def _certify(
                                aggregate_current.active_stop_price,
                                aggregate_current.tp1_exchange_order_id,
                                aggregate_current.tp1_target_qty,
-                               aggregate_current.tp1_filled_qty
+                               aggregate_current.tp1_filled_qty,
+                               reservation.status AS budget_reservation_status,
+                               (SELECT count(*)
+                                  FROM brc_exchange_commands command
+                                 WHERE command.ticket_id = ticket.ticket_id
+                                   AND command.status IN (
+                                       'prepared', 'claimed',
+                                       'dispatch_started', 'outcome_unknown'
+                                   )) AS unresolved_command_count,
+                               (SELECT count(*)
+                                  FROM brc_runtime_incidents incident
+                                 WHERE incident.ticket_id = ticket.ticket_id
+                                   AND incident.status <> 'resolved'
+                               ) AS open_incident_count
                           FROM brc_trade_tickets ticket
                           JOIN brc_trade_aggregates aggregate_current
                             ON aggregate_current.ticket_id = ticket.ticket_id
+                          LEFT JOIN brc_budget_reservations reservation
+                            ON reservation.ticket_id = ticket.ticket_id
                          WHERE ticket.terminal_at_ms IS NULL
                          ORDER BY ticket.ticket_id
                         """
@@ -672,12 +787,16 @@ async def _certify(
         },
         "temporarily_unavailable_certification_count": int(universe_counts[8]),
     }
+    protected_rows = [dict(row) for row in protected_ticket_rows]
+    protected_promotion_internal_pass = _protected_handover_is_valid(
+        protected_rows,
+        active_ticket_count=active_ticket_domains,
+    )
     protected_tickets = (
         []
         if normalized_closure_ticket_id is not None
-        else _protected_handover_tickets(
-            [dict(row) for row in protected_ticket_rows]
-        )
+        or not protected_promotion_internal_pass
+        else _protected_handover_tickets(protected_rows)
     )
     owner_policy = (
         None
@@ -703,10 +822,18 @@ async def _certify(
             isinstance(owner_policy_row["new_entry_submit_enabled"], bool),
             int(owner_policy_row["max_concurrent_tickets"])
             == DYNAMIC_POLICY.max_concurrent_tickets,
-            Decimal(str(owner_policy_row["planned_stop_risk_fraction"]))
-            == DYNAMIC_POLICY.planned_stop_risk_fraction,
-            Decimal(str(owner_policy_row["max_initial_margin_utilization"]))
-            == DYNAMIC_POLICY.max_initial_margin_utilization,
+            Decimal(str(owner_policy_row["max_ticket_stop_risk_fraction"]))
+            == DYNAMIC_POLICY.max_ticket_stop_risk_fraction,
+            Decimal(str(owner_policy_row["max_gross_stop_risk_fraction"]))
+            == DYNAMIC_POLICY.max_gross_stop_risk_fraction,
+            Decimal(
+                str(owner_policy_row["max_ticket_initial_margin_fraction"])
+            )
+            == DYNAMIC_POLICY.max_ticket_initial_margin_fraction,
+            Decimal(
+                str(owner_policy_row["max_gross_initial_margin_utilization"])
+            )
+            == DYNAMIC_POLICY.max_gross_initial_margin_utilization,
             int(owner_policy_row["max_leverage"]) == DYNAMIC_POLICY.max_leverage,
             owner_policy_row["supported_margin_mode"]
             == DYNAMIC_POLICY.supported_margin_mode,
@@ -754,13 +881,49 @@ async def _certify(
     warming_scope_count = int(entry_gate_counts[2])
     active_member_count = int(entry_gate_counts[3])
     eligible_fresh_certification_count = int(entry_gate_counts[4])
+    expected_manifest_digest = build_certification_manifest_digest(
+        APPROVED_FIRST_BATCH_INSTRUMENT_IDS
+    )
+    runtime_profile_id = (
+        None
+        if not isinstance(policy_scope, dict)
+        else policy_scope.get("runtime_profile_id")
+    )
+    certification_batch_pass = bool(
+        certification_batch_row is not None
+        and certification_batch_row["runtime_profile_id"] == runtime_profile_id
+        and certification_batch_row["target_commit"]
+        == runtime_identity.get("runtime_commit")
+        and certification_batch_row["target_schema_revision"]
+        == runtime_identity.get("schema_revision")
+        and certification_batch_row["target_seed_identity"]
+        == runtime_identity.get("seed_identity")
+        and certification_batch_row["owner_policy_id"] == OWNER_POLICY_ID
+        and owner_policy_row is not None
+        and _certification_batch_policy_stage_matches(
+            batch_policy_version=int(
+                certification_batch_row["owner_policy_version"]
+            ),
+            current_policy_version=int(owner_policy_row["policy_version"]),
+            new_entry_submit_enabled=bool(
+                owner_policy_row["new_entry_submit_enabled"]
+            ),
+        )
+        and certification_batch_row["manifest_digest"]
+        == expected_manifest_digest
+        and certification_batch_row["status"] == "completed"
+        and int(certification_batch_row["member_count"])
+        == len(APPROVED_FIRST_BATCH_INSTRUMENT_IDS)
+        and int(certification_batch_row["eligible_member_count"])
+        == len(APPROVED_FIRST_BATCH_INSTRUMENT_IDS)
+    )
     universe_bootstrap_pass = (
         database_integrity_pass
         and active_current_count == 6
         and active_scope_count == 42
         and warming_scope_count == 0
         and active_member_count == 7
-        and eligible_fresh_certification_count == 7
+        and certification_batch_pass
         and policy_events == expected_event_spec_ids
     )
     flatness_pass = (
@@ -770,9 +933,17 @@ async def _certify(
         and open_incidents == 0
         and active_budget_reservations == 0
     )
+    protected_promotion_pass = (
+        universe_bootstrap_pass
+        and protected_promotion_internal_pass
+        and non_flat_positions == active_ticket_domains
+        and active_budget_reservations == active_ticket_domains
+        and unresolved_commands == 0
+        and open_incidents == 0
+    )
     entry_promotion_pass = (
         universe_bootstrap_pass
-        and flatness_pass
+        and (flatness_pass or protected_promotion_pass)
         and owner_policy_row is not None
         and owner_policy_row["new_entry_submit_enabled"] is False
         and capabilities.get("exchange_commands") is False
@@ -813,6 +984,7 @@ async def _certify(
         "strategy_universe": strategy_universe,
         "database_integrity_pass": database_integrity_pass,
         "flatness_pass": flatness_pass,
+        "protected_promotion_pass": protected_promotion_pass,
         "universe_bootstrap_pass": universe_bootstrap_pass,
         "entry_promotion_pass": entry_promotion_pass,
         "entry_promotion_counts": {
@@ -822,6 +994,12 @@ async def _certify(
             "active_instruments": active_member_count,
             "eligible_fresh_certifications": eligible_fresh_certification_count,
         },
+        "certification_batch": (
+            None
+            if certification_batch_row is None
+            else dict(certification_batch_row)
+        ),
+        "certification_batch_pass": certification_batch_pass,
         "capabilities": capabilities,
         "owner_policy": owner_policy,
         "release_counts": release_counts,

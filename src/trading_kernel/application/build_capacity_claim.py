@@ -127,12 +127,22 @@ def build_capacity_claim(
             total_wallet_balance=account_risk.total_wallet_balance,
             total_margin_balance=account_risk.total_margin_balance,
             total_initial_margin=account_risk.total_initial_margin,
+            current_reserved_margin=usage.current_reserved_margin,
+            gross_risk_at_stop=usage.gross_risk_at_stop,
             available_margin=account_risk.available_margin,
             active_ticket_count=usage.active_ticket_count,
             max_concurrent_tickets=policy.max_concurrent_tickets,
-            planned_stop_risk_fraction=policy.planned_stop_risk_fraction,
-            max_initial_margin_utilization=(
-                policy.max_initial_margin_utilization
+            max_ticket_stop_risk_fraction=(
+                policy.max_ticket_stop_risk_fraction
+            ),
+            max_gross_stop_risk_fraction=(
+                policy.max_gross_stop_risk_fraction
+            ),
+            max_ticket_initial_margin_fraction=(
+                policy.max_ticket_initial_margin_fraction
+            ),
+            max_gross_initial_margin_utilization=(
+                policy.max_gross_initial_margin_utilization
             ),
             permitted_max_leverage=min(
                 policy.max_leverage,
@@ -219,7 +229,7 @@ def build_capacity_claim(
         runtime=runtime,
         netting_domain=netting_domain,
     )
-    post_fill_stop_risk_limit = selected.planned_stop_risk_budget * (
+    post_fill_stop_risk_limit = selected.ticket_stop_risk_budget * (
         Decimal(1) + policy.max_post_fill_stop_risk_overrun_fraction
     )
     claim = freeze_capacity_claim(
@@ -251,13 +261,23 @@ def build_capacity_claim(
         margin_mode_at_claim=account_risk.margin_mode,
         active_ticket_count_at_claim=usage.active_ticket_count,
         remaining_slots_at_claim=selected.remaining_slots,
-        planned_stop_risk_fraction=policy.planned_stop_risk_fraction,
-        planned_stop_risk_budget=selected.planned_stop_risk_budget,
+        gross_risk_at_stop_at_claim=usage.gross_risk_at_stop,
+        current_reserved_margin_at_claim=usage.current_reserved_margin,
+        max_ticket_stop_risk_fraction=(
+            policy.max_ticket_stop_risk_fraction
+        ),
+        max_gross_stop_risk_fraction=policy.max_gross_stop_risk_fraction,
+        max_ticket_initial_margin_fraction=(
+            policy.max_ticket_initial_margin_fraction
+        ),
+        max_gross_initial_margin_utilization=(
+            policy.max_gross_initial_margin_utilization
+        ),
+        planned_stop_risk_budget=selected.ticket_stop_risk_budget,
         max_post_fill_stop_risk_overrun_fraction=(
             policy.max_post_fill_stop_risk_overrun_fraction
         ),
         post_fill_stop_risk_limit=post_fill_stop_risk_limit,
-        max_initial_margin_utilization=policy.max_initial_margin_utilization,
         post_stop_stress_multiple=policy.post_stop_stress_multiple,
         ticket_margin_budget=selected.ticket_margin_budget,
         required_leverage=selected.required_leverage,
@@ -291,6 +311,7 @@ def build_capacity_claim(
 def _sizing_refusal(status: CapacitySizingStatus) -> CapacityClaimStatus:
     if status in {
         CapacitySizingStatus.COUNT_EXHAUSTED,
+        CapacitySizingStatus.STOP_RISK_EXHAUSTED,
         CapacitySizingStatus.MARGIN_EXHAUSTED,
         CapacitySizingStatus.VENUE_MINIMUM_UNMET,
         CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE,

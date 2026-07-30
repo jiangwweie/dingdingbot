@@ -2,7 +2,7 @@
 title: P0_TRADING_KERNEL_REBUILD_DESIGN
 status: CURRENT
 program_id: P0-TKR
-last_verified: 2026-07-24
+last_verified: 2026-07-30
 ---
 
 # P0 Trading Kernel Rebuild Design
@@ -58,7 +58,7 @@ src/trading_kernel/infrastructure PostgreSQL and venue adapters
 src/trading_kernel/interfaces     bounded runtime and readonly surfaces
 ```
 
-The tracked database head is `0001_trading_kernel_baseline_v2`. PostgreSQL owns
+The tracked database head is `0001_trading_kernel_baseline_v3`. PostgreSQL owns
 current runtime truth and append-only lifecycle facts. Exchange readonly facts
 own external truth. Repository documents and generated output never own
 production decisions.
@@ -102,11 +102,16 @@ exchange-configured fact, never emits a leverage-mutation command, and ENTRY
 revalidates that same fact immediately before dispatch. A regular deployment is
 blocked when any supported instrument differs from the approved profile.
 
-An eligible Ticket may use the current remaining executable margin needed to
-reach its stop-risk target. The system does not divide that margin by unused
-future Ticket slots. `max_concurrent_tickets` remains a concurrency ceiling;
-current Reservations, available margin, the profile utilization limit, Initial
-Stop risk, venue minimums, and liquidation distance still bound every Ticket.
+An eligible Ticket uses current remaining executable margin only within the
+Owner-approved per-Ticket and gross stop-risk and initial-margin ceilings owned
+by `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md`. The system does not divide
+capital into equal fixed slots: the first two Tickets may reach their full
+risk target, while a third uses only the remaining risk and margin.
+`max_concurrent_tickets` remains a concurrency ceiling rather than a promise of
+three equal positions. Current Reservations, available margin, the profile
+limits, Initial Stop risk, venue minimums, and liquidation distance still bound
+every Ticket. These explicit ticket/gross limits become production truth only
+after the active operability repair passes its clean-schema deployment.
 
 ## Transaction And Exchange Model
 

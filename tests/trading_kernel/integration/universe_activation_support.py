@@ -69,8 +69,8 @@ REPLACEMENT_MEMBERS = (
     "binance-usdm:OPUSDT:perpetual",
 )
 NOW_MS = 1_800_000_100_000
-SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
-    "0001_trading_kernel_baseline_v2"
+SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v3"] = (
+    "0001_trading_kernel_baseline_v3"
 )
 _READINESS_DIGEST = "sha256:" + ("a" * 64)
 _FACTS_DIGEST = "sha256:" + ("b" * 64)

@@ -16,6 +16,8 @@ EXPECTED_TABLES = {
     "brc_fact_definitions",
     "brc_facts_current",
     "brc_instrument_rules_current",
+    "brc_instrument_certification_batch_members",
+    "brc_instrument_certification_batches",
     "brc_instrument_certification_current",
     "brc_instruments",
     "brc_monitor_current",
@@ -54,6 +56,10 @@ def test_strategy_universe_metadata_has_forward_only_authority_shape() -> None:
     members = metadata.tables["brc_strategy_universe_members"]
     current = metadata.tables["brc_strategy_universe_current"]
     certifications = metadata.tables["brc_instrument_certification_current"]
+    batches = metadata.tables["brc_instrument_certification_batches"]
+    batch_members = metadata.tables[
+        "brc_instrument_certification_batch_members"
+    ]
     comparative = metadata.tables["brc_comparative_projection_current"]
     instruments = metadata.tables["brc_instruments"]
     scopes = metadata.tables["brc_runtime_scopes_current"]
@@ -89,6 +95,34 @@ def test_strategy_universe_metadata_has_forward_only_authority_shape() -> None:
         "runtime_profile_id",
         "exchange_instrument_id",
     )
+    assert tuple(column.name for column in batches.primary_key.columns) == (
+        "certification_batch_id",
+    )
+    assert tuple(column.name for column in batch_members.primary_key.columns) == (
+        "certification_batch_id",
+        "exchange_instrument_id",
+    )
+    assert {
+        "target_commit",
+        "target_schema_revision",
+        "target_seed_identity",
+        "owner_policy_id",
+        "owner_policy_version",
+        "manifest_digest",
+        "status",
+        "minimum_valid_until_ms",
+        "completed_at_ms",
+        "valid_until_ms",
+        "blocker_code",
+    }.issubset(batches.c.keys())
+    assert {
+        "status",
+        "blocker_code",
+        "facts_digest",
+        "product_rules_digest",
+        "observed_at_ms",
+        "valid_until_ms",
+    }.issubset(batch_members.c.keys())
     assert tuple(column.name for column in comparative.primary_key.columns) == (
         "event_spec_id",
         "universe_version_id",
@@ -282,14 +316,18 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
 
     assert {
         "new_entry_submit_enabled",
-        "planned_stop_risk_fraction",
-        "max_initial_margin_utilization",
+        "max_ticket_stop_risk_fraction",
+        "max_gross_stop_risk_fraction",
+        "max_ticket_initial_margin_fraction",
+        "max_gross_initial_margin_utilization",
         "max_leverage",
         "supported_margin_mode",
         "post_stop_stress_multiple",
         "max_post_fill_stop_risk_overrun_fraction",
     }.issubset(policies.c.keys())
     assert {
+        "planned_stop_risk_fraction",
+        "max_initial_margin_utilization",
         "real_submit_enabled",
         "max_gross_notional",
         "max_gross_risk_at_stop",
@@ -299,12 +337,24 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
     assert "priority_rank > 0" in check_sql
     assert "max_concurrent_tickets > 0" in check_sql
     assert (
-        "planned_stop_risk_fraction > 0 AND planned_stop_risk_fraction < 1"
+        "max_ticket_stop_risk_fraction > 0 "
+        "AND max_ticket_stop_risk_fraction < 1"
         in check_sql
     )
     assert (
-        "max_initial_margin_utilization > 0 "
-        "AND max_initial_margin_utilization <= 1"
+        "max_gross_stop_risk_fraction > 0 "
+        "AND max_gross_stop_risk_fraction <= 1 "
+        "AND max_ticket_stop_risk_fraction <= max_gross_stop_risk_fraction"
+    ) in check_sql
+    assert (
+        "max_ticket_initial_margin_fraction > 0 "
+        "AND max_ticket_initial_margin_fraction <= 1"
+    ) in check_sql
+    assert (
+        "max_gross_initial_margin_utilization > 0 "
+        "AND max_gross_initial_margin_utilization <= 1 "
+        "AND max_ticket_initial_margin_fraction "
+        "<= max_gross_initial_margin_utilization"
     ) in check_sql
     assert "max_leverage >= 1 AND max_leverage <= 10" in check_sql
     assert "supported_margin_mode = 'cross'" in check_sql
@@ -416,9 +466,37 @@ def test_dynamic_claim_and_incident_storage_enforce_typed_safety_boundaries() ->
         "risk_at_stop <= planned_stop_risk_budget",
         "post_fill_stop_risk_limit >= planned_stop_risk_budget",
     }.issubset(claim_checks)
+    assert {
+        "gross_risk_at_stop_at_claim",
+        "current_reserved_margin_at_claim",
+        "max_ticket_stop_risk_fraction",
+        "max_gross_stop_risk_fraction",
+        "max_ticket_initial_margin_fraction",
+        "max_gross_initial_margin_utilization",
+        "ticket_margin_budget",
+        "reserved_margin",
+    }.issubset(claims.c.keys())
     assert {"entry_block_scope", "entry_block_key"}.issubset(incidents.c.keys())
     assert any("entry_block_scope IN" in check for check in incident_checks)
     assert any("entry_block_key" in check for check in incident_checks)
+
+
+def test_account_exposure_tracks_reserved_margin_for_atomic_capacity_revalidation() -> None:
+    exposure = metadata.tables["brc_account_exposure_current"]
+    check_sql = {
+        str(constraint.sqltext)
+        for constraint in exposure.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+
+    assert {
+        "gross_notional",
+        "gross_risk_at_stop",
+        "current_reserved_margin",
+        "active_ticket_count",
+        "projection_version",
+    }.issubset(exposure.c.keys())
+    assert "current_reserved_margin >= 0" in check_sql
 
 
 def test_exit_policy_registry_and_capacity_claim_freeze_runner_split() -> None:

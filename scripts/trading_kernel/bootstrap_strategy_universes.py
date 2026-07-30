@@ -20,6 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.trading_kernel.application.certification_batch import (
+    StartCertificationBatchRequest,
+    start_certification_batch,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseConfigurationRequest,
     configure_strategy_universe,
@@ -32,6 +36,10 @@ from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_FIRST_BATCH_INSTRUMENT_IDS,
     APPROVED_UNIVERSE_EVENT_ORDER,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.instrument_certification import (
+    build_certification_manifest_digest,
+)
 from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
@@ -41,6 +49,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
 
 EVENT_ORDER = APPROVED_UNIVERSE_EVENT_ORDER
 INITIAL_MEMBERS = APPROVED_FIRST_BATCH_INSTRUMENT_IDS
+CERTIFICATION_PROMOTION_WINDOW_MS = 120_000
 
 
 class BootstrapBlocked(RuntimeError):
@@ -52,6 +61,15 @@ class BootstrapResult:
     event_id: str
     status: str
     universe_version_id: str
+
+
+@dataclass(frozen=True)
+class BootstrapAuthority:
+    runtime_commit: str
+    schema_revision: str
+    seed_identity: str
+    owner_policy_id: str
+    owner_policy_version: int
 
 
 def _validate_static_manifest() -> None:
@@ -68,7 +86,7 @@ async def _validate_database_authority(
     engine: AsyncEngine,
     *,
     runtime_profile_id: str,
-) -> None:
+) -> BootstrapAuthority:
     contracts = {contract.event_id: contract for contract in registered_strategy_contracts()}
     expected_event_specs = tuple(contracts[event_id].event_spec_id for event_id in EVENT_ORDER)
     async with engine.connect() as connection:
@@ -93,6 +111,28 @@ async def _validate_database_authority(
                 {"runtime_profile_id": runtime_profile_id},
             )
         ).mappings().all()
+        identity_rows = (
+            await connection.execute(
+                text(
+                    "SELECT metadata_key, metadata_value "
+                    "FROM brc_schema_metadata "
+                    "WHERE metadata_key IN "
+                    "('runtime_commit','schema_revision','seed_identity')"
+                )
+            )
+        ).all()
+        policy_identity = (
+            await connection.execute(
+                text(
+                    "SELECT owner_policy_id, policy_version "
+                    "FROM brc_owner_policy_current "
+                    "WHERE enabled = true "
+                    "AND scope ->> 'runtime_profile_id' = :runtime_profile_id "
+                    "ORDER BY owner_policy_id LIMIT 2"
+                ),
+                {"runtime_profile_id": runtime_profile_id},
+            )
+        ).all()
     actual_event_specs = {
         str(row["event_id"]): str(row["event_spec_id"]) for row in event_rows
     }
@@ -110,6 +150,94 @@ async def _validate_database_authority(
         sorted(expected_event_specs)
     ):
         raise BootstrapBlocked("owner_policy_event_manifest_mismatch")
+    identity = {str(key): str(value) for key, value in identity_rows}
+    if set(identity) != {"runtime_commit", "schema_revision", "seed_identity"}:
+        raise BootstrapBlocked("runtime_identity_incomplete")
+    if len(policy_identity) != 1:
+        raise BootstrapBlocked("owner_policy_identity_mismatch")
+    return BootstrapAuthority(
+        runtime_commit=identity["runtime_commit"],
+        schema_revision=identity["schema_revision"],
+        seed_identity=identity["seed_identity"],
+        owner_policy_id=str(policy_identity[0][0]),
+        owner_policy_version=int(policy_identity[0][1]),
+    )
+
+
+async def _ensure_certification_batch(
+    engine: AsyncEngine,
+    *,
+    runtime_profile_id: str,
+    authority: BootstrapAuthority,
+    started_at_ms: int,
+) -> str:
+    manifest_digest = build_certification_manifest_digest(INITIAL_MEMBERS)
+    async with engine.connect() as connection:
+        existing = (
+            await connection.execute(
+                text(
+                    "SELECT certification_batch_id, started_at_ms, "
+                    "minimum_valid_until_ms "
+                    "FROM brc_instrument_certification_batches "
+                    "WHERE runtime_profile_id = :runtime_profile_id "
+                    "AND target_commit = :target_commit "
+                    "AND target_schema_revision = :target_schema_revision "
+                    "AND target_seed_identity = :target_seed_identity "
+                    "AND owner_policy_id = :owner_policy_id "
+                    "AND owner_policy_version = :owner_policy_version "
+                    "AND manifest_digest = :manifest_digest "
+                    "AND status IN ('pending','completed') "
+                    "ORDER BY started_at_ms DESC LIMIT 1"
+                ),
+                {
+                    "runtime_profile_id": runtime_profile_id,
+                    "target_commit": authority.runtime_commit,
+                    "target_schema_revision": authority.schema_revision,
+                    "target_seed_identity": authority.seed_identity,
+                    "owner_policy_id": authority.owner_policy_id,
+                    "owner_policy_version": authority.owner_policy_version,
+                    "manifest_digest": manifest_digest,
+                },
+            )
+        ).one_or_none()
+    if existing is None:
+        batch_id = "certification-batch:" + canonical_digest(
+            {
+                "runtime_profile_id": runtime_profile_id,
+                "target_commit": authority.runtime_commit,
+                "target_schema_revision": authority.schema_revision,
+                "target_seed_identity": authority.seed_identity,
+                "owner_policy_id": authority.owner_policy_id,
+                "owner_policy_version": authority.owner_policy_version,
+                "manifest_digest": manifest_digest,
+                "started_at_ms": started_at_ms,
+            }
+        )[7:39]
+        batch_started_at_ms = started_at_ms
+        minimum_valid_until_ms = (
+            started_at_ms + CERTIFICATION_PROMOTION_WINDOW_MS
+        )
+    else:
+        batch_id = str(existing[0])
+        batch_started_at_ms = int(existing[1])
+        minimum_valid_until_ms = int(existing[2])
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await start_certification_batch(
+            uow,
+            StartCertificationBatchRequest(
+                certification_batch_id=batch_id,
+                runtime_profile_id=runtime_profile_id,
+                target_commit=authority.runtime_commit,
+                target_schema_revision=authority.schema_revision,
+                target_seed_identity=authority.seed_identity,
+                owner_policy_id=authority.owner_policy_id,
+                owner_policy_version=authority.owner_policy_version,
+                exchange_instrument_ids=INITIAL_MEMBERS,
+                started_at_ms=batch_started_at_ms,
+                minimum_valid_until_ms=minimum_valid_until_ms,
+            ),
+        )
+    return batch_id
 
 
 async def bootstrap_strategy_universes(
@@ -130,8 +258,13 @@ async def bootstrap_strategy_universes(
     _validate_static_manifest()
     engine = create_async_engine(database_url)
     try:
-        await _validate_database_authority(engine, runtime_profile_id=runtime_profile_id)
+        authority = await _validate_database_authority(
+            engine,
+            runtime_profile_id=runtime_profile_id,
+        )
+        deadline_ms = now_ms() + wait_timeout_ms
         results: list[BootstrapResult] = []
+        certification_batch_id: str | None = None
         for event_id in EVENT_ORDER:
             installed_at_ms = now_ms()
             async with PostgresKernelUnitOfWork(engine) as uow:
@@ -146,8 +279,14 @@ async def bootstrap_strategy_universes(
                 )
             if installed.universe is None:
                 raise BootstrapBlocked("warming_universe_slot_occupied")
+            if certification_batch_id is None:
+                certification_batch_id = await _ensure_certification_batch(
+                    engine,
+                    runtime_profile_id=runtime_profile_id,
+                    authority=authority,
+                    started_at_ms=installed_at_ms,
+                )
             universe_version_id = installed.universe.universe_version_id
-            deadline_ms = installed_at_ms + wait_timeout_ms
             while installed.lifecycle_state != "active":
                 if now_ms() >= deadline_ms:
                     raise BootstrapBlocked(f"warming_timeout:{event_id}")

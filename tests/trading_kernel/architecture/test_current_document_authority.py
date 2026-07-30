@@ -22,6 +22,9 @@ CURRENT_DOCUMENT_ALLOWLIST = {
     "STRATEGY_ENGINEERING_INTAKE_CONTRACT.md",
     "STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md",
     "TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
+    "TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
+    "TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
+    "TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
     "TRADEABILITY_DECISION_CONTRACT.md",
     "strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md",
 }
@@ -32,6 +35,11 @@ ENTRY_DOCUMENTS = (
     "README.md",
     "MEMORY.md",
     "docs/README.md",
+)
+ACTIVE_OPERABILITY_REPAIR_DOCUMENTS = (
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
 )
 
 RETIRED_AUTHORITY_MARKERS = (
@@ -52,12 +60,17 @@ VOLATILE_STATE_FREE_DOCUMENTS = (
     "docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md",
     "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md",
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
 )
 RUNTIME_MODEL_DOCUMENTS = (
     CURRENT_RUNTIME_STATE_DOCUMENT,
     "docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md",
     "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md",
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
 )
 
 CURRENT_PRODUCTION_COMMIT = "8b8bddc8"
@@ -141,6 +154,17 @@ def test_entry_documents_reference_only_existing_current_documents() -> None:
     assert not missing, "stale current-document references remain:\n" + "\n".join(
         missing
     )
+
+
+def test_active_operability_repair_documents_are_entry_references() -> None:
+    for relative_path in ("AGENTS.md", "README.md", "docs/README.md"):
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        missing = [
+            document
+            for document in ACTIVE_OPERABILITY_REPAIR_DOCUMENTS
+            if document not in source
+        ]
+        assert not missing, f"{relative_path} is missing repair references: {missing}"
 
 
 def test_current_authority_does_not_reintroduce_retired_execution_semantics() -> None:

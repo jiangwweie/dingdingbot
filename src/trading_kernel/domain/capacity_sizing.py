@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 class CapacitySizingStatus(StrEnum):
     SELECTED = "selected"
     COUNT_EXHAUSTED = "count_exhausted"
+    STOP_RISK_EXHAUSTED = "stop_risk_exhausted"
     MARGIN_EXHAUSTED = "margin_exhausted"
     VENUE_MINIMUM_UNMET = "venue_minimum_unmet"
     EXIT_PLAN_UNEXECUTABLE = "exit_plan_unexecutable"
@@ -25,11 +26,15 @@ class CapacitySizingRequest(BaseModel):
     total_wallet_balance: Decimal
     total_margin_balance: Decimal
     total_initial_margin: Decimal
+    current_reserved_margin: Decimal
+    gross_risk_at_stop: Decimal
     available_margin: Decimal
     active_ticket_count: int
     max_concurrent_tickets: int
-    planned_stop_risk_fraction: Decimal
-    max_initial_margin_utilization: Decimal
+    max_ticket_stop_risk_fraction: Decimal
+    max_gross_stop_risk_fraction: Decimal
+    max_ticket_initial_margin_fraction: Decimal
+    max_gross_initial_margin_utilization: Decimal
     permitted_max_leverage: int
     configured_leverage: int
     entry_reference_price: Decimal
@@ -43,6 +48,8 @@ class CapacitySizingRequest(BaseModel):
         "total_wallet_balance",
         "total_margin_balance",
         "total_initial_margin",
+        "current_reserved_margin",
+        "gross_risk_at_stop",
         "available_margin",
     )
     @classmethod
@@ -64,7 +71,12 @@ class CapacitySizingRequest(BaseModel):
             raise ValueError("sizing prices, rules, and ratios must be finite and positive")
         return value
 
-    @field_validator("planned_stop_risk_fraction", "max_initial_margin_utilization")
+    @field_validator(
+        "max_ticket_stop_risk_fraction",
+        "max_gross_stop_risk_fraction",
+        "max_ticket_initial_margin_fraction",
+        "max_gross_initial_margin_utilization",
+    )
     @classmethod
     def _require_fraction(cls, value: Decimal) -> Decimal:
         if not value.is_finite() or value <= 0 or value > 1:
@@ -106,8 +118,9 @@ class CapacitySizingSelection(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     remaining_slots: int
-    planned_stop_risk_budget: Decimal
-    remaining_policy_margin: Decimal
+    ticket_stop_risk_budget: Decimal
+    remaining_gross_stop_risk: Decimal
+    remaining_gross_margin: Decimal
     remaining_executable_margin: Decimal
     ticket_margin_budget: Decimal
     risk_quantity: Decimal
@@ -145,29 +158,44 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
         return _refused(CapacitySizingStatus.INVALID_FACTS)
 
     remaining_slots = request.max_concurrent_tickets - request.active_ticket_count
-    planned_stop_risk_budget = (
-        request.total_wallet_balance * request.planned_stop_risk_fraction
+    remaining_gross_stop_risk = max(
+        request.total_wallet_balance * request.max_gross_stop_risk_fraction
+        - request.gross_risk_at_stop,
+        Decimal(0),
     )
-    account_initial_margin_limit = (
-        request.total_margin_balance * request.max_initial_margin_utilization
+    ticket_stop_risk_budget = min(
+        request.total_wallet_balance * request.max_ticket_stop_risk_fraction,
+        remaining_gross_stop_risk,
     )
-    remaining_policy_margin = max(
-        account_initial_margin_limit - request.total_initial_margin,
+    if ticket_stop_risk_budget <= 0:
+        return _refused(CapacitySizingStatus.STOP_RISK_EXHAUSTED)
+
+    gross_initial_margin_limit = (
+        request.total_margin_balance
+        * request.max_gross_initial_margin_utilization
+    )
+    current_margin_usage = max(
+        request.total_initial_margin,
+        request.current_reserved_margin,
+    )
+    remaining_gross_margin = max(
+        gross_initial_margin_limit - current_margin_usage,
         Decimal(0),
     )
     remaining_executable_margin = min(
         request.available_margin,
-        remaining_policy_margin,
+        remaining_gross_margin,
     )
-    if (
-        planned_stop_risk_budget <= 0
-        or remaining_executable_margin <= 0
-    ):
+    ticket_margin_budget = min(
+        request.total_margin_balance
+        * request.max_ticket_initial_margin_fraction,
+        remaining_executable_margin,
+    )
+    if ticket_margin_budget <= 0:
         return _refused(CapacitySizingStatus.MARGIN_EXHAUSTED)
-    ticket_margin_budget = remaining_executable_margin
     risk_per_unit = abs(request.entry_reference_price - request.initial_stop_price)
     risk_quantity = _floor_to_step(
-        planned_stop_risk_budget / risk_per_unit,
+        ticket_stop_risk_budget / risk_per_unit,
         request.quantity_step,
     )
     if risk_quantity <= 0:
@@ -186,8 +214,9 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
         candidate = _evaluate_candidate(
             request=request,
             remaining_slots=remaining_slots,
-            planned_stop_risk_budget=planned_stop_risk_budget,
-            remaining_policy_margin=remaining_policy_margin,
+            ticket_stop_risk_budget=ticket_stop_risk_budget,
+            remaining_gross_stop_risk=remaining_gross_stop_risk,
+            remaining_gross_margin=remaining_gross_margin,
             remaining_executable_margin=remaining_executable_margin,
             ticket_margin_budget=ticket_margin_budget,
             risk_quantity=risk_quantity,
@@ -229,8 +258,9 @@ def _evaluate_candidate(
     *,
     request: CapacitySizingRequest,
     remaining_slots: int,
-    planned_stop_risk_budget: Decimal,
-    remaining_policy_margin: Decimal,
+    ticket_stop_risk_budget: Decimal,
+    remaining_gross_stop_risk: Decimal,
+    remaining_gross_margin: Decimal,
     remaining_executable_margin: Decimal,
     ticket_margin_budget: Decimal,
     risk_quantity: Decimal,
@@ -261,8 +291,9 @@ def _evaluate_candidate(
         return CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
     return CapacitySizingSelection(
         remaining_slots=remaining_slots,
-        planned_stop_risk_budget=planned_stop_risk_budget,
-        remaining_policy_margin=remaining_policy_margin,
+        ticket_stop_risk_budget=ticket_stop_risk_budget,
+        remaining_gross_stop_risk=remaining_gross_stop_risk,
+        remaining_gross_margin=remaining_gross_margin,
         remaining_executable_margin=remaining_executable_margin,
         ticket_margin_budget=ticket_margin_budget,
         risk_quantity=risk_quantity,

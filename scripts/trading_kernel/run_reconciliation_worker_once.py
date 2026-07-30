@@ -68,7 +68,7 @@ def _parser() -> argparse.ArgumentParser:
         default=300_000,
     )
     parser.add_argument("--idle-poll-interval-ms", type=int, default=2_000)
-    parser.add_argument("--fee-capability-monitor-interval-ms", type=int, default=60_000)
+    parser.add_argument("--fee-capability-monitor-interval-ms", type=int, default=300_000)
     parser.add_argument("--run-forever", action="store_true")
     parser.add_argument("--poll-interval-ms", type=int, default=5_000)
     parser.add_argument("--idle-log-interval-ms", type=int, default=300_000)
@@ -114,16 +114,9 @@ async def _run(args: argparse.Namespace) -> int:
 
     engine = create_async_engine(database_url)
     try:
-        last_fee_capability_observed_at_ms = 0
-
         async def tick():
-            nonlocal last_fee_capability_observed_at_ms
             now_ms = args.now_ms or int(time.time() * 1_000)
-            observe_fee_capability = (
-                now_ms - last_fee_capability_observed_at_ms
-                >= args.fee_capability_monitor_interval_ms
-            )
-            result = await run_reconciliation_worker_once(
+            return await run_reconciliation_worker_once(
                 lambda: PostgresKernelUnitOfWork(engine),
                 cast(VenueTruthPort, adapter),
                 cast(PositionSnapshotSource, adapter),
@@ -140,19 +133,19 @@ async def _run(args: argparse.Namespace) -> int:
                         args.review_economics_visibility_grace_ms
                     ),
                     idle_poll_interval_ms=args.idle_poll_interval_ms,
+                    fee_capability_monitor_interval_ms=(
+                        args.fee_capability_monitor_interval_ms
+                    ),
                 ),
                 account_risk_source=cast(AccountRiskSnapshotSource, adapter),
                 instrument_rules_source=cast(InstrumentRulesSource, adapter),
                 review_economics_source=cast(ReviewEconomicsSource, adapter),
-                fee_discount_capability_source=(adapter if observe_fee_capability else None),
+                fee_discount_capability_source=adapter,
                 instrument_certification_source=cast(
                     InstrumentCertificationSource,
                     adapter,
                 ),
             )
-            if observe_fee_capability:
-                last_fee_capability_observed_at_ms = now_ms
-            return result
 
         return await run_worker_process(
             tick,
@@ -168,8 +161,6 @@ async def _run(args: argparse.Namespace) -> int:
             if inspect.isawaitable(closed):
                 await closed
         await engine.dispose()
-
-
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     return asyncio.run(_run(args))

@@ -42,6 +42,7 @@ from src.trading_kernel.domain.signal import (
 )
 from src.trading_kernel.infrastructure.pg_models import (
     facts_current,
+    instrument_certification_current,
     instrument_rules_current,
     instruments,
     owner_policy_current,
@@ -100,7 +101,7 @@ async def test_ingest_persists_signal_and_fact_lineage_without_ticket_terms(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 now_ms=1_001,
             ),
         )
@@ -170,7 +171,7 @@ async def test_signal_ingest_does_not_consume_action_time_capital_authority(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 now_ms=1_001,
             ),
         )
@@ -189,7 +190,7 @@ async def test_duplicate_strategy_signal_is_exactly_idempotent(
     request = IngestSignalRequest(
         signal=signal,
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         now_ms=1_001,
     )
 
@@ -299,7 +300,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit=runtime_commit,
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 now_ms=now_ms,
             ),
         )
@@ -322,7 +323,7 @@ async def test_expired_candidate_is_terminally_blocked(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 now_ms=1_001,
             ),
         )
@@ -336,7 +337,7 @@ async def test_expired_candidate_is_terminally_blocked(
                 admission_snapshot=_admission_snapshot(),
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 now_ms=signal.expires_at_ms,
             ),
         )
@@ -361,7 +362,7 @@ async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 now_ms=1_001,
             ),
         )
@@ -375,7 +376,7 @@ async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
                 admission_snapshot=_admission_snapshot(),
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 now_ms=1_002,
             ),
         )
@@ -405,6 +406,75 @@ async def test_no_candidate_returns_explicit_idle_result(
 
     assert result.status is SelectEntryCandidateStatus.NO_CANDIDATE
     assert result.candidate is None
+
+
+@pytest.mark.asyncio
+async def test_stale_certification_pauses_candidate_until_same_signal_recovers(
+    issue_engine: AsyncEngine,
+) -> None:
+    """Catches candidate arbitration ignoring current instrument eligibility."""
+
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal(signal_event_id="signal-certification-recovery")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0001_trading_kernel_baseline_v3",
+                now_ms=1_001,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
+
+    async with issue_engine.begin() as connection:
+        await connection.execute(
+            sa.update(instrument_certification_current)
+            .where(
+                instrument_certification_current.c.runtime_profile_id
+                == "tiny-live-v1",
+                instrument_certification_current.c.exchange_instrument_id
+                == signal.exchange_instrument_id,
+            )
+            .values(
+                observed_at_ms=900,
+                valid_until_ms=1_002,
+                next_check_at_ms=1_002,
+                projection_version=1,
+            )
+        )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        stale = await select_entry_candidate(
+            uow,
+            SelectEntryCandidateRequest(now_ms=1_002),
+        )
+    assert stale.status is SelectEntryCandidateStatus.NO_CANDIDATE
+
+    async with issue_engine.begin() as connection:
+        await connection.execute(
+            sa.update(instrument_certification_current).values(
+                observed_at_ms=1_002,
+                valid_until_ms=10_000,
+                next_check_at_ms=5_000,
+                projection_version=2,
+            )
+        )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        recovered = await select_entry_candidate(
+            uow,
+            SelectEntryCandidateRequest(now_ms=1_003),
+        )
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+
+    assert recovered.status is SelectEntryCandidateStatus.SELECTED
+    assert recovered.candidate is not None
+    assert recovered.candidate.signal.signal_event_id == signal.signal_event_id
+    assert readiness is not None
+    assert readiness.readiness_state == "candidate_ready"
+    assert readiness.first_blocker is None
 
 
 def _signal(
@@ -526,8 +596,10 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 new_entry_submit_enabled=True,
                 priority_rank=1,
                 max_concurrent_tickets=8,
-                planned_stop_risk_fraction=Decimal("0.03"),
-                max_initial_margin_utilization=Decimal("0.90"),
+                max_ticket_stop_risk_fraction=Decimal("0.03"),
+                max_gross_stop_risk_fraction=Decimal("0.06"),
+                max_ticket_initial_margin_fraction=Decimal("0.45"),
+                max_gross_initial_margin_utilization=Decimal("0.90"),
                 max_leverage=10,
                 supported_margin_mode="cross",
                 post_stop_stress_multiple=Decimal("2.0"),
@@ -545,6 +617,26 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 position_mode="independent_sides",
                 status="active",
                 updated_at_ms=1_000,
+            )
+        )
+        await connection.execute(
+            sa.insert(instrument_certification_current).values(
+                runtime_profile_id="tiny-live-v1",
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                status="eligible",
+                blocker_code=None,
+                facts_digest="sha256:" + "c" * 64,
+                product_rules_digest="sha256:" + "d" * 64,
+                configured_leverage=5,
+                margin_mode="cross",
+                position_mode="independent_sides",
+                observed_at_ms=1_000,
+                valid_until_ms=10_000,
+                next_check_at_ms=5_000,
+                lease_owner=None,
+                lease_expires_at_ms=None,
+                lease_universe_version_id=None,
+                projection_version=1,
             )
         )
         await connection.execute(
@@ -580,7 +672,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 certification={},
                 updated_at_ms=1_000,
             )

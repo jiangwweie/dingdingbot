@@ -198,6 +198,9 @@ async def issue_ready_signal(
         gross_risk_at_stop=(
             exposure.gross_risk_at_stop if exposure else Decimal(0)
         ),
+        current_reserved_margin=(
+            exposure.current_reserved_margin if exposure else Decimal(0)
+        ),
         active_ticket_count=(exposure.active_ticket_count if exposure else 0),
     )
     domain = NettingDomain(
@@ -216,9 +219,17 @@ async def issue_ready_signal(
             owner_policy_id=policy.owner_policy_id,
             policy_version=policy.policy_version,
             max_concurrent_tickets=policy.max_concurrent_tickets,
-            planned_stop_risk_fraction=policy.planned_stop_risk_fraction,
-            max_initial_margin_utilization=(
-                policy.max_initial_margin_utilization
+            max_ticket_stop_risk_fraction=(
+                policy.max_ticket_stop_risk_fraction
+            ),
+            max_gross_stop_risk_fraction=(
+                policy.max_gross_stop_risk_fraction
+            ),
+            max_ticket_initial_margin_fraction=(
+                policy.max_ticket_initial_margin_fraction
+            ),
+            max_gross_initial_margin_utilization=(
+                policy.max_gross_initial_margin_utilization
             ),
             max_leverage=policy.max_leverage,
             supported_margin_mode=policy.supported_margin_mode,

@@ -60,8 +60,8 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-9-test"
-SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
-    "0001_trading_kernel_baseline_v2"
+SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v3"] = (
+    "0001_trading_kernel_baseline_v3"
 )
 MPG_CONTRACT = next(
     contract

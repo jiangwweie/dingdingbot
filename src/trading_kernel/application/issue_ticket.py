@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -177,12 +178,38 @@ async def issue_ticket(
         )
 
     current_tickets = exposure.active_ticket_count if exposure is not None else 0
+    current_gross_risk = (
+        exposure.gross_risk_at_stop if exposure is not None else Decimal(0)
+    )
+    current_reserved_margin = (
+        exposure.current_reserved_margin if exposure is not None else Decimal(0)
+    )
     if (
         current_tickets >= policy.max_concurrent_tickets
         or ticket.selected_leverage > policy.max_leverage
         or ticket.margin_mode != policy.supported_margin_mode
         or ticket.risk_at_stop > ticket.planned_stop_risk_budget
         or ticket.post_fill_stop_risk_limit < ticket.planned_stop_risk_budget
+        or policy.max_ticket_stop_risk_fraction
+        != claim.max_ticket_stop_risk_fraction
+        or policy.max_gross_stop_risk_fraction
+        != claim.max_gross_stop_risk_fraction
+        or policy.max_ticket_initial_margin_fraction
+        != claim.max_ticket_initial_margin_fraction
+        or policy.max_gross_initial_margin_utilization
+        != claim.max_gross_initial_margin_utilization
+        or ticket.risk_at_stop
+        > claim.total_wallet_balance_at_claim
+        * policy.max_ticket_stop_risk_fraction
+        or current_gross_risk + ticket.risk_at_stop
+        > claim.total_wallet_balance_at_claim
+        * policy.max_gross_stop_risk_fraction
+        or ticket.reserved_margin
+        > claim.total_margin_balance_at_claim
+        * policy.max_ticket_initial_margin_fraction
+        or current_reserved_margin + ticket.reserved_margin
+        > claim.total_margin_balance_at_claim
+        * policy.max_gross_initial_margin_utilization
     ):
         return IssueTicketResult(
             status=IssueTicketStatus.BUDGET_EXHAUSTED,
@@ -211,6 +238,7 @@ async def issue_ticket(
         account_id=ticket.identity.netting_domain.account_id,
         notional=ticket.notional,
         risk_at_stop=ticket.risk_at_stop,
+        reserved_margin=ticket.reserved_margin,
         expected_version=(
             None if exposure is None else exposure.projection_version
         ),

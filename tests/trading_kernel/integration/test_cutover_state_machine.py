@@ -39,7 +39,9 @@ from src.trading_kernel.infrastructure.pg_models import (
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
+    ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
+    arm_acceptance_policy,
     build_runtime_seed_identity,
     seed_runtime_authority,
 )
@@ -51,8 +53,8 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-BASELINE_SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
-    "0001_trading_kernel_baseline_v2"
+BASELINE_SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v3"] = (
+    "0001_trading_kernel_baseline_v3"
 )
 @pytest_asyncio.fixture
 async def journal_database_url() -> AsyncGenerator[str, None]:
@@ -76,7 +78,7 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
     plan = _plan()
 
     assert plan.target_commit == "a" * 40
-    assert plan.target_schema_revision == "0001_trading_kernel_baseline_v2"
+    assert plan.target_schema_revision == "0001_trading_kernel_baseline_v3"
     assert plan.target_seed_identity.startswith("sha256:")
     assert "exchange_instrument_ids" not in CutoverPlan.model_fields
     assert CUTOVER_PHASES == (
@@ -89,9 +91,12 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
         CutoverPhase.SEED_CURRENT_AUTHORITY,
         CutoverPhase.DEPLOY_EXACT_RELEASE,
         CutoverPhase.CERTIFY_SCHEMA_AND_READONLY,
-        CutoverPhase.ENABLE_OBSERVATION_MONITOR,
-        CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE,
-        CutoverPhase.CERTIFY_ENTRY_FENCED,
+        CutoverPhase.START_READONLY_WORKERS,
+        CutoverPhase.COMPLETE_TARGET_CERTIFICATION,
+        CutoverPhase.START_LIFECYCLE,
+        CutoverPhase.START_ENTRY_FENCED,
+        CutoverPhase.FINAL_POSTFLIGHT,
+        CutoverPhase.UNFENCE_ENTRY,
     )
     with pytest.raises(ValidationError):
         _plan(target_commit="not-a-commit")
@@ -275,7 +280,7 @@ async def test_resume_after_entry_fence_certification_does_not_restart_cutover(
     plan = _plan(cutover_id="tokyo-kernel-final-phase-crash")
     adapter = FakeCutoverAdapter(
         _facts(plan),
-        fail_after_effect_once=CutoverPhase.CERTIFY_ENTRY_FENCED,
+        fail_after_effect_once=CutoverPhase.START_ENTRY_FENCED,
     )
     journal = PostgresCutoverJournal(journal_database_url)
     try:
@@ -288,7 +293,7 @@ async def test_resume_after_entry_fence_certification_does_not_restart_cutover(
 
     assert completed.status == "completed"
     assert adapter.apply_calls.count(CutoverPhase.REBUILD_APPLICATION_SCHEMA) == 1
-    assert adapter.apply_calls.count(CutoverPhase.CERTIFY_ENTRY_FENCED) == 1
+    assert adapter.apply_calls.count(CutoverPhase.START_ENTRY_FENCED) == 1
 
 
 @pytest.mark.asyncio
@@ -353,7 +358,7 @@ async def test_disposable_postgres_rehearsal_rebuilds_clean_schema_and_seeds_aut
     assert "legacy_execution_path" not in actual_tables
     assert seed_identity == plan.target_seed_identity
     assert capabilities == {
-        "exchange_commands": False,
+        "exchange_commands": True,
         "strategy_signal_ingest": True,
     }
 
@@ -448,7 +453,7 @@ async def test_readonly_certification_reports_exact_runtime_authority(
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
                     schema_revision=cast(
-                        Literal["0001_trading_kernel_baseline_v2"],
+                        Literal["0001_trading_kernel_baseline_v3"],
                         plan.target_schema_revision,
                     ),
                     seeded_at_ms=1_000,
@@ -480,8 +485,10 @@ async def test_readonly_certification_reports_exact_runtime_authority(
         "enabled": True,
         "new_entry_submit_enabled": False,
         "max_concurrent_tickets": 3,
-        "planned_stop_risk_fraction": "0.03",
-        "max_initial_margin_utilization": "0.9",
+        "max_ticket_stop_risk_fraction": "0.03",
+        "max_gross_stop_risk_fraction": "0.06",
+        "max_ticket_initial_margin_fraction": "0.45",
+        "max_gross_initial_margin_utilization": "0.9",
         "max_leverage": 10,
         "supported_margin_mode": "cross",
         "post_stop_stress_multiple": "2",
@@ -520,7 +527,7 @@ async def test_readonly_certification_accepts_enabled_exchange_commands_under_co
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
                     schema_revision=cast(
-                        Literal["0001_trading_kernel_baseline_v2"],
+                        Literal["0001_trading_kernel_baseline_v3"],
                         plan.target_schema_revision,
                     ),
                     seeded_at_ms=1_000,
@@ -704,6 +711,10 @@ class LocalPostgresCutoverAdapter:
         self.readonly_certified = False
         self.observation_enabled = False
         self.signal_to_ticket_no_write_certified = False
+        self.lifecycle_enabled = False
+        self.entry_started_fenced = False
+        self.final_postflight_passed = False
+        self.entry_unfenced = False
 
     async def close(self) -> None:
         await self.engine.dispose()
@@ -745,14 +756,38 @@ class LocalPostgresCutoverAdapter:
             if actual != set(metadata.tables) | {"alembic_version"}:
                 raise RuntimeError("rehearsal schema certification failed")
             self.readonly_certified = True
-        elif phase is CutoverPhase.ENABLE_OBSERVATION_MONITOR:
+        elif phase is CutoverPhase.START_READONLY_WORKERS:
             self.observation_enabled = True
-        elif phase is CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE:
+        elif phase is CutoverPhase.COMPLETE_TARGET_CERTIFICATION:
             self.signal_to_ticket_no_write_certified = True
-        elif phase is CutoverPhase.CERTIFY_ENTRY_FENCED and await self._capability_enabled(
+        elif phase is CutoverPhase.START_LIFECYCLE:
+            self.lifecycle_enabled = True
+        elif phase is CutoverPhase.START_ENTRY_FENCED and await self._capability_enabled(
             "exchange_commands"
         ):
             raise RuntimeError("exchange commands must remain disabled")
+        elif phase is CutoverPhase.START_ENTRY_FENCED:
+            self.entry_started_fenced = True
+        elif phase is CutoverPhase.FINAL_POSTFLIGHT:
+            if not (
+                self.writes_fenced
+                and self.observation_enabled
+                and self.signal_to_ticket_no_write_certified
+                and self.lifecycle_enabled
+                and self.entry_started_fenced
+            ):
+                raise RuntimeError("local final postflight prerequisites failed")
+            self.final_postflight_passed = True
+        elif phase is CutoverPhase.UNFENCE_ENTRY:
+            if not self.final_postflight_passed:
+                raise RuntimeError("local final postflight is missing")
+            async with PostgresKernelUnitOfWork(self.engine) as uow:
+                await arm_acceptance_policy(
+                    uow,
+                    ArmAcceptancePolicyRequest(armed_at_ms=2_000),
+                )
+            self.writes_fenced = False
+            self.entry_unfenced = True
 
     async def phase_satisfied(
         self,
@@ -777,17 +812,28 @@ class LocalPostgresCutoverAdapter:
             return self.release_deployed
         if phase is CutoverPhase.CERTIFY_SCHEMA_AND_READONLY:
             return self.readonly_certified
-        if phase is CutoverPhase.ENABLE_OBSERVATION_MONITOR:
+        if phase is CutoverPhase.START_READONLY_WORKERS:
             return self.observation_enabled
-        if phase is CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE:
+        if phase is CutoverPhase.COMPLETE_TARGET_CERTIFICATION:
             return (
                 self.signal_to_ticket_no_write_certified
                 and not await self._capability_enabled("exchange_commands")
             )
-        if phase is CutoverPhase.CERTIFY_ENTRY_FENCED:
+        if phase is CutoverPhase.START_ENTRY_FENCED:
             return (
                 self.writes_fenced
+                and self.entry_started_fenced
                 and not await self._capability_enabled("exchange_commands")
+            )
+        if phase is CutoverPhase.START_LIFECYCLE:
+            return self.lifecycle_enabled and self.writes_fenced
+        if phase is CutoverPhase.FINAL_POSTFLIGHT:
+            return self.final_postflight_passed and self.writes_fenced
+        if phase is CutoverPhase.UNFENCE_ENTRY:
+            return (
+                self.entry_unfenced
+                and not self.writes_fenced
+                and await self._capability_enabled("exchange_commands")
             )
         return False
 
@@ -799,7 +845,7 @@ class LocalPostgresCutoverAdapter:
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
                     schema_revision=cast(
-                        Literal["0001_trading_kernel_baseline_v2"],
+                        Literal["0001_trading_kernel_baseline_v3"],
                         plan.target_schema_revision,
                     ),
                     seeded_at_ms=1_000,

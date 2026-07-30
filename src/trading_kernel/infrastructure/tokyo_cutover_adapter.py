@@ -37,9 +37,11 @@ PROTECTED_CONTAINERS = (
     "owner_ai_redis",
 )
 ENTRY_WORKER = "brc-trading-kernel-entry-worker.service"
-OBSERVATION_WORKERS = (
+READONLY_WORKERS = (
     "brc-trading-kernel-observation-worker.service",
+    "brc-trading-kernel-reconciliation-worker.service",
 )
+LIFECYCLE_WORKER = "brc-trading-kernel-lifecycle-worker.service"
 WRITE_FENCE = PurePosixPath("/etc/brc/trading-kernel.write-fenced")
 RUNTIME_ENV = PurePosixPath("/etc/brc/trading-kernel.env")
 RELEASE_ROOT = PurePosixPath("/opt/brc/releases")
@@ -75,10 +77,14 @@ class TokyoPhaseState(BaseModel):
     release_staged: bool = False
     release_active: bool = False
     readonly_certified: bool = False
-    observation_enabled: bool = False
-    signal_to_ticket_no_write_certified: bool = False
+    readonly_workers_started: bool = False
+    target_certified: bool = False
+    lifecycle_started: bool = False
     entry_worker_enabled: bool = False
+    entry_worker_active: bool = False
+    final_postflight_passed: bool = False
     exchange_commands_enabled: bool = False
+    new_entry_submit_enabled: bool = False
 
 
 class TokyoSystem(Protocol):
@@ -123,11 +129,17 @@ class TokyoSystem(Protocol):
 
     async def certify_readonly(self, plan: CutoverPlan) -> None: ...
 
-    async def enable_observation(self, plan: CutoverPlan) -> None: ...
+    async def start_readonly_workers(self, plan: CutoverPlan) -> None: ...
 
-    async def certify_signal_to_ticket_no_write(self, plan: CutoverPlan) -> None: ...
+    async def complete_target_certification(self, plan: CutoverPlan) -> None: ...
 
-    async def certify_entry_fenced(self, plan: CutoverPlan) -> None: ...
+    async def start_lifecycle(self, plan: CutoverPlan) -> None: ...
+
+    async def start_entry_fenced(self, plan: CutoverPlan) -> None: ...
+
+    async def final_postflight(self, plan: CutoverPlan) -> None: ...
+
+    async def unfence_entry(self, plan: CutoverPlan) -> None: ...
 
     async def close(self) -> None: ...
 
@@ -188,12 +200,18 @@ class TokyoCutoverAdapter:
             await self.system.activate_release(plan)
         elif phase_value == CutoverPhase.CERTIFY_SCHEMA_AND_READONLY.value:
             await self.system.certify_readonly(plan)
-        elif phase_value == CutoverPhase.ENABLE_OBSERVATION_MONITOR.value:
-            await self.system.enable_observation(plan)
-        elif phase_value == CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE.value:
-            await self.system.certify_signal_to_ticket_no_write(plan)
-        elif phase_value == CutoverPhase.CERTIFY_ENTRY_FENCED.value:
-            await self.system.certify_entry_fenced(plan)
+        elif phase_value == CutoverPhase.START_READONLY_WORKERS.value:
+            await self.system.start_readonly_workers(plan)
+        elif phase_value == CutoverPhase.COMPLETE_TARGET_CERTIFICATION.value:
+            await self.system.complete_target_certification(plan)
+        elif phase_value == CutoverPhase.START_LIFECYCLE.value:
+            await self.system.start_lifecycle(plan)
+        elif phase_value == CutoverPhase.START_ENTRY_FENCED.value:
+            await self.system.start_entry_fenced(plan)
+        elif phase_value == CutoverPhase.FINAL_POSTFLIGHT.value:
+            await self.system.final_postflight(plan)
+        elif phase_value == CutoverPhase.UNFENCE_ENTRY.value:
+            await self.system.unfence_entry(plan)
         else:
             raise RuntimeError(f"unsupported production cutover phase: {phase.value}")
 
@@ -223,18 +241,32 @@ class TokyoCutoverAdapter:
             return state.release_active
         if phase_value == CutoverPhase.CERTIFY_SCHEMA_AND_READONLY.value:
             return state.readonly_certified
-        if phase_value == CutoverPhase.ENABLE_OBSERVATION_MONITOR.value:
-            return state.observation_enabled and state.exchange_writes_fenced
-        if phase_value == CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE.value:
+        if phase_value == CutoverPhase.START_READONLY_WORKERS.value:
+            return state.readonly_workers_started and state.exchange_writes_fenced
+        if phase_value == CutoverPhase.COMPLETE_TARGET_CERTIFICATION.value:
             return (
-                state.signal_to_ticket_no_write_certified
+                state.target_certified
                 and not state.exchange_commands_enabled
             )
-        if phase_value == CutoverPhase.CERTIFY_ENTRY_FENCED.value:
+        if phase_value == CutoverPhase.START_LIFECYCLE.value:
+            return state.lifecycle_started and state.exchange_writes_fenced
+        if phase_value == CutoverPhase.START_ENTRY_FENCED.value:
             return (
                 state.exchange_writes_fenced
-                and not state.entry_worker_enabled
+                and state.entry_worker_enabled
+                and state.entry_worker_active
                 and not state.exchange_commands_enabled
+                and not state.new_entry_submit_enabled
+            )
+        if phase_value == CutoverPhase.FINAL_POSTFLIGHT.value:
+            return state.final_postflight_passed and state.exchange_writes_fenced
+        if phase_value == CutoverPhase.UNFENCE_ENTRY.value:
+            return (
+                not state.exchange_writes_fenced
+                and state.entry_worker_enabled
+                and state.entry_worker_active
+                and state.exchange_commands_enabled
+                and state.new_entry_submit_enabled
             )
         return False
 
@@ -274,6 +306,7 @@ class SshCommandRunner:
         argv: tuple[str, ...],
         *,
         check: bool = True,
+        timeout_seconds: float | None = None,
     ) -> _RemoteResult:
         if not argv or any("\x00" in value for value in argv):
             raise ValueError("remote command arguments must be bounded strings")
@@ -293,7 +326,11 @@ class SshCommandRunner:
         try:
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
-                timeout=self._timeout_seconds,
+                timeout=(
+                    self._timeout_seconds
+                    if timeout_seconds is None
+                    else timeout_seconds
+                ),
             )
         except TimeoutError:
             process.kill()
@@ -430,16 +467,32 @@ class SshTokyoSystem:
 
     async def inspect_phase_state(self, plan: CutoverPlan) -> TokyoPhaseState:
         release = _release_path(plan)
-        entry_enabled = (
-            await self._unit_enabled(ENTRY_WORKER)
-            or await self._unit_active(ENTRY_WORKER)
-        )
+        entry_enabled = await self._unit_enabled(ENTRY_WORKER)
+        entry_active = await self._unit_active(ENTRY_WORKER)
         exchange_commands_enabled = await self._target_boolean(
             "SELECT enabled FROM brc_runtime_capabilities_current "
             "WHERE capability_key = 'exchange_commands'"
         )
+        new_entry_submit_enabled = await self._target_boolean(
+            "SELECT new_entry_submit_enabled "
+            "FROM brc_owner_policy_current "
+            "WHERE owner_policy_id = 'policy-main'"
+        )
+        readonly_workers_started = all(
+            [
+                await self._unit_enabled(unit)
+                and await self._unit_active(unit)
+                for unit in READONLY_WORKERS
+            ]
+        )
+        target_certified = await self._target_certified(plan)
+        lifecycle_started = (
+            await self._unit_enabled(LIFECYCLE_WORKER)
+            and await self._unit_active(LIFECYCLE_WORKER)
+        )
+        fenced = await self._path_exists(WRITE_FENCE)
         return TokyoPhaseState(
-            exchange_writes_fenced=await self._path_exists(WRITE_FENCE),
+            exchange_writes_fenced=fenced,
             runtime_writers_stopped=await self._units_stopped_and_disabled(
                 EXPECTED_NEW_BRC_WRITER_UNITS
             ),
@@ -450,24 +503,24 @@ class SshTokyoSystem:
             release_staged=await self._release_is_staged(release, plan),
             release_active=(await self._readlink(CURRENT_RELEASE)) == str(release),
             readonly_certified=await self._readonly_certified(release, plan),
-            observation_enabled=all(
-                [
-                    await self._unit_enabled(unit)
-                    and await self._unit_active(unit)
-                    for unit in OBSERVATION_WORKERS
-                ]
-            ),
-            signal_to_ticket_no_write_certified=(
-                await self._target_schema_ready(release)
-                and await self._target_int("SELECT count(*) FROM brc_trade_tickets")
-                == 0
-                and await self._target_int(
-                    "SELECT count(*) FROM brc_exchange_commands"
-                )
-                == 0
-            ),
+            readonly_workers_started=readonly_workers_started,
+            target_certified=target_certified,
+            lifecycle_started=lifecycle_started,
             entry_worker_enabled=entry_enabled,
+            entry_worker_active=entry_active,
+            final_postflight_passed=(
+                fenced
+                and readonly_workers_started
+                and target_certified
+                and lifecycle_started
+                and entry_enabled
+                and entry_active
+                and not exchange_commands_enabled
+                and not new_entry_submit_enabled
+                and await self._final_postflight_passes(release, plan)
+            ),
             exchange_commands_enabled=exchange_commands_enabled,
+            new_entry_submit_enabled=new_entry_submit_enabled,
         )
 
     async def read_non_quant_digest(self) -> str:
@@ -676,45 +729,94 @@ class SshTokyoSystem:
                     "readonly production identity differs from plan"
                 )
 
-    async def enable_observation(self, plan: CutoverPlan) -> None:
+    async def start_readonly_workers(self, plan: CutoverPlan) -> None:
         del plan
-        for unit in OBSERVATION_WORKERS:
+        for unit in READONLY_WORKERS:
             await self._runner.run(
                 ("sudo", "systemctl", "enable", "--now", unit)
             )
+        await self._runner.run(
+            ("sudo", "systemctl", "disable", "--now", LIFECYCLE_WORKER),
+            check=False,
+        )
         await self._runner.run(
             ("sudo", "systemctl", "disable", "--now", ENTRY_WORKER),
             check=False,
         )
 
-    async def certify_signal_to_ticket_no_write(self, plan: CutoverPlan) -> None:
-        await self.certify_entry_fenced(plan)
+    async def complete_target_certification(self, plan: CutoverPlan) -> None:
+        await self._require_entry_authority_disabled()
         release = _release_path(plan)
         await self._release_python(
             release,
-            "scripts/trading_kernel/run_observation_worker_once.py",
-            "--market-source-factory",
-            "src.trading_kernel.infrastructure.production_runtime:build_binance_usdm_market_source",
-            "--worker-id",
-            "cutover-observation-certifier",
-            "--runtime-commit",
-            plan.target_commit,
-            "--schema-revision",
-            plan.target_schema_revision,
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            plan.runtime_profile_id,
+            "--wait-timeout-ms",
+            "900000",
+            "--poll-interval-ms",
+            "5000",
+            timeout_seconds=930,
         )
+        certification = await self._release_python(
+            release,
+            "scripts/trading_kernel/certify_readonly.py",
+            "--require-flat",
+        )
+        payload = json.loads(certification.stdout)
+        if (
+            payload.get("status") != "pass"
+            or payload.get("universe_bootstrap_pass") is not True
+            or payload.get("certification_batch_pass") is not True
+            or payload.get("entry_promotion_pass") is not True
+        ):
+            raise RuntimeError("target Certification Batch did not pass")
         if await self._target_int("SELECT count(*) FROM brc_trade_tickets") != 0:
-            raise RuntimeError("no-write certification created a Ticket")
+            raise RuntimeError("target certification created a Ticket")
         if await self._target_int("SELECT count(*) FROM brc_exchange_commands") != 0:
-            raise RuntimeError("no-write certification created an Exchange Command")
+            raise RuntimeError("target certification created an Exchange Command")
 
-    async def certify_entry_fenced(self, plan: CutoverPlan) -> None:
+    async def start_lifecycle(self, plan: CutoverPlan) -> None:
         del plan
+        await self._require_entry_authority_disabled()
+        await self._runner.run(
+            ("sudo", "systemctl", "enable", "--now", LIFECYCLE_WORKER)
+        )
+
+    async def start_entry_fenced(self, plan: CutoverPlan) -> None:
+        del plan
+        await self._require_entry_authority_disabled()
+        await self._runner.run(
+            ("sudo", "systemctl", "enable", "--now", ENTRY_WORKER)
+        )
+        await self._require_entry_authority_disabled(require_entry_active=True)
+
+    async def final_postflight(self, plan: CutoverPlan) -> None:
+        release = _release_path(plan)
+        await self._require_entry_authority_disabled(require_entry_active=True)
+        if not await self._final_postflight_passes(release, plan):
+            raise RuntimeError("final fenced postflight failed")
+
+    async def unfence_entry(self, plan: CutoverPlan) -> None:
+        release = _release_path(plan)
+        await self._release_python(
+            release,
+            "scripts/trading_kernel/promote_entry.py",
+            timeout_seconds=120,
+        )
+
+    async def _require_entry_authority_disabled(
+        self,
+        *,
+        require_entry_active: bool = False,
+    ) -> None:
         if not await self._path_exists(WRITE_FENCE):
             raise RuntimeError("new ENTRY write fence is missing")
-        if await self._unit_enabled(ENTRY_WORKER) or await self._unit_active(
-            ENTRY_WORKER
-        ):
-            raise RuntimeError("ENTRY worker is enabled during readonly cutover")
+        entry_active = await self._unit_active(ENTRY_WORKER)
+        if require_entry_active and not entry_active:
+            raise RuntimeError("ENTRY worker is not active under the fence")
+        if not require_entry_active and entry_active:
+            raise RuntimeError("ENTRY worker started before its fenced phase")
         if await self._target_boolean(
             "SELECT new_entry_submit_enabled FROM brc_owner_policy_current "
             "WHERE owner_policy_id = 'policy-main'"
@@ -860,6 +962,72 @@ class SshTokyoSystem:
             return False
         return True
 
+    async def _target_certified(self, plan: CutoverPlan) -> bool:
+        release = _release_path(plan)
+        result = await self._release_python(
+            release,
+            "scripts/trading_kernel/certify_readonly.py",
+            "--require-flat",
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return False
+        runtime_identity = payload.get("runtime_identity")
+        if not isinstance(runtime_identity, Mapping):
+            return False
+        try:
+            _require_runtime_identity(runtime_identity, plan)
+        except RuntimeError:
+            return False
+        return bool(
+            payload.get("status") == "pass"
+            and payload.get("universe_bootstrap_pass") is True
+            and payload.get("certification_batch_pass") is True
+            and payload.get("entry_promotion_pass") is True
+        )
+
+    async def _final_postflight_passes(
+        self,
+        release: PurePosixPath,
+        plan: CutoverPlan,
+    ) -> bool:
+        if not await self._target_certified(plan):
+            return False
+        result = await self._release_python(
+            release,
+            "scripts/trading_kernel/probe_production_runtime.py",
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return False
+        rules = payload.get("rules")
+        manifest = payload.get("probe_manifest")
+        return bool(
+            payload.get("venue_id") == plan.venue_id
+            and payload.get("account_id") == plan.account_id
+            and payload.get("account_position_mode") == "independent_sides"
+            and payload.get("account_margin_mode") == "cross"
+            and payload.get("non_flat_domain_count") == 0
+            and payload.get("open_order_domain_count") == 0
+            and isinstance(manifest, list)
+            and len(manifest) == 7
+            and isinstance(rules, list)
+            and len(rules) == 7
+            and all(
+                isinstance(row, Mapping)
+                and row.get("configured_leverage") == 5
+                for row in rules
+            )
+        )
+
     async def _install_runtime_identity(self, plan: CutoverPlan) -> None:
         replacements = (
             ("TRADING_KERNEL_RUNTIME_COMMIT", plan.target_commit),
@@ -956,6 +1124,7 @@ class SshTokyoSystem:
         script: str,
         *args: str,
         check: bool = True,
+        timeout_seconds: float | None = None,
     ) -> _RemoteResult:
         executable = shlex.join(
             (
@@ -968,9 +1137,13 @@ class SshTokyoSystem:
             f"set -a; . {shlex.quote(str(RUNTIME_ENV))}; "
             f"set +a; exec {executable}"
         )
+        runner_args = ("sudo", "-u", "brc", "/bin/bash", "-lc", command)
+        if timeout_seconds is None:
+            return await self._runner.run(runner_args, check=check)
         return await self._runner.run(
-            ("sudo", "-u", "brc", "/bin/bash", "-lc", command),
+            runner_args,
             check=check,
+            timeout_seconds=timeout_seconds,
         )
 
     async def _active_units(self, units: frozenset[str]) -> tuple[str, ...]:

@@ -23,6 +23,10 @@ from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationStatus,
     activation_readiness_blocker,
 )
+from src.trading_kernel.application.certification_batch import (
+    CertificationBatchSnapshot,
+    StartCertificationBatchRequest,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseCurrent,
     UniverseInstallContext,
@@ -47,10 +51,17 @@ from src.trading_kernel.application.read_strategy_universe_status import (
     StrategyUniverseStatusResult,
     StrategyUniverseVersionStatus,
 )
+from src.trading_kernel.application.reconciliation_scheduler import (
+    ReconciliationActionCandidate,
+    ReconciliationActionKind,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
+    CertificationBatchMemberResult,
+    CertificationBatchStatus,
     InstrumentCertification,
     InstrumentCertificationBlockerCode,
+    evaluate_certification_batch,
 )
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
@@ -63,12 +74,15 @@ from src.trading_kernel.domain.strategy_universe import (
 from src.trading_kernel.infrastructure.pg_models import (
     comparative_projection_current,
     event_specs,
+    instrument_certification_batch_members,
+    instrument_certification_batches,
     instrument_certification_current,
     instruments,
     monitor_current,
     owner_policy_current,
     runtime_profiles,
     runtime_scopes_current,
+    schema_metadata,
     strategy_groups,
     strategy_universe_current,
     strategy_universe_members,
@@ -1634,6 +1648,85 @@ class PostgresStrategyUniverseRepository:
             lease_expires_at_ms=lease_until_ms,
         )
 
+    async def peek_next_due_instrument_certification_action(
+        self,
+        *,
+        now_ms: int,
+    ) -> ReconciliationActionCandidate | None:
+        if now_ms <= 0:
+            raise ValueError("certification selection time must be positive")
+        certification = instrument_certification_current
+        due_at = sa.func.coalesce(
+            certification.c.next_check_at_ms,
+            strategy_universe_versions.c.installed_at_ms,
+        )
+        row = (
+            await self._connection.execute(
+                sa.select(
+                    runtime_scopes_current.c.runtime_profile_id,
+                    runtime_scopes_current.c.exchange_instrument_id,
+                    due_at.label("due_at_ms"),
+                )
+                .select_from(
+                    runtime_scopes_current.join(
+                        strategy_universe_versions,
+                        strategy_universe_versions.c.universe_version_id
+                        == runtime_scopes_current.c.universe_version_id,
+                    )
+                    .join(
+                        instruments,
+                        instruments.c.exchange_instrument_id
+                        == runtime_scopes_current.c.exchange_instrument_id,
+                    )
+                    .outerjoin(
+                        certification,
+                        sa.and_(
+                            certification.c.runtime_profile_id
+                            == runtime_scopes_current.c.runtime_profile_id,
+                            certification.c.exchange_instrument_id
+                            == runtime_scopes_current.c.exchange_instrument_id,
+                        ),
+                    )
+                )
+                .where(
+                    strategy_universe_versions.c.lifecycle_state.in_(
+                        ("warming", "active")
+                    ),
+                    runtime_scopes_current.c.lifecycle_state.in_(
+                        ("warming", "active")
+                    ),
+                    sa.or_(
+                        certification.c.runtime_profile_id.is_(None),
+                        sa.and_(
+                            certification.c.next_check_at_ms <= now_ms,
+                            sa.or_(
+                                certification.c.lease_expires_at_ms.is_(None),
+                                certification.c.lease_expires_at_ms <= now_ms,
+                            ),
+                        ),
+                    ),
+                )
+                .order_by(
+                    due_at,
+                    runtime_scopes_current.c.exchange_instrument_id,
+                    runtime_scopes_current.c.runtime_profile_id,
+                )
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        runtime_profile_id = str(row["runtime_profile_id"])
+        exchange_instrument_id = str(row["exchange_instrument_id"])
+        return ReconciliationActionCandidate(
+            kind=ReconciliationActionKind.CERTIFICATION,
+            stable_identity=(
+                f"{runtime_profile_id}:{exchange_instrument_id}"
+            ),
+            due_at_ms=int(row["due_at_ms"]),
+            max_wait_ms=120_000,
+        )
+
     async def save_instrument_certification(
         self,
         *,
@@ -1697,6 +1790,385 @@ class PostgresStrategyUniverseRepository:
                     else "pending_certification"
                 )
             )
+        )
+        await self._record_certification_batch_result(
+            target=target,
+            certification=certification,
+            product_rules_digest=product_rules_digest,
+        )
+
+    async def start_certification_batch(
+        self,
+        *,
+        request: StartCertificationBatchRequest,
+        manifest_digest: str,
+    ) -> CertificationBatchSnapshot:
+        """Create one exact pending batch after revalidating current authority."""
+
+        await self._lock_installs()
+        existing = await self._load_certification_batch(
+            request.certification_batch_id,
+            for_update=True,
+        )
+        if existing is not None:
+            expected = (
+                request.runtime_profile_id,
+                request.target_commit,
+                request.target_schema_revision,
+                request.target_seed_identity,
+                request.owner_policy_id,
+                request.owner_policy_version,
+                manifest_digest,
+                tuple(sorted(request.exchange_instrument_ids)),
+                request.started_at_ms,
+                request.minimum_valid_until_ms,
+            )
+            actual = (
+                existing.runtime_profile_id,
+                existing.target_commit,
+                existing.target_schema_revision,
+                existing.target_seed_identity,
+                existing.owner_policy_id,
+                existing.owner_policy_version,
+                existing.manifest_digest,
+                existing.exchange_instrument_ids,
+                existing.started_at_ms,
+                existing.minimum_valid_until_ms,
+            )
+            if actual != expected:
+                raise UniverseInstallConflict(
+                    "CERTIFICATION_BATCH_IDENTITY_CONFLICT"
+                )
+            return existing
+
+        pending = (
+            await self._connection.execute(
+                sa.select(
+                    instrument_certification_batches.c.certification_batch_id
+                )
+                .where(
+                    instrument_certification_batches.c.runtime_profile_id
+                    == request.runtime_profile_id,
+                    instrument_certification_batches.c.status == "pending",
+                )
+                .with_for_update(of=instrument_certification_batches)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if pending is not None:
+            raise UniverseInstallConflict(
+                "CERTIFICATION_BATCH_ALREADY_PENDING"
+            )
+
+        profile = (
+            await self._connection.execute(
+                sa.select(runtime_profiles.c.status)
+                .where(
+                    runtime_profiles.c.runtime_profile_id
+                    == request.runtime_profile_id
+                )
+                .with_for_update(of=runtime_profiles)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        policy = (
+            await self._connection.execute(
+                sa.select(
+                    owner_policy_current.c.policy_version,
+                    owner_policy_current.c.enabled,
+                )
+                .where(
+                    owner_policy_current.c.owner_policy_id
+                    == request.owner_policy_id
+                )
+                .with_for_update(of=owner_policy_current)
+                .limit(1)
+            )
+        ).one_or_none()
+        identity = {
+            str(row[0]): str(row[1])
+            for row in (
+                await self._connection.execute(
+                    sa.select(
+                        schema_metadata.c.metadata_key,
+                        schema_metadata.c.metadata_value,
+                    ).where(
+                        schema_metadata.c.metadata_key.in_(
+                            (
+                                "runtime_commit",
+                                "schema_revision",
+                                "seed_identity",
+                            )
+                        )
+                    )
+                )
+            ).all()
+        }
+        manifest = tuple(
+            str(value)
+            for value in (
+                await self._connection.execute(
+                    sa.select(instruments.c.exchange_instrument_id)
+                    .where(
+                        instruments.c.exchange_instrument_id.in_(
+                            request.exchange_instrument_ids
+                        )
+                    )
+                    .order_by(instruments.c.exchange_instrument_id)
+                    .with_for_update(of=instruments)
+                )
+            ).scalars()
+        )
+        if profile != "active":
+            raise UniverseInstallConflict(
+                "CERTIFICATION_BATCH_PROFILE_CONFLICT"
+            )
+        if (
+            policy is None
+            or int(policy[0]) != request.owner_policy_version
+            or policy[1] is not True
+        ):
+            raise UniverseInstallConflict(
+                "CERTIFICATION_BATCH_POLICY_CONFLICT"
+            )
+        if identity != {
+            "runtime_commit": request.target_commit,
+            "schema_revision": request.target_schema_revision,
+            "seed_identity": request.target_seed_identity,
+        }:
+            raise UniverseInstallConflict(
+                "CERTIFICATION_BATCH_RUNTIME_IDENTITY_CONFLICT"
+            )
+        if manifest != tuple(sorted(request.exchange_instrument_ids)):
+            raise UniverseInstallConflict(
+                "CERTIFICATION_BATCH_MANIFEST_CONFLICT"
+            )
+
+        await self._connection.execute(
+            sa.insert(instrument_certification_batches).values(
+                certification_batch_id=request.certification_batch_id,
+                runtime_profile_id=request.runtime_profile_id,
+                target_commit=request.target_commit,
+                target_schema_revision=request.target_schema_revision,
+                target_seed_identity=request.target_seed_identity,
+                owner_policy_id=request.owner_policy_id,
+                owner_policy_version=request.owner_policy_version,
+                manifest_digest=manifest_digest,
+                status="pending",
+                started_at_ms=request.started_at_ms,
+                minimum_valid_until_ms=request.minimum_valid_until_ms,
+                completed_at_ms=None,
+                valid_until_ms=None,
+                blocker_code=None,
+            )
+        )
+        await self._connection.execute(
+            sa.insert(instrument_certification_batch_members),
+            [
+                {
+                    "certification_batch_id": request.certification_batch_id,
+                    "exchange_instrument_id": exchange_instrument_id,
+                    "status": "pending",
+                    "blocker_code": None,
+                    "facts_digest": None,
+                    "product_rules_digest": None,
+                    "observed_at_ms": None,
+                    "valid_until_ms": None,
+                }
+                for exchange_instrument_id in manifest
+            ],
+        )
+        created = await self._load_certification_batch(
+            request.certification_batch_id,
+            for_update=False,
+        )
+        if created is None:
+            raise RuntimeError("certification batch insert was not visible")
+        return created
+
+    async def _record_certification_batch_result(
+        self,
+        *,
+        target: InstrumentCertificationTarget,
+        certification: InstrumentCertification,
+        product_rules_digest: str | None,
+    ) -> None:
+        if certification.status == "temporarily_unavailable":
+            return
+        batch = (
+            await self._connection.execute(
+                sa.select(instrument_certification_batches)
+                .join(
+                    instrument_certification_batch_members,
+                    instrument_certification_batch_members.c.certification_batch_id
+                    == instrument_certification_batches.c.certification_batch_id,
+                )
+                .where(
+                    instrument_certification_batches.c.runtime_profile_id
+                    == target.runtime_profile_id,
+                    instrument_certification_batches.c.status == "pending",
+                    instrument_certification_batch_members.c.exchange_instrument_id
+                    == target.exchange_instrument_id,
+                    instrument_certification_batch_members.c.status == "pending",
+                )
+                .with_for_update(of=instrument_certification_batches)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if batch is None:
+            return
+        if (
+            certification.status == "eligible"
+            and certification.valid_until_ms
+            < int(batch["minimum_valid_until_ms"])
+        ):
+            return
+        updated = await self._connection.execute(
+            sa.update(instrument_certification_batch_members)
+            .where(
+                instrument_certification_batch_members.c.certification_batch_id
+                == batch["certification_batch_id"],
+                instrument_certification_batch_members.c.exchange_instrument_id
+                == target.exchange_instrument_id,
+                instrument_certification_batch_members.c.status == "pending",
+            )
+            .values(
+                status=certification.status,
+                blocker_code=certification.blocker_code,
+                facts_digest=certification.facts_digest,
+                product_rules_digest=product_rules_digest,
+                observed_at_ms=certification.observed_at_ms,
+                valid_until_ms=certification.valid_until_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            return
+        if certification.status == "owner_action_required":
+            await self._connection.execute(
+                sa.update(instrument_certification_batches)
+                .where(
+                    instrument_certification_batches.c.certification_batch_id
+                    == batch["certification_batch_id"],
+                    instrument_certification_batches.c.status == "pending",
+                )
+                .values(
+                    status="blocked",
+                    completed_at_ms=certification.observed_at_ms,
+                    blocker_code=certification.blocker_code,
+                )
+            )
+            return
+
+        rows = (
+            await self._connection.execute(
+                sa.select(instrument_certification_batch_members)
+                .where(
+                    instrument_certification_batch_members.c.certification_batch_id
+                    == batch["certification_batch_id"]
+                )
+                .order_by(
+                    instrument_certification_batch_members.c.exchange_instrument_id
+                )
+                .with_for_update(of=instrument_certification_batch_members)
+            )
+        ).mappings().all()
+        completed_rows = tuple(row for row in rows if row["status"] != "pending")
+        evaluation = evaluate_certification_batch(
+            manifest=tuple(str(row["exchange_instrument_id"]) for row in rows),
+            member_results=tuple(
+                CertificationBatchMemberResult(
+                    exchange_instrument_id=str(row["exchange_instrument_id"]),
+                    status=cast(
+                        Literal["eligible", "owner_action_required"],
+                        str(row["status"]),
+                    ),
+                    blocker_code=row["blocker_code"],
+                    facts_digest=str(row["facts_digest"]),
+                    product_rules_digest=(
+                        None
+                        if row["product_rules_digest"] is None
+                        else str(row["product_rules_digest"])
+                    ),
+                    observed_at_ms=int(row["observed_at_ms"]),
+                    valid_until_ms=int(row["valid_until_ms"]),
+                )
+                for row in completed_rows
+            ),
+            minimum_valid_until_ms=int(batch["minimum_valid_until_ms"]),
+        )
+        if evaluation.status is CertificationBatchStatus.COMPLETED:
+            await self._connection.execute(
+                sa.update(instrument_certification_batches)
+                .where(
+                    instrument_certification_batches.c.certification_batch_id
+                    == batch["certification_batch_id"],
+                    instrument_certification_batches.c.status == "pending",
+                )
+                .values(
+                    status="completed",
+                    completed_at_ms=certification.observed_at_ms,
+                    valid_until_ms=evaluation.valid_until_ms,
+                )
+            )
+
+    async def _load_certification_batch(
+        self,
+        certification_batch_id: str,
+        *,
+        for_update: bool,
+    ) -> CertificationBatchSnapshot | None:
+        query = sa.select(instrument_certification_batches).where(
+            instrument_certification_batches.c.certification_batch_id
+            == certification_batch_id
+        )
+        if for_update:
+            query = query.with_for_update(of=instrument_certification_batches)
+        row = (await self._connection.execute(query.limit(1))).mappings().one_or_none()
+        if row is None:
+            return None
+        members = tuple(
+            str(value)
+            for value in (
+                await self._connection.execute(
+                    sa.select(
+                        instrument_certification_batch_members.c.exchange_instrument_id
+                    )
+                    .where(
+                        instrument_certification_batch_members.c.certification_batch_id
+                        == certification_batch_id
+                    )
+                    .order_by(
+                        instrument_certification_batch_members.c.exchange_instrument_id
+                    )
+                )
+            ).scalars()
+        )
+        return CertificationBatchSnapshot(
+            certification_batch_id=str(row["certification_batch_id"]),
+            runtime_profile_id=str(row["runtime_profile_id"]),
+            target_commit=str(row["target_commit"]),
+            target_schema_revision=str(row["target_schema_revision"]),
+            target_seed_identity=str(row["target_seed_identity"]),
+            owner_policy_id=str(row["owner_policy_id"]),
+            owner_policy_version=int(row["owner_policy_version"]),
+            manifest_digest=str(row["manifest_digest"]),
+            exchange_instrument_ids=members,
+            status=CertificationBatchStatus(str(row["status"])),
+            started_at_ms=int(row["started_at_ms"]),
+            minimum_valid_until_ms=int(row["minimum_valid_until_ms"]),
+            completed_at_ms=(
+                None
+                if row["completed_at_ms"] is None
+                else int(row["completed_at_ms"])
+            ),
+            valid_until_ms=(
+                None
+                if row["valid_until_ms"] is None
+                else int(row["valid_until_ms"])
+            ),
+            blocker_code=(
+                None if row["blocker_code"] is None else str(row["blocker_code"])
+            ),
         )
 
     async def _lock_installs(self) -> None:

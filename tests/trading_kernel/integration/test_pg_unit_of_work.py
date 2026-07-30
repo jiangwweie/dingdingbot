@@ -149,6 +149,7 @@ async def test_reconciliation_match_releases_all_capital_authorities_before_sett
             account_id=ticket.identity.netting_domain.account_id,
             notional=ticket.notional,
             risk_at_stop=ticket.risk_at_stop,
+            reserved_margin=ticket.reserved_margin,
             expected_version=None,
             updated_at_ms=1_001,
         )

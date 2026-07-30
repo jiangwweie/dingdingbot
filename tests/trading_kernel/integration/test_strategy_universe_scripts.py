@@ -61,7 +61,7 @@ async def script_database_url() -> AsyncGenerator[str, None]:
                 RuntimeAuthoritySeedRequest(
                     account_id="sensitive-account-id",
                     runtime_commit="task-12-local-test",
-                    schema_revision="0001_trading_kernel_baseline_v2",
+                    schema_revision="0001_trading_kernel_baseline_v3",
                     seeded_at_ms=NOW_MS - 1_000,
                 ),
             )

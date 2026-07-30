@@ -1,6 +1,6 @@
 # AGENTS.md - BRC Trading Kernel Operating Guide
 
-Last updated: 2026-07-24
+Last updated: 2026-07-30
 Scope: Tokyo Trading Kernel engineering and operation
 
 ## Authority Order
@@ -21,6 +21,9 @@ docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
 docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md
 docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md
+docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md
+docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md
+docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md
 docs/current/MAIN_CONTROL_ROADMAP.md
 docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md
 docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md

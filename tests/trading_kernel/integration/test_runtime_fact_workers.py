@@ -280,7 +280,7 @@ async def _enable_exchange_commands(engine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -298,7 +298,7 @@ async def test_expected_readonly_command_fence_resolves_prior_identity_incident(
                 capability_key="exchange_commands",
                 enabled=False,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -308,14 +308,14 @@ async def test_expected_readonly_command_fence_resolves_prior_identity_incident(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         worker_id="lifecycle-worker-1",
         runtime_commit="wrong-commit",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         observed_at_ms=1_001,
     )
     readonly = await runtime_writer_is_certified(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         worker_id="lifecycle-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         observed_at_ms=1_002,
     )
 
@@ -474,7 +474,7 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 now_ms=1_002,
             ),
         )
@@ -488,7 +488,7 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
@@ -530,7 +530,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 now_ms=1_002,
             ),
         )
@@ -541,7 +541,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
@@ -561,7 +561,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         now_ms=1_006,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -612,7 +612,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 now_ms=1_002,
             ),
         )
@@ -624,7 +624,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
@@ -652,7 +652,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
             now_ms=1_007,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -675,7 +675,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     worker_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         now_ms=1_008,
         lease_until_ms=6_008,
         timeout_seconds=1,

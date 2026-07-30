@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-SCHEMA_REVISION = "0001_trading_kernel_baseline_v2"
+SCHEMA_REVISION = "0001_trading_kernel_baseline_v3"
 EXPECTED_CONFIGURED_LEVERAGE = 5
 RELEASE_ROOT = "/opt/brc/releases"
 CURRENT_RELEASE = "/opt/brc/current"
@@ -192,6 +192,8 @@ def deploy_tokyo_release(
     )
 
     services_stopped = False
+    identity_rotated = False
+    target_release_activated = False
     try:
         backend.stop_services(ALL_SERVICES)
         services_stopped = True
@@ -231,12 +233,14 @@ def deploy_tokyo_release(
             deployment_identity,
             plan,
         )
+        identity_rotated = True
         backend.activate_release(
             plan.target_release,
             plan.target_commit,
             plan.schema_revision,
             seed_identity,
         )
+        target_release_activated = True
         _, _, target_identity = _read_release_facts(backend, plan)
         if target_identity != {
             "runtime_commit": plan.target_commit,
@@ -274,7 +278,8 @@ def deploy_tokyo_release(
     except Exception:
         if services_stopped:
             backend.fence_entry()
-            backend.start_services(SAFETY_SERVICES)
+            if target_release_activated or not identity_rotated:
+                backend.start_services(SAFETY_SERVICES)
         raise
 
     return DeploymentResult(

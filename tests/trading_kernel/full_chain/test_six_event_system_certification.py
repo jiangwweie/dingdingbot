@@ -583,7 +583,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         ObservationWorkerRequest(
             worker_id="observation-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
             now_ms=NOW_MS,
             lease_until_ms=NOW_MS + 30_000,
             timeout_seconds=5,
@@ -618,7 +618,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         EntryWorkerRequest(
             worker_id="entry-worker-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
             now_ms=NOW_MS + 1_000,
             lease_until_ms=NOW_MS + 6_000,
             timeout_seconds=1,
@@ -639,7 +639,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         now_ms=NOW_MS + 2_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -656,7 +656,7 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
     lifecycle_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-certification",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         now_ms=NOW_MS + 3_000,
         lease_until_ms=NOW_MS + 8_000,
         timeout_seconds=1,
@@ -821,7 +821,7 @@ async def _seed_runtime(
             RuntimeAuthoritySeedRequest(
                 account_id="account-certification",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v2",
+                schema_revision="0001_trading_kernel_baseline_v3",
                 seeded_at_ms=warm_now_ms - 10_000,
             ),
         )
@@ -847,14 +847,14 @@ async def _seed_runtime(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-universe-certification",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
             now_ms=warm_now_ms,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
             idle_poll_interval_ms=1_000,
             certification_lease_ms=60_000,
-            certification_valid_for_ms=60_000,
-            certification_eligible_check_interval_ms=60_000,
+            certification_valid_for_ms=600_000,
+            certification_eligible_check_interval_ms=300_000,
             certification_owner_action_check_interval_ms=300_000,
             certification_transient_retry_interval_ms=30_000,
         ),
@@ -869,7 +869,7 @@ async def _seed_runtime(
         ObservationWorkerRequest(
             worker_id="observation-worker-universe-warming",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
             now_ms=warm_now_ms,
             lease_until_ms=warm_now_ms + 30_000,
             timeout_seconds=5,
@@ -878,6 +878,23 @@ async def _seed_runtime(
     )
     assert warmed.status is ObservationWorkerStatus.OBSERVED
     assert warmed.observation_status is ObservationStatus.WARMED
+
+    refreshed = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(engine),
+        CertifiedVenue(),
+        CertifiedPositionSource(),
+        ReconciliationWorkerRequest(
+            worker_id="reconciliation-worker-active-certification-refresh",
+            runtime_commit="kernel-test-head",
+            schema_revision="0001_trading_kernel_baseline_v3",
+            now_ms=NOW_MS - 1,
+            timeout_seconds=1,
+            unknown_visibility_grace_ms=30_000,
+            idle_poll_interval_ms=1_000,
+        ),
+        instrument_certification_source=RecordingReadonlyCertificationSource(engine),
+    )
+    assert refreshed.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
 
     async with engine.connect() as connection:
         runtime_scope_id = await connection.scalar(

@@ -72,8 +72,8 @@ def test_entry_preflight_recomputes_stress_from_fresh_account_facts() -> None:
         exclude={"snapshot_digest"},
     )
     risk_values.update(
-        total_margin_balance=Decimal(270),
-        total_maintenance_margin=Decimal(200),
+        total_margin_balance=Decimal(1000),
+        total_maintenance_margin=Decimal(1500),
     )
     stressed = snapshot.model_copy(
         update={
@@ -144,6 +144,7 @@ def _preflight_request(*, snapshot):
         usage=CapacityUsage(
             gross_notional=Decimal(0),
             gross_risk_at_stop=Decimal(0),
+            current_reserved_margin=Decimal(0),
             active_ticket_count=0,
         ),
         instrument_rules=_rules(),
@@ -200,8 +201,10 @@ def _preflight_request(*, snapshot):
             new_entry_submit_enabled=True,
             priority_rank=1,
             max_concurrent_tickets=3,
-            planned_stop_risk_fraction=Decimal("0.03"),
-            max_initial_margin_utilization=Decimal("0.90"),
+            max_ticket_stop_risk_fraction=Decimal("0.03"),
+            max_gross_stop_risk_fraction=Decimal("0.06"),
+            max_ticket_initial_margin_fraction=Decimal("0.45"),
+            max_gross_initial_margin_utilization=Decimal("0.90"),
             max_leverage=10,
             supported_margin_mode="cross",
             post_stop_stress_multiple=Decimal(2),
@@ -255,10 +258,10 @@ def _preflight_request(*, snapshot):
             capability_key="exchange_commands",
             enabled=True,
             certified_commit="commit-1",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
         ),
         runtime_commit="commit-1",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         admission_snapshot=snapshot,
         instrument_rules=InstrumentRulesFacts(
             exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",

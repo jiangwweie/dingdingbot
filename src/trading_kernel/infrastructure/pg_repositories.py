@@ -22,6 +22,10 @@ from src.trading_kernel.application.ports import (
     RuntimeIncidentRecord,
     TradeReviewRecord,
 )
+from src.trading_kernel.application.reconciliation_scheduler import (
+    ReconciliationActionCandidate,
+    ReconciliationActionKind,
+)
 from src.trading_kernel.domain.aggregate import (
     RECONCILIATION_POSITION_STATUSES,
     AggregateStatus,
@@ -295,12 +299,16 @@ class PostgresAggregateRepository:
     async def claim_next_routine_reconciliation_work(
         self,
         *,
+        worker_id: str,
         now_ms: int,
+        lease_until_ms: int,
     ) -> TradeAggregate | None:
         """Select one due closure action after safety and overdue certification."""
 
-        if now_ms <= 0:
-            raise ValueError("reconciliation selector requires positive now_ms")
+        if not worker_id.strip():
+            raise ValueError("reconciliation claim worker must be non-blank")
+        if now_ms <= 0 or lease_until_ms <= now_ms:
+            raise ValueError("reconciliation claim lease must be future-dated")
         due_at = sa.func.coalesce(
             trade_aggregates.c.reconciliation_due_at_ms,
             trade_aggregates.c.updated_at_ms,
@@ -320,7 +328,64 @@ class PostgresAggregateRepository:
             .limit(1)
         )
         ticket_id = result.scalar_one_or_none()
-        return None if ticket_id is None else await self.get(str(ticket_id))
+        if ticket_id is None:
+            return None
+        leased = await self._connection.execute(
+            sa.update(trade_aggregates)
+            .where(
+                trade_aggregates.c.ticket_id == ticket_id,
+                due_at <= now_ms,
+            )
+            .values(reconciliation_due_at_ms=lease_until_ms)
+        )
+        if leased.rowcount != 1:
+            return None
+        return await self.get(str(ticket_id))
+
+    async def peek_next_routine_reconciliation_action(
+        self,
+        *,
+        now_ms: int,
+    ) -> ReconciliationActionCandidate | None:
+        if now_ms <= 0:
+            raise ValueError("reconciliation selector requires positive now_ms")
+        due_at = sa.func.coalesce(
+            trade_aggregates.c.reconciliation_due_at_ms,
+            trade_aggregates.c.updated_at_ms,
+        )
+        row = (
+            await self._connection.execute(
+                sa.select(
+                    trade_aggregates.c.ticket_id,
+                    trade_aggregates.c.status,
+                    due_at.label("due_at_ms"),
+                )
+                .where(
+                    trade_aggregates.c.status.in_(
+                        (
+                            AggregateStatus.SETTLEMENT_PENDING.value,
+                            AggregateStatus.REVIEW_PENDING.value,
+                        )
+                    ),
+                    due_at <= now_ms,
+                )
+                .order_by(due_at, trade_aggregates.c.ticket_id)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        status = AggregateStatus(str(row["status"]))
+        return ReconciliationActionCandidate(
+            kind=(
+                ReconciliationActionKind.SETTLEMENT
+                if status is AggregateStatus.SETTLEMENT_PENDING
+                else ReconciliationActionKind.REVIEW
+            ),
+            stable_identity=str(row["ticket_id"]),
+            due_at_ms=int(row["due_at_ms"]),
+            max_wait_ms=60_000,
+        )
 
     async def schedule_next_check(
         self,
@@ -1161,7 +1226,17 @@ class PostgresMonitorRepository:
         )
         current_row = result.mappings().one_or_none()
         if current_row is not None and _same_monitor_state(current_row, state):
-            return MonitorStateRecord.model_validate(current_row)
+            current = MonitorStateRecord.model_validate(current_row)
+            if state.updated_at_ms <= current.updated_at_ms:
+                return current
+            await self._connection.execute(
+                sa.update(monitor_current)
+                .where(monitor_current.c.monitor_key == state.monitor_key)
+                .values(updated_at_ms=state.updated_at_ms)
+            )
+            return current.model_copy(
+                update={"updated_at_ms": state.updated_at_ms}
+            )
 
         version = 1 if current_row is None else int(current_row["projection_version"]) + 1
         persisted = state.model_copy(update={"projection_version": version})
@@ -1253,9 +1328,17 @@ class PostgresEntryAdmissionRepository:
             new_entry_submit_enabled=bool(row["new_entry_submit_enabled"]),
             priority_rank=int(row["priority_rank"]),
             max_concurrent_tickets=int(row["max_concurrent_tickets"]),
-            planned_stop_risk_fraction=Decimal(row["planned_stop_risk_fraction"]),
-            max_initial_margin_utilization=Decimal(
-                row["max_initial_margin_utilization"]
+            max_ticket_stop_risk_fraction=Decimal(
+                row["max_ticket_stop_risk_fraction"]
+            ),
+            max_gross_stop_risk_fraction=Decimal(
+                row["max_gross_stop_risk_fraction"]
+            ),
+            max_ticket_initial_margin_fraction=Decimal(
+                row["max_ticket_initial_margin_fraction"]
+            ),
+            max_gross_initial_margin_utilization=Decimal(
+                row["max_gross_initial_margin_utilization"]
             ),
             max_leverage=int(row["max_leverage"]),
             supported_margin_mode=cast(Literal["cross"], supported_margin_mode),
@@ -1451,6 +1534,7 @@ class PostgresEntryAdmissionRepository:
         account_id: str,
         notional: Decimal,
         risk_at_stop: Decimal,
+        reserved_margin: Decimal,
         expected_version: int | None,
         updated_at_ms: int,
     ) -> None:
@@ -1461,6 +1545,7 @@ class PostgresEntryAdmissionRepository:
                     account_id=account_id,
                     gross_notional=notional,
                     gross_risk_at_stop=risk_at_stop,
+                    current_reserved_margin=reserved_margin,
                     active_ticket_count=1,
                     projection_version=1,
                     updated_at_ms=updated_at_ms,
@@ -1479,6 +1564,10 @@ class PostgresEntryAdmissionRepository:
                 gross_risk_at_stop=(
                     account_exposure_current.c.gross_risk_at_stop + risk_at_stop
                 ),
+                current_reserved_margin=(
+                    account_exposure_current.c.current_reserved_margin
+                    + reserved_margin
+                ),
                 active_ticket_count=account_exposure_current.c.active_ticket_count + 1,
                 projection_version=expected_version + 1,
                 updated_at_ms=updated_at_ms,
@@ -1494,6 +1583,7 @@ class PostgresEntryAdmissionRepository:
         account_id: str,
         notional: Decimal,
         risk_at_stop: Decimal,
+        reserved_margin: Decimal,
         updated_at_ms: int,
     ) -> None:
         current = await self.get_account_exposure(
@@ -1503,7 +1593,11 @@ class PostgresEntryAdmissionRepository:
         )
         if current is None or current.active_ticket_count <= 0:
             raise AggregateVersionConflict("account exposure is missing during release")
-        if current.gross_notional < notional or current.gross_risk_at_stop < risk_at_stop:
+        if (
+            current.gross_notional < notional
+            or current.gross_risk_at_stop < risk_at_stop
+            or current.current_reserved_margin < reserved_margin
+        ):
             raise AggregateVersionConflict("account exposure release would become negative")
         updated = await self._connection.execute(
             sa.update(account_exposure_current)
@@ -1516,6 +1610,9 @@ class PostgresEntryAdmissionRepository:
             .values(
                 gross_notional=current.gross_notional - notional,
                 gross_risk_at_stop=current.gross_risk_at_stop - risk_at_stop,
+                current_reserved_margin=(
+                    current.current_reserved_margin - reserved_margin
+                ),
                 active_ticket_count=current.active_ticket_count - 1,
                 projection_version=current.projection_version + 1,
                 updated_at_ms=updated_at_ms,
@@ -1739,13 +1836,27 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "margin_mode_at_claim": claim.margin_mode_at_claim,
         "active_ticket_count_at_claim": claim.active_ticket_count_at_claim,
         "remaining_slots_at_claim": claim.remaining_slots_at_claim,
-        "planned_stop_risk_fraction": claim.planned_stop_risk_fraction,
+        "gross_risk_at_stop_at_claim": claim.gross_risk_at_stop_at_claim,
+        "current_reserved_margin_at_claim": (
+            claim.current_reserved_margin_at_claim
+        ),
+        "max_ticket_stop_risk_fraction": (
+            claim.max_ticket_stop_risk_fraction
+        ),
+        "max_gross_stop_risk_fraction": (
+            claim.max_gross_stop_risk_fraction
+        ),
+        "max_ticket_initial_margin_fraction": (
+            claim.max_ticket_initial_margin_fraction
+        ),
+        "max_gross_initial_margin_utilization": (
+            claim.max_gross_initial_margin_utilization
+        ),
         "planned_stop_risk_budget": claim.planned_stop_risk_budget,
         "max_post_fill_stop_risk_overrun_fraction": (
             claim.max_post_fill_stop_risk_overrun_fraction
         ),
         "post_fill_stop_risk_limit": claim.post_fill_stop_risk_limit,
-        "max_initial_margin_utilization": claim.max_initial_margin_utilization,
         "post_stop_stress_multiple": claim.post_stop_stress_multiple,
         "ticket_margin_budget": claim.ticket_margin_budget,
         "required_leverage": claim.required_leverage,
@@ -1835,15 +1946,29 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         ),
         active_ticket_count_at_claim=int(row["active_ticket_count_at_claim"]),
         remaining_slots_at_claim=int(row["remaining_slots_at_claim"]),
-        planned_stop_risk_fraction=Decimal(row["planned_stop_risk_fraction"]),
+        gross_risk_at_stop_at_claim=Decimal(
+            row["gross_risk_at_stop_at_claim"]
+        ),
+        current_reserved_margin_at_claim=Decimal(
+            row["current_reserved_margin_at_claim"]
+        ),
+        max_ticket_stop_risk_fraction=Decimal(
+            row["max_ticket_stop_risk_fraction"]
+        ),
+        max_gross_stop_risk_fraction=Decimal(
+            row["max_gross_stop_risk_fraction"]
+        ),
+        max_ticket_initial_margin_fraction=Decimal(
+            row["max_ticket_initial_margin_fraction"]
+        ),
+        max_gross_initial_margin_utilization=Decimal(
+            row["max_gross_initial_margin_utilization"]
+        ),
         planned_stop_risk_budget=Decimal(row["planned_stop_risk_budget"]),
         max_post_fill_stop_risk_overrun_fraction=Decimal(
             row["max_post_fill_stop_risk_overrun_fraction"]
         ),
         post_fill_stop_risk_limit=Decimal(row["post_fill_stop_risk_limit"]),
-        max_initial_margin_utilization=Decimal(
-            row["max_initial_margin_utilization"]
-        ),
         post_stop_stress_multiple=Decimal(row["post_stop_stress_multiple"]),
         ticket_margin_budget=Decimal(row["ticket_margin_budget"]),
         required_leverage=int(row["required_leverage"]),

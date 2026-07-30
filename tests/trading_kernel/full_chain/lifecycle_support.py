@@ -48,7 +48,7 @@ async def dispatch_lifecycle_command(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision="0001_trading_kernel_baseline_v2" if entry else None,
+            schema_revision="0001_trading_kernel_baseline_v3" if entry else None,
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,

@@ -510,6 +510,144 @@ async def test_long_and_short_are_independent_default_netting_domains(
 
 
 @pytest.mark.asyncio
+async def test_stale_claims_cannot_exceed_gross_stop_risk_after_atomic_revalidation(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_policy(issue_engine)
+    first = _ticket()
+    second = _ticket_for_signal(
+        "signal-risk-2",
+        "episode-risk-2",
+        position_side="short",
+    )
+    third = _ticket_for_instrument(
+        "signal-risk-3",
+        "episode-risk-3",
+        exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+        runtime_scope_id="scope-sor-eth-long",
+    )
+    await _seed_ticket_runtime_scope(issue_engine, third)
+    second_request = _issue_request(
+        ticket=second,
+        now_ms=1_002,
+        claim_owner="worker-risk-2",
+        stress_balance=Decimal(100),
+    )
+    third_request = _issue_request(
+        ticket=third,
+        now_ms=1_003,
+        claim_owner="worker-risk-3",
+        stress_balance=Decimal(100),
+    )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        first_result = await issue_ticket(
+            uow,
+            _issue_request(
+                ticket=first,
+                now_ms=1_001,
+                claim_owner="worker-risk-1",
+                stress_balance=Decimal(100),
+            ),
+        )
+    assert first_result.status is IssueTicketStatus.ISSUED
+    await _release_global_entry_lane(issue_engine)
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        second_result = await issue_ticket(uow, second_request)
+    assert second_result.status is IssueTicketStatus.ISSUED
+    await _release_global_entry_lane(issue_engine)
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        third_result = await issue_ticket(uow, third_request)
+        exposure = await uow.entry_admission.get_account_exposure(
+            first.identity.netting_domain.venue_id,
+            first.identity.netting_domain.account_id,
+        )
+
+    assert third_result.status is IssueTicketStatus.BUDGET_EXHAUSTED
+    assert exposure is not None
+    assert exposure.gross_risk_at_stop == Decimal(6)
+    assert exposure.active_ticket_count == 2
+
+
+@pytest.mark.asyncio
+async def test_stale_claims_cannot_exceed_gross_margin_after_atomic_revalidation(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_policy(issue_engine)
+    first = _ticket(risk_at_stop=Decimal(1), reserved_margin=Decimal(45))
+    second_base = _ticket_for_signal(
+        "signal-margin-2",
+        "episode-margin-2",
+        position_side="short",
+    )
+    second = _ticket(
+        identity=second_base.identity,
+        runtime_scope_id=second_base.runtime_scope_id,
+        universe_version_id=second_base.universe_version_id,
+        initial_stop_price=second_base.initial_stop_price,
+        take_profit_prices=second_base.take_profit_prices,
+        risk_at_stop=Decimal(1),
+        reserved_margin=Decimal(45),
+    )
+    third = _ticket_for_instrument(
+        "signal-margin-3",
+        "episode-margin-3",
+        exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+        runtime_scope_id="scope-sor-eth-long",
+        risk_at_stop=Decimal(1),
+        reserved_margin=Decimal(45),
+    )
+    await _seed_ticket_runtime_scope(issue_engine, third)
+    second_request = _issue_request(
+        ticket=second,
+        now_ms=1_002,
+        claim_owner="worker-margin-2",
+        stress_balance=Decimal(100),
+        ticket_margin_budget=Decimal(45),
+    )
+    third_request = _issue_request(
+        ticket=third,
+        now_ms=1_003,
+        claim_owner="worker-margin-3",
+        stress_balance=Decimal(100),
+        ticket_margin_budget=Decimal(45),
+    )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        first_result = await issue_ticket(
+            uow,
+            _issue_request(
+                ticket=first,
+                now_ms=1_001,
+                claim_owner="worker-margin-1",
+                stress_balance=Decimal(100),
+                ticket_margin_budget=Decimal(45),
+            ),
+        )
+    assert first_result.status is IssueTicketStatus.ISSUED
+    await _release_global_entry_lane(issue_engine)
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        second_result = await issue_ticket(uow, second_request)
+    assert second_result.status is IssueTicketStatus.ISSUED
+    await _release_global_entry_lane(issue_engine)
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        third_result = await issue_ticket(uow, third_request)
+        exposure = await uow.entry_admission.get_account_exposure(
+            first.identity.netting_domain.venue_id,
+            first.identity.netting_domain.account_id,
+        )
+
+    assert third_result.status is IssueTicketStatus.BUDGET_EXHAUSTED
+    assert exposure is not None
+    assert exposure.current_reserved_margin == Decimal(90)
+    assert exposure.gross_risk_at_stop == Decimal(2)
+    assert exposure.active_ticket_count == 2
+
+
+@pytest.mark.asyncio
 async def test_one_signal_cannot_create_a_second_ticket_identity(
     issue_engine: AsyncEngine,
 ) -> None:
@@ -580,8 +718,10 @@ async def _seed_policy(
                 new_entry_submit_enabled=new_entry_submit_enabled,
                 priority_rank=1,
                 max_concurrent_tickets=max_concurrent_tickets,
-                planned_stop_risk_fraction="0.03",
-                max_initial_margin_utilization="0.90",
+                max_ticket_stop_risk_fraction="0.03",
+                max_gross_stop_risk_fraction="0.06",
+                max_ticket_initial_margin_fraction="0.45",
+                max_gross_initial_margin_utilization="0.90",
                 max_leverage=10,
                 supported_margin_mode="cross",
                 post_stop_stress_multiple="2.0",
@@ -655,6 +795,10 @@ async def _issue_and_release_lane(engine: AsyncEngine, ticket) -> None:
             _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
         )
     assert result.status is IssueTicketStatus.ISSUED
+    await _release_global_entry_lane(engine)
+
+
+async def _release_global_entry_lane(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
         await connection.execute(
             sa.update(entry_lane_current).values(
@@ -759,13 +903,58 @@ def _ticket_for_signal(
     return _ticket(**terms)
 
 
-def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketRequest:
+def _ticket_for_instrument(
+    signal_event_id: str,
+    exposure_episode_id: str,
+    *,
+    exchange_instrument_id: str,
+    runtime_scope_id: str,
+    **updates: object,
+):
+    original = _identity()
+    domain = NettingDomain(
+        venue_id=original.netting_domain.venue_id,
+        account_id=original.netting_domain.account_id,
+        exchange_instrument_id=exchange_instrument_id,
+        position_side="long",
+    )
+    identity = TicketIdentity(
+        ticket_id=build_ticket_id(
+            signal_event_id=signal_event_id,
+            runtime=original.runtime,
+            netting_domain=domain,
+        ),
+        exposure_episode_id=exposure_episode_id,
+        signal_event_id=signal_event_id,
+        runtime=original.runtime,
+        netting_domain=domain,
+    )
+    terms: dict[str, object] = {
+        "identity": identity,
+        "runtime_scope_id": runtime_scope_id,
+    }
+    terms.update(updates)
+    return _ticket(**terms)
+
+
+def _issue_request(
+    *,
+    ticket,
+    now_ms: int,
+    claim_owner: str,
+    stress_balance: Decimal | None = None,
+    ticket_margin_budget: Decimal = Decimal(30),
+) -> IssueTicketRequest:
     configured_leverage = (
         ticket.selected_leverage - 1
         if ticket.leverage_change_required
         else ticket.selected_leverage
     )
-    stress_balance = max(Decimal(100), ticket.notional * Decimal(10))
+    resolved_stress_balance = (
+        max(Decimal(100), ticket.notional * Decimal(10))
+        if stress_balance is None
+        else stress_balance
+    )
     return IssueTicketRequest(
         capacity_claim=freeze_capacity_claim(
             ticket_identity=ticket.identity,
@@ -789,30 +978,37 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
                 f"{ticket.identity.netting_domain.account_id}:"
                 f"{ticket.identity.netting_domain.exchange_instrument_id}"
             ),
-            total_wallet_balance_at_claim=stress_balance,
-            total_margin_balance_at_claim=stress_balance,
+            total_wallet_balance_at_claim=resolved_stress_balance,
+            total_margin_balance_at_claim=resolved_stress_balance,
             total_initial_margin_at_claim=Decimal(0),
             total_maintenance_margin_at_claim=Decimal(0),
-            available_margin_at_claim=stress_balance,
+            available_margin_at_claim=resolved_stress_balance,
             mark_price_at_claim=ticket.entry_reference_price,
             position_mode_at_claim="independent_sides",
             margin_mode_at_claim=ticket.margin_mode,
             active_ticket_count_at_claim=0,
             remaining_slots_at_claim=3,
-            planned_stop_risk_fraction=Decimal("0.03"),
+            gross_risk_at_stop_at_claim=Decimal(0),
+            current_reserved_margin_at_claim=Decimal(0),
+            max_ticket_stop_risk_fraction=Decimal("0.03"),
+            max_gross_stop_risk_fraction=Decimal("0.06"),
+            max_ticket_initial_margin_fraction=Decimal("0.45"),
             planned_stop_risk_budget=ticket.planned_stop_risk_budget,
             max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
             post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
-            max_initial_margin_utilization=Decimal("0.90"),
+            max_gross_initial_margin_utilization=Decimal("0.90"),
             post_stop_stress_multiple=ticket.post_stop_stress_multiple,
-            ticket_margin_budget=Decimal(30),
+            ticket_margin_budget=ticket_margin_budget,
             required_leverage=ticket.selected_leverage,
             selected_leverage=ticket.selected_leverage,
             configured_leverage_at_claim=configured_leverage,
             leverage_change_required=ticket.leverage_change_required,
             exchange_max_leverage=10,
             reserved_margin=ticket.reserved_margin,
-            cross_margin_stress_evidence=_stress_evidence(ticket),
+            cross_margin_stress_evidence=_stress_evidence(
+                ticket,
+                stress_balance=resolved_stress_balance,
+            ),
             created_at_ms=ticket.created_at_ms,
             expires_at_ms=ticket.expires_at_ms,
             entry_reference_price=ticket.entry_reference_price,
@@ -830,8 +1026,12 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
     )
 
 
-def _stress_evidence(ticket):
-    stress_balance = max(Decimal(100), ticket.notional * Decimal(10))
+def _stress_evidence(ticket, *, stress_balance: Decimal | None = None):
+    resolved_stress_balance = (
+        max(Decimal(100), ticket.notional * Decimal(10))
+        if stress_balance is None
+        else stress_balance
+    )
     configured_leverage = (
         ticket.selected_leverage - 1
         if ticket.leverage_change_required
@@ -849,11 +1049,11 @@ def _stress_evidence(ticket):
         ),
         mark_price=ticket.entry_reference_price,
         configured_leverage=configured_leverage,
-        total_wallet_balance=stress_balance,
-        total_margin_balance=stress_balance,
+        total_wallet_balance=resolved_stress_balance,
+        total_margin_balance=resolved_stress_balance,
         total_initial_margin=Decimal(0),
         total_maintenance_margin=Decimal(0),
-        available_margin=stress_balance,
+        available_margin=resolved_stress_balance,
         account_positions=(),
         observed_at_ms=ticket.created_at_ms,
         valid_until_ms=ticket.expires_at_ms,

@@ -38,6 +38,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     event_required_facts,
     event_specs,
     facts_current,
+    instrument_certification_current,
     instrument_rules_current,
     instruments,
     owner_policy_current,
@@ -205,6 +206,15 @@ class PostgresSignalRepository:
                 == runtime_scopes_current.c.owner_policy_id,
             )
             .join(
+                instrument_certification_current,
+                sa.and_(
+                    instrument_certification_current.c.runtime_profile_id
+                    == runtime_scopes_current.c.runtime_profile_id,
+                    instrument_certification_current.c.exchange_instrument_id
+                    == signal_events.c.exchange_instrument_id,
+                ),
+            )
+            .join(
                 strategy_universe_current,
                 sa.and_(
                     strategy_universe_current.c.event_spec_id
@@ -237,6 +247,9 @@ class PostgresSignalRepository:
                 == signal_events.c.universe_semantic_digest,
                 owner_policy_current.c.enabled.is_(True),
                 owner_policy_current.c.new_entry_submit_enabled.is_(True),
+                instrument_certification_current.c.status == "eligible",
+                instrument_certification_current.c.blocker_code.is_(None),
+                instrument_certification_current.c.valid_until_ms > now_ms,
                 ~already_ticketed,
             )
             .order_by(

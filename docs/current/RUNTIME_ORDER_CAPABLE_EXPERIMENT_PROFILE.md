@@ -1,7 +1,7 @@
 ---
 title: RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE
 status: CURRENT
-last_verified: 2026-07-24
+last_verified: 2026-07-30
 ---
 
 # Runtime Order-Capable Experiment Profile
@@ -48,13 +48,33 @@ finite `max_concurrent_tickets`, gross notional, risk, margin, or leverage cap.
 Those values are seeded from the current approved policy and must not be
 invented or expanded during cutover.
 
-The approved profile seed is three concurrent Tickets, `0.03` planned stop-risk
-fraction, `0.90` maximum initial-margin utilization, maximum leverage `10`, and
-`cross` margin mode. Supported exchange instruments use fixed `5x`; the kernel
-freezes and revalidates that account fact and does not submit leverage changes.
-Remaining executable margin is allocated by the current Ticket's validated
-demand, not divided equally across unused Ticket slots. The
-`new_entry_submit_enabled` setting controls only new ENTRY; it never removes
+The Owner-approved operability-repair profile is:
+
+```text
+max_concurrent_tickets = 3
+max_ticket_stop_risk_fraction = 0.03
+max_gross_stop_risk_fraction = 0.06
+max_ticket_initial_margin_fraction = 0.45
+max_gross_initial_margin_utilization = 0.90
+max_leverage = 10
+supported_margin_mode = cross
+```
+
+Supported exchange instruments use fixed `5x`; the kernel freezes and
+revalidates that account fact and does not submit leverage changes. A Ticket
+may target up to `0.03` planned stop risk but may receive less when its `0.45`
+margin cap, the remaining `0.06` gross stop-risk budget, the remaining `0.90`
+gross margin budget, venue minimums, or current account facts bind. The policy
+therefore normally permits two full-risk Tickets and allows a third only from
+remaining risk and margin; it does not promise three equal positions.
+
+The pre-repair deployed model still uses `planned_stop_risk_fraction` and one
+gross initial-margin utilization value without the approved explicit ticket and
+gross boundaries. Until the repair code, clean schema, seed, certification and
+Tokyo cutover complete, current tracked code, PostgreSQL and exchange facts
+remain the authority for what production actually enforces.
+
+The `new_entry_submit_enabled` setting controls only new ENTRY; it never removes
 protection, controlled flatten, reconciliation, Settlement, or Review authority
 from existing exchange exposure.
 

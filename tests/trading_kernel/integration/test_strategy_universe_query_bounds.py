@@ -62,8 +62,8 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-13-query-bounds"
-SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
-    "0001_trading_kernel_baseline_v2"
+SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v3"] = (
+    "0001_trading_kernel_baseline_v3"
 )
 ACTIVE_MEMBERS = tuple(
     f"binance-usdm:{symbol}USDT:perpetual"
@@ -241,6 +241,14 @@ async def test_activation_member_and_scope_selects_are_all_limited_to_eleven(
         contract=contract,
         members=WARMING_MEMBERS,
     )
+    async with PostgresKernelUnitOfWork(query_bounds_engine) as uow:
+        due_certification = (
+            await uow.strategy_universes.peek_next_due_instrument_certification_action(
+                now_ms=NOW_MS
+            )
+        )
+    assert due_certification is not None
+    assert due_certification.due_at_ms <= NOW_MS
     statements: list[tuple[str, object]] = []
 
     def _capture(

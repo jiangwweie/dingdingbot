@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from scripts.trading_kernel.bootstrap_strategy_universes import (
     INITIAL_MEMBERS,
+    BootstrapBlocked,
     bootstrap_strategy_universes,
 )
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
@@ -24,6 +25,8 @@ from src.trading_kernel.application.observe_strategy_scope import ObservationSta
 from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
+    instrument_certification_batch_members,
+    instrument_certification_batches,
     runtime_scopes_current,
     signal_events,
     strategy_universe_current,
@@ -66,7 +69,7 @@ ADMIN_DSN = os.getenv(
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 RUNTIME_COMMIT = "strategy-universe-rehearsal"
-SCHEMA_REVISION = "0001_trading_kernel_baseline_v2"
+SCHEMA_REVISION = "0001_trading_kernel_baseline_v3"
 
 
 class RecordingWarmMarket:
@@ -119,7 +122,7 @@ async def test_six_event_batch_bootstrap_is_idempotent_and_uses_worker_boundarie
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-batch-bootstrap-test",
                     runtime_commit=RUNTIME_COMMIT,
-                    schema_revision="0001_trading_kernel_baseline_v2",
+                    schema_revision="0001_trading_kernel_baseline_v3",
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
             )
@@ -172,6 +175,8 @@ async def test_six_event_batch_bootstrap_is_idempotent_and_uses_worker_boundarie
             "active_scopes": 42,
             "warming_scopes": 0,
             "active_members": tuple(INITIAL_MEMBERS),
+            "completed_certification_batches": 1,
+            "eligible_certification_batch_members": 7,
             "signals": 0,
             "tickets": 0,
             "commands": 0,
@@ -182,6 +187,60 @@ async def test_six_event_batch_bootstrap_is_idempotent_and_uses_worker_boundarie
         assert market.requests
         assert certification.mutation_calls == []
         assert market.mutation_calls == []
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        await _drop_database(admin, database_name)
+        await admin.close()
+
+
+@pytest.mark.asyncio
+async def test_six_event_batch_uses_one_total_wait_budget() -> None:
+    """Catches resetting the deployment timeout independently for every Event."""
+
+    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
+    assert SAFE_DATABASE.fullmatch(database_name)
+    admin = await asyncpg.connect(ADMIN_DSN)
+    engine: AsyncEngine | None = None
+    try:
+        await admin.execute(f'CREATE DATABASE "{database_name}"')
+        database_url = _database_url(database_name)
+        _run_alembic(database_url)
+        engine = create_async_engine(database_url)
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id="subaccount-batch-timeout-test",
+                    runtime_commit=RUNTIME_COMMIT,
+                    schema_revision=SCHEMA_REVISION,
+                    seeded_at_ms=NOW_MS - 10_000,
+                ),
+            )
+
+        clock = VirtualClock()
+        market = RecordingWarmMarket()
+        certification = RecordingReadonlyCertificationSource(engine)
+        drive_workers = _worker_driving_sleep(
+            engine=engine,
+            clock=clock,
+            market=market,
+            certification=certification,
+        )
+
+        async def slow_worker_progress(delay_seconds: float) -> None:
+            await drive_workers(delay_seconds)
+            clock.advance(20_000)
+
+        with pytest.raises(BootstrapBlocked, match=r"warming_timeout:"):
+            await bootstrap_strategy_universes(
+                database_url,
+                runtime_profile_id=RUNTIME_PROFILE_ID,
+                now_ms=clock.read,
+                wait_timeout_ms=60_000,
+                poll_interval_ms=1,
+                sleep=slow_worker_progress,
+            )
     finally:
         if engine is not None:
             await engine.dispose()
@@ -266,9 +325,9 @@ def _reconciliation_request(now_ms: int) -> ReconciliationWorkerRequest:
         unknown_visibility_grace_ms=30_000,
         idle_poll_interval_ms=2_000,
         certification_lease_ms=60_000,
-        certification_max_wait_ms=60_000,
-        certification_valid_for_ms=60_000,
-        certification_eligible_check_interval_ms=60_000,
+        certification_max_wait_ms=120_000,
+        certification_valid_for_ms=600_000,
+        certification_eligible_check_interval_ms=300_000,
         certification_owner_action_check_interval_ms=300_000,
         certification_transient_retry_interval_ms=30_000,
     )
@@ -331,6 +390,26 @@ async def _snapshot(engine: AsyncEngine) -> dict[str, object]:
                 or 0
             ),
             "active_members": active_members,
+            "completed_certification_batches": int(
+                await connection.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(instrument_certification_batches)
+                    .where(
+                        instrument_certification_batches.c.status == "completed"
+                    )
+                )
+                or 0
+            ),
+            "eligible_certification_batch_members": int(
+                await connection.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(instrument_certification_batch_members)
+                    .where(
+                        instrument_certification_batch_members.c.status == "eligible"
+                    )
+                )
+                or 0
+            ),
             "signals": int(
                 await connection.scalar(
                     sa.select(sa.func.count()).select_from(signal_events)

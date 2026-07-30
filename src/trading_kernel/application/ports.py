@@ -9,7 +9,7 @@ from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 from types import TracebackType
-from typing import Literal, Protocol, Self
+from typing import TYPE_CHECKING, Literal, Protocol, Self
 
 from pydantic import (
     BaseModel,
@@ -41,6 +41,9 @@ from src.trading_kernel.application.read_strategy_universe_status import (
     StrategyUniverseStatusRequest,
     StrategyUniverseStatusResult,
 )
+from src.trading_kernel.application.reconciliation_scheduler import (
+    ReconciliationActionCandidate,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity import CapacityClaim
@@ -70,6 +73,12 @@ from src.trading_kernel.domain.strategy_registry import (
 )
 from src.trading_kernel.domain.ticket import TradeTicket
 from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
+
+if TYPE_CHECKING:
+    from src.trading_kernel.application.certification_batch import (
+        CertificationBatchSnapshot,
+        StartCertificationBatchRequest,
+    )
 
 
 class AggregateVersionConflict(RuntimeError):
@@ -171,8 +180,10 @@ class OwnerPolicySnapshot(BaseModel):
     new_entry_submit_enabled: bool
     priority_rank: int
     max_concurrent_tickets: int
-    planned_stop_risk_fraction: Decimal
-    max_initial_margin_utilization: Decimal
+    max_ticket_stop_risk_fraction: Decimal
+    max_gross_stop_risk_fraction: Decimal
+    max_ticket_initial_margin_fraction: Decimal
+    max_gross_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
     post_stop_stress_multiple: Decimal
@@ -186,6 +197,7 @@ class AccountExposureSnapshot(BaseModel):
     account_id: str
     gross_notional: Decimal
     gross_risk_at_stop: Decimal
+    current_reserved_margin: Decimal
     active_ticket_count: int
     projection_version: int
     updated_at_ms: int
@@ -518,8 +530,16 @@ class AggregateRepository(Protocol):
     async def claim_next_routine_reconciliation_work(
         self,
         *,
+        worker_id: str,
         now_ms: int,
+        lease_until_ms: int,
     ) -> TradeAggregate | None: ...
+
+    async def peek_next_routine_reconciliation_action(
+        self,
+        *,
+        now_ms: int,
+    ) -> ReconciliationActionCandidate | None: ...
 
     async def schedule_next_check(
         self,
@@ -756,6 +776,7 @@ class EntryAdmissionRepository(Protocol):
         account_id: str,
         notional: Decimal,
         risk_at_stop: Decimal,
+        reserved_margin: Decimal,
         expected_version: int | None,
         updated_at_ms: int,
     ) -> None: ...
@@ -767,6 +788,7 @@ class EntryAdmissionRepository(Protocol):
         account_id: str,
         notional: Decimal,
         risk_at_stop: Decimal,
+        reserved_margin: Decimal,
         updated_at_ms: int,
     ) -> None: ...
 
@@ -1047,6 +1069,12 @@ class StrategyUniverseRepository(Protocol):
         overdue_before_ms: int | None = None,
     ) -> InstrumentCertificationTarget | None: ...
 
+    async def peek_next_due_instrument_certification_action(
+        self,
+        *,
+        now_ms: int,
+    ) -> ReconciliationActionCandidate | None: ...
+
     async def save_instrument_certification(
         self,
         *,
@@ -1058,6 +1086,13 @@ class StrategyUniverseRepository(Protocol):
         position_mode: str | None,
         next_check_at_ms: int,
     ) -> None: ...
+
+    async def start_certification_batch(
+        self,
+        *,
+        request: StartCertificationBatchRequest,
+        manifest_digest: str,
+    ) -> CertificationBatchSnapshot: ...
 
 
 class InstrumentCertificationTarget(BaseModel):

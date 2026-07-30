@@ -67,6 +67,9 @@ def test_empty_database_rehearsal_reaches_six_active_universes_then_fenced_entry
             "arm",
             "start",
             "active_fenced",
+            "certification",
+            "external",
+            "safety",
             "unfence",
             "active",
         ]

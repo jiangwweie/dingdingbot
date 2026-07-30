@@ -47,9 +47,12 @@ class CutoverPhase(StrEnum):
     SEED_CURRENT_AUTHORITY = "seed_current_authority"
     DEPLOY_EXACT_RELEASE = "deploy_exact_release"
     CERTIFY_SCHEMA_AND_READONLY = "certify_schema_and_readonly"
-    ENABLE_OBSERVATION_MONITOR = "enable_observation_monitor"
-    CERTIFY_SIGNAL_TO_TICKET_NO_WRITE = "certify_signal_to_ticket_no_write"
-    CERTIFY_ENTRY_FENCED = "certify_entry_fenced"
+    START_READONLY_WORKERS = "start_readonly_workers"
+    COMPLETE_TARGET_CERTIFICATION = "complete_target_certification"
+    START_LIFECYCLE = "start_lifecycle"
+    START_ENTRY_FENCED = "start_entry_fenced"
+    FINAL_POSTFLIGHT = "final_postflight"
+    UNFENCE_ENTRY = "unfence_entry"
 
 
 CUTOVER_PHASES = (
@@ -62,9 +65,12 @@ CUTOVER_PHASES = (
     CutoverPhase.SEED_CURRENT_AUTHORITY,
     CutoverPhase.DEPLOY_EXACT_RELEASE,
     CutoverPhase.CERTIFY_SCHEMA_AND_READONLY,
-    CutoverPhase.ENABLE_OBSERVATION_MONITOR,
-    CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE,
-    CutoverPhase.CERTIFY_ENTRY_FENCED,
+    CutoverPhase.START_READONLY_WORKERS,
+    CutoverPhase.COMPLETE_TARGET_CERTIFICATION,
+    CutoverPhase.START_LIFECYCLE,
+    CutoverPhase.START_ENTRY_FENCED,
+    CutoverPhase.FINAL_POSTFLIGHT,
+    CutoverPhase.UNFENCE_ENTRY,
 )
 
 
@@ -828,7 +834,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-profile-id", required=True)
     parser.add_argument("--application-schema", default="public")
     parser.add_argument("--target-commit", required=True)
-    parser.add_argument("--target-schema-revision", default="0001_trading_kernel_baseline_v2")
+    parser.add_argument("--target-schema-revision", default="0001_trading_kernel_baseline_v3")
     parser.add_argument("--target-seed-identity", required=True)
     parser.add_argument("--target-release-id", required=True)
     parser.add_argument("--now-ms", type=int)

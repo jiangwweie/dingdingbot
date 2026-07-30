@@ -328,6 +328,119 @@ sa.Index(
     instrument_certification_current.c.lease_expires_at_ms,
 )
 
+instrument_certification_batches = sa.Table(
+    "brc_instrument_certification_batches",
+    metadata,
+    _id("certification_batch_id", primary_key=True),
+    _id("runtime_profile_id"),
+    sa.Column("target_commit", SHORT_TEXT, nullable=False),
+    sa.Column("target_schema_revision", SHORT_TEXT, nullable=False),
+    sa.Column("target_seed_identity", LONG_TEXT, nullable=False),
+    _id("owner_policy_id"),
+    sa.Column("owner_policy_version", sa.Integer, nullable=False),
+    sa.Column("manifest_digest", LONG_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("started_at_ms"),
+    _time("minimum_valid_until_ms"),
+    _time("completed_at_ms", nullable=True),
+    _time("valid_until_ms", nullable=True),
+    sa.Column("blocker_code", SHORT_TEXT, nullable=True),
+    sa.ForeignKeyConstraint(
+        ["runtime_profile_id"],
+        ["brc_runtime_profiles.runtime_profile_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["owner_policy_id"],
+        ["brc_owner_policy_current.owner_policy_id"],
+    ),
+    sa.CheckConstraint(
+        "status IN ('pending', 'completed', 'blocked')",
+        name="status_valid",
+    ),
+    sa.CheckConstraint(
+        "target_seed_identity ~ '^sha256:[0-9a-f]{64}$'",
+        name="seed_identity_valid",
+    ),
+    sa.CheckConstraint(
+        "manifest_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="manifest_digest_valid",
+    ),
+    sa.CheckConstraint(
+        "minimum_valid_until_ms > started_at_ms",
+        name="promotion_window_valid",
+    ),
+    sa.CheckConstraint(
+        "(status = 'pending' AND completed_at_ms IS NULL "
+        "AND valid_until_ms IS NULL AND blocker_code IS NULL) OR "
+        "(status = 'completed' AND completed_at_ms IS NOT NULL "
+        "AND valid_until_ms >= minimum_valid_until_ms "
+        "AND blocker_code IS NULL) OR "
+        "(status = 'blocked' AND completed_at_ms IS NOT NULL "
+        "AND valid_until_ms IS NULL AND blocker_code IS NOT NULL)",
+        name="terminal_shape_valid",
+    ),
+)
+
+sa.Index(
+    "uq_brc_instrument_certification_batches_pending_profile",
+    instrument_certification_batches.c.runtime_profile_id,
+    unique=True,
+    postgresql_where=instrument_certification_batches.c.status == "pending",
+)
+
+instrument_certification_batch_members = sa.Table(
+    "brc_instrument_certification_batch_members",
+    metadata,
+    _id("certification_batch_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    sa.Column("blocker_code", SHORT_TEXT, nullable=True),
+    sa.Column("facts_digest", LONG_TEXT, nullable=True),
+    sa.Column("product_rules_digest", LONG_TEXT, nullable=True),
+    _time("observed_at_ms", nullable=True),
+    _time("valid_until_ms", nullable=True),
+    sa.PrimaryKeyConstraint(
+        "certification_batch_id",
+        "exchange_instrument_id",
+    ),
+    sa.ForeignKeyConstraint(
+        ["certification_batch_id"],
+        ["brc_instrument_certification_batches.certification_batch_id"],
+        ondelete="CASCADE",
+    ),
+    sa.ForeignKeyConstraint(
+        ["exchange_instrument_id"],
+        ["brc_instruments.exchange_instrument_id"],
+    ),
+    sa.CheckConstraint(
+        "status IN ('pending', 'eligible', 'owner_action_required')",
+        name="status_valid",
+    ),
+    sa.CheckConstraint(
+        "facts_digest IS NULL OR facts_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="facts_digest_valid",
+    ),
+    sa.CheckConstraint(
+        "product_rules_digest IS NULL "
+        "OR product_rules_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="product_rules_digest_valid",
+    ),
+    sa.CheckConstraint(
+        "(status = 'pending' AND blocker_code IS NULL "
+        "AND facts_digest IS NULL AND product_rules_digest IS NULL "
+        "AND observed_at_ms IS NULL AND valid_until_ms IS NULL) OR "
+        "(status = 'eligible' AND blocker_code IS NULL "
+        "AND facts_digest IS NOT NULL AND product_rules_digest IS NOT NULL "
+        "AND observed_at_ms IS NOT NULL "
+        "AND valid_until_ms > observed_at_ms) OR "
+        "(status = 'owner_action_required' AND blocker_code IS NOT NULL "
+        "AND facts_digest IS NOT NULL "
+        "AND observed_at_ms IS NOT NULL "
+        "AND valid_until_ms > observed_at_ms)",
+        name="result_shape_valid",
+    ),
+)
+
 comparative_projection_current = sa.Table(
     "brc_comparative_projection_current",
     metadata,
@@ -433,8 +546,10 @@ owner_policy_current = sa.Table(
         server_default=sa.text("100"),
     ),
     sa.Column("max_concurrent_tickets", sa.Integer, nullable=False),
-    sa.Column("planned_stop_risk_fraction", MONEY, nullable=False),
-    sa.Column("max_initial_margin_utilization", MONEY, nullable=False),
+    sa.Column("max_ticket_stop_risk_fraction", MONEY, nullable=False),
+    sa.Column("max_gross_stop_risk_fraction", MONEY, nullable=False),
+    sa.Column("max_ticket_initial_margin_fraction", MONEY, nullable=False),
+    sa.Column("max_gross_initial_margin_utilization", MONEY, nullable=False),
     sa.Column("max_leverage", sa.Integer, nullable=False),
     sa.Column("supported_margin_mode", SHORT_TEXT, nullable=False),
     sa.Column("post_stop_stress_multiple", MONEY, nullable=False),
@@ -447,12 +562,27 @@ owner_policy_current = sa.Table(
         name="max_concurrent_tickets_positive",
     ),
     sa.CheckConstraint(
-        "planned_stop_risk_fraction > 0 AND planned_stop_risk_fraction < 1",
-        name="planned_stop_risk_fraction_valid",
+        "max_ticket_stop_risk_fraction > 0 "
+        "AND max_ticket_stop_risk_fraction < 1",
+        name="ticket_stop_risk_fraction_valid",
     ),
     sa.CheckConstraint(
-        "max_initial_margin_utilization > 0 AND max_initial_margin_utilization <= 1",
-        name="margin_utilization_valid",
+        "max_gross_stop_risk_fraction > 0 "
+        "AND max_gross_stop_risk_fraction <= 1 "
+        "AND max_ticket_stop_risk_fraction <= max_gross_stop_risk_fraction",
+        name="gross_stop_risk_fraction_valid",
+    ),
+    sa.CheckConstraint(
+        "max_ticket_initial_margin_fraction > 0 "
+        "AND max_ticket_initial_margin_fraction <= 1",
+        name="ticket_margin_fraction_valid",
+    ),
+    sa.CheckConstraint(
+        "max_gross_initial_margin_utilization > 0 "
+        "AND max_gross_initial_margin_utilization <= 1 "
+        "AND max_ticket_initial_margin_fraction "
+        "<= max_gross_initial_margin_utilization",
+        name="gross_margin_utilization_valid",
     ),
     sa.CheckConstraint(
         "max_leverage >= 1 AND max_leverage <= 10",
@@ -772,11 +902,15 @@ capacity_claims = sa.Table(
     sa.Column("margin_mode_at_claim", SHORT_TEXT, nullable=False),
     sa.Column("active_ticket_count_at_claim", sa.Integer, nullable=False),
     sa.Column("remaining_slots_at_claim", sa.Integer, nullable=False),
-    sa.Column("planned_stop_risk_fraction", MONEY, nullable=False),
+    sa.Column("gross_risk_at_stop_at_claim", MONEY, nullable=False),
+    sa.Column("current_reserved_margin_at_claim", MONEY, nullable=False),
+    sa.Column("max_ticket_stop_risk_fraction", MONEY, nullable=False),
+    sa.Column("max_gross_stop_risk_fraction", MONEY, nullable=False),
+    sa.Column("max_ticket_initial_margin_fraction", MONEY, nullable=False),
+    sa.Column("max_gross_initial_margin_utilization", MONEY, nullable=False),
     sa.Column("planned_stop_risk_budget", MONEY, nullable=False),
     sa.Column("max_post_fill_stop_risk_overrun_fraction", MONEY, nullable=False),
     sa.Column("post_fill_stop_risk_limit", MONEY, nullable=False),
-    sa.Column("max_initial_margin_utilization", MONEY, nullable=False),
     sa.Column("post_stop_stress_multiple", MONEY, nullable=False),
     sa.Column("ticket_margin_budget", MONEY, nullable=False),
     sa.Column("required_leverage", sa.Integer, nullable=False),
@@ -1065,11 +1199,16 @@ account_exposure_current = sa.Table(
     _id("account_id", primary_key=True),
     sa.Column("gross_notional", MONEY, nullable=False),
     sa.Column("gross_risk_at_stop", MONEY, nullable=False),
+    sa.Column("current_reserved_margin", MONEY, nullable=False),
     sa.Column("active_ticket_count", sa.Integer, nullable=False),
     sa.Column("projection_version", sa.BigInteger, nullable=False),
     _time("updated_at_ms"),
     sa.CheckConstraint("gross_notional >= 0", name="notional_nonnegative"),
     sa.CheckConstraint("gross_risk_at_stop >= 0", name="risk_nonnegative"),
+    sa.CheckConstraint(
+        "current_reserved_margin >= 0",
+        name="reserved_margin_nonnegative",
+    ),
     sa.CheckConstraint("active_ticket_count >= 0", name="ticket_count_nonnegative"),
 )
 

@@ -62,8 +62,8 @@ MEMBERS = (
 )
 NOW_MS = 1_800_000_010_000
 RUNTIME_COMMIT = "task-7-test"
-SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v2"] = (
-    "0001_trading_kernel_baseline_v2"
+SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v3"] = (
+    "0001_trading_kernel_baseline_v3"
 )
 
 
@@ -264,8 +264,9 @@ def worker_request(now_ms: int):
         unknown_visibility_grace_ms=30_000,
         idle_poll_interval_ms=2_000,
         certification_lease_ms=60_000,
-        certification_valid_for_ms=60_000,
-        certification_eligible_check_interval_ms=60_000,
+        certification_max_wait_ms=120_000,
+        certification_valid_for_ms=600_000,
+        certification_eligible_check_interval_ms=300_000,
         certification_owner_action_check_interval_ms=300_000,
         certification_transient_retry_interval_ms=30_000,
     )

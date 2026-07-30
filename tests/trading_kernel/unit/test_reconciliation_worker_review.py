@@ -54,8 +54,10 @@ class _AggregateRepository:
     async def claim_next_critical_reconciliation_work(self, *, now_ms):
         del now_ms
 
-    async def claim_next_routine_reconciliation_work(self, *, now_ms):
-        del now_ms
+    async def claim_next_routine_reconciliation_work(
+        self, *, worker_id, now_ms, lease_until_ms
+    ):
+        del worker_id, now_ms, lease_until_ms
         return self.aggregate
 
     async def schedule_next_check(self, ticket_id, *, work_kind, due_at_ms):
@@ -119,7 +121,7 @@ class _SignalRepository:
             capability_key="exchange_commands",
             enabled=True,
             certified_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
         )
 
 
@@ -313,7 +315,7 @@ def _request() -> ReconciliationWorkerRequest:
     return ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-test",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         now_ms=5_000,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,

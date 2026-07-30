@@ -1,7 +1,7 @@
 ---
 title: TOKYO_RUNTIME_DEPLOYMENT_CONTRACT
 status: CURRENT
-last_verified: 2026-07-24
+last_verified: 2026-07-30
 ---
 
 # Tokyo Runtime Deployment Contract
@@ -57,7 +57,7 @@ the three safety workers for fix-forward recovery.
 The versioned StrategyUniverse release is a **flat-only destructive rebuild**.
 It is not activated by a local test pass or by all positions becoming flat
 without an Owner release confirmation. Before its
-`0001_trading_kernel_baseline_v2` rebuild, configuration, or Entry enablement,
+`0001_trading_kernel_baseline_v3` rebuild, configuration, or Entry enablement,
 all Ticket, position, order, Incident, Settlement and Review projections must
 be terminal and exchange truth must be flat.
 
@@ -69,6 +69,13 @@ pointer. Entry remains fenced until those safety workers and the exact active
 Universe/current/profile/policy identities pass postflight. `--enable-entry`
 is still an explicit final deployment action; neither configuration nor
 activation can enable it.
+
+The completed Batch is created while new ENTRY authority is disabled. The
+final promotion may carry that Batch across only the exact policy-stage
+transition from disabled version 1 to armed version 2. Version 3, skipped
+versions, an unarmed successor, or any risk/scope/manifest/commit/schema/seed
+drift invalidates the gate. This is a bounded stage transition, not a policy
+compatibility rule.
 
 ### Bounded Rebuild Procedure
 
@@ -83,19 +90,22 @@ rebuild rather than a long sequential Warming procedure:
 3. Rebuild only BRC PostgreSQL state from the committed clean baseline and
    deterministic Registry/Policy/Capability seeds. Do not alter credentials,
    funds, account mode, leverage, or exchange trading scope.
-4. Stage one exact committed release; start Observation, Lifecycle, and
-   Reconciliation while the Entry fence remains present.
+4. Stage one exact committed release; start Observation and Reconciliation
+   while the Entry fence remains present. Lifecycle and Entry remain stopped.
 5. Run the official batch bootstrap once. It serially installs and awaits all
    six Warming Universes because PostgreSQL permits only one Warming Universe
    at a time; the resident workers perform the required readonly certification
-   and activation work between Events. The deployment never waits for a
-   separate multi-hour operator sequence per Event.
-6. Repeat readonly postflight for exact commit, clean schema, seed, account
-   mode, runtime profile, policy, active Universe pointers, exchange flatness,
-   worker health, and zero unresolved runtime state.
-7. Only an explicit `--enable-entry` after all postflight gates can remove the
-   fence. If any step fails, keep Entry fenced and retain the three safety
-   workers for diagnosis or controlled exit.
+   and activation work between Events under one shared bounded stage deadline.
+   The deployment never waits for a separate multi-hour operator sequence per
+   Event.
+6. Start Lifecycle and complete its fenced flat/no-residue smoke. Then start
+   Entry while the write fence and disabled new-ENTRY authority remain present.
+7. Repeat readonly postflight for exact commit, clean schema, seed, account
+   mode, runtime profile, policy, Certification Batch, active Universe pointers,
+   exchange flatness, worker health, and zero unresolved runtime state.
+8. Only an explicit promotion after all postflight gates may arm new-ENTRY
+   authority and remove the fence. If any step fails, keep Entry fenced and
+   retain only the phase-safe workers for diagnosis or controlled recovery.
 
 This is a forward-only fix path. Reintroducing the retired schema evolution
 chain, a compatibility reader, or an old writer is not a rollback.

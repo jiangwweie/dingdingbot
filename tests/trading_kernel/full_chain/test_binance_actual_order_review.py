@@ -268,7 +268,7 @@ def _review_worker_request(*, now_ms: int) -> ReconciliationWorkerRequest:
     return ReconciliationWorkerRequest(
         worker_id="reconciliation-full-chain",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         now_ms=now_ms,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,

@@ -381,6 +381,7 @@ class PostgresKernelUnitOfWork:
                     account_id=aggregate.ticket.identity.netting_domain.account_id,
                     notional=aggregate.ticket.notional,
                     risk_at_stop=aggregate.ticket.risk_at_stop,
+                    reserved_margin=aggregate.ticket.reserved_margin,
                     updated_at_ms=event.occurred_at_ms,
                 )
                 continue
@@ -448,6 +449,7 @@ class PostgresKernelUnitOfWork:
                     account_id=aggregate.ticket.identity.netting_domain.account_id,
                     notional=effect.notional,
                     risk_at_stop=effect.risk_at_stop,
+                    reserved_margin=aggregate.ticket.reserved_margin,
                     updated_at_ms=effect.released_at_ms,
                 )
                 await self.tickets.release_active_netting_domain(

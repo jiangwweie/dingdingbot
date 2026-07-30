@@ -5,7 +5,6 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-import src.trading_kernel.interfaces.reconciliation_worker as worker_module
 from src.trading_kernel.application.certify_universe_instrument import (
     CertifyUniverseInstrumentRequest,
     InstrumentCertificationSnapshot,
@@ -21,16 +20,6 @@ from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBrack
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertificationFacts,
-)
-from src.trading_kernel.interfaces.reconciliation_worker import (
-    ReconciliationWorkerRequest,
-    ReconciliationWorkerResult,
-    ReconciliationWorkerStatus,
-    run_reconciliation_worker_once,
-)
-from tests.trading_kernel.integration.universe_certification_support import (
-    NoTicketPositionSource,
-    NoTicketVenueTruth,
 )
 
 
@@ -329,47 +318,6 @@ async def test_eligible_recheck_resolves_an_existing_owner_monitor() -> None:
     assert len(state.monitors) == 2
     assert state.monitors[-1].owner_status is MonitorOwnerStatus.RUNNING
     assert state.monitors[-1].summary == "instrument_certification:resolved"
-
-
-@pytest.mark.asyncio
-async def test_ticket_safety_result_preempts_due_instrument_certification(
-    monkeypatch,
-) -> None:
-    """Catches maintenance certification running after safety work in one cadence."""
-
-    state = _State()
-    source = _ReadonlySource(state)
-
-    async def safety_work(*args, **kwargs):
-        del args, kwargs
-        return ReconciliationWorkerResult(
-            status=ReconciliationWorkerStatus.POSITION_RECONCILED,
-            ticket_id="ticket:safety",
-        )
-
-    monkeypatch.setattr(
-        worker_module,
-        "_run_reconciliation_worker_once_core",
-        safety_work,
-    )
-    result = await run_reconciliation_worker_once(
-        state.factory,
-        NoTicketVenueTruth(),
-        NoTicketPositionSource(),
-        ReconciliationWorkerRequest(
-            worker_id="reconciliation-worker",
-            runtime_commit="commit:test",
-            schema_revision="0001_trading_kernel_baseline_v2",
-            now_ms=1_000,
-            timeout_seconds=1,
-            unknown_visibility_grace_ms=30_000,
-            idle_poll_interval_ms=2_000,
-        ),
-        instrument_certification_source=source,
-    )
-
-    assert result.status is ReconciliationWorkerStatus.POSITION_RECONCILED
-    assert source.requests == []
 
 
 def _request(*, now_ms: int = 1_000) -> CertifyUniverseInstrumentRequest:

@@ -58,7 +58,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                 IngestSignalRequest(
                     signal=signal,
                     runtime_commit="commit-test",
-                    schema_revision="0001_trading_kernel_baseline_v2",
+                    schema_revision="0001_trading_kernel_baseline_v3",
                     now_ms=1_010,
                 ),
             )
@@ -86,7 +86,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                         update={"signal_event_id": "signal:old-universe-after-switch"}
                     ),
                     runtime_commit="commit-test",
-                    schema_revision="0001_trading_kernel_baseline_v2",
+                    schema_revision="0001_trading_kernel_baseline_v3",
                     now_ms=1_011,
                 ),
             )
@@ -171,6 +171,24 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             'binance-usdm:BTCUSDT:perpetual', 'binance-usdm',
             'crypto', 'BTCUSDT', 'perpetual', 'active'
         );
+        INSERT INTO brc_runtime_profiles (
+            runtime_profile_id, venue_id, account_id, environment,
+            position_mode, status, updated_at_ms
+        ) VALUES (
+            'profile-a', 'binance-usdm', 'account-a', 'live',
+            'independent_sides', 'active', 1000
+        );
+        INSERT INTO brc_instrument_certification_current (
+            runtime_profile_id, exchange_instrument_id, status, blocker_code,
+            facts_digest, product_rules_digest, configured_leverage,
+            margin_mode, position_mode, observed_at_ms, valid_until_ms,
+            next_check_at_ms, lease_owner, lease_expires_at_ms,
+            lease_universe_version_id, projection_version
+        ) VALUES (
+            'profile-a', 'binance-usdm:BTCUSDT:perpetual', 'eligible', NULL,
+            $2, $2, 5, 'cross', 'independent_sides', 1000, 2000,
+            1500, NULL, NULL, NULL, 1
+        );
         INSERT INTO brc_strategy_universe_versions (
             universe_version_id, strategy_group_id, event_spec_id,
             universe_version, semantic_digest, lifecycle_state,
@@ -185,13 +203,15 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
         ) VALUES ('event-a', 'uni-a', $1, 'active', 1, 950);
         INSERT INTO brc_owner_policy_current (
             owner_policy_id, policy_version, enabled, new_entry_submit_enabled,
-            priority_rank, max_concurrent_tickets, planned_stop_risk_fraction,
-            max_initial_margin_utilization, max_leverage,
+            priority_rank, max_concurrent_tickets,
+            max_ticket_stop_risk_fraction, max_gross_stop_risk_fraction,
+            max_ticket_initial_margin_fraction,
+            max_gross_initial_margin_utilization, max_leverage,
             supported_margin_mode,
             post_stop_stress_multiple,
             max_post_fill_stop_risk_overrun_fraction, scope, updated_at_ms
         ) VALUES (
-            'policy-a', 1, true, true, 7, 3, 0.03, 0.9, 5,
+            'policy-a', 1, true, true, 7, 3, 0.03, 0.06, 0.45, 0.9, 5,
             'cross', 2, 0.1, '{}'::jsonb, 1000
         );
         INSERT INTO brc_runtime_scopes_current (
@@ -219,10 +239,12 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             certification, updated_at_ms
         ) VALUES (
             'strategy_signal_ingest', true, 'commit-test',
-            '0001_trading_kernel_baseline_v2', '{}'::jsonb, 1000
+            '0001_trading_kernel_baseline_v3', '{}'::jsonb, 1000
         )
         """
-    await conn.execute(statement.replace("$1", f"'{DIGEST_A}'"))
+    await conn.execute(
+        statement.replace("$1", f"'{DIGEST_A}'").replace("$2", f"'{DIGEST_B}'")
+    )
 
 
 async def _switch_current_pointer(conn: asyncpg.Connection) -> None:

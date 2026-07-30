@@ -60,7 +60,7 @@ class RuntimeAuthoritySeedRequest(BaseModel):
 
     account_id: str
     runtime_commit: str
-    schema_revision: Literal["0001_trading_kernel_baseline_v2"]
+    schema_revision: Literal["0001_trading_kernel_baseline_v3"]
     seeded_at_ms: int
 
     @field_validator("account_id", "runtime_commit", mode="before")
@@ -121,8 +121,10 @@ class RuntimePolicyState(BaseModel):
     policy_version: int
     new_entry_submit_enabled: bool
     max_concurrent_tickets: int
-    planned_stop_risk_fraction: Decimal
-    max_initial_margin_utilization: Decimal
+    max_ticket_stop_risk_fraction: Decimal
+    max_gross_stop_risk_fraction: Decimal
+    max_ticket_initial_margin_fraction: Decimal
+    max_gross_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
     post_stop_stress_multiple: Decimal
@@ -144,7 +146,7 @@ class RuntimeDeploymentIdentityResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     runtime_commit: str
-    schema_revision: Literal["0001_trading_kernel_baseline_v2"]
+    schema_revision: Literal["0001_trading_kernel_baseline_v3"]
     runtime_seed_semantic_hash: str
     refreshed_existing_authority: bool
 
@@ -152,8 +154,10 @@ class RuntimeDeploymentIdentityResult(BaseModel):
 @dataclass(frozen=True)
 class _DynamicPolicy:
     max_concurrent_tickets: int
-    planned_stop_risk_fraction: Decimal
-    max_initial_margin_utilization: Decimal
+    max_ticket_stop_risk_fraction: Decimal
+    max_gross_stop_risk_fraction: Decimal
+    max_ticket_initial_margin_fraction: Decimal
+    max_gross_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
     post_stop_stress_multiple: Decimal
@@ -170,8 +174,10 @@ class _ExactRow:
 
 DYNAMIC_POLICY = _DynamicPolicy(
     max_concurrent_tickets=3,
-    planned_stop_risk_fraction=Decimal("0.03"),
-    max_initial_margin_utilization=Decimal("0.90"),
+    max_ticket_stop_risk_fraction=Decimal("0.03"),
+    max_gross_stop_risk_fraction=Decimal("0.06"),
+    max_ticket_initial_margin_fraction=Decimal("0.45"),
+    max_gross_initial_margin_utilization=Decimal("0.90"),
     max_leverage=10,
     supported_margin_mode="cross",
     post_stop_stress_multiple=Decimal("2.0"),
@@ -183,8 +189,10 @@ _POLICY_COMPARE_KEYS = (
     "new_entry_submit_enabled",
     "priority_rank",
     "max_concurrent_tickets",
-    "planned_stop_risk_fraction",
-    "max_initial_margin_utilization",
+    "max_ticket_stop_risk_fraction",
+    "max_gross_stop_risk_fraction",
+    "max_ticket_initial_margin_fraction",
+    "max_gross_initial_margin_utilization",
     "max_leverage",
     "supported_margin_mode",
     "post_stop_stress_multiple",
@@ -295,6 +303,7 @@ async def seed_runtime_authority(
                 "account_id": request.account_id,
                 "gross_notional": Decimal(0),
                 "gross_risk_at_stop": Decimal(0),
+                "current_reserved_margin": Decimal(0),
                 "active_ticket_count": 0,
                 "projection_version": 0,
                 "updated_at_ms": request.seeded_at_ms,
@@ -303,6 +312,7 @@ async def seed_runtime_authority(
                 "venue_id",
                 "gross_notional",
                 "gross_risk_at_stop",
+                "current_reserved_margin",
                 "active_ticket_count",
                 "projection_version",
             ),
@@ -745,9 +755,17 @@ def _policy_values(
         "new_entry_submit_enabled": new_entry_submit_enabled,
         "priority_rank": 1,
         "max_concurrent_tickets": DYNAMIC_POLICY.max_concurrent_tickets,
-        "planned_stop_risk_fraction": DYNAMIC_POLICY.planned_stop_risk_fraction,
-        "max_initial_margin_utilization": (
-            DYNAMIC_POLICY.max_initial_margin_utilization
+        "max_ticket_stop_risk_fraction": (
+            DYNAMIC_POLICY.max_ticket_stop_risk_fraction
+        ),
+        "max_gross_stop_risk_fraction": (
+            DYNAMIC_POLICY.max_gross_stop_risk_fraction
+        ),
+        "max_ticket_initial_margin_fraction": (
+            DYNAMIC_POLICY.max_ticket_initial_margin_fraction
+        ),
+        "max_gross_initial_margin_utilization": (
+            DYNAMIC_POLICY.max_gross_initial_margin_utilization
         ),
         "max_leverage": DYNAMIC_POLICY.max_leverage,
         "supported_margin_mode": DYNAMIC_POLICY.supported_margin_mode,
@@ -842,11 +860,17 @@ def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
         policy_version=int(str(values["policy_version"])),
         new_entry_submit_enabled=bool(values["new_entry_submit_enabled"]),
         max_concurrent_tickets=int(str(values["max_concurrent_tickets"])),
-        planned_stop_risk_fraction=Decimal(
-            str(values["planned_stop_risk_fraction"])
+        max_ticket_stop_risk_fraction=Decimal(
+            str(values["max_ticket_stop_risk_fraction"])
         ),
-        max_initial_margin_utilization=Decimal(
-            str(values["max_initial_margin_utilization"])
+        max_gross_stop_risk_fraction=Decimal(
+            str(values["max_gross_stop_risk_fraction"])
+        ),
+        max_ticket_initial_margin_fraction=Decimal(
+            str(values["max_ticket_initial_margin_fraction"])
+        ),
+        max_gross_initial_margin_utilization=Decimal(
+            str(values["max_gross_initial_margin_utilization"])
         ),
         max_leverage=int(str(values["max_leverage"])),
         supported_margin_mode=cast(Literal["cross"], supported_margin_mode),
@@ -888,6 +912,7 @@ async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
     if (
         Decimal(str(exposure["gross_notional"])) != 0
         or Decimal(str(exposure["gross_risk_at_stop"])) != 0
+        or Decimal(str(exposure["current_reserved_margin"])) != 0
         or int(str(exposure["active_ticket_count"])) != 0
     ):
         raise RuntimeAuthorityTransitionRefused(
@@ -1036,6 +1061,7 @@ async def _require_closure_identity_activity(
         or exposures[0]["account_id"] != account_id
         or Decimal(str(exposures[0]["gross_notional"])) != 0
         or Decimal(str(exposures[0]["gross_risk_at_stop"])) != 0
+        or Decimal(str(exposures[0]["current_reserved_margin"])) != 0
         or int(str(exposures[0]["active_ticket_count"])) != 0
     ):
         raise RuntimeAuthorityTransitionRefused(
@@ -1144,17 +1170,18 @@ async def _require_protected_identity_activity(
                 "protected identity requires matching projected positions"
             )
 
+    active_reservations = (
+        await connection.execute(
+            sa.select(budget_reservations)
+            .where(
+                budget_reservations.c.status == "active",
+            )
+            .with_for_update(of=budget_reservations)
+        )
+    ).mappings().all()
     _require_exact_active_budget_reservations(
         active_tickets,
-        (
-            await connection.execute(
-                sa.select(budget_reservations)
-                .where(
-                    budget_reservations.c.status == "active",
-                )
-                .with_for_update(of=budget_reservations)
-            )
-        ).mappings().all(),
+        active_reservations,
     )
 
     exposures = (
@@ -1174,6 +1201,11 @@ async def _require_protected_identity_activity(
         != sum(Decimal(str(ticket["notional"])) for ticket in active_tickets)
         or Decimal(str(exposures[0]["gross_risk_at_stop"]))
         != sum(Decimal(str(ticket["risk_at_stop"])) for ticket in active_tickets)
+        or Decimal(str(exposures[0]["current_reserved_margin"]))
+        != sum(
+            Decimal(str(reservation["reserved_margin"]))
+            for reservation in active_reservations
+        )
     ):
         raise RuntimeAuthorityTransitionRefused(
             "protected identity requires matching account exposure"

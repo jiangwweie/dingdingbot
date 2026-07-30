@@ -37,12 +37,15 @@ def test_cutover_targets_only_exact_brc_allowlist() -> None:
     assert "owner_ai_cpa" not in adapter.mutable_containers
 
 
-def test_observation_only_cutover_starts_no_command_workers() -> None:
+def test_readonly_cutover_starts_observation_and_reconciliation_only() -> None:
     module = _production_adapter_module()
 
-    assert module.OBSERVATION_WORKERS == (
+    assert module.READONLY_WORKERS == (
         "brc-trading-kernel-observation-worker.service",
+        "brc-trading-kernel-reconciliation-worker.service",
     )
+    assert module.LIFECYCLE_WORKER not in module.READONLY_WORKERS
+    assert module.ENTRY_WORKER not in module.READONLY_WORKERS
 
 
 @pytest.mark.asyncio
@@ -72,19 +75,20 @@ async def test_cutover_phase_actions_preserve_entry_fence_and_runtime_workers() 
 
     await adapter.apply_phase(CutoverPhase.FENCE_EXCHANGE_WRITES, plan)
     await adapter.apply_phase(CutoverPhase.STOP_RUNTIME_WRITERS, plan)
-    await adapter.apply_phase(CutoverPhase.CERTIFY_ENTRY_FENCED, plan)
+    await adapter.apply_phase(CutoverPhase.START_ENTRY_FENCED, plan)
 
     assert system.actions == [
         ("fence_new_entry", ()),
         ("stop_units", tuple(sorted(module.EXPECTED_NEW_BRC_WRITER_UNITS))),
-        ("certify_entry_fenced", ()),
+        ("start_entry_fenced", ()),
     ]
     assert await adapter.phase_satisfied(
-        CutoverPhase.CERTIFY_ENTRY_FENCED,
+        CutoverPhase.START_ENTRY_FENCED,
         plan,
     )
     assert system.phase_state.exchange_writes_fenced is True
-    assert system.phase_state.entry_worker_enabled is False
+    assert system.phase_state.entry_worker_enabled is True
+    assert system.phase_state.entry_worker_active is True
     assert system.phase_state.exchange_commands_enabled is False
 
 
@@ -207,7 +211,7 @@ async def test_initial_file_fence_does_not_require_old_database_capability_freez
         plan,
     )
     assert not await adapter.phase_satisfied(
-        CutoverPhase.CERTIFY_ENTRY_FENCED,
+        CutoverPhase.START_ENTRY_FENCED,
         plan,
     )
 
@@ -776,23 +780,54 @@ class FakeTokyoSystem:
             update={"readonly_certified": True}
         )
 
-    async def enable_observation(self, plan: CutoverPlan) -> None:
+    async def start_readonly_workers(self, plan: CutoverPlan) -> None:
         del plan
-        self.actions.append(("enable_observation", ()))
+        self.actions.append(("start_readonly_workers", ()))
         self.phase_state = self.phase_state.model_copy(
-            update={"observation_enabled": True}
+            update={"readonly_workers_started": True}
         )
 
-    async def certify_signal_to_ticket_no_write(self, plan: CutoverPlan) -> None:
+    async def complete_target_certification(self, plan: CutoverPlan) -> None:
         del plan
-        self.actions.append(("certify_signal_to_ticket_no_write", ()))
+        self.actions.append(("complete_target_certification", ()))
         self.phase_state = self.phase_state.model_copy(
-            update={"signal_to_ticket_no_write_certified": True}
+            update={"target_certified": True}
         )
 
-    async def certify_entry_fenced(self, plan: CutoverPlan) -> None:
+    async def start_lifecycle(self, plan: CutoverPlan) -> None:
         del plan
-        self.actions.append(("certify_entry_fenced", ()))
+        self.actions.append(("start_lifecycle", ()))
+        self.phase_state = self.phase_state.model_copy(
+            update={"lifecycle_started": True}
+        )
+
+    async def start_entry_fenced(self, plan: CutoverPlan) -> None:
+        del plan
+        self.actions.append(("start_entry_fenced", ()))
+        self.phase_state = self.phase_state.model_copy(
+            update={
+                "entry_worker_enabled": True,
+                "entry_worker_active": True,
+            }
+        )
+
+    async def final_postflight(self, plan: CutoverPlan) -> None:
+        del plan
+        self.actions.append(("final_postflight", ()))
+        self.phase_state = self.phase_state.model_copy(
+            update={"final_postflight_passed": True}
+        )
+
+    async def unfence_entry(self, plan: CutoverPlan) -> None:
+        del plan
+        self.actions.append(("unfence_entry", ()))
+        self.phase_state = self.phase_state.model_copy(
+            update={
+                "exchange_writes_fenced": False,
+                "exchange_commands_enabled": True,
+                "new_entry_submit_enabled": True,
+            }
+        )
 
     async def close(self) -> None:
         return None
@@ -808,7 +843,7 @@ def _plan() -> CutoverPlan:
         runtime_profile_id="tiny-live-v1",
         application_schema="public",
         target_commit="a" * 40,
-        target_schema_revision="0001_trading_kernel_baseline_v2",
+        target_schema_revision="0001_trading_kernel_baseline_v3",
         target_seed_identity="sha256:" + "b" * 64,
         target_release_id="brc-trading-kernel-aaaaaaaaaaaa",
     )

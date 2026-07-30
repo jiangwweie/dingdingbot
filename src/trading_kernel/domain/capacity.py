@@ -41,8 +41,10 @@ class CapacityPolicy(BaseModel):
     owner_policy_id: str
     policy_version: int
     max_concurrent_tickets: int
-    planned_stop_risk_fraction: Decimal
-    max_initial_margin_utilization: Decimal
+    max_ticket_stop_risk_fraction: Decimal
+    max_gross_stop_risk_fraction: Decimal
+    max_ticket_initial_margin_fraction: Decimal
+    max_gross_initial_margin_utilization: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
     post_stop_stress_multiple: Decimal
@@ -64,8 +66,10 @@ class CapacityPolicy(BaseModel):
         return value
 
     @field_validator(
-        "planned_stop_risk_fraction",
-        "max_initial_margin_utilization",
+        "max_ticket_stop_risk_fraction",
+        "max_gross_stop_risk_fraction",
+        "max_ticket_initial_margin_fraction",
+        "max_gross_initial_margin_utilization",
     )
     @classmethod
     def _require_policy_fraction(cls, value: Decimal) -> Decimal:
@@ -95,9 +99,14 @@ class CapacityUsage(BaseModel):
 
     gross_notional: Decimal
     gross_risk_at_stop: Decimal
+    current_reserved_margin: Decimal
     active_ticket_count: int
 
-    @field_validator("gross_notional", "gross_risk_at_stop")
+    @field_validator(
+        "gross_notional",
+        "gross_risk_at_stop",
+        "current_reserved_margin",
+    )
     @classmethod
     def _require_nonnegative_decimal(cls, value: Decimal) -> Decimal:
         if value < 0:
@@ -186,11 +195,15 @@ class CapacityClaim(BaseModel):
     margin_mode_at_claim: Literal["cross", "isolated"]
     active_ticket_count_at_claim: int
     remaining_slots_at_claim: int
-    planned_stop_risk_fraction: Decimal
+    gross_risk_at_stop_at_claim: Decimal
+    current_reserved_margin_at_claim: Decimal
+    max_ticket_stop_risk_fraction: Decimal
+    max_gross_stop_risk_fraction: Decimal
+    max_ticket_initial_margin_fraction: Decimal
+    max_gross_initial_margin_utilization: Decimal
     planned_stop_risk_budget: Decimal
     max_post_fill_stop_risk_overrun_fraction: Decimal
     post_fill_stop_risk_limit: Decimal
-    max_initial_margin_utilization: Decimal
     post_stop_stress_multiple: Decimal
     ticket_margin_budget: Decimal
     required_leverage: int
@@ -250,10 +263,12 @@ class CapacityClaim(BaseModel):
         "total_margin_balance_at_claim",
         "available_margin_at_claim",
         "mark_price_at_claim",
-        "planned_stop_risk_fraction",
+        "max_ticket_stop_risk_fraction",
+        "max_gross_stop_risk_fraction",
+        "max_ticket_initial_margin_fraction",
+        "max_gross_initial_margin_utilization",
         "planned_stop_risk_budget",
         "post_fill_stop_risk_limit",
-        "max_initial_margin_utilization",
         "post_stop_stress_multiple",
         "ticket_margin_budget",
         "reserved_margin",
@@ -267,6 +282,8 @@ class CapacityClaim(BaseModel):
     @field_validator(
         "total_initial_margin_at_claim",
         "total_maintenance_margin_at_claim",
+        "gross_risk_at_stop_at_claim",
+        "current_reserved_margin_at_claim",
     )
     @classmethod
     def _require_nonnegative_financial(cls, value: Decimal) -> Decimal:
@@ -332,6 +349,37 @@ class CapacityClaim(BaseModel):
             raise ValueError("CapacityClaim stop risk exceeds its planned budget")
         if self.post_fill_stop_risk_limit < self.planned_stop_risk_budget:
             raise ValueError("CapacityClaim post-fill limit undercuts planned risk")
+        if self.planned_stop_risk_budget > (
+            self.total_wallet_balance_at_claim
+            * self.max_ticket_stop_risk_fraction
+        ):
+            raise ValueError("CapacityClaim exceeds the per-Ticket stop-risk limit")
+        remaining_gross_risk = (
+            self.total_wallet_balance_at_claim
+            * self.max_gross_stop_risk_fraction
+            - self.gross_risk_at_stop_at_claim
+        )
+        if self.planned_stop_risk_budget > remaining_gross_risk:
+            raise ValueError("CapacityClaim exceeds remaining gross stop risk")
+        if self.ticket_margin_budget > (
+            self.total_margin_balance_at_claim
+            * self.max_ticket_initial_margin_fraction
+        ):
+            raise ValueError("CapacityClaim exceeds the per-Ticket margin limit")
+        if self.reserved_margin > self.ticket_margin_budget:
+            raise ValueError(
+                "CapacityClaim reserved margin exceeds its frozen ticket budget"
+            )
+        remaining_gross_margin = (
+            self.total_margin_balance_at_claim
+            * self.max_gross_initial_margin_utilization
+            - max(
+                self.total_initial_margin_at_claim,
+                self.current_reserved_margin_at_claim,
+            )
+        )
+        if self.ticket_margin_budget > remaining_gross_margin:
+            raise ValueError("CapacityClaim exceeds remaining gross margin")
         evidence = self.cross_margin_stress_evidence
         if evidence.proof.status is not CrossMarginStressStatus.PASSED:
             raise ValueError("CapacityClaim requires a passed stress proof")
@@ -468,11 +516,15 @@ def freeze_capacity_claim(
     margin_mode_at_claim: Literal["cross", "isolated"],
     active_ticket_count_at_claim: int,
     remaining_slots_at_claim: int,
-    planned_stop_risk_fraction: Decimal,
+    gross_risk_at_stop_at_claim: Decimal,
+    current_reserved_margin_at_claim: Decimal,
+    max_ticket_stop_risk_fraction: Decimal,
+    max_gross_stop_risk_fraction: Decimal,
+    max_ticket_initial_margin_fraction: Decimal,
+    max_gross_initial_margin_utilization: Decimal,
     planned_stop_risk_budget: Decimal,
     max_post_fill_stop_risk_overrun_fraction: Decimal,
     post_fill_stop_risk_limit: Decimal,
-    max_initial_margin_utilization: Decimal,
     post_stop_stress_multiple: Decimal,
     ticket_margin_budget: Decimal,
     required_leverage: int,
@@ -520,13 +572,21 @@ def freeze_capacity_claim(
         "margin_mode_at_claim": margin_mode_at_claim,
         "active_ticket_count_at_claim": active_ticket_count_at_claim,
         "remaining_slots_at_claim": remaining_slots_at_claim,
-        "planned_stop_risk_fraction": planned_stop_risk_fraction,
+        "gross_risk_at_stop_at_claim": gross_risk_at_stop_at_claim,
+        "current_reserved_margin_at_claim": current_reserved_margin_at_claim,
+        "max_ticket_stop_risk_fraction": max_ticket_stop_risk_fraction,
+        "max_gross_stop_risk_fraction": max_gross_stop_risk_fraction,
+        "max_ticket_initial_margin_fraction": (
+            max_ticket_initial_margin_fraction
+        ),
+        "max_gross_initial_margin_utilization": (
+            max_gross_initial_margin_utilization
+        ),
         "planned_stop_risk_budget": planned_stop_risk_budget,
         "max_post_fill_stop_risk_overrun_fraction": (
             max_post_fill_stop_risk_overrun_fraction
         ),
         "post_fill_stop_risk_limit": post_fill_stop_risk_limit,
-        "max_initial_margin_utilization": max_initial_margin_utilization,
         "post_stop_stress_multiple": post_stop_stress_multiple,
         "ticket_margin_budget": ticket_margin_budget,
         "required_leverage": required_leverage,
@@ -608,15 +668,19 @@ def _normalize_claim_decimals_for_storage(
         "total_margin_balance_at_claim",
         "available_margin_at_claim",
         "ticket_margin_budget",
-        "max_initial_margin_utilization",
+        "max_ticket_stop_risk_fraction",
+        "max_gross_stop_risk_fraction",
+        "max_ticket_initial_margin_fraction",
+        "max_gross_initial_margin_utilization",
         "post_stop_stress_multiple",
         "max_post_fill_stop_risk_overrun_fraction",
-        "planned_stop_risk_fraction",
         "quantity",
     }
     ceiling_fields = {
         "total_initial_margin_at_claim",
         "total_maintenance_margin_at_claim",
+        "gross_risk_at_stop_at_claim",
+        "current_reserved_margin_at_claim",
         "planned_stop_risk_budget",
         "post_fill_stop_risk_limit",
         "reserved_margin",

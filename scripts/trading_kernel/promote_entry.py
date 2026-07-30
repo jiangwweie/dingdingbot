@@ -32,7 +32,10 @@ class EntryPromotionBlocked(RuntimeError):
 class EntryPromotionBackend(Protocol):
     def certification(self) -> Mapping[str, object]: ...
 
-    def external_flat_and_rules_match(self) -> bool: ...
+    def external_state_and_rules_match(
+        self,
+        certification: Mapping[str, object],
+    ) -> bool: ...
 
     def safety_workers_active_stable(self) -> bool: ...
 
@@ -54,17 +57,27 @@ class EntryPromotionBackend(Protocol):
 def promote_entry(backend: EntryPromotionBackend) -> str:
     """Perform the one-way promotion; every failure leaves ENTRY fenced."""
 
+    entry_already_started_fenced = False
     if not backend.entry_is_inactive_disabled_and_fenced():
         certification = backend.certification()
         if _authority_is_armed(certification) and backend.entry_is_active():
             return "already_promoted"
-        raise EntryPromotionBlocked("entry_service_not_fenced_inactive_disabled")
-    certification = backend.certification()
+        if (
+            certification.get("entry_promotion_pass") is True
+            and backend.entry_is_active_while_fenced()
+        ):
+            entry_already_started_fenced = True
+        else:
+            raise EntryPromotionBlocked(
+                "entry_service_not_fenced_inactive_disabled"
+            )
+    else:
+        certification = backend.certification()
     requires_arm = certification.get("entry_promotion_pass") is True
     if not requires_arm and not _authority_is_armed(certification):
         raise EntryPromotionBlocked("entry_promotion_gate_failed")
-    if not backend.external_flat_and_rules_match():
-        raise EntryPromotionBlocked("exchange_flatness_or_rule_gate_failed")
+    if not backend.external_state_and_rules_match(certification):
+        raise EntryPromotionBlocked("exchange_state_or_rule_gate_failed")
     if not backend.safety_workers_active_stable():
         raise EntryPromotionBlocked("safety_worker_gate_failed")
     try:
@@ -75,9 +88,17 @@ def promote_entry(backend: EntryPromotionBackend) -> str:
                 or armed.get("policy_version") != 2
             ):
                 raise EntryPromotionBlocked("entry_authority_arm_failed")
-        backend.start_entry_while_fenced()
+        if not entry_already_started_fenced:
+            backend.start_entry_while_fenced()
         if not backend.entry_is_active_while_fenced():
             raise EntryPromotionBlocked("entry_not_active_while_fenced")
+        postflight = backend.certification()
+        if (
+            not _authority_is_armed(postflight)
+            or not backend.external_state_and_rules_match(postflight)
+            or not backend.safety_workers_active_stable()
+        ):
+            raise EntryPromotionBlocked("final_postflight_failed")
         backend.remove_entry_fence()
         if not backend.entry_is_active():
             raise EntryPromotionBlocked("entry_not_active_after_unfence")
@@ -92,7 +113,11 @@ def _authority_is_armed(certification: Mapping[str, object]) -> bool:
     capabilities = certification.get("capabilities")
     return bool(
         certification.get("universe_bootstrap_pass") is True
-        and certification.get("flatness_pass") is True
+        and certification.get("certification_batch_pass") is True
+        and (
+            certification.get("flatness_pass") is True
+            or certification.get("protected_promotion_pass") is True
+        )
         and isinstance(owner_policy, Mapping)
         and owner_policy.get("policy_version") == 2
         and owner_policy.get("new_entry_submit_enabled") is True
@@ -111,16 +136,46 @@ class LocalEntryPromotionBackend:
     def certification(self) -> Mapping[str, object]:
         return self._json_script("certify_readonly.py")
 
-    def external_flat_and_rules_match(self) -> bool:
-        probe = self._json_script("probe_production_runtime.py")
+    def external_state_and_rules_match(
+        self,
+        certification: Mapping[str, object],
+    ) -> bool:
+        protected = certification.get("protected_tickets")
+        if not isinstance(protected, list) or any(
+            not isinstance(item, Mapping) for item in protected
+        ):
+            return False
+        probe_args: list[str] = []
+        for item in protected:
+            probe_args.extend(
+                (
+                    "--protected-ticket-json",
+                    json.dumps(item, separators=(",", ":"), sort_keys=True),
+                )
+            )
+        probe = self._json_script("probe_production_runtime.py", *probe_args)
         rules = probe.get("rules")
         manifest = probe.get("probe_manifest")
+        probe_protected = probe.get("protected_tickets")
+        protected_mode = certification.get("protected_promotion_pass") is True
+        exposure_matches = (
+            probe.get("non_flat_domain_count") == len(protected)
+            and probe.get("open_order_domain_count") == len(protected)
+            and isinstance(probe_protected, list)
+            and len(probe_protected) == len(protected)
+            if protected_mode
+            else (
+                certification.get("flatness_pass") is True
+                and not protected
+                and probe.get("non_flat_domain_count") == 0
+                and probe.get("open_order_domain_count") == 0
+            )
+        )
         return bool(
             probe.get("venue_id") == "binance-usdm"
             and probe.get("account_position_mode") == "independent_sides"
             and probe.get("account_margin_mode") == "cross"
-            and probe.get("non_flat_domain_count") == 0
-            and probe.get("open_order_domain_count") == 0
+            and exposure_matches
             and isinstance(manifest, list)
             and len(manifest) == 7
             and isinstance(rules, list)

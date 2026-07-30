@@ -131,7 +131,7 @@ def revalidate_entry_dispatch(
         return _refused(EntryDispatchPreflightStatus.COMMAND_MISMATCH)
     if request.now_ms >= command.deadline_at_ms or request.now_ms >= claim.expires_at_ms:
         return _refused(EntryDispatchPreflightStatus.DEADLINE_EXPIRED)
-    if not _policy_matches(request.owner_policy, ticket):
+    if not _policy_matches(request.owner_policy, ticket, claim):
         return _refused(EntryDispatchPreflightStatus.POLICY_DRIFT)
     assert request.owner_policy is not None
     if not request.owner_policy.new_entry_submit_enabled:
@@ -183,19 +183,30 @@ def revalidate_entry_dispatch(
         return _refused(EntryDispatchPreflightStatus.OWNERSHIP_CONFLICT)
     if ticket.risk_at_stop > (
         account_risk.total_wallet_balance
-        * request.owner_policy.planned_stop_risk_fraction
+        * request.owner_policy.max_ticket_stop_risk_fraction
+    ) or claim.gross_risk_at_stop_at_claim + ticket.risk_at_stop > (
+        account_risk.total_wallet_balance
+        * request.owner_policy.max_gross_stop_risk_fraction
     ):
         return _refused(EntryDispatchPreflightStatus.WALLET_RISK_DRIFT)
-    executable_margin = min(
-        account_risk.available_margin,
-        max(
-            account_risk.total_margin_balance
-            * request.owner_policy.max_initial_margin_utilization
-            - account_risk.total_initial_margin,
-            Decimal(0),
-        ),
+    ticket_margin_limit = (
+        account_risk.total_margin_balance
+        * request.owner_policy.max_ticket_initial_margin_fraction
     )
-    if ticket.reserved_margin > executable_margin:
+    remaining_gross_margin = max(
+        account_risk.total_margin_balance
+        * request.owner_policy.max_gross_initial_margin_utilization
+        - max(
+            account_risk.total_initial_margin,
+            claim.current_reserved_margin_at_claim,
+        ),
+        Decimal(0),
+    )
+    if ticket.reserved_margin > min(
+        ticket_margin_limit,
+        account_risk.available_margin,
+        remaining_gross_margin,
+    ):
         return _refused(EntryDispatchPreflightStatus.MARGIN_DRIFT)
     entry_price = (
         snapshot.best_ask_price
@@ -260,6 +271,7 @@ def _command_matches_ticket_and_claim(
 def _policy_matches(
     policy: OwnerPolicySnapshot | None,
     ticket: TradeTicket,
+    claim: CapacityClaim,
 ) -> bool:
     return bool(
         policy
@@ -268,6 +280,14 @@ def _policy_matches(
         and policy.enabled
         and ticket.selected_leverage <= policy.max_leverage
         and ticket.margin_mode == policy.supported_margin_mode
+        and claim.max_ticket_stop_risk_fraction
+        == policy.max_ticket_stop_risk_fraction
+        and claim.max_gross_stop_risk_fraction
+        == policy.max_gross_stop_risk_fraction
+        and claim.max_ticket_initial_margin_fraction
+        == policy.max_ticket_initial_margin_fraction
+        and claim.max_gross_initial_margin_utilization
+        == policy.max_gross_initial_margin_utilization
     )
 
 

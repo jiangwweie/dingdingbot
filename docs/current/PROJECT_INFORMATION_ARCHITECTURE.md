@@ -1,7 +1,7 @@
 ---
 title: PROJECT_INFORMATION_ARCHITECTURE
 status: CURRENT
-last_verified: 2026-07-24
+last_verified: 2026-07-30
 ---
 
 # Project Information Architecture
@@ -39,6 +39,9 @@ owner; other documents summarize stable meaning and link to that owner.
 | Strategy right-tail evaluation | `STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md` | Medium | Link to the evaluation contract |
 | Target architecture and invariants | `P0_TRADING_KERNEL_REBUILD_DESIGN.md` | Low | Reuse the canonical chain only |
 | Implementation stages and acceptance checklist | `P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md` | Medium | Do not treat as runtime state |
+| Active operability-repair architecture and decisions | `TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md` | Medium | Own only the repair target; do not restate production state |
+| Operability-repair verification | `TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md` | Medium | Own RED/GREEN, local rehearsal, and readonly acceptance |
+| Operability-repair task cards and deployment sequence | `TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md` | Medium | Own order, dependencies, hard stops, and phase recovery |
 | Current commit, tag, certification, runtime state, and blockers | `MAIN_CONTROL_ROADMAP.md` | High | Link; never copy current values |
 | Deployment procedure and resource limits | `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` | Medium | Do not copy current runtime values |
 | Entry navigation | repository `README.md` and `docs/README.md` | Low | Stay short and point to owners |
@@ -48,10 +51,19 @@ identity and measured runtime snapshots. Stable documents must not embed a
 production SHA, dated production tag, exact test count, Ticket ID, or transient
 acceptance-stage name.
 
+The P0 rebuild documents remain the completed baseline authority. The active
+operability-repair design supersedes only the affected target semantics for
+scheduling, certification, Entry promotion, deployment recovery, and capacity.
+It does not claim those semantics are already implemented. Current tracked code
+and direct runtime facts remain higher authority until implementation and
+certification are complete. After final acceptance, the repair's stable results
+must be consolidated into the P0 design, experiment profile, and deployment
+contract; completed task-card material may then be retired from `docs/current`.
+
 ## Current Runtime Authority
 
 The only production execution package is `src/trading_kernel`. The local repair
-candidate schema head is `0001_trading_kernel_baseline_v2`. It replaces the
+candidate schema head is `0001_trading_kernel_baseline_v3`. It replaces the
 retired evolution chain only through the approved destructive empty-schema
 rebuild; it is not an in-place forward migration. The deployed schema identity
 remains a volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.

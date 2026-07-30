@@ -2,7 +2,7 @@
 title: P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN
 status: CURRENT_PLAN
 program_id: P0-TKR
-last_verified: 2026-07-24
+last_verified: 2026-07-30
 ---
 
 # P0 Trading Kernel Rebuild Implementation Plan
@@ -12,6 +12,24 @@ last_verified: 2026-07-24
 Deliver one readable multi-StrategyGroup, multi-position trading system from
 natural market Observation through terminal Review, with one clean PostgreSQL
 authority and one Tokyo runtime.
+
+## Active Operability Repair
+
+The completed P0 baseline does not certify the newly identified scheduling,
+certification, protected-promotion, deployment-recovery, or multi-Ticket
+capacity defects. Their target design, production-shaped verification, and
+ordered execution are owned by:
+
+```text
+docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md
+docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md
+docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md
+```
+
+For those affected subjects, the repair documents own the implementation
+target while current tracked code and direct runtime facts remain higher
+authority until the repair passes acceptance. Completed-baseline statements in
+this plan must not be used as evidence that the active repair is already done.
 
 ## Architecture
 
@@ -47,7 +65,7 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| Clean PostgreSQL schema head | Complete locally | `0001_trading_kernel_baseline_v2`, clean rebuild and downgrade/upgrade certification |
+| Clean PostgreSQL schema head | Complete locally | `0001_trading_kernel_baseline_v3`, empty rebuild and forward-only downgrade rejection certification |
 | Six Strategy Events | Complete | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, BRF2-SHORT |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, deterministic identity, Live/Replay parity |
 | Arbitration and CapacityClaim | Complete | Deterministic priority, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
@@ -69,7 +87,7 @@ substitute for action-time Tokyo readonly facts.
 
 | Boundary | Required local evidence | Rejected outcome |
 | --- | --- | --- |
-| Clean baseline | Disposable PostgreSQL rebuilds from an empty schema using only `0001_trading_kernel_baseline_v2`; no retired migration, table, reader, or compatibility path remains | An incremental upgrade or an old-schema fallback is accepted |
+| Clean baseline | Disposable PostgreSQL rebuilds from an empty schema using only `0001_trading_kernel_baseline_v3`; no retired migration, table, reader, or compatibility path remains | An incremental upgrade or an old-schema fallback is accepted |
 | Batch bootstrap | The six Registry Events receive the approved fixed initial member set in one bounded run; no operator configures members one Event at a time | A second Warming Universe is required for every Event or member |
 | Warming and readiness | Warming performs readonly market/account certification, produces zero StrategySignal, preserves observation time separately from certification time, and activates only after every member passes | Warming can submit an order, stale evidence activates, or a failed member becomes eligible |
 | Concurrency and recovery | One global Warming slot is enforced; the official `abandon_strategy_universe.py` CLI permanently abandons one exact Warming Universe with an audited reason so the slot is released | A failed Warming state blocks all later deployment work, is changed by direct SQL, or can be silently reused |
@@ -162,8 +180,9 @@ the immutable production tag recorded in `MAIN_CONTROL_ROADMAP.md`.
 
 ### Stage 4: Final Audit
 
-- Run the complete Trading Kernel test suite, Ruff, Mypy, schema rebuild,
-  downgrade/upgrade, production file-I/O audit, and readonly Tokyo certification.
+- Run the complete Trading Kernel test suite, Ruff, Mypy, empty schema rebuild,
+  forward-only downgrade rejection, production file-I/O audit, and readonly Tokyo
+  certification.
 - Prove every design acceptance item from current evidence.
 - Prove no retired code, table, migration, service, document, Skill
   reference, or compatibility path remains.

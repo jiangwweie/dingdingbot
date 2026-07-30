@@ -32,6 +32,12 @@ from src.trading_kernel.application.reconcile_ticket import (
     reconcile_ticket,
     record_post_fill_stress_retry,
 )
+from src.trading_kernel.application.reconciliation_scheduler import (
+    ReconciliationActionCandidate,
+    ReconciliationActionKind,
+    ReconciliationScheduleInput,
+    select_reconciliation_schedule,
+)
 from src.trading_kernel.application.recover_unknown_command import (
     RecoverUnknownCommandRequest,
     recover_unknown_command,
@@ -92,6 +98,7 @@ class ReconciliationWorkerStatus(StrEnum):
     SETTLED = "settled"
     REVIEWED = "reviewed"
     INSTRUMENT_CERTIFIED = "instrument_certified"
+    FEE_CAPABILITY_OBSERVED = "fee_capability_observed"
 
 
 class ReconciliationWorkerRequest(BaseModel):
@@ -107,11 +114,14 @@ class ReconciliationWorkerRequest(BaseModel):
     closure_retry_interval_ms: int = 30_000
     review_economics_visibility_grace_ms: int = 300_000
     certification_lease_ms: int = 60_000
-    certification_max_wait_ms: int = 60_000
-    certification_valid_for_ms: int = 60_000
-    certification_eligible_check_interval_ms: int = 60_000
+    certification_max_wait_ms: int = 120_000
+    certification_valid_for_ms: int = 600_000
+    certification_eligible_check_interval_ms: int = 300_000
     certification_owner_action_check_interval_ms: int = 300_000
     certification_transient_retry_interval_ms: int = 30_000
+    fee_capability_monitor_interval_ms: int = 300_000
+    fee_capability_max_wait_ms: int = 600_000
+    housekeeping_lease_ms: int = 60_000
 
     @field_validator("worker_id", "runtime_commit", "schema_revision", mode="before")
     @classmethod
@@ -136,6 +146,9 @@ class ReconciliationWorkerRequest(BaseModel):
             or self.certification_eligible_check_interval_ms <= 0
             or self.certification_owner_action_check_interval_ms <= 0
             or self.certification_transient_retry_interval_ms <= 0
+            or self.fee_capability_monitor_interval_ms <= 0
+            or self.fee_capability_max_wait_ms <= 0
+            or self.housekeeping_lease_ms <= 0
         ):
             raise ValueError("reconciliation worker windows must be positive")
         return self
@@ -150,6 +163,10 @@ class ReconciliationWorkerResult(BaseModel):
     reconciliation_status: ReconcileTicketStatus | None = None
     detail: str | None = None
     exchange_instrument_id: str | None = None
+    housekeeping_status: ReconciliationWorkerStatus | None = None
+    housekeeping_ticket_id: str | None = None
+    housekeeping_detail: str | None = None
+    housekeeping_exchange_instrument_id: str | None = None
 
 
 async def run_reconciliation_worker_once(
@@ -164,12 +181,13 @@ async def run_reconciliation_worker_once(
     fee_discount_capability_source: FeeDiscountCapabilitySource | None = None,
     instrument_certification_source: InstrumentCertificationSource | None = None,
 ) -> ReconciliationWorkerResult:
-    """Advance exactly one critical, overdue-certification, or routine action."""
+    """Advance at most one safety and one housekeeping action."""
 
     async with uow_factory() as uow:
         unknown = await uow.exchange_commands.get_one_unknown()
+    safety: ReconciliationWorkerResult | None
     if unknown is not None:
-        return await _run_reconciliation_worker_once_core(
+        safety = await _run_reconciliation_worker_once_core(
             uow_factory,
             venue_truth,
             position_source,
@@ -180,25 +198,161 @@ async def run_reconciliation_worker_once(
             instrument_rules_source=instrument_rules_source,
             review_economics_source=review_economics_source,
         )
+    else:
+        async with uow_factory() as uow:
+            critical = await uow.aggregates.claim_next_critical_reconciliation_work(
+                now_ms=request.now_ms,
+            )
+        safety = (
+            None
+            if critical is None
+            else await _run_reconciliation_worker_once_core(
+                uow_factory,
+                venue_truth,
+                position_source,
+                request,
+                unknown=None,
+                aggregate=critical,
+                account_risk_source=account_risk_source,
+                instrument_rules_source=instrument_rules_source,
+                review_economics_source=review_economics_source,
+            )
+        )
 
+    housekeeping = await _run_housekeeping_once(
+        uow_factory,
+        venue_truth,
+        position_source,
+        request,
+        account_risk_source=account_risk_source,
+        instrument_rules_source=instrument_rules_source,
+        review_economics_source=review_economics_source,
+        fee_discount_capability_source=fee_discount_capability_source,
+        instrument_certification_source=instrument_certification_source,
+    )
+    if safety is None:
+        return housekeeping
+    if housekeeping.status is ReconciliationWorkerStatus.NO_WORK:
+        return safety
+    return safety.model_copy(
+        update={
+            "housekeeping_status": housekeeping.status,
+            "housekeeping_ticket_id": housekeeping.ticket_id,
+            "housekeeping_detail": housekeeping.detail,
+            "housekeeping_exchange_instrument_id": (
+                housekeeping.exchange_instrument_id
+            ),
+        }
+    )
+
+
+async def _run_housekeeping_once(
+    uow_factory: UnitOfWorkFactory,
+    venue_truth: VenueTruthPort,
+    position_source: PositionSnapshotSource,
+    request: ReconciliationWorkerRequest,
+    *,
+    account_risk_source: AccountRiskSnapshotSource | None,
+    instrument_rules_source: InstrumentRulesSource | None,
+    review_economics_source: ReviewEconomicsSource | None,
+    fee_discount_capability_source: FeeDiscountCapabilitySource | None,
+    instrument_certification_source: InstrumentCertificationSource | None,
+) -> ReconciliationWorkerResult:
+    routine_candidate: ReconciliationActionCandidate | None = None
+    certification_candidate: ReconciliationActionCandidate | None = None
+    fee_candidate: ReconciliationActionCandidate | None = None
+    routine_scheduler_available = False
+    certification_scheduler_available = instrument_certification_source is None
     async with uow_factory() as uow:
-        critical = await uow.aggregates.claim_next_critical_reconciliation_work(
-            now_ms=request.now_ms,
+        peek_routine = getattr(
+            uow.aggregates,
+            "peek_next_routine_reconciliation_action",
+            None,
         )
-    if critical is not None:
-        return await _run_reconciliation_worker_once_core(
-            uow_factory,
-            venue_truth,
-            position_source,
-            request,
-            unknown=None,
-            aggregate=critical,
-            account_risk_source=account_risk_source,
-            instrument_rules_source=instrument_rules_source,
-            review_economics_source=review_economics_source,
-        )
+        if callable(peek_routine):
+            routine_scheduler_available = True
+            routine_candidate = await peek_routine(now_ms=request.now_ms)
+        if instrument_certification_source is not None:
+            peek_certification = getattr(
+                uow.strategy_universes,
+                "peek_next_due_instrument_certification_action",
+                None,
+            )
+            if callable(peek_certification):
+                certification_scheduler_available = True
+                certification_candidate = await peek_certification(
+                    now_ms=request.now_ms
+                )
+        if fee_discount_capability_source is not None:
+            monitor = await uow.monitors.get(
+                "account:binance-usdm:bnb-fee-capability"
+            )
+            due_at_ms = (
+                0
+                if monitor is None
+                else monitor.updated_at_ms
+                + request.fee_capability_monitor_interval_ms
+            )
+            fee_candidate = ReconciliationActionCandidate(
+                kind=ReconciliationActionKind.FEE_MONITOR,
+                stable_identity="account:binance-usdm:bnb-fee-capability",
+                due_at_ms=due_at_ms,
+                max_wait_ms=request.fee_capability_max_wait_ms,
+            )
 
-    if instrument_certification_source is not None:
+    advanced_scheduler_available = (
+        routine_scheduler_available and certification_scheduler_available
+    )
+
+    advanced_candidates = tuple(
+        candidate
+        for candidate in (
+            routine_candidate,
+            certification_candidate,
+            fee_candidate,
+        )
+        if candidate is not None
+    )
+    selected: ReconciliationActionCandidate | None = None
+    if advanced_scheduler_available:
+        schedule = select_reconciliation_schedule(
+            ReconciliationScheduleInput(
+                now_ms=request.now_ms,
+                housekeeping_candidates=advanced_candidates,
+            )
+        )
+        selected = schedule.housekeeping_action
+        if selected is None:
+            return ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.NO_WORK
+            )
+        if selected.kind is ReconciliationActionKind.FEE_MONITOR:
+            assert fee_discount_capability_source is not None
+            await _observe_fee_discount_capability(
+                uow_factory,
+                source=fee_discount_capability_source,
+                now_ms=request.now_ms,
+                timeout_seconds=request.timeout_seconds,
+            )
+            return ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.FEE_CAPABILITY_OBSERVED,
+            )
+        if selected.kind is ReconciliationActionKind.CERTIFICATION:
+            assert instrument_certification_source is not None
+            certification = await _certify_one_due_instrument(
+                uow_factory,
+                source=instrument_certification_source,
+                request=request,
+            )
+            return (
+                ReconciliationWorkerResult(
+                    status=ReconciliationWorkerStatus.NO_WORK
+                )
+                if certification is None
+                else certification
+            )
+
+    if not advanced_scheduler_available and instrument_certification_source is not None:
         overdue = await _certify_one_due_instrument(
             uow_factory,
             source=instrument_certification_source,
@@ -208,10 +362,27 @@ async def run_reconciliation_worker_once(
         if overdue is not None:
             return overdue
 
-    async with uow_factory() as uow:
-        routine = await uow.aggregates.claim_next_routine_reconciliation_work(
-            now_ms=request.now_ms,
-        )
+    routine = None
+    if (
+        not advanced_scheduler_available
+        or selected is not None
+        and selected.kind
+        in {
+            ReconciliationActionKind.SETTLEMENT,
+            ReconciliationActionKind.REVIEW,
+        }
+    ):
+        async with uow_factory() as uow:
+            routine = await uow.aggregates.claim_next_routine_reconciliation_work(
+                worker_id=request.worker_id,
+                now_ms=request.now_ms,
+                lease_until_ms=request.now_ms + request.housekeeping_lease_ms,
+            )
+    if routine is not None and routine.status not in {
+        AggregateStatus.SETTLEMENT_PENDING,
+        AggregateStatus.REVIEW_PENDING,
+    }:
+        routine = None
     if routine is not None:
         return await _run_reconciliation_worker_once_core(
             uow_factory,
@@ -225,7 +396,7 @@ async def run_reconciliation_worker_once(
             review_economics_source=review_economics_source,
         )
 
-    if instrument_certification_source is not None:
+    if not advanced_scheduler_available and instrument_certification_source is not None:
         certification = await _certify_one_due_instrument(
             uow_factory,
             source=instrument_certification_source,
@@ -234,12 +405,15 @@ async def run_reconciliation_worker_once(
         if certification is not None:
             return certification
 
-    if fee_discount_capability_source is not None:
+    if not advanced_scheduler_available and fee_discount_capability_source is not None:
         await _observe_fee_discount_capability(
             uow_factory,
             source=fee_discount_capability_source,
             now_ms=request.now_ms,
             timeout_seconds=request.timeout_seconds,
+        )
+        return ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.FEE_CAPABILITY_OBSERVED,
         )
     return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.NO_WORK)
 
@@ -500,6 +674,11 @@ async def _run_reconciliation_worker_once_core(
                     ticket_id=aggregate.identity.ticket_id,
                     settled_at_ms=request.now_ms,
                 ),
+            )
+            await uow.aggregates.schedule_next_check(
+                aggregate.identity.ticket_id,
+                work_kind="reconciliation",
+                due_at_ms=request.now_ms,
             )
             return ReconciliationWorkerResult(
                 status=ReconciliationWorkerStatus.SETTLED,

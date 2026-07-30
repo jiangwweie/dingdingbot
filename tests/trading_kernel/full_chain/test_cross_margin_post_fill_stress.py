@@ -574,7 +574,7 @@ async def _reach_post_fill_pending(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=TicketPreflightFacts(ticket),
@@ -648,7 +648,7 @@ async def _run_post_fill_worker(
         ReconciliationWorkerRequest(
             worker_id="post-fill-reconciliation",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v2",
+            schema_revision="0001_trading_kernel_baseline_v3",
             now_ms=now_ms,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,

@@ -277,7 +277,7 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
     request = ReconciliationWorkerRequest(
         worker_id="reconciliation-fairness-full-chain",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v2",
+        schema_revision="0001_trading_kernel_baseline_v3",
         now_ms=33_600,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -291,6 +291,8 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
         request,
     )
     assert protected.status is ReconciliationWorkerStatus.POSITION_RECONCILED
+    assert protected.housekeeping_status is ReconciliationWorkerStatus.SETTLED
+    assert protected.housekeeping_ticket_id == btc_ticket.identity.ticket_id
     assert protected.ticket_id in {
         sol_ticket.identity.ticket_id,
         avax_ticket.identity.ticket_id,
@@ -300,21 +302,13 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         NoTicketVenueTruth(),
         source,
-        request.model_copy(update={"now_ms": 33_601}),
+        request.model_copy(update={"now_ms": 38_600}),
     )
     assert other_protected.status is ReconciliationWorkerStatus.POSITION_RECONCILED
     assert other_protected.ticket_id in {
         sol_ticket.identity.ticket_id,
         avax_ticket.identity.ticket_id,
     }
-    closure = await run_reconciliation_worker_once(
-        lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        NoTicketVenueTruth(),
-        source,
-        request.model_copy(update={"now_ms": 33_602}),
-    )
-    assert closure.status is ReconciliationWorkerStatus.SETTLED
-    assert closure.ticket_id == btc_ticket.identity.ticket_id
     assert {
         protected.ticket_id,
         other_protected.ticket_id,

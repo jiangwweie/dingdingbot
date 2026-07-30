@@ -20,18 +20,19 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.trading_kernel.infrastructure.pg_models import metadata
 
-revision: str = "0001_trading_kernel_baseline_v2"
+revision: str = "0001_trading_kernel_baseline_v3"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Build the complete v2 schema from its one current SQLAlchemy authority."""
+    """Build the complete v3 schema from its one current SQLAlchemy authority."""
     metadata.create_all(op.get_bind(), checkfirst=False)
     _create_universe_member_guards()
     _create_instrument_identity_guard()
     _create_universe_activation_entry_fence()
+    _create_certification_batch_guards()
 
 
 def _create_universe_member_guards() -> None:
@@ -223,5 +224,46 @@ def _create_universe_activation_entry_fence() -> None:
     )
 
 
+def _create_certification_batch_guards() -> None:
+    """Allow one pending-to-result transition and reject result rewriting."""
+
+    op.execute(
+        sa.text(
+            """
+            CREATE FUNCTION brc_guard_certification_batch_member_result()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF TG_OP = 'DELETE' THEN
+                    RAISE EXCEPTION 'certification batch members are immutable'
+                        USING ERRCODE = '23514',
+                              CONSTRAINT = 'ck_brc_certification_batch_member_immutable';
+                END IF;
+                IF OLD.status <> 'pending'
+                   OR NEW.status = 'pending'
+                   OR NEW.certification_batch_id <> OLD.certification_batch_id
+                   OR NEW.exchange_instrument_id <> OLD.exchange_instrument_id THEN
+                    RAISE EXCEPTION 'certification batch member result is immutable'
+                        USING ERRCODE = '23514',
+                              CONSTRAINT = 'ck_brc_certification_batch_member_immutable';
+                END IF;
+                RETURN NEW;
+            END
+            $$;
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            CREATE TRIGGER trg_brc_certification_batch_member_result
+            BEFORE UPDATE OR DELETE
+            ON brc_instrument_certification_batch_members
+            FOR EACH ROW
+            EXECUTE FUNCTION brc_guard_certification_batch_member_result();
+            """
+        )
+    )
 def downgrade() -> None:
     raise RuntimeError("forward-only baseline; rebuild an empty database instead")
