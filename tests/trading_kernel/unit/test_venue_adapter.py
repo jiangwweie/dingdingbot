@@ -2061,7 +2061,7 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
         expected_position_quantity=Decimal("0.005"),
         entry_order_reference=_entry_order_reference(),
         tp1_exchange_order_id="venue-tp1-1",
-        entered_at_ms=1_000,
+        exposure_started_at_ms=1_000,
         price_tick=Decimal("0.1"),
         structure_window_bars=4,
         atr_period=14,
@@ -2086,6 +2086,53 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
     assert facts.market_facts.is_final_closed_candle is True
     assert facts.market_facts.structure_reference == Decimal(60002)
     assert facts.market_facts.atr > 0
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_accepts_entry_fill_after_ticket_issue_before_observation() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): LifecycleFactsExchange()
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        taker_fee_rates={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): Decimal("0.0005")
+        },
+        clock_ms=lambda: 20_000_000,
+    )
+    request = LifecycleFactsRequest(
+        ticket_id="ticket-1",
+        netting_domain=NettingDomain(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            position_side="long",
+        ),
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+        timeframe="15m",
+        entry_quantity=Decimal("0.01"),
+        expected_position_quantity=Decimal("0.005"),
+        entry_order_reference=_entry_order_reference(),
+        tp1_exchange_order_id="venue-tp1-1",
+        exposure_started_at_ms=1_000,
+        price_tick=Decimal("0.1"),
+        structure_window_bars=4,
+        atr_period=14,
+        runner_market_required=False,
+        observed_at_ms=20_000_000,
+    )
+
+    facts = await adapter.read_lifecycle_facts(request)
+
+    assert facts.allocated_entry_fee_quote == Decimal("0.20")
 
 
 @pytest.mark.asyncio
@@ -2121,7 +2168,7 @@ async def test_ccxt_adapter_keeps_runner_window_after_dropping_open_candle() -> 
         expected_position_quantity=Decimal("0.005"),
         entry_order_reference=_entry_order_reference(),
         tp1_exchange_order_id=None,
-        entered_at_ms=1_000,
+        exposure_started_at_ms=1_000,
         price_tick=Decimal("0.1"),
         structure_window_bars=4,
         atr_period=14,
@@ -2170,7 +2217,7 @@ async def test_ccxt_adapter_uses_conservative_taker_bound_for_bnb_lifecycle_fee(
         expected_position_quantity=Decimal("0.005"),
         entry_order_reference=_entry_order_reference(),
         tp1_exchange_order_id=None,
-        entered_at_ms=1_000,
+        exposure_started_at_ms=1_000,
         price_tick=Decimal("0.1"),
         structure_window_bars=4,
         atr_period=14,

@@ -618,6 +618,7 @@ async def test_readonly_certification_emits_exact_protected_ticket_manifest(
     assert isinstance(protected_tickets, list)
     assert [ticket["ticket_id"] for ticket in protected_tickets] == list(ticket_ids)
     assert protected_tickets[0]["active_tp1_order"]["exchange_order_id"] == "tp1:1"
+    assert protected_tickets[0]["active_tp1_order"]["order_namespace"] == "regular"
     assert protected_tickets[1]["recorded_tp1_fill_quantity"] == "1"
 
 

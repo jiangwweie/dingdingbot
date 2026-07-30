@@ -364,14 +364,15 @@ def _require_exact_protected_order(
     if order is None:
         raise RuntimeError("exchange protected order is absent")
     expected_order_side = "sell" if expected_position_side == "long" else "buy"
+    expected_order_namespace = str(expected.get("order_namespace") or "")
     if (
-        expected.get("order_namespace") != "conditional"
+        expected_order_namespace not in {"regular", "conditional"}
         or expected.get("position_side") != expected_position_side
         or expected.get("order_side") != expected_order_side
         or expected.get("reduce_only") is not True
         or order.exchange_instrument_id != expected_instrument_id
         or order.position_side != expected_position_side
-        or order.order_namespace != "conditional"
+        or order.order_namespace != expected_order_namespace
         or order.order_side != expected_order_side
         or order.reduce_only is not True
         or order.quantity != expected_quantity

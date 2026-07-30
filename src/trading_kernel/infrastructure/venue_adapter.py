@@ -810,7 +810,7 @@ class CcxtVenueAdapter:
                     row,
                     resolved=resolved_entry,
                     position_side=domain.position_side,
-                    entry_time_ms=request.entered_at_ms,
+                    entry_time_ms=request.exposure_started_at_ms,
                     exit_time_ms=request.observed_at_ms,
                 )
                 if notional is not None:
@@ -822,7 +822,7 @@ class CcxtVenueAdapter:
                 fee_valuation_context=lifecycle_fee_context,
                 settlement_asset=settlement_asset,
                 position_side=domain.position_side,
-                entry_time_ms=request.entered_at_ms,
+                entry_time_ms=request.exposure_started_at_ms,
                 exit_time_ms=request.observed_at_ms,
             )
             if fill is not None:
@@ -842,7 +842,7 @@ class CcxtVenueAdapter:
                 _require_list(candle_rows, name="lifecycle candles"),
                 timeframe=request.timeframe,
                 observed_at_ms=request.observed_at_ms,
-                entered_at_ms=request.entered_at_ms,
+                entered_at_ms=request.exposure_started_at_ms,
                 position_side=domain.position_side,
                 structure_window_bars=request.structure_window_bars,
                 atr_period=request.atr_period,

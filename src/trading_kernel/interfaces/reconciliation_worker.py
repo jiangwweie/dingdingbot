@@ -512,7 +512,10 @@ async def _run_reconciliation_worker_once_core(
                 review.identity.ticket_id
             )
             events = await uow.events.list_for_ticket(review.identity.ticket_id)
-            review_window = _review_window(events)
+            review_window = _review_window(
+                events,
+                exposure_started_at_ms=review.ticket.created_at_ms,
+            )
             entry_references = tuple(
                 reference
                 for reference in order_references
@@ -772,7 +775,13 @@ class _ReviewWindow(BaseModel):
     external_flat: bool
 
 
-def _review_window(events: list[TradeEvent]) -> _ReviewWindow | None:
+def _review_window(
+    events: list[TradeEvent],
+    *,
+    exposure_started_at_ms: int,
+) -> _ReviewWindow | None:
+    if exposure_started_at_ms <= 0:
+        raise ValueError("review exposure start time must be positive")
     entry_events = [
         event
         for event in events
@@ -794,7 +803,7 @@ def _review_window(events: list[TradeEvent]) -> _ReviewWindow | None:
     if exit_event is None:
         return None
     return _ReviewWindow(
-        entry_time_ms=entry.occurred_at_ms,
+        entry_time_ms=exposure_started_at_ms,
         exit_time_ms=exit_event.occurred_at_ms,
         executed_entry_quantity=entry.filled_qty,
         external_flat=isinstance(exit_event, ExternalFlatDetected),

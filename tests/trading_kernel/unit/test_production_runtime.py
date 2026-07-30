@@ -590,7 +590,7 @@ async def test_readonly_probe_verifies_each_protected_ticket_against_exact_excha
                 exchange_instrument_id=instrument_id,
                 position_side="long",
                 reduce_only=True,
-                order_namespace="conditional",
+                order_namespace="regular",
                 order_side="sell",
                 quantity=Decimal("0.5"),
             ),
@@ -616,7 +616,7 @@ async def test_readonly_probe_verifies_each_protected_ticket_against_exact_excha
             },
             "active_tp1_order": {
                 "exchange_order_id": "tp1:btc",
-                "order_namespace": "conditional",
+                "order_namespace": "regular",
                 "position_side": "long",
                 "order_side": "sell",
                 "quantity": "0.5",

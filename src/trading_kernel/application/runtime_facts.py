@@ -310,7 +310,7 @@ class LifecycleFactsRequest(BaseModel):
     expected_position_quantity: Decimal
     entry_order_reference: TicketOrderReference
     tp1_exchange_order_id: str | None
-    entered_at_ms: int
+    exposure_started_at_ms: int
     price_tick: Decimal
     structure_window_bars: int
     atr_period: int
@@ -346,8 +346,8 @@ class LifecycleFactsRequest(BaseModel):
         if self.price_tick <= 0:
             raise ValueError("lifecycle price tick must be positive")
         if (
-            self.entered_at_ms <= 0
-            or self.observed_at_ms < self.entered_at_ms
+            self.exposure_started_at_ms <= 0
+            or self.observed_at_ms < self.exposure_started_at_ms
             or self.structure_window_bars <= 0
             or self.atr_period <= 0
         ):

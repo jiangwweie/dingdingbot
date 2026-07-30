@@ -190,7 +190,7 @@ async def run_lifecycle_worker_once(
         expected_position_quantity=aggregate.position_qty,
         entry_order_reference=entry_order_reference,
         tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
-        entered_at_ms=entry_fill.occurred_at_ms,
+        exposure_started_at_ms=aggregate.ticket.created_at_ms,
         price_tick=rules.price_tick,
         structure_window_bars=policy.runner.structure_window_bars,
         atr_period=policy.runner.atr_period,

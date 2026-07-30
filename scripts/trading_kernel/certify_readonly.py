@@ -81,7 +81,7 @@ def _protected_handover_tickets(
                 raise ValueError("protected Ticket lacks canonical TP1 price")
             ticket["active_tp1_order"] = {
                 "exchange_order_id": str(row["tp1_exchange_order_id"]),
-                "order_namespace": "conditional",
+                "order_namespace": "regular",
                 "position_side": position_side,
                 "order_side": order_side,
                 "quantity": _canonical_decimal(row["tp1_target_qty"]),
