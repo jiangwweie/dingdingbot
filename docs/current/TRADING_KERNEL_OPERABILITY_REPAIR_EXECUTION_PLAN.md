@@ -13,8 +13,11 @@ last_verified: 2026-07-30
 
 1. **程序修复交付**：按测试优先完成双 Lane、Certification Batch、Admission、Protected
    Promotion、部署状态机和容量模型；
-2. **生产部署交付**：因为目标 schema 会变化，当前 release 使用 exchange-flat 后的
-   停机 clean rebuild，不使用 active-position schema 热升级。
+2. **生产部署交付**：因为目标 schema 会变化，保持 Entry fenced 并等待当前 exposure
+   完成 **natural terminal closure**；随后执行 **Terminal-History Clean Rebuild**，通过
+   **terminal-history transformer** 保留完整终态证据，在 `HISTORY_IMPORTED` 后继续 v3
+   bootstrap。当前 release 不使用 active-position schema 热升级，也不为部署日程主动结束
+   健康 Runner。
 
 本计划是执行顺序和 gate 的权威，不记录生产瞬时 Ticket、SHA、标签或服务状态。执行前
 必须从 `docs/current/MAIN_CONTROL_ROADMAP.md` 和 Tokyo readonly facts 重新获取当前状态。
@@ -26,8 +29,8 @@ last_verified: 2026-07-30
 1. 在 focused `codex/*` branch 修改 Kernel、测试、单一 schema baseline 和部署工具；
 2. 删除错误或过时的代码、测试、fixture、字段、migration 和文档语义；
 3. 使用 disposable PostgreSQL 做 destructive local rebuild；
-4. 在全部 hard gate 通过后执行 reviewed Tokyo flat cutover；
-5. 使用官方 Lifecycle durable-command path 完成必要的 controlled exit；
+4. 在全部 hard gate 通过后执行 reviewed Tokyo Terminal-History Clean Rebuild；
+5. 允许 Lifecycle 因策略、Stop 或独立安全条件沿 durable-command path 正常退出；
 6. 使用 readonly exchange/account/position/order/rule facts 做 preflight/postflight。
 
 ### 2.2 禁止
@@ -40,6 +43,9 @@ last_verified: 2026-07-30
 6. 为了让旧测试通过而削弱新语义；
 7. 在 deterministic 本地失败仍存在时继续上服务器试错；
 8. 在生产执行步骤中无限等待认证或 worker 偶然取得进度。
+9. 为部署日程触发健康 Runner 的 controlled exit；
+10. 把旧 Policy current、worker lease、Reservation、Domain hold、runtime identity 或其他
+    current/control row 复制到 v3。
 
 ## 3. 工作流总览
 
@@ -52,8 +58,9 @@ TC-00 决策与基线冻结
 -> TC-05 Capacity + Schema
 -> TC-06 删除旧语义与文档一致性
 -> TC-07 Local Clean-Rebuild Rehearsal
+-> TC-07A Terminal-History Transformer Rehearsal
 -> RC Review / Verification
--> TC-08 Tokyo Flat Deployment
+-> TC-08 Tokyo Terminal-History Clean Rebuild
 -> Postflight / Main Control Roadmap 更新
 ```
 
@@ -241,7 +248,8 @@ approved instrument manifest 内容
 3. continuous certification 使用 10 分钟有效期、5 分钟刷新目标、2 分钟调度最大等待；
 4. ready candidate query 加 exact current certification join；
 5. stale certification 只暂停仲裁，不改变未过期 Signal 的 terminal state；
-6. `certify_readonly.py` 的 Promotion gate 改为 exact completed batch；
+6. `certify_readonly.py` 的 Promotion gate 改为 exact completed batch 或唯一 direct-successor
+   ENTRY-arm policy stage，不硬编码 `v1 -> v2`；
 7. bootstrap 一次请求 approved manifest，六个 Universe 自动串行推进；
 8. local recording adapter 证明零 exchange mutation。
 
@@ -305,8 +313,9 @@ direct exchange order
 3. 对每个 Ticket 比较 internal/exchange exact position 与 protection facts；
 4. 拒绝未归属 position/order、unknown、incident、release identity drift；
 5. 原子 arm new-entry policy/capability；
-6. postflight 只承认 exact Batch policy version，或唯一允许的 `v1 -> v2` ENTRY-arm
-   direct successor；拒绝 v3、跳级和其他 policy drift；
+6. postflight 只承认 exact Batch policy version，或
+   `current_policy_version = batch_policy_version + 1` 的唯一 ENTRY-arm direct successor；
+   拒绝复用历史 version、跳级和其他 policy drift；
 7. Entry while fenced 启动并做无 mutation smoke；
 8. final postflight 后移除 fence；
 9. 任一失败 refence + stop Entry；
@@ -443,9 +452,11 @@ float 金额
 4. Claim/Ticket 冻结实际 budget、limit 与 usage snapshot；
 5. Ticket 原子提交时锁 account exposure 并重验；
 6. 更新 seed、readonly certification、review lineage；
-7. 创建下一版唯一 clean baseline，删除旧 baseline；
-8. 删除旧字段、fixture、tests 和兼容语义；
-9. 更新 experiment profile 与 Owner operating model 中已确认的最终值。
+7. 保留历史 `policy-main:v2` 的不可变 identity，新 v3 seed 从未占用的后续 version 开始；
+8. 将 acceptance/full transition 改为单调 direct successor，不硬编码 `v1 -> v2 -> v3`；
+9. 创建下一版唯一 clean baseline，删除旧 baseline；
+10. 删除旧字段、fixture、tests 和兼容语义；
+11. 更新 experiment profile 与 Owner operating model 中已确认的最终值。
 
 ### 10.7 Done
 
@@ -454,7 +465,8 @@ float 金额
 3. 第四个 Ticket、总风险耗尽、总保证金耗尽分别有明确 blocker；
 4. account usage race 不能超额提交；
 5. empty schema rebuild、forward-only downgrade rejection、metadata exact 通过；
-6. migrations 目录只有一个 current baseline。
+6. migrations 目录只有一个 current baseline；
+7. terminal historical policy version 与新 current policy lineage 不冲突。
 
 ### 10.8 Hard Stop
 
@@ -568,9 +580,86 @@ tests/trading_kernel/integration/**
 任何 deterministic failure 只能在 Tokyo 复现、任何 phase 需要人工 direct SQL、或任何 local
 场景产生 exchange mutation，都阻止 RC。
 
-## 13. Release Candidate Review
+## 13. TC-07A：Terminal-History Transformer Rehearsal
 
-### 13.1 Review 维度
+### 13.1 目标
+
+在当前 exposure 自然终态前，使用 production-shaped v2 fixture 完成 transformer 工程；在
+自然终态后，只读导出 exact production snapshot 并重复同一 rehearsal。证明终态历史可进入
+v3 canonical schema，同时旧 current/control 状态不会成为新运行权威。
+
+### 13.2 依赖
+
+TC-01 至 TC-07 全部 Done；最终 production rehearsal 还依赖 natural terminal closure、
+Settlement、Review、exchange flat 和零 residue。
+
+### 13.3 允许文件
+
+```text
+scripts/trading_kernel/transform_terminal_history.py
+scripts/trading_kernel/verify_terminal_history_snapshot.py
+src/trading_kernel/application/terminal_history.py
+src/trading_kernel/infrastructure/pg_terminal_history.py
+tests/trading_kernel/unit/test_terminal_history_transformer.py
+tests/trading_kernel/integration/test_terminal_history_import_postgres.py
+tests/trading_kernel/full_chain/test_terminal_history_clean_rebuild.py
+```
+
+实现必须位于现有 Kernel/Application/PostgreSQL 边界内；不得新增 runtime worker、旧 schema
+reader service 或长期兼容 package。
+
+### 13.4 输入与输出合同
+
+输入：
+
+1. exact v2 schema/seed/runtime identity；
+2. writers 全停后的 PostgreSQL snapshot；
+3. table/row counts、source checksum 和 terminal closure manifest；
+4. exchange-flat/no-order readonly proof；
+5. Ticket terminal、Reservation/Domain release、Settlement、Review 和 zero Incident proof。
+
+输出：
+
+1. v3 canonical terminal Signal/Claim/Ticket/Event/Command/Settlement/Review lineage；
+2. 每个派生字段的 source identity、公式与 digest；
+3. 历史 `policy-main:v2` identity 与未占用的新 current policy version；
+4. 明确的 excluded current/control table 清单；
+5. 一个可在空 v3 target transaction 内执行的 deterministic import operation。
+
+部署不得依赖未提交的 loose SQL/DML 文件作为 authority。transformer 读取 exact snapshot，
+通过版本控制代码直接写入 disposable/target PostgreSQL；snapshot 和 manifest 只是受控部署
+输入，导入完成后 PostgreSQL v3 才成为 current authority。
+
+### 13.5 RED 与实现
+
+1. RED：旧 Claim 因新显式 ticket/gross policy 字段无法直接载入；
+2. RED：历史 `policy-main:v2` 与硬编码新 v2 acceptance policy 冲突；
+3. RED：直接复制 current rows 会产生 active Reservation/Exposure 或错误 runtime identity；
+4. 实现 claim-time gross risk/reserved margin 的确定性重建；
+5. 实现旧 per-Ticket policy + concurrency ceiling 到历史 gross ceiling 的可审计派生；
+6. 将新 policy seed/promotion 改为未占用 version 的 direct-successor lineage；
+7. 单事务写入完整 terminal episode，任何 parity/constraint 失败整笔回滚；
+8. 删除所有 temporary export、partial import 和默认值分支。
+
+### 13.6 Done
+
+1. synthetic fixture 与 exact production snapshot 两次 rehearsal 都通过；
+2. source/target Ticket、Event、Command、Settlement、Review identity 与 digest parity exact；
+3. v3 domain 可读取历史终态 Claim/Ticket；
+4. 零 active Ticket selector、Reservation、Domain hold、Exposure、due Command、open Incident；
+5. 新 Policy/Universe/runtime current authority 只来自 v3 seed；
+6. `HISTORY_IMPORTED` crash/rollback/retry 全部通过；
+7. transformer 产生零 exchange mutation、零 loose runtime authority 文件；
+8. 完整 suite、Ruff、Mypy、architecture、file-I/O 和 diff checks 通过。
+
+### 13.7 Hard Stop
+
+任一字段需要猜测、默认值、伪造 policy 含义、partial Ticket import，或必须让 v3 runtime
+读取 v2 表时，TC-07A 不得完成，Tokyo 保持旧版本和 Entry fence。
+
+## 14. Release Candidate Review
+
+### 14.1 Review 维度
 
 | 维度 | 必查内容 | 阻断条件 |
 | --- | --- | --- |
@@ -583,26 +672,29 @@ tests/trading_kernel/integration/**
 | Operability | max wait、timeout、metrics、Owner state | 无限 waiting 或内部 gate 需人工操作 |
 | Documentation | authority ownership、无 volatile duplication | current docs 冲突 |
 
-### 13.2 RC Hard Gate
+### 14.2 RC Hard Gate
 
 只有全部 review finding 关闭、完整验证从 clean checkout 重跑通过后，才能 commit/tag 并进入
 TC-08。
 
-## 14. TC-08：Tokyo Flat Deployment
+## 15. TC-08：Tokyo Terminal-History Clean Rebuild
 
-### 14.1 选择此路径的原因
+### 15.1 选择此路径的原因
 
 本 repair 包含 schema identity 变化。**Protected Promotion**是未来 regular code release
 和无 schema 变化的 protected handover 能力，不用于本次 active-schema 热升级。因此本次
 生产采用：
 
 ```text
-停止新 ENTRY
--> 既有 Ticket 正常或受控退出
+Entry 保持 fenced
+-> 既有 Ticket natural terminal closure
 -> Settlement/Review 完成
 -> exchange/internal flat
 -> 停四 worker
+-> final v2 snapshot + manifest/checksum
 -> BRC application schema clean rebuild
+-> terminal-history transformer
+-> HISTORY_IMPORTED
 -> batch bootstrap
 -> safety workers
 -> Entry fenced start
@@ -610,7 +702,7 @@ TC-08。
 -> unfence
 ```
 
-### 14.2 前置事实刷新
+### 15.2 前置事实刷新
 
 执行当日从当前代码、PostgreSQL、systemd 和 exchange readonly facts 重新验证：
 
@@ -620,22 +712,25 @@ TC-08。
 4. Entry fence 和 service 状态 exact；
 5. active Ticket、position、order、protection、command、incident exact；
 6. account 为 independent sides、cross，approved instruments configured leverage exact；
-7. 无旧 writer 或非 BRC 数据进入 deletion scope。
+7. TC-07A 已用 production-shaped snapshot 完成 transformer rehearsal；
+8. 新 Policy version 不复用历史 Ticket 的 frozen version；
+9. 无旧 writer 或非 BRC 数据进入 deletion scope。
 
-### 14.3 Exposure Closure
+### 15.3 Exposure Closure
 
 若执行时仍有 active Ticket：
 
 1. 保持 Entry fenced；
 2. Observation、Lifecycle、Reconciliation 继续运行；
-3. 优先等待策略自然 exit；若 deployment window 要求立即关闭，则只通过官方 Lifecycle
-   controlled-exit command generation；
+3. 等待策略、Stop、Runner trailing 或正常 Lifecycle 产生 natural exit；
 4. 不直接撤单、不手工下反向单、不 direct SQL 改 terminal state；
 5. 等待 exchange flat、零 residual order；
 6. 等待 budget/domain release、Reconciliation matched、Settlement、Review；
-7. 确认零 open Incident、零 unknown command。
+7. 确认零 open Incident、零 unknown command；
+8. 若 deployment window 到达但 Ticket 仍健康 active，取消该窗口并继续旧 safety runtime，
+   不为部署触发 controlled exit。
 
-### 14.4 Cutover Plan 命令合同
+### 15.4 Cutover Plan 命令合同
 
 TC-04 完成后，先使用现有 cutover controller 的 plan 模式。以下为命令结构，实际 identity
 必须从当日 readonly preflight 注入，禁止使用文档中的默认猜测：
@@ -652,90 +747,104 @@ python3 scripts/trading_kernel/cutover_tokyo.py \
   --runtime-profile-id <exact-runtime-profile-id> \
   --application-schema public \
   --target-commit <exact-40-hex-commit> \
-  --target-schema-revision <next-clean-baseline-revision> \
+  --target-schema-revision <target-clean-baseline-revision> \
   --target-seed-identity <exact-seed-digest> \
-  --target-release-id <exact-release-id>
+  --target-release-id <exact-release-id> \
+  --terminal-history-manifest <exact-snapshot-manifest>
 ```
 
 `--plan` 必须返回 pass 后，才允许使用同一组 exact identity 执行 `--apply`。任何参数变化
 都创建新的 operation identity，不复用旧 journal。
 
-### 14.5 Apply 阶段
+### 15.5 Apply 阶段
 
-1. **STAGED**：上传 committed release，校验 markers；
-2. **QUIESCED**：touch Entry fence，停止四 workers，确认无进程；
-3. **FINAL_FLAT**：在 writers 全停后再次读取 PostgreSQL/exchange flat facts；
-4. **REBUILD**：只删除 BRC application schema，保留 ops journal 与非 BRC 数据；
-5. **SEED**：安装唯一 baseline，seed Registry/Policy/Capability/runtime identity；
-6. **READONLY START**：启动 Observation 与 Reconciliation；
-7. **TARGET CERTIFIED**：完成 exact Certification Batch 与六 Universe Active pointers；
-8. **LIFECYCLE START**：启动 Lifecycle，执行 flat/no-residue smoke；
-9. **ENTRY FENCED START**：启动 Entry，确认 fence 仍存在且零 mutation；
-10. **FINAL POSTFLIGHT**：重验 commit/schema/seed/policy/batch/account/rules/flatness；
-11. **UNFENCE**：原子 arm authority 后移除 fence；
-12. **TAG/ROADMAP**：验证 immutable tag，并将瞬时证据写入 Main Control Roadmap。
+1. **STAGED**：上传 committed release、transformer 与 markers；
+2. **TERMINAL_CERTIFIED**：重验 natural terminal closure、Settlement/Review、exchange flat、
+   零 residual order/Incident/unknown；
+3. **QUIESCED**：确认 Entry fence，停止四 workers，确认无进程；
+4. **FINAL_TERMINAL**：writers 全停后再次读取 PostgreSQL/exchange terminal facts；
+5. **HISTORY_EXPORTED**：取得 exact v2 snapshot、table/row manifest 与 checksum；
+6. **REBUILD**：只删除 BRC application schema，保留 ops journal 与非 BRC 数据；
+7. **SEED**：安装唯一 v3 baseline，seed Registry/新 Policy lineage/Capability/runtime identity；
+8. **HISTORY_IMPORTED**：terminal-history transformer 单事务导入完整 terminal episode，验证
+   identity/digest parity 与零 active state；
+9. **READONLY START**：启动 Observation 与 Reconciliation；
+10. **TARGET CERTIFIED**：完成 exact Certification Batch 与六 Universe Active pointers；
+11. **LIFECYCLE START**：启动 Lifecycle，执行 flat/no-residue/terminal-history smoke；
+12. **ENTRY FENCED START**：启动 Entry，确认 fence 仍存在且零 mutation；
+13. **FINAL POSTFLIGHT**：重验 commit/schema/seed/policy/history/batch/account/rules/flatness；
+14. **UNFENCE**：原子 arm authority 后移除 fence；
+15. **TAG/ROADMAP**：验证 immutable tag，并将瞬时证据写入 Main Control Roadmap。
 
-### 14.6 超时与耗时边界
+### 15.6 超时与耗时边界
 
 以下是基于阶段数量和 bounded readonly calls 的**执行估算**，不是当前生产事实：
 
 | 阶段 | 目标时间 | Hard timeout | 超时动作 |
 | --- | ---: | ---: | --- |
 | Final flat recheck + stop | 1–3 分钟 | **5 分钟** | 保持旧状态或全部 fenced，停止 cutover |
+| Snapshot export + checksum | 1–3 分钟 | **5 分钟** | 不删除 schema，重新导出或恢复旧 safety workers |
 | Schema rebuild + seed | 2–5 分钟 | **10 分钟** | 不恢复旧 writer，fix-forward target |
+| Terminal history import + parity | 1–5 分钟 | **10 分钟** | 整笔回滚，保持全停和 Entry fenced |
 | Certification Batch + Universe activation | 2–8 分钟 | **15 分钟** | 保持 Entry fenced，记录 exact blocker |
 | Lifecycle/Entry fenced smoke | 1–3 分钟 | **5 分钟** | 停止失败 worker，保留安全可运行集合 |
 | Final postflight + unfence | 1–3 分钟 | **5 分钟** | refence Entry |
 
-在 exchange 已 flat 的前提下，目标生产停机窗口为约 **10–30 分钟**。超过 hard timeout
+在 exchange 已 flat 的前提下，目标生产停机窗口为约 **15–35 分钟**。超过 hard timeout
 不是“继续等几十小时”，而是进入明确 blocked/fix-forward 状态。
 
-### 14.7 部署后观察
+### 15.7 部署后观察
 
 1. 四 workers active，restart count 不增长；
 2. Entry fence 已按 final gate 状态正确存在或移除；
 3. Certification Batch 与 current certifications 新鲜；
 4. 六 Active Universe、approved scopes 与 manifest exact；
 5. 零 active Ticket 时 exchange 零 position/order；
-6. 零 unresolved command、open incident、orphan reservation/domain；
-7. 一个代表性 idle window 中 Safety/Housekeeping 无 deadline breach；
-8. no-signal cadence 零生成文件；
-9. Main Control Roadmap 更新 current commit、tag、schema、certification、snapshot 和剩余路径。
+6. 历史 terminal Ticket/Event/Command/Settlement/Review parity exact，且不进入 active selector；
+7. 零 unresolved command、open incident、orphan reservation/domain；
+8. 一个代表性 idle window 中 Safety/Housekeeping 无 deadline breach；
+9. no-signal cadence 零生成文件；
+10. Main Control Roadmap 更新 current commit、tag、schema、certification、snapshot 和剩余路径。
 
-## 15. Fix-forward 与恢复规则
+## 16. Fix-forward 与恢复规则
 
-### 15.1 Rebuild 前失败
+### 16.1 Rebuild 前失败
 
 如果 application schema 尚未删除、旧 release identity 仍 exact，可保持 Entry fenced并恢复
-旧 safety workers。不得自动 unfence Entry。
+旧 safety workers。snapshot/manifest 不一致时必须在旧 schema 上重新导出，不得自动
+unfence Entry。
 
-### 15.2 Rebuild 后失败
+### 16.2 Rebuild 后失败
 
 application schema 一旦删除，旧 runtime 不再是 rollback authority：
 
 1. Entry 保持 fenced；
 2. 只运行 target identity 下已经通过对应 phase 的 workers；
 3. 从 ops journal resume；
-4. 修复 target release 并继续 forward；
-5. 不恢复旧 schema、旧数据或旧 writer。
+4. `HISTORY_IMPORTED` 未完成时保持全部 target workers 停止，修复 transformer 后重新
+   rebuild/import；
+5. 修复 target release 并继续 forward；
+6. v2 snapshot 是审计与受控恢复输入，不自动恢复成 production runtime；
+7. 不恢复旧 schema、旧数据或旧 writer。
 
-### 15.3 Unfence 后异常
+### 16.3 Unfence 后异常
 
 立即恢复 Entry fence 并停止 Entry；既有 exposure 若已经产生，Lifecycle 与 Reconciliation
 继续使用 durable safety authority。随后按 exact Ticket/command/position facts诊断，不盲目
 重发 ENTRY。
 
-## 16. 最终完成定义
+## 17. 最终完成定义
 
 程序修复与部署只有在以下全部成立时完成：
 
 1. 三份 repair 文档为 current authority 且引用一致；
-2. TC-01 至 TC-07 全部 Done；
+2. TC-01 至 TC-07A 全部 Done；
 3. 完整 local verification 从 clean state 重跑通过；
 4. Owner 批准的 D-CAP-01 exact 值已进入 profile、seed、schema、certification 和测试；
-5. Tokyo flat cutover 每个 phase 从 direct evidence 完成；
+5. Tokyo Terminal-History Clean Rebuild 每个 phase 从 direct evidence 完成；
 6. 四 workers、fence、identity、schema、seed、policy、manifest、batch exact；
 7. exchange 与 PostgreSQL 无未归属或矛盾 runtime state；
 8. 生产 observation window 无 lane starvation、假 monitor 进度或文件输出回归；
-9. 错误旧代码、测试、schema 和部署分支已删除；
-10. `MAIN_CONTROL_ROADMAP.md` 持有唯一当前生产结果与剩余关键路径。
+9. terminal history source/target identity、count、digest parity exact，且零 active-state 污染；
+10. 错误旧代码、测试、schema 和部署分支已删除；
+11. `MAIN_CONTROL_ROADMAP.md` 持有唯一当前生产结果与剩余关键路径。

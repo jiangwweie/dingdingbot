@@ -61,6 +61,14 @@ without an Owner release confirmation. Before its
 all Ticket, position, order, Incident, Settlement and Review projections must
 be terminal and exchange truth must be flat.
 
+The approved v2-to-v3 procedure is **Terminal-History Clean Rebuild**. Entry
+remains fenced while the existing exposure reaches **natural terminal
+closure**; a healthy Runner is never controlled-exited merely to satisfy a
+deployment window. After terminal closure, a version-controlled
+**terminal-history transformer** imports the exact terminal episode into the
+clean v3 schema. No target worker starts before `HISTORY_IMPORTED` proves
+identity/digest parity and zero active runtime state.
+
 After the target code and schema pass readonly certification, the Owner fixes
 each Event's final **1..10** canonical USDT-perpetual members. The official
 configuration CLI installs Warming Universes only. Existing Reconciliation and
@@ -71,44 +79,62 @@ is still an explicit final deployment action; neither configuration nor
 activation can enable it.
 
 The completed Batch is created while new ENTRY authority is disabled. The
-final promotion may carry that Batch across only the exact policy-stage
-transition from disabled version 1 to armed version 2. Version 3, skipped
-versions, an unarmed successor, or any risk/scope/manifest/commit/schema/seed
-drift invalidates the gate. This is a bounded stage transition, not a policy
-compatibility rule.
+final promotion may carry that Batch across only an exact direct-successor
+policy-stage transition where
+`current_policy_version = batch_policy_version + 1` and new ENTRY authority is
+armed. Skipped versions, an unarmed successor, or any
+risk/scope/manifest/commit/schema/seed drift invalidates the gate. Historical
+Ticket policy versions remain immutable; the v3 seed uses an unoccupied later
+version rather than redefining `policy-main:v2`. This is a bounded stage
+transition, not a policy compatibility rule.
 
 ### Bounded Rebuild Procedure
 
 For a small-capital, flat personal runtime, the approved path is a stopped
 rebuild rather than a long sequential Warming procedure:
 
-1. Use the official Lifecycle path to make each exact named Ticket terminal,
-   then verify exchange flatness, no open orders, no unresolved command, no
-   open Incident, and released budget/Netting Domain state.
-2. Fence Entry and stop all four BRC workers. Confirm no old writer can mutate
-   the account before schema deletion.
-3. Rebuild only BRC PostgreSQL state from the committed clean baseline and
+1. Keep Entry fenced and let Observation, Lifecycle and Reconciliation manage
+   every current exposure until natural terminal closure. A deployment
+   schedule does not authorize controlled exit.
+2. Verify exchange flatness, no open orders, no unresolved command, no open
+   Incident, released budget/Netting Domain state, Reconciliation, Settlement
+   and Review.
+3. Stage the exact committed release and its tested terminal-history
+   transformer. Stop all four BRC workers and atomically recheck terminal and
+   flat facts.
+4. Export the exact v2 PostgreSQL snapshot, table/row manifest and checksum.
+   The source is a controlled deployment input, not a runtime authority file.
+5. Rebuild only BRC PostgreSQL state from the committed clean baseline and
    deterministic Registry/Policy/Capability seeds. Do not alter credentials,
-   funds, account mode, leverage, or exchange trading scope.
-4. Stage one exact committed release; start Observation and Reconciliation
-   while the Entry fence remains present. Lifecycle and Entry remain stopped.
-5. Run the official batch bootstrap once. It serially installs and awaits all
+   funds, account mode, leverage or exchange trading scope.
+6. Run the terminal-history transformer in one target transaction. It must
+   preserve the complete terminal Signal/Claim/Ticket/Event/Command/
+   Settlement/Review lineage, preserve historical policy identity, exclude
+   all old current/control rows, and complete `HISTORY_IMPORTED` only after
+   parity and zero-active-state checks pass.
+7. Start Observation and Reconciliation while the Entry fence remains
+   present. Lifecycle and Entry remain stopped.
+8. Run the official batch bootstrap once. It serially installs and awaits all
    six Warming Universes because PostgreSQL permits only one Warming Universe
    at a time; the resident workers perform the required readonly certification
    and activation work between Events under one shared bounded stage deadline.
    The deployment never waits for a separate multi-hour operator sequence per
    Event.
-6. Start Lifecycle and complete its fenced flat/no-residue smoke. Then start
-   Entry while the write fence and disabled new-ENTRY authority remain present.
-7. Repeat readonly postflight for exact commit, clean schema, seed, account
-   mode, runtime profile, policy, Certification Batch, active Universe pointers,
-   exchange flatness, worker health, and zero unresolved runtime state.
-8. Only an explicit promotion after all postflight gates may arm new-ENTRY
+9. Start Lifecycle and complete its fenced flat/no-residue/terminal-history
+   smoke. Then start Entry while the write fence and disabled new-ENTRY
+   authority remain present.
+10. Repeat readonly postflight for exact commit, clean schema, seed, historical
+   parity, account mode, runtime profile, policy, Certification Batch, active
+   Universe pointers, exchange flatness, worker health, and zero unresolved
+   runtime state.
+11. Only an explicit promotion after all postflight gates may arm new-ENTRY
    authority and remove the fence. If any step fails, keep Entry fenced and
    retain only the phase-safe workers for diagnosis or controlled recovery.
 
-This is a forward-only fix path. Reintroducing the retired schema evolution
-chain, a compatibility reader, or an old writer is not a rollback.
+This is a forward-only fix path. The transformer is a one-time data conversion,
+not a v2 runtime reader, compatibility service, dual-write path or schema
+fallback. Reintroducing the retired schema evolution chain or an old writer is
+not a rollback.
 
 If batch bootstrap reports an exact Warming timeout or a terminal
 certification blocker, Entry remains fenced. Inspect the bounded Universe
@@ -128,6 +154,12 @@ PostgreSQL host operation, and unrelated data remained outside deletion scope.
 
 The production tag is the rollback reference for code history only. Retired BRC
 program or database state is not a runtime rollback authority.
+
+For the pending v3 cutover, the Owner superseded the prior no-history-retention
+procedure only for the exact terminal episode: the final v2 snapshot is kept as
+auditable source evidence and the canonical terminal lineage is transformed
+into v3. Old current/control state, old workers and old schema remain retired
+and are not restored as production authority.
 
 ## Version Contract
 
@@ -245,6 +277,8 @@ Every condition must be current and true:
 - readonly account mode, position, order, and protection truth;
 - exact StrategySignal, CapacityClaim, Ticket, Trade Event, Exchange Command,
   position, Reconciliation, Settlement, and Review lineage;
+- exact v2 terminal snapshot manifest/checksum, transformer identity,
+  `HISTORY_IMPORTED` parity and excluded current/control rows;
 - final flatness, no residual order, released budget/domain, zero Incident, and
   completed Owner state;
 - first successful hourly observation after any deployment change.

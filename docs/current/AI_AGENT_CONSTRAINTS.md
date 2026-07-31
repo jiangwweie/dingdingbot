@@ -38,6 +38,10 @@ real-funds terminal lifecycle.
 - PostgreSQL behavior uses disposable PostgreSQL; clean-rebuild deployment is
   rehearsed locally from an empty database through schema, seed, Universe
   installation, worker progression, certification, and Entry promotion.
+- A deployment that preserves terminal history must additionally restore a
+  production-shaped source snapshot locally, run the version-controlled
+  transformer into an empty target, and prove identity/digest parity, atomic
+  rollback, zero active-state carryover, and no synthetic policy evidence.
 - Recording exchange fakes must prove the exact read and mutation boundary.
   Local certification and warming tests perform zero exchange mutation.
 - A server deployment verifies current external facts; it is not the primary

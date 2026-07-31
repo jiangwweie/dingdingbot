@@ -20,6 +20,12 @@ last_verified: 2026-07-30
 服务状态。生产事实与当前关键路径仅由
 `docs/current/MAIN_CONTROL_ROADMAP.md` 持有。
 
+本次 schema cutover 采用 **Terminal-History Clean Rebuild**：保持 Entry fenced，等待
+当前 exposure 完成 **natural terminal closure**，再由版本控制的
+**terminal-history transformer** 将终态 v2 交易证据转换为 v3 规范数据。生产在空 schema
+安装 v3 baseline、seed 新权威并完成 `HISTORY_IMPORTED` 后才启动 target workers。该路径
+不是 active-position schema 热升级，也不允许为了部署日程主动结束健康 Runner。
+
 ### 1.2 状态词
 
 | 标记 | 含义 | 是否可作为当前生产事实 |
@@ -35,7 +41,7 @@ last_verified: 2026-07-30
 1. Reconciliation 调度与后台进度保证；
 2. Instrument Certification、Signal Admission 与部署认证的一致性；
 3. 活跃 protected Ticket 场景下的正式 ENTRY Promotion；
-4. 常规发布和停机重建的显式状态机；
+4. 常规发布、终态历史转换和停机重建的显式状态机；
 5. 多 Ticket 的止损风险与保证金容量语义；
 6. 与上述语义冲突的代码、测试、文档和 schema 基线清理。
 
@@ -76,6 +82,10 @@ last_verified: 2026-07-30
 
 部署耗时由真实外部读取和固定数量的本地阶段决定，不再由一个活跃 Ticket 对后台工作
 造成无限饥饿，也不再要求七份 **60 秒**认证记录偶然同时新鲜。
+
+本次 v2→v3 schema cutover 与上述 same-schema Protected Promotion 分离：当前 Runner 正常
+闭环后，终态历史才进入离线转换和 clean rebuild；Protected Promotion 继续服务未来
+**无 schema 变化**的 regular release。
 
 ## 3. 已知客观事实
 
@@ -247,12 +257,17 @@ Batch 只能在 exact manifest 全部成员属于当前 approved scope、identit
 且最早 valid-until 覆盖 promotion 最小窗口时完成。失败 batch 不自动缩小 manifest；修复
 原因后创建新 batch，旧 batch 只保留审计事实。
 
-Batch 在 ENTRY disabled 的 Owner Policy stage 下完成。Promotion 将该 policy 从 **v1**
-原子推进到仅开放新 ENTRY authority 的直接 successor **v2** 时，postflight 允许同一 Batch
-继续作为认证证据；只接受 `v1 -> v2` 且 `new_entry_submit_enabled=true` 的 exact stage
-continuity。跳到 v3、跨版本、仍 disabled 或其他 policy drift 均使 Batch 失效。这样避免
-“Batch 要求当前 v1、arm 后又要求当前 v2”的循环依赖，同时不放宽风险、scope、manifest、
-commit、schema 或 seed identity。
+Batch 在 ENTRY disabled 的 Owner Policy stage 下完成。Promotion 只允许将该 policy 原子
+推进到 **直接 successor**，且 successor 只能改变已批准的 ENTRY authority stage；风险、
+scope、manifest、commit、schema 和 seed identity 必须完全一致。postflight 接受 exact
+Batch policy version，或 `current_policy_version = batch_policy_version + 1` 且
+`new_entry_submit_enabled=true` 的唯一直接 successor；跳级、仍 disabled 或其他 drift 均使
+Batch 失效。
+
+为了保留历史 Ticket 冻结的 `policy-main:v2` 身份，新 v3 clean baseline 不得重新定义同一
+version。新运行政策从未占用的后续 version 开始，disabled、acceptance 和 full promotion
+保持单调递增。具体起始 version 由 terminal-history manifest 和 seed 共同证明，运行代码
+不得硬编码 `v1 -> v2 -> v3`。
 
 ### 6.3 Candidate Admission
 
@@ -300,8 +315,8 @@ Ticket 清单。程序逐 Ticket 验证：
 7. 零未归属 position、open order 或旧 writer；
 8. runtime identity、schema、seed、policy、manifest 和 Certification Batch 一致。
 
-其中 policy 一致性包含上节定义的 exact `v1 -> v2` ENTRY-arm stage continuity；它不是
-任意旧 policy version 的兼容规则。
+其中 policy 一致性包含上节定义的 direct-successor ENTRY-arm continuity；它不是任意旧
+policy version 的兼容规则。
 
 ### 7.3 启动顺序
 
@@ -372,12 +387,17 @@ selected_quantity
 
 ### 8.3 现有 Exposure 的处理
 
-若修复部署时已有 protected Ticket 超过新的单 Ticket 上限：
+本次 schema cutover 不把 active Ticket 带入 v3：
 
-1. 不取消其 protection，不撤销 Lifecycle 或 controlled exit 权威；
-2. 账户总容量按实际 reservation/exposure 计算；
-3. 在容量回落前，新的 Ticket 以明确 blocker 拒绝或暂缓；
-4. 不伪造“仍有三个槽位”来绕过保证金或总止损风险。
+1. Entry 保持 fenced，Observation、Lifecycle、Reconciliation 继续管理现有 exposure；
+2. 健康 Runner 只按策略和正常 Lifecycle 自然结束，不为部署日程触发 controlled exit；
+3. 等待 exchange flat、零 residual order、Ticket terminal、Reservation/Netting Domain
+   release、Reconciliation、Settlement 和 Review 全部完成；
+4. 只有 natural terminal closure 通过后才冻结最终 v2 snapshot；
+5. 新政策只约束 v3 新 Ticket，不回写或重新审批历史 Claim。
+
+若 Lifecycle 因策略、Stop 或独立安全条件生成退出，它仍走正常 durable-command chain；这
+不等于部署主动平仓授权。
 
 ## 9. 数据、事务与 Identity
 
@@ -385,8 +405,12 @@ selected_quantity
 
 本修复改变 Owner Policy 和 capacity projection 字段，并新增 Certification Batch，因此
 属于 **schema identity 变化**。实现时创建下一版单一 clean baseline，并删除旧 baseline；
-生产只允许在 exchange flat、内部 closure 完成后执行 empty-schema rebuild，不做 in-place
-兼容迁移。
+生产只允许在 exchange flat、内部 closure 完成后执行 empty-schema rebuild，不做 active
+in-place 兼容迁移。
+
+终态历史通过 terminal-history transformer 离线转换，而不是让 v3 runtime 读取旧表。转换
+后的数据必须直接满足 v3 schema、domain 和 identity 约束；若任一必需字段只能靠猜测或
+伪造，`HISTORY_IMPORTED` 不得完成，生产保持旧版本或 target fenced。
 
 ### 9.2 原子边界
 
@@ -418,6 +442,27 @@ readonly I/O，再以 expected batch identity 与 lease 写入；最后一个成
 任一不一致均保留 ENTRY fence。Identity mismatch 不通过重试、默认值或旧 schema reader
 自动修复。
 
+### 9.4 终态历史转换边界
+
+转换输入是 writers 全停后取得的 exact v2 PostgreSQL snapshot 与 manifest/checksum。转换
+输出只包含一个完整 terminal Exposure Episode 的规范链路：Signal、Claim、Ticket、Trade
+Events、Exchange Commands、订单/成交归属、Settlement、Review、closed Incident，以及其
+冻结的 Policy、Universe 和 runtime lineage。
+
+旧 Claim 的新增 v3 evidence 只能从已持久化事实确定性重建：
+
+1. claim-time gross risk 与 reserved margin 从当时已存在的 active Reservations/Exposure
+   计算；
+2. ticket risk 与 margin limit 从旧 policy、concurrency ceiling 和冻结 Claim 事实推导；
+3. 每个推导公式、输入行 identity 和结果 digest 写入 migration manifest；
+4. 无法证明的字段使整张 Ticket 不导入，禁止部分链路或合成默认值；
+5. 历史 `policy-main:v2` 保持不可变，新 v3 current policy 使用未占用的后续版本。
+
+以下 current/control 状态禁止复制：worker lease、runtime fence、旧 release identity、Active
+Reservation、Netting Domain hold、非零 Account Exposure、Warming lease、Monitor 临时状态、
+过期 Facts/Readiness、旧 Policy current 和旧 Universe current pointer。v3 current authority
+必须来自新 baseline、seed、Certification Batch 和运行时 worker。
+
 ## 10. 部署状态机
 
 ### 10.1 正式阶段
@@ -425,8 +470,11 @@ readonly I/O，再以 expected batch identity 与 lease 写入；最后一个成
 | 阶段 | 完成条件 | 允许运行的 Worker | 失败恢复 |
 | --- | --- | --- | --- |
 | **STAGED** | exact committed release 与 markers 已落盘 | 旧 release 按原状态 | 删除未激活 stage 或重新校验 |
+| **TERMINAL_CERTIFIED** | natural terminal closure、exchange flat、Settlement/Review、零 residue 全部 exact | 旧 Observation/Lifecycle/Reconciliation | 保持 Entry fenced，继续旧 safety runtime |
 | **QUIESCED** | Entry fenced，四个 writer 已停 | 无 | 若 schema 未改，可恢复旧 safety workers |
+| **HISTORY_EXPORTED** | exact v2 snapshot、manifest、row counts 和 checksum 已冻结 | 无 | schema 未改时可重新导出或恢复旧 safety workers |
 | **IDENTITY_ROTATED** | target runtime/schema/seed identity 原子完成 | 无 | 保持 fence，禁止旧 writer |
+| **HISTORY_IMPORTED** | terminal-history transformer 在单事务内导入完整规范链，且零 active state | 无 | 回滚整笔导入；修复 transformer 后重建 target |
 | **READONLY_WORKERS_STARTED** | Observation、Reconciliation 使用 target identity active | Observation、Reconciliation | 保持 fence，停止不匹配 worker |
 | **TARGET_CERTIFIED** | exact Certification Batch complete | Observation、Reconciliation | 保持 fence，修复 blocker 后新建 batch |
 | **LIFECYCLE_STARTED** | Lifecycle identity 与无副作用 smoke 通过 | 三个 safety workers | 保持 fence；Lifecycle 不安全则停止 |
@@ -480,7 +528,8 @@ selector；Certification Batch 最大成员数由 Universe 合同限制，不允
 6. durable Exchange Command、unknown outcome 和 partial fill 语义；
 7. fixed exchange leverage readonly adoption；
 8. exact runtime fence；
-9. flat-only destructive schema rebuild。
+9. flat-only destructive schema rebuild；
+10. exact terminal history 与新 current authority 的隔离。
 
 ## 13. 决策登记
 
@@ -489,11 +538,12 @@ selector；Certification Batch 最大成员数由 Universe 合同限制，不允
 | **D-OR-01** | 已定 | 保持四个 persistent workers，Reconciliation 内部双 Lane | 本设计实施 |
 | **D-OR-02** | 已定 | Certification stale 只暂停 admission，不终态拒绝未过期 Signal | 本设计实施 |
 | **D-OR-03** | 已定 | 支持 exact protected ENTRY Promotion | exact facts 全通过 |
-| **D-OR-04** | 已定 | schema 变化使用 flat-only clean rebuild，不做兼容迁移 | 本地 rehearsal 通过 |
+| **D-OR-04** | 已定 | schema 变化等待 natural terminal closure 后使用 Terminal-History Clean Rebuild，不做 active in-place 迁移 | 本地 transformer/rebuild rehearsal 通过 |
+| **D-DEP-01** | Owner 已批准 | 健康 Runner 不为部署主动退出；终态后保留 exact v2 snapshot，并在不伪造语义时转换为 v3 canonical history | TC-07A 与 TC-08 hard gates 通过 |
 | **D-CAP-01** | Owner 已批准 | 单 Ticket `3%`、账户总止损风险 `6%`、单 Ticket 保证金 `45%`、总保证金 `90%`、最多 `3` 个 Ticket | TC-05 按 exact 参数实现并验证 |
 
 **D-CAP-01** 已关闭决策门，但批准不等于已部署。只有 TC-05、完整本地验证和 Tokyo
-flat-only cutover 全部完成后，生产 seed 和 runtime 才能被描述为实施该政策。
+Terminal-History Clean Rebuild 全部完成后，生产 seed 和 runtime 才能被描述为实施该政策。
 
 ## 14. 完成定义
 
@@ -509,5 +559,8 @@ flat-only cutover 全部完成后，生产 seed 和 runtime 才能被描述为�
    progression 和 Entry Promotion；
 7. 完整 suite、Ruff、Mypy、architecture、runtime file-I/O、diff checks 全部通过；
 8. Tokyo 只在本地证据完成后执行 readonly preflight 和受控 flat rebuild；
-9. 错误旧代码、旧测试、旧 schema 和旧文档语义已删除；
-10. 当前生产证据写回 `MAIN_CONTROL_ROADMAP.md`，本设计不复制瞬时状态。
+9. exact production-shaped v2 snapshot 已在本地完成 terminal-history transformer、v3 导入、
+   hash/count/parity 和零 active-state 验证；
+10. `HISTORY_IMPORTED` 失败可整笔回滚，且不会启动任何 target writer；
+11. 错误旧代码、旧测试、旧 schema 和旧文档语义已删除；
+12. 当前生产证据写回 `MAIN_CONTROL_ROADMAP.md`，本设计不复制瞬时状态。

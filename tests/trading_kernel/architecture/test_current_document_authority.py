@@ -41,6 +41,12 @@ ACTIVE_OPERABILITY_REPAIR_DOCUMENTS = (
     "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
     "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
 )
+TERMINAL_HISTORY_DEPLOYMENT_DOCUMENTS = (
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
+    "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
+)
 
 RETIRED_AUTHORITY_MARKERS = (
     "DUAL_POSITION_",
@@ -165,6 +171,26 @@ def test_active_operability_repair_documents_are_entry_references() -> None:
             if document not in source
         ]
         assert not missing, f"{relative_path} is missing repair references: {missing}"
+
+
+def test_current_deployment_docs_require_terminal_history_clean_rebuild() -> None:
+    required_markers = (
+        "Terminal-History Clean Rebuild",
+        "terminal-history transformer",
+        "natural terminal closure",
+        "HISTORY_IMPORTED",
+    )
+
+    violations: list[str] = []
+    for relative_path in TERMINAL_HISTORY_DEPLOYMENT_DOCUMENTS:
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        for marker in required_markers:
+            if marker not in source:
+                violations.append(f"{relative_path}: missing {marker}")
+
+    assert not violations, "terminal-history deployment authority drift:\n" + "\n".join(
+        violations
+    )
 
 
 def test_current_authority_does_not_reintroduce_retired_execution_semantics() -> None:

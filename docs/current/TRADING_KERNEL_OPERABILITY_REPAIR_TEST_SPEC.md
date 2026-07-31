@@ -16,6 +16,11 @@ last_verified: 2026-07-30
 本规格不记录当前测试数量、生产 commit、Ticket 或服务瞬时状态。当前生产证据仅由
 `docs/current/MAIN_CONTROL_ROADMAP.md` 持有。
 
+本次部署验证对象是 **Terminal-History Clean Rebuild**：测试必须先证明当前 exposure 已
+完成 **natural terminal closure**，再用版本控制的 **terminal-history transformer** 将
+exact v2 snapshot 转换并导入空 v3 baseline。只有 `HISTORY_IMPORTED` 的完整性、零活跃
+状态和新 current authority 隔离全部通过，才允许启动 target workers。
+
 ## 2. 测试原则
 
 ### 2.1 强制规则
@@ -53,6 +58,7 @@ last_verified: 2026-07-30
 | **R-05 Certification Batch** | OR-P1-02 | Unit、Integration、Rehearsal | exact manifest 在 batch 有效窗口内完成并可 Promotion |
 | **R-06 部署状态机** | OR-P1-03 | Unit、Rehearsal | 每个 phase failure 只执行允许的恢复动作 |
 | **R-07 删除错误历史语义** | 全部 | Architecture、静态扫描 | 无旧字段、旧测试、旧 baseline、兼容 reader 或双写 |
+| **R-08 终态历史转换** | D-DEP-01 | Integration、Rehearsal | exact terminal episode 可转换；无猜测字段、部分链路或 active-state copy |
 
 ## 4. RED 顺序
 
@@ -109,6 +115,13 @@ account gross risk 仍低于目标总上限。
 
 构造 Safety action 每 tick 都执行、Fee Monitor due。当前 runner 会推进进程内 observed
 时间但 source 未被调用，测试形成 RED。
+
+### 4.7 RED-7：v2 终态数据不能直接进入 v3
+
+恢复 production-shaped v2 snapshot，完成 Ticket terminal、exchange flat、Reservation 与
+Netting Domain release、Settlement 和 Review。直接向 v3 插入旧 Claim/Policy/current rows
+必须因字段、policy version 或 current-state 约束形成 RED；测试不得通过 nullable legacy
+字段、默认值或跳过 CapacityClaim 伪造完整链路。
 
 ## 5. Unit 测试规格
 
@@ -177,9 +190,9 @@ Unit 测试必须逐项拒绝：
 11. final postflight 后 service 异常；
 12. Promotion 重试不是 exact idempotent state。
 
-Batch policy 测试必须证明：exact current version 可用；仅直接 `v1 -> v2` 且 ENTRY 已
-arm 的 successor 可继续使用；`v1 -> v3`、`v2 -> v3`、未 arm 的 v2 或其他版本漂移
-全部拒绝。
+Batch policy 测试必须证明：exact current version 可用；仅
+`current_policy_version = batch_policy_version + 1` 且 ENTRY 已 arm 的直接 successor
+可继续使用；跳级、未 arm、风险/scope/manifest drift 或复用历史 policy version 全部拒绝。
 
 ### 5.5 Capacity Sizing
 
@@ -213,6 +226,20 @@ Owner 已批准的 exact policy 为单 Ticket `3%`、账户总风险 `6%`、单 
 6. failure recovery；
 7. target identity conflict；
 8. ops journal attempt count 与 sanitized error。
+
+### 5.7 Terminal-History Transformer
+
+Unit 测试必须覆盖：
+
+1. 输入 manifest 只接受 exact v2 schema/seed/source checksum；
+2. natural terminal closure 任一条件缺失时拒绝转换；
+3. claim-time gross risk 和 reserved margin 从 source facts 确定性重建；
+4. 旧 per-Ticket policy 与 concurrency ceiling 的派生公式使用 `Decimal` 并写入 manifest；
+5. 历史 `policy-main:v2` 不被 v3 seed 覆盖，新 current policy 使用未占用 successor version；
+6. 任一必需字段不可证明时整张 Ticket 拒绝，不允许 partial import；
+7. worker lease、fence、current policy/universe、active hold/reservation/exposure 等 control rows
+   永不进入输出；
+8. 相同输入产生相同 row identity、ordering 和 digest。
 
 ## 6. PostgreSQL Integration 规格
 
@@ -262,6 +289,22 @@ Schema test 必须证明：
 4. 表、索引、constraint 与 metadata exact；
 5. 旧 policy 字段、旧 baseline、兼容 view、trigger、reader 和双写不存在；
 6. ops journal schema 与 application schema 的删除边界清晰。
+
+### 6.5 Terminal History PostgreSQL Import
+
+Disposable PostgreSQL 使用 exact v2 snapshot 和空 v3 target，必须验证：
+
+1. source 先通过 terminal/flat/no-residue/Settlement/Review gate；
+2. transformer 输出在一个 target transaction 内导入，任一行失败整笔回滚；
+3. Signal、Claim、Ticket、Event、Command、Settlement、Review 与 closed Incident 的 source
+   row count、exact identity 和 canonical digest 对应；
+4. v3 domain 可以读取转换后的终态 Claim/Ticket，不触发新容量或 Lifecycle authority；
+5. 零 active Ticket selector、零 Active Reservation、零 Netting Domain hold、零非零 Exposure、
+   零 due Command、零 open Incident；
+6. 新 seed 的 Policy、Universe current、runtime identity 和 Certification Batch 不被 source
+   current rows 覆盖；
+7. 再次导入相同 manifest 明确 idempotent pass 或在 transaction 前 exact refuse，不产生半套
+   duplicate lineage。
 
 ## 7. Full-chain 规格
 
@@ -327,6 +370,24 @@ Lifecycle/Reconciliation 仍工作。
 7. Initial Stop 缺失时 fail-closed；
 8. Settlement/Review 只在 exchange-flat 与内部释放后完成。
 
+### 7.5 Terminal-History Clean Rebuild 链
+
+```text
+natural terminal closure
+-> exact v2 snapshot + checksum
+-> local restore
+-> terminal-history transformer
+-> empty v3 baseline + seed
+-> HISTORY_IMPORTED
+-> readonly workers
+-> Certification Batch
+-> Entry fenced smoke
+-> Promotion
+```
+
+必须证明旧 terminal Ticket 只提供历史与 Review 证据；新的 Observation、Admission、Claim
+和 Ticket 只读取 v3 current Policy/Universe/runtime identity。
+
 ## 8. Deployment Failure Matrix
 
 ### 8.1 注入点
@@ -334,8 +395,11 @@ Lifecycle/Reconciliation 仍工作。
 | 注入阶段 | 故障 | 期望 Fence | 期望 Worker | 数据恢复 |
 | --- | --- | --- | --- | --- |
 | STAGED | release marker 不一致 | 保持原状态 | 旧 runtime 不变 | 丢弃 stage |
+| TERMINAL_CERTIFIED | Ticket 未 terminal、残留订单或 Review 未完成 | present | 旧 safety workers | 继续自然 Lifecycle，不进入 cutover |
 | QUIESCED | worker 未全部停止 | present | 不启动 target | 不改 schema/identity |
+| HISTORY_EXPORTED | snapshot checksum/manifest 不一致 | present | 全停或恢复旧 safety workers | 不删除 schema |
 | IDENTITY_ROTATED | identity transaction 失败 | present | 全停 | ops journal 可重试 |
+| HISTORY_IMPORTED | transformer、constraint 或 parity 失败 | present | 全停 | target transaction 回滚并重建 |
 | READONLY_WORKERS_STARTED | Observation 或 Reconciliation crash | present | 只保留 identity 正确者 | 不启动 Lifecycle/Entry |
 | TARGET_CERTIFIED | 一个 member blocked/timeout | present | readonly workers | 新 batch 重试，旧 batch 不改 |
 | LIFECYCLE_STARTED | smoke 失败 | present | Observation/Reconciliation | 停 Lifecycle |
@@ -352,23 +416,27 @@ Lifecycle/Reconciliation 仍工作。
 
 ### 9.1 环境
 
-Rehearsal 使用 disposable PostgreSQL、临时 release root、fake systemd backend 和 recording
-Binance USD-M readonly adapter。禁止使用生产凭证执行 mutation。
+Rehearsal 使用 production-shaped v2 snapshot restore、disposable v3 PostgreSQL、临时 release
+root、fake systemd backend 和 recording Binance USD-M readonly adapter。禁止使用生产凭证
+执行 mutation。
 
 ### 9.2 必须完成的链路
 
-1. 从空 application schema 开始；
-2. 安装唯一 baseline；
-3. seed Registry、Owner Policy、Capability、runtime identity；
-4. 一次安装 approved seven-instrument manifest；
-5. 启动 Observation/Reconciliation 模拟器；
-6. 完成 Certification Batch；
-7. 自动推进六个 Universe 到 Active；
-8. 启动 Lifecycle 并完成 flat smoke；
-9. 启动 Entry while fenced；
-10. 执行 final postflight 并 unfence；
-11. 重跑同一 operation，证明 exact idempotency；
-12. 全程记录 exchange mutation count = 0。
+1. 恢复 exact v2 snapshot 并验证 natural terminal closure；
+2. 生成 source manifest、row counts 和 checksum；
+3. 从空 v3 application schema 安装唯一 baseline；
+4. seed Registry、新 Owner Policy lineage、Capability、runtime identity；
+5. 执行 terminal-history transformer 并完成 `HISTORY_IMPORTED`；
+6. 验证历史 parity 与零 active/current-control 污染；
+7. 一次安装 approved seven-instrument manifest；
+8. 启动 Observation/Reconciliation 模拟器；
+9. 完成 Certification Batch；
+10. 自动推进六个 Universe 到 Active；
+11. 启动 Lifecycle 并完成 flat smoke；
+12. 启动 Entry while fenced；
+13. 执行 final postflight 并 unfence；
+14. 重跑同一 operation，证明 exact idempotency；
+15. 全程记录 exchange mutation count = 0。
 
 ### 9.3 时间预算
 
@@ -418,7 +486,8 @@ Tokyo 只读检查必须重新获取：
 4. exchange account mode、margin mode、configured leverage；
 5. positions、open orders、protection ownership；
 6. approved manifest 与 current Universe pointers；
-7. database/exchange flatness 或 exact protected facts。
+7. natural terminal closure、database/exchange flatness、Settlement/Review 与零 residue；
+8. final v2 snapshot manifest/checksum 与本地 rehearsal 使用的 source shape 一致。
 
 ### 11.2 部署后
 
@@ -459,8 +528,10 @@ Tokyo 只读检查必须重新获取：
 4. active position 下 Housekeeping 仍无最大等待保证；
 5. protected Promotion 需要放松 unknown/incident/protection gate；
 6. 新 schema 需要旧表 reader、兼容 migration 或双写；
-7. 本地无法复现或验证 deterministic deployment phase；
-8. 任何测试或脚本发生未授权 exchange mutation。
+7. terminal-history transformer 需要默认值、伪造 gross policy、部分 Ticket import 或复制旧
+   current/control rows；
+8. 本地无法复现或验证 deterministic deployment phase；
+9. 任何测试或脚本发生未授权 exchange mutation。
 
 ## 13. 交付证据格式
 

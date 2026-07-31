@@ -65,8 +65,12 @@ contract; completed task-card material may then be retired from `docs/current`.
 The only production execution package is `src/trading_kernel`. The local repair
 candidate schema head is `0001_trading_kernel_baseline_v3`. It replaces the
 retired evolution chain only through the approved destructive empty-schema
-rebuild; it is not an in-place forward migration. The deployed schema identity
-remains a volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.
+rebuild; it is not an active-state in-place forward migration. After natural
+terminal closure, a version-controlled terminal-history transformer may copy
+only an exact complete terminal episode into the clean target schema. It may
+not copy old current/control authority or make v3 read retired tables. The
+deployed schema identity remains a volatile fact owned only by
+`MAIN_CONTROL_ROADMAP.md`.
 
 Strategy semantics live in the Registry, while concrete instrument membership,
 certification, warming, current activation, and frozen Signal/Ticket lineage
@@ -83,5 +87,8 @@ read by exact key from PostgreSQL and reconciled against exchange facts.
 - Trade Events and Exchange Commands are append-only.
 - Healthy no-signal and reconciliation ticks do not create report files.
 - Manual exports are bounded, display-only, and disposable.
+- A final terminal-history database snapshot is a checksummed deployment input
+  governed by `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`; it is not runtime input
+  after the one-time target transaction completes.
 - Retired program generations are deleted rather than preserved as current
   compatibility surfaces.
