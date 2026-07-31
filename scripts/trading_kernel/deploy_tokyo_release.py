@@ -13,6 +13,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
+from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
@@ -25,6 +26,7 @@ from src.trading_kernel.infrastructure.runtime_identity import (
 )
 
 SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
+COMPATIBLE_SOURCE_SCHEMA_REVISION = "0001_trading_kernel_baseline_v4"
 EXPECTED_CONFIGURED_LEVERAGE = 5
 RELEASE_ROOT = "/opt/brc/releases"
 CURRENT_RELEASE = "/opt/brc/current"
@@ -55,6 +57,11 @@ class DeploymentBlocked(RuntimeError):
     """Preflight or postflight facts do not satisfy the release contract."""
 
 
+class DeploymentMode(StrEnum):
+    REGULAR = "regular"
+    COMPATIBLE_UPGRADE = "compatible_upgrade"
+
+
 @dataclass(frozen=True)
 class DeploymentPlan:
     target_commit: str
@@ -62,7 +69,8 @@ class DeploymentPlan:
     schema_revision: str
     expected_configured_leverage: int
     enable_entry: bool
-    protected_ticket_ids: tuple[str, ...] = ()
+    source_schema_revision: str | None = None
+    mode: DeploymentMode = DeploymentMode.REGULAR
     closure_ticket_id: str | None = None
 
     def __post_init__(self) -> None:
@@ -73,20 +81,24 @@ class DeploymentPlan:
         )
         if self.target_release != expected_release:
             raise ValueError("target release path differs from target commit")
-        if self.schema_revision != SCHEMA_REVISION:
-            raise ValueError("regular deployment cannot change schema revision")
+        if self.mode is DeploymentMode.REGULAR:
+            if self.source_schema_revision is not None:
+                raise ValueError("regular deployment cannot change schema revision")
+            if self.schema_revision != SCHEMA_REVISION:
+                raise ValueError("regular deployment cannot change schema revision")
+        elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
+            if self.source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
+                raise ValueError("compatible upgrade requires the exact v4 source")
+            if self.schema_revision != SCHEMA_REVISION:
+                raise ValueError("compatible upgrade requires the current schema head")
+            if self.closure_ticket_id is not None:
+                raise ValueError("compatible upgrade requires fully terminal history")
+        else:
+            raise ValueError("unsupported deployment mode")
         if self.expected_configured_leverage != EXPECTED_CONFIGURED_LEVERAGE:
             raise ValueError("production configured leverage must remain fixed at 5x")
-        if any(not ticket_id.strip() for ticket_id in self.protected_ticket_ids):
-            raise ValueError("protected Ticket identities must be non-blank")
-        if len(set(self.protected_ticket_ids)) != len(self.protected_ticket_ids):
-            raise ValueError("protected Ticket identities must be distinct")
-        if self.protected_ticket_ids and self.enable_entry:
-            raise ValueError("protected handover must keep ENTRY fenced")
         if self.closure_ticket_id is not None and not self.closure_ticket_id.strip():
             raise ValueError("closure-only Ticket identity must be non-blank")
-        if self.closure_ticket_id is not None and self.protected_ticket_ids:
-            raise ValueError("closure-only and protected handover are mutually exclusive")
         if self.closure_ticket_id is not None and self.enable_entry:
             raise ValueError("closure-only handover must keep ENTRY fenced")
 
@@ -99,14 +111,13 @@ class DeploymentResult:
     schema_revision: str
     configured_leverage: int
     entry_enabled: bool
+    mode: DeploymentMode
 
 
 class TokyoReleaseBackend(Protocol):
     def read_current_release(self) -> str: ...
 
     def certify_flat(self, release: str) -> Mapping[str, object]: ...
-
-    def certify_protected(self, release: str) -> Mapping[str, object]: ...
 
     def certify_closure(
         self,
@@ -116,10 +127,10 @@ class TokyoReleaseBackend(Protocol):
 
     def probe_exchange(self, release: str) -> Mapping[str, object]: ...
 
-    def probe_protected_exchange(
+    def certify_compatible_source(
         self,
         release: str,
-        protected_tickets: list[object],
+        source_schema_revision: str,
     ) -> Mapping[str, object]: ...
 
     def read_release_marker(self, release: str, marker: str) -> str: ...
@@ -137,12 +148,25 @@ class TokyoReleaseBackend(Protocol):
         schema_revision: str,
     ) -> Mapping[str, object]: ...
 
-    def deploy_protected_identity(
+    def migrate_schema(
+        self,
+        release: str,
+        source_schema_revision: str,
+        target_schema_revision: str,
+    ) -> None: ...
+
+    def verify_preservation(
+        self,
+        release: str,
+        source_schema_revision: str,
+        expected_digest: str,
+    ) -> Mapping[str, object]: ...
+
+    def deploy_compatible_identity(
         self,
         release: str,
         commit: str,
         schema_revision: str,
-        ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]: ...
 
     def deploy_closure_identity(
@@ -163,6 +187,8 @@ class TokyoReleaseBackend(Protocol):
 
     def start_services(self, services: tuple[str, ...]) -> None: ...
 
+    def bootstrap_strategy_universes(self, release: str) -> None: ...
+
     def unfence_entry(self) -> None: ...
 
     def fence_entry(self) -> None: ...
@@ -178,10 +204,16 @@ def deploy_tokyo_release(
     if current_release == plan.target_release:
         raise DeploymentBlocked("target release is already current")
     backend.install_release(plan.target_commit, plan.target_release)
-    _, _, current_identity = _read_release_facts(
-        backend,
-        plan,
-    )
+    preservation_digest: str | None = None
+    if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
+        source_certification, _, current_identity = _read_compatible_source_facts(
+            backend,
+            plan,
+            exchange_probe_release=current_release,
+        )
+        preservation_digest = _require_preservation_digest(source_certification)
+    else:
+        _, _, current_identity = _read_release_facts(backend, plan)
     _require_marker(
         backend,
         current_release,
@@ -192,10 +224,11 @@ def deploy_tokyo_release(
         backend,
         current_release,
         ".brc-schema-revision",
-        plan.schema_revision,
+        plan.source_schema_revision or plan.schema_revision,
     )
 
     services_stopped = False
+    schema_migrated = False
     identity_rotated = False
     target_release_activated = False
     try:
@@ -209,24 +242,51 @@ def deploy_tokyo_release(
                 + ",".join(sorted(active_after_stop))
             )
 
-        if plan.closure_ticket_id is not None:
+        if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
+            final_source, _, final_identity = _read_compatible_source_facts(
+                backend,
+                plan,
+                exchange_probe_release=current_release,
+            )
+            if final_identity != current_identity:
+                raise DeploymentBlocked("source runtime identity changed during cutover")
+            if _require_preservation_digest(final_source) != preservation_digest:
+                raise DeploymentBlocked("source preservation digest changed during cutover")
+            if preservation_digest is None:
+                raise DeploymentBlocked("source preservation digest is missing")
+            backend.migrate_schema(
+                plan.target_release,
+                plan.source_schema_revision or "",
+                plan.schema_revision,
+            )
+            schema_migrated = True
+            preservation = backend.verify_preservation(
+                plan.target_release,
+                plan.source_schema_revision or "",
+                preservation_digest,
+            )
+            _require_preservation_verification(
+                preservation,
+                target_schema_revision=plan.schema_revision,
+                expected_digest=preservation_digest,
+            )
+        elif plan.closure_ticket_id is not None:
             _read_release_facts(backend, plan)
 
         deployment_identity = (
-            backend.deploy_closure_identity(
+            backend.deploy_compatible_identity(
+                plan.target_release,
+                plan.target_commit,
+                plan.schema_revision,
+            )
+            if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
+            else backend.deploy_closure_identity(
                 plan.target_release,
                 plan.target_commit,
                 plan.schema_revision,
                 plan.closure_ticket_id,
             )
             if plan.closure_ticket_id is not None
-            else backend.deploy_protected_identity(
-                plan.target_release,
-                plan.target_commit,
-                plan.schema_revision,
-                plan.protected_ticket_ids,
-            )
-            if plan.protected_ticket_ids
             else backend.deploy_identity(
                 plan.target_release,
                 plan.target_commit,
@@ -245,13 +305,6 @@ def deploy_tokyo_release(
             seed_identity,
         )
         target_release_activated = True
-        _, _, target_identity = _read_release_facts(backend, plan)
-        if target_identity != {
-            "runtime_commit": plan.target_commit,
-            "schema_revision": plan.schema_revision,
-            "seed_identity": seed_identity,
-        }:
-            raise DeploymentBlocked("deployed runtime identity differs from target")
         if backend.read_current_release() != plan.target_release:
             raise DeploymentBlocked("current release symlink differs from target")
         for marker, expected in (
@@ -262,11 +315,15 @@ def deploy_tokyo_release(
             _require_marker(backend, plan.target_release, marker, expected)
 
         backend.start_services(SAFETY_SERVICES)
+        if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
+            backend.bootstrap_strategy_universes(plan.target_release)
+        _require_target_postflight(backend, plan, seed_identity=seed_identity)
         if plan.enable_entry:
             backend.start_services((ENTRY_SERVICE,))
             active_before_unfence = backend.services_active(ALL_SERVICES)
             if active_before_unfence != frozenset(ALL_SERVICES):
                 raise DeploymentBlocked("ENTRY did not become active while write-fenced")
+            _require_target_postflight(backend, plan, seed_identity=seed_identity)
             backend.unfence_entry()
         if (
             plan.closure_ticket_id is not None
@@ -282,7 +339,9 @@ def deploy_tokyo_release(
     except Exception:
         if services_stopped:
             backend.fence_entry()
-            if target_release_activated or not identity_rotated:
+            if target_release_activated or (
+                not schema_migrated and not identity_rotated
+            ):
                 backend.start_services(SAFETY_SERVICES)
         raise
 
@@ -293,6 +352,7 @@ def deploy_tokyo_release(
         schema_revision=plan.schema_revision,
         configured_leverage=plan.expected_configured_leverage,
         entry_enabled=plan.enable_entry,
+        mode=plan.mode,
     )
 
 
@@ -316,22 +376,6 @@ def _read_release_facts(
                 closure_ticket_id=plan.closure_ticket_id,
             ),
         )
-    if plan.protected_ticket_ids:
-        certification = backend.certify_protected(plan.target_release)
-        probe = backend.probe_protected_exchange(
-            plan.target_release,
-            _require_protected_ticket_rows(certification),
-        )
-        return (
-            certification,
-            probe,
-            _require_protected_release_facts(
-                certification,
-                probe,
-                expected_leverage=plan.expected_configured_leverage,
-                protected_ticket_ids=plan.protected_ticket_ids,
-            ),
-        )
     certification = backend.certify_flat(plan.target_release)
     probe = backend.probe_exchange(plan.target_release)
     return (
@@ -345,6 +389,112 @@ def _read_release_facts(
     )
 
 
+def _read_compatible_source_facts(
+    backend: TokyoReleaseBackend,
+    plan: DeploymentPlan,
+    *,
+    exchange_probe_release: str,
+) -> tuple[Mapping[str, object], Mapping[str, object], dict[str, str]]:
+    source_schema_revision = plan.source_schema_revision
+    if source_schema_revision is None:
+        raise DeploymentBlocked("compatible source schema is missing")
+    certification = backend.certify_compatible_source(
+        plan.target_release,
+        source_schema_revision,
+    )
+    probe = backend.probe_exchange(exchange_probe_release)
+    identity = _require_compatible_source_facts(
+        certification,
+        probe,
+        source_schema_revision=source_schema_revision,
+        expected_leverage=plan.expected_configured_leverage,
+    )
+    return certification, probe, identity
+
+
+def _require_target_postflight(
+    backend: TokyoReleaseBackend,
+    plan: DeploymentPlan,
+    *,
+    seed_identity: str,
+) -> None:
+    _, _, target_identity = _read_release_facts(backend, plan)
+    if target_identity != {
+        "runtime_commit": plan.target_commit,
+        "schema_revision": plan.schema_revision,
+        "seed_identity": seed_identity,
+    }:
+        raise DeploymentBlocked("deployed runtime identity differs from target")
+
+
+def _require_compatible_source_facts(
+    certification: Mapping[str, object],
+    probe: Mapping[str, object],
+    *,
+    source_schema_revision: str,
+    expected_leverage: int,
+) -> dict[str, str]:
+    if certification.get("status") != "pass":
+        raise DeploymentBlocked("compatible source certification failed")
+    if certification.get("alembic_revision") != source_schema_revision:
+        raise DeploymentBlocked("compatible source schema revision differs")
+    migration_gate = certification.get("migration_gate")
+    if not isinstance(migration_gate, Mapping):
+        raise DeploymentBlocked("compatible migration gate is missing")
+    blockers = (
+        ("active_tickets", "active Ticket"),
+        ("non_flat_positions", "projected position"),
+        ("active_reservations", "Budget Reservation"),
+        ("active_domains", "Netting Domain"),
+        ("unreviewed_terminal_tickets", "terminal Ticket Review"),
+        ("unresolved_commands", "unresolved Exchange Command"),
+        ("open_incidents", "open Incident"),
+    )
+    for key, label in blockers:
+        if int(str(migration_gate.get(key, -1))) != 0:
+            raise DeploymentBlocked(f"compatible migration requires zero {label}")
+    runtime_identity = certification.get("runtime_identity")
+    if not isinstance(runtime_identity, Mapping):
+        raise DeploymentBlocked("compatible source runtime identity is missing")
+    identity = {
+        key: str(runtime_identity.get(key, ""))
+        for key in ("runtime_commit", "schema_revision", "seed_identity")
+    }
+    if (
+        not _COMMIT.fullmatch(identity["runtime_commit"])
+        or identity["schema_revision"] != source_schema_revision
+        or not _SEED_IDENTITY.fullmatch(identity["seed_identity"])
+    ):
+        raise DeploymentBlocked("compatible source runtime identity is invalid")
+    _require_preservation_digest(certification)
+    _require_flat_exchange_facts(probe, expected_leverage=expected_leverage)
+    return identity
+
+
+def _require_preservation_digest(payload: Mapping[str, object]) -> str:
+    manifest = payload.get("preservation_manifest")
+    if not isinstance(manifest, Mapping):
+        raise DeploymentBlocked("history preservation manifest is missing")
+    digest = str(manifest.get("digest", ""))
+    if not _SEED_IDENTITY.fullmatch(digest):
+        raise DeploymentBlocked("history preservation digest is invalid")
+    return digest
+
+
+def _require_preservation_verification(
+    payload: Mapping[str, object],
+    *,
+    target_schema_revision: str,
+    expected_digest: str,
+) -> None:
+    if payload.get("status") != "pass":
+        raise DeploymentBlocked("history preservation digest differs")
+    if payload.get("alembic_revision") != target_schema_revision:
+        raise DeploymentBlocked("compatible target schema revision differs")
+    if _require_preservation_digest(payload) != expected_digest:
+        raise DeploymentBlocked("history preservation digest differs")
+
+
 def _require_release_facts(
     certification: Mapping[str, object],
     probe: Mapping[str, object],
@@ -353,6 +503,14 @@ def _require_release_facts(
 ) -> dict[str, str]:
     if certification.get("status") != "pass":
         raise DeploymentBlocked("database flat certification failed")
+    required_gates = (
+        ("universe_bootstrap_pass", "StrategyUniverse bootstrap certification failed"),
+        ("certification_batch_pass", "Certification Batch certification failed"),
+        ("flatness_pass", "database flatness gate failed"),
+    )
+    for key, message in required_gates:
+        if certification.get(key) is not True:
+            raise DeploymentBlocked(message)
     active_counts = certification.get("active_counts")
     if not isinstance(active_counts, Mapping) or any(
         int(str(active_counts.get(key, -1))) != 0
@@ -485,62 +643,6 @@ def _require_flat_exchange_facts(
     )
 
 
-def _require_protected_release_facts(
-    certification: Mapping[str, object],
-    probe: Mapping[str, object],
-    *,
-    expected_leverage: int,
-    protected_ticket_ids: tuple[str, ...],
-) -> dict[str, str]:
-    protected_ticket_count = len(protected_ticket_ids)
-    if certification.get("status") != "pass":
-        raise DeploymentBlocked("database protected certification failed")
-    active_counts = certification.get("active_counts")
-    if not isinstance(active_counts, Mapping) or any(
-        int(str(active_counts.get(key, -1))) != expected
-        for key, expected in (
-            ("tickets", protected_ticket_count),
-            ("commands", 0),
-            ("positions", protected_ticket_count),
-            ("incidents", 0),
-        )
-    ):
-        raise DeploymentBlocked("database protected runtime activity differs")
-    runtime_identity = certification.get("runtime_identity")
-    if not isinstance(runtime_identity, Mapping):
-        raise DeploymentBlocked("database runtime identity is missing")
-    identity = {
-        key: str(runtime_identity.get(key, ""))
-        for key in ("runtime_commit", "schema_revision", "seed_identity")
-    }
-    if (
-        not _COMMIT.fullmatch(identity["runtime_commit"])
-        or identity["schema_revision"] != SCHEMA_REVISION
-        or not _SEED_IDENTITY.fullmatch(identity["seed_identity"])
-    ):
-        raise DeploymentBlocked("database runtime identity is invalid")
-    if probe.get("venue_id") != "binance-usdm":
-        raise DeploymentBlocked("production venue identity differs from policy")
-    if probe.get("account_position_mode") != "independent_sides":
-        raise DeploymentBlocked("production account position mode is invalid")
-    if probe.get("account_margin_mode") != "cross":
-        raise DeploymentBlocked("production account margin mode is invalid")
-    if int(str(probe.get("non_flat_domain_count", -1))) != protected_ticket_count:
-        raise DeploymentBlocked("exchange protected position count differs")
-    if int(str(probe.get("open_order_domain_count", -1))) != protected_ticket_count:
-        raise DeploymentBlocked("exchange protected order count differs")
-    _require_exact_protected_exchange_facts(
-        certification,
-        probe,
-        protected_ticket_ids=protected_ticket_ids,
-    )
-    _require_probe_rules(
-        probe,
-        expected_leverage=expected_leverage,
-    )
-    return identity
-
-
 def _require_probe_rules(
     probe: Mapping[str, object],
     *,
@@ -579,67 +681,6 @@ def _require_probe_rules(
         raise DeploymentBlocked(
             "production configured leverage differs from fixed 5x policy"
         )
-
-
-def _require_exact_protected_exchange_facts(
-    certification: Mapping[str, object],
-    probe: Mapping[str, object],
-    *,
-    protected_ticket_ids: tuple[str, ...],
-) -> None:
-    certification_tickets = certification.get("protected_tickets")
-    probe_tickets = probe.get("protected_tickets")
-    if not isinstance(certification_tickets, list) or not isinstance(
-        probe_tickets,
-        list,
-    ):
-        raise DeploymentBlocked("exact protected exchange facts are missing")
-    expected_ids = set(protected_ticket_ids)
-    certification_by_ticket = _protected_ticket_facts_by_ticket(
-        certification_tickets,
-        expected_ids=expected_ids,
-    )
-    probe_by_ticket = _protected_ticket_facts_by_ticket(
-        probe_tickets,
-        expected_ids=expected_ids,
-    )
-    if certification_by_ticket != probe_by_ticket:
-        raise DeploymentBlocked("exact protected exchange facts differ")
-
-
-def _require_protected_ticket_rows(
-    certification: Mapping[str, object],
-) -> list[object]:
-    rows = certification.get("protected_tickets")
-    if not isinstance(rows, list):
-        raise DeploymentBlocked("exact protected exchange facts are missing")
-    return rows
-
-
-def _protected_ticket_facts_by_ticket(
-    rows: list[object],
-    *,
-    expected_ids: set[str],
-) -> dict[str, str]:
-    normalized: dict[str, str] = {}
-    for row in rows:
-        if not isinstance(row, Mapping):
-            raise DeploymentBlocked("exact protected exchange facts are invalid")
-        canonical_row = dict(row)
-        if canonical_row.get("recorded_tp1_fill_quantity") is None:
-            canonical_row.pop("recorded_tp1_fill_quantity", None)
-        ticket_id = str(canonical_row.get("ticket_id", "")).strip()
-        if not ticket_id or ticket_id in normalized:
-            raise DeploymentBlocked("exact protected exchange facts are invalid")
-        normalized[ticket_id] = json.dumps(
-            canonical_row,
-            ensure_ascii=True,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-    if set(normalized) != expected_ids:
-        raise DeploymentBlocked("exact protected exchange facts differ")
-    return normalized
 
 
 def _require_deployment_identity(
@@ -703,12 +744,6 @@ class SshTokyoReleaseBackend:
             "--require-flat",
         )
 
-    def certify_protected(self, release: str) -> Mapping[str, object]:
-        return self._release_json(
-            release,
-            "scripts/trading_kernel/certify_readonly.py",
-        )
-
     def certify_closure(
         self,
         release: str,
@@ -727,27 +762,16 @@ class SshTokyoReleaseBackend:
             "scripts/trading_kernel/probe_production_runtime.py",
         )
 
-    def probe_protected_exchange(
+    def certify_compatible_source(
         self,
         release: str,
-        protected_tickets: list[object],
+        source_schema_revision: str,
     ) -> Mapping[str, object]:
-        encoded_rows: list[str] = []
-        for row in protected_tickets:
-            if not isinstance(row, Mapping):
-                raise TypeError("protected certification row must be a mapping")
-            encoded_rows.append(
-                json.dumps(
-                    row,
-                    ensure_ascii=True,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                )
-            )
         return self._release_json(
             release,
-            "scripts/trading_kernel/probe_production_runtime.py",
-            *(argument for row in encoded_rows for argument in ("--protected-ticket-json", row)),
+            "scripts/trading_kernel/verify_schema.py",
+            "--compatible-source-revision",
+            source_schema_revision,
         )
 
     def read_release_marker(self, release: str, marker: str) -> str:
@@ -812,26 +836,53 @@ class SshTokyoReleaseBackend:
             schema_revision,
         )
 
-    def deploy_protected_identity(
+    def migrate_schema(
+        self,
+        release: str,
+        source_schema_revision: str,
+        target_schema_revision: str,
+    ) -> None:
+        if source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
+            raise ValueError("compatible migration source revision differs")
+        self._release_command(
+            release,
+            "-m",
+            "alembic",
+            "-c",
+            "migrations/trading_kernel/alembic.ini",
+            "upgrade",
+            target_schema_revision,
+        )
+
+    def verify_preservation(
+        self,
+        release: str,
+        source_schema_revision: str,
+        expected_digest: str,
+    ) -> Mapping[str, object]:
+        return self._release_json(
+            release,
+            "scripts/trading_kernel/verify_schema.py",
+            "--preserve-source-revision",
+            source_schema_revision,
+            "--expected-preservation-digest",
+            expected_digest,
+        )
+
+    def deploy_compatible_identity(
         self,
         release: str,
         commit: str,
         schema_revision: str,
-        ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         return self._release_json(
             release,
             "scripts/trading_kernel/seed_runtime_authority.py",
-            "deploy-protected-identity",
+            "deploy-compatible-identity",
             "--runtime-commit",
             commit,
             "--schema-revision",
             schema_revision,
-            *(
-                argument
-                for ticket_id in ticket_ids
-                for argument in ("--protected-ticket-id", ticket_id)
-            ),
         )
 
     def deploy_closure_identity(
@@ -914,6 +965,18 @@ class SshTokyoReleaseBackend:
             raise ValueError("ENTRY must be started as the final isolated phase")
         self._remote(("sudo", "systemctl", "enable", "--now", *services))
 
+    def bootstrap_strategy_universes(self, release: str) -> None:
+        self._release_command(
+            release,
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            "tiny-live-v1",
+            "--wait-timeout-ms",
+            "900000",
+            "--poll-interval-ms",
+            "5000",
+        )
+
     def unfence_entry(self) -> None:
         self._remote(("sudo", "rm", "-f", WRITE_FENCE))
 
@@ -975,6 +1038,20 @@ class SshTokyoReleaseBackend:
         if not isinstance(payload, Mapping):
             raise TypeError("Tokyo release command did not return a JSON object")
         return payload
+
+    def _release_command(
+        self,
+        release: str,
+        *args: str,
+    ) -> _CommandResult:
+        executable = shlex.join((f"{release}/.venv/bin/python", *args))
+        command = (
+            f"set -a; . {shlex.quote(RUNTIME_ENV)}; set +a; "
+            f"cd {shlex.quote(release)}; exec {executable}"
+        )
+        return self._remote(
+            ("sudo", "-u", "brc", "/bin/bash", "-lc", command)
+        )
 
     def _upload_git_archive(self, commit: str, release: str) -> None:
         archive = subprocess.Popen(
@@ -1062,13 +1139,13 @@ def _parser() -> argparse.ArgumentParser:
         help="Enable ENTRY only after all target postflight checks pass.",
     )
     parser.add_argument(
-        "--protected-ticket-id",
-        action="append",
-        default=[],
-        help=(
-            "Exact fully protected Ticket allowed across this one guarded "
-            "identity handover; repeat once per active Ticket."
-        ),
+        "--mode",
+        choices=tuple(mode.value for mode in DeploymentMode),
+        default=DeploymentMode.REGULAR.value,
+    )
+    parser.add_argument(
+        "--source-schema-revision",
+        help="Exact source revision for compatible_upgrade mode.",
     )
     parser.add_argument(
         "--closure-ticket-id",
@@ -1105,7 +1182,8 @@ def main(argv: list[str] | None = None) -> int:
         schema_revision=SCHEMA_REVISION,
         expected_configured_leverage=EXPECTED_CONFIGURED_LEVERAGE,
         enable_entry=args.enable_entry,
-        protected_ticket_ids=tuple(args.protected_ticket_id),
+        source_schema_revision=args.source_schema_revision,
+        mode=DeploymentMode(args.mode),
         closure_ticket_id=args.closure_ticket_id,
     )
     backend = SshTokyoReleaseBackend(

@@ -10,6 +10,7 @@ from scripts.trading_kernel.deploy_tokyo_release import (
     ENTRY_SERVICE,
     SAFETY_SERVICES,
     DeploymentBlocked,
+    DeploymentMode,
     DeploymentPlan,
     SshTokyoReleaseBackend,
     deploy_tokyo_release,
@@ -19,7 +20,10 @@ TARGET_COMMIT = "a" * 40
 CURRENT_COMMIT = "b" * 40
 CURRENT_RELEASE = "/opt/brc/releases/brc-trading-kernel-bbbbbbbbbbbb"
 TARGET_RELEASE = "/opt/brc/releases/brc-trading-kernel-aaaaaaaaaaaa"
+SOURCE_SCHEMA_REVISION = "0001_trading_kernel_baseline_v4"
+TARGET_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
 SEED_IDENTITY = "sha256:" + "c" * 64
+PRESERVATION_DIGEST = "sha256:" + "d" * 64
 TARGET_EXCHANGE_INSTRUMENT_IDS = (
     "binance-usdm:ADAUSDT:perpetual",
     "binance-usdm:BNBUSDT:perpetual",
@@ -44,6 +48,133 @@ def test_regular_plan_freezes_current_schema_without_operator_probe_scope() -> N
     assert "exchange_instrument_ids" not in plan.__dataclass_fields__
 
 
+def test_regular_plan_rejects_a_schema_change() -> None:
+    with pytest.raises(ValueError, match="regular deployment cannot change schema"):
+        DeploymentPlan(
+            target_commit=TARGET_COMMIT,
+            target_release=TARGET_RELEASE,
+            schema_revision=TARGET_SCHEMA_REVISION,
+            source_schema_revision=SOURCE_SCHEMA_REVISION,
+            expected_configured_leverage=5,
+            enable_entry=False,
+        )
+
+
+def test_compatible_upgrade_accepts_only_the_exact_flat_v4_to_v5_path() -> None:
+    plan = DeploymentPlan(
+        target_commit=TARGET_COMMIT,
+        target_release=TARGET_RELEASE,
+        schema_revision=TARGET_SCHEMA_REVISION,
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        mode=DeploymentMode.COMPATIBLE_UPGRADE,
+        expected_configured_leverage=5,
+        enable_entry=False,
+    )
+
+    assert plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
+    assert plan.source_schema_revision == SOURCE_SCHEMA_REVISION
+
+    with pytest.raises(ValueError, match="exact v4 source"):
+        DeploymentPlan(
+            target_commit=TARGET_COMMIT,
+            target_release=TARGET_RELEASE,
+            schema_revision=TARGET_SCHEMA_REVISION,
+            source_schema_revision="0000_unknown",
+            mode=DeploymentMode.COMPATIBLE_UPGRADE,
+            expected_configured_leverage=5,
+            enable_entry=False,
+        )
+
+
+def test_compatible_upgrade_cannot_reuse_active_position_handover() -> None:
+    with pytest.raises(TypeError, match="protected_ticket_ids"):
+        DeploymentPlan(
+            target_commit=TARGET_COMMIT,
+            target_release=TARGET_RELEASE,
+            schema_revision=TARGET_SCHEMA_REVISION,
+            source_schema_revision=SOURCE_SCHEMA_REVISION,
+            mode=DeploymentMode.COMPATIBLE_UPGRADE,
+            expected_configured_leverage=5,
+            enable_entry=False,
+            protected_ticket_ids=("ticket:btc",),
+        )
+
+
+def test_compatible_upgrade_migrates_only_after_final_flat_recheck() -> None:
+    backend = FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION)
+    plan = _compatible_plan(enable_entry=True)
+
+    result = deploy_tokyo_release(backend, plan)
+
+    assert result.status == "pass"
+    assert result.entry_enabled is True
+    assert backend.calls.index(("fence_entry",)) < backend.calls.index(
+        ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
+    )
+    final_source_check = max(
+        index
+        for index, call in enumerate(backend.calls)
+        if call == (
+            "certify_compatible_source",
+            TARGET_RELEASE,
+            SOURCE_SCHEMA_REVISION,
+        )
+    )
+    assert final_source_check < backend.calls.index(
+        ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
+    )
+    assert (
+        "verify_preservation",
+        TARGET_RELEASE,
+        SOURCE_SCHEMA_REVISION,
+        PRESERVATION_DIGEST,
+    ) in backend.calls
+    assert backend.calls.index(("bootstrap_strategy_universes", TARGET_RELEASE)) < (
+        backend.calls.index(("start_services", (ENTRY_SERVICE,)))
+    )
+
+
+@pytest.mark.parametrize(
+    ("source_gate", "expected_message"),
+    [
+        ("active_tickets", "active Ticket"),
+        ("active_reservations", "Budget Reservation"),
+        ("active_domains", "Netting Domain"),
+        ("unreviewed_terminal_tickets", "terminal Ticket Review"),
+        ("unresolved_commands", "unresolved Exchange Command"),
+        ("open_incidents", "open Incident"),
+    ],
+)
+def test_compatible_upgrade_source_gate_blocks_before_service_stop(
+    source_gate: str,
+    expected_message: str,
+) -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        source_gate=source_gate,
+    )
+
+    with pytest.raises(DeploymentBlocked, match=expected_message):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+    assert not any(call[0] == "migrate_schema" for call in backend.calls)
+
+
+def test_compatible_upgrade_preservation_mismatch_keeps_entry_fenced() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        preservation_matches=False,
+    )
+
+    with pytest.raises(DeploymentBlocked, match="preservation digest"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=True))
+
+    assert backend.entry_fenced is True
+    assert not any(call == ("unfence_entry",) for call in backend.calls)
+    assert not any(call == ("start_services", (ENTRY_SERVICE,)) for call in backend.calls)
+
+
 def test_regular_release_uses_database_derived_probe_manifest() -> None:
     backend = FakeDeploymentBackend()
     plan = DeploymentPlan(
@@ -60,6 +191,73 @@ def test_regular_release_uses_database_derived_probe_manifest() -> None:
         ("probe_exchange", TARGET_RELEASE),
         ("probe_exchange", TARGET_RELEASE),
     ]
+
+
+@pytest.mark.parametrize(
+    ("certification_gate", "expected_message"),
+    [
+        ("universe_bootstrap_pass", "StrategyUniverse bootstrap"),
+        ("certification_batch_pass", "Certification Batch"),
+        ("flatness_pass", "database flatness gate"),
+    ],
+)
+def test_release_certification_requires_every_entry_promotion_fact_before_stop(
+    certification_gate: str,
+    expected_message: str,
+) -> None:
+    backend = FakeDeploymentBackend(
+        certification_gate_failure=(1, certification_gate),
+    )
+
+    with pytest.raises(DeploymentBlocked, match=expected_message):
+        deploy_tokyo_release(backend, _plan(enable_entry=True))
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+    assert not any(call == ("start_services", (ENTRY_SERVICE,)) for call in backend.calls)
+
+
+def test_final_database_postflight_failure_restores_fence_and_stops_entry() -> None:
+    backend = FakeDeploymentBackend(
+        certification_gate_failure=(3, "flatness_pass"),
+    )
+
+    with pytest.raises(DeploymentBlocked, match="database flatness gate"):
+        deploy_tokyo_release(backend, _plan(enable_entry=True))
+
+    entry_start = backend.calls.index(("start_services", (ENTRY_SERVICE,)))
+    final_certification = max(
+        index
+        for index, call in enumerate(backend.calls)
+        if call == ("certify_flat", TARGET_RELEASE)
+    )
+    recovery_fence = max(
+        index for index, call in enumerate(backend.calls) if call == ("fence_entry",)
+    )
+    assert entry_start < final_certification < recovery_fence
+    assert ("unfence_entry",) not in backend.calls
+    assert backend.entry_fenced is True
+    assert backend.active_services == set(SAFETY_SERVICES)
+
+
+def test_final_exchange_postflight_failure_restores_fence_and_stops_entry() -> None:
+    backend = FakeDeploymentBackend(probe_non_flat_failure_call=3)
+
+    with pytest.raises(DeploymentBlocked, match="exchange position is not flat"):
+        deploy_tokyo_release(backend, _plan(enable_entry=True))
+
+    entry_start = backend.calls.index(("start_services", (ENTRY_SERVICE,)))
+    final_probe = max(
+        index
+        for index, call in enumerate(backend.calls)
+        if call == ("probe_exchange", TARGET_RELEASE)
+    )
+    recovery_fence = max(
+        index for index, call in enumerate(backend.calls) if call == ("fence_entry",)
+    )
+    assert entry_start < final_probe < recovery_fence
+    assert ("unfence_entry",) not in backend.calls
+    assert backend.entry_fenced is True
+    assert backend.active_services == set(SAFETY_SERVICES)
 
 
 def test_ssh_probe_exchange_has_no_operator_instrument_arguments(
@@ -85,38 +283,6 @@ def test_ssh_probe_exchange_has_no_operator_instrument_arguments(
     backend.probe_exchange(TARGET_RELEASE)
 
     assert calls == [(TARGET_RELEASE, "scripts/trading_kernel/probe_production_runtime.py")]
-
-
-def test_ssh_protected_probe_passes_only_ticket_manifest(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend = SshTokyoReleaseBackend(
-        target="tokyo",
-        repo_root=Path("."),
-        timeout_seconds=30,
-    )
-    calls: list[tuple[object, ...]] = []
-
-    def release_json(
-        release: str,
-        script: str,
-        *args: str,
-    ) -> Mapping[str, object]:
-        calls.append((release, script, *args))
-        return {}
-
-    monkeypatch.setattr(backend, "_release_json", release_json)
-
-    backend.probe_protected_exchange(
-        TARGET_RELEASE,
-        [{"ticket_id": "ticket:btc"}],
-    )
-
-    assert calls[0][0:2] == (
-        TARGET_RELEASE,
-        "scripts/trading_kernel/probe_production_runtime.py",
-    )
-    assert calls[0][2] == "--protected-ticket-json"
 
 
 def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
@@ -150,15 +316,17 @@ def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
             "0002_sor_v3_strategy_group_capacity",
             SEED_IDENTITY,
         ),
-        ("certify_flat", TARGET_RELEASE),
-        ("probe_exchange", TARGET_RELEASE),
         ("read_current_release",),
         ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
         ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
         ("start_services", SAFETY_SERVICES),
+        ("certify_flat", TARGET_RELEASE),
+        ("probe_exchange", TARGET_RELEASE),
         ("start_services", (ENTRY_SERVICE,)),
         ("services_active", ALL_SERVICES),
+        ("certify_flat", TARGET_RELEASE),
+        ("probe_exchange", TARGET_RELEASE),
         ("unfence_entry",),
         ("services_active", ALL_SERVICES),
     ]
@@ -199,89 +367,6 @@ def test_identity_rotated_activation_failure_keeps_all_workers_stopped() -> None
     assert backend.calls[-1] == ("fence_entry",)
     assert ("start_services", SAFETY_SERVICES) not in backend.calls
     assert ("start_services", (ENTRY_SERVICE,)) not in backend.calls
-
-
-def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
-    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
-    backend = FakeDeploymentBackend(protected_ticket_ids=ticket_ids)
-
-    result = deploy_tokyo_release(
-        backend,
-        _plan(
-            enable_entry=False,
-            protected_ticket_ids=ticket_ids,
-        ),
-    )
-
-    assert result.status == "pass"
-    assert backend.calls == [
-        ("read_current_release",),
-        ("install_release", TARGET_COMMIT, TARGET_RELEASE),
-        ("certify_protected", TARGET_RELEASE),
-        (
-            "probe_protected_exchange",
-            TARGET_RELEASE,
-            ticket_ids,
-        ),
-        ("read_release_marker", CURRENT_RELEASE, ".brc-runtime-commit"),
-        ("read_release_marker", CURRENT_RELEASE, ".brc-schema-revision"),
-        ("stop_services", ALL_SERVICES),
-        ("fence_entry",),
-        ("services_active", ALL_SERVICES),
-        (
-            "deploy_protected_identity",
-            TARGET_RELEASE,
-            TARGET_COMMIT,
-            "0002_sor_v3_strategy_group_capacity",
-            ticket_ids,
-        ),
-        (
-            "activate_release",
-            TARGET_RELEASE,
-            TARGET_COMMIT,
-            "0002_sor_v3_strategy_group_capacity",
-            SEED_IDENTITY,
-        ),
-        ("certify_protected", TARGET_RELEASE),
-        (
-            "probe_protected_exchange",
-            TARGET_RELEASE,
-            ticket_ids,
-        ),
-        ("read_current_release",),
-        ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
-        ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
-        ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
-        ("start_services", SAFETY_SERVICES),
-        ("services_active", ALL_SERVICES),
-    ]
-
-
-def test_protected_release_refuses_exchange_domains_outside_ticket_set() -> None:
-    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
-    backend = FakeDeploymentBackend(
-        protected_ticket_ids=ticket_ids,
-        open_order_domain_count=2,
-    )
-
-    with pytest.raises(DeploymentBlocked, match="protected order count"):
-        deploy_tokyo_release(
-            backend,
-            _plan(
-                enable_entry=False,
-                protected_ticket_ids=ticket_ids,
-            ),
-        )
-
-    assert not any(call[0] == "stop_services" for call in backend.calls)
-
-
-def test_protected_release_forbids_enabling_entry() -> None:
-    with pytest.raises(ValueError, match="ENTRY"):
-        _plan(
-            enable_entry=True,
-            protected_ticket_ids=("ticket:avax",),
-        )
 
 
 def test_closure_only_release_requires_one_exact_ticket_and_keeps_entry_fenced() -> None:
@@ -335,103 +420,21 @@ def test_closure_only_release_recovers_only_the_exact_pending_ticket() -> None:
             "0002_sor_v3_strategy_group_capacity",
             SEED_IDENTITY,
         ),
-        ("certify_closure", TARGET_RELEASE, ticket_id),
-        ("probe_exchange", TARGET_RELEASE),
         ("read_current_release",),
         ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
         ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
         ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
         ("start_services", SAFETY_SERVICES),
+        ("certify_closure", TARGET_RELEASE, ticket_id),
+        ("probe_exchange", TARGET_RELEASE),
         ("entry_is_inactive_disabled_and_fenced",),
         ("services_active", ALL_SERVICES),
     ]
 
 
-def test_protected_release_refuses_count_only_exchange_evidence() -> None:
-    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
-    backend = FakeDeploymentBackend(
-        protected_ticket_ids=ticket_ids,
-        include_exact_protected_facts=False,
-    )
-
-    with pytest.raises(DeploymentBlocked, match="exact protected exchange facts"):
-        deploy_tokyo_release(
-            backend,
-            _plan(
-                enable_entry=False,
-                protected_ticket_ids=ticket_ids,
-            ),
-        )
-
-    assert not any(call[0] == "stop_services" for call in backend.calls)
-
-
-def test_protected_release_accepts_missing_and_null_optional_tp1_fill_quantity() -> None:
-    ticket_ids = ("ticket:bnb",)
-    backend = FakeDeploymentBackend(
-        protected_ticket_ids=ticket_ids,
-        certification_omits_tp1_fill_quantity=True,
-        probe_tp1_fill_quantity=None,
-    )
-
-    result = deploy_tokyo_release(
-        backend,
-        _plan(
-            enable_entry=False,
-            protected_ticket_ids=ticket_ids,
-        ),
-    )
-
-    assert result.status == "pass"
-    assert ("stop_services", ALL_SERVICES) in backend.calls
-
-
-def test_protected_release_refuses_non_null_tp1_fill_quantity_difference() -> None:
-    ticket_ids = ("ticket:bnb",)
-    backend = FakeDeploymentBackend(
-        protected_ticket_ids=ticket_ids,
-        probe_tp1_fill_quantity="2",
-    )
-
-    with pytest.raises(DeploymentBlocked, match="exact protected exchange facts differ"):
-        deploy_tokyo_release(
-            backend,
-            _plan(
-                enable_entry=False,
-                protected_ticket_ids=ticket_ids,
-            ),
-        )
-
-    assert not any(call[0] == "stop_services" for call in backend.calls)
-
-
-def test_failed_protected_postflight_restores_safety_workers_with_entry_fenced() -> None:
-    ticket_ids = ("ticket:avax", "ticket:btc", "ticket:sol")
-    backend = FakeDeploymentBackend(
-        protected_ticket_ids=ticket_ids,
-        fail_at="target_protected_certification",
-    )
-
-    with pytest.raises(RuntimeError, match="simulated protected certification failure"):
-        deploy_tokyo_release(
-            backend,
-            _plan(
-                enable_entry=False,
-                protected_ticket_ids=ticket_ids,
-            ),
-        )
-
-    assert backend.calls[-2:] == [
-        ("fence_entry",),
-        ("start_services", SAFETY_SERVICES),
-    ]
-    assert backend.entry_fenced is True
-
-
 def _plan(
     *,
     enable_entry: bool,
-    protected_ticket_ids: tuple[str, ...] = (),
     closure_ticket_id: str | None = None,
 ) -> DeploymentPlan:
     return DeploymentPlan(
@@ -440,8 +443,19 @@ def _plan(
         schema_revision="0002_sor_v3_strategy_group_capacity",
         expected_configured_leverage=5,
         enable_entry=enable_entry,
-        protected_ticket_ids=protected_ticket_ids,
         closure_ticket_id=closure_ticket_id,
+    )
+
+
+def _compatible_plan(*, enable_entry: bool) -> DeploymentPlan:
+    return DeploymentPlan(
+        target_commit=TARGET_COMMIT,
+        target_release=TARGET_RELEASE,
+        schema_revision=TARGET_SCHEMA_REVISION,
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        mode=DeploymentMode.COMPATIBLE_UPGRADE,
+        expected_configured_leverage=5,
+        enable_entry=enable_entry,
     )
 
 
@@ -451,43 +465,40 @@ class FakeDeploymentBackend:
         *,
         configured_leverage: int = 5,
         active_ticket_count: int = 0,
-        protected_ticket_ids: tuple[str, ...] = (),
         closure_ticket_id: str | None = None,
         open_order_domain_count: int | None = None,
-        include_exact_protected_facts: bool = True,
-        certification_omits_tp1_fill_quantity: bool = False,
-        probe_tp1_fill_quantity: str | None = "1",
         rule_instrument_ids: tuple[str, ...] = TARGET_EXCHANGE_INSTRUMENT_IDS,
         probe_manifest: tuple[str, ...] = TARGET_EXCHANGE_INSTRUMENT_IDS,
+        source_schema_revision: str = TARGET_SCHEMA_REVISION,
+        source_gate: str | None = None,
+        preservation_matches: bool = True,
+        certification_gate_failure: tuple[int, str] | None = None,
+        probe_non_flat_failure_call: int | None = None,
         fail_at: str | None = None,
     ) -> None:
         self.configured_leverage = configured_leverage
-        self.protected_ticket_ids = protected_ticket_ids
         self.closure_ticket_id = closure_ticket_id
-        self.active_ticket_count = (
-            len(protected_ticket_ids)
-            if protected_ticket_ids
-            else active_ticket_count
-        )
+        self.active_ticket_count = active_ticket_count
         self.open_order_domain_count = (
             self.active_ticket_count
             if open_order_domain_count is None
             else open_order_domain_count
         )
-        self.include_exact_protected_facts = include_exact_protected_facts
-        self.certification_omits_tp1_fill_quantity = (
-            certification_omits_tp1_fill_quantity
-        )
-        self.probe_tp1_fill_quantity = probe_tp1_fill_quantity
         self.rule_instrument_ids = rule_instrument_ids
         self.probe_manifest = probe_manifest
+        self.source_schema_revision = source_schema_revision
+        self.source_gate = source_gate
+        self.preservation_matches = preservation_matches
+        self.certification_gate_failure = certification_gate_failure
+        self.probe_non_flat_failure_call = probe_non_flat_failure_call
         self.fail_at = fail_at
-        self.protected_certification_calls = 0
         self.calls: list[tuple[object, ...]] = []
         self.current_release = CURRENT_RELEASE
         self.runtime_commit = CURRENT_COMMIT
         self.active_services = set(ALL_SERVICES)
         self.entry_fenced = False
+        self.certification_call_count = 0
+        self.probe_call_count = 0
 
     def read_current_release(self) -> str:
         self.calls.append(("read_current_release",))
@@ -495,8 +506,12 @@ class FakeDeploymentBackend:
 
     def certify_flat(self, release: str) -> Mapping[str, object]:
         self.calls.append(("certify_flat", release))
-        return {
+        self.certification_call_count += 1
+        payload: dict[str, object] = {
             "status": "pass",
+            "flatness_pass": True,
+            "universe_bootstrap_pass": True,
+            "certification_batch_pass": True,
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
                 "schema_revision": "0002_sor_v3_strategy_group_capacity",
@@ -509,33 +524,11 @@ class FakeDeploymentBackend:
                 "incidents": 0,
             },
         }
-
-    def certify_protected(self, release: str) -> Mapping[str, object]:
-        self.calls.append(("certify_protected", release))
-        self.protected_certification_calls += 1
         if (
-            self.fail_at == "target_protected_certification"
-            and self.protected_certification_calls == 2
+            self.certification_gate_failure is not None
+            and self.certification_gate_failure[0] == self.certification_call_count
         ):
-            raise RuntimeError("simulated protected certification failure")
-        payload: dict[str, object] = {
-            "status": "pass",
-            "runtime_identity": {
-                "runtime_commit": self.runtime_commit,
-                "schema_revision": "0002_sor_v3_strategy_group_capacity",
-                "seed_identity": SEED_IDENTITY,
-            },
-            "active_counts": {
-                "tickets": self.active_ticket_count,
-                "commands": 0,
-                "positions": self.active_ticket_count,
-                "incidents": 0,
-            },
-        }
-        if self.include_exact_protected_facts:
-            payload["protected_tickets"] = self._protected_ticket_facts(
-                omit_tp1_fill_quantity=self.certification_omits_tp1_fill_quantity,
-            )
+            payload[self.certification_gate_failure[1]] = False
         return payload
 
     def certify_closure(
@@ -574,7 +567,11 @@ class FakeDeploymentBackend:
 
     def probe_exchange(self, release: str) -> Mapping[str, object]:
         self.calls.append(("probe_exchange", release))
-        return self._probe_payload()
+        self.probe_call_count += 1
+        payload = self._probe_payload()
+        if self.probe_non_flat_failure_call == self.probe_call_count:
+            payload["non_flat_domain_count"] = 1
+        return payload
 
     def _probe_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -592,69 +589,49 @@ class FakeDeploymentBackend:
             ],
             "probe_manifest": list(self.probe_manifest),
         }
-        if self.include_exact_protected_facts:
-            payload["protected_tickets"] = self._protected_ticket_facts(
-                recorded_tp1_fill_quantity=self.probe_tp1_fill_quantity,
-            )
         return payload
 
-    def probe_protected_exchange(
+    def certify_compatible_source(
         self,
         release: str,
-        protected_tickets: list[object],
+        source_schema_revision: str,
     ) -> Mapping[str, object]:
         self.calls.append(
-            (
-                "probe_protected_exchange",
-                release,
-                tuple(
-                    str(row["ticket_id"])
-                    for row in protected_tickets
-                    if isinstance(row, Mapping)
-                ),
-            )
+            ("certify_compatible_source", release, source_schema_revision)
         )
-        return self._probe_payload()
-
-    def _protected_ticket_facts(
-        self,
-        *,
-        omit_tp1_fill_quantity: bool = False,
-        recorded_tp1_fill_quantity: str | None = "1",
-    ) -> list[dict[str, object]]:
-        tickets = [
-            {
-                "ticket_id": ticket_id,
-                "netting_domain_key": (
-                    f"binance-usdm:subaccount-main:instrument-{index}:short"
-                ),
-                "aggregate_status": "runner_protected",
-                "position_quantity": "1",
-                "protected_quantity": "1",
-                "active_stop_order": {
-                    "exchange_order_id": f"stop-{index}",
-                    "order_namespace": "conditional",
-                    "position_side": "short",
-                    "order_side": "buy",
-                    "quantity": "1",
-                    "reduce_only": True,
-                    "stop_price": "101",
-                },
-                "recorded_tp1_fill_quantity": recorded_tp1_fill_quantity,
-            }
-            for index, ticket_id in enumerate(self.protected_ticket_ids, start=1)
-        ]
-        if omit_tp1_fill_quantity:
-            for ticket in tickets:
-                ticket.pop("recorded_tp1_fill_quantity")
-        return tickets
+        gates = {
+            "active_tickets": 0,
+            "non_flat_positions": 0,
+            "active_reservations": 0,
+            "active_domains": 0,
+            "unreviewed_terminal_tickets": 0,
+            "unresolved_commands": 0,
+            "open_incidents": 0,
+        }
+        if self.source_gate is not None:
+            gates[self.source_gate] = 1
+        return {
+            "status": "pass",
+            "alembic_revision": self.source_schema_revision,
+            "runtime_identity": {
+                "runtime_commit": self.runtime_commit,
+                "schema_revision": self.source_schema_revision,
+                "seed_identity": SEED_IDENTITY,
+            },
+            "migration_gate": gates,
+            "preservation_manifest": {"digest": PRESERVATION_DIGEST},
+        }
 
     def read_release_marker(self, release: str, marker: str) -> str:
         self.calls.append(("read_release_marker", release, marker))
         if marker == ".brc-runtime-commit":
             return TARGET_COMMIT if release == TARGET_RELEASE else CURRENT_COMMIT
         if marker == ".brc-schema-revision":
-            return "0002_sor_v3_strategy_group_capacity"
+            return (
+                TARGET_SCHEMA_REVISION
+                if release == TARGET_RELEASE
+                else self.source_schema_revision
+            )
         if marker == ".brc-seed-identity":
             return SEED_IDENTITY
         raise AssertionError(f"unexpected marker: {marker}")
@@ -687,21 +664,51 @@ class FakeDeploymentBackend:
             "refreshed_existing_authority": True,
         }
 
-    def deploy_protected_identity(
+    def migrate_schema(
+        self,
+        release: str,
+        source_schema_revision: str,
+        target_schema_revision: str,
+    ) -> None:
+        self.calls.append(
+            (
+                "migrate_schema",
+                release,
+                source_schema_revision,
+                target_schema_revision,
+            )
+        )
+        self.source_schema_revision = target_schema_revision
+
+    def verify_preservation(
+        self,
+        release: str,
+        source_schema_revision: str,
+        expected_digest: str,
+    ) -> Mapping[str, object]:
+        self.calls.append(
+            (
+                "verify_preservation",
+                release,
+                source_schema_revision,
+                expected_digest,
+            )
+        )
+        digest = expected_digest if self.preservation_matches else "sha256:" + "e" * 64
+        return {
+            "status": "pass" if self.preservation_matches else "fail",
+            "alembic_revision": TARGET_SCHEMA_REVISION,
+            "preservation_manifest": {"digest": digest},
+        }
+
+    def deploy_compatible_identity(
         self,
         release: str,
         commit: str,
         schema_revision: str,
-        ticket_ids: tuple[str, ...],
     ) -> Mapping[str, object]:
         self.calls.append(
-            (
-                "deploy_protected_identity",
-                release,
-                commit,
-                schema_revision,
-                ticket_ids,
-            )
+            ("deploy_compatible_identity", release, commit, schema_revision)
         )
         self.runtime_commit = commit
         return {
@@ -758,6 +765,9 @@ class FakeDeploymentBackend:
     def start_services(self, services: tuple[str, ...]) -> None:
         self.calls.append(("start_services", services))
         self.active_services.update(services)
+
+    def bootstrap_strategy_universes(self, release: str) -> None:
+        self.calls.append(("bootstrap_strategy_universes", release))
 
     def fence_entry(self) -> None:
         self.calls.append(("fence_entry",))

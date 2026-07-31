@@ -8,7 +8,6 @@ import asyncio
 import os
 import sys
 import time
-from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal, Protocol
@@ -32,10 +31,6 @@ from src.trading_kernel.application.runtime_facts import (
 )
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_FIRST_BATCH_INSTRUMENT_IDS,
-)
-from src.trading_kernel.domain.cross_margin_stress import AccountRiskPosition
-from src.trading_kernel.domain.entry_admission_snapshot import (
-    AdmissionOrder,
 )
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
@@ -64,21 +59,6 @@ class InstrumentRuleProbe(BaseModel):
     valid_until_ms: int
 
 
-class ProtectedHandoverTicketProbe(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    ticket_id: str
-    netting_domain_key: str
-    exchange_instrument_id: str
-    position_side: Literal["long", "short"]
-    aggregate_status: Literal["position_protected", "runner_protected"]
-    position_quantity: Decimal
-    protected_quantity: Decimal
-    active_stop_order: dict[str, object]
-    active_tp1_order: dict[str, object] | None = None
-    recorded_tp1_fill_quantity: Decimal | None = None
-
-
 class ProductionRuntimeProbe(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -95,7 +75,6 @@ class ProductionRuntimeProbe(BaseModel):
     available_margin: Decimal
     rules: tuple[InstrumentRuleProbe, ...]
     probe_manifest: tuple[str, ...]
-    protected_tickets: tuple[ProtectedHandoverTicketProbe, ...] = ()
     observed_at_ms: int
 
 
@@ -103,12 +82,6 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--now-ms", type=int)
     parser.add_argument("--validity-ms", type=int, default=5_000)
-    parser.add_argument(
-        "--protected-ticket-json",
-        action="append",
-        default=[],
-        help="Exact readonly protected Ticket manifest row from certification.",
-    )
     parser.add_argument(
         "--cutover-first-batch",
         action="store_true",
@@ -127,7 +100,6 @@ async def probe_production_runtime(
     now_ms: int,
     validity_ms: int,
     exchange_instrument_ids: tuple[str, ...],
-    expected_protected_tickets: tuple[ProtectedHandoverTicketProbe, ...] = (),
 ) -> ProductionRuntimeProbe:
     if now_ms <= 0 or validity_ms <= 0:
         raise ValueError("probe time and validity must be positive")
@@ -197,11 +169,6 @@ async def probe_production_runtime(
             for order in admission_snapshot.open_orders
         }
     )
-    protected_tickets = _verify_protected_exchange_tickets(
-        expected_protected_tickets,
-        positions=account_risk.account_positions,
-        open_orders=admission_snapshot.open_orders,
-    )
     return ProductionRuntimeProbe(
         environment=settings.environment,
         venue_id=settings.venue_id,
@@ -216,7 +183,6 @@ async def probe_production_runtime(
         available_margin=account_risk.available_margin,
         rules=tuple(rule_rows),
         probe_manifest=instruments,
-        protected_tickets=protected_tickets,
         observed_at_ms=now_ms,
     )
 
@@ -294,104 +260,10 @@ def _canonical_active_universe_instrument_ids(
     return tuple(sorted(canonical_ids))
 
 
-def _verify_protected_exchange_tickets(
-    expected_tickets: tuple[ProtectedHandoverTicketProbe, ...],
-    *,
-    positions: tuple[AccountRiskPosition, ...],
-    open_orders: tuple[AdmissionOrder, ...],
-) -> tuple[ProtectedHandoverTicketProbe, ...]:
-    if not expected_tickets:
-        return ()
-    position_by_domain = {
-        (position.exchange_instrument_id, position.position_side): position
-        for position in positions
-    }
-    orders_by_id = {
-        order.exchange_order_id: order
-        for order in open_orders
-    }
-    if len({ticket.ticket_id for ticket in expected_tickets}) != len(
-        expected_tickets
-    ):
-        raise RuntimeError("protected Ticket manifest contains duplicate identities")
-    for ticket in expected_tickets:
-        position = position_by_domain.get(
-            (ticket.exchange_instrument_id, ticket.position_side)
-        )
-        if position is None or position.quantity != ticket.position_quantity:
-            raise RuntimeError("exchange protected position differs from manifest")
-        if ticket.protected_quantity != ticket.position_quantity:
-            raise RuntimeError("protected manifest quantity is inconsistent")
-        _require_exact_protected_order(
-            ticket.active_stop_order,
-            order=orders_by_id.get(str(ticket.active_stop_order.get("exchange_order_id"))),
-            expected_instrument_id=ticket.exchange_instrument_id,
-            expected_position_side=ticket.position_side,
-            expected_quantity=ticket.protected_quantity,
-            require_stop_price=True,
-        )
-        if ticket.aggregate_status == "position_protected":
-            if ticket.active_tp1_order is None or ticket.recorded_tp1_fill_quantity is not None:
-                raise RuntimeError("protected manifest TP1 state is inconsistent")
-            _require_exact_protected_order(
-                ticket.active_tp1_order,
-                order=orders_by_id.get(
-                    str(ticket.active_tp1_order.get("exchange_order_id"))
-                ),
-                expected_instrument_id=ticket.exchange_instrument_id,
-                expected_position_side=ticket.position_side,
-                expected_quantity=Decimal(str(ticket.active_tp1_order.get("quantity"))),
-                require_stop_price=False,
-            )
-        elif (
-            ticket.active_tp1_order is not None
-            or ticket.recorded_tp1_fill_quantity is None
-            or ticket.recorded_tp1_fill_quantity <= 0
-        ):
-            raise RuntimeError("runner manifest TP1 state is inconsistent")
-    return expected_tickets
-
-
-def _require_exact_protected_order(
-    expected: Mapping[str, object],
-    *,
-    order: AdmissionOrder | None,
-    expected_instrument_id: str,
-    expected_position_side: Literal["long", "short"],
-    expected_quantity: Decimal,
-    require_stop_price: bool,
-) -> None:
-    if order is None:
-        raise RuntimeError("exchange protected order is absent")
-    expected_order_side = "sell" if expected_position_side == "long" else "buy"
-    expected_order_namespace = str(expected.get("order_namespace") or "")
-    if (
-        expected_order_namespace not in {"regular", "conditional"}
-        or expected.get("position_side") != expected_position_side
-        or expected.get("order_side") != expected_order_side
-        or expected.get("reduce_only") is not True
-        or order.exchange_instrument_id != expected_instrument_id
-        or order.position_side != expected_position_side
-        or order.order_namespace != expected_order_namespace
-        or order.order_side != expected_order_side
-        or order.reduce_only is not True
-        or order.quantity != expected_quantity
-    ):
-        raise RuntimeError("exchange protected order differs from manifest")
-    if require_stop_price:
-        expected_stop_price = Decimal(str(expected.get("stop_price")))
-        if order.trigger_price != expected_stop_price:
-            raise RuntimeError("exchange protected Stop price differs from manifest")
-
-
 async def _run(args: argparse.Namespace) -> int:
     settings = ProductionRuntimeSettings.from_environment()
     adapter = build_binance_usdm_venue_adapter()
     try:
-        expected_protected_tickets = tuple(
-            ProtectedHandoverTicketProbe.model_validate_json(row)
-            for row in args.protected_ticket_json
-        )
         result = await probe_production_runtime(
             adapter,
             settings,
@@ -404,7 +276,6 @@ async def _run(args: argparse.Namespace) -> int:
                     os.getenv("TRADING_KERNEL_DATABASE_URL", "")
                 )
             ),
-            expected_protected_tickets=expected_protected_tickets,
         )
         print(result.model_dump_json())
         return 0

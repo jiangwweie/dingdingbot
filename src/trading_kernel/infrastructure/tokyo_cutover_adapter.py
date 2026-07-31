@@ -56,6 +56,7 @@ CURRENT_RELEASE = PurePosixPath("/opt/brc/current")
 TARGET_DATABASE_CONTAINER = "brc-trading-kernel-pg"
 TARGET_DATABASE_USER = "brc_kernel"
 TARGET_DATABASE_NAME = "brc_trading_kernel"
+COMPATIBLE_SOURCE_SCHEMA_REVISION = "0001_trading_kernel_baseline_v4"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -122,7 +123,9 @@ class TokyoPhaseState(BaseModel):
 
     exchange_writes_fenced: bool = False
     runtime_writers_stopped: bool = False
+    history_manifest_captured: bool = False
     target_schema_ready: bool = False
+    history_preserved: bool = False
     seed_identity_matches: bool = False
     release_staged: bool = False
     release_active: bool = False
@@ -174,7 +177,11 @@ class TokyoSystem(Protocol):
         units: tuple[str, ...],
     ) -> None: ...
 
-    async def create_target_database(self, plan: CutoverPlan) -> None: ...
+    async def migrate_application_schema(self, plan: CutoverPlan) -> None: ...
+
+    async def capture_history_manifest(self, plan: CutoverPlan) -> None: ...
+
+    async def verify_history_preservation(self, plan: CutoverPlan) -> None: ...
 
     async def seed_target_authority(self, plan: CutoverPlan) -> None: ...
 
@@ -245,8 +252,12 @@ class TokyoCutoverAdapter:
                 plan,
                 tuple(sorted(EXPECTED_NEW_BRC_WRITER_UNITS)),
             )
-        elif phase_value == CutoverPhase.REBUILD_APPLICATION_SCHEMA.value:
-            await self.system.create_target_database(plan)
+        elif phase_value == CutoverPhase.CAPTURE_HISTORY_MANIFEST.value:
+            await self.system.capture_history_manifest(plan)
+        elif phase_value == CutoverPhase.MIGRATE_APPLICATION_SCHEMA.value:
+            await self.system.migrate_application_schema(plan)
+        elif phase_value == CutoverPhase.VERIFY_HISTORY_PRESERVATION.value:
+            await self.system.verify_history_preservation(plan)
         elif phase_value == CutoverPhase.SEED_CURRENT_AUTHORITY.value:
             await self.system.seed_target_authority(plan)
         elif phase_value == CutoverPhase.STAGE_EXACT_RELEASE.value:
@@ -286,8 +297,12 @@ class TokyoCutoverAdapter:
             )
         if phase_value == CutoverPhase.STOP_RUNTIME_WRITERS.value:
             return state.runtime_writers_stopped
-        if phase_value == CutoverPhase.REBUILD_APPLICATION_SCHEMA.value:
+        if phase_value == CutoverPhase.CAPTURE_HISTORY_MANIFEST.value:
+            return state.history_manifest_captured
+        if phase_value == CutoverPhase.MIGRATE_APPLICATION_SCHEMA.value:
             return state.target_schema_ready
+        if phase_value == CutoverPhase.VERIFY_HISTORY_PRESERVATION.value:
+            return state.history_preserved
         if phase_value == CutoverPhase.SEED_CURRENT_AUTHORITY.value:
             return state.seed_identity_matches
         if phase_value == CutoverPhase.STAGE_EXACT_RELEASE.value:
@@ -510,6 +525,10 @@ class SshTokyoSystem:
             protection_orders=0 if open_orders == 0 else open_orders,
             nonterminal_tickets=current_counts["nonterminal_tickets"],
             active_budgets=current_counts["active_budgets"],
+            active_domains=current_counts["active_domains"],
+            unreviewed_terminal_tickets=current_counts[
+                "unreviewed_terminal_tickets"
+            ],
             unresolved_outcomes=current_counts["unresolved_outcomes"],
             open_incidents=current_counts["open_incidents"],
             active_old_writers=(),
@@ -609,9 +628,23 @@ class SshTokyoSystem:
                     EXPECTED_NEW_BRC_WRITER_UNITS
                 )
             )
-        if phase_value == CutoverPhase.REBUILD_APPLICATION_SCHEMA.value:
+        if phase_value == CutoverPhase.CAPTURE_HISTORY_MANIFEST.value:
+            return TokyoPhaseState(
+                history_manifest_captured=(
+                    await self._history_preservation_digest(plan)
+                )
+                is not None
+            )
+        if phase_value == CutoverPhase.MIGRATE_APPLICATION_SCHEMA.value:
             return TokyoPhaseState(
                 target_schema_ready=await self._target_schema_ready(release)
+            )
+        if phase_value == CutoverPhase.VERIFY_HISTORY_PRESERVATION.value:
+            return TokyoPhaseState(
+                history_preserved=await self._history_preservation_passes(
+                    release,
+                    plan,
+                )
             )
         if phase_value == CutoverPhase.SEED_CURRENT_AUTHORITY.value:
             return TokyoPhaseState(
@@ -851,30 +884,50 @@ class SshTokyoSystem:
                 check=False,
             )
 
-    async def create_target_database(self, plan: CutoverPlan) -> None:
+    async def migrate_application_schema(self, plan: CutoverPlan) -> None:
         release = _release_path(plan)
-        await self._runner.run(
-            (
-                "sudo",
-                "docker",
-                "exec",
-                TARGET_DATABASE_CONTAINER,
-                "psql",
-                "-U",
-                TARGET_DATABASE_USER,
-                "-d",
-                TARGET_DATABASE_NAME,
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-c",
-                ("DROP SCHEMA public CASCADE; "
-                "CREATE SCHEMA public AUTHORIZATION brc_kernel"),
-            )
-        )
         await self._release_python(
             release,
             "scripts/trading_kernel/bootstrap_schema.py",
         )
+
+    async def capture_history_manifest(self, plan: CutoverPlan) -> None:
+        release = _release_path(plan)
+        result = await self._release_python(
+            release,
+            "scripts/trading_kernel/verify_schema.py",
+            "--compatible-source-revision",
+            COMPATIBLE_SOURCE_SCHEMA_REVISION,
+        )
+        payload = json.loads(result.stdout)
+        manifest = payload.get("preservation_manifest")
+        if payload.get("status") != "pass" or not isinstance(manifest, Mapping):
+            raise RuntimeError("compatible source preservation preflight failed")
+        digest = str(manifest.get("digest", ""))
+        if not _valid_sha256_identity(digest):
+            raise RuntimeError("compatible source preservation digest is invalid")
+        path = _history_preservation_path(plan)
+        await self._runner.run(
+            ("sudo", "install", "-d", "-m", "0750", str(path.parent))
+        )
+        await self._runner.run(
+            (
+                "sudo",
+                "python3",
+                "-c",
+                (
+                    "from pathlib import Path; import sys; "
+                    "Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')"
+                ),
+                str(path),
+                digest,
+            )
+        )
+
+    async def verify_history_preservation(self, plan: CutoverPlan) -> None:
+        release = _release_path(plan)
+        if not await self._history_preservation_passes(release, plan):
+            raise RuntimeError("compatible history preservation verification failed")
 
     async def seed_target_authority(self, plan: CutoverPlan) -> None:
         release = _release_path(plan)
@@ -882,7 +935,7 @@ class SshTokyoSystem:
         result = await self._release_python(
             release,
             "scripts/trading_kernel/seed_runtime_authority.py",
-            "deploy-identity",
+            "deploy-compatible-identity",
             "--account-id",
             plan.account_id,
             "--runtime-commit",
@@ -1139,6 +1192,16 @@ class SshTokyoSystem:
                 "SELECT count(*) FROM brc_budget_reservations "
                 "WHERE status = 'active'"
             ),
+            "active_domains": (
+                "SELECT count(*) FROM brc_trade_tickets "
+                "WHERE active_netting_domain_key IS NOT NULL"
+            ),
+            "unreviewed_terminal_tickets": (
+                "SELECT count(*) FROM brc_trade_tickets ticket "
+                "WHERE ticket.terminal_at_ms IS NOT NULL "
+                "AND NOT EXISTS (SELECT 1 FROM brc_trade_reviews review "
+                "WHERE review.ticket_id = ticket.ticket_id)"
+            ),
             "unresolved_outcomes": (
                 "SELECT count(*) FROM brc_exchange_commands "
                 "WHERE status IN "
@@ -1190,6 +1253,44 @@ class SshTokyoSystem:
         if result.returncode != 0:
             return False
         return json.loads(result.stdout).get("status") == "pass"
+
+    async def _history_preservation_digest(
+        self,
+        plan: CutoverPlan,
+    ) -> str | None:
+        result = await self._runner.run(
+            ("sudo", "cat", str(_history_preservation_path(plan))),
+            check=False,
+        )
+        digest = result.stdout.strip()
+        return digest if result.returncode == 0 and _valid_sha256_identity(digest) else None
+
+    async def _history_preservation_passes(
+        self,
+        release: PurePosixPath,
+        plan: CutoverPlan,
+    ) -> bool:
+        digest = await self._history_preservation_digest(plan)
+        if digest is None:
+            return False
+        result = await self._release_python(
+            release,
+            "scripts/trading_kernel/verify_schema.py",
+            "--preserve-source-revision",
+            COMPATIBLE_SOURCE_SCHEMA_REVISION,
+            "--expected-preservation-digest",
+            digest,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        payload = json.loads(result.stdout)
+        manifest = payload.get("preservation_manifest")
+        return bool(
+            payload.get("status") == "pass"
+            and isinstance(manifest, Mapping)
+            and manifest.get("digest") == digest
+        )
 
     async def _readonly_certified(
         self,
@@ -1592,6 +1693,22 @@ def _non_quant_baseline_path(plan: CutoverPlan) -> PurePosixPath:
         PurePosixPath("/opt/brc/cutover")
         / plan.cutover_id
         / "non-quant-baseline.sha256"
+    )
+
+
+def _history_preservation_path(plan: CutoverPlan) -> PurePosixPath:
+    return (
+        PurePosixPath("/opt/brc/cutover")
+        / plan.cutover_id
+        / "history-preservation.sha256"
+    )
+
+
+def _valid_sha256_identity(value: str) -> bool:
+    return bool(
+        len(value) == 71
+        and value.startswith("sha256:")
+        and all(character in "0123456789abcdef" for character in value[7:])
     )
 
 

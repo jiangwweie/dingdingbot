@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Mapping
+from decimal import Decimal
 from hashlib import sha256
-from typing import Literal, TypedDict
+from typing import TypedDict
 from uuid import uuid4
 
 import asyncpg
@@ -64,6 +65,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from src.trading_kernel.interfaces.observation_worker import (
     ObservationWorkerRequest,
     ObservationWorkerStatus,
@@ -95,9 +99,7 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-8-test"
-SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v4"] = (
-    "0001_trading_kernel_baseline_v4"
-)
+SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
 CONTRACT = next(
     item
     for item in registered_strategy_contracts()
@@ -313,7 +315,15 @@ async def test_all_warming_members_become_ready_without_signal_chain(
         "warm_ready",
         "warm_ready",
     ]
-    assert counts == {"signals": 0, "tickets": 0, "commands": 0, "facts": 6}
+    expected_fact_count = len(MEMBERS) * len(
+        (*CONTRACT.required_facts, *CONTRACT.disable_facts)
+    )
+    assert counts == {
+        "signals": 0,
+        "tickets": 0,
+        "commands": 0,
+        "facts": expected_fact_count,
+    }
 
 
 @pytest.mark.asyncio
@@ -1471,15 +1481,25 @@ def _shifted_triggering_source(
     *,
     delta_ms: int,
 ) -> TypedMarketFake:
-    candles = tuple(
-        candle.model_copy(
-            update={
-                "open_time_ms": candle.open_time_ms + delta_ms,
-                "close_time_ms": candle.close_time_ms + delta_ms,
-            }
-        )
-        for candle in sor_snapshot(side="long").candles_15m
+    if delta_ms != 900_000:
+        raise ValueError("SOR shifted trigger fixture supports one next closed bar")
+    base = sor_snapshot(side="long").candles_15m
+    prior_trigger = base[-1]
+    prior_inside = prior_trigger.model_copy(
+        update={
+            "open": Decimal(100),
+            "high": Decimal(101),
+            "low": Decimal(99),
+            "close": Decimal(100),
+        }
     )
+    next_trigger = prior_trigger.model_copy(
+        update={
+            "open_time_ms": prior_trigger.open_time_ms + delta_ms,
+            "close_time_ms": prior_trigger.close_time_ms + delta_ms,
+        }
+    )
+    candles = (*base[:-1], prior_inside, next_trigger)
     return TypedMarketFake(
         engine,
         {(member, "15m"): candles for member in members},

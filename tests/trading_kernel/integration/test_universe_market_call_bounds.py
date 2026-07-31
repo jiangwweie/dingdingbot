@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 from collections.abc import AsyncGenerator
-from typing import Literal
 from uuid import uuid4
 
 import asyncpg
@@ -42,6 +41,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from tests.trading_kernel.integration.universe_certification_support import (
     ADMIN_DSN,
     SAFE_DATABASE,
@@ -60,9 +62,7 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-9-test"
-SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v4"] = (
-    "0001_trading_kernel_baseline_v4"
-)
+SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
 MPG_CONTRACT = next(
     contract
     for contract in registered_strategy_contracts()

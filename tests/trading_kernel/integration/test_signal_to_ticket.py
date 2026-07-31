@@ -101,7 +101,7 @@ async def test_ingest_persists_signal_and_fact_lineage_without_ticket_terms(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 now_ms=1_001,
             ),
         )
@@ -171,7 +171,7 @@ async def test_signal_ingest_does_not_consume_action_time_capital_authority(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 now_ms=1_001,
             ),
         )
@@ -190,7 +190,7 @@ async def test_duplicate_strategy_signal_is_exactly_idempotent(
     request = IngestSignalRequest(
         signal=signal,
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v4",
+        schema_revision="0002_sor_v3_strategy_group_capacity",
         now_ms=1_001,
     )
 
@@ -300,7 +300,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit=runtime_commit,
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 now_ms=now_ms,
             ),
         )
@@ -323,7 +323,7 @@ async def test_expired_candidate_is_terminally_blocked(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 now_ms=1_001,
             ),
         )
@@ -337,7 +337,7 @@ async def test_expired_candidate_is_terminally_blocked(
                 admission_snapshot=_admission_snapshot(),
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 now_ms=signal.expires_at_ms,
             ),
         )
@@ -362,7 +362,7 @@ async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 now_ms=1_001,
             ),
         )
@@ -376,7 +376,7 @@ async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
                 admission_snapshot=_admission_snapshot(),
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 now_ms=1_002,
             ),
         )
@@ -422,7 +422,7 @@ async def test_stale_certification_pauses_candidate_until_same_signal_recovers(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 now_ms=1_001,
             ),
         )
@@ -674,7 +674,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 certification={},
                 updated_at_ms=1_000,
             )

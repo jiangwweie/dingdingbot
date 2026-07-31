@@ -68,98 +68,19 @@ def _certification_batch_policy_stage_matches(
 ) -> bool:
     """Accept an exact batch policy or its one authorized ENTRY-arm successor."""
 
+    if (
+        isinstance(batch_policy_version, bool)
+        or isinstance(current_policy_version, bool)
+        or batch_policy_version <= 0
+        or current_policy_version <= 0
+    ):
+        return False
     if batch_policy_version == current_policy_version:
         return True
     return bool(
-        batch_policy_version == 1
-        and current_policy_version == 2
+        current_policy_version == batch_policy_version + 1
         and new_entry_submit_enabled
     )
-
-
-def _protected_handover_tickets(
-    rows: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    tickets: list[dict[str, object]] = []
-    for row in rows:
-        position_side = str(row["position_side"])
-        order_side = "sell" if position_side == "long" else "buy"
-        status = str(row["aggregate_status"])
-        ticket: dict[str, object] = {
-            "ticket_id": str(row["ticket_id"]),
-            "netting_domain_key": str(row["netting_domain_key"]),
-            "exchange_instrument_id": str(row["exchange_instrument_id"]),
-            "position_side": position_side,
-            "aggregate_status": status,
-            "position_quantity": _canonical_decimal(row["position_qty"]),
-            "protected_quantity": _canonical_decimal(row["protected_qty"]),
-            "active_stop_order": {
-                "exchange_order_id": str(row["active_stop_exchange_order_id"]),
-                "order_namespace": "conditional",
-                "position_side": position_side,
-                "order_side": order_side,
-                "quantity": _canonical_decimal(row["protected_qty"]),
-                "reduce_only": True,
-                "stop_price": _canonical_decimal(row["active_stop_price"]),
-            },
-        }
-        if status == "position_protected":
-            take_profit_prices = row["take_profit_prices"]
-            if not isinstance(take_profit_prices, list) or not take_profit_prices:
-                raise ValueError("protected Ticket lacks canonical TP1 price")
-            ticket["active_tp1_order"] = {
-                "exchange_order_id": str(row["tp1_exchange_order_id"]),
-                "order_namespace": "regular",
-                "position_side": position_side,
-                "order_side": order_side,
-                "quantity": _canonical_decimal(row["tp1_target_qty"]),
-                "reduce_only": True,
-                "limit_price": _canonical_decimal(take_profit_prices[0]),
-            }
-        else:
-            ticket["recorded_tp1_fill_quantity"] = _canonical_decimal(
-                row["tp1_filled_qty"]
-            )
-        tickets.append(ticket)
-    return tickets
-
-
-def _protected_handover_is_valid(
-    rows: list[dict[str, object]],
-    *,
-    active_ticket_count: int,
-) -> bool:
-    if not rows or len(rows) != active_ticket_count:
-        return False
-    for row in rows:
-        status = str(row["aggregate_status"])
-        position_qty = Decimal(str(row["position_qty"]))
-        protected_qty = Decimal(str(row["protected_qty"]))
-        if (
-            status not in {"position_protected", "runner_protected"}
-            or row["active_netting_domain_key"] != row["netting_domain_key"]
-            or row["budget_reservation_status"] != "active"
-            or position_qty <= 0
-            or protected_qty != position_qty
-            or row["active_stop_exchange_order_id"] is None
-            or row["active_stop_price"] is None
-            or int(str(row["unresolved_command_count"])) != 0
-            or int(str(row["open_incident_count"])) != 0
-        ):
-            return False
-        if status == "position_protected":
-            if (
-                row["tp1_exchange_order_id"] is None
-                or Decimal(str(row["tp1_target_qty"])) <= 0
-                or Decimal(str(row["tp1_filled_qty"])) != 0
-            ):
-                return False
-        elif (
-            row["tp1_exchange_order_id"] is not None
-            or Decimal(str(row["tp1_filled_qty"])) <= 0
-        ):
-            return False
-    return True
 
 
 def _closure_ticket_manifest(
@@ -433,6 +354,19 @@ async def _certify(
                     )
                 )
             ).mappings().one_or_none()
+            owner_policy_event_versions = tuple(
+                int(value)
+                for value in (
+                    await connection.execute(
+                        text(
+                            "SELECT policy_version FROM brc_owner_policy_events "
+                            "WHERE owner_policy_id = :owner_policy_id "
+                            "ORDER BY policy_version"
+                        ),
+                        {"owner_policy_id": OWNER_POLICY_ID},
+                    )
+                ).scalars()
+            )
             entry_gate_counts = (
                 await connection.execute(
                     text(
@@ -633,48 +567,6 @@ async def _certify(
                     )
                 )
             ).mappings().one_or_none()
-            protected_ticket_rows = (
-                await connection.execute(
-                    text(
-                        """
-                        SELECT ticket.ticket_id,
-                               ticket.netting_domain_key,
-                               ticket.active_netting_domain_key,
-                               ticket.exchange_instrument_id,
-                               ticket.position_side,
-                               ticket.take_profit_prices,
-                               aggregate_current.status AS aggregate_status,
-                               aggregate_current.position_qty,
-                               aggregate_current.protected_qty,
-                               aggregate_current.active_stop_exchange_order_id,
-                               aggregate_current.active_stop_price,
-                               aggregate_current.tp1_exchange_order_id,
-                               aggregate_current.tp1_target_qty,
-                               aggregate_current.tp1_filled_qty,
-                               reservation.status AS budget_reservation_status,
-                               (SELECT count(*)
-                                  FROM brc_exchange_commands command
-                                 WHERE command.ticket_id = ticket.ticket_id
-                                   AND command.status IN (
-                                       'prepared', 'claimed',
-                                       'dispatch_started', 'outcome_unknown'
-                                   )) AS unresolved_command_count,
-                               (SELECT count(*)
-                                  FROM brc_runtime_incidents incident
-                                 WHERE incident.ticket_id = ticket.ticket_id
-                                   AND incident.status <> 'resolved'
-                               ) AS open_incident_count
-                          FROM brc_trade_tickets ticket
-                          JOIN brc_trade_aggregates aggregate_current
-                            ON aggregate_current.ticket_id = ticket.ticket_id
-                          LEFT JOIN brc_budget_reservations reservation
-                            ON reservation.ticket_id = ticket.ticket_id
-                         WHERE ticket.terminal_at_ms IS NULL
-                         ORDER BY ticket.ticket_id
-                        """
-                    )
-                )
-            ).mappings().all()
             closure_ticket_row = None
             closure_active_ticket_count = 0
             if normalized_closure_ticket_id is not None:
@@ -791,17 +683,6 @@ async def _certify(
         },
         "temporarily_unavailable_certification_count": int(universe_counts[8]),
     }
-    protected_rows = [dict(row) for row in protected_ticket_rows]
-    protected_promotion_internal_pass = _protected_handover_is_valid(
-        protected_rows,
-        active_ticket_count=active_ticket_domains,
-    )
-    protected_tickets = (
-        []
-        if normalized_closure_ticket_id is not None
-        or not protected_promotion_internal_pass
-        else _protected_handover_tickets(protected_rows)
-    )
     owner_policy = (
         None
         if owner_policy_row is None
@@ -821,7 +702,7 @@ async def _certify(
     policy_is_dynamic = owner_policy_row is not None and all(
         (
             owner_policy_row["owner_policy_id"] == OWNER_POLICY_ID,
-            int(owner_policy_row["policy_version"]) in {1, 2, 3},
+            int(owner_policy_row["policy_version"]) > 0,
             owner_policy_row["enabled"] is True,
             isinstance(owner_policy_row["new_entry_submit_enabled"], bool),
             int(owner_policy_row["max_concurrent_tickets"])
@@ -857,6 +738,20 @@ async def _certify(
             == DYNAMIC_POLICY.max_post_fill_stop_risk_overrun_fraction,
         )
     )
+    policy_lineage_pass = bool(
+        owner_policy_row is not None
+        and owner_policy_event_versions
+        and owner_policy_event_versions[0] == 1
+        and owner_policy_event_versions
+        == tuple(
+            range(
+                owner_policy_event_versions[0],
+                int(owner_policy_row["policy_version"]) + 1,
+            )
+        )
+        and owner_policy_event_versions[-1]
+        == int(owner_policy_row["policy_version"])
+    )
     capabilities_are_current = (
         set(capabilities) == {"exchange_commands", "strategy_signal_ingest"}
         and capabilities["strategy_signal_ingest"] is True
@@ -871,6 +766,7 @@ async def _certify(
         and strategy_universe["integrity_violation_count"] == 0
         and capabilities_are_current
         and policy_is_dynamic
+        and policy_lineage_pass
         and integrity_orphans == 0
         and legacy_execution_tables == 0
         and unresolved_commands == 0
@@ -943,17 +839,9 @@ async def _certify(
         and open_incidents == 0
         and active_budget_reservations == 0
     )
-    protected_promotion_pass = (
-        universe_bootstrap_pass
-        and protected_promotion_internal_pass
-        and non_flat_positions == active_ticket_domains
-        and active_budget_reservations == active_ticket_domains
-        and unresolved_commands == 0
-        and open_incidents == 0
-    )
     entry_promotion_pass = (
         universe_bootstrap_pass
-        and (flatness_pass or protected_promotion_pass)
+        and flatness_pass
         and owner_policy_row is not None
         and owner_policy_row["new_entry_submit_enabled"] is False
         and capabilities.get("exchange_commands") is False
@@ -994,7 +882,6 @@ async def _certify(
         "strategy_universe": strategy_universe,
         "database_integrity_pass": database_integrity_pass,
         "flatness_pass": flatness_pass,
-        "protected_promotion_pass": protected_promotion_pass,
         "universe_bootstrap_pass": universe_bootstrap_pass,
         "entry_promotion_pass": entry_promotion_pass,
         "entry_promotion_counts": {
@@ -1012,10 +899,10 @@ async def _certify(
         "certification_batch_pass": certification_batch_pass,
         "capabilities": capabilities,
         "owner_policy": owner_policy,
+        "owner_policy_lineage_pass": policy_lineage_pass,
         "release_counts": release_counts,
         "active_counts": active_counts,
         "owner_projection": owner_projection,
-        "protected_tickets": protected_tickets,
         "closure_ticket": closure_ticket,
         "require_flat": require_flat,
         "closure_ticket_id": normalized_closure_ticket_id,

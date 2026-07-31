@@ -299,10 +299,10 @@ def _preflight_request(*, snapshot):
             capability_key="exchange_commands",
             enabled=True,
             certified_commit="commit-1",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
         ),
         runtime_commit="commit-1",
-        schema_revision="0001_trading_kernel_baseline_v4",
+        schema_revision="0002_sor_v3_strategy_group_capacity",
         admission_snapshot=snapshot,
         instrument_rules=InstrumentRulesFacts(
             exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",

@@ -15,14 +15,14 @@ class FakePromotionBackend:
         gate: bool = True,
         armed: bool = False,
         fail_start: bool = False,
-        protected: bool = False,
+        policy_version: int = 7,
         external_match: bool = True,
         postflight_external_match: bool | None = None,
     ) -> None:
         self.gate = gate
         self.armed = armed
         self.fail_start = fail_start
-        self.protected = protected
+        self.policy_version = policy_version
         self.external_match = external_match
         self.postflight_external_match = postflight_external_match
         self.external_calls = 0
@@ -37,26 +37,21 @@ class FakePromotionBackend:
                 "entry_promotion_pass": False,
                 "universe_bootstrap_pass": True,
                 "certification_batch_pass": True,
-                "flatness_pass": not self.protected,
-                "protected_promotion_pass": self.protected,
-                "protected_tickets": ([{"ticket_id": "ticket:one"}] if self.protected else []),
+                "flatness_pass": True,
                 "owner_policy": {
-                    "policy_version": 2,
+                    "policy_version": self.policy_version,
                     "new_entry_submit_enabled": True,
                 },
                 "capabilities": {"exchange_commands": True},
             }
         return {
             "entry_promotion_pass": self.gate,
-            "flatness_pass": not self.protected,
-            "protected_promotion_pass": self.protected,
-            "protected_tickets": ([{"ticket_id": "ticket:one"}] if self.protected else []),
+            "flatness_pass": True,
         }
 
     def external_state_and_rules_match(self, certification):
         self.calls.append("external")
         self.external_calls += 1
-        assert certification["protected_promotion_pass"] is self.protected
         if self.external_calls > 1 and self.postflight_external_match is not None:
             return self.postflight_external_match
         return self.external_match
@@ -72,7 +67,10 @@ class FakePromotionBackend:
     def arm_entry_authority(self):
         self.calls.append("arm")
         self.armed = True
-        return {"policy_version": 2, "new_entry_submit_enabled": True}
+        return {
+            "policy_version": self.policy_version,
+            "new_entry_submit_enabled": True,
+        }
 
     def start_entry_while_fenced(self):
         self.calls.append("start")
@@ -143,23 +141,17 @@ def test_armed_service_fenced_retry_resumes_without_creating_another_policy() ->
     assert "arm" not in backend.calls
 
 
-def test_exact_protected_snapshot_can_promote_without_flatness() -> None:
-    """Catches the historical protected-release ENTRY dead end."""
-
-    backend = FakePromotionBackend(protected=True)
+def test_positive_monotonic_policy_version_is_not_fixed_to_v2() -> None:
+    backend = FakePromotionBackend(policy_version=9)
 
     assert promote_entry(backend) == "promoted"
-    assert backend.calls.index("external") < backend.calls.index("arm")
 
 
-def test_protected_external_mismatch_keeps_entry_fenced_and_unarmed() -> None:
-    backend = FakePromotionBackend(protected=True, external_match=False)
+def test_nonpositive_armed_policy_version_is_rejected() -> None:
+    backend = FakePromotionBackend(armed=True, policy_version=0)
 
-    with pytest.raises(EntryPromotionBlocked, match="exchange_state_or_rule"):
+    with pytest.raises(EntryPromotionBlocked, match="promotion_gate"):
         promote_entry(backend)
-
-    assert "arm" not in backend.calls
-    assert backend.fenced is True
 
 
 def test_final_postflight_mismatch_refences_and_stops_entry() -> None:

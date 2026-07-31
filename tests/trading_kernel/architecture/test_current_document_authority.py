@@ -72,6 +72,14 @@ RUNTIME_MODEL_DOCUMENTS = (
     "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
     "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
 )
+SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS = (
+    "docs/current/PROJECT_INFORMATION_ARCHITECTURE.md",
+    "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md",
+    "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
+    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
+)
 
 CURRENT_ACCEPTANCE_STAGE = "Current live acceptance"
 RETIRED_ACCEPTANCE_TICKET = "ticket:c1ebc24a178a3ae4d87978e2fa1204ae"
@@ -284,4 +292,38 @@ def test_current_runtime_documents_do_not_deploy_timer_workers() -> None:
 
     assert not violations, "timer-based worker deployment remains:\n" + "\n".join(
         sorted(violations)
+    )
+
+
+def test_current_schema_authority_is_the_exact_flat_forward_revision_chain() -> None:
+    expected_chain = (
+        "0001_trading_kernel_baseline_v4 "
+        "-> 0002_sor_v3_strategy_group_capacity"
+    )
+
+    for relative_path in SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS:
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        normalized = re.sub(r"\s+", " ", source.replace("`", ""))
+        assert expected_chain in normalized, (
+            f"{relative_path} does not own the exact forward revision chain"
+        )
+
+
+def test_current_deployment_authority_has_no_active_handover_or_schema_deletion() -> None:
+    forbidden = (
+        "--protected-ticket-id",
+        "--protected-ticket-json",
+        "deploy-protected-identity",
+        "DROP SCHEMA public",
+    )
+    violations: list[str] = []
+
+    for relative_path in SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS:
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        for marker in forbidden:
+            if marker in source:
+                violations.append(f"{relative_path}: {marker}")
+
+    assert not violations, (
+        "retired deployment authority remains:\n" + "\n".join(violations)
     )

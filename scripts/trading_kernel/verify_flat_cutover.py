@@ -40,6 +40,8 @@ class CutoverBlocker(StrEnum):
     PROTECTION_RESIDUE_PRESENT = "protection_residue_present"
     OLD_TICKETS_NONTERMINAL = "old_tickets_nonterminal"
     ACTIVE_BUDGETS_PRESENT = "active_budgets_present"
+    ACTIVE_DOMAINS_PRESENT = "active_domains_present"
+    TERMINAL_REVIEW_MISSING = "terminal_review_missing"
     COMMAND_OUTCOME_UNKNOWN = "command_outcome_unknown"
     RUNTIME_INCIDENT_OPEN = "runtime_incident_open"
     TARGET_COMMIT_MISMATCH = "target_commit_mismatch"
@@ -132,6 +134,8 @@ class CutoverFacts(BaseModel):
     protection_orders: int
     nonterminal_tickets: int
     active_budgets: int
+    active_domains: int = 0
+    unreviewed_terminal_tickets: int = 0
     unresolved_outcomes: int
     open_incidents: int
     active_old_writers: tuple[str, ...]
@@ -162,6 +166,8 @@ class CutoverFacts(BaseModel):
         "protection_orders",
         "nonterminal_tickets",
         "active_budgets",
+        "active_domains",
+        "unreviewed_terminal_tickets",
         "unresolved_outcomes",
         "open_incidents",
     )
@@ -221,6 +227,11 @@ def verify_cutover_facts(
             CutoverBlocker.OLD_TICKETS_NONTERMINAL,
         ),
         (facts.active_budgets != 0, CutoverBlocker.ACTIVE_BUDGETS_PRESENT),
+        (facts.active_domains != 0, CutoverBlocker.ACTIVE_DOMAINS_PRESENT),
+        (
+            facts.unreviewed_terminal_tickets != 0,
+            CutoverBlocker.TERMINAL_REVIEW_MISSING,
+        ),
         (
             facts.unresolved_outcomes != 0,
             CutoverBlocker.COMMAND_OUTCOME_UNKNOWN,

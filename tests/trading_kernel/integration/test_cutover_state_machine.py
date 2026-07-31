@@ -87,7 +87,9 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
         CutoverPhase.FENCE_EXCHANGE_WRITES,
         CutoverPhase.STOP_RUNTIME_WRITERS,
         CutoverPhase.VERIFY_FINAL_FLAT,
-        CutoverPhase.REBUILD_APPLICATION_SCHEMA,
+        CutoverPhase.CAPTURE_HISTORY_MANIFEST,
+        CutoverPhase.MIGRATE_APPLICATION_SCHEMA,
+        CutoverPhase.VERIFY_HISTORY_PRESERVATION,
         CutoverPhase.SEED_CURRENT_AUTHORITY,
         CutoverPhase.DEPLOY_EXACT_RELEASE,
         CutoverPhase.CERTIFY_SCHEMA_AND_READONLY,
@@ -136,18 +138,18 @@ async def test_apply_stages_exact_release_before_target_release_preflight() -> N
 
 
 @pytest.mark.asyncio
-async def test_new_operation_rebuilds_even_when_schema_postcondition_is_already_true() -> None:
-    """Schema health cannot impersonate this operation's destructive effect."""
+async def test_new_operation_migrates_even_when_schema_postcondition_is_already_true() -> None:
+    """Schema health cannot impersonate this operation's migration effect."""
 
-    plan = _plan(cutover_id="tokyo-kernel-same-revision-clean-rebuild")
+    plan = _plan(cutover_id="tokyo-kernel-compatible-migration")
     adapter = FakeCutoverAdapter(_facts(plan))
-    adapter.satisfied.add(CutoverPhase.REBUILD_APPLICATION_SCHEMA)
+    adapter.satisfied.add(CutoverPhase.MIGRATE_APPLICATION_SCHEMA)
     journal = MemoryCutoverJournal()
 
     result = await run_cutover(adapter, journal, plan, now_ms=1_000)
 
     assert result.status == "completed"
-    assert adapter.apply_calls.count(CutoverPhase.REBUILD_APPLICATION_SCHEMA) == 1
+    assert adapter.apply_calls.count(CutoverPhase.MIGRATE_APPLICATION_SCHEMA) == 1
 
 
 @pytest.mark.parametrize(
@@ -166,6 +168,11 @@ async def test_new_operation_rebuilds_even_when_schema_postcondition_is_already_
         ({"protection_orders": 1}, CutoverBlocker.PROTECTION_RESIDUE_PRESENT),
         ({"nonterminal_tickets": 1}, CutoverBlocker.OLD_TICKETS_NONTERMINAL),
         ({"active_budgets": 1}, CutoverBlocker.ACTIVE_BUDGETS_PRESENT),
+        ({"active_domains": 1}, CutoverBlocker.ACTIVE_DOMAINS_PRESENT),
+        (
+            {"unreviewed_terminal_tickets": 1},
+            CutoverBlocker.TERMINAL_REVIEW_MISSING,
+        ),
         ({"unresolved_outcomes": 1}, CutoverBlocker.COMMAND_OUTCOME_UNKNOWN),
         ({"open_incidents": 1}, CutoverBlocker.RUNTIME_INCIDENT_OPEN),
         ({"target_commit": "c" * 40}, CutoverBlocker.TARGET_COMMIT_MISMATCH),
@@ -211,7 +218,7 @@ def test_each_cutover_precondition_has_an_exact_blocker(
 
 
 @pytest.mark.asyncio
-async def test_final_verification_blocks_before_schema_destruction() -> None:
+async def test_final_verification_blocks_before_schema_migration() -> None:
     plan = _plan()
     adapter = FakeCutoverAdapter(
         _facts(plan),
@@ -222,7 +229,7 @@ async def test_final_verification_blocks_before_schema_destruction() -> None:
     with pytest.raises(CutoverBlocked, match="open_orders_present"):
         await run_cutover(adapter, journal, plan, now_ms=1_000)
 
-    assert CutoverPhase.REBUILD_APPLICATION_SCHEMA not in adapter.apply_calls
+    assert CutoverPhase.MIGRATE_APPLICATION_SCHEMA not in adapter.apply_calls
 
 
 @pytest.mark.asyncio
@@ -255,7 +262,7 @@ async def test_interrupted_apply_resumes_at_first_unverified_phase(
     assert snapshot.run_status == "completed"
     assert all(record.status == "completed" for record in snapshot.phases)
     assert adapter.apply_calls.count(CutoverPhase.FENCE_EXCHANGE_WRITES) == 1
-    assert adapter.apply_calls.count(CutoverPhase.REBUILD_APPLICATION_SCHEMA) == 1
+    assert adapter.apply_calls.count(CutoverPhase.MIGRATE_APPLICATION_SCHEMA) == 1
 
 
 @pytest.mark.asyncio
@@ -307,75 +314,8 @@ async def test_resume_after_entry_fence_certification_does_not_restart_cutover(
         await journal.close()
 
     assert completed.status == "completed"
-    assert adapter.apply_calls.count(CutoverPhase.REBUILD_APPLICATION_SCHEMA) == 1
+    assert adapter.apply_calls.count(CutoverPhase.MIGRATE_APPLICATION_SCHEMA) == 1
     assert adapter.apply_calls.count(CutoverPhase.START_ENTRY_FENCED) == 1
-
-
-@pytest.mark.asyncio
-async def test_disposable_postgres_rehearsal_rebuilds_clean_schema_and_seeds_authority(
-    journal_database_url: str,
-) -> None:
-    plan = _plan(cutover_id="tokyo-kernel-postgres-rehearsal")
-    engine = create_async_engine(journal_database_url)
-    async with engine.begin() as connection:
-        await connection.execute(
-            text("CREATE TABLE legacy_execution_path (legacy_id TEXT PRIMARY KEY)")
-        )
-        await connection.execute(
-            text("INSERT INTO legacy_execution_path VALUES ('legacy-1')")
-        )
-    adapter = LocalPostgresCutoverAdapter(journal_database_url, plan)
-    journal = PostgresCutoverJournal(journal_database_url)
-    try:
-        result = await run_cutover(adapter, journal, plan, now_ms=1_000)
-        async with engine.connect() as connection:
-            actual_tables = {
-                str(name)
-                for name in (
-                    await connection.execute(
-                        text(
-                            """
-                            SELECT relname
-                              FROM pg_catalog.pg_class
-                             WHERE relkind IN ('r', 'p')
-                               AND relnamespace = 'public'::regnamespace
-                             ORDER BY relname
-                            """
-                        )
-                    )
-                ).scalars()
-            }
-            seed_identity = (
-                await connection.execute(
-                    sa.select(schema_metadata.c.metadata_value).where(
-                        schema_metadata.c.metadata_key == "seed_identity"
-                    )
-                )
-            ).scalar_one()
-            capability_rows = (
-                await connection.execute(
-                    sa.select(
-                        runtime_capabilities_current.c.capability_key,
-                        runtime_capabilities_current.c.enabled,
-                    )
-                )
-            ).all()
-            capabilities: dict[str, bool] = {
-                str(row[0]): bool(row[1]) for row in capability_rows
-            }
-    finally:
-        await adapter.close()
-        await journal.close()
-        await engine.dispose()
-
-    assert result.status == "completed"
-    assert actual_tables == set(metadata.tables) | {"alembic_version"}
-    assert "legacy_execution_path" not in actual_tables
-    assert seed_identity == plan.target_seed_identity
-    assert capabilities == {
-        "exchange_commands": True,
-        "strategy_signal_ingest": True,
-    }
 
 
 def test_systemd_runtime_workers_are_four_explicit_bounded_roles() -> None:
@@ -751,11 +691,7 @@ class LocalPostgresCutoverAdapter:
             self.runtime_writers = ()
         elif phase is CutoverPhase.STAGE_EXACT_RELEASE:
             self.release_staged = True
-        elif phase is CutoverPhase.REBUILD_APPLICATION_SCHEMA:
-            async with self.engine.begin() as connection:
-                await connection.execute(text("DROP SCHEMA public CASCADE"))
-                await connection.execute(text("CREATE SCHEMA public"))
-            await self.engine.dispose()
+        elif phase is CutoverPhase.MIGRATE_APPLICATION_SCHEMA:
             await asyncio.to_thread(
                 _run_alembic,
                 self.database_url,
@@ -817,11 +753,8 @@ class LocalPostgresCutoverAdapter:
             return not self.runtime_writers
         if phase is CutoverPhase.STAGE_EXACT_RELEASE:
             return self.release_staged
-        if phase is CutoverPhase.REBUILD_APPLICATION_SCHEMA:
-            return (
-                await self._relation_exists("public.brc_trade_tickets")
-                and not await self._relation_exists("public.legacy_execution_path")
-            )
+        if phase is CutoverPhase.MIGRATE_APPLICATION_SCHEMA:
+            return await self._relation_exists("public.brc_trade_tickets")
         if phase is CutoverPhase.SEED_CURRENT_AUTHORITY:
             return await self._metadata_matches("seed_identity", self.plan.target_seed_identity)
         if phase is CutoverPhase.DEPLOY_EXACT_RELEASE:

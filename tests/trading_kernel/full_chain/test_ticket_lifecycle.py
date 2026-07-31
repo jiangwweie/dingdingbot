@@ -1135,7 +1135,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -1144,7 +1144,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 set_={
                     "enabled": True,
                     "certified_commit": "kernel-test-head",
-                    "schema_revision": "0001_trading_kernel_baseline_v4",
+                    "schema_revision": "0002_sor_v3_strategy_group_capacity",
                     "certification": {},
                     "updated_at_ms": 1_000,
                 },
@@ -1174,7 +1174,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

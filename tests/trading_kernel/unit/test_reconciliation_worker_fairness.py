@@ -180,7 +180,7 @@ async def test_pending_unknown_is_the_only_network_work_in_a_cadence(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-test",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             now_ms=5_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -220,7 +220,7 @@ async def test_bnb_capability_monitor_progresses_after_position_safety(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-test",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             now_ms=5_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -354,7 +354,7 @@ async def test_fee_monitor_preempts_later_closure_deadline(monkeypatch) -> None:
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-test",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             now_ms=1_000_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -411,7 +411,7 @@ async def test_due_certification_preempts_later_closure_deadline(monkeypatch) ->
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-test",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             now_ms=1_000_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -463,7 +463,7 @@ async def test_overdue_certification_preempts_continuous_routine_work_within_two
             ReconciliationWorkerRequest(
                 worker_id="reconciliation-worker-test",
                 runtime_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 now_ms=now_ms,
                 timeout_seconds=1,
                 unknown_visibility_grace_ms=30_000,
@@ -519,7 +519,7 @@ async def test_worker_progresses_position_safety_before_routine_closure(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-test",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             now_ms=31_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -568,7 +568,7 @@ async def test_overdue_certification_progresses_during_continuous_position_safet
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-test",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             now_ms=125_000,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,

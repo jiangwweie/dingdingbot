@@ -105,7 +105,7 @@ async def test_non_quant_baseline_drift_blocks_every_mutating_phase() -> None:
 
     assert adapter.non_quant_baseline_matches() is False
     with pytest.raises(RuntimeError, match="non-quantitative baseline changed"):
-        await adapter.apply_phase(CutoverPhase.REBUILD_APPLICATION_SCHEMA, plan)
+        await adapter.apply_phase(CutoverPhase.MIGRATE_APPLICATION_SCHEMA, plan)
     assert system.actions == []
 
 
@@ -137,7 +137,34 @@ async def test_cutover_phase_actions_preserve_entry_fence_and_runtime_workers() 
 
 
 @pytest.mark.asyncio
-async def test_exact_release_is_staged_before_destructive_rebuild_and_activation() -> None:
+async def test_cutover_requires_history_manifest_before_and_after_migration() -> None:
+    module = _production_adapter_module()
+    system = FakeTokyoSystem(module, _facts())
+    adapter = module.TokyoCutoverAdapter(system)
+    plan = _plan()
+    await adapter.inspect_preconditions(plan)
+
+    await adapter.apply_phase(CutoverPhase.CAPTURE_HISTORY_MANIFEST, plan)
+    await adapter.apply_phase(CutoverPhase.MIGRATE_APPLICATION_SCHEMA, plan)
+    await adapter.apply_phase(CutoverPhase.VERIFY_HISTORY_PRESERVATION, plan)
+
+    assert system.actions == [
+        ("capture_history_manifest", ()),
+        ("migrate_application_schema", ()),
+        ("verify_history_preservation", ()),
+    ]
+    assert await adapter.phase_satisfied(
+        CutoverPhase.CAPTURE_HISTORY_MANIFEST,
+        plan,
+    )
+    assert await adapter.phase_satisfied(
+        CutoverPhase.VERIFY_HISTORY_PRESERVATION,
+        plan,
+    )
+
+
+@pytest.mark.asyncio
+async def test_exact_release_is_staged_before_schema_migration_and_activation() -> None:
     module = _production_adapter_module()
     system = FakeTokyoSystem(module, _facts())
     adapter = module.TokyoCutoverAdapter(system)
@@ -385,29 +412,16 @@ async def test_entry_fence_keeps_runtime_directory_traversable_by_brc() -> None:
 
 
 @pytest.mark.asyncio
-async def test_target_database_rebuilds_public_schema_before_bootstrap() -> None:
+async def test_target_database_uses_forward_migration_without_schema_drop() -> None:
     module = _production_adapter_module()
     runner = RecordingRunner(module)
     system = module.SshTokyoSystem(runner)
 
-    await system.create_target_database(_plan())
+    await system.migrate_application_schema(_plan())
 
-    assert runner.commands[0] == (
-        "sudo",
-        "docker",
-        "exec",
-        "brc-trading-kernel-pg",
-        "psql",
-        "-U",
-        "brc_kernel",
-        "-d",
-        "brc_trading_kernel",
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-c",
-        ("DROP SCHEMA public CASCADE; "
-        "CREATE SCHEMA public AUTHORIZATION brc_kernel"),
-    )
+    rendered = " ".join(" ".join(command) for command in runner.commands)
+    assert "scripts/trading_kernel/bootstrap_schema.py" in rendered
+    assert "DROP SCHEMA" not in rendered
 
 
 @pytest.mark.asyncio
@@ -491,7 +505,7 @@ async def test_seed_uses_explicit_plan_identity_not_stale_environment(
     assert calls == [
         (
             "scripts/trading_kernel/seed_runtime_authority.py",
-            "deploy-identity",
+            "deploy-compatible-identity",
             "--account-id",
             plan.account_id,
             "--runtime-commit",
@@ -550,6 +564,8 @@ async def test_preconditions_probe_uses_exact_cutover_instrument_authority(
         return {
             "nonterminal_tickets": 0,
             "active_budgets": 0,
+            "active_domains": 0,
+            "unreviewed_terminal_tickets": 0,
             "unresolved_outcomes": 0,
             "open_incidents": 0,
         }
@@ -661,6 +677,8 @@ async def test_current_kernel_counts_never_read_retired_database() -> None:
     assert counts == {
         "nonterminal_tickets": 0,
         "active_budgets": 0,
+        "active_domains": 0,
+        "unreviewed_terminal_tickets": 0,
         "unresolved_outcomes": 0,
         "open_incidents": 0,
     }
@@ -854,11 +872,25 @@ class FakeTokyoSystem:
             update={"runtime_writers_stopped": True}
         )
 
-    async def create_target_database(self, plan: CutoverPlan) -> None:
+    async def migrate_application_schema(self, plan: CutoverPlan) -> None:
         del plan
-        self.actions.append(("create_target_database", ()))
+        self.actions.append(("migrate_application_schema", ()))
         self.phase_state = self.phase_state.model_copy(
             update={"target_schema_ready": True}
+        )
+
+    async def capture_history_manifest(self, plan: CutoverPlan) -> None:
+        del plan
+        self.actions.append(("capture_history_manifest", ()))
+        self.phase_state = self.phase_state.model_copy(
+            update={"history_manifest_captured": True}
+        )
+
+    async def verify_history_preservation(self, plan: CutoverPlan) -> None:
+        del plan
+        self.actions.append(("verify_history_preservation", ()))
+        self.phase_state = self.phase_state.model_copy(
+            update={"history_preserved": True}
         )
 
     async def seed_target_authority(self, plan: CutoverPlan) -> None:

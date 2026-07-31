@@ -58,7 +58,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                 IngestSignalRequest(
                     signal=signal,
                     runtime_commit="commit-test",
-                    schema_revision="0001_trading_kernel_baseline_v4",
+                    schema_revision="0002_sor_v3_strategy_group_capacity",
                     now_ms=1_010,
                 ),
             )
@@ -86,7 +86,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                         update={"signal_event_id": "signal:old-universe-after-switch"}
                     ),
                     runtime_commit="commit-test",
-                    schema_revision="0001_trading_kernel_baseline_v4",
+                    schema_revision="0002_sor_v3_strategy_group_capacity",
                     now_ms=1_011,
                 ),
             )
@@ -241,7 +241,7 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             certification, updated_at_ms
         ) VALUES (
             'strategy_signal_ingest', true, 'commit-test',
-            '0001_trading_kernel_baseline_v4', '{}'::jsonb, 1000
+            '0002_sor_v3_strategy_group_capacity', '{}'::jsonb, 1000
         )
         """
     await conn.execute(

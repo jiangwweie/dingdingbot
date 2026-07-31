@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from hashlib import sha256
@@ -48,6 +48,7 @@ OWNER_POLICY_ID = "policy-main"
 GLOBAL_ENTRY_LANE_ID = "global-entry"
 VENUE_ID = "binance-usdm"
 POSITION_MODE = "independent_sides"
+COMPATIBLE_SOURCE_SCHEMA_REVISION = "0001_trading_kernel_baseline_v4"
 
 
 class RuntimeAuthoritySeedConflict(RuntimeError):
@@ -402,6 +403,188 @@ async def deploy_runtime_identity(
     return await _deploy_runtime_identity(uow, request)
 
 
+async def deploy_compatible_upgrade_identity(
+    uow: PostgresKernelUnitOfWork,
+    request: RuntimeAuthoritySeedRequest,
+) -> RuntimeDeploymentIdentityResult:
+    """Move one exact flat v4 authority to the current Registry and schema."""
+
+    connection = uow._require_connection()
+    metadata_rows = {
+        str(row["metadata_key"]): str(row["metadata_value"])
+        for row in (
+            await connection.execute(
+                sa.select(schema_metadata).with_for_update(of=schema_metadata)
+            )
+        ).mappings()
+    }
+    if metadata_rows.get("schema_revision") == request.schema_revision:
+        return await _deploy_runtime_identity(uow, request)
+    if metadata_rows.get("schema_revision") != COMPATIBLE_SOURCE_SCHEMA_REVISION:
+        raise RuntimeAuthorityTransitionRefused(
+            "compatible identity requires the exact v4 source authority"
+        )
+
+    await _require_flat_compatible_upgrade_activity(connection)
+    current_policy = dict(await _lock_policy(connection))
+    current_version = int(str(current_policy["policy_version"]))
+    current_submit_enabled = bool(current_policy["new_entry_submit_enabled"])
+    target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
+    source_event_spec_ids = tuple(
+        event_spec_id.replace(
+            "event_spec:SOR-001:SOR-LONG:v3",
+            "event_spec:SOR-001:SOR-LONG:v2",
+        ).replace(
+            "event_spec:SOR-001:SOR-SHORT:v3",
+            "event_spec:SOR-001:SOR-SHORT:v2",
+        )
+        for event_spec_id in target_event_spec_ids
+    )
+    if not _policy_matches(
+        current_policy,
+        version=current_version,
+        new_entry_submit_enabled=current_submit_enabled,
+        allowed_event_spec_ids=source_event_spec_ids,
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "compatible identity source Owner Policy differs from approved capital"
+        )
+    if request.seeded_at_ms <= int(str(current_policy["updated_at_ms"])):
+        raise RuntimeAuthorityTransitionRefused(
+            "compatible identity time must advance monotonically"
+        )
+
+    registry = await seed_strategy_registry(uow, seeded_at_ms=request.seeded_at_ms)
+    seed_identity = _seed_identity(
+        account_id=request.account_id,
+        schema_revision=request.schema_revision,
+        registry_semantic_hash=registry.registry_semantic_hash,
+        allowed_event_spec_ids=target_event_spec_ids,
+    )
+    target_policy_version = current_version + 1
+    target_policy = _policy_values(
+        version=target_policy_version,
+        new_entry_submit_enabled=current_submit_enabled,
+        allowed_event_spec_ids=target_event_spec_ids,
+        updated_at_ms=request.seeded_at_ms,
+    )
+    await _insert_exact(
+        connection,
+        _ExactRow(
+            owner_policy_events,
+            "owner_policy_event_id",
+            _policy_event(
+                version=target_policy_version,
+                operation="compatible_upgrade_sor_v3",
+                policy=target_policy,
+                occurred_at_ms=request.seeded_at_ms,
+            ),
+            ("owner_policy_id", "policy_version", "operation", "payload"),
+        ),
+    )
+    updated_policy = await connection.execute(
+        sa.update(owner_policy_current)
+        .where(
+            owner_policy_current.c.owner_policy_id == OWNER_POLICY_ID,
+            owner_policy_current.c.policy_version == current_version,
+        )
+        .values(target_policy)
+    )
+    if updated_policy.rowcount != 1:
+        raise RuntimeAuthorityTransitionRefused(
+            "compatible Owner Policy transition lost optimistic authority"
+        )
+
+    profile = (
+        await connection.execute(
+            sa.select(runtime_profiles)
+            .where(runtime_profiles.c.runtime_profile_id == RUNTIME_PROFILE_ID)
+            .with_for_update(of=runtime_profiles)
+        )
+    ).mappings().one_or_none()
+    if profile is None or any(
+        (
+            profile["venue_id"] != VENUE_ID,
+            profile["account_id"] != request.account_id,
+            profile["environment"] != "live",
+            profile["position_mode"] != POSITION_MODE,
+            profile["status"] != "active",
+        )
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "compatible runtime profile differs from approved identity"
+        )
+
+    capabilities = (
+        await connection.execute(
+            sa.select(runtime_capabilities_current).with_for_update(
+                of=runtime_capabilities_current
+            )
+        )
+    ).mappings().all()
+    if {str(row["capability_key"]) for row in capabilities} != {
+        "exchange_commands",
+        "strategy_signal_ingest",
+    }:
+        raise RuntimeAuthorityTransitionRefused(
+            "compatible runtime capability identities differ"
+        )
+    for capability in capabilities:
+        certification = dict(capability["certification"])
+        certification.update(
+            {
+                "deployment_commit": request.runtime_commit,
+                "seed_identity": seed_identity,
+                "stage": "compatible_upgrade",
+            }
+        )
+        updated_capability = await connection.execute(
+            sa.update(runtime_capabilities_current)
+            .where(
+                runtime_capabilities_current.c.capability_key
+                == capability["capability_key"]
+            )
+            .values(
+                certified_commit=request.runtime_commit,
+                schema_revision=request.schema_revision,
+                certification=certification,
+                updated_at_ms=request.seeded_at_ms,
+            )
+        )
+        if updated_capability.rowcount != 1:
+            raise RuntimeAuthorityTransitionRefused(
+                "compatible runtime capability update was lost"
+            )
+
+    metadata_targets = {
+        "registry_semantic_hash": registry.registry_semantic_hash,
+        "runtime_commit": request.runtime_commit,
+        "schema_revision": request.schema_revision,
+        "seed_identity": seed_identity,
+    }
+    if set(metadata_rows) != set(metadata_targets):
+        raise RuntimeAuthorityTransitionRefused(
+            "compatible runtime metadata identity set differs"
+        )
+    for key, value in metadata_targets.items():
+        updated_metadata = await connection.execute(
+            sa.update(schema_metadata)
+            .where(schema_metadata.c.metadata_key == key)
+            .values(metadata_value=value, updated_at_ms=request.seeded_at_ms)
+        )
+        if updated_metadata.rowcount != 1:
+            raise RuntimeAuthorityTransitionRefused(
+                "compatible runtime metadata update was lost"
+            )
+
+    return RuntimeDeploymentIdentityResult(
+        runtime_commit=request.runtime_commit,
+        schema_revision=request.schema_revision,
+        runtime_seed_semantic_hash=seed_identity,
+        refreshed_existing_authority=True,
+    )
+
+
 async def deploy_recovery_identity(
     uow: PostgresKernelUnitOfWork,
     request: RuntimeAuthoritySeedRequest,
@@ -417,28 +600,6 @@ async def deploy_recovery_identity(
         uow,
         request,
         recovery_ticket_id=normalized_ticket_id,
-    )
-
-
-async def deploy_protected_identity(
-    uow: PostgresKernelUnitOfWork,
-    request: RuntimeAuthoritySeedRequest,
-    *,
-    protected_ticket_ids: Sequence[str],
-) -> RuntimeDeploymentIdentityResult:
-    """Rotate identity only across an exact, fully protected Ticket set."""
-
-    normalized_ticket_ids = tuple(
-        ticket_id.strip() for ticket_id in protected_ticket_ids
-    )
-    if not normalized_ticket_ids or any(not item for item in normalized_ticket_ids):
-        raise ValueError("protected Ticket identities must be non-blank")
-    if len(set(normalized_ticket_ids)) != len(normalized_ticket_ids):
-        raise ValueError("protected Ticket identities must be distinct")
-    return await _deploy_runtime_identity(
-        uow,
-        request,
-        protected_ticket_ids=frozenset(normalized_ticket_ids),
     )
 
 
@@ -465,7 +626,6 @@ async def _deploy_runtime_identity(
     request: RuntimeAuthoritySeedRequest,
     *,
     recovery_ticket_id: str | None = None,
-    protected_ticket_ids: frozenset[str] | None = None,
     closure_ticket_id: str | None = None,
 ) -> RuntimeDeploymentIdentityResult:
     """Install the exact identity after a flat or narrowly safe recovery gate."""
@@ -474,7 +634,6 @@ async def _deploy_runtime_identity(
         value is not None
         for value in (
             recovery_ticket_id,
-            protected_ticket_ids,
             closure_ticket_id,
         )
     ) > 1:
@@ -489,7 +648,6 @@ async def _deploy_runtime_identity(
     if metadata_count == 0:
         if (
             recovery_ticket_id is not None
-            or protected_ticket_ids is not None
             or closure_ticket_id is not None
         ):
             raise RuntimeAuthorityTransitionRefused(
@@ -503,13 +661,7 @@ async def _deploy_runtime_identity(
             refreshed_existing_authority=False,
         )
 
-    if protected_ticket_ids is not None:
-        await _require_protected_identity_activity(
-            connection,
-            protected_ticket_ids=protected_ticket_ids,
-            account_id=request.account_id,
-        )
-    elif closure_ticket_id is not None:
+    if closure_ticket_id is not None:
         await _require_closure_identity_activity(
             connection,
             closure_ticket_id=closure_ticket_id,
@@ -628,9 +780,7 @@ async def arm_acceptance_policy(
 ) -> RuntimePolicyState:
     return await _transition_policy(
         uow,
-        expected_version=1,
         expected_submit=False,
-        target_version=2,
         operation="arm_acceptance_ticket",
         stage="acceptance_armed",
         occurred_at_ms=request.armed_at_ms,
@@ -643,9 +793,7 @@ async def promote_full_policy(
 ) -> RuntimePolicyState:
     return await _transition_policy(
         uow,
-        expected_version=2,
         expected_submit=True,
-        target_version=3,
         operation="promote_full_runtime",
         stage="full_runtime",
         occurred_at_ms=request.promoted_at_ms,
@@ -656,9 +804,7 @@ async def promote_full_policy(
 async def _transition_policy(
     uow: PostgresKernelUnitOfWork,
     *,
-    expected_version: int,
     expected_submit: bool,
-    target_version: int,
     operation: str,
     stage: str,
     occurred_at_ms: int,
@@ -667,16 +813,10 @@ async def _transition_policy(
     connection = uow._require_connection()
     allowed_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
     current = dict(await _lock_policy(connection))
-    if _policy_matches(
-        current,
-        version=target_version,
-        new_entry_submit_enabled=True,
-        allowed_event_spec_ids=allowed_event_spec_ids,
-    ):
-        return _policy_state(current)
+    current_version = int(str(current["policy_version"]))
     if not _policy_matches(
         current,
-        version=expected_version,
+        version=current_version,
         new_entry_submit_enabled=expected_submit,
         allowed_event_spec_ids=allowed_event_spec_ids,
     ):
@@ -692,6 +832,7 @@ async def _transition_policy(
         )
     await _require_zero_runtime_activity(connection)
 
+    target_version = current_version + 1
     target = _policy_values(
         version=target_version,
         new_entry_submit_enabled=True,
@@ -716,7 +857,7 @@ async def _transition_policy(
         sa.update(owner_policy_current)
         .where(
             owner_policy_current.c.owner_policy_id == OWNER_POLICY_ID,
-            owner_policy_current.c.policy_version == expected_version,
+            owner_policy_current.c.policy_version == current_version,
         )
         .values(target)
     )
@@ -978,6 +1119,54 @@ async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
         )
 
 
+async def _require_flat_compatible_upgrade_activity(
+    connection: AsyncConnection,
+) -> None:
+    await _require_zero_runtime_activity(connection)
+    checks = (
+        (
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(positions_current).where(
+                    positions_current.c.quantity != 0
+                )
+            ),
+            "compatible identity requires zero projected positions",
+        ),
+        (
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(budget_reservations).where(
+                    budget_reservations.c.status == "active"
+                )
+            ),
+            "compatible identity requires zero active Budget Reservations",
+        ),
+        (
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(trade_tickets).where(
+                    trade_tickets.c.active_netting_domain_key.is_not(None)
+                )
+            ),
+            "compatible identity requires every Netting Domain released",
+        ),
+        (
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(trade_tickets).where(
+                    trade_tickets.c.terminal_at_ms.is_not(None),
+                    ~sa.exists(
+                        sa.select(trade_reviews.c.review_id).where(
+                            trade_reviews.c.ticket_id == trade_tickets.c.ticket_id
+                        )
+                    ),
+                )
+            ),
+            "compatible identity requires every terminal Ticket reviewed",
+        ),
+    )
+    for count, message in checks:
+        if int(count or 0) != 0:
+            raise RuntimeAuthorityTransitionRefused(message)
+
+
 async def _require_closure_identity_activity(
     connection: AsyncConnection,
     *,
@@ -1120,218 +1309,6 @@ async def _require_closure_identity_activity(
         )
 
 
-async def _require_protected_identity_activity(
-    connection: AsyncConnection,
-    *,
-    protected_ticket_ids: frozenset[str],
-    account_id: str,
-) -> None:
-    active_tickets = (
-        await connection.execute(
-            sa.select(trade_tickets)
-            .where(trade_tickets.c.terminal_at_ms.is_(None))
-            .with_for_update(of=trade_tickets)
-        )
-    ).mappings().all()
-    active_ticket_ids = {str(row["ticket_id"]) for row in active_tickets}
-    if active_ticket_ids != protected_ticket_ids:
-        raise RuntimeAuthorityTransitionRefused(
-            "protected identity requires the exact active protected Ticket set"
-        )
-
-    aggregates = (
-        await connection.execute(
-            sa.select(trade_aggregates)
-            .where(trade_aggregates.c.ticket_id.in_(protected_ticket_ids))
-            .with_for_update(of=trade_aggregates)
-        )
-    ).mappings().all()
-    aggregates_by_ticket = {str(row["ticket_id"]): row for row in aggregates}
-    if set(aggregates_by_ticket) != protected_ticket_ids or any(
-        not _aggregate_has_complete_protection(row) for row in aggregates
-    ):
-        raise RuntimeAuthorityTransitionRefused(
-            "protected identity requires complete active protection"
-        )
-
-    projected_positions = (
-        await connection.execute(
-            sa.select(positions_current)
-            .where(positions_current.c.quantity != 0)
-            .with_for_update(of=positions_current)
-        )
-    ).mappings().all()
-    projected_by_ticket = {
-        str(row["ticket_id"]): row
-        for row in projected_positions
-        if row["ticket_id"] is not None
-    }
-    if set(projected_by_ticket) != protected_ticket_ids or len(
-        projected_by_ticket
-    ) != len(projected_positions):
-        raise RuntimeAuthorityTransitionRefused(
-            "protected identity requires matching projected positions"
-        )
-    for ticket_id in protected_ticket_ids:
-        aggregate = aggregates_by_ticket[ticket_id]
-        expected_quantity = Decimal(str(aggregate["position_qty"]))
-        if (
-            Decimal(str(projected_by_ticket[ticket_id]["quantity"]))
-            != expected_quantity
-        ):
-            raise RuntimeAuthorityTransitionRefused(
-                "protected identity requires matching projected positions"
-            )
-
-    active_reservations = (
-        await connection.execute(
-            sa.select(budget_reservations)
-            .where(
-                budget_reservations.c.status == "active",
-            )
-            .with_for_update(of=budget_reservations)
-        )
-    ).mappings().all()
-    _require_exact_active_budget_reservations(
-        active_tickets,
-        active_reservations,
-    )
-
-    exposures = (
-        await connection.execute(
-            sa.select(account_exposure_current).with_for_update(
-                of=account_exposure_current
-            )
-        )
-    ).mappings().all()
-    if (
-        len(exposures) != 1
-        or exposures[0]["venue_id"] != VENUE_ID
-        or exposures[0]["account_id"] != account_id
-        or int(str(exposures[0]["active_ticket_count"]))
-        != len(protected_ticket_ids)
-        or Decimal(str(exposures[0]["gross_notional"]))
-        != sum(Decimal(str(ticket["notional"])) for ticket in active_tickets)
-        or Decimal(str(exposures[0]["gross_risk_at_stop"]))
-        != sum(Decimal(str(ticket["risk_at_stop"])) for ticket in active_tickets)
-        or Decimal(str(exposures[0]["current_reserved_margin"]))
-        != sum(
-            Decimal(str(reservation["reserved_margin"]))
-            for reservation in active_reservations
-        )
-    ):
-        raise RuntimeAuthorityTransitionRefused(
-            "protected identity requires matching account exposure"
-        )
-
-    lane = (
-        await connection.execute(
-            sa.select(entry_lane_current)
-            .where(entry_lane_current.c.lane_id == GLOBAL_ENTRY_LANE_ID)
-            .with_for_update(of=entry_lane_current)
-        )
-    ).mappings().one_or_none()
-    if (
-        lane is None
-        or lane["status"] != "idle"
-        or lane["ticket_id"] is not None
-        or lane["signal_event_id"] is not None
-    ):
-        raise RuntimeAuthorityTransitionRefused(
-            "protected identity requires an idle global ENTRY lane"
-        )
-
-    unresolved_commands = await connection.scalar(
-        sa.select(sa.func.count()).select_from(exchange_commands).where(
-            exchange_commands.c.status.in_(
-                ("prepared", "claimed", "dispatch_started", "outcome_unknown")
-            )
-        )
-    )
-    if int(unresolved_commands or 0) != 0:
-        raise RuntimeAuthorityTransitionRefused(
-            "protected identity requires zero unresolved Exchange Commands"
-        )
-
-    open_incidents = await connection.scalar(
-        sa.select(sa.func.count()).select_from(runtime_incidents).where(
-            runtime_incidents.c.status != "resolved"
-        )
-    )
-    if int(open_incidents or 0) != 0:
-        raise RuntimeAuthorityTransitionRefused(
-            "protected identity requires zero open Incidents"
-        )
-
-
-def _require_exact_active_budget_reservations(
-    active_tickets: Sequence[RowMapping],
-    reservations: Sequence[RowMapping],
-) -> None:
-    reservations_by_ticket = {
-        str(row["ticket_id"]): row for row in reservations
-    }
-    expected_ticket_ids = {str(ticket["ticket_id"]) for ticket in active_tickets}
-    if set(reservations_by_ticket) != expected_ticket_ids or len(reservations) != len(
-        expected_ticket_ids
-    ):
-        raise RuntimeAuthorityTransitionRefused(
-            "protected identity requires exact active Budget Reservations"
-        )
-
-    for ticket in active_tickets:
-        reservation = reservations_by_ticket[str(ticket["ticket_id"])]
-        if (
-            reservation["owner_policy_id"] != ticket["owner_policy_id"]
-            or reservation["venue_id"] != ticket["venue_id"]
-            or reservation["account_id"] != ticket["account_id"]
-            or Decimal(str(reservation["reserved_notional"]))
-            != Decimal(str(ticket["notional"]))
-            or Decimal(str(reservation["reserved_risk"]))
-            != Decimal(str(ticket["risk_at_stop"]))
-            or Decimal(str(reservation["reserved_margin"]))
-            != Decimal(str(ticket["reserved_margin"]))
-            or Decimal(str(reservation["planned_stop_risk_budget"]))
-            != Decimal(str(ticket["planned_stop_risk_budget"]))
-            or reservation["risk_reservation_basis"]
-            != ticket["risk_reservation_basis"]
-            or reservation["released_at_ms"] is not None
-        ):
-            raise RuntimeAuthorityTransitionRefused(
-                "protected identity requires exact active Budget Reservations"
-            )
-
-
-def _aggregate_has_complete_protection(row: RowMapping) -> bool:
-    status = str(row["status"])
-    position_quantity = Decimal(str(row["position_qty"]))
-    if (
-        status not in {"position_protected", "runner_protected"}
-        or position_quantity <= 0
-        or Decimal(str(row["protected_qty"])) != position_quantity
-        or row["entry_exchange_order_id"] is None
-        or row["active_stop_exchange_order_id"] is None
-        or row["active_stop_price"] is None
-        or row["pending_replaced_stop_exchange_order_id"] is not None
-        or row["pending_stop_price"] is not None
-        or row["pending_cancel_exchange_order_id"] is not None
-        or row["exit_exchange_order_id"] is not None
-        or row["review_id"] is not None
-    ):
-        return False
-    if status == "position_protected":
-        return (
-            row["initial_stop_exchange_order_id"] is not None
-            and row["tp1_exchange_order_id"] is not None
-        )
-    return (
-        row["tp1_exchange_order_id"] is None
-        and Decimal(str(row["tp1_filled_qty"]))
-        == Decimal(str(row["tp1_target_qty"]))
-        and row["break_even_floor_price"] is not None
-    )
-
-
 async def _require_recovery_identity_activity(
     connection: AsyncConnection,
     *,
@@ -1454,7 +1431,6 @@ async def _terminal_review_exists(
             sa.select(trade_tickets.c.ticket_id).where(
                 trade_tickets.c.ticket_id == ticket_id,
                 trade_tickets.c.owner_policy_id == OWNER_POLICY_ID,
-                trade_tickets.c.owner_policy_version == 2,
                 trade_tickets.c.status == "terminal",
                 trade_tickets.c.terminal_at_ms.is_not(None),
                 trade_tickets.c.active_netting_domain_key.is_(None),

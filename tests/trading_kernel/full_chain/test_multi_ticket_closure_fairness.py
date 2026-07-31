@@ -16,10 +16,15 @@ from src.trading_kernel.application.reconcile_ticket import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import OrderCommandPayload
+from src.trading_kernel.domain.exit_policy import exit_policy_for
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
@@ -67,8 +72,26 @@ class _ActivePositionSource:
         )
 
 
-def _active_ticket(*, instrument: str, signal_event_id: str):
+def _active_ticket(
+    *,
+    instrument: str,
+    signal_event_id: str,
+    event_id: str = "SOR-LONG",
+):
     original = _registered_sor_long_ticket()
+    contract = next(
+        item
+        for item in registered_strategy_contracts()
+        if item.event_id == event_id
+    )
+    policy = exit_policy_for(contract.event_spec_id)
+    runtime = original.identity.runtime.model_copy(
+        update={
+            "strategy_group_id": contract.strategy_group_id,
+            "strategy_version_id": contract.strategy_version_id,
+            "event_spec_id": contract.event_spec_id,
+        }
+    )
     domain = NettingDomain(
         venue_id=original.identity.netting_domain.venue_id,
         account_id=original.identity.netting_domain.account_id,
@@ -79,11 +102,12 @@ def _active_ticket(*, instrument: str, signal_event_id: str):
         update={
             "ticket_id": build_ticket_id(
                 signal_event_id=signal_event_id,
-                runtime=original.identity.runtime,
+                runtime=runtime,
                 netting_domain=domain,
             ),
             "signal_event_id": signal_event_id,
             "exposure_episode_id": f"episode:{instrument}",
+            "runtime": runtime,
             "netting_domain": domain,
         }
     )
@@ -91,6 +115,20 @@ def _active_ticket(*, instrument: str, signal_event_id: str):
         update={
             "identity": identity,
             "runtime_scope_id": f"scope:{instrument}",
+            "universe_version_id": (
+                original.universe_version_id
+                if contract.strategy_group_id
+                == original.identity.runtime.strategy_group_id
+                else f"universe:{contract.event_id.lower()}:1"
+            ),
+            "exit_policy_id": policy.exit_policy_id,
+            "exit_policy_semantic_hash": policy.semantic_hash(),
+            "pre_tp1_reclaim_price": (
+                original.pre_tp1_reclaim_price if event_id.startswith("SOR-") else None
+            ),
+            "exposure_session_end_ms": (
+                original.exposure_session_end_ms if event_id.startswith("SOR-") else None
+            ),
         }
     )
 
@@ -264,7 +302,11 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
     await _reach_position_protected(dispatch_engine, sol_ticket)
     await reach_runner_protected(dispatch_engine, avax_ticket, seed_policy=False)
 
-    btc_ticket = _registered_sor_long_ticket()
+    btc_ticket = _active_ticket(
+        instrument="BTCUSDT",
+        signal_event_id="signal-btc",
+        event_id="MI-LONG",
+    )
     await _settlement_pending_from_runner(dispatch_engine, btc_ticket)
     open_orders_by_ticket = await _active_stop_truth(
         dispatch_engine,
@@ -277,7 +319,7 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
     request = ReconciliationWorkerRequest(
         worker_id="reconciliation-fairness-full-chain",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v4",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         now_ms=33_600,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,

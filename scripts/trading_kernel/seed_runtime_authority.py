@@ -28,7 +28,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimePolicyState,
     arm_acceptance_policy,
     deploy_closure_identity,
-    deploy_protected_identity,
+    deploy_compatible_upgrade_identity,
     deploy_recovery_identity,
     deploy_runtime_identity,
     promote_full_policy,
@@ -87,6 +87,27 @@ def _parser() -> argparse.ArgumentParser:
     )
     deploy.add_argument("--now-ms", type=int)
 
+    compatible = subparsers.add_parser(
+        "deploy-compatible-identity",
+        help="move one exact flat v4 authority to the current schema and Registry",
+    )
+    compatible.add_argument(
+        "--account-id",
+        default=os.getenv("TRADING_KERNEL_ACCOUNT_ID", ""),
+    )
+    compatible.add_argument(
+        "--runtime-commit",
+        default=os.getenv("TRADING_KERNEL_RUNTIME_COMMIT", ""),
+    )
+    compatible.add_argument(
+        "--schema-revision",
+        default=os.getenv(
+            "TRADING_KERNEL_SCHEMA_REVISION",
+            CURRENT_SCHEMA_REVISION,
+        ),
+    )
+    compatible.add_argument("--now-ms", type=int)
+
     recovery = subparsers.add_parser(
         "deploy-recovery-identity",
         help="rotate identity only to reconcile one zero-exposure leverage unknown",
@@ -108,32 +129,6 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     recovery.add_argument("--now-ms", type=int)
-
-    protected = subparsers.add_parser(
-        "deploy-protected-identity",
-        help="rotate identity only across exact fully protected active Tickets",
-    )
-    protected.add_argument(
-        "--protected-ticket-id",
-        action="append",
-        required=True,
-    )
-    protected.add_argument(
-        "--account-id",
-        default=os.getenv("TRADING_KERNEL_ACCOUNT_ID", ""),
-    )
-    protected.add_argument(
-        "--runtime-commit",
-        default=os.getenv("TRADING_KERNEL_RUNTIME_COMMIT", ""),
-    )
-    protected.add_argument(
-        "--schema-revision",
-        default=os.getenv(
-            "TRADING_KERNEL_SCHEMA_REVISION",
-            CURRENT_SCHEMA_REVISION,
-        ),
-    )
-    protected.add_argument("--now-ms", type=int)
 
     closure = subparsers.add_parser(
         "deploy-closure-identity",
@@ -205,6 +200,16 @@ async def _run(args: argparse.Namespace) -> int:
                         seeded_at_ms=now_ms,
                     ),
                 )
+            elif args.action == "deploy-compatible-identity":
+                result = await deploy_compatible_upgrade_identity(
+                    uow,
+                    RuntimeAuthoritySeedRequest(
+                        account_id=args.account_id,
+                        runtime_commit=args.runtime_commit,
+                        schema_revision=args.schema_revision,
+                        seeded_at_ms=now_ms,
+                    ),
+                )
             elif args.action == "deploy-recovery-identity":
                 result = await deploy_recovery_identity(
                     uow,
@@ -215,17 +220,6 @@ async def _run(args: argparse.Namespace) -> int:
                         seeded_at_ms=now_ms,
                     ),
                     recovery_ticket_id=args.recovery_ticket_id,
-                )
-            elif args.action == "deploy-protected-identity":
-                result = await deploy_protected_identity(
-                    uow,
-                    RuntimeAuthoritySeedRequest(
-                        account_id=args.account_id,
-                        runtime_commit=args.runtime_commit,
-                        schema_revision=args.schema_revision,
-                        seeded_at_ms=now_ms,
-                    ),
-                    protected_ticket_ids=tuple(args.protected_ticket_id),
                 )
             elif args.action == "deploy-closure-identity":
                 result = await deploy_closure_identity(

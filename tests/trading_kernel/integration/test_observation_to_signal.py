@@ -110,7 +110,7 @@ async def test_observation_worker_claims_one_due_scope_and_waits_for_next_close(
     request = ObservationWorkerRequest(
         worker_id="observation-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v4",
+        schema_revision="0002_sor_v3_strategy_group_capacity",
         now_ms=NOW_MS,
         lease_until_ms=NOW_MS + 30_000,
         timeout_seconds=1,
@@ -206,7 +206,7 @@ async def test_observer_ignores_open_tail_and_appends_no_signal_history(
         ObservationRequest(
             runtime_scope_id="scope-sor-eth-long",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             trigger_candle_close_time_ms=NOW_MS,
         ),
     )
@@ -250,7 +250,7 @@ async def test_triggered_observation_persists_one_stable_strategy_signal(
     request = ObservationRequest(
         runtime_scope_id="scope-sor-eth-long",
         runtime_commit="kernel-test-head",
-        schema_revision="0001_trading_kernel_baseline_v4",
+        schema_revision="0002_sor_v3_strategy_group_capacity",
         trigger_candle_close_time_ms=NOW_MS,
     )
 
@@ -332,7 +332,7 @@ async def test_sor_same_session_recross_keeps_one_exposure_episode(
         ObservationRequest(
             runtime_scope_id="scope-sor-eth-long",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             trigger_candle_close_time_ms=NOW_MS,
         ),
     )
@@ -342,7 +342,7 @@ async def test_sor_same_session_recross_keeps_one_exposure_episode(
         ObservationRequest(
             runtime_scope_id="scope-sor-eth-long",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             trigger_candle_close_time_ms=NOW_MS + 1_800_000,
         ),
     )
@@ -375,7 +375,7 @@ async def test_market_timeout_fails_closed_as_observation_unavailable(
         ObservationRequest(
             runtime_scope_id="scope-sor-eth-long",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             trigger_candle_close_time_ms=NOW_MS,
         ),
     )
@@ -425,7 +425,7 @@ async def test_active_detector_exception_preserves_worker_retry_semantics(
         ObservationWorkerRequest(
             worker_id="active-detector-retry-worker",
             runtime_commit="kernel-test-head",
-            schema_revision="0001_trading_kernel_baseline_v4",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
             now_ms=NOW_MS,
             lease_until_ms=NOW_MS + 30_000,
             timeout_seconds=1,
@@ -499,7 +499,7 @@ async def test_all_six_registered_events_produce_signals_through_observation(
                 ObservationRequest(
                     runtime_scope_id=scope_id,
                     runtime_commit="kernel-test-head",
-                    schema_revision="0001_trading_kernel_baseline_v4",
+                    schema_revision="0002_sor_v3_strategy_group_capacity",
                     trigger_candle_close_time_ms=NOW_MS,
                 ),
             )
@@ -567,7 +567,7 @@ async def _seed_sor_scope(engine: AsyncEngine) -> None:
                 capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 certification={},
                 updated_at_ms=NOW_MS - 1,
             )
@@ -684,7 +684,7 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
                 capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 certification={},
                 updated_at_ms=NOW_MS - 1,
             )

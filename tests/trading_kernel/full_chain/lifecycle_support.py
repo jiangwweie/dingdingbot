@@ -17,6 +17,9 @@ from src.trading_kernel.application.reconcile_ticket import (
 )
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
@@ -48,7 +51,7 @@ async def dispatch_lifecycle_command(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision="0001_trading_kernel_baseline_v4" if entry else None,
+            schema_revision=CURRENT_SCHEMA_REVISION if entry else None,
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,

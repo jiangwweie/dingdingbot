@@ -82,7 +82,7 @@ def promote_entry(backend: EntryPromotionBackend) -> str:
             armed = backend.arm_entry_authority()
             if (
                 armed.get("new_entry_submit_enabled") is not True
-                or armed.get("policy_version") != 2
+                or not _is_positive_policy_version(armed.get("policy_version"))
             ):
                 raise EntryPromotionBlocked("entry_authority_arm_failed")
         if not entry_already_started_fenced:
@@ -111,16 +111,17 @@ def _authority_is_armed(certification: Mapping[str, object]) -> bool:
     return bool(
         certification.get("universe_bootstrap_pass") is True
         and certification.get("certification_batch_pass") is True
-        and (
-            certification.get("flatness_pass") is True
-            or certification.get("protected_promotion_pass") is True
-        )
+        and certification.get("flatness_pass") is True
         and isinstance(owner_policy, Mapping)
-        and owner_policy.get("policy_version") == 2
+        and _is_positive_policy_version(owner_policy.get("policy_version"))
         and owner_policy.get("new_entry_submit_enabled") is True
         and isinstance(capabilities, Mapping)
         and capabilities.get("exchange_commands") is True
     )
+
+
+def _is_positive_policy_version(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 class LocalEntryPromotionBackend:
@@ -137,42 +138,16 @@ class LocalEntryPromotionBackend:
         self,
         certification: Mapping[str, object],
     ) -> bool:
-        protected = certification.get("protected_tickets")
-        if not isinstance(protected, list) or any(
-            not isinstance(item, Mapping) for item in protected
-        ):
-            return False
-        probe_args: list[str] = []
-        for item in protected:
-            probe_args.extend(
-                (
-                    "--protected-ticket-json",
-                    json.dumps(item, separators=(",", ":"), sort_keys=True),
-                )
-            )
-        probe = self._json_script("probe_production_runtime.py", *probe_args)
+        probe = self._json_script("probe_production_runtime.py")
         rules = probe.get("rules")
         manifest = probe.get("probe_manifest")
-        probe_protected = probe.get("protected_tickets")
-        protected_mode = certification.get("protected_promotion_pass") is True
-        exposure_matches = (
-            probe.get("non_flat_domain_count") == len(protected)
-            and probe.get("open_order_domain_count") == len(protected)
-            and isinstance(probe_protected, list)
-            and len(probe_protected) == len(protected)
-            if protected_mode
-            else (
-                certification.get("flatness_pass") is True
-                and not protected
-                and probe.get("non_flat_domain_count") == 0
-                and probe.get("open_order_domain_count") == 0
-            )
-        )
         return bool(
             probe.get("venue_id") == "binance-usdm"
             and probe.get("account_position_mode") == "independent_sides"
             and probe.get("account_margin_mode") == "cross"
-            and exposure_matches
+            and certification.get("flatness_pass") is True
+            and probe.get("non_flat_domain_count") == 0
+            and probe.get("open_order_domain_count") == 0
             and isinstance(manifest, list)
             and len(manifest) == 7
             and isinstance(rules, list)

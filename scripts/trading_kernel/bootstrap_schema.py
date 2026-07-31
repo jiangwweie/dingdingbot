@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upgrade an empty PostgreSQL database to the trading-kernel baseline."""
+"""Advance PostgreSQL through the certified trading-kernel revision chain."""
 
 from __future__ import annotations
 

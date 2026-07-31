@@ -458,7 +458,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision="0001_trading_kernel_baseline_v4" if entry else None,
+            schema_revision="0002_sor_v3_strategy_group_capacity" if entry else None,
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
@@ -547,7 +547,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0001_trading_kernel_baseline_v4",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
                 certification={},
                 updated_at_ms=1_000,
             )

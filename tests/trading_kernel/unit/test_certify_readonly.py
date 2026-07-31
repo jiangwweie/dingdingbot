@@ -18,9 +18,12 @@ from scripts.trading_kernel.certify_readonly import (
         (1, 1, False, True),
         (1, 2, True, True),
         (2, 2, True, True),
+        (2, 3, True, True),
+        (7, 8, True, True),
         (1, 2, False, False),
         (1, 3, True, False),
-        (2, 3, True, False),
+        (3, 2, True, False),
+        (0, 1, True, False),
     ),
 )
 def test_certification_batch_accepts_only_its_exact_policy_or_direct_arm_successor(

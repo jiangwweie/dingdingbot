@@ -46,7 +46,9 @@ class CutoverPhase(StrEnum):
     STOP_RUNTIME_WRITERS = "stop_runtime_writers"
     VERIFY_FINAL_FLAT = "verify_final_flat"
     STAGE_EXACT_RELEASE = "stage_exact_release"
-    REBUILD_APPLICATION_SCHEMA = "rebuild_application_schema"
+    CAPTURE_HISTORY_MANIFEST = "capture_history_manifest"
+    MIGRATE_APPLICATION_SCHEMA = "migrate_application_schema"
+    VERIFY_HISTORY_PRESERVATION = "verify_history_preservation"
     SEED_CURRENT_AUTHORITY = "seed_current_authority"
     DEPLOY_EXACT_RELEASE = "deploy_exact_release"
     CERTIFY_SCHEMA_AND_READONLY = "certify_schema_and_readonly"
@@ -64,7 +66,9 @@ CUTOVER_PHASES = (
     CutoverPhase.FENCE_EXCHANGE_WRITES,
     CutoverPhase.STOP_RUNTIME_WRITERS,
     CutoverPhase.VERIFY_FINAL_FLAT,
-    CutoverPhase.REBUILD_APPLICATION_SCHEMA,
+    CutoverPhase.CAPTURE_HISTORY_MANIFEST,
+    CutoverPhase.MIGRATE_APPLICATION_SCHEMA,
+    CutoverPhase.VERIFY_HISTORY_PRESERVATION,
     CutoverPhase.SEED_CURRENT_AUTHORITY,
     CutoverPhase.DEPLOY_EXACT_RELEASE,
     CutoverPhase.CERTIFY_SCHEMA_AND_READONLY,
@@ -627,18 +631,18 @@ async def run_cutover(
 ) -> CutoverResult:
     async with journal.run_lock(plan.cutover_id):
         await journal.ensure_run(plan, now_ms=now_ms)
-        rebuild_index = CUTOVER_PHASES.index(
-            CutoverPhase.REBUILD_APPLICATION_SCHEMA
+        migration_index = CUTOVER_PHASES.index(
+            CutoverPhase.MIGRATE_APPLICATION_SCHEMA
         )
-        destructive_started = False
-        for destructive_phase in CUTOVER_PHASES[rebuild_index:]:
+        migration_started = False
+        for migration_phase in CUTOVER_PHASES[migration_index:]:
             if (
-                await journal.phase_status(plan.cutover_id, destructive_phase)
+                await journal.phase_status(plan.cutover_id, migration_phase)
                 is not None
             ):
-                destructive_started = True
+                migration_started = True
                 break
-        if not destructive_started:
+        if not migration_started:
             await _stage_release_before_preflight(
                 adapter,
                 journal,
@@ -653,10 +657,10 @@ async def run_cutover(
 
         for index, phase in enumerate(CUTOVER_PHASES, start=1):
             status = await journal.phase_status(plan.cutover_id, phase)
-            if destructive_started and index <= rebuild_index:
+            if migration_started and index <= migration_index:
                 if status != "completed":
                     raise CutoverBlocked(
-                        ("pre_destruction_phase_incomplete_after_schema_rebuild",)
+                        ("pre_migration_phase_incomplete_after_schema_upgrade",)
                     )
                 continue
             if phase is CutoverPhase.PLAN_IDENTITIES:
@@ -685,7 +689,7 @@ async def run_cutover(
                 continue
 
             operation_effect_required = (
-                phase is CutoverPhase.REBUILD_APPLICATION_SCHEMA
+                phase is CutoverPhase.MIGRATE_APPLICATION_SCHEMA
                 and status is None
             )
             if (
