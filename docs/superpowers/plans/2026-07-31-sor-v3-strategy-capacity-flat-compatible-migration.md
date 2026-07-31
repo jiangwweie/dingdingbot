@@ -157,7 +157,7 @@ pytest -q tests/trading_kernel/integration/test_issue_ticket.py tests/trading_ke
 - `tests/trading_kernel/integration/test_bootstrap_schema.py`
 - `tests/trading_kernel/integration/test_clean_baseline_rebuild.py`
 - `tests/trading_kernel/integration/test_sor_v3_compatible_migration.py`
-- `tests/architecture/test_trading_kernel_baseline_only.py`
+- `tests/trading_kernel/architecture/test_strategy_universe_operability_architecture.py`
 
 ### TDD 步骤
 
@@ -176,7 +176,7 @@ pytest -q tests/trading_kernel/integration/test_issue_ticket.py tests/trading_ke
 
 ```bash
 pytest -q tests/trading_kernel/integration/test_schema_baseline.py tests/trading_kernel/integration/test_bootstrap_schema.py tests/trading_kernel/integration/test_clean_baseline_rebuild.py tests/trading_kernel/integration/test_sor_v3_compatible_migration.py
-pytest -q tests/architecture/test_trading_kernel_baseline_only.py
+pytest -q tests/trading_kernel/architecture/test_strategy_universe_operability_architecture.py
 ```
 
 ## Task 5：Registry Seed、Universe 切换与历史 Review 分类
@@ -224,13 +224,13 @@ pytest -q tests/trading_kernel/integration/test_strategy_registry_seed.py tests/
 
 ### TDD 步骤
 
-- [ ] RED：compatible-upgrade 在 active Ticket、position、open order、unresolved Command、open Incident 任一非零时 fail-closed。
-- [ ] RED：要求历史 Ticket terminal/reviewed、Reservation/Domain released、Entry fenced、旧 writer 全停。
-- [ ] RED：只运行 certified migration chain、preservation certification、seed、runtime identity switch、worker restart 和 v3 Universe warming。
-- [ ] RED：recording venue 在 dry-run/rehearsal 中收到零 exchange mutation。
-- [ ] RED：regular release 仍禁止 schema change；compatible-upgrade 不复用 protected-ticket handover。
-- [ ] GREEN：增加显式 deployment mode、preflight manifest、postflight preservation digest 和 schema head 参数。
-- [ ] REFACTOR：删除 active-position schema handover、临时 SQL 和 rebuild-only 分支。
+- [x] RED：compatible-upgrade 在 active Ticket、position、open order、unresolved Command、open Incident 任一非零时 fail-closed。
+- [x] RED：要求历史 Ticket terminal/reviewed、Reservation/Domain released、Entry fenced、旧 writer 全停。
+- [x] RED：只运行 certified migration chain、preservation certification、seed、runtime identity switch、worker restart 和 v3 Universe warming。
+- [x] RED：recording venue 在 dry-run/rehearsal 中收到零 exchange mutation。
+- [x] RED：regular release 仍禁止 schema change；compatible-upgrade 不复用 protected-ticket handover。
+- [x] GREEN：增加显式 deployment mode、preflight manifest、postflight preservation digest 和 schema head 参数。
+- [x] REFACTOR：删除 active-position schema handover、临时 SQL 和 rebuild-only 分支。
 
 ### 验证命令
 
@@ -254,44 +254,44 @@ pytest -q tests/trading_kernel/integration/test_production_cutover_adapter.py te
 
 ### 步骤
 
-- [ ] 更新 schema authority 为单 head 前向 revision chain。
-- [ ] 更新 Policy 参数语义，明确账户总容量 3、同 StrategyGroup 容量 2。
-- [ ] 增加 official flat compatible-upgrade 合同和 hard gates。
-- [ ] 删除与 compatible migration 冲突的 rebuild-only 和 active handover 描述。
-- [ ] 扫描 TODO/TBD、旧 SOR v2 producer、旧 schema head、旧容量语义和文档重复权威。
-- [ ] 未实际部署前不修改 MAIN_CONTROL_ROADMAP 的生产 commit、schema、tag 或 runtime snapshot。
+- [x] 更新 schema authority 为单 head 前向 revision chain。
+- [x] 更新 Policy 参数语义，明确账户总容量 3、同 StrategyGroup 容量 2。
+- [x] 增加 official flat compatible-upgrade 合同和 hard gates。
+- [x] 删除与 compatible migration 冲突的 rebuild-only 和 active handover 描述。
+- [x] 扫描 TODO/TBD、旧 SOR v2 producer、旧 schema head、旧容量语义和文档重复权威。
+- [x] 未实际部署前不修改 MAIN_CONTROL_ROADMAP 的生产 commit、schema、tag 或 runtime snapshot。
 
 ## Task 8：全量自测、架构审查与 Deployable 判定
 
 ### Fresh verification
 
-- [ ] Targeted unit tests 全部通过。
-- [ ] Targeted PostgreSQL integration tests 全部通过。
-- [ ] Production-shaped v4 -> 0002 preservation 测试通过。
-- [ ] Empty database base -> head 测试通过。
-- [ ] Full Trading Kernel test suite 通过。
-- [ ] Architecture tests 通过。
-- [ ] Ruff 通过。
-- [ ] Mypy 通过。
-- [ ] `git diff --check` 通过。
-- [ ] migration/deployment recording venue 证明零 exchange mutation。
+- [x] Targeted unit tests 全部通过。
+- [x] Targeted PostgreSQL integration tests 全部通过。
+- [x] Production-shaped v4 -> 0002 preservation 测试通过。
+- [x] Empty database base -> head 测试通过。
+- [x] Full Trading Kernel test suite 通过。
+- [x] Architecture tests 通过。
+- [x] Ruff 通过。
+- [x] Mypy 通过。
+- [x] `git diff --check` 通过。
+- [x] migration/deployment recording venue 证明零 exchange mutation。
 
 ### 审查维度
 
-- [ ] 设计验收条目逐条映射到代码和测试。
-- [ ] Domain 保持纯净，无 SQLAlchemy、venue client、filesystem 或 subprocess 泄漏。
-- [ ] 金融数值继续使用 `Decimal`，核心边界继续使用 frozen named Pydantic models。
-- [ ] 网络 I/O 不进入数据库事务；所有 exchange write 仍 durable-before-dispatch。
-- [ ] Runtime 查询使用 exact identity 和 bounded current-state query。
-- [ ] 无 dual write、fallback、old-table reader、平行 worker、active v2 compatibility surface。
-- [ ] 无语义过时测试、占位符、跳过关键门或静默降级。
-- [ ] 分支 diff 仅包含本次批准范围。
+- [x] 设计验收条目逐条映射到代码和测试。
+- [x] Domain 保持纯净，无 SQLAlchemy、venue client、filesystem 或 subprocess 泄漏。
+- [x] 金融数值继续使用 `Decimal`，核心边界继续使用 frozen named Pydantic models。
+- [x] 网络 I/O 不进入数据库事务；所有 exchange write 仍 durable-before-dispatch。
+- [x] Runtime 查询使用 exact identity 和 bounded current-state query。
+- [x] 无 dual write、fallback、old-table reader、平行 worker、active v2 compatibility surface。
+- [x] 无语义过时测试、占位符、跳过关键门或静默降级。
+- [x] 分支 diff 仅包含本次批准范围。
 
 ### 最终命令
 
 ```bash
-pytest -q tests/trading_kernel tests/architecture
-ruff check src/trading_kernel scripts/trading_kernel tests/trading_kernel tests/architecture
+pytest -q tests/trading_kernel
+ruff check src/trading_kernel scripts/trading_kernel tests/trading_kernel
 mypy src/trading_kernel scripts/trading_kernel
 git diff --check
 git status --short

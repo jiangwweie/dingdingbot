@@ -1,7 +1,7 @@
 ---
 title: TOKYO_RUNTIME_DEPLOYMENT_CONTRACT
 status: CURRENT
-last_verified: 2026-07-30
+last_verified: 2026-07-31
 ---
 
 # Tokyo Runtime Deployment Contract
@@ -27,88 +27,71 @@ configured `5x` leverage for all supported instruments, then stops the old
 workers and switches the release. Schema rebuild and destructive cutover
 checks are outside this regular-release path.
 
-An explicit `--protected-ticket-id` handover is a separate, one-time
-fix-forward mode for an exact set of already protected Tickets. It does not
-relax the normal flat-release rule: the caller must name every active Ticket,
-every named `position_protected` Ticket must retain a complete active Stop and
-TP1 identity, and every named `runner_protected` Ticket must retain its
-complete active runner Stop and recorded TP1 fill. Projected quantity must
-equal protected quantity unless that Ticket is explicitly named as an
-unrecorded full-TP1 runner replay. The ENTRY lane must be idle, and there must
-be zero unresolved Exchange Command or Incident. PostgreSQL
-atomically rechecks those predicates while all old workers are stopped before
-it rotates runtime identity. The mode permits no schema change, no new ENTRY,
-no Ticket/quantity/policy mutation, and no exchange write outside the normal
-Lifecycle durable-command chain. It also requires the exchange protected
-position and open-order domain counts to equal the named Ticket count. It is
-not a general active-position upgrade mechanism. Observation and
-Reconciliation restart first for a static target identity check; Lifecycle
-restarts only after that check so its intended recovery mutation cannot race
-the handover certification.
-
 After a normal switch, Observation, Lifecycle, and Reconciliation start first.
 Readonly database and exchange certification repeats against the target
 release. Entry starts last only when explicitly requested and every postflight
 gate passes. A failure after service stop writes the Entry fence and restores
 the three safety workers for fix-forward recovery.
 
+## Flat Compatible Upgrade
+
+The only schema-changing release path is an exact, forward-only, stopped
+upgrade:
+
+```text
+0001_trading_kernel_baseline_v4
+-> 0002_sor_v3_strategy_group_capacity
+```
+
+It preserves terminal PostgreSQL lineage; it does not preserve an active v2
+runtime. An active-position handover, dual write, v4 reader, schema fallback,
+manual DML conversion and direct SQL lifecycle mutation are forbidden.
+
+The compatible-upgrade preflight requires all of the following to be current:
+
+1. zero nonterminal Ticket and zero non-flat projected or exchange position;
+2. zero open exchange order or internal protection residue;
+3. zero active Budget Reservation and released Netting Domains;
+4. every terminal Ticket has Settlement/Review evidence;
+5. zero unresolved Exchange Command and zero open Incident;
+6. Entry is fenced and every old writer is stopped before the final check;
+7. source revision, target revision, commit, account, venue and policy identity
+   match the exact plan.
+
+The official bounded sequence is:
+
+1. Use the Lifecycle and Reconciliation chain to terminate every old exposure;
+   migration never substitutes for an EXIT or settlement operation.
+2. Stage the exact target release and run source-schema plus exchange readonly
+   preflight.
+3. Fence Entry, stop all four writers and atomically repeat the flat checks.
+4. Compute and persist a canonical SHA-256 manifest over every v4 table's exact
+   v4 columns; `alembic_version` and v5-only columns are excluded.
+5. Run the single certified Alembic revision without `DROP SCHEMA`.
+6. Recompute the same v4-column manifest and require an exact digest match.
+7. In one PostgreSQL transaction, retire SOR v2 Registry authority, activate
+   SOR v3, create the next Owner Policy version with unchanged capital limits,
+   move scope to v3 and rotate schema/commit/seed capability identity.
+8. Activate the target release and start Observation, Lifecycle and
+   Reconciliation while Entry remains fenced.
+9. Run one bounded six-Event StrategyUniverse bootstrap; PostgreSQL may
+   serialize the Warming slot internally, but the operator does not install
+   Events one at a time.
+10. Repeat database, history, exchange, Universe, worker and identity postflight;
+    start Entry last and remove the fence only when explicitly requested.
+
+The journaled cutover state machine and `deploy_tokyo_release.py` use the same
+gates and authority transition. They must not evolve into different migration
+semantics. A failure after migration remains Entry-fenced and proceeds by
+target-schema fix-forward; the v4 runtime is never restarted against v5.
+
 ## StrategyUniverse Deployment Gate
 
-The versioned StrategyUniverse release is a **flat-only destructive rebuild**.
-It is not activated by a local test pass or by all positions becoming flat
-without an Owner release confirmation. Before its
-`0001_trading_kernel_baseline_v4` rebuild, configuration, or Entry enablement,
-all Ticket, position, order, Incident, Settlement and Review projections must
-be terminal and exchange truth must be flat.
-
-After the target code and schema pass readonly certification, the Owner fixes
-each Event's final **1..10** canonical USDT-perpetual members. The official
-configuration CLI installs Warming Universes only. Existing Reconciliation and
-Observation workers then certify, prewarm and atomically activate the current
-pointer. Entry remains fenced until those safety workers and the exact active
-Universe/current/profile/policy identities pass postflight. `--enable-entry`
-is still an explicit final deployment action; neither configuration nor
-activation can enable it.
-
-The completed Batch is created while new ENTRY authority is disabled. The
-final promotion may carry that Batch across only the exact policy-stage
-transition from disabled version 1 to armed version 2. Version 3, skipped
-versions, an unarmed successor, or any risk/scope/manifest/commit/schema/seed
-drift invalidates the gate. This is a bounded stage transition, not a policy
-compatibility rule.
-
-### Bounded Rebuild Procedure
-
-For a small-capital, flat personal runtime, the approved path is a stopped
-rebuild rather than a long sequential Warming procedure:
-
-1. Use the official Lifecycle path to make each exact named Ticket terminal,
-   then verify exchange flatness, no open orders, no unresolved command, no
-   open Incident, and released budget/Netting Domain state.
-2. Fence Entry and stop all four BRC workers. Confirm no old writer can mutate
-   the account before schema deletion.
-3. Rebuild only BRC PostgreSQL state from the committed clean baseline and
-   deterministic Registry/Policy/Capability seeds. Do not alter credentials,
-   funds, account mode, leverage, or exchange trading scope.
-4. Stage one exact committed release; start Observation and Reconciliation
-   while the Entry fence remains present. Lifecycle and Entry remain stopped.
-5. Run the official batch bootstrap once. It serially installs and awaits all
-   six Warming Universes because PostgreSQL permits only one Warming Universe
-   at a time; the resident workers perform the required readonly certification
-   and activation work between Events under one shared bounded stage deadline.
-   The deployment never waits for a separate multi-hour operator sequence per
-   Event.
-6. Start Lifecycle and complete its fenced flat/no-residue smoke. Then start
-   Entry while the write fence and disabled new-ENTRY authority remain present.
-7. Repeat readonly postflight for exact commit, clean schema, seed, account
-   mode, runtime profile, policy, Certification Batch, active Universe pointers,
-   exchange flatness, worker health, and zero unresolved runtime state.
-8. Only an explicit promotion after all postflight gates may arm new-ENTRY
-   authority and remove the fence. If any step fails, keep Entry fenced and
-   retain only the phase-safe workers for diagnosis or controlled recovery.
-
-This is a forward-only fix path. Reintroducing the retired schema evolution
-chain, a compatibility reader, or an old writer is not a rollback.
+After target identity activation, the official configuration CLI installs only
+Warming Universes. Observation and Reconciliation certify and atomically switch
+the current pointer to v3. Entry remains fenced until the exact active Universe,
+profile, Policy, schema, preservation and runtime identities pass postflight.
+Neither configuration nor activation independently grants new-ENTRY authority.
 
 If batch bootstrap reports an exact Warming timeout or a terminal
 certification blocker, Entry remains fenced. Inspect the bounded Universe

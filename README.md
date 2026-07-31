@@ -72,7 +72,7 @@ are owned by `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
 | `docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md` | Architecture and business invariants |
 | `docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md` | Active operability-repair target and decisions |
 | `docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md` | Local-first repair verification contract |
-| `docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md` | Repair task cards and flat deployment runbook |
+| `docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md` | Repair task cards and flat compatible-upgrade runbook |
 | `docs/current/MAIN_CONTROL_ROADMAP.md` | Current production facts and critical path |
 | `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` | Release, recovery, and resource contract |
 

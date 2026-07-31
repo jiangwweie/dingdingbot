@@ -2,7 +2,7 @@
 title: P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN
 status: CURRENT_PLAN
 program_id: P0-TKR
-last_verified: 2026-07-30
+last_verified: 2026-07-31
 ---
 
 # P0 Trading Kernel Rebuild Implementation Plan
@@ -16,7 +16,7 @@ authority and one Tokyo runtime.
 ## Active Operability Repair
 
 The completed P0 baseline does not certify the newly identified scheduling,
-certification, protected-promotion, deployment-recovery, or multi-Ticket
+certification, flat-promotion, deployment-recovery, or multi-Ticket
 capacity defects. Their target design, production-shaped verification, and
 ordered execution are owned by:
 
@@ -65,7 +65,7 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| Clean PostgreSQL schema head | Complete locally | `0001_trading_kernel_baseline_v4`, empty rebuild and forward-only downgrade rejection certification |
+| PostgreSQL revision chain | Complete locally | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity`; single head, empty upgrade, production-shaped preservation and forward-only downgrade rejection certified |
 | Six Strategy Events | Complete | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, BRF2-SHORT |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, deterministic identity, Live/Replay parity |
 | Arbitration and CapacityClaim | Complete | Deterministic priority, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
@@ -87,7 +87,7 @@ substitute for action-time Tokyo readonly facts.
 
 | Boundary | Required local evidence | Rejected outcome |
 | --- | --- | --- |
-| Clean baseline | Disposable PostgreSQL rebuilds from an empty schema using only `0001_trading_kernel_baseline_v4`; no retired migration, table, reader, or compatibility path remains | An incremental upgrade or an old-schema fallback is accepted |
+| Revision integrity | Disposable PostgreSQL upgrades from empty base to the single head and from production-shaped v4 to v5; exact v4-column preservation digest matches | A branch, schema fallback, old-table reader or changed historical value is accepted |
 | Batch bootstrap | The six Registry Events receive the approved fixed initial member set in one bounded run; no operator configures members one Event at a time | A second Warming Universe is required for every Event or member |
 | Warming and readiness | Warming performs readonly market/account certification, produces zero StrategySignal, preserves observation time separately from certification time, and activates only after every member passes | Warming can submit an order, stale evidence activates, or a failed member becomes eligible |
 | Concurrency and recovery | One global Warming slot is enforced; the official `abandon_strategy_universe.py` CLI permanently abandons one exact Warming Universe with an audited reason so the slot is released | A failed Warming state blocks all later deployment work, is changed by direct SQL, or can be silently reused |
@@ -134,6 +134,16 @@ release, starts the three safety workers, repeats readonly certification, and
 starts Entry last. Any failure after service stop fences Entry and restores the
 safety workers. This bounded regular-release path does not rebuild PostgreSQL
 and does not run the historical destructive cutover.
+
+The one approved schema-changing path is explicit `compatible_upgrade`. It
+accepts only the exact flat `0001` -> `0002` transition, requires zero active
+Ticket, position, order, Reservation, Netting Domain, unresolved Command,
+unreviewed terminal Ticket and open Incident, and requires Entry fenced with all
+old writers stopped. It computes the canonical v4-column preservation digest,
+runs the single Alembic revision, verifies the same digest, monotonically moves
+Registry and Owner Policy scope to SOR v3, starts safety workers, completes v3
+Universe bootstrap, and starts Entry last. It is not an active-position handover
+or a runtime compatibility reader.
 
 ## Completed Destructive Cutover
 

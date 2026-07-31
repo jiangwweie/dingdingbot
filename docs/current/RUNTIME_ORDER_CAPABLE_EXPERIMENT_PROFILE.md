@@ -1,7 +1,7 @@
 ---
 title: RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE
 status: CURRENT
-last_verified: 2026-07-30
+last_verified: 2026-07-31
 ---
 
 # Runtime Order-Capable Experiment Profile
@@ -52,6 +52,7 @@ The Owner-approved operability-repair profile is:
 
 ```text
 max_concurrent_tickets = 3
+max_strategy_group_concurrent_tickets = 2
 max_ticket_stop_risk_fraction = 0.03
 max_gross_stop_risk_fraction = 0.06
 max_ticket_initial_margin_fraction = 0.45
@@ -67,6 +68,11 @@ margin cap, the remaining `0.06` gross stop-risk budget, the remaining `0.90`
 gross margin budget, venue minimums, or current account facts bind. The policy
 therefore normally permits two full-risk Tickets and allows a third only from
 remaining risk and margin; it does not promise three equal positions.
+
+The StrategyGroup limit is evaluated per `venue + account + strategy_group`.
+Long/Short and instruments within the same StrategyGroup share the two-Ticket
+limit; another StrategyGroup may use the account's remaining third slot when
+risk and margin remain available.
 
 The pre-repair deployed model still uses `planned_stop_risk_fraction` and one
 gross initial-margin utilization value without the approved explicit ticket and

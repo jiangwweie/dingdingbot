@@ -2,7 +2,7 @@
 title: P0_TRADING_KERNEL_REBUILD_DESIGN
 status: CURRENT
 program_id: P0-TKR
-last_verified: 2026-07-30
+last_verified: 2026-07-31
 ---
 
 # P0 Trading Kernel Rebuild Design
@@ -10,8 +10,10 @@ last_verified: 2026-07-30
 ## Decision
 
 The repository and Tokyo runtime use one multi-position Trading Kernel and one
-clean PostgreSQL baseline. There is no compatibility migration, dual write,
-retired-runtime fallback, or alternate execution chain.
+unbranched PostgreSQL revision chain. A flat, exact, forward-only migration may
+preserve terminal history between certified revisions. There is no active-
+position schema handover, dual write, old-schema reader, fallback, or alternate
+execution chain.
 
 ## Authoritative Chain
 
@@ -65,10 +67,11 @@ src/trading_kernel/infrastructure PostgreSQL and venue adapters
 src/trading_kernel/interfaces     bounded runtime and readonly surfaces
 ```
 
-The tracked database head is `0001_trading_kernel_baseline_v4`. PostgreSQL owns
-current runtime truth and append-only lifecycle facts. Exchange readonly facts
-own external truth. Repository documents and generated output never own
-production decisions.
+The tracked database head is `0002_sor_v3_strategy_group_capacity`; the frozen
+`0001_trading_kernel_baseline_v4` definition remains only as the source schema
+for the certified forward revision. PostgreSQL owns current runtime truth and
+append-only lifecycle facts. Exchange readonly facts own external truth.
+Repository documents and generated output never own production decisions.
 
 Strategy Registry owns only immutable Event semantics. PostgreSQL
 StrategyUniverse owns each Event's unordered **1..10** member set,
@@ -118,7 +121,7 @@ risk target, while a third uses only the remaining risk and margin.
 three equal positions. Current Reservations, available margin, the profile
 limits, Initial Stop risk, venue minimums, and liquidation distance still bound
 every Ticket. These explicit ticket/gross limits become production truth only
-after the active operability repair passes its clean-schema deployment.
+after the active operability repair passes its certified schema deployment.
 
 ## Transaction And Exchange Model
 

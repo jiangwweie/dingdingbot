@@ -557,7 +557,7 @@ exposure 时部署保持 Entry fenced 并停止，不通过 schema mutation 代�
 | EXIT unknown outcome | Reconciliation 解析，不盲目重发 |
 | migration 失败 | PostgreSQL DDL transaction rollback，旧 release 可恢复 |
 | migration 成功但 target postflight 失败 | Entry 保持 fenced，target safety workers 优先恢复，fix-forward |
-| v2 Ticket 在 migration 中 | 不重写、不平仓、原生保护订单保持 |
+| preflight 发现 active v2 Ticket | migration 不开始；Entry 保持 fenced，官方 Lifecycle/Reconciliation 先完成 terminal、Review 与 internal/exchange flat |
 
 ## 本地优先测试
 

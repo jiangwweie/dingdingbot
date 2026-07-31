@@ -1,7 +1,7 @@
 ---
 title: PROJECT_INFORMATION_ARCHITECTURE
 status: CURRENT
-last_verified: 2026-07-30
+last_verified: 2026-07-31
 ---
 
 # Project Information Architecture
@@ -62,11 +62,19 @@ contract; completed task-card material may then be retired from `docs/current`.
 
 ## Current Runtime Authority
 
-The only production execution package is `src/trading_kernel`. The local repair
-candidate schema head is `0001_trading_kernel_baseline_v4`. It replaces the
-retired evolution chain only through the approved destructive empty-schema
-rebuild; it is not an in-place forward migration. The deployed schema identity
-remains a volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.
+The only production execution package is `src/trading_kernel`. Schema authority
+is one unbranched forward Alembic chain:
+
+```text
+0001_trading_kernel_baseline_v4
+-> 0002_sor_v3_strategy_group_capacity
+```
+
+`0001` is a frozen historical schema snapshot; current runtime metadata owns
+the single head. The exact flat v4 -> v5 operation may preserve terminal history
+through the certified migration, but no runtime reads the old schema, performs
+dual writes, or falls back to v4. The deployed schema identity remains a
+volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.
 
 Strategy semantics live in the Registry, while concrete instrument membership,
 certification, warming, current activation, and frozen Signal/Ticket lineage
