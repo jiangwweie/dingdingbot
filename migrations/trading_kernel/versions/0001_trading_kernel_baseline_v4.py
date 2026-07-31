@@ -1,9 +1,4 @@
-"""Create the only supported Trading Kernel database baseline.
-
-This release is deliberately rebuild-only.  A database carrying any prior
-revision must be dropped by the controlled deployment procedure; it is never
-translated in place into this authority model.
-"""
+"""Create the exact historical Trading Kernel v4 database baseline."""
 
 from __future__ import annotations
 
@@ -18,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.trading_kernel.infrastructure.pg_models import metadata
+from migrations.trading_kernel.v4_schema import metadata
 
 revision: str = "0001_trading_kernel_baseline_v4"
 down_revision: str | None = None
@@ -27,7 +22,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Build the complete v4 schema from its one current SQLAlchemy authority."""
+    """Build v4 from migration-owned metadata that can never drift with head."""
     metadata.create_all(op.get_bind(), checkfirst=False)
     _create_universe_member_guards()
     _create_instrument_identity_guard()

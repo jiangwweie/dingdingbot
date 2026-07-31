@@ -31,9 +31,12 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     DYNAMIC_POLICY,
     OWNER_POLICY_ID,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 
 SCHEMA = "brc.trading_kernel.readonly_certification.v1"
-EXPECTED_ALEMBIC_REVISION = "0001_trading_kernel_baseline_v4"
+EXPECTED_ALEMBIC_REVISION = CURRENT_SCHEMA_REVISION
 LEGACY_EXECUTION_TABLES = (
     "brc_runtime_execution_tickets",
     "brc_runtime_execution_orders",

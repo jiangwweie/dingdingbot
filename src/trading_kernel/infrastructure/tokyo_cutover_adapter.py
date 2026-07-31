@@ -10,7 +10,7 @@ import subprocess
 from collections.abc import Mapping
 from hashlib import sha256
 from pathlib import Path, PurePosixPath
-from typing import Literal, Protocol, cast
+from typing import Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -19,6 +19,9 @@ from scripts.trading_kernel.verify_flat_cutover import CutoverFacts, CutoverPlan
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     build_runtime_seed_identity,
+)
+from src.trading_kernel.infrastructure.runtime_identity import (
+    TradingKernelSchemaRevision,
 )
 
 EXPECTED_NEW_BRC_UNITS = frozenset(
@@ -84,7 +87,7 @@ def _local_target_manifest(plan: CutoverPlan) -> dict[str, str]:
             account_id=plan.account_id,
             runtime_commit=plan.target_commit,
             schema_revision=cast(
-                Literal["0001_trading_kernel_baseline_v4"],
+                TradingKernelSchemaRevision,
                 plan.target_schema_revision,
             ),
             seeded_at_ms=1,

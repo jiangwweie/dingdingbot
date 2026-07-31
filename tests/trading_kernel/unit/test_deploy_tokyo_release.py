@@ -35,12 +35,12 @@ def test_regular_plan_freezes_current_schema_without_operator_probe_scope() -> N
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
-        schema_revision="0001_trading_kernel_baseline_v4",
+        schema_revision="0002_sor_v3_strategy_group_capacity",
         expected_configured_leverage=5,
         enable_entry=False,
     )
 
-    assert plan.schema_revision == "0001_trading_kernel_baseline_v4"
+    assert plan.schema_revision == "0002_sor_v3_strategy_group_capacity"
     assert "exchange_instrument_ids" not in plan.__dataclass_fields__
 
 
@@ -49,7 +49,7 @@ def test_regular_release_uses_database_derived_probe_manifest() -> None:
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
-        schema_revision="0001_trading_kernel_baseline_v4",
+        schema_revision="0002_sor_v3_strategy_group_capacity",
         expected_configured_leverage=5,
         enable_entry=False,
     )
@@ -141,13 +141,13 @@ def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
             "deploy_identity",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0001_trading_kernel_baseline_v4",
+            "0002_sor_v3_strategy_group_capacity",
         ),
         (
             "activate_release",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0001_trading_kernel_baseline_v4",
+            "0002_sor_v3_strategy_group_capacity",
             SEED_IDENTITY,
         ),
         ("certify_flat", TARGET_RELEASE),
@@ -232,14 +232,14 @@ def test_protected_release_rotates_only_the_explicit_ticket_set() -> None:
             "deploy_protected_identity",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0001_trading_kernel_baseline_v4",
+            "0002_sor_v3_strategy_group_capacity",
             ticket_ids,
         ),
         (
             "activate_release",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0001_trading_kernel_baseline_v4",
+            "0002_sor_v3_strategy_group_capacity",
             SEED_IDENTITY,
         ),
         ("certify_protected", TARGET_RELEASE),
@@ -325,14 +325,14 @@ def test_closure_only_release_recovers_only_the_exact_pending_ticket() -> None:
             "deploy_closure_identity",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0001_trading_kernel_baseline_v4",
+            "0002_sor_v3_strategy_group_capacity",
             ticket_id,
         ),
         (
             "activate_release",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0001_trading_kernel_baseline_v4",
+            "0002_sor_v3_strategy_group_capacity",
             SEED_IDENTITY,
         ),
         ("certify_closure", TARGET_RELEASE, ticket_id),
@@ -437,7 +437,7 @@ def _plan(
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
-        schema_revision="0001_trading_kernel_baseline_v4",
+        schema_revision="0002_sor_v3_strategy_group_capacity",
         expected_configured_leverage=5,
         enable_entry=enable_entry,
         protected_ticket_ids=protected_ticket_ids,
@@ -499,7 +499,7 @@ class FakeDeploymentBackend:
             "status": "pass",
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
-                "schema_revision": "0001_trading_kernel_baseline_v4",
+                "schema_revision": "0002_sor_v3_strategy_group_capacity",
                 "seed_identity": SEED_IDENTITY,
             },
             "active_counts": {
@@ -522,7 +522,7 @@ class FakeDeploymentBackend:
             "status": "pass",
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
-                "schema_revision": "0001_trading_kernel_baseline_v4",
+                "schema_revision": "0002_sor_v3_strategy_group_capacity",
                 "seed_identity": SEED_IDENTITY,
             },
             "active_counts": {
@@ -548,7 +548,7 @@ class FakeDeploymentBackend:
             "status": "pass",
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
-                "schema_revision": "0001_trading_kernel_baseline_v4",
+                "schema_revision": "0002_sor_v3_strategy_group_capacity",
                 "seed_identity": SEED_IDENTITY,
             },
             "active_counts": {
@@ -654,7 +654,7 @@ class FakeDeploymentBackend:
         if marker == ".brc-runtime-commit":
             return TARGET_COMMIT if release == TARGET_RELEASE else CURRENT_COMMIT
         if marker == ".brc-schema-revision":
-            return "0001_trading_kernel_baseline_v4"
+            return "0002_sor_v3_strategy_group_capacity"
         if marker == ".brc-seed-identity":
             return SEED_IDENTITY
         raise AssertionError(f"unexpected marker: {marker}")

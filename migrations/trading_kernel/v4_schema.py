@@ -59,7 +59,7 @@ event_specs = sa.Table(
     metadata,
     _id("event_spec_id", primary_key=True),
     _id("strategy_version_id"),
-    sa.Column("event_id", SHORT_TEXT, nullable=False),
+    sa.Column("event_id", SHORT_TEXT, nullable=False, unique=True),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("timeframe", SHORT_TEXT, nullable=False),
     sa.Column("freshness_window_ms", sa.BigInteger, nullable=False),
@@ -70,7 +70,6 @@ event_specs = sa.Table(
     _json("execution_semantics"),
     sa.Column("status", SHORT_TEXT, nullable=False),
     _time("created_at_ms"),
-    sa.UniqueConstraint("strategy_version_id", "event_id"),
 )
 
 exit_policies = sa.Table(
@@ -547,11 +546,6 @@ owner_policy_current = sa.Table(
         server_default=sa.text("100"),
     ),
     sa.Column("max_concurrent_tickets", sa.Integer, nullable=False),
-    sa.Column(
-        "max_strategy_group_concurrent_tickets",
-        sa.Integer,
-        nullable=False,
-    ),
     sa.Column("max_ticket_stop_risk_fraction", MONEY, nullable=False),
     sa.Column("max_gross_stop_risk_fraction", MONEY, nullable=False),
     sa.Column("max_ticket_initial_margin_fraction", MONEY, nullable=False),
@@ -566,10 +560,6 @@ owner_policy_current = sa.Table(
     sa.CheckConstraint(
         "max_concurrent_tickets > 0",
         name="max_concurrent_tickets_positive",
-    ),
-    sa.CheckConstraint(
-        "max_strategy_group_concurrent_tickets > 0",
-        name="max_strategy_group_concurrent_tickets_positive",
     ),
     sa.CheckConstraint(
         "max_ticket_stop_risk_fraction > 0 "
@@ -751,7 +741,6 @@ signal_events = sa.Table(
     "brc_signal_events",
     metadata,
     _id("signal_event_id", primary_key=True),
-    _id("exposure_episode_id"),
     _id("runtime_scope_id"),
     sa.Column("runtime_scope_version", sa.Integer, nullable=False),
     _id("strategy_group_id"),
@@ -765,7 +754,6 @@ signal_events = sa.Table(
     _time("occurred_at_ms"),
     _time("observed_at_ms"),
     _time("expires_at_ms"),
-    sa.UniqueConstraint("exposure_episode_id"),
     sa.CheckConstraint(
         "position_side IN ('long', 'short')",
         name="position_side_valid",
@@ -813,8 +801,7 @@ signal_fact_snapshots = sa.Table(
     sa.Column("projection_version", sa.BigInteger, nullable=False),
     sa.PrimaryKeyConstraint("signal_event_id", "fact_definition_id"),
     sa.CheckConstraint(
-        "role IN ('condition', 'protection_reference', 'identity_reference', "
-        "'lifecycle_reference', 'disable')",
+        "role IN ('condition', 'protection_reference', 'disable')",
         name="role_valid",
     ),
     sa.CheckConstraint(
@@ -899,8 +886,6 @@ capacity_claims = sa.Table(
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
     sa.Column("fact_digest", LONG_TEXT, nullable=False),
-    _id("exit_policy_id"),
-    sa.Column("exit_policy_semantic_hash", LONG_TEXT, nullable=False),
     sa.Column("entry_admission_snapshot_digest", LONG_TEXT, nullable=False),
     sa.Column("account_entry_health_digest", LONG_TEXT, nullable=False),
     sa.Column("instrument_entry_health_digest", LONG_TEXT, nullable=False),
@@ -917,21 +902,6 @@ capacity_claims = sa.Table(
     sa.Column("margin_mode_at_claim", SHORT_TEXT, nullable=False),
     sa.Column("active_ticket_count_at_claim", sa.Integer, nullable=False),
     sa.Column("remaining_slots_at_claim", sa.Integer, nullable=False),
-    sa.Column(
-        "active_strategy_group_ticket_count_at_claim",
-        sa.Integer,
-        nullable=False,
-    ),
-    sa.Column(
-        "max_strategy_group_concurrent_tickets",
-        sa.Integer,
-        nullable=False,
-    ),
-    sa.Column(
-        "remaining_strategy_group_slots_at_claim",
-        sa.Integer,
-        nullable=False,
-    ),
     sa.Column("gross_risk_at_stop_at_claim", MONEY, nullable=False),
     sa.Column("current_reserved_margin_at_claim", MONEY, nullable=False),
     sa.Column("max_ticket_stop_risk_fraction", MONEY, nullable=False),
@@ -957,8 +927,6 @@ capacity_claims = sa.Table(
     sa.Column("entry_order_type", SHORT_TEXT, nullable=False),
     sa.Column("entry_limit_price", MONEY, nullable=True),
     sa.Column("initial_stop_price", MONEY, nullable=False),
-    sa.Column("pre_tp1_reclaim_price", MONEY, nullable=True),
-    _time("exposure_session_end_ms", nullable=True),
     _json("take_profit_prices"),
     _json("take_profit_quantities"),
     sa.Column("decision_digest", LONG_TEXT, nullable=False),
@@ -1024,8 +992,6 @@ trade_tickets = sa.Table(
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
     sa.Column("active_netting_domain_key", LONG_TEXT, nullable=True),
-    _id("exit_policy_id"),
-    sa.Column("exit_policy_semantic_hash", LONG_TEXT, nullable=False),
     sa.Column("entry_reference_price", MONEY, nullable=False),
     sa.Column("quantity", MONEY, nullable=False),
     sa.Column("notional", MONEY, nullable=False),
@@ -1044,8 +1010,6 @@ trade_tickets = sa.Table(
     sa.Column("entry_order_type", SHORT_TEXT, nullable=False),
     sa.Column("entry_limit_price", MONEY, nullable=True),
     sa.Column("initial_stop_price", MONEY, nullable=False),
-    sa.Column("pre_tp1_reclaim_price", MONEY, nullable=True),
-    _time("exposure_session_end_ms", nullable=True),
     _json("take_profit_prices"),
     _json("take_profit_quantities"),
     sa.Column("fact_digest", LONG_TEXT, nullable=False),
@@ -1083,13 +1047,6 @@ sa.Index(
     trade_tickets.c.account_id,
     trade_tickets.c.exchange_instrument_id,
     trade_tickets.c.created_at_ms,
-    trade_tickets.c.terminal_at_ms,
-)
-sa.Index(
-    "ix_brc_trade_tickets_active_strategy_group",
-    trade_tickets.c.venue_id,
-    trade_tickets.c.account_id,
-    trade_tickets.c.strategy_group_id,
     trade_tickets.c.terminal_at_ms,
 )
 

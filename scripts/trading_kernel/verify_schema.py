@@ -18,9 +18,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.trading_kernel.infrastructure.pg_models import metadata
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 
 SCHEMA = "brc.trading_kernel.schema_verification.v1"
-EXPECTED_ALEMBIC_REVISION = "0001_trading_kernel_baseline_v4"
+EXPECTED_ALEMBIC_REVISION = CURRENT_SCHEMA_REVISION
 
 
 def _parser() -> argparse.ArgumentParser:

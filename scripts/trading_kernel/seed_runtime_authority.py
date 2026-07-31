@@ -34,6 +34,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     promote_full_policy,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -58,7 +61,7 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv(
             "TRADING_KERNEL_SCHEMA_REVISION",
-            "0001_trading_kernel_baseline_v4",
+            CURRENT_SCHEMA_REVISION,
         ),
     )
     seed.add_argument("--now-ms", type=int)
@@ -79,7 +82,7 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv(
             "TRADING_KERNEL_SCHEMA_REVISION",
-            "0001_trading_kernel_baseline_v4",
+            CURRENT_SCHEMA_REVISION,
         ),
     )
     deploy.add_argument("--now-ms", type=int)
@@ -101,7 +104,7 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv(
             "TRADING_KERNEL_SCHEMA_REVISION",
-            "0001_trading_kernel_baseline_v4",
+            CURRENT_SCHEMA_REVISION,
         ),
     )
     recovery.add_argument("--now-ms", type=int)
@@ -127,7 +130,7 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv(
             "TRADING_KERNEL_SCHEMA_REVISION",
-            "0001_trading_kernel_baseline_v4",
+            CURRENT_SCHEMA_REVISION,
         ),
     )
     protected.add_argument("--now-ms", type=int)
@@ -149,7 +152,7 @@ def _parser() -> argparse.ArgumentParser:
         "--schema-revision",
         default=os.getenv(
             "TRADING_KERNEL_SCHEMA_REVISION",
-            "0001_trading_kernel_baseline_v4",
+            CURRENT_SCHEMA_REVISION,
         ),
     )
     closure.add_argument("--now-ms", type=int)

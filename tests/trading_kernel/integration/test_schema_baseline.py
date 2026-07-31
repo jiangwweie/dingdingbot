@@ -51,6 +51,14 @@ def test_kernel_metadata_has_exact_clean_table_allowlist() -> None:
     assert set(metadata.tables) == EXPECTED_TABLES
 
 
+def test_event_identity_is_unique_within_strategy_version() -> None:
+    events = metadata.tables["brc_event_specs"]
+    uniques = _unique_column_sets(events)
+
+    assert ("strategy_version_id", "event_id") in uniques
+    assert ("event_id",) not in uniques
+
+
 def test_strategy_universe_metadata_has_forward_only_authority_shape() -> None:
     versions = metadata.tables["brc_strategy_universe_versions"]
     members = metadata.tables["brc_strategy_universe_members"]

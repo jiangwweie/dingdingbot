@@ -36,6 +36,9 @@ from src.trading_kernel.infrastructure.pg_models import (
     trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import (
+    TradingKernelSchemaRevision,
+)
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
@@ -60,7 +63,7 @@ class RuntimeAuthoritySeedRequest(BaseModel):
 
     account_id: str
     runtime_commit: str
-    schema_revision: Literal["0001_trading_kernel_baseline_v4"]
+    schema_revision: TradingKernelSchemaRevision
     seeded_at_ms: int
 
     @field_validator("account_id", "runtime_commit", mode="before")
@@ -147,7 +150,7 @@ class RuntimeDeploymentIdentityResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     runtime_commit: str
-    schema_revision: Literal["0001_trading_kernel_baseline_v4"]
+    schema_revision: TradingKernelSchemaRevision
     runtime_seed_semantic_hash: str
     refreshed_existing_authority: bool
 

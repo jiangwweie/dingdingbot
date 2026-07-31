@@ -20,6 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
+
 _COMMIT_IDENTITY = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_IDENTITY = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SCHEMA_NAME = re.compile(r"^[a-z_][a-z0-9_]*$")
@@ -98,9 +102,9 @@ class CutoverPlan(BaseModel):
     @classmethod
     def _require_schema_revision(cls, value: object) -> str:
         normalized = str(value or "").strip()
-        if normalized != "0001_trading_kernel_baseline_v4":
+        if normalized != CURRENT_SCHEMA_REVISION:
             raise ValueError(
-                "target schema revision must be 0001_trading_kernel_baseline_v4"
+                f"target schema revision must be {CURRENT_SCHEMA_REVISION}"
             )
         return normalized
 
@@ -262,7 +266,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-profile-id", required=True)
     parser.add_argument("--application-schema", default="public")
     parser.add_argument("--target-commit", required=True)
-    parser.add_argument("--target-schema-revision", default="0001_trading_kernel_baseline_v4")
+    parser.add_argument(
+        "--target-schema-revision",
+        default=CURRENT_SCHEMA_REVISION,
+    )
     parser.add_argument("--target-seed-identity", required=True)
     parser.add_argument("--target-release-id", required=True)
     parser.add_argument("--require-writer-fence", action="store_true")

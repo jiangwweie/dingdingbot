@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import inspect
 from pathlib import Path
 
@@ -12,17 +13,44 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_operability_repair_removes_the_retired_time_and_migration_generations() -> None:
-    """The v2 rebuild has one semantic time model and one schema baseline."""
+def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> None:
+    """The runtime owns one unbranched v4-to-head migration chain."""
 
-    migration_names = tuple(
+    migration_paths = tuple(
         sorted(
-            path.name
+            path
             for path in (REPO_ROOT / "migrations/trading_kernel/versions").glob("*.py")
             if path.name != "__init__.py"
         )
     )
-    assert migration_names == ("0001_trading_kernel_baseline_v4.py",)
+    assert tuple(path.name for path in migration_paths) == (
+        "0001_trading_kernel_baseline_v4.py",
+        "0002_sor_v3_strategy_group_capacity.py",
+    )
+
+    revisions: dict[str, str | None] = {}
+    for path in migration_paths:
+        assignments = {
+            node.target.id: ast.literal_eval(node.value)
+            for node in ast.parse(path.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id in {"revision", "down_revision"}
+        }
+        revisions[str(assignments["revision"])] = assignments["down_revision"]
+    assert revisions == {
+        "0001_trading_kernel_baseline_v4": None,
+        "0002_sor_v3_strategy_group_capacity": (
+            "0001_trading_kernel_baseline_v4"
+        ),
+    }
+    assert set(revisions.values()) - {None} == {
+        "0001_trading_kernel_baseline_v4"
+    }
+
+    baseline_source = migration_paths[0].read_text(encoding="utf-8")
+    assert "migrations.trading_kernel.v4_schema" in baseline_source
+    assert "src.trading_kernel.infrastructure.pg_models" not in baseline_source
 
     production_sources = (
         REPO_ROOT / "src/trading_kernel",
@@ -57,7 +85,7 @@ def test_reconciliation_certification_is_a_bounded_safety_worker_concern() -> No
     request = ReconciliationWorkerRequest(
         worker_id="architecture-check",
         runtime_commit="commit-check",
-        schema_revision="0001_trading_kernel_baseline_v4",
+        schema_revision="0002_sor_v3_strategy_group_capacity",
         now_ms=1,
         timeout_seconds=1,
         unknown_visibility_grace_ms=1,

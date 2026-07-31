@@ -20,11 +20,11 @@ ADMIN_DSN = os.getenv(
     "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
-BASELINE_REVISION = "0001_trading_kernel_baseline_v4"
+HEAD_REVISION = "0002_sor_v3_strategy_group_capacity"
 
 
 @pytest.mark.asyncio
-async def test_empty_postgres_builds_only_the_v4_baseline() -> None:
+async def test_empty_postgres_upgrades_from_frozen_v4_baseline_to_head() -> None:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -48,7 +48,7 @@ async def test_empty_postgres_builds_only_the_v4_baseline() -> None:
                     )
                 )
             assert table_names == EXPECTED_TABLES | {"alembic_version"}
-            assert revision == BASELINE_REVISION
+            assert revision == HEAD_REVISION
         finally:
             await engine.dispose()
 

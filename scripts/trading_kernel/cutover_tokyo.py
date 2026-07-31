@@ -33,6 +33,9 @@ from scripts.trading_kernel.verify_flat_cutover import (
     load_cutover_adapter,
     verify_cutover_facts,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 
 OPS_SCHEMA = "brc_cutover_ops"
 
@@ -841,7 +844,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-profile-id", required=True)
     parser.add_argument("--application-schema", default="public")
     parser.add_argument("--target-commit", required=True)
-    parser.add_argument("--target-schema-revision", default="0001_trading_kernel_baseline_v4")
+    parser.add_argument(
+        "--target-schema-revision",
+        default=CURRENT_SCHEMA_REVISION,
+    )
     parser.add_argument("--target-seed-identity", required=True)
     parser.add_argument("--target-release-id", required=True)
     parser.add_argument("--now-ms", type=int)

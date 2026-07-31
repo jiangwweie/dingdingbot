@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from tests.trading_kernel.integration.test_schema_baseline import EXPECTED_TABLES
@@ -71,9 +72,13 @@ async def test_bootstrap_schema_creates_only_the_clean_kernel_baseline() -> None
                         ]
                     )
                 )
+                revision = await conn.scalar(
+                    sa.text("SELECT version_num FROM alembic_version")
+                )
             assert tables == EXPECTED_TABLES | {"alembic_version"}
             assert {"venue_id", "account_id"}.issubset(exposure_columns)
             assert exposure_primary_key == {"venue_id", "account_id"}
+            assert revision == "0002_sor_v3_strategy_group_capacity"
         finally:
             await engine.dispose()
     finally:
