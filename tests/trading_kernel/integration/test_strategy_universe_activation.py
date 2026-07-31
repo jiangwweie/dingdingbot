@@ -16,11 +16,14 @@ from src.trading_kernel.infrastructure.pg_models import (
     comparative_projection_current,
     instrument_certification_current,
     runtime_scopes_current,
+    strategy_universe_current,
+    strategy_universe_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
 from tests.trading_kernel.integration.universe_activation_support import (
+    ACTIVE_MEMBERS,
     COMPARATIVE_CONTRACT,
     DIRECT_CONTRACT,
     NOW_MS,
@@ -28,6 +31,7 @@ from tests.trading_kernel.integration.universe_activation_support import (
     activation_snapshot,
     make_warming_ready,
     prepare_active_and_warming,
+    prepare_retired_v2_active_and_v3_warming,
     save_complete_comparative_projection,
 )
 
@@ -109,6 +113,80 @@ async def test_fully_ready_replacement_activates_atomically_without_chain_writes
     assert new_due_times == {expected_next_close_ms}
     assert before["side_effect_counts"] == (0, 0, 0, 0, 0)
     assert after["side_effect_counts"] == before["side_effect_counts"]
+
+
+@pytest.mark.asyncio
+async def test_v3_activation_atomically_retires_the_v2_event_lineage(
+    activation_engine: AsyncEngine,
+) -> None:
+    old_version_id, new_version_id = (
+        await prepare_retired_v2_active_and_v3_warming(activation_engine)
+    )
+    await make_warming_ready(
+        activation_engine,
+        universe_version_id=new_version_id,
+    )
+
+    async with PostgresKernelUnitOfWork(activation_engine) as uow:
+        result = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=new_version_id,
+                attempted_at_ms=NOW_MS,
+            ),
+        )
+
+    async with activation_engine.connect() as connection:
+        current_rows = (
+            await connection.execute(
+                sa.select(
+                    strategy_universe_current.c.event_spec_id,
+                    strategy_universe_current.c.universe_version_id,
+                    strategy_universe_current.c.activation_generation,
+                )
+                .where(
+                    strategy_universe_current.c.event_spec_id.in_(
+                        (
+                            "event_spec:SOR-001:SOR-LONG:v2",
+                            DIRECT_CONTRACT.event_spec_id,
+                        )
+                    )
+                )
+                .order_by(strategy_universe_current.c.event_spec_id)
+            )
+        ).all()
+        old_version = (
+            await connection.execute(
+                sa.select(
+                    strategy_universe_versions.c.lifecycle_state,
+                    strategy_universe_versions.c.retired_at_ms,
+                ).where(
+                    strategy_universe_versions.c.universe_version_id
+                    == old_version_id
+                )
+            )
+        ).one()
+        old_scopes = (
+            await connection.execute(
+                sa.select(
+                    runtime_scopes_current.c.lifecycle_state,
+                    runtime_scopes_current.c.observation_enabled,
+                    runtime_scopes_current.c.entry_enabled,
+                ).where(
+                    runtime_scopes_current.c.universe_version_id
+                    == old_version_id
+                )
+            )
+        ).all()
+
+    assert result.status is UniverseActivationStatus.ACTIVATED
+    assert result.previous_universe_version_id == old_version_id
+    assert result.activation_generation == 2
+    assert current_rows == [
+        (DIRECT_CONTRACT.event_spec_id, new_version_id, 2)
+    ]
+    assert old_version == ("retired", NOW_MS)
+    assert old_scopes == [("retired", False, False)] * len(ACTIVE_MEMBERS)
 
 
 @pytest.mark.parametrize(

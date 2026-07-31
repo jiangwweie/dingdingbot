@@ -6,7 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
 
 from src.trading_kernel.domain.fee_valuation import ValuedFee
 from src.trading_kernel.domain.order_attribution import (
@@ -23,6 +23,39 @@ class ReviewEconomicsCompleteness(StrEnum):
     COMPLETE = "complete"
     FUNDING_UNAVAILABLE = "funding_unavailable"
     EXTERNAL_EXIT_UNAVAILABLE = "external_exit_unavailable"
+
+
+class SorV2HistoryClassification(StrEnum):
+    RIGHT_TAIL_UNVERIFIED = "right_tail_unverified"
+    INVALID_PERSISTENT_STATE = "invalid_persistent_state"
+
+
+def sor_v2_history_decision_impact(
+    classification: SorV2HistoryClassification,
+) -> dict[str, JsonValue]:
+    """Return the exact append-only evidence classification for one v2 Ticket."""
+
+    if classification is SorV2HistoryClassification.RIGHT_TAIL_UNVERIFIED:
+        return {
+            "entry_semantics": "unverified_against_sor_v3_edge",
+            "evidence_scope": [
+                "lifecycle",
+                "tp1_transition",
+                "break_even",
+                "structural_runner",
+                "right_tail",
+            ],
+            "entry_alpha_inclusion": (
+                "excluded_until_candle_reconstruction"
+            ),
+        }
+    return {
+        "entry_semantics": "invalid_sor_v2_persistent_state",
+        "entry_alpha_inclusion": "excluded",
+        "execution_evidence": "retained",
+        "lifecycle_evidence": "retained",
+        "economics_evidence": "retained",
+    }
 
 
 class ReviewFill(BaseModel):

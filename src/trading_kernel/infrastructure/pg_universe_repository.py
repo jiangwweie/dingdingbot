@@ -114,24 +114,45 @@ class PostgresStrategyUniverseRepository:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
 
+    async def _resolve_current_event_spec_id(self, event_id: str) -> str:
+        rows = (
+            await self._connection.execute(
+                sa.select(event_specs.c.event_spec_id)
+                .join(
+                    strategy_versions,
+                    strategy_versions.c.strategy_version_id
+                    == event_specs.c.strategy_version_id,
+                )
+                .join(
+                    strategy_groups,
+                    sa.and_(
+                        strategy_groups.c.strategy_group_id
+                        == strategy_versions.c.strategy_group_id,
+                        strategy_groups.c.active_version_id
+                        == strategy_versions.c.strategy_version_id,
+                    ),
+                )
+                .where(
+                    event_specs.c.event_id == event_id,
+                    event_specs.c.status == "active",
+                    strategy_versions.c.status == "active",
+                    strategy_groups.c.status == "active",
+                )
+                .order_by(event_specs.c.event_spec_id)
+                .limit(2)
+            )
+        ).scalars().all()
+        if len(rows) != 1:
+            raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
+        return str(rows[0])
+
     async def resolve_install_context(
         self,
         *,
         runtime_profile_id: str,
         event_id: str,
     ) -> UniverseInstallContext:
-        event = (
-            await self._connection.execute(
-                sa.select(
-                    event_specs.c.event_spec_id,
-                    event_specs.c.status,
-                )
-                .where(event_specs.c.event_id == event_id)
-                .limit(1)
-            )
-        ).mappings().one_or_none()
-        if event is None or event["status"] != "active":
-            raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
+        event_spec_id = await self._resolve_current_event_spec_id(event_id)
 
         profile = (
             await self._connection.execute(
@@ -155,7 +176,6 @@ class PostgresStrategyUniverseRepository:
                 "RUNTIME_PROFILE_AUTHORITY_CONFLICT"
             )
 
-        event_spec_id = str(event["event_spec_id"])
         policies = (
             await self._connection.execute(
                 sa.select(owner_policy_current.c.owner_policy_id)
@@ -348,18 +368,7 @@ class PostgresStrategyUniverseRepository:
                 "RUNTIME_PROFILE_AUTHORITY_CONFLICT"
             )
         if request.event_id is not None:
-            event_exists = (
-                await self._connection.execute(
-                    sa.select(event_specs.c.event_spec_id)
-                    .where(
-                        event_specs.c.event_id == request.event_id,
-                        event_specs.c.status == "active",
-                    )
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if event_exists is None:
-                raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
+            await self._resolve_current_event_spec_id(request.event_id)
 
         certification = instrument_certification_current
         monitor_key = sa.func.concat(
@@ -554,33 +563,6 @@ class PostgresStrategyUniverseRepository:
             raise UniverseInstallConflict("UNIVERSE_ACTIVATION_TARGET_NOT_FOUND")
 
         event_spec_id = str(target["event_spec_id"])
-        current = (
-            await self._connection.execute(
-                sa.select(strategy_universe_current)
-                .where(
-                    strategy_universe_current.c.event_spec_id
-                    == event_spec_id
-                )
-                .with_for_update(of=strategy_universe_current)
-                .limit(1)
-            )
-        ).mappings().one_or_none()
-        target_is_active = target["lifecycle_state"] == "active"
-        if target_is_active and (
-            current is None
-            or current["universe_version_id"]
-            != request.universe_version_id
-            or current["semantic_digest"] != target["semantic_digest"]
-        ):
-            return _not_ready_activation(
-                target=target,
-                current=current,
-                reason_code="CURRENT_UNIVERSE_IDENTITY_CONFLICT",
-            )
-        current_is_complete = (
-            current is None
-            or await self._current_universe_identity_is_complete(current)
-        )
         event = (
             await self._connection.execute(
                 sa.select(
@@ -597,6 +579,56 @@ class PostgresStrategyUniverseRepository:
                 .limit(1)
             )
         ).mappings().one_or_none()
+        current_event = event_specs.alias("current_event")
+        current_version = strategy_versions.alias("current_strategy_version")
+        current_rows = (
+            await self._connection.execute(
+                sa.select(strategy_universe_current)
+                .join(
+                    current_event,
+                    current_event.c.event_spec_id
+                    == strategy_universe_current.c.event_spec_id,
+                )
+                .join(
+                    current_version,
+                    current_version.c.strategy_version_id
+                    == current_event.c.strategy_version_id,
+                )
+                .where(
+                    current_version.c.strategy_group_id
+                    == target["strategy_group_id"],
+                    current_event.c.event_id
+                    == (None if event is None else event["event_id"]),
+                    current_event.c.position_side
+                    == (None if event is None else event["position_side"]),
+                )
+                .with_for_update(of=strategy_universe_current)
+            )
+        ).mappings().all()
+        if len(current_rows) > 1:
+            raise UniverseInstallConflict("CURRENT_UNIVERSE_LINEAGE_CONFLICT")
+        current = None if not current_rows else current_rows[0]
+        target_is_active = target["lifecycle_state"] == "active"
+        if target_is_active and (
+            current is None
+            or current["universe_version_id"]
+            != request.universe_version_id
+            or current["semantic_digest"] != target["semantic_digest"]
+        ):
+            return _not_ready_activation(
+                target=target,
+                current=current,
+                reason_code="CURRENT_UNIVERSE_IDENTITY_CONFLICT",
+            )
+        current_is_complete = (
+            current is None
+            or await self._current_universe_identity_is_complete(
+                current,
+                require_active_registry_authority=(
+                    current["event_spec_id"] == event_spec_id
+                ),
+            )
+        )
         event_is_active = not (
             event is None
             or event["status"] != "active"
@@ -737,13 +769,14 @@ class PostgresStrategyUniverseRepository:
                 sa.update(strategy_universe_current)
                 .where(
                     strategy_universe_current.c.event_spec_id
-                    == event_spec_id,
+                    == current["event_spec_id"],
                     strategy_universe_current.c.universe_version_id
                     == previous_universe_version_id,
                     strategy_universe_current.c.activation_generation
                     == current["activation_generation"],
                 )
                 .values(
+                    event_spec_id=event_spec_id,
                     universe_version_id=request.universe_version_id,
                     semantic_digest=target["semantic_digest"],
                     activation_generation=generation,
@@ -870,6 +903,8 @@ class PostgresStrategyUniverseRepository:
     async def _current_universe_identity_is_complete(
         self,
         current: RowMapping,
+        *,
+        require_active_registry_authority: bool = True,
     ) -> bool:
         universe_version_id = str(current["universe_version_id"])
         version = (
@@ -922,7 +957,7 @@ class PostgresStrategyUniverseRepository:
                 .limit(MAX_UNIVERSE_MEMBERS + 1)
             )
         ).mappings().all()
-        return (
+        structurally_complete = (
             1 <= len(members) <= MAX_UNIVERSE_MEMBERS
             and len(scopes) == len(members)
             and tuple(
@@ -939,12 +974,34 @@ class PostgresStrategyUniverseRepository:
                 and scope["entry_enabled"]
                 for scope in scopes
             )
-            and await self._scopes_have_exact_authority(
+        )
+        if not structurally_complete:
+            return False
+        if require_active_registry_authority:
+            return await self._scopes_have_exact_authority(
                 target=version,
                 scopes=scopes,
                 expected_lifecycle="active",
                 event=None,
             )
+        historical_event = (
+            await self._connection.execute(
+                sa.select(
+                    event_specs.c.strategy_version_id,
+                    event_specs.c.position_side,
+                )
+                .where(
+                    event_specs.c.event_spec_id == current["event_spec_id"]
+                )
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        return historical_event is not None and all(
+            scope["strategy_group_id"] == version["strategy_group_id"]
+            and scope["strategy_version_id"]
+            == historical_event["strategy_version_id"]
+            and scope["position_side"] == historical_event["position_side"]
+            for scope in scopes
         )
 
     async def _activation_readiness(

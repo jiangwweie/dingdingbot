@@ -27,11 +27,14 @@ from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    event_specs,
     instrument_certification_current,
     instruments,
     runtime_scopes_current,
     strategy_universe_current,
+    strategy_universe_members,
     strategy_universe_versions,
+    strategy_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
@@ -69,8 +72,8 @@ REPLACEMENT_MEMBERS = (
     "binance-usdm:OPUSDT:perpetual",
 )
 NOW_MS = 1_800_000_100_000
-SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v4"] = (
-    "0001_trading_kernel_baseline_v4"
+SCHEMA_REVISION: Literal["0002_sor_v3_strategy_group_capacity"] = (
+    "0002_sor_v3_strategy_group_capacity"
 )
 _READINESS_DIGEST = "sha256:" + ("a" * 64)
 _FACTS_DIGEST = "sha256:" + ("b" * 64)
@@ -178,6 +181,130 @@ async def prepare_active_and_warming(
     new_version_id = await _install(
         engine,
         contract=contract,
+        members=REPLACEMENT_MEMBERS,
+        installed_at_ms=NOW_MS - 100_000,
+    )
+    return old_version_id, new_version_id
+
+
+async def prepare_retired_v2_active_and_v3_warming(
+    engine: AsyncEngine,
+) -> tuple[str, str]:
+    """Build the exact post-Registry-seed, pre-Universe-switch SOR state."""
+
+    old_version_id = "universe:legacy-sor-long:v2:1"
+    old_event_spec_id = "event_spec:SOR-001:SOR-LONG:v2"
+    old_semantic_digest = "sha256:" + "9" * 64
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(strategy_versions).values(
+                strategy_version_id="sgv:SOR-001:v2",
+                strategy_group_id="SOR-001",
+                version=2,
+                semantics={"source": "committed_old_main_program_v2"},
+                status="retired",
+                created_at_ms=NOW_MS - 2_000_000,
+            )
+        )
+        await connection.execute(
+            sa.insert(event_specs).values(
+                event_spec_id=old_event_spec_id,
+                strategy_version_id="sgv:SOR-001:v2",
+                event_id="SOR-LONG",
+                position_side="long",
+                timeframe="15m",
+                freshness_window_ms=900_000,
+                event_time_authority="trigger_candle_close_time_ms",
+                entry_order_type="market",
+                protection_reference_fact_definition_id="fact:legacy-range-low:v1",
+                exit_policy_id="exit-policy:SOR-001:SOR-LONG:right-tail-v1",
+                execution_semantics={"source": "committed_old_main_program_v2"},
+                status="retired",
+                created_at_ms=NOW_MS - 2_000_000,
+            )
+        )
+        await connection.execute(
+            sa.insert(instruments),
+            [
+                {
+                    "exchange_instrument_id": instrument_id,
+                    "venue_id": "binance-usdm",
+                    "asset_class": "crypto",
+                    "venue_symbol": instrument_id.split(":")[1],
+                    "contract_kind": "perpetual",
+                    "status": "active",
+                }
+                for instrument_id in ACTIVE_MEMBERS
+            ],
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_versions).values(
+                universe_version_id=old_version_id,
+                strategy_group_id="SOR-001",
+                event_spec_id=old_event_spec_id,
+                universe_version=1,
+                semantic_digest=old_semantic_digest,
+                lifecycle_state="active",
+                installed_at_ms=NOW_MS - 1_900_000,
+                activated_at_ms=NOW_MS - 1_800_000,
+                retired_at_ms=None,
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_members),
+            [
+                {
+                    "universe_version_id": old_version_id,
+                    "exchange_instrument_id": instrument_id,
+                }
+                for instrument_id in ACTIVE_MEMBERS
+            ],
+        )
+        await connection.execute(
+            sa.insert(runtime_scopes_current),
+            [
+                {
+                    "runtime_scope_id": f"scope:legacy-v2:{index}",
+                    "strategy_group_id": "SOR-001",
+                    "strategy_version_id": "sgv:SOR-001:v2",
+                    "event_spec_id": old_event_spec_id,
+                    "runtime_profile_id": RUNTIME_PROFILE_ID,
+                    "owner_policy_id": OWNER_POLICY_ID,
+                    "exchange_instrument_id": instrument_id,
+                    "position_side": "long",
+                    "universe_version_id": old_version_id,
+                    "universe_semantic_digest": old_semantic_digest,
+                    "lifecycle_state": "active",
+                    "observation_enabled": True,
+                    "entry_enabled": True,
+                    "scope_version": 2,
+                    "warm_closed_bar_time_ms": NOW_MS - 1_800_000,
+                    "warm_completed_at_ms": NOW_MS - 1_800_000,
+                    "warm_readiness_digest": _READINESS_DIGEST,
+                    "warm_valid_until_ms": NOW_MS + 60_000,
+                    "next_observation_due_at_ms": NOW_MS + 900_000,
+                    "lease_expires_at_ms": None,
+                    "lease_owner": None,
+                    "observation_generation": 2,
+                    "updated_at_ms": NOW_MS - 1_800_000,
+                }
+                for index, instrument_id in enumerate(ACTIVE_MEMBERS, start=1)
+            ],
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_current).values(
+                event_spec_id=old_event_spec_id,
+                universe_version_id=old_version_id,
+                semantic_digest=old_semantic_digest,
+                lifecycle_state="active",
+                activation_generation=1,
+                activated_at_ms=NOW_MS - 1_800_000,
+            )
+        )
+
+    new_version_id = await _install(
+        engine,
+        contract=DIRECT_CONTRACT,
         members=REPLACEMENT_MEMBERS,
         installed_at_ms=NOW_MS - 100_000,
     )

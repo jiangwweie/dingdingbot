@@ -62,8 +62,8 @@ MEMBERS = (
 )
 NOW_MS = 1_800_000_010_000
 RUNTIME_COMMIT = "task-7-test"
-SCHEMA_REVISION: Literal["0001_trading_kernel_baseline_v4"] = (
-    "0001_trading_kernel_baseline_v4"
+SCHEMA_REVISION: Literal["0002_sor_v3_strategy_group_capacity"] = (
+    "0002_sor_v3_strategy_group_capacity"
 )
 
 

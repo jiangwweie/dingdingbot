@@ -40,7 +40,7 @@ ADMIN_DSN = os.getenv(
     "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
-CANONICAL_EVENT_SPEC_ID = "event_spec:SOR-001:SOR-LONG:v2"
+CANONICAL_EVENT_SPEC_ID = "event_spec:SOR-001:SOR-LONG:v3"
 NOW_MS = 1_800_001_000_000
 
 
@@ -61,7 +61,7 @@ async def script_database_url() -> AsyncGenerator[str, None]:
                 RuntimeAuthoritySeedRequest(
                     account_id="sensitive-account-id",
                     runtime_commit="task-12-local-test",
-                    schema_revision="0001_trading_kernel_baseline_v4",
+                    schema_revision="0002_sor_v3_strategy_group_capacity",
                     seeded_at_ms=NOW_MS - 1_000,
                 ),
             )

@@ -215,6 +215,12 @@ class RegisteredStrategyContract(BaseModel):
     def disable_fact_names(self) -> tuple[str, ...]:
         return tuple(item.fact_name for item in self.disable_facts)
 
+    @property
+    def semantic_version(self) -> int:
+        """Return the canonical positive version frozen in the strategy identity."""
+
+        return int(self.strategy_version_id.rpartition(":v")[2])
+
 def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
     """Return the exact six Event contracts recovered from committed runtime code."""
 

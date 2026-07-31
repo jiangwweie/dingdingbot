@@ -312,13 +312,15 @@ async def test_postgres_enforces_strategy_universe_authority_constraints() -> No
                 asyncpg.ForeignKeyViolationError,
                 """
                 INSERT INTO brc_signal_events (
-                    signal_event_id, runtime_scope_id, runtime_scope_version,
+                    signal_event_id, exposure_episode_id,
+                    runtime_scope_id, runtime_scope_version,
                     strategy_group_id, strategy_version_id, event_spec_id,
                     universe_version_id, universe_semantic_digest,
                     exchange_instrument_id, position_side, fact_digest,
                     occurred_at_ms, observed_at_ms, expires_at_ms
                 ) VALUES (
-                    'signal-wrong-digest', 'scope-a', 1, 'sg-a', 'sv-a',
+                    'signal-wrong-digest', 'episode-wrong-digest',
+                    'scope-a', 1, 'sg-a', 'sv-a',
                     'event-a', 'uni-a', $1,
                     'binance-usdm:T00USDT:perpetual', 'long', $2,
                     1000, 1100, 2000

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -77,48 +78,48 @@ class PostgresStrategyRegistryRepository:
             )
 
         for strategy_group_id, group_contracts in sorted(contracts_by_group.items()):
+            group_contracts = sorted(
+                group_contracts,
+                key=lambda item: item.event_spec_id,
+            )
+            version_ids = {
+                contract.strategy_version_id for contract in group_contracts
+            }
+            semantic_versions = {
+                contract.semantic_version for contract in group_contracts
+            }
+            if len(version_ids) != 1 or len(semantic_versions) != 1:
+                raise RegistrySeedConflict(
+                    f"strategy Registry group version conflicts: {strategy_group_id}"
+                )
             active_version_id = group_contracts[0].strategy_version_id
+            semantic_version = group_contracts[0].semantic_version
             group_statuses = {contract.status for contract in group_contracts}
             if len(group_statuses) != 1:
                 raise RegistrySeedConflict(
                     f"strategy Registry group status conflicts: {strategy_group_id}"
                 )
             status = group_contracts[0].status
-            counters["inserted_strategy_group_count"] += await self._insert_exact(
-                strategy_groups,
-                "strategy_group_id",
-                {
-                    "strategy_group_id": strategy_group_id,
-                    "display_name": _display_name(strategy_group_id),
-                    "active_version_id": active_version_id,
-                    "status": status,
-                    "updated_at_ms": seeded_at_ms,
-                },
-                compare_keys=("display_name", "active_version_id", "status"),
+            counters["inserted_strategy_group_count"] += (
+                await self._activate_strategy_group_version(
+                    strategy_group_id=strategy_group_id,
+                    active_version_id=active_version_id,
+                    status=status,
+                    seeded_at_ms=seeded_at_ms,
+                )
             )
-            counters["inserted_strategy_version_count"] += await self._insert_exact(
-                strategy_versions,
-                "strategy_version_id",
-                {
-                    "strategy_version_id": active_version_id,
-                    "strategy_group_id": strategy_group_id,
-                    "version": 2,
-                    "semantics": {
-                        "event_spec_ids": sorted(
-                            item.event_spec_id for item in group_contracts
-                        ),
-                        "registry_semantic_hash": registry_semantic_hash,
-                        "source": "committed_old_main_program_v2",
-                    },
-                    "status": status,
-                    "created_at_ms": seeded_at_ms,
-                },
-                compare_keys=(
-                    "strategy_group_id",
-                    "version",
-                    "semantics",
-                    "status",
-                ),
+            counters["inserted_strategy_version_count"] += (
+                await self._insert_strategy_version(
+                    strategy_version_id=active_version_id,
+                    strategy_group_id=strategy_group_id,
+                    semantic_version=semantic_version,
+                    event_spec_ids=tuple(
+                        item.event_spec_id for item in group_contracts
+                    ),
+                    registry_semantic_hash=registry_semantic_hash,
+                    status=status,
+                    seeded_at_ms=seeded_at_ms,
+                )
             )
 
         facts_by_id = {
@@ -175,7 +176,7 @@ class PostgresStrategyRegistryRepository:
                     "execution_semantics": {
                         "event_semantic_hash": contract_hash,
                         "signal_grade": "trial_grade_signal",
-                        "source": "committed_old_main_program_v2",
+                        "source": _contract_source(contract.semantic_version),
                     },
                     "status": contract.status,
                     "created_at_ms": seeded_at_ms,
@@ -241,10 +242,274 @@ class PostgresStrategyRegistryRepository:
             **counters,
         )
 
+    async def _activate_strategy_group_version(
+        self,
+        *,
+        strategy_group_id: str,
+        active_version_id: str,
+        status: str,
+        seeded_at_ms: int,
+    ) -> int:
+        expected = {
+            "strategy_group_id": strategy_group_id,
+            "display_name": _display_name(strategy_group_id),
+            "active_version_id": active_version_id,
+            "status": status,
+            "updated_at_ms": seeded_at_ms,
+        }
+        result = await self._connection.execute(
+            sa.select(strategy_groups)
+            .where(strategy_groups.c.strategy_group_id == strategy_group_id)
+            .with_for_update(of=strategy_groups)
+        )
+        existing = result.mappings().one_or_none()
+        active_version_ids = tuple(
+            str(value)
+            for value in (
+                await self._connection.execute(
+                    sa.select(strategy_versions.c.strategy_version_id)
+                    .where(
+                        strategy_versions.c.strategy_group_id
+                        == strategy_group_id,
+                        strategy_versions.c.status == "active",
+                    )
+                    .order_by(
+                        strategy_versions.c.version,
+                        strategy_versions.c.strategy_version_id,
+                    )
+                    .with_for_update(of=strategy_versions)
+                )
+            ).scalars()
+        )
+        if existing is None:
+            if active_version_ids:
+                raise RegistrySeedConflict(
+                    "strategy Registry active version conflicts: "
+                    f"{strategy_group_id}"
+                )
+            await self._connection.execute(sa.insert(strategy_groups).values(expected))
+            return 1
+        if not _matches(existing, expected, ("display_name", "status")):
+            raise RegistrySeedConflict(
+                f"strategy Registry conflict for {strategy_group_id}"
+            )
+
+        current_version_id = str(existing["active_version_id"] or "")
+        expected_active_versions = (
+            () if not current_version_id else (current_version_id,)
+        )
+        if active_version_ids != expected_active_versions:
+            raise RegistrySeedConflict(
+                f"strategy Registry active version conflicts: {strategy_group_id}"
+            )
+        if current_version_id == active_version_id:
+            return 0
+        if status != "active":
+            raise RegistrySeedConflict(
+                f"strategy Registry cannot activate disabled group: {strategy_group_id}"
+            )
+        target_version = _version_from_identity(
+            strategy_group_id,
+            active_version_id,
+        )
+        if current_version_id:
+            current_version = _version_from_identity(
+                strategy_group_id,
+                current_version_id,
+            )
+            if target_version <= current_version:
+                raise RegistrySeedConflict(
+                    f"strategy Registry version is not monotonic: {strategy_group_id}"
+                )
+            await self._retire_strategy_version(
+                strategy_group_id=strategy_group_id,
+                strategy_version_id=current_version_id,
+                semantic_version=current_version,
+            )
+
+        await self._connection.execute(
+            sa.update(strategy_groups)
+            .where(strategy_groups.c.strategy_group_id == strategy_group_id)
+            .values(
+                active_version_id=active_version_id,
+                status=status,
+                updated_at_ms=seeded_at_ms,
+            )
+        )
+        return 0
+
+    async def _retire_strategy_version(
+        self,
+        *,
+        strategy_group_id: str,
+        strategy_version_id: str,
+        semantic_version: int,
+    ) -> None:
+        result = await self._connection.execute(
+            sa.select(strategy_versions)
+            .where(
+                strategy_versions.c.strategy_version_id == strategy_version_id
+            )
+            .with_for_update(of=strategy_versions)
+        )
+        existing = result.mappings().one_or_none()
+        if (
+            existing is None
+            or str(existing["strategy_group_id"]) != strategy_group_id
+            or int(existing["version"]) != semantic_version
+            or str(existing["status"]) != "active"
+        ):
+            raise RegistrySeedConflict(
+                f"strategy Registry active version conflicts: {strategy_version_id}"
+            )
+        historical_events = (
+            await self._connection.execute(
+                sa.select(
+                    event_specs.c.event_spec_id,
+                    event_specs.c.exit_policy_id,
+                    event_specs.c.status,
+                )
+                .where(
+                    event_specs.c.strategy_version_id == strategy_version_id
+                )
+                .order_by(event_specs.c.event_spec_id)
+                .with_for_update(of=event_specs)
+            )
+        ).mappings().all()
+        if not historical_events or any(
+            row["status"] != "active" for row in historical_events
+        ):
+            raise RegistrySeedConflict(
+                f"strategy Registry historical Event conflicts: {strategy_version_id}"
+            )
+        historical_event_ids = tuple(
+            str(row["event_spec_id"]) for row in historical_events
+        )
+        historical_policies = (
+            await self._connection.execute(
+                sa.select(
+                    exit_policies.c.exit_policy_id,
+                    exit_policies.c.event_spec_id,
+                    exit_policies.c.status,
+                )
+                .where(
+                    exit_policies.c.event_spec_id.in_(historical_event_ids)
+                )
+                .order_by(exit_policies.c.event_spec_id)
+                .with_for_update(of=exit_policies)
+            )
+        ).mappings().all()
+        policies_by_event = {
+            str(row["event_spec_id"]): row for row in historical_policies
+        }
+        if len(policies_by_event) != len(historical_events) or any(
+            event_id not in policies_by_event
+            or policies_by_event[event_id]["status"] != "active"
+            or str(policies_by_event[event_id]["exit_policy_id"])
+            != str(event["exit_policy_id"])
+            for event_id, event in zip(
+                historical_event_ids,
+                historical_events,
+                strict=True,
+            )
+        ):
+            raise RegistrySeedConflict(
+                f"strategy Registry historical policy conflicts: {strategy_version_id}"
+            )
+        await self._connection.execute(
+            sa.update(exit_policies)
+            .where(exit_policies.c.event_spec_id.in_(historical_event_ids))
+            .values(status="retired")
+        )
+        await self._connection.execute(
+            sa.update(event_specs)
+            .where(event_specs.c.strategy_version_id == strategy_version_id)
+            .values(status="retired")
+        )
+        await self._connection.execute(
+            sa.update(strategy_versions)
+            .where(
+                strategy_versions.c.strategy_version_id == strategy_version_id
+            )
+            .values(status="retired")
+        )
+
+    async def _insert_strategy_version(
+        self,
+        *,
+        strategy_version_id: str,
+        strategy_group_id: str,
+        semantic_version: int,
+        event_spec_ids: tuple[str, ...],
+        registry_semantic_hash: str,
+        status: str,
+        seeded_at_ms: int,
+    ) -> int:
+        semantics = {
+            "event_spec_ids": list(event_spec_ids),
+            "registry_semantic_hash": registry_semantic_hash,
+            "source": _contract_source(semantic_version),
+        }
+        expected = {
+            "strategy_version_id": strategy_version_id,
+            "strategy_group_id": strategy_group_id,
+            "version": semantic_version,
+            "semantics": semantics,
+            "status": status,
+            "created_at_ms": seeded_at_ms,
+        }
+        result = await self._connection.execute(
+            sa.select(strategy_versions)
+            .where(
+                strategy_versions.c.strategy_version_id == strategy_version_id
+            )
+            .limit(1)
+        )
+        existing = result.mappings().one_or_none()
+        if existing is None:
+            await self._connection.execute(sa.insert(strategy_versions).values(expected))
+            return 1
+        if not _matches(
+            existing,
+            expected,
+            ("strategy_group_id", "version", "status"),
+        ):
+            raise RegistrySeedConflict(
+                f"strategy Registry conflict for {strategy_version_id}"
+            )
+        if existing["semantics"] == semantics:
+            return 0
+        if semantic_version == 2 and _matches_legacy_v2_semantics(
+            existing["semantics"],
+            event_spec_ids,
+        ):
+            return 0
+        raise RegistrySeedConflict(
+            f"strategy Registry conflict for {strategy_version_id}"
+        )
+
     async def list_current_event_ids(self) -> tuple[str, ...]:
         result = await self._connection.execute(
             sa.select(event_specs.c.event_id)
-            .where(event_specs.c.status == "active")
+            .join(
+                strategy_versions,
+                strategy_versions.c.strategy_version_id
+                == event_specs.c.strategy_version_id,
+            )
+            .join(
+                strategy_groups,
+                sa.and_(
+                    strategy_groups.c.strategy_group_id
+                    == strategy_versions.c.strategy_group_id,
+                    strategy_groups.c.active_version_id
+                    == strategy_versions.c.strategy_version_id,
+                ),
+            )
+            .where(
+                event_specs.c.status == "active",
+                strategy_versions.c.status == "active",
+                strategy_groups.c.status == "active",
+            )
             .order_by(event_specs.c.event_id)
         )
         return tuple(str(value) for value in result.scalars())
@@ -338,3 +603,41 @@ def _display_name(strategy_group_id: str) -> str:
         "SOR-001": "SOR opening range breakout and breakdown",
         "BRF2-001": "BRF2 bear rally failure",
     }[strategy_group_id]
+
+
+def _version_from_identity(strategy_group_id: str, strategy_version_id: str) -> int:
+    match = re.fullmatch(
+        rf"sgv:{re.escape(strategy_group_id)}:v([1-9][0-9]*)",
+        strategy_version_id,
+    )
+    if match is None:
+        raise RegistrySeedConflict(
+            f"strategy Registry version identity conflicts: {strategy_version_id}"
+        )
+    return int(match.group(1))
+
+
+def _contract_source(semantic_version: int) -> str:
+    if semantic_version == 2:
+        return "committed_old_main_program_v2"
+    return "committed_strategy_registry_contract"
+
+
+def _matches_legacy_v2_semantics(
+    value: object,
+    event_spec_ids: tuple[str, ...],
+) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    if set(value) != {
+        "event_spec_ids",
+        "registry_semantic_hash",
+        "source",
+    }:
+        return False
+    registry_hash = str(value.get("registry_semantic_hash") or "")
+    return (
+        value.get("event_spec_ids") == list(event_spec_ids)
+        and value.get("source") == "committed_old_main_program_v2"
+        and re.fullmatch(r"sha256:[0-9a-f]{64}", registry_hash) is not None
+    )
