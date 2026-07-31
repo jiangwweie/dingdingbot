@@ -186,6 +186,8 @@ migration。
 5. downgrade 在 v3 row 出现后 fail-closed；
 6. verify-schema 计算 exact v4-column canonical digest；
 7. runtime authority 单调切换 Registry、Policy、metadata 与 capability identity。
+8. compatible identity 精确识别 frozen v4 Contract shape 产生的非 SOR v2 Event hash，
+   不接受任意 hash，也不通过重写历史 Registry 行消除冲突。
 
 ### Hard Stop
 

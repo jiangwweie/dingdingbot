@@ -135,6 +135,8 @@ preflight
 - Owner Policy 使用 `current_version + 1`，资本参数保持不变；
 - metadata、capability、commit、schema、seed 同事务更新；
 - source revision 或 source policy 不精确时 fail-closed；
+- 未改变业务语义的非 SOR v2 Event 必须精确接受 frozen v4 Contract 字段集合计算出的
+  历史 `event_semantic_hash`，任意其他 hash 仍 fail-closed，且 migration 不重写历史行；
 - active Ticket、position、Reservation、Domain、unreviewed terminal Ticket、Command 或
   Incident 会拒绝 compatible transition；
 - closure-only 与 recovery identity 的既有安全路径不被误删。

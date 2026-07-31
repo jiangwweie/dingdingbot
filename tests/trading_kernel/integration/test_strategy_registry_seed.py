@@ -378,6 +378,53 @@ async def test_strategy_seed_accepts_only_the_exact_legacy_v2_semantics_shape(
             await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)
 
 
+@pytest.mark.asyncio
+async def test_strategy_seed_accepts_exact_production_v2_event_semantics(
+    registry_engine: AsyncEngine,
+) -> None:
+    production_hashes = {
+        "event_spec:BRF2-001:BRF2-SHORT:v2": (
+            "sha256:93ec2c387c02442bb4f2d4a936aa035a30376cb1a25d"
+            "f194a15a2d4809a1ab66"
+        ),
+        "event_spec:CPM-RO-001:CPM-LONG:v2": (
+            "sha256:d4a9ceb2c096a13701ca148438d607bee970deef5d658"
+            "790aa1081f816661a2e"
+        ),
+        "event_spec:MI-001:MI-LONG:v2": (
+            "sha256:533abcf09e68d590f2619507cc5951229bf0a95b18eae"
+            "8fbf4ae384e21edff0f"
+        ),
+        "event_spec:MPG-001:MPG-LONG:v2": (
+            "sha256:e7161b5c5b3fb8f2c6edbb134ea1081f80e55db74304"
+            "e99a84c1cb20e3b93939"
+        ),
+    }
+    async with PostgresKernelUnitOfWork(registry_engine) as uow:
+        await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
+    async with registry_engine.begin() as connection:
+        for event_spec_id, event_semantic_hash in production_hashes.items():
+            await connection.execute(
+                sa.update(event_specs)
+                .where(event_specs.c.event_spec_id == event_spec_id)
+                .values(
+                    execution_semantics={
+                        "event_semantic_hash": event_semantic_hash,
+                        "signal_grade": "trial_grade_signal",
+                        "source": "committed_old_main_program_v2",
+                    }
+                )
+            )
+
+    async with PostgresKernelUnitOfWork(registry_engine) as uow:
+        result = await seed_strategy_registry(
+            uow,
+            seeded_at_ms=1_800_000_000_001,
+        )
+
+    assert result.total_inserted_count == 0
+
+
 async def _insert_legacy_sor_v2_registry(
     connection: AsyncConnection,
 ) -> None:

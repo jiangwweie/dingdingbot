@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
+from hashlib import sha256
 from typing import Any
 
 import sqlalchemy as sa
@@ -154,9 +156,8 @@ class PostgresStrategyRegistryRepository:
 
         for contract in contracts:
             contract_hash = build_registry_semantic_hash((contract,))
-            counters["inserted_event_count"] += await self._insert_exact(
-                event_specs,
-                "event_spec_id",
+            counters["inserted_event_count"] += await self._insert_event_spec(
+                contract,
                 {
                     "event_spec_id": contract.event_spec_id,
                     "strategy_version_id": contract.strategy_version_id,
@@ -181,19 +182,6 @@ class PostgresStrategyRegistryRepository:
                     "status": contract.status,
                     "created_at_ms": seeded_at_ms,
                 },
-                compare_keys=(
-                    "strategy_version_id",
-                    "event_id",
-                    "position_side",
-                    "timeframe",
-                    "freshness_window_ms",
-                    "event_time_authority",
-                    "entry_order_type",
-                    "protection_reference_fact_definition_id",
-                    "exit_policy_id",
-                    "execution_semantics",
-                    "status",
-                ),
             )
 
             exit_policy = next(
@@ -488,6 +476,41 @@ class PostgresStrategyRegistryRepository:
             f"strategy Registry conflict for {strategy_version_id}"
         )
 
+    async def _insert_event_spec(
+        self,
+        contract: RegisteredStrategyContract,
+        values: Mapping[str, Any],
+    ) -> int:
+        compare_keys = (
+            "strategy_version_id",
+            "event_id",
+            "position_side",
+            "timeframe",
+            "freshness_window_ms",
+            "event_time_authority",
+            "entry_order_type",
+            "protection_reference_fact_definition_id",
+            "exit_policy_id",
+            "execution_semantics",
+            "status",
+        )
+        result = await self._connection.execute(
+            sa.select(event_specs)
+            .where(event_specs.c.event_spec_id == contract.event_spec_id)
+            .limit(1)
+        )
+        existing = result.mappings().one_or_none()
+        if existing is None:
+            await self._connection.execute(sa.insert(event_specs).values(dict(values)))
+            return 1
+        if _matches(existing, values, compare_keys):
+            return 0
+        if _matches_legacy_v2_event_spec(existing, values, contract):
+            return 0
+        raise RegistrySeedConflict(
+            f"strategy Registry conflict for {contract.event_spec_id}"
+        )
+
     async def list_current_event_ids(self) -> tuple[str, ...]:
         result = await self._connection.execute(
             sa.select(event_specs.c.event_id)
@@ -641,3 +664,47 @@ def _matches_legacy_v2_semantics(
         and value.get("source") == "committed_old_main_program_v2"
         and re.fullmatch(r"sha256:[0-9a-f]{64}", registry_hash) is not None
     )
+
+
+def _matches_legacy_v2_event_spec(
+    existing: RowMapping,
+    expected: Mapping[str, Any],
+    contract: RegisteredStrategyContract,
+) -> bool:
+    """Accept only the exact v2 hash from the pre-SOR-v3 Contract shape."""
+
+    if contract.semantic_version != 2 or not _matches(
+        existing,
+        expected,
+        (
+            "strategy_version_id",
+            "event_id",
+            "position_side",
+            "timeframe",
+            "freshness_window_ms",
+            "event_time_authority",
+            "entry_order_type",
+            "protection_reference_fact_definition_id",
+            "exit_policy_id",
+            "status",
+        ),
+    ):
+        return False
+    legacy_contract = contract.model_dump(
+        mode="json",
+        exclude={
+            "pre_tp1_reclaim_reference_fact",
+            "exposure_session_end_reference_fact",
+        },
+    )
+    canonical = json.dumps(
+        [legacy_contract],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return existing["execution_semantics"] == {
+        "event_semantic_hash": f"sha256:{sha256(canonical).hexdigest()}",
+        "signal_grade": "trial_grade_signal",
+        "source": "committed_old_main_program_v2",
+    }
