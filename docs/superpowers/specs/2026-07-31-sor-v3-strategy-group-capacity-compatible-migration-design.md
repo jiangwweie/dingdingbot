@@ -15,7 +15,7 @@ date: 2026-07-31
 3. 仅对新的 v3 Ticket 增加 TP1 前 failed-breakout、Session invalidation 和 time-stop；
 4. 在 Owner Policy、CapacityClaim、Entry Preflight 和 Ticket 原子提交四处共同执行 **同一 StrategyGroup 最多两个 Active Ticket**；
 5. PostgreSQL 从当前 v4 schema 通过增量 Alembic revision 前向升级，不再要求清库重建；
-6. 当前 v2 Ticket、仓位、保护订单、事件、Command、Reservation 和 Review lineage 原样保留；
+6. PostgreSQL 中现有 Ticket、事件、Command、Reservation 和 Review lineage 全部保留；部署时不要求保留全部活跃仓位，只允许零活跃仓位或一个经过精确核验的 BNB v2 protected Ticket；
 7. 迁移后仍只有一条 Trading Kernel 执行链，不增加双写、旧表读取、schema fallback 或平行 worker。
 
 本次不修改 Owner 已批准的账户资本边界：
@@ -31,6 +31,23 @@ configured_exchange_leverage = 5
 max_leverage = 10
 margin_mode = cross
 ```
+
+### Owner 活跃持仓切换决定
+
+**数据库兼容迁移**与**活跃持仓兼容切换**是两个不同边界：
+
+- schema 必须前向迁移，保留全部历史 Ticket 和 append-only lineage；
+- Owner 所指的三笔活跃仓位不需要作为一个整体跨版本保留；
+- 非 BNB 活跃 Ticket 必须在 cutover 前通过官方 Lifecycle 自然终结或受控终结；
+- 若旧 BNB Ticket 在 cutover 时仍然活跃、数量和 Stop/TP1 完整一致且不存在
+  unresolved Command/Incident，可作为唯一 protected Ticket 跨版本保留；
+- 若 BNB 已在 cutover 前自然终结，则直接使用 flat compatible-upgrade 路径，
+  不重新建仓，也不为保仓目的延迟部署；
+- 设计文档不冻结易变 Ticket ID，preflight 必须从 PostgreSQL 与交易所只读事实
+  解析当时唯一的 exact BNB Ticket。
+
+本次文档更新不授权立即平仓、撤单或修改任何现有保护订单；实际终结动作仍必须
+经过部署执行计划和官方 durable-command Lifecycle 路径。
 
 ## 已知客观事实
 
@@ -461,7 +478,10 @@ other.terminal_at_ms IS NULL
 OR other.terminal_at_ms > claim.created_at_ms
 ```
 
-若同毫秒存在多个 Ticket，则按 `ticket_id` 确定稳定次序。现有第三个同策略 Ticket 可以保留，即使回填计数已等于新上限；新上限只阻止 migration 完成后的新 ENTRY。
+若同毫秒存在多个 Ticket，则按 `ticket_id` 确定稳定次序。Migration 本身不删除
+或终结任何 Ticket；但 official cutover preflight 只接受零活跃 Ticket，或唯一一个
+符合 protected handover 条件的 BNB Ticket。发现第二个活跃 Ticket 时部署保持
+Entry fenced 并停止，不通过 schema mutation 代替 Lifecycle 终结。
 
 ### Downgrade 与 fix-forward
 
@@ -567,7 +587,8 @@ OR other.terminal_at_ms > claim.created_at_ms
 生产形状 fixture 必须包含：
 
 - v4 Registry、Policy、Universe；
-- 三个 SOR v2 active Ticket；
+- 一个受完整 Stop/TP1 保护的 BNB SOR v2 active Ticket；
+- 两个已经 terminal 的历史 SOR v2 Ticket 及其完整 lineage；
 - Active Budget Reservation；
 - Position/Aggregate；
 - accepted ENTRY、Initial Stop、TP1 Command lineage；
@@ -594,6 +615,18 @@ OR other.terminal_at_ms > claim.created_at_ms
 **official protected compatible-upgrade mode**，并同步更新该 CURRENT 合同；禁止
 用手工 SSH、临时 SQL 或复用 flat-only 参数绕过合同。
 
+该模式的活跃仓位基数被 Owner 收窄为：
+
+```text
+0 active Ticket
+OR
+1 exact BNB protected Ticket
+```
+
+它不是通用多 Ticket 带仓迁移能力；出现任何额外活跃 Ticket 都是 cutover hard
+stop。这个限制属于本次 deployment profile，不改变 Trading Kernel 的多持仓
+架构能力。
+
 该模式只允许：
 
 - exact certified migration chain 的前向升级；
@@ -609,10 +642,12 @@ readonly certification 是 Entry 解封前硬门。
 
 1. 读取 exact production commit/schema；
 2. 读取 PostgreSQL active Ticket、Command、Incident；
-3. authenticated readonly 验证三笔 position、Stop、TP1；
+3. authenticated readonly 验证当前 position/order truth；只接受 flat，或唯一
+   BNB Ticket 与其 position、Stop、TP1 精确一致；
 4. 验证无 unknown command outcome；
 5. 写入 new ENTRY fence，不撤销 protection/lifecycle authority；
-6. 记录 exact protected Ticket handover manifest。
+6. flat 时记录 empty handover manifest；BNB 仍活跃时记录 exact single-Ticket
+   protected handover manifest。
 
 ### Migration and release switch
 
@@ -624,7 +659,7 @@ readonly certification 是 Entry 解封前硬门。
 6. runtime identity 原子更新到 target commit/schema/seed；
 7. 切换 release symlink；
 8. 启动 Observation、Lifecycle、Reconciliation；
-9. exact protected Ticket readonly certification；
+9. flat 或 exact BNB protected Ticket readonly certification；
 10. 安装 v3 Warming Universe；
 11. 完成七标的 certification/warming；
 12. 原子退休 v2 Universe、激活 v3 Universe；
@@ -632,8 +667,10 @@ readonly certification 是 Entry 解封前硬门。
 
 ### Postflight
 
-- v2 positions、Stop、TP1 数量和订单 ID 与 preflight 一致；
-- v2 Ticket、Reservation、Netting Domain 均仍 active；
+- flat 路径保持零 position/open order；BNB handover 路径的数量、Stop、TP1 和
+  订单 ID 与 preflight 一致；
+- BNB handover 时其 v2 Ticket、Reservation、Netting Domain 仍 active；历史
+  terminal Ticket lineage 保持不变；
 - v3 Event/Universe identity 唯一且 Active；
 - 新 Signal 只来自 v3；
 - 同策略两个活跃 Ticket 后 Tradeability 显示 `strategy_group_capacity_exhausted`；
