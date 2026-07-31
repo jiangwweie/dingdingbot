@@ -225,7 +225,7 @@ async def test_observer_ignores_open_tail_and_appends_no_signal_history(
         ) == 0
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(facts_current)
-        ) == 3
+        ) == 6
         readiness = (
             await connection.execute(sa.select(readiness_current))
         ).mappings().one()
@@ -284,13 +284,83 @@ async def test_triggered_observation_persists_one_stable_strategy_signal(
         ) == 1
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(signal_fact_snapshots)
-        ) == 3
+        ) == 6
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(trade_tickets)
         ) == 0
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(exchange_commands)
         ) == 0
+
+
+@pytest.mark.asyncio
+async def test_sor_same_session_recross_keeps_one_exposure_episode(
+    observation_engine: AsyncEngine,
+) -> None:
+    await _seed_sor_scope(observation_engine)
+    snapshot = sor_snapshot(side="long")
+    return_inside = ClosedCandle(
+        open_time_ms=NOW_MS,
+        close_time_ms=NOW_MS + 900_000,
+        open=Decimal(103),
+        high=Decimal(104),
+        low=Decimal(100),
+        close=Decimal(101),
+        volume=Decimal(100),
+    )
+    recross = ClosedCandle(
+        open_time_ms=NOW_MS + 900_000,
+        close_time_ms=NOW_MS + 1_800_000,
+        open=Decimal(101),
+        high=Decimal(104),
+        low=Decimal(100),
+        close=Decimal(103),
+        volume=Decimal(100),
+    )
+    source = FakeMarketSource(
+        {
+            (
+                snapshot.exchange_instrument_id,
+                "15m",
+            ): (*snapshot.candles_15m, return_inside, recross)
+        }
+    )
+
+    first = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        source,
+        ObservationRequest(
+            runtime_scope_id="scope-sor-eth-long",
+            runtime_commit="kernel-test-head",
+            schema_revision="0001_trading_kernel_baseline_v4",
+            trigger_candle_close_time_ms=NOW_MS,
+        ),
+    )
+    duplicate_episode = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        source,
+        ObservationRequest(
+            runtime_scope_id="scope-sor-eth-long",
+            runtime_commit="kernel-test-head",
+            schema_revision="0001_trading_kernel_baseline_v4",
+            trigger_candle_close_time_ms=NOW_MS + 1_800_000,
+        ),
+    )
+
+    assert first.status is ObservationStatus.SIGNAL_CREATED
+    assert duplicate_episode.status is ObservationStatus.DUPLICATE_SIGNAL
+    assert duplicate_episode.signal_event_id == first.signal_event_id
+    async with observation_engine.connect() as connection:
+        rows = (
+            await connection.execute(
+                sa.select(
+                    signal_events.c.signal_event_id,
+                    signal_events.c.exposure_episode_id,
+                )
+            )
+        ).all()
+    assert len(rows) == 1
+    assert str(rows[0].exposure_episode_id).startswith("episode:")
 
 
 @pytest.mark.asyncio
@@ -445,16 +515,16 @@ async def test_all_six_registered_events_produce_signals_through_observation(
         ) == 6
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(signal_fact_snapshots)
-        ) == 19
+        ) == 25
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(facts_current)
-        ) == 19
+        ) == 25
 
 
 async def _seed_sor_scope(engine: AsyncEngine) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
-    event_spec_id = "event_spec:SOR-001:SOR-LONG:v2"
+    event_spec_id = "event_spec:SOR-001:SOR-LONG:v3"
     universe_version_id, universe_digest = _universe_identity(
         strategy_group_id="SOR-001",
         event_spec_id=event_spec_id,
@@ -473,7 +543,7 @@ async def _seed_sor_scope(engine: AsyncEngine) -> None:
             sa.insert(runtime_scopes_current).values(
                 runtime_scope_id="scope-sor-eth-long",
                 strategy_group_id="SOR-001",
-                strategy_version_id="sgv:SOR-001:v2",
+                strategy_version_id="sgv:SOR-001:v3",
                 event_spec_id=event_spec_id,
                 runtime_profile_id="profile-observation-only",
                 owner_policy_id="policy-observation-only",
@@ -538,8 +608,8 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
         (
             "scope-sor-avax-long",
             "SOR-001",
-            "sgv:SOR-001:v2",
-            "event_spec:SOR-001:SOR-LONG:v2",
+            "sgv:SOR-001:v3",
+            "event_spec:SOR-001:SOR-LONG:v3",
             AVAX,
             "long",
             (AVAX,),
@@ -547,8 +617,8 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
         (
             "scope-sor-btc-short",
             "SOR-001",
-            "sgv:SOR-001:v2",
-            "event_spec:SOR-001:SOR-SHORT:v2",
+            "sgv:SOR-001:v3",
+            "event_spec:SOR-001:SOR-SHORT:v3",
             BTC,
             "short",
             (BTC,),

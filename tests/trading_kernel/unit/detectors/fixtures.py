@@ -178,20 +178,33 @@ def mi_flat_snapshot() -> MarketSnapshot:
     return snapshot(candles_1h=_flat_candles(14, 3_600_000))
 
 
-def sor_snapshot(*, side: str | None) -> MarketSnapshot:
+def sor_snapshot(
+    *,
+    side: str | None,
+    previous_outside: bool = False,
+) -> MarketSnapshot:
+    count = NOW_MS % 86_400_000 // 900_000
     opening = (
-        _candle_values(0, 5, 900_000, "100", "101", "99", "100"),
-        _candle_values(1, 5, 900_000, "100", "102", "99", "101"),
-        _candle_values(2, 5, 900_000, "101", "102", "98", "100"),
-        _candle_values(3, 5, 900_000, "100", "101", "98", "100"),
+        _candle_values(0, count, 900_000, "100", "101", "99", "100"),
+        _candle_values(1, count, 900_000, "100", "102", "99", "101"),
+        _candle_values(2, count, 900_000, "101", "102", "98", "100"),
+        _candle_values(3, count, 900_000, "100", "101", "98", "100"),
     )
+    filler = [
+        _candle_values(index, count, 900_000, "100", "101", "99", "100")
+        for index in range(4, count - 1)
+    ]
+    if previous_outside and side == "long":
+        filler[-1] = _candle_values(count - 2, count, 900_000, "102", "104", "101", "103")
+    elif previous_outside and side == "short":
+        filler[-1] = _candle_values(count - 2, count, 900_000, "98", "99", "96", "97")
     if side == "long":
-        trigger = _candle_values(4, 5, 900_000, "101", "104", "100", "103")
+        trigger = _candle_values(count - 1, count, 900_000, "101", "104", "100", "103")
     elif side == "short":
-        trigger = _candle_values(4, 5, 900_000, "99", "100", "96", "97")
+        trigger = _candle_values(count - 1, count, 900_000, "99", "100", "96", "97")
     else:
-        trigger = _candle_values(4, 5, 900_000, "100", "101", "99", "100")
-    return snapshot(candles_15m=(*opening, trigger))
+        trigger = _candle_values(count - 1, count, 900_000, "100", "101", "99", "100")
+    return snapshot(candles_15m=(*opening, *filler, trigger))
 
 
 def brf2_short_snapshot(*, strong_uptrend: bool = False) -> MarketSnapshot:

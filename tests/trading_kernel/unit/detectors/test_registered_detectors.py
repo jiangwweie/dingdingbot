@@ -20,9 +20,7 @@ def test_every_registered_event_has_one_deterministic_detector() -> None:
         detector = detector_for(contract.event_spec_id)
         assert detector.event_spec_id == contract.event_spec_id
 
-    detector = detector_for(
-        "event_spec:SOR-001:SOR-LONG:v2"
-    )
+    detector = detector_for("event_spec:SOR-001:SOR-LONG:v3")
     snapshot = sor_snapshot(side="long")
     assert detector.evaluate(snapshot) == detector.evaluate(snapshot)
 
@@ -56,14 +54,14 @@ def test_detector_accepts_a_canonical_instrument_not_hard_coded_in_registry() ->
             "impulse_invalidation_reference",
         ),
         (
-            "event_spec:SOR-001:SOR-LONG:v2",
+            "event_spec:SOR-001:SOR-LONG:v3",
             lambda: sor_snapshot(side="long"),
-            "opening_range_low_reference",
+            "opening_range_low_reference_v3",
         ),
         (
-            "event_spec:SOR-001:SOR-SHORT:v2",
+            "event_spec:SOR-001:SOR-SHORT:v3",
             lambda: sor_snapshot(side="short"),
-            "opening_range_high_reference",
+            "opening_range_high_reference_v3",
         ),
         (
             "event_spec:BRF2-001:BRF2-SHORT:v2",
@@ -98,6 +96,34 @@ def test_each_registered_event_emits_exact_triggered_fact_bundle(
         fact.satisfied
         for fact in result.facts
         if fact.role != "disable"
+    )
+
+
+@pytest.mark.parametrize("side", ["long", "short"])
+def test_sor_v3_requires_a_first_edge_crossing(side: str) -> None:
+    event_id = "SOR-LONG" if side == "long" else "SOR-SHORT"
+    detector = detector_for(f"event_spec:SOR-001:{event_id}:v3")
+
+    first_crossing = detector.evaluate(sor_snapshot(side=side))
+    persistent_outside = detector.evaluate(
+        sor_snapshot(side=side, previous_outside=True)
+    )
+
+    assert first_crossing.status is DetectorStatus.TRIGGERED
+    assert persistent_outside.status is DetectorStatus.NOT_TRIGGERED
+
+
+@pytest.mark.parametrize("side", ["long", "short"])
+def test_sor_v3_emits_session_identity_and_lifecycle_references(side: str) -> None:
+    event_id = "SOR-LONG" if side == "long" else "SOR-SHORT"
+    result = detector_for(f"event_spec:SOR-001:{event_id}:v3").evaluate(
+        sor_snapshot(side=side)
+    )
+
+    assert result.facts_by_name["session_start_ms_v3"].role == "identity_reference"
+    assert result.facts_by_name["session_end_ms_v3"].role == "lifecycle_reference"
+    assert result.facts_by_name["session_end_ms_v3"].value == str(
+        int(result.facts_by_name["session_start_ms_v3"].value) + 86_400_000
     )
     assert all(
         not fact.satisfied

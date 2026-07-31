@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from hashlib import sha256
 
 from src.trading_kernel.application.ports import RuntimeScopeSnapshot
@@ -56,14 +57,27 @@ def produce_strategy_signal(
     fact_digest = build_signal_fact_digest(facts)
     occurred_at_ms = detector_result.occurred_at_ms
     expires_at_ms = min(item.valid_until_ms for item in facts)
-    identity_payload = {
+    identity_references = tuple(
+        _canonical_decimal(fact.value)
+        for fact in facts
+        if fact.role == "identity_reference"
+    )
+    episode_payload = {
         "event_spec_id": contract.event_spec_id,
-        "fact_digest": fact_digest,
-        "occurred_at_ms": occurred_at_ms,
-        "runtime_scope_id": scope.runtime_scope_id,
-        "runtime_scope_version": scope.scope_version,
-        "universe_version_id": scope.universe_version_id,
-        "universe_semantic_digest": scope.universe_semantic_digest,
+        "exchange_instrument_id": scope.exchange_instrument_id,
+        "position_side": contract.position_side,
+        "identity_references": (
+            identity_references if identity_references else (str(occurred_at_ms),)
+        ),
+    }
+    episode_canonical = json.dumps(
+        episode_payload,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    exposure_episode_id = f"episode:{sha256(episode_canonical).hexdigest()}"
+    identity_payload = {
+        "exposure_episode_id": exposure_episode_id,
     }
     canonical = json.dumps(
         identity_payload,
@@ -73,6 +87,7 @@ def produce_strategy_signal(
     signal_event_id = f"signal:{sha256(canonical).hexdigest()}"
     return StrategySignal(
         signal_event_id=signal_event_id,
+        exposure_episode_id=exposure_episode_id,
         runtime_scope_id=scope.runtime_scope_id,
         runtime_scope_version=scope.scope_version,
         strategy_group_id=contract.strategy_group_id,
@@ -88,3 +103,8 @@ def produce_strategy_signal(
         expires_at_ms=expires_at_ms,
         facts=facts,
     )
+
+
+def _canonical_decimal(value: object) -> str:
+    decimal_value = Decimal(str(value))
+    return format(decimal_value.normalize(), "f")

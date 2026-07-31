@@ -5,13 +5,20 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Sequence
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
 
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-FactRole = Literal["condition", "protection_reference", "disable"]
+FactRole = Literal[
+    "condition",
+    "protection_reference",
+    "identity_reference",
+    "lifecycle_reference",
+    "disable",
+]
 
 
 class SignalFactSnapshot(BaseModel):
@@ -41,6 +48,18 @@ class SignalFactSnapshot(BaseModel):
             or self.projection_version <= 0
         ):
             raise ValueError("fact snapshot time and version must be positive")
+        if self.role in {"condition", "disable"}:
+            if not isinstance(self.value, bool):
+                raise ValueError("condition and disable facts must be boolean")
+        else:
+            if isinstance(self.value, bool):
+                raise ValueError("reference facts must be decimal")
+            try:
+                decimal_value = Decimal(str(self.value))
+            except (InvalidOperation, ValueError) as exc:
+                raise ValueError("reference facts must be decimal") from exc
+            if not decimal_value.is_finite() or decimal_value <= 0:
+                raise ValueError("reference facts must be positive finite decimals")
         return self
 
 
@@ -64,6 +83,7 @@ class StrategySignal(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     signal_event_id: str
+    exposure_episode_id: str
     runtime_scope_id: str
     runtime_scope_version: int
     strategy_group_id: str
@@ -81,6 +101,7 @@ class StrategySignal(BaseModel):
 
     @field_validator(
         "signal_event_id",
+        "exposure_episode_id",
         "runtime_scope_id",
         "strategy_group_id",
         "strategy_version_id",
@@ -128,11 +149,8 @@ class StrategySignal(BaseModel):
             raise ValueError("strategy signal requires one protection reference fact")
         if any(item.role == "disable" and item.satisfied for item in ordered):
             raise ValueError("disable facts must be unsatisfied for an eligible signal")
-        if any(
-            item.role != "disable" and not item.satisfied
-            for item in ordered
-        ):
-            raise ValueError("condition and protection facts must be satisfied")
+        if any(item.role != "disable" and not item.satisfied for item in ordered):
+            raise ValueError("required Signal facts must be satisfied")
         return ordered
 
     @model_validator(mode="after")

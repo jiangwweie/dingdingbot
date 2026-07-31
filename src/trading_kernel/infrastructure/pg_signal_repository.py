@@ -65,7 +65,7 @@ class PostgresSignalRepository:
         result = await self._connection.execute(
             pg_insert(signal_events)
             .values(_signal_values(signal))
-            .on_conflict_do_nothing(index_elements=[signal_events.c.signal_event_id])
+            .on_conflict_do_nothing()
         )
         if result.rowcount != 1:
             return False
@@ -1022,6 +1022,7 @@ class PostgresSignalRepository:
 def _signal_values(signal: StrategySignal) -> dict[str, object]:
     return {
         "signal_event_id": signal.signal_event_id,
+        "exposure_episode_id": signal.exposure_episode_id,
         "runtime_scope_id": signal.runtime_scope_id,
         "runtime_scope_version": signal.runtime_scope_version,
         "strategy_group_id": signal.strategy_group_id,
@@ -1060,6 +1061,7 @@ def _signal_from_row(
 ) -> StrategySignal:
     return StrategySignal(
         signal_event_id=str(row["signal_event_id"]),
+        exposure_episode_id=str(row["exposure_episode_id"]),
         runtime_scope_id=str(row["runtime_scope_id"]),
         runtime_scope_version=int(row["runtime_scope_version"]),
         strategy_group_id=str(row["strategy_group_id"]),

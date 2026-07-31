@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from hashlib import sha256
 from typing import Literal
 
@@ -11,7 +12,13 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from src.trading_kernel.domain.ticket import EntryOrderType
 
 FactValueType = Literal["boolean", "decimal"]
-FactRole = Literal["condition", "protection_reference", "disable"]
+FactRole = Literal[
+    "condition",
+    "protection_reference",
+    "identity_reference",
+    "lifecycle_reference",
+    "disable",
+]
 Timeframe = Literal["15m", "1h"]
 PositionSide = Literal["long", "short"]
 
@@ -69,8 +76,16 @@ class RegisteredFactRequirement(BaseModel):
 
     @model_validator(mode="after")
     def _validate_role_value_type(self) -> RegisteredFactRequirement:
-        if self.role == "protection_reference" and self.value_type != "decimal":
-            raise ValueError("protection reference facts must be decimal")
+        if (
+            self.role
+            in {
+                "protection_reference",
+                "identity_reference",
+                "lifecycle_reference",
+            }
+            and self.value_type != "decimal"
+        ):
+            raise ValueError("reference facts must be decimal")
         if self.role in {"condition", "disable"} and self.value_type != "boolean":
             raise ValueError("condition and disable facts must be boolean")
         return self
@@ -119,14 +134,18 @@ class RegisteredStrategyContract(BaseModel):
 
     @model_validator(mode="after")
     def _validate_contract(self) -> RegisteredStrategyContract:
-        expected_version = f"sgv:{self.strategy_group_id}:v2"
-        expected_event = (
-            f"event_spec:{self.strategy_group_id}:{self.event_id}:v2"
+        version_match = re.fullmatch(
+            rf"sgv:{re.escape(self.strategy_group_id)}:v([1-9][0-9]*)",
+            self.strategy_version_id,
         )
-        if self.strategy_version_id != expected_version:
-            raise ValueError("strategy version identity must be the accepted v2 identity")
+        if version_match is None:
+            raise ValueError("strategy version identity must be canonical")
+        version = version_match.group(1)
+        expected_event = (
+            f"event_spec:{self.strategy_group_id}:{self.event_id}:v{version}"
+        )
         if self.event_spec_id != expected_event:
-            raise ValueError("event spec identity must be the accepted v2 identity")
+            raise ValueError("event spec identity must match the strategy version")
 
         required_names = [item.fact_name for item in self.required_facts]
         disable_names = [item.fact_name for item in self.disable_facts]
@@ -210,11 +229,17 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
             position_side="long",
             timeframe="15m",
             facts=(
-                ("opening_range_defined", "condition"),
-                ("breakout_confirmed", "condition"),
-                ("opening_range_low_reference", "protection_reference"),
+                ("opening_range_defined_v3", "condition"),
+                ("breakout_edge_crossed_v3", "condition"),
+                ("opening_range_high_reference_v3", "lifecycle_reference"),
+                ("opening_range_low_reference_v3", "protection_reference"),
+                ("session_start_ms_v3", "identity_reference"),
+                ("session_end_ms_v3", "lifecycle_reference"),
             ),
-            protection_reference_fact="opening_range_low_reference",
+            protection_reference_fact="opening_range_low_reference_v3",
+            semantic_version=3,
+            fact_version=3,
+            exit_policy_variant="sor-v3-right-tail-v1",
         ),
         _contract(
             strategy_group_id="SOR-001",
@@ -222,11 +247,17 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
             position_side="short",
             timeframe="15m",
             facts=(
-                ("opening_range_defined", "condition"),
-                ("breakdown_confirmed", "condition"),
-                ("opening_range_high_reference", "protection_reference"),
+                ("opening_range_defined_v3", "condition"),
+                ("breakdown_edge_crossed_v3", "condition"),
+                ("opening_range_low_reference_v3", "lifecycle_reference"),
+                ("opening_range_high_reference_v3", "protection_reference"),
+                ("session_start_ms_v3", "identity_reference"),
+                ("session_end_ms_v3", "lifecycle_reference"),
             ),
-            protection_reference_fact="opening_range_high_reference",
+            protection_reference_fact="opening_range_high_reference_v3",
+            semantic_version=3,
+            fact_version=3,
+            exit_policy_variant="sor-v3-right-tail-v1",
         ),
         _contract(
             strategy_group_id="BRF2-001",
@@ -270,16 +301,32 @@ def _contract(
     event_id: str,
     position_side: PositionSide,
     timeframe: Timeframe,
-    facts: tuple[tuple[str, Literal["condition", "protection_reference"]], ...],
+    facts: tuple[
+        tuple[
+            str,
+            Literal[
+                "condition",
+                "protection_reference",
+                "identity_reference",
+                "lifecycle_reference",
+            ],
+        ],
+        ...,
+    ],
     protection_reference_fact: str,
     disable_fact_names: tuple[str, ...] = (),
     status: Literal["active", "disabled"] = "active",
+    semantic_version: int = 2,
+    fact_version: int = 1,
+    exit_policy_variant: str = "right-tail-v1",
 ) -> RegisteredStrategyContract:
     freshness_window_ms = 900_000 if timeframe == "15m" else 3_600_000
     return RegisteredStrategyContract(
         strategy_group_id=strategy_group_id,
-        strategy_version_id=f"sgv:{strategy_group_id}:v2",
-        event_spec_id=f"event_spec:{strategy_group_id}:{event_id}:v2",
+        strategy_version_id=f"sgv:{strategy_group_id}:v{semantic_version}",
+        event_spec_id=(
+            f"event_spec:{strategy_group_id}:{event_id}:v{semantic_version}"
+        ),
         event_id=event_id,
         position_side=position_side,
         timeframe=timeframe,
@@ -288,15 +335,15 @@ def _contract(
         entry_order_type=EntryOrderType.MARKET,
         protection_reference_fact=protection_reference_fact,
         required_facts=tuple(
-            _fact(fact_name, role, freshness_window_ms)
+            _fact(fact_name, role, freshness_window_ms, fact_version)
             for fact_name, role in facts
         ),
         disable_facts=tuple(
-            _fact(fact_name, "disable", freshness_window_ms)
+            _fact(fact_name, "disable", freshness_window_ms, fact_version)
             for fact_name in disable_fact_names
         ),
         exit_policy_id=(
-            f"exit-policy:{strategy_group_id}:{event_id}:right-tail-v1"
+            f"exit-policy:{strategy_group_id}:{event_id}:{exit_policy_variant}"
         ),
         status=status,
     )
@@ -306,11 +353,16 @@ def _fact(
     fact_name: str,
     role: FactRole,
     freshness_ms: int,
+    fact_version: int,
 ) -> RegisteredFactRequirement:
     return RegisteredFactRequirement(
-        fact_definition_id=f"fact:{fact_name}:v1",
+        fact_definition_id=f"fact:{fact_name}:v{fact_version}",
         fact_name=fact_name,
-        value_type="decimal" if role == "protection_reference" else "boolean",
+        value_type=(
+            "boolean"
+            if role in {"condition", "disable"}
+            else "decimal"
+        ),
         role=role,
         freshness_ms=freshness_ms,
     )

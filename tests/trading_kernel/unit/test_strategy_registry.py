@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.trading_kernel.domain.strategy_registry import (
+    RegisteredFactRequirement,
     RegisteredStrategyContract,
     build_registry_semantic_hash,
     registered_strategy_contracts,
@@ -29,7 +30,7 @@ def test_registry_contains_only_the_six_owner_accepted_events() -> None:
     assert len(contracts) == 6
 
 
-def test_registry_preserves_exact_v2_semantic_contracts_without_membership() -> None:
+def test_registry_preserves_exact_active_semantic_contracts_without_membership() -> None:
     contracts = {item.event_id: item for item in registered_strategy_contracts()}
 
     assert contracts["CPM-LONG"].timeframe == "1h"
@@ -55,14 +56,20 @@ def test_registry_preserves_exact_v2_semantic_contracts_without_membership() -> 
         assert contracts[event_id].timeframe == "15m"
 
     assert contracts["SOR-LONG"].required_fact_names == (
-        "opening_range_defined",
-        "breakout_confirmed",
-        "opening_range_low_reference",
+        "opening_range_defined_v3",
+        "breakout_edge_crossed_v3",
+        "opening_range_high_reference_v3",
+        "opening_range_low_reference_v3",
+        "session_start_ms_v3",
+        "session_end_ms_v3",
     )
     assert contracts["SOR-SHORT"].required_fact_names == (
-        "opening_range_defined",
-        "breakdown_confirmed",
-        "opening_range_high_reference",
+        "opening_range_defined_v3",
+        "breakdown_edge_crossed_v3",
+        "opening_range_low_reference_v3",
+        "opening_range_high_reference_v3",
+        "session_start_ms_v3",
+        "session_end_ms_v3",
     )
 
     assert contracts["BRF2-SHORT"].required_fact_names == (
@@ -86,12 +93,26 @@ def test_registry_preserves_exact_v2_semantic_contracts_without_membership() -> 
 
 def test_registry_uses_exact_versioned_semantic_identities() -> None:
     for contract in registered_strategy_contracts():
-        assert contract.strategy_version_id == (
-            f"sgv:{contract.strategy_group_id}:v2"
+        version = 3 if contract.strategy_group_id == "SOR-001" else 2
+        assert contract.strategy_version_id == f"sgv:{contract.strategy_group_id}:v{version}"
+        assert contract.event_spec_id == f"event_spec:{contract.strategy_group_id}:{contract.event_id}:v{version}"
+
+
+def test_registry_fact_roles_are_generic_and_type_safe() -> None:
+    for role in ("protection_reference", "identity_reference", "lifecycle_reference"):
+        fact = RegisteredFactRequirement(
+            fact_definition_id=f"fact:{role}:v3",
+            fact_name=role,
+            value_type="decimal",
+            role=role,
+            freshness_ms=900_000,
         )
-        assert contract.event_spec_id == (
-            f"event_spec:{contract.strategy_group_id}:{contract.event_id}:v2"
-        )
+        assert fact.role == role
+
+        with pytest.raises(ValidationError):
+            RegisteredFactRequirement.model_validate(
+                {**fact.model_dump(mode="python"), "value_type": "boolean"}
+            )
 
 
 def test_registry_status_is_frozen_semantics_and_changes_its_hash() -> None:

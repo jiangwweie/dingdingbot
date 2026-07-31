@@ -113,8 +113,8 @@ def test_mi_comparative_return_mismatch_is_invalid() -> None:
 @pytest.mark.parametrize(
     ("event_spec_id", "event_fact"),
     [
-        ("event_spec:SOR-001:SOR-LONG:v2", "breakout_confirmed"),
-        ("event_spec:SOR-001:SOR-SHORT:v2", "breakdown_confirmed"),
+        ("event_spec:SOR-001:SOR-LONG:v3", "breakout_edge_crossed_v3"),
+        ("event_spec:SOR-001:SOR-SHORT:v3", "breakdown_edge_crossed_v3"),
     ],
 )
 def test_sor_intact_range_is_not_triggered(
@@ -124,7 +124,7 @@ def test_sor_intact_range_is_not_triggered(
     result = detector_for(event_spec_id).evaluate(sor_snapshot(side=None))
 
     assert result.status is DetectorStatus.NOT_TRIGGERED
-    assert result.facts_by_name["opening_range_defined"].satisfied is True
+    assert result.facts_by_name["opening_range_defined_v3"].satisfied is True
     assert result.facts_by_name[event_fact].satisfied is False
 
 

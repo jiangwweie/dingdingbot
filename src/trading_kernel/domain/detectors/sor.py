@@ -29,17 +29,35 @@ class SORDetector:
                 "sor_invalid_insufficient_15m_candles",
             )
 
+        session_start_ms = (
+            snapshot.trigger_candle_close_time_ms // 86_400_000
+        ) * 86_400_000
+        session_end_ms = session_start_ms + 86_400_000
+        if (
+            candles[0].open_time_ms != session_start_ms
+            or any(
+                candle.open_time_ms != session_start_ms + index * 900_000
+                or candle.close_time_ms != session_start_ms + (index + 1) * 900_000
+                for index, candle in enumerate(candles)
+            )
+        ):
+            return invalid_result(
+                self._contract,
+                "sor_invalid_session_candle_sequence",
+            )
+
         opening_range = candles[:4]
         latest = candles[-1]
         previous = candles[-2]
         range_high = max(item.high for item in opening_range)
         range_low = min(item.low for item in opening_range)
-        breakout = latest.close > range_high and latest.close >= previous.close
-        breakdown = latest.close < range_low and latest.close <= previous.close
+        breakout = previous.close <= range_high and latest.close > range_high
+        breakdown = previous.close >= range_low and latest.close < range_low
         if self._contract.event_id == "SOR-LONG":
             triggered = breakout
-            event_fact = "breakout_confirmed"
-            reference_fact = "opening_range_low_reference"
+            event_fact = "breakout_edge_crossed_v3"
+            protection_fact = "opening_range_low_reference_v3"
+            lifecycle_fact = "opening_range_high_reference_v3"
             reference_value = range_low
             reason = (
                 "sor_opening_range_breakout"
@@ -48,8 +66,9 @@ class SORDetector:
             )
         else:
             triggered = breakdown
-            event_fact = "breakdown_confirmed"
-            reference_fact = "opening_range_high_reference"
+            event_fact = "breakdown_edge_crossed_v3"
+            protection_fact = "opening_range_high_reference_v3"
+            lifecycle_fact = "opening_range_low_reference_v3"
             reference_value = range_high
             reason = (
                 "sor_opening_range_breakdown"
@@ -60,7 +79,7 @@ class SORDetector:
             fact_snapshot(
                 self._contract,
                 snapshot,
-                fact_name="opening_range_defined",
+                fact_name="opening_range_defined_v3",
                 value=True,
                 satisfied=True,
             ),
@@ -74,8 +93,29 @@ class SORDetector:
             fact_snapshot(
                 self._contract,
                 snapshot,
-                fact_name=reference_fact,
+                fact_name=lifecycle_fact,
+                value=str(range_high if self._contract.position_side == "long" else range_low),
+                satisfied=True,
+            ),
+            fact_snapshot(
+                self._contract,
+                snapshot,
+                fact_name=protection_fact,
                 value=str(reference_value),
+                satisfied=True,
+            ),
+            fact_snapshot(
+                self._contract,
+                snapshot,
+                fact_name="session_start_ms_v3",
+                value=str(session_start_ms),
+                satisfied=True,
+            ),
+            fact_snapshot(
+                self._contract,
+                snapshot,
+                fact_name="session_end_ms_v3",
+                value=str(session_end_ms),
                 satisfied=True,
             ),
         )

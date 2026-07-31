@@ -741,6 +741,7 @@ signal_events = sa.Table(
     "brc_signal_events",
     metadata,
     _id("signal_event_id", primary_key=True),
+    _id("exposure_episode_id"),
     _id("runtime_scope_id"),
     sa.Column("runtime_scope_version", sa.Integer, nullable=False),
     _id("strategy_group_id"),
@@ -754,6 +755,7 @@ signal_events = sa.Table(
     _time("occurred_at_ms"),
     _time("observed_at_ms"),
     _time("expires_at_ms"),
+    sa.UniqueConstraint("exposure_episode_id"),
     sa.CheckConstraint(
         "position_side IN ('long', 'short')",
         name="position_side_valid",
@@ -801,7 +803,8 @@ signal_fact_snapshots = sa.Table(
     sa.Column("projection_version", sa.BigInteger, nullable=False),
     sa.PrimaryKeyConstraint("signal_event_id", "fact_definition_id"),
     sa.CheckConstraint(
-        "role IN ('condition', 'protection_reference', 'disable')",
+        "role IN ('condition', 'protection_reference', 'identity_reference', "
+        "'lifecycle_reference', 'disable')",
         name="role_valid",
     ),
     sa.CheckConstraint(
