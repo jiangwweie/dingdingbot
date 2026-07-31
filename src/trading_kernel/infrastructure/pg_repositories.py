@@ -1730,11 +1730,15 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
         "entry_order_type": ticket.entry_order_type.value,
         "entry_limit_price": ticket.entry_limit_price,
         "initial_stop_price": ticket.initial_stop_price,
+        "pre_tp1_reclaim_price": ticket.pre_tp1_reclaim_price,
+        "exposure_session_end_ms": ticket.exposure_session_end_ms,
         "take_profit_prices": [str(price) for price in ticket.take_profit_prices],
         "take_profit_quantities": [
             str(quantity) for quantity in ticket.take_profit_quantities
         ],
         "fact_digest": ticket.fact_digest,
+        "exit_policy_id": ticket.exit_policy_id,
+        "exit_policy_semantic_hash": ticket.exit_policy_semantic_hash,
         "decision_digest": ticket.decision_digest(),
         "status": ticket.status.value,
         "created_at_ms": ticket.created_at_ms,
@@ -1775,6 +1779,8 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         universe_version_id=str(row["universe_version_id"]),
         universe_semantic_digest=str(row["universe_semantic_digest"]),
         fact_digest=str(row["fact_digest"]),
+        exit_policy_id=str(row["exit_policy_id"]),
+        exit_policy_semantic_hash=str(row["exit_policy_semantic_hash"]),
         capacity_claim_id=str(row["capacity_claim_id"]),
         created_at_ms=int(row["created_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),
@@ -1802,6 +1808,16 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
             else Decimal(row["entry_limit_price"])
         ),
         initial_stop_price=Decimal(row["initial_stop_price"]),
+        pre_tp1_reclaim_price=(
+            None
+            if row["pre_tp1_reclaim_price"] is None
+            else Decimal(row["pre_tp1_reclaim_price"])
+        ),
+        exposure_session_end_ms=(
+            None
+            if row["exposure_session_end_ms"] is None
+            else int(row["exposure_session_end_ms"])
+        ),
         take_profit_prices=tuple(Decimal(value) for value in row["take_profit_prices"]),
         take_profit_quantities=tuple(
             Decimal(value) for value in row["take_profit_quantities"]
@@ -1835,6 +1851,8 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "position_side": identity.netting_domain.position_side,
         "netting_domain_key": identity.netting_domain.key(),
         "fact_digest": claim.fact_digest,
+        "exit_policy_id": claim.exit_policy_id,
+        "exit_policy_semantic_hash": claim.exit_policy_semantic_hash,
         "entry_admission_snapshot_digest": claim.entry_admission_snapshot_digest,
         "account_entry_health_digest": claim.account_entry_health_digest,
         "instrument_entry_health_digest": claim.instrument_entry_health_digest,
@@ -1892,6 +1910,8 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "entry_order_type": claim.entry_order_type.value,
         "entry_limit_price": claim.entry_limit_price,
         "initial_stop_price": claim.initial_stop_price,
+        "pre_tp1_reclaim_price": claim.pre_tp1_reclaim_price,
+        "exposure_session_end_ms": claim.exposure_session_end_ms,
         "take_profit_prices": [str(value) for value in claim.take_profit_prices],
         "take_profit_quantities": [
             str(value) for value in claim.take_profit_quantities
@@ -1937,6 +1957,8 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         universe_version_id=str(row["universe_version_id"]),
         universe_semantic_digest=str(row["universe_semantic_digest"]),
         fact_digest=str(row["fact_digest"]),
+        exit_policy_id=str(row["exit_policy_id"]),
+        exit_policy_semantic_hash=str(row["exit_policy_semantic_hash"]),
         entry_admission_snapshot_digest=str(row["entry_admission_snapshot_digest"]),
         account_entry_health_digest=str(row["account_entry_health_digest"]),
         instrument_entry_health_digest=str(row["instrument_entry_health_digest"]),
@@ -2010,6 +2032,16 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
             else Decimal(row["entry_limit_price"])
         ),
         initial_stop_price=Decimal(row["initial_stop_price"]),
+        pre_tp1_reclaim_price=(
+            None
+            if row["pre_tp1_reclaim_price"] is None
+            else Decimal(row["pre_tp1_reclaim_price"])
+        ),
+        exposure_session_end_ms=(
+            None
+            if row["exposure_session_end_ms"] is None
+            else int(row["exposure_session_end_ms"])
+        ),
         take_profit_prices=tuple(
             Decimal(value) for value in row["take_profit_prices"]
         ),

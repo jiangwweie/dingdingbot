@@ -179,6 +179,8 @@ class CapacityClaim(BaseModel):
     universe_version_id: str
     universe_semantic_digest: str
     fact_digest: str
+    exit_policy_id: str
+    exit_policy_semantic_hash: str
     entry_admission_snapshot_digest: str
     account_entry_health_digest: str
     instrument_entry_health_digest: str
@@ -222,6 +224,8 @@ class CapacityClaim(BaseModel):
     entry_order_type: EntryOrderType
     entry_limit_price: Decimal | None
     initial_stop_price: Decimal
+    pre_tp1_reclaim_price: Decimal | None
+    exposure_session_end_ms: int | None
     take_profit_prices: tuple[Decimal, ...]
     take_profit_quantities: tuple[Decimal, ...]
     decision_digest: str
@@ -231,6 +235,7 @@ class CapacityClaim(BaseModel):
         "owner_policy_id",
         "runtime_scope_id",
         "universe_version_id",
+        "exit_policy_id",
         mode="before",
     )
     @classmethod
@@ -247,6 +252,7 @@ class CapacityClaim(BaseModel):
         "account_entry_health_digest",
         "instrument_entry_health_digest",
         "decision_digest",
+        "exit_policy_semantic_hash",
     )
     @classmethod
     def _require_digest(cls, value: str) -> str:
@@ -298,6 +304,16 @@ class CapacityClaim(BaseModel):
             raise ValueError("CapacityClaim risk cannot be negative")
         return value
 
+    @field_validator("pre_tp1_reclaim_price")
+    @classmethod
+    def _require_optional_positive_reclaim(
+        cls,
+        value: Decimal | None,
+    ) -> Decimal | None:
+        if value is not None and value <= 0:
+            raise ValueError("CapacityClaim pre-TP1 reclaim must be positive")
+        return value
+
     @field_validator(
         "active_ticket_count_at_claim",
     )
@@ -335,6 +351,15 @@ class CapacityClaim(BaseModel):
                 raise ValueError("market CapacityClaim forbids a limit price")
         elif self.entry_limit_price is None or self.entry_limit_price <= 0:
             raise ValueError("limit CapacityClaim requires a positive limit price")
+        if (self.pre_tp1_reclaim_price is None) != (
+            self.exposure_session_end_ms is None
+        ):
+            raise ValueError("CapacityClaim pre-TP1 plan fields must be paired")
+        if (
+            self.exposure_session_end_ms is not None
+            and self.exposure_session_end_ms <= 0
+        ):
+            raise ValueError("CapacityClaim Session end must be positive")
         if len(self.take_profit_prices) != len(self.take_profit_quantities):
             raise ValueError("CapacityClaim take-profit legs must align")
         if any(value <= 0 for value in self.take_profit_prices):
@@ -448,6 +473,8 @@ class CapacityClaim(BaseModel):
             universe_version_id=self.universe_version_id,
             universe_semantic_digest=self.universe_semantic_digest,
             fact_digest=self.fact_digest,
+            exit_policy_id=self.exit_policy_id,
+            exit_policy_semantic_hash=self.exit_policy_semantic_hash,
             capacity_claim_id=self.capacity_claim_id,
             created_at_ms=self.created_at_ms,
             expires_at_ms=self.expires_at_ms,
@@ -472,6 +499,8 @@ class CapacityClaim(BaseModel):
             entry_order_type=self.entry_order_type,
             entry_limit_price=self.entry_limit_price,
             initial_stop_price=self.initial_stop_price,
+            pre_tp1_reclaim_price=self.pre_tp1_reclaim_price,
+            exposure_session_end_ms=self.exposure_session_end_ms,
             take_profit_prices=self.take_profit_prices,
             take_profit_quantities=self.take_profit_quantities,
         )
@@ -500,6 +529,8 @@ def freeze_capacity_claim(
     universe_version_id: str,
     universe_semantic_digest: str,
     fact_digest: str,
+    exit_policy_id: str,
+    exit_policy_semantic_hash: str,
     entry_admission_snapshot_digest: str,
     account_entry_health_digest: str,
     instrument_entry_health_digest: str,
@@ -543,6 +574,8 @@ def freeze_capacity_claim(
     entry_order_type: EntryOrderType,
     entry_limit_price: Decimal | None,
     initial_stop_price: Decimal,
+    pre_tp1_reclaim_price: Decimal | None,
+    exposure_session_end_ms: int | None,
     take_profit_prices: tuple[Decimal, ...],
     take_profit_quantities: tuple[Decimal, ...],
 ) -> CapacityClaim:
@@ -556,6 +589,8 @@ def freeze_capacity_claim(
         "universe_version_id": universe_version_id,
         "universe_semantic_digest": universe_semantic_digest,
         "fact_digest": fact_digest,
+        "exit_policy_id": exit_policy_id,
+        "exit_policy_semantic_hash": exit_policy_semantic_hash,
         "entry_admission_snapshot_digest": entry_admission_snapshot_digest,
         "account_entry_health_digest": account_entry_health_digest,
         "instrument_entry_health_digest": instrument_entry_health_digest,
@@ -605,6 +640,8 @@ def freeze_capacity_claim(
         "entry_order_type": entry_order_type,
         "entry_limit_price": entry_limit_price,
         "initial_stop_price": initial_stop_price,
+        "pre_tp1_reclaim_price": pre_tp1_reclaim_price,
+        "exposure_session_end_ms": exposure_session_end_ms,
         "take_profit_prices": take_profit_prices,
         "take_profit_quantities": take_profit_quantities,
         "decision_digest": "sha256:" + "0" * 64,

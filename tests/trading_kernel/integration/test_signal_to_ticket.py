@@ -258,7 +258,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
             await connection.execute(
                 sa.delete(strategy_universe_current).where(
                     strategy_universe_current.c.event_spec_id
-                    == "event_spec:SOR-001:SOR-LONG:v2"
+                    == "event_spec:SOR-001:SOR-LONG:v3"
                 )
             )
             await connection.execute(
@@ -284,7 +284,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
                 sa.update(facts_current)
                 .where(
                     facts_current.c.fact_definition_id
-                    == "fact:breakout_confirmed:v1"
+                    == "fact:breakout_edge_crossed_v3:v3"
                 )
                 .values(value=False, satisfied=False)
             )
@@ -486,17 +486,18 @@ def _signal(
     occurred_at_ms: int = 1_000,
 ) -> StrategySignal:
     event_spec_id = (
-        "event_spec:SOR-001:SOR-LONG:v2"
+        "event_spec:SOR-001:SOR-LONG:v3"
         if position_side == "long"
-        else "event_spec:SOR-001:SOR-SHORT:v2"
+        else "event_spec:SOR-001:SOR-SHORT:v3"
     )
     facts = _signal_facts(position_side=position_side)
     return StrategySignal(
         signal_event_id=signal_event_id,
+        exposure_episode_id=f"episode:{signal_event_id}",
         runtime_scope_id=runtime_scope_id,
         runtime_scope_version=4,
         strategy_group_id="SOR-001",
-        strategy_version_id="sgv:SOR-001:v2",
+        strategy_version_id="sgv:SOR-001:v3",
         event_spec_id=event_spec_id,
         universe_version_id="universe:sor-long:4",
         universe_semantic_digest="sha256:" + "a" * 64,
@@ -541,7 +542,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
             sa.insert(strategy_universe_versions).values(
                 universe_version_id="universe:sor-long:4",
                 strategy_group_id="SOR-001",
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v3",
                 universe_version=4,
                 semantic_digest="sha256:" + "a" * 64,
                 lifecycle_state="active",
@@ -557,7 +558,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
         )
         await connection.execute(
             sa.insert(strategy_universe_current).values(
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v3",
                 universe_version_id="universe:sor-long:4",
                 semantic_digest="sha256:" + "a" * 64,
                 lifecycle_state="active",
@@ -643,8 +644,8 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
             sa.insert(runtime_scopes_current).values(
                 runtime_scope_id="scope-sor-btc-long",
                 strategy_group_id="SOR-001",
-                strategy_version_id="sgv:SOR-001:v2",
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                strategy_version_id="sgv:SOR-001:v3",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v3",
                 runtime_profile_id="tiny-live-v1",
                 owner_policy_id="policy-main",
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
@@ -686,29 +687,71 @@ def _signal_facts(
         values: tuple[
             tuple[
                 str,
-                Literal["condition", "protection_reference", "disable"],
+                Literal[
+                    "condition",
+                    "protection_reference",
+                    "identity_reference",
+                    "lifecycle_reference",
+                    "disable",
+                ],
                 JsonValue,
                 bool,
             ],
             ...,
         ] = (
-            ("fact:opening_range_defined:v1", "condition", True, True),
-            ("fact:breakout_confirmed:v1", "condition", True, True),
+            ("fact:opening_range_defined_v3:v3", "condition", True, True),
+            ("fact:breakout_edge_crossed_v3:v3", "condition", True, True),
             (
-                "fact:opening_range_low_reference:v1",
+                "fact:opening_range_high_reference_v3:v3",
+                "lifecycle_reference",
+                "10050.0",
+                True,
+            ),
+            (
+                "fact:opening_range_low_reference_v3:v3",
                 "protection_reference",
                 "9900.0",
+                True,
+            ),
+            (
+                "fact:session_start_ms_v3:v3",
+                "identity_reference",
+                "1000",
+                True,
+            ),
+            (
+                "fact:session_end_ms_v3:v3",
+                "lifecycle_reference",
+                "86401000",
                 True,
             ),
         )
     else:
         values = (
-            ("fact:opening_range_defined:v1", "condition", True, True),
-            ("fact:breakdown_confirmed:v1", "condition", True, True),
+            ("fact:opening_range_defined_v3:v3", "condition", True, True),
+            ("fact:breakdown_edge_crossed_v3:v3", "condition", True, True),
             (
-                "fact:opening_range_high_reference:v1",
+                "fact:opening_range_low_reference_v3:v3",
+                "lifecycle_reference",
+                "9950.0",
+                True,
+            ),
+            (
+                "fact:opening_range_high_reference_v3:v3",
                 "protection_reference",
                 "10100.0",
+                True,
+            ),
+            (
+                "fact:session_start_ms_v3:v3",
+                "identity_reference",
+                "1000",
+                True,
+            ),
+            (
+                "fact:session_end_ms_v3:v3",
+                "lifecycle_reference",
+                "86401000",
                 True,
             ),
         )

@@ -249,14 +249,20 @@ class PostgresStrategyRegistryRepository:
         )
         return tuple(str(value) for value in result.scalars())
 
-    async def get_exit_policy(self, event_spec_id: str) -> ExitPolicy | None:
-        normalized = str(event_spec_id or "").strip()
-        if not normalized:
-            raise ValueError("exit-policy lookup requires Event Spec identity")
+    async def get_exit_policy(
+        self,
+        *,
+        exit_policy_id: str,
+        semantic_hash: str,
+    ) -> ExitPolicy | None:
+        normalized_policy_id = str(exit_policy_id or "").strip()
+        normalized_hash = str(semantic_hash or "").strip()
+        if not normalized_policy_id or not normalized_hash:
+            raise ValueError("exit-policy lookup requires frozen identity and hash")
         result = await self._connection.execute(
             sa.select(exit_policies).where(
-                exit_policies.c.event_spec_id == normalized,
-                exit_policies.c.status == "active",
+                exit_policies.c.exit_policy_id == normalized_policy_id,
+                exit_policies.c.semantic_hash == normalized_hash,
             )
         )
         row = result.mappings().one_or_none()
@@ -266,7 +272,7 @@ class PostgresStrategyRegistryRepository:
         if (
             policy.exit_policy_id != str(row["exit_policy_id"])
             or policy.exit_policy_version != str(row["exit_policy_version"])
-            or policy.event_spec_id != normalized
+            or policy.exit_policy_id != normalized_policy_id
             or policy.semantic_hash() != str(row["semantic_hash"])
         ):
             raise RegistrySeedConflict(

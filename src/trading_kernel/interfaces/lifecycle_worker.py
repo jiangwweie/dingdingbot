@@ -135,7 +135,8 @@ async def run_lifecycle_worker_once(
         if aggregate is None:
             return LifecycleWorkerResult(status=LifecycleWorkerStatus.NO_WORK)
         policy = await uow.strategy_registry.get_exit_policy(
-            aggregate.identity.runtime.event_spec_id
+            exit_policy_id=aggregate.ticket.exit_policy_id,
+            semantic_hash=aggregate.ticket.exit_policy_semantic_hash,
         )
         rules = await uow.signals.get_instrument_rules(
             aggregate.identity.netting_domain.venue_id,
@@ -196,6 +197,7 @@ async def run_lifecycle_worker_once(
         atr_period=policy.runner.atr_period,
         runner_market_required=(
             aggregate.status is AggregateStatus.RUNNER_PROTECTED
+            or aggregate.ticket.pre_tp1_reclaim_price is not None
         ),
         observed_at_ms=request.now_ms,
     )

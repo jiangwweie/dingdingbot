@@ -2675,6 +2675,7 @@ def _lifecycle_market_facts(
     return LifecycleMarketFacts(
         watermark_ms=candles[-1][1],
         is_final_closed_candle=True,
+        latest_close=candles[-1][4],
         structure_reference=structure_reference,
         atr=atr,
         holding_bars=sum(1 for item in candles if item[1] >= entered_at_ms),

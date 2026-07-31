@@ -813,6 +813,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
             market_facts=LifecycleMarketFacts(
                 watermark_ms=3_600_000,
                 is_final_closed_candle=True,
+                latest_close=Decimal(60500),
                 structure_reference=Decimal(60500),
                 atr=Decimal(100),
                 holding_bars=10,

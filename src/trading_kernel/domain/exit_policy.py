@@ -33,6 +33,7 @@ class LifecycleMarketFacts(BaseModel):
 
     watermark_ms: int
     is_final_closed_candle: bool
+    latest_close: Decimal
     structure_reference: Decimal
     atr: Decimal
     holding_bars: int
@@ -41,7 +42,7 @@ class LifecycleMarketFacts(BaseModel):
     def _validate_facts(self) -> LifecycleMarketFacts:
         if self.watermark_ms <= 0 or self.holding_bars < 0:
             raise ValueError("lifecycle market watermark and holding bars are invalid")
-        if self.structure_reference <= 0 or self.atr <= 0:
+        if self.latest_close <= 0 or self.structure_reference <= 0 or self.atr <= 0:
             raise ValueError("lifecycle structure and ATR facts must be positive")
         return self
 
@@ -369,10 +370,69 @@ def evaluate_exit_policy(
     )
 
 
+def evaluate_pre_tp1_exit(
+    *,
+    policy: ExitPolicy,
+    pre_tp1_reclaim_price: Decimal,
+    exposure_session_end_ms: int,
+    market_facts: LifecycleMarketFacts,
+    observed_at_ms: int,
+) -> ExitDecision:
+    if pre_tp1_reclaim_price <= 0 or exposure_session_end_ms <= 0:
+        raise ValueError("pre-TP1 exit plan must be positive")
+    if observed_at_ms < market_facts.watermark_ms:
+        raise ValueError("pre-TP1 observation precedes market facts")
+    if not market_facts.is_final_closed_candle:
+        return _exit_decision(
+            ExitDecisionKind.NO_CHANGE,
+            "closed_candle_required",
+            market_facts.watermark_ms,
+        )
+    if observed_at_ms >= exposure_session_end_ms:
+        return _exit_decision(
+            ExitDecisionKind.EXIT,
+            "sor_session_expired",
+            market_facts.watermark_ms,
+        )
+    reclaim_hit = (
+        market_facts.latest_close <= pre_tp1_reclaim_price
+        if policy.position_side == "long"
+        else market_facts.latest_close >= pre_tp1_reclaim_price
+    )
+    if reclaim_hit:
+        return _exit_decision(
+            ExitDecisionKind.EXIT,
+            (
+                "failed_breakout_reclaimed"
+                if policy.position_side == "long"
+                else "failed_breakdown_reclaimed"
+            ),
+            market_facts.watermark_ms,
+        )
+    if (
+        policy.time_stop is not None
+        and market_facts.holding_bars >= policy.time_stop.max_holding_bars
+    ):
+        return _exit_decision(
+            ExitDecisionKind.EXIT,
+            "time_stop_hit",
+            market_facts.watermark_ms,
+        )
+    return _exit_decision(
+        ExitDecisionKind.NO_CHANGE,
+        "pre_tp1_plan_intact",
+        market_facts.watermark_ms,
+    )
+
+
 def _policy_for_contract(contract: RegisteredStrategyContract) -> ExitPolicy:
     return ExitPolicy(
         exit_policy_id=contract.exit_policy_id,
-        exit_policy_version="2026-07-22-v1",
+        exit_policy_version=(
+            "2026-07-31-sor-v3"
+            if contract.strategy_group_id == "SOR-001"
+            else "2026-07-22-v1"
+        ),
         event_spec_id=contract.event_spec_id,
         event_id=contract.event_id,
         position_side=contract.position_side,
@@ -399,7 +459,7 @@ def _policy_for_contract(contract: RegisteredStrategyContract) -> ExitPolicy:
         ),
         time_stop=(
             TimeStopRule(max_holding_bars=96)
-            if contract.event_id == "SOR-LONG"
+            if contract.strategy_group_id == "SOR-001"
             else None
         ),
     )

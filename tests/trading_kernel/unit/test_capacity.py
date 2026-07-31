@@ -27,8 +27,13 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
 )
+from src.trading_kernel.domain.signal import (
+    SignalFactSnapshot,
+    StrategySignal,
+    build_signal_fact_digest,
+)
+from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.domain.ticket import EntryOrderType
-from tests.trading_kernel.unit.test_signal import _signal
 
 
 def test_capacity_claim_freezes_configured_leverage_and_demand_based_margin() -> None:
@@ -54,6 +59,11 @@ def test_capacity_claim_freezes_configured_leverage_and_demand_based_margin() ->
     assert claim.account_capacity_domain_key == "binance-usdm:experiment-1"
     assert claim.leverage_domain_key == "binance-usdm:experiment-1:binance-usdm:BTCUSDT:perpetual"
     assert claim.leverage_change_required is False
+    assert claim.ticket_identity.exposure_episode_id == _long_signal().exposure_episode_id
+    assert claim.exit_policy_id.startswith("exit-policy:SOR-001:SOR-LONG:")
+    assert claim.exit_policy_semantic_hash.startswith("sha256:")
+    assert claim.pre_tp1_reclaim_price == Decimal(102)
+    assert claim.exposure_session_end_ms == 86_401_000
     ticket = claim.to_ticket()
     assert ticket.selected_leverage == 5
     assert (
@@ -121,28 +131,48 @@ def _build_decision():
 
 
 def _long_signal():
-    base = _signal(
+    contract = next(
+        item
+        for item in registered_strategy_contracts()
+        if item.event_id == "SOR-LONG"
+    )
+    values = {
+        "opening_range_defined_v3": True,
+        "breakout_edge_crossed_v3": True,
+        "opening_range_high_reference_v3": "102",
+        "opening_range_low_reference_v3": "97.5",
+        "session_start_ms_v3": "1000",
+        "session_end_ms_v3": "86401000",
+    }
+    facts = tuple(
+        SignalFactSnapshot(
+            fact_definition_id=requirement.fact_definition_id,
+            role=requirement.role,
+            value=values[requirement.fact_name],
+            satisfied=True,
+            observed_at_ms=1_000,
+            valid_until_ms=2_000,
+            projection_version=1,
+        )
+        for requirement in contract.required_facts
+    )
+    return StrategySignal(
         signal_event_id="signal-capacity-long",
+        exposure_episode_id="episode:" + "c" * 64,
+        runtime_scope_id="scope-sor-btc-long",
+        runtime_scope_version=1,
+        strategy_group_id=contract.strategy_group_id,
+        strategy_version_id=contract.strategy_version_id,
+        event_spec_id=contract.event_spec_id,
+        universe_version_id="universe:SOR-LONG:3",
+        universe_semantic_digest="sha256:" + "a" * 64,
+        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+        position_side="long",
+        fact_digest=build_signal_fact_digest(facts),
         occurred_at_ms=1_000,
         observed_at_ms=1_005,
         expires_at_ms=2_000,
-    )
-    facts = tuple(
-        fact.model_copy(update={"value": "97.5"})
-        if fact.role == "protection_reference"
-        else fact
-        for fact in base.facts
-    )
-    from src.trading_kernel.domain.signal import build_signal_fact_digest
-
-    return base.model_copy(
-        update={
-            "runtime_scope_id": "scope-sor-btc-long",
-            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v2",
-            "position_side": "long",
-            "facts": facts,
-            "fact_digest": build_signal_fact_digest(facts),
-        }
+        facts=facts,
     )
 
 

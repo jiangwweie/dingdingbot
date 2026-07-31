@@ -1030,7 +1030,12 @@ class StrategyRegistryRepository(Protocol):
 
     async def list_current_event_ids(self) -> tuple[str, ...]: ...
 
-    async def get_exit_policy(self, event_spec_id: str) -> ExitPolicy | None: ...
+    async def get_exit_policy(
+        self,
+        *,
+        exit_policy_id: str,
+        semantic_hash: str,
+    ) -> ExitPolicy | None: ...
 
 
 class StrategyUniverseRepository(Protocol):

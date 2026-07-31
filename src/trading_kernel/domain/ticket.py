@@ -47,6 +47,8 @@ class TradeTicket(BaseModel):
     universe_version_id: str
     universe_semantic_digest: str
     fact_digest: str
+    exit_policy_id: str
+    exit_policy_semantic_hash: str
     capacity_claim_id: str
     created_at_ms: int
     expires_at_ms: int
@@ -67,6 +69,8 @@ class TradeTicket(BaseModel):
     entry_order_type: EntryOrderType
     entry_limit_price: Decimal | None = None
     initial_stop_price: Decimal
+    pre_tp1_reclaim_price: Decimal | None = None
+    exposure_session_end_ms: int | None = None
     take_profit_prices: tuple[Decimal, ...] = ()
     take_profit_quantities: tuple[Decimal, ...] = ()
     status: TicketStatus = TicketStatus.ISSUED
@@ -75,6 +79,7 @@ class TradeTicket(BaseModel):
         "owner_policy_id",
         "runtime_scope_id",
         "universe_version_id",
+        "exit_policy_id",
         "capacity_claim_id",
         "risk_reservation_basis",
         mode="before",
@@ -89,6 +94,7 @@ class TradeTicket(BaseModel):
         "fact_digest",
         "universe_semantic_digest",
         "claim_stress_proof_digest",
+        "exit_policy_semantic_hash",
         mode="before",
     )
     @classmethod
@@ -126,6 +132,16 @@ class TradeTicket(BaseModel):
     def _require_nonnegative_risk(cls, value: Decimal) -> Decimal:
         if value < 0:
             raise ValueError("risk_at_stop must be nonnegative")
+        return value
+
+    @field_validator("pre_tp1_reclaim_price")
+    @classmethod
+    def _require_optional_positive_reclaim(
+        cls,
+        value: Decimal | None,
+    ) -> Decimal | None:
+        if value is not None and value <= 0:
+            raise ValueError("pre-TP1 reclaim price must be positive")
         return value
 
     @field_validator("selected_leverage")
@@ -172,6 +188,15 @@ class TradeTicket(BaseModel):
             raise ValueError("Ticket stop risk cannot exceed planned risk budget")
         if self.post_fill_stop_risk_limit < self.planned_stop_risk_budget:
             raise ValueError("Ticket post-fill stop risk limit cannot undercut plan")
+        if (self.pre_tp1_reclaim_price is None) != (
+            self.exposure_session_end_ms is None
+        ):
+            raise ValueError("Ticket pre-TP1 plan fields must be paired")
+        if (
+            self.exposure_session_end_ms is not None
+            and self.exposure_session_end_ms <= 0
+        ):
+            raise ValueError("Ticket Session end must be positive")
         return self
 
     def decision_digest(self) -> str:

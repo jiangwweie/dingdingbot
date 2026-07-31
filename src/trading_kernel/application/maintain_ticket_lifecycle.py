@@ -21,6 +21,7 @@ from src.trading_kernel.domain.exit_policy import (
     LifecycleMarketFacts,
     calculate_cost_adjusted_break_even,
     evaluate_exit_policy,
+    evaluate_pre_tp1_exit,
 )
 from src.trading_kernel.domain.reducer import reduce_event
 
@@ -120,16 +121,56 @@ async def maintain_ticket_lifecycle(
     if aggregate is None:
         raise ValueError("lifecycle Ticket does not exist")
     policy = await uow.strategy_registry.get_exit_policy(
-        aggregate.ticket.identity.runtime.event_spec_id
+        exit_policy_id=aggregate.ticket.exit_policy_id,
+        semantic_hash=aggregate.ticket.exit_policy_semantic_hash,
     )
     if policy is None:
-        raise ValueError("Ticket Event has no active exit policy")
+        raise ValueError("Ticket has no exact frozen exit policy")
+    if policy.event_spec_id != aggregate.ticket.identity.runtime.event_spec_id:
+        raise ValueError("exit-policy Event differs from frozen Ticket")
     if policy.position_side != aggregate.identity.netting_domain.position_side:
         raise ValueError("exit-policy side differs from Ticket Netting Domain")
 
     if aggregate.status is AggregateStatus.POSITION_PROTECTED:
         target = aggregate.tp1_target_qty
         if request.facts.tp1_filled_quantity == 0:
+            if request.facts.position_quantity != aggregate.position_qty:
+                raise ValueError(
+                    "pre-TP1 venue quantity differs from Ticket projection"
+                )
+            reclaim = aggregate.ticket.pre_tp1_reclaim_price
+            session_end = aggregate.ticket.exposure_session_end_ms
+            if reclaim is None and session_end is None:
+                return LifecycleMaintenanceResult(
+                    status=LifecycleMaintenanceStatus.NO_CHANGE
+                )
+            if reclaim is None or session_end is None:
+                raise ValueError("Ticket pre-TP1 exit plan is incomplete")
+            if request.facts.market_facts is None:
+                return LifecycleMaintenanceResult(
+                    status=LifecycleMaintenanceStatus.NO_CHANGE
+                )
+            decision = evaluate_pre_tp1_exit(
+                policy=policy,
+                pre_tp1_reclaim_price=reclaim,
+                exposure_session_end_ms=session_end,
+                market_facts=request.facts.market_facts,
+                observed_at_ms=request.facts.observed_at_ms,
+            )
+            if decision.kind is ExitDecisionKind.EXIT:
+                exit_event = ExitRequested(
+                    **_event_fields(aggregate, request.now_ms),
+                    reason=decision.reason,
+                )
+                await uow.commit_reduction(
+                    event=exit_event,
+                    reduction=reduce_event(aggregate, exit_event),
+                    expected_version=aggregate.version,
+                )
+                return LifecycleMaintenanceResult(
+                    status=LifecycleMaintenanceStatus.EXIT_REQUESTED,
+                    event_id=exit_event.event_id,
+                )
             return LifecycleMaintenanceResult(
                 status=LifecycleMaintenanceStatus.NO_CHANGE
             )

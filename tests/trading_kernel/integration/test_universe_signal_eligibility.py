@@ -123,6 +123,7 @@ def _signal() -> StrategySignal:
     )
     return StrategySignal(
         signal_event_id="signal:active-universe",
+        exposure_episode_id="episode:active-universe",
         runtime_scope_id="scope-a",
         runtime_scope_version=1,
         strategy_group_id="sg-a",

@@ -39,6 +39,7 @@ from src.trading_kernel.domain.instrument_entry_health import (
     InstrumentEntryHealthStatus,
 )
 from src.trading_kernel.domain.signal import StrategySignal
+from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.domain.ticket import EntryOrderType, build_ticket_id
 
 
@@ -122,6 +123,25 @@ def build_capacity_claim(
 
     if account_risk.exchange_instrument_id != signal.exchange_instrument_id:
         return _refused(CapacityClaimStatus.SCOPE_OR_POLICY_MISMATCH)
+    contract = strategy_contract_for(signal.event_spec_id)
+    exit_policy = exit_policy_for(signal.event_spec_id)
+    pre_tp1_reclaim_price = _contract_decimal_fact(
+        signal,
+        contract.pre_tp1_reclaim_reference_fact,
+        expected_role="lifecycle_reference",
+    )
+    session_end_decimal = _contract_decimal_fact(
+        signal,
+        contract.exposure_session_end_reference_fact,
+        expected_role="lifecycle_reference",
+    )
+    if (pre_tp1_reclaim_price is None) != (session_end_decimal is None):
+        return _refused(CapacityClaimStatus.PROTECTION_UNAVAILABLE)
+    exposure_session_end_ms: int | None = None
+    if session_end_decimal is not None:
+        if session_end_decimal != session_end_decimal.to_integral_value():
+            return _refused(CapacityClaimStatus.PROTECTION_UNAVAILABLE)
+        exposure_session_end_ms = int(session_end_decimal)
     sizing = select_capacity_candidate(
         CapacitySizingRequest(
             total_wallet_balance=account_risk.total_wallet_balance,
@@ -154,7 +174,7 @@ def build_capacity_claim(
             quantity_step=instrument_rules.quantity_step,
             min_quantity=instrument_rules.min_quantity,
             min_notional=instrument_rules.min_notional,
-            tp1_quantity_fraction=exit_policy_for(signal.event_spec_id).tp1.quantity_fraction,
+            tp1_quantity_fraction=exit_policy.tp1.quantity_fraction,
         )
     )
     if sizing.status is not CapacitySizingStatus.SELECTED or sizing.selected is None:
@@ -224,7 +244,7 @@ def build_capacity_claim(
     )
     ticket_identity = TicketIdentity(
         ticket_id=ticket_id,
-        exposure_episode_id=f"episode:{ticket_id.removeprefix('ticket:')}",
+        exposure_episode_id=signal.exposure_episode_id,
         signal_event_id=signal.signal_event_id,
         runtime=runtime,
         netting_domain=netting_domain,
@@ -241,6 +261,8 @@ def build_capacity_claim(
         universe_version_id=signal.universe_version_id,
         universe_semantic_digest=signal.universe_semantic_digest,
         fact_digest=signal.fact_digest,
+        exit_policy_id=exit_policy.exit_policy_id,
+        exit_policy_semantic_hash=exit_policy.semantic_hash(),
         entry_admission_snapshot_digest=snapshot_digest,
         account_entry_health_digest=account_entry_health.decision_digest,
         instrument_entry_health_digest=instrument_entry_health.decision_digest,
@@ -302,6 +324,8 @@ def build_capacity_claim(
             entry_price if entry_order_type is EntryOrderType.LIMIT else None
         ),
         initial_stop_price=stop_price,
+        pre_tp1_reclaim_price=pre_tp1_reclaim_price,
+        exposure_session_end_ms=exposure_session_end_ms,
         take_profit_prices=(take_profit_price,),
         take_profit_quantities=(selected.tp1_quantity,),
     )
@@ -326,6 +350,40 @@ def _protection_reference(signal: StrategySignal) -> Decimal | None:
         return None
     try:
         value = Decimal(str(references[0].value))
+    except (ArithmeticError, ValueError):
+        return None
+    return value if value.is_finite() and value > 0 else None
+
+
+def _contract_decimal_fact(
+    signal: StrategySignal,
+    fact_name: str | None,
+    *,
+    expected_role: str,
+) -> Decimal | None:
+    if fact_name is None:
+        return None
+    contract = strategy_contract_for(signal.event_spec_id)
+    expected_id = next(
+        (
+            requirement.fact_definition_id
+            for requirement in contract.required_facts
+            if requirement.fact_name == fact_name
+            and requirement.role == expected_role
+        ),
+        None,
+    )
+    if expected_id is None:
+        return None
+    matches = [
+        fact
+        for fact in signal.facts
+        if fact.fact_definition_id == expected_id and fact.role == expected_role
+    ]
+    if len(matches) != 1:
+        return None
+    try:
+        value = Decimal(str(matches[0].value))
     except (ArithmeticError, ValueError):
         return None
     return value if value.is_finite() and value > 0 else None

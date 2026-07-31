@@ -54,6 +54,8 @@ def _ticket(**updates: object) -> TradeTicket:
         "universe_version_id": "universe:sor-long:4",
         "universe_semantic_digest": "sha256:" + "a" * 64,
         "fact_digest": "sha256:" + "1" * 64,
+        "exit_policy_id": "exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1",
+        "exit_policy_semantic_hash": "sha256:" + "4" * 64,
         "capacity_claim_id": "claim:" + "2" * 32,
         "created_at_ms": 1_000,
         "expires_at_ms": 31_000,
@@ -74,6 +76,8 @@ def _ticket(**updates: object) -> TradeTicket:
         "entry_order_type": EntryOrderType.MARKET,
         "entry_limit_price": None,
         "initial_stop_price": Decimal(59000),
+        "pre_tp1_reclaim_price": Decimal(60100),
+        "exposure_session_end_ms": 86_400_000,
         "take_profit_prices": (Decimal(62000),),
         "take_profit_quantities": (Decimal("0.0005"),),
         "status": TicketStatus.ISSUED,
@@ -91,6 +95,8 @@ def test_trade_ticket_is_immutable_and_contains_complete_decision() -> None:
     assert ticket.identity.netting_domain.position_side == "long"
     assert ticket.cross_margin_stress_model_id == "cross-margin-stop-stress-v1"
     assert ticket.claim_stress_proof_digest.startswith("sha256:")
+    assert ticket.exit_policy_semantic_hash.startswith("sha256:")
+    assert ticket.pre_tp1_reclaim_price == Decimal(60100)
     assert ticket.decision_digest().startswith("sha256:")
 
     with pytest.raises(ValidationError):
@@ -141,6 +147,19 @@ def test_limit_ticket_requires_limit_price_and_market_ticket_forbids_it() -> Non
             entry_order_type=EntryOrderType.MARKET,
             entry_limit_price=Decimal(60000),
         )
+
+
+def test_ticket_requires_pre_tp1_plan_fields_to_be_both_present_or_both_absent() -> None:
+    with pytest.raises(ValidationError):
+        _ticket(pre_tp1_reclaim_price=None)
+    with pytest.raises(ValidationError):
+        _ticket(exposure_session_end_ms=None)
+
+    non_sor = _ticket(
+        pre_tp1_reclaim_price=None,
+        exposure_session_end_ms=None,
+    )
+    assert non_sor.pre_tp1_reclaim_price is None
 
 
 def test_ticket_id_is_deterministic_and_causal() -> None:

@@ -11,6 +11,7 @@ from src.trading_kernel.domain.exit_policy import (
     calculate_cost_adjusted_break_even,
     calculate_structural_runner_stop,
     evaluate_exit_policy,
+    evaluate_pre_tp1_exit,
     exit_policy_for,
     split_tp1_quantity,
 )
@@ -49,19 +50,82 @@ def test_each_registered_event_has_one_current_exit_policy(event_id: str) -> Non
     assert policy.runner.minimum_improvement_ticks == 2
 
 
-def test_only_sor_long_retains_registered_96_bar_time_stop() -> None:
+def test_both_sor_v3_sides_have_registered_96_bar_time_stop() -> None:
     policies = {
         contract.event_id: exit_policy_for(contract.event_spec_id)
         for contract in registered_strategy_contracts()
     }
 
     assert policies["SOR-LONG"].time_stop is not None
+    assert policies["SOR-SHORT"].time_stop is not None
     assert policies["SOR-LONG"].time_stop.max_holding_bars == 96
+    assert policies["SOR-SHORT"].time_stop.max_holding_bars == 96
     assert all(
         policy.time_stop is None
         for event_id, policy in policies.items()
-        if event_id != "SOR-LONG"
+        if event_id not in {"SOR-LONG", "SOR-SHORT"}
     )
+
+
+@pytest.mark.parametrize(
+    ("event_id", "latest_close", "reclaim_price", "reason"),
+    [
+        ("SOR-LONG", Decimal(101), Decimal(102), "failed_breakout_reclaimed"),
+        ("SOR-SHORT", Decimal(99), Decimal(98), "failed_breakdown_reclaimed"),
+    ],
+)
+def test_sor_v3_pre_tp1_reclaim_is_side_symmetric(
+    event_id: str,
+    latest_close: Decimal,
+    reclaim_price: Decimal,
+    reason: str,
+) -> None:
+    contract = next(
+        item for item in registered_strategy_contracts() if item.event_id == event_id
+    )
+    decision = evaluate_pre_tp1_exit(
+        policy=exit_policy_for(contract.event_spec_id),
+        pre_tp1_reclaim_price=reclaim_price,
+        exposure_session_end_ms=10_000,
+        market_facts=LifecycleMarketFacts(
+            watermark_ms=2_000,
+            is_final_closed_candle=True,
+            latest_close=latest_close,
+            structure_reference=Decimal(100),
+            atr=Decimal(1),
+            holding_bars=10,
+        ),
+        observed_at_ms=2_000,
+    )
+
+    assert decision.kind is ExitDecisionKind.EXIT
+    assert decision.reason == reason
+
+
+def test_sor_v3_pre_tp1_exit_prioritizes_session_then_reclaim_then_time_stop() -> None:
+    contract = next(
+        item
+        for item in registered_strategy_contracts()
+        if item.event_id == "SOR-LONG"
+    )
+    facts = LifecycleMarketFacts(
+        watermark_ms=10_000,
+        is_final_closed_candle=True,
+        latest_close=Decimal(90),
+        structure_reference=Decimal(100),
+        atr=Decimal(1),
+        holding_bars=96,
+    )
+
+    decision = evaluate_pre_tp1_exit(
+        policy=exit_policy_for(contract.event_spec_id),
+        pre_tp1_reclaim_price=Decimal(102),
+        exposure_session_end_ms=10_000,
+        market_facts=facts,
+        observed_at_ms=10_000,
+    )
+
+    assert decision.reason == "sor_session_expired"
 
 
 def test_tp1_split_is_step_aligned_and_preserves_runner_quantity() -> None:
@@ -137,6 +201,7 @@ def test_sor_long_time_stop_closes_runner_at_96_final_bars() -> None:
         market_facts=LifecycleMarketFacts(
             watermark_ms=2_000,
             is_final_closed_candle=True,
+            latest_close=Decimal(102),
             structure_reference=Decimal(102),
             atr=Decimal(2),
             holding_bars=96,
@@ -162,6 +227,7 @@ def test_non_sor_event_does_not_invent_time_stop() -> None:
         market_facts=LifecycleMarketFacts(
             watermark_ms=2_000,
             is_final_closed_candle=True,
+            latest_close=Decimal(102),
             structure_reference=Decimal(102),
             atr=Decimal(2),
             holding_bars=10_000,
@@ -189,6 +255,7 @@ def test_runner_ignores_open_or_duplicate_candle_and_requires_two_tick_improveme
         market_facts=LifecycleMarketFacts(
             watermark_ms=2_000,
             is_final_closed_candle=False,
+            latest_close=Decimal(98),
             structure_reference=Decimal(98),
             atr=Decimal(2),
             holding_bars=10,
@@ -203,6 +270,7 @@ def test_runner_ignores_open_or_duplicate_candle_and_requires_two_tick_improveme
         market_facts=LifecycleMarketFacts(
             watermark_ms=2_000,
             is_final_closed_candle=True,
+            latest_close=Decimal(98),
             structure_reference=Decimal(98),
             atr=Decimal(2),
             holding_bars=10,
@@ -217,6 +285,7 @@ def test_runner_ignores_open_or_duplicate_candle_and_requires_two_tick_improveme
         market_facts=LifecycleMarketFacts(
             watermark_ms=2_000,
             is_final_closed_candle=True,
+            latest_close=Decimal("99.8"),
             structure_reference=Decimal("99.8"),
             atr=Decimal("0.2"),
             holding_bars=10,

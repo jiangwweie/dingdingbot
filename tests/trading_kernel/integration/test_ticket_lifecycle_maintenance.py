@@ -22,7 +22,7 @@ from src.trading_kernel.application.reconcile_ticket import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind, OrderCommandPayload
-from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
+from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts, exit_policy_for
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
@@ -89,6 +89,65 @@ async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protect
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("latest_close", "holding_bars", "session_end_ms", "reason"),
+    [
+        (Decimal(60000), 10, 86_400_000, "failed_breakout_reclaimed"),
+        (Decimal(60500), 10, 3_000, "sor_session_expired"),
+        (Decimal(60500), 96, 86_400_000, "time_stop_hit"),
+    ],
+)
+async def test_sor_v3_position_protected_exit_plan_is_durable(
+    lifecycle_engine,
+    latest_close: Decimal,
+    holding_bars: int,
+    session_end_ms: int,
+    reason: str,
+) -> None:
+    ticket = _registered_sor_long_ticket().model_copy(
+        update={"exposure_session_end_ms": session_end_ms}
+    )
+    await _reach_position_protected(lifecycle_engine, ticket)
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        result = await maintain_ticket_lifecycle(
+            uow,
+            LifecycleMaintenanceRequest(
+                ticket_id=ticket.identity.ticket_id,
+                facts=TicketLifecycleFacts(
+                    position_quantity=ticket.quantity,
+                    tp1_filled_quantity=Decimal(0),
+                    tp1_average_fill_price=None,
+                    allocated_entry_fee_quote=Decimal("0.01"),
+                    exit_taker_fee_rate=Decimal("0.001"),
+                    price_tick=Decimal("0.1"),
+                    market_facts=LifecycleMarketFacts(
+                        watermark_ms=3_000,
+                        is_final_closed_candle=True,
+                        latest_close=latest_close,
+                        structure_reference=Decimal(60500),
+                        atr=Decimal(100),
+                        holding_bars=holding_bars,
+                    ),
+                    observed_at_ms=3_000,
+                ),
+                now_ms=3_000,
+            ),
+        )
+
+    assert result.status is LifecycleMaintenanceStatus.EXIT_REQUESTED
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.status is AggregateStatus.EXIT_PENDING
+    assert events[-1].reason == reason
+    assert any(command.kind is ExchangeCommandKind.EXIT for command in commands)
+
+
+@pytest.mark.asyncio
 async def test_runner_maintenance_uses_closed_candle_and_sor_time_stop(
     lifecycle_engine,
 ) -> None:
@@ -112,6 +171,7 @@ async def test_runner_maintenance_uses_closed_candle_and_sor_time_stop(
                     market_facts=LifecycleMarketFacts(
                         watermark_ms=3_000,
                         is_final_closed_candle=False,
+                        latest_close=Decimal(60500),
                         structure_reference=Decimal(60500),
                         atr=Decimal(100),
                         holding_bars=95,
@@ -140,6 +200,7 @@ async def test_runner_maintenance_uses_closed_candle_and_sor_time_stop(
                     market_facts=LifecycleMarketFacts(
                         watermark_ms=3_100,
                         is_final_closed_candle=True,
+                        latest_close=Decimal(60500),
                         structure_reference=Decimal(60500),
                         atr=Decimal(100),
                         holding_bars=96,
@@ -184,6 +245,7 @@ async def test_runner_maintenance_requests_monotonic_structural_atr_stop(
                     market_facts=LifecycleMarketFacts(
                         watermark_ms=3_100,
                         is_final_closed_candle=True,
+                        latest_close=Decimal(60500),
                         structure_reference=Decimal(60500),
                         atr=Decimal(100),
                         holding_bars=10,
@@ -544,4 +606,13 @@ def _registered_sor_long_ticket():
             )
         }
     )
-    return ticket.model_copy(update={"identity": identity})
+    policy = exit_policy_for(contract.event_spec_id)
+    return ticket.model_copy(
+        update={
+            "identity": identity,
+            "exit_policy_id": policy.exit_policy_id,
+            "exit_policy_semantic_hash": policy.semantic_hash(),
+            "pre_tp1_reclaim_price": Decimal(60100),
+            "exposure_session_end_ms": 86_400_000,
+        }
+    )
