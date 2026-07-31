@@ -100,6 +100,13 @@ def build_capacity_claim(
         return _refused(CapacityClaimStatus.BUDGET_EXHAUSTED)
     if netting_domain_occupied:
         return _refused(CapacityClaimStatus.NETTING_DOMAIN_OCCUPIED)
+    if (
+        usage.active_strategy_group_ticket_count
+        >= policy.max_strategy_group_concurrent_tickets
+    ):
+        return _refused(
+            CapacityClaimStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED
+        )
 
     entry_price = (
         admission_snapshot.best_ask_price
@@ -283,6 +290,16 @@ def build_capacity_claim(
         margin_mode_at_claim=account_risk.margin_mode,
         active_ticket_count_at_claim=usage.active_ticket_count,
         remaining_slots_at_claim=selected.remaining_slots,
+        active_strategy_group_ticket_count_at_claim=(
+            usage.active_strategy_group_ticket_count
+        ),
+        max_strategy_group_concurrent_tickets=(
+            policy.max_strategy_group_concurrent_tickets
+        ),
+        remaining_strategy_group_slots_at_claim=(
+            policy.max_strategy_group_concurrent_tickets
+            - usage.active_strategy_group_ticket_count
+        ),
         gross_risk_at_stop_at_claim=usage.gross_risk_at_stop,
         current_reserved_margin_at_claim=usage.current_reserved_margin,
         max_ticket_stop_risk_fraction=(

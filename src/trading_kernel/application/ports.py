@@ -208,6 +208,7 @@ class OwnerPolicySnapshot(BaseModel):
     new_entry_submit_enabled: bool
     priority_rank: int
     max_concurrent_tickets: int
+    max_strategy_group_concurrent_tickets: int
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
     max_ticket_initial_margin_fraction: Decimal
@@ -782,6 +783,14 @@ class EntryAdmissionRepository(Protocol):
     async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool: ...
 
     async def has_ticket_for_signal(self, signal_event_id: str) -> bool: ...
+
+    async def count_active_strategy_group_tickets(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+        strategy_group_id: str,
+    ) -> int: ...
 
     async def read_admission_ownership(
         self,

@@ -1345,6 +1345,9 @@ class PostgresEntryAdmissionRepository:
             new_entry_submit_enabled=bool(row["new_entry_submit_enabled"]),
             priority_rank=int(row["priority_rank"]),
             max_concurrent_tickets=int(row["max_concurrent_tickets"]),
+            max_strategy_group_concurrent_tickets=int(
+                row["max_strategy_group_concurrent_tickets"]
+            ),
             max_ticket_stop_risk_fraction=Decimal(
                 row["max_ticket_stop_risk_fraction"]
             ),
@@ -1382,6 +1385,25 @@ class PostgresEntryAdmissionRepository:
             .limit(1)
         )
         return result.scalar_one_or_none() is not None
+
+    async def count_active_strategy_group_tickets(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+        strategy_group_id: str,
+    ) -> int:
+        result = await self._connection.execute(
+            sa.select(sa.func.count())
+            .select_from(trade_tickets)
+            .where(
+                trade_tickets.c.venue_id == venue_id,
+                trade_tickets.c.account_id == account_id,
+                trade_tickets.c.strategy_group_id == strategy_group_id,
+                trade_tickets.c.terminal_at_ms.is_(None),
+            )
+        )
+        return int(result.scalar_one())
 
     async def read_admission_ownership(
         self,
@@ -1871,6 +1893,15 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "margin_mode_at_claim": claim.margin_mode_at_claim,
         "active_ticket_count_at_claim": claim.active_ticket_count_at_claim,
         "remaining_slots_at_claim": claim.remaining_slots_at_claim,
+        "active_strategy_group_ticket_count_at_claim": (
+            claim.active_strategy_group_ticket_count_at_claim
+        ),
+        "max_strategy_group_concurrent_tickets": (
+            claim.max_strategy_group_concurrent_tickets
+        ),
+        "remaining_strategy_group_slots_at_claim": (
+            claim.remaining_strategy_group_slots_at_claim
+        ),
         "gross_risk_at_stop_at_claim": claim.gross_risk_at_stop_at_claim,
         "current_reserved_margin_at_claim": (
             claim.current_reserved_margin_at_claim
@@ -1985,6 +2016,15 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         ),
         active_ticket_count_at_claim=int(row["active_ticket_count_at_claim"]),
         remaining_slots_at_claim=int(row["remaining_slots_at_claim"]),
+        active_strategy_group_ticket_count_at_claim=int(
+            row["active_strategy_group_ticket_count_at_claim"]
+        ),
+        max_strategy_group_concurrent_tickets=int(
+            row["max_strategy_group_concurrent_tickets"]
+        ),
+        remaining_strategy_group_slots_at_claim=int(
+            row["remaining_strategy_group_slots_at_claim"]
+        ),
         gross_risk_at_stop_at_claim=Decimal(
             row["gross_risk_at_stop_at_claim"]
         ),

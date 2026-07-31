@@ -934,6 +934,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 new_entry_submit_enabled=True,
                 priority_rank=1,
                 max_concurrent_tickets=3,
+                max_strategy_group_concurrent_tickets=2,
                 max_ticket_stop_risk_fraction="0.03",
                 max_gross_stop_risk_fraction="0.06",
                 max_ticket_initial_margin_fraction="0.45",

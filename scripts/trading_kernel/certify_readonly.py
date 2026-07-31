@@ -415,6 +415,7 @@ async def _certify(
                                enabled,
                                new_entry_submit_enabled,
                                max_concurrent_tickets,
+                               max_strategy_group_concurrent_tickets,
                                max_ticket_stop_risk_fraction,
                                max_gross_stop_risk_fraction,
                                max_ticket_initial_margin_fraction,
@@ -822,6 +823,12 @@ async def _certify(
             isinstance(owner_policy_row["new_entry_submit_enabled"], bool),
             int(owner_policy_row["max_concurrent_tickets"])
             == DYNAMIC_POLICY.max_concurrent_tickets,
+            int(
+                owner_policy_row[
+                    "max_strategy_group_concurrent_tickets"
+                ]
+            )
+            == DYNAMIC_POLICY.max_strategy_group_concurrent_tickets,
             Decimal(str(owner_policy_row["max_ticket_stop_risk_fraction"]))
             == DYNAMIC_POLICY.max_ticket_stop_risk_fraction,
             Decimal(str(owner_policy_row["max_gross_stop_risk_fraction"]))

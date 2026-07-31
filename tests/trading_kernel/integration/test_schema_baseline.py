@@ -331,6 +331,12 @@ def test_review_funding_attribution_has_bounded_instrument_window_index() -> Non
         "created_at_ms",
         "terminal_at_ms",
     ) in _index_column_sets(tickets)
+    assert (
+        "venue_id",
+        "account_id",
+        "strategy_group_id",
+        "terminal_at_ms",
+    ) in _index_column_sets(tickets)
 
 
 def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> None:
@@ -343,6 +349,7 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
 
     assert {
         "new_entry_submit_enabled",
+        "max_strategy_group_concurrent_tickets",
         "max_ticket_stop_risk_fraction",
         "max_gross_stop_risk_fraction",
         "max_ticket_initial_margin_fraction",
@@ -363,6 +370,7 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
     }.isdisjoint(policies.c.keys())
     assert "priority_rank > 0" in check_sql
     assert "max_concurrent_tickets > 0" in check_sql
+    assert "max_strategy_group_concurrent_tickets > 0" in check_sql
     assert (
         "max_ticket_stop_risk_fraction > 0 "
         "AND max_ticket_stop_risk_fraction < 1"
@@ -538,7 +546,12 @@ def test_exit_policy_registry_and_capacity_claim_freeze_runner_split() -> None:
         "policy",
         "status",
     }.issubset(policies.c.keys())
-    assert "take_profit_quantities" in claims.c
+    assert {
+        "take_profit_quantities",
+        "active_strategy_group_ticket_count_at_claim",
+        "max_strategy_group_concurrent_tickets",
+        "remaining_strategy_group_slots_at_claim",
+    }.issubset(claims.c.keys())
 
 
 def test_aggregate_schema_conserves_authoritative_entry_order_identity() -> None:

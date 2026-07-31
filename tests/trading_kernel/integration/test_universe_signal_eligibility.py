@@ -205,6 +205,7 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
         INSERT INTO brc_owner_policy_current (
             owner_policy_id, policy_version, enabled, new_entry_submit_enabled,
             priority_rank, max_concurrent_tickets,
+            max_strategy_group_concurrent_tickets,
             max_ticket_stop_risk_fraction, max_gross_stop_risk_fraction,
             max_ticket_initial_margin_fraction,
             max_gross_initial_margin_utilization, max_leverage,
@@ -212,7 +213,7 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             post_stop_stress_multiple,
             max_post_fill_stop_risk_overrun_fraction, scope, updated_at_ms
         ) VALUES (
-            'policy-a', 1, true, true, 7, 3, 0.03, 0.06, 0.45, 0.9, 5,
+            'policy-a', 1, true, true, 7, 3, 2, 0.03, 0.06, 0.45, 0.9, 5,
             'cross', 2, 0.1, '{}'::jsonb, 1000
         );
         INSERT INTO brc_runtime_scopes_current (

@@ -226,13 +226,21 @@ async def test_three_serial_tickets_protect_independent_domains_and_fence_refusa
         position_side="short",
         runtime_scope_id="scope-sor-btc-short",
     )
+    cpm_runtime = btc_long.identity.runtime.model_copy(
+        update={
+            "strategy_group_id": "CPM-RO-001",
+            "strategy_version_id": "sgv:CPM-RO-001:v2",
+            "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
+        }
+    )
     eth_long = _ticket_for_domain(
         btc_long,
         signal_event_id="signal-eth-long",
         exposure_episode_id="episode-eth-long",
         exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
         position_side="long",
-        runtime_scope_id="scope-sor-eth-long",
+        runtime_scope_id="scope-cpm-eth-long",
+        runtime=cpm_runtime,
     )
 
     for index, ticket in enumerate((btc_long, btc_short, eth_long), start=1):
@@ -252,21 +260,28 @@ async def test_three_serial_tickets_protect_independent_domains_and_fence_refusa
             stop_now_ms=issued_at_ms + 300,
         )
 
-    cpm_runtime = eth_long.identity.runtime.model_copy(
+    mi_runtime = eth_long.identity.runtime.model_copy(
         update={
-            "strategy_group_id": "CPM-RO-001",
-            "strategy_version_id": "sgv:CPM-RO-001:v2",
-            "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
+            "strategy_group_id": "MI-001",
+            "strategy_version_id": "sgv:MI-001:v2",
+            "event_spec_id": "event_spec:MI-001:MI-LONG:v2",
         }
     )
     same_direction = _ticket_for_domain(
         eth_long,
-        signal_event_id="signal-eth-cpm-long",
-        exposure_episode_id="episode-eth-cpm-long",
+        signal_event_id="signal-eth-mi-long",
+        exposure_episode_id="episode-eth-mi-long",
         exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
         position_side="long",
-        runtime_scope_id="scope-cpm-eth-long",
-        runtime=cpm_runtime,
+        runtime_scope_id="scope-mi-eth-long",
+        runtime=mi_runtime,
+    )
+    brf_runtime = eth_long.identity.runtime.model_copy(
+        update={
+            "strategy_group_id": "BRF2-001",
+            "strategy_version_id": "sgv:BRF2-001:v2",
+            "event_spec_id": "event_spec:BRF2-001:BRF2-SHORT:v2",
+        }
     )
     fourth_ticket = _ticket_for_domain(
         eth_long,
@@ -274,7 +289,8 @@ async def test_three_serial_tickets_protect_independent_domains_and_fence_refusa
         exposure_episode_id="episode-eth-short",
         exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
         position_side="short",
-        runtime_scope_id="scope-sor-eth-short",
+        runtime_scope_id="scope-brf-eth-short",
+        runtime=brf_runtime,
     )
     venue_call_count = len(venue.calls)
 
@@ -513,6 +529,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 new_entry_submit_enabled=True,
                 priority_rank=1,
                 max_concurrent_tickets=3,
+                max_strategy_group_concurrent_tickets=2,
                 max_ticket_stop_risk_fraction="0.03",
                 max_gross_stop_risk_fraction="0.06",
                 max_ticket_initial_margin_fraction="0.45",

@@ -53,6 +53,8 @@ _TICKET_UNIVERSE_DIGEST = "sha256:" + "3" * 64
 _TICKET_RUNTIME_SCOPE_ID = "scope:test-cpm"
 _TICKET_EXCHANGE_INSTRUMENT_ID = "binance-usdm:ETHUSDT:perpetual"
 _TICKET_POSITION_SIDE = "long"
+_TICKET_EXIT_POLICY_ID = "exit-policy:CPM-RO-001:CPM-LONG:right-tail-v1"
+_TICKET_EXIT_POLICY_HASH = "sha256:" + "5" * 64
 
 
 def _runtime_seed_module() -> ModuleType:
@@ -144,6 +146,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     assert first.new_entry_submit_enabled is False
     assert first.policy_version == 1
     assert first.max_concurrent_tickets == 3
+    assert first.max_strategy_group_concurrent_tickets == 2
     assert first.max_ticket_stop_risk_fraction == Decimal("0.03")
     assert first.max_gross_stop_risk_fraction == Decimal("0.06")
     assert first.max_ticket_initial_margin_fraction == Decimal("0.45")
@@ -167,6 +170,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         assert policy["enabled"] is True
         assert policy["new_entry_submit_enabled"] is False
         assert policy["max_concurrent_tickets"] == 3
+        assert policy["max_strategy_group_concurrent_tickets"] == 2
         assert Decimal(policy["max_ticket_stop_risk_fraction"]) == Decimal("0.03")
         assert Decimal(policy["max_gross_stop_risk_fraction"]) == Decimal("0.06")
         assert Decimal(policy["max_ticket_initial_margin_fraction"]) == Decimal("0.45")
@@ -186,8 +190,8 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
                 "event_spec:CPM-RO-001:CPM-LONG:v2",
                 "event_spec:MI-001:MI-LONG:v2",
                 "event_spec:MPG-001:MPG-LONG:v2",
-                "event_spec:SOR-001:SOR-LONG:v2",
-                "event_spec:SOR-001:SOR-SHORT:v2",
+                "event_spec:SOR-001:SOR-LONG:v3",
+                "event_spec:SOR-001:SOR-SHORT:v3",
             ],
         }
 
@@ -833,6 +837,7 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     assert armed.policy_version == 2
     assert armed.new_entry_submit_enabled is True
     assert armed.max_concurrent_tickets == 3
+    assert armed.max_strategy_group_concurrent_tickets == 2
     assert armed.max_ticket_stop_risk_fraction == Decimal("0.03")
     assert armed.max_gross_stop_risk_fraction == Decimal("0.06")
     assert armed.max_ticket_initial_margin_fraction == Decimal("0.45")
@@ -869,6 +874,7 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     assert promoted.policy_version == 3
     assert promoted.new_entry_submit_enabled is True
     assert promoted.max_concurrent_tickets == 3
+    assert promoted.max_strategy_group_concurrent_tickets == 2
     assert promoted.max_ticket_stop_risk_fraction == Decimal("0.03")
     assert promoted.max_gross_stop_risk_fraction == Decimal("0.06")
     assert promoted.max_ticket_initial_margin_fraction == Decimal("0.45")
@@ -979,6 +985,8 @@ async def _insert_terminal_reviewed_ticket(engine: AsyncEngine) -> None:
                 position_side=_TICKET_POSITION_SIDE,
                 netting_domain_key="acceptance-domain",
                 active_netting_domain_key=None,
+                exit_policy_id=_TICKET_EXIT_POLICY_ID,
+                exit_policy_semantic_hash=_TICKET_EXIT_POLICY_HASH,
                 entry_reference_price=Decimal(100),
                 quantity=Decimal("0.1"),
                 notional=Decimal(10),
@@ -1045,6 +1053,8 @@ async def _insert_released_pending_closure_ticket(engine: AsyncEngine) -> None:
                 position_side=_TICKET_POSITION_SIDE,
                 netting_domain_key="closure-domain",
                 active_netting_domain_key=None,
+                exit_policy_id=_TICKET_EXIT_POLICY_ID,
+                exit_policy_semantic_hash=_TICKET_EXIT_POLICY_HASH,
                 entry_reference_price=Decimal(100),
                 quantity=Decimal("0.1"),
                 notional=Decimal(10),
@@ -1172,6 +1182,8 @@ async def _insert_protected_tickets(
                     position_side="short",
                     netting_domain_key=netting_domain,
                     active_netting_domain_key=netting_domain,
+                    exit_policy_id=_TICKET_EXIT_POLICY_ID,
+                    exit_policy_semantic_hash=_TICKET_EXIT_POLICY_HASH,
                     entry_reference_price=Decimal(100),
                     quantity=quantity,
                     notional=notional,

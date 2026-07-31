@@ -55,6 +55,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_universe_members,
     strategy_universe_versions,
     strategy_versions,
+    trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from tests.trading_kernel.unit.test_ticket import _identity, _ticket
@@ -510,6 +511,176 @@ async def test_long_and_short_are_independent_default_netting_domains(
 
 
 @pytest.mark.asyncio
+async def test_strategy_group_capacity_merges_long_short_and_rejects_third_without_artifacts(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_policy(issue_engine)
+    first = _ticket(risk_at_stop=Decimal(1), reserved_margin=Decimal(20))
+    second_base = _ticket_for_signal(
+        "signal-strategy-2",
+        "episode-strategy-2",
+        position_side="short",
+    )
+    second = _ticket(
+        identity=second_base.identity,
+        runtime_scope_id=second_base.runtime_scope_id,
+        universe_version_id=second_base.universe_version_id,
+        initial_stop_price=second_base.initial_stop_price,
+        take_profit_prices=second_base.take_profit_prices,
+        risk_at_stop=Decimal(1),
+        reserved_margin=Decimal(20),
+    )
+    third = _ticket_for_instrument(
+        "signal-strategy-3",
+        "episode-strategy-3",
+        exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+        runtime_scope_id="scope-sor-eth-long",
+        risk_at_stop=Decimal(1),
+        reserved_margin=Decimal(20),
+    )
+    await _seed_ticket_runtime_scope(issue_engine, third)
+
+    await _issue_and_release_lane(issue_engine, first)
+    await _issue_and_release_lane(issue_engine, second)
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        refused = await issue_ticket(
+            uow,
+            _issue_request(
+                ticket=third,
+                now_ms=1_003,
+                claim_owner="worker-strategy-3",
+            ),
+        )
+
+    assert (
+        refused.status
+        is IssueTicketStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED
+    )
+    await _assert_no_durable_entry_state(
+        issue_engine,
+        third.identity.ticket_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_two_sor_tickets_and_one_other_strategy_can_fill_account_capacity(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_policy(issue_engine)
+    first = _ticket(risk_at_stop=Decimal(1), reserved_margin=Decimal(20))
+    second_base = _ticket_for_signal(
+        "signal-account-2",
+        "episode-account-2",
+        position_side="short",
+    )
+    second = _ticket(
+        identity=second_base.identity,
+        runtime_scope_id=second_base.runtime_scope_id,
+        universe_version_id=second_base.universe_version_id,
+        initial_stop_price=second_base.initial_stop_price,
+        take_profit_prices=second_base.take_profit_prices,
+        risk_at_stop=Decimal(1),
+        reserved_margin=Decimal(20),
+    )
+    third = _ticket_for_strategy_group(
+        "signal-account-3",
+        "episode-account-3",
+        strategy_group_id="MI-001",
+        strategy_version_id="MI-001:v2",
+        event_spec_id="mi-long-v2",
+        exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+        runtime_scope_id="scope-mi-eth-long",
+        risk_at_stop=Decimal(1),
+        reserved_margin=Decimal(20),
+    )
+    await _seed_ticket_runtime_scope(issue_engine, third)
+
+    await _issue_and_release_lane(issue_engine, first)
+    await _issue_and_release_lane(issue_engine, second)
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result = await issue_ticket(
+            uow,
+            _issue_request(
+                ticket=third,
+                now_ms=1_003,
+                claim_owner="worker-account-3",
+            ),
+        )
+        exposure = await uow.entry_admission.get_account_exposure(
+            first.identity.netting_domain.venue_id,
+            first.identity.netting_domain.account_id,
+        )
+
+    assert result.status is IssueTicketStatus.ISSUED
+    assert exposure is not None
+    assert exposure.active_ticket_count == 3
+
+
+@pytest.mark.asyncio
+async def test_strategy_group_active_count_is_isolated_by_venue_and_account(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_policy(issue_engine)
+    ticket = _ticket()
+    await _issue_and_release_lane(issue_engine, ticket)
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        exact = await uow.entry_admission.count_active_strategy_group_tickets(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id=ticket.identity.netting_domain.account_id,
+            strategy_group_id=ticket.identity.runtime.strategy_group_id,
+        )
+        other_account = (
+            await uow.entry_admission.count_active_strategy_group_tickets(
+                venue_id=ticket.identity.netting_domain.venue_id,
+                account_id="other-account",
+                strategy_group_id=ticket.identity.runtime.strategy_group_id,
+            )
+        )
+        other_venue = (
+            await uow.entry_admission.count_active_strategy_group_tickets(
+                venue_id="other-venue",
+                account_id=ticket.identity.netting_domain.account_id,
+                strategy_group_id=ticket.identity.runtime.strategy_group_id,
+            )
+        )
+
+    assert exact == 1
+    assert other_account == 0
+    assert other_venue == 0
+
+
+@pytest.mark.asyncio
+async def test_strategy_group_active_count_excludes_terminal_tickets(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_policy(issue_engine)
+    ticket = _ticket()
+    await _issue_and_release_lane(issue_engine, ticket)
+    async with issue_engine.begin() as connection:
+        await connection.execute(
+            sa.update(trade_tickets)
+            .where(trade_tickets.c.ticket_id == ticket.identity.ticket_id)
+            .values(
+                status="terminal",
+                active_netting_domain_key=None,
+                terminal_at_ms=2_000,
+            )
+        )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        active_count = (
+            await uow.entry_admission.count_active_strategy_group_tickets(
+                venue_id=ticket.identity.netting_domain.venue_id,
+                account_id=ticket.identity.netting_domain.account_id,
+                strategy_group_id=ticket.identity.runtime.strategy_group_id,
+            )
+        )
+
+    assert active_count == 0
+
+
+@pytest.mark.asyncio
 async def test_stale_claims_cannot_exceed_gross_stop_risk_after_atomic_revalidation(
     issue_engine: AsyncEngine,
 ) -> None:
@@ -520,11 +691,14 @@ async def test_stale_claims_cannot_exceed_gross_stop_risk_after_atomic_revalidat
         "episode-risk-2",
         position_side="short",
     )
-    third = _ticket_for_instrument(
+    third = _ticket_for_strategy_group(
         "signal-risk-3",
         "episode-risk-3",
+        strategy_group_id="MI-001",
+        strategy_version_id="MI-001:v2",
+        event_spec_id="mi-long-v2",
         exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
-        runtime_scope_id="scope-sor-eth-long",
+        runtime_scope_id="scope-mi-eth-long",
     )
     await _seed_ticket_runtime_scope(issue_engine, third)
     second_request = _issue_request(
@@ -590,11 +764,14 @@ async def test_stale_claims_cannot_exceed_gross_margin_after_atomic_revalidation
         risk_at_stop=Decimal(1),
         reserved_margin=Decimal(45),
     )
-    third = _ticket_for_instrument(
+    third = _ticket_for_strategy_group(
         "signal-margin-3",
         "episode-margin-3",
+        strategy_group_id="MI-001",
+        strategy_version_id="MI-001:v2",
+        event_spec_id="mi-long-v2",
         exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
-        runtime_scope_id="scope-sor-eth-long",
+        runtime_scope_id="scope-mi-eth-long",
         risk_at_stop=Decimal(1),
         reserved_margin=Decimal(45),
     )
@@ -718,6 +895,7 @@ async def _seed_policy(
                 new_entry_submit_enabled=new_entry_submit_enabled,
                 priority_rank=1,
                 max_concurrent_tickets=max_concurrent_tickets,
+                max_strategy_group_concurrent_tickets=2,
                 max_ticket_stop_risk_fraction="0.03",
                 max_gross_stop_risk_fraction="0.06",
                 max_ticket_initial_margin_fraction="0.45",
@@ -937,6 +1115,54 @@ def _ticket_for_instrument(
     return _ticket(**terms)
 
 
+def _ticket_for_strategy_group(
+    signal_event_id: str,
+    exposure_episode_id: str,
+    *,
+    strategy_group_id: str,
+    strategy_version_id: str,
+    event_spec_id: str,
+    exchange_instrument_id: str,
+    runtime_scope_id: str,
+    **updates: object,
+):
+    original = _identity()
+    runtime = original.runtime.model_copy(
+        update={
+            "strategy_group_id": strategy_group_id,
+            "strategy_version_id": strategy_version_id,
+            "event_spec_id": event_spec_id,
+        }
+    )
+    domain = NettingDomain(
+        venue_id=original.netting_domain.venue_id,
+        account_id=original.netting_domain.account_id,
+        exchange_instrument_id=exchange_instrument_id,
+        position_side="long",
+    )
+    identity = TicketIdentity(
+        ticket_id=build_ticket_id(
+            signal_event_id=signal_event_id,
+            runtime=runtime,
+            netting_domain=domain,
+        ),
+        exposure_episode_id=exposure_episode_id,
+        signal_event_id=signal_event_id,
+        runtime=runtime,
+        netting_domain=domain,
+    )
+    terms: dict[str, object] = {
+        "identity": identity,
+        "runtime_scope_id": runtime_scope_id,
+        "universe_version_id": f"universe:{event_spec_id}:1",
+        "exit_policy_id": f"exit-policy:{event_spec_id}",
+        "pre_tp1_reclaim_price": None,
+        "exposure_session_end_ms": None,
+    }
+    terms.update(updates)
+    return _ticket(**terms)
+
+
 def _issue_request(
     *,
     ticket,
@@ -990,6 +1216,9 @@ def _issue_request(
             margin_mode_at_claim=ticket.margin_mode,
             active_ticket_count_at_claim=0,
             remaining_slots_at_claim=3,
+            active_strategy_group_ticket_count_at_claim=0,
+            max_strategy_group_concurrent_tickets=2,
+            remaining_strategy_group_slots_at_claim=2,
             gross_risk_at_stop_at_claim=Decimal(0),
             current_reserved_margin_at_claim=Decimal(0),
             max_ticket_stop_risk_fraction=Decimal("0.03"),
@@ -1123,6 +1352,13 @@ async def _assert_no_durable_entry_state(
         assert lane is not None
         assert lane.status == "idle"
         assert lane.ticket_id is None
+    async with engine.connect() as connection:
+        incident_count = await connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(runtime_incidents)
+            .where(runtime_incidents.c.ticket_id == ticket_id)
+        )
+    assert incident_count == 0
 
 
 async def _seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:

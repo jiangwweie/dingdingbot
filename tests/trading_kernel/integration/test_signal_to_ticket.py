@@ -597,6 +597,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 new_entry_submit_enabled=True,
                 priority_rank=1,
                 max_concurrent_tickets=8,
+                max_strategy_group_concurrent_tickets=2,
                 max_ticket_stop_risk_fraction=Decimal("0.03"),
                 max_gross_stop_risk_fraction=Decimal("0.06"),
                 max_ticket_initial_margin_fraction=Decimal("0.45"),

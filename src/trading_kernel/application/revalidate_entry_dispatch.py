@@ -60,6 +60,9 @@ class EntryDispatchPreflightStatus(StrEnum):
     OWNERSHIP_CONFLICT = "ownership_conflict"
     WALLET_RISK_DRIFT = "wallet_risk_drift"
     MARGIN_DRIFT = "margin_drift"
+    STRATEGY_GROUP_CAPACITY_EXHAUSTED = (
+        "strategy_group_capacity_exhausted"
+    )
     QUOTE_RISK = "quote_risk"
     STRESS_FAILED = "stress_failed"
     LEVERAGE_MISMATCH = "leverage_mismatch"
@@ -87,6 +90,7 @@ class EntryDispatchPreflightRequest(BaseModel):
     instrument_rules: InstrumentRulesFacts
     account_entry_health: AccountEntryHealth
     instrument_entry_health: InstrumentEntryHealth
+    active_strategy_group_ticket_count: int
     now_ms: int
 
     @field_validator("runtime_commit", "schema_revision", mode="before")
@@ -96,6 +100,13 @@ class EntryDispatchPreflightRequest(BaseModel):
         if not normalized:
             raise ValueError("dispatch runtime identity must be non-blank")
         return normalized
+
+    @field_validator("active_strategy_group_ticket_count")
+    @classmethod
+    def _require_nonnegative_strategy_group_count(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("active strategy-group Ticket count cannot be negative")
+        return value
 
     @field_validator("now_ms")
     @classmethod
@@ -136,6 +147,13 @@ def revalidate_entry_dispatch(
     assert request.owner_policy is not None
     if not request.owner_policy.new_entry_submit_enabled:
         return _refused(EntryDispatchPreflightStatus.NEW_ENTRY_DISABLED)
+    if (
+        request.active_strategy_group_ticket_count
+        > request.owner_policy.max_strategy_group_concurrent_tickets
+    ):
+        return _refused(
+            EntryDispatchPreflightStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED
+        )
     if not _scope_matches(request.runtime_scope, ticket):
         return _refused(EntryDispatchPreflightStatus.SCOPE_DRIFT)
     if not _active_universe_matches(request.active_universe, ticket):
@@ -280,6 +298,8 @@ def _policy_matches(
         and policy.enabled
         and ticket.selected_leverage <= policy.max_leverage
         and ticket.margin_mode == policy.supported_margin_mode
+        and claim.max_strategy_group_concurrent_tickets
+        == policy.max_strategy_group_concurrent_tickets
         and claim.max_ticket_stop_risk_fraction
         == policy.max_ticket_stop_risk_fraction
         and claim.max_gross_stop_risk_fraction

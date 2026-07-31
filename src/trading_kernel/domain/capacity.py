@@ -32,6 +32,7 @@ class CapacityClaimStatus(StrEnum):
     INSTRUMENT_RULES_INVALID = "instrument_rules_invalid"
     NETTING_DOMAIN_OCCUPIED = "netting_domain_occupied"
     BUDGET_EXHAUSTED = "budget_exhausted"
+    STRATEGY_GROUP_CAPACITY_EXHAUSTED = "strategy_group_capacity_exhausted"
     PROTECTION_UNAVAILABLE = "protection_unavailable"
 
 
@@ -41,6 +42,7 @@ class CapacityPolicy(BaseModel):
     owner_policy_id: str
     policy_version: int
     max_concurrent_tickets: int
+    max_strategy_group_concurrent_tickets: int
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
     max_ticket_initial_margin_fraction: Decimal
@@ -58,7 +60,12 @@ class CapacityPolicy(BaseModel):
             raise ValueError("capacity policy identity must be non-blank")
         return normalized
 
-    @field_validator("policy_version", "max_concurrent_tickets", "max_leverage")
+    @field_validator(
+        "policy_version",
+        "max_concurrent_tickets",
+        "max_strategy_group_concurrent_tickets",
+        "max_leverage",
+    )
     @classmethod
     def _require_positive_integer(cls, value: int) -> int:
         if value <= 0:
@@ -101,6 +108,7 @@ class CapacityUsage(BaseModel):
     gross_risk_at_stop: Decimal
     current_reserved_margin: Decimal
     active_ticket_count: int
+    active_strategy_group_ticket_count: int
 
     @field_validator(
         "gross_notional",
@@ -113,7 +121,10 @@ class CapacityUsage(BaseModel):
             raise ValueError("capacity usage cannot be negative")
         return value
 
-    @field_validator("active_ticket_count")
+    @field_validator(
+        "active_ticket_count",
+        "active_strategy_group_ticket_count",
+    )
     @classmethod
     def _require_nonnegative_count(cls, value: int) -> int:
         if value < 0:
@@ -197,6 +208,9 @@ class CapacityClaim(BaseModel):
     margin_mode_at_claim: Literal["cross", "isolated"]
     active_ticket_count_at_claim: int
     remaining_slots_at_claim: int
+    active_strategy_group_ticket_count_at_claim: int
+    max_strategy_group_concurrent_tickets: int
+    remaining_strategy_group_slots_at_claim: int
     gross_risk_at_stop_at_claim: Decimal
     current_reserved_margin_at_claim: Decimal
     max_ticket_stop_risk_fraction: Decimal
@@ -316,6 +330,8 @@ class CapacityClaim(BaseModel):
 
     @field_validator(
         "active_ticket_count_at_claim",
+        "active_strategy_group_ticket_count_at_claim",
+        "remaining_strategy_group_slots_at_claim",
     )
     @classmethod
     def _require_nonnegative_count(cls, value: int) -> int:
@@ -325,6 +341,7 @@ class CapacityClaim(BaseModel):
 
     @field_validator(
         "remaining_slots_at_claim",
+        "max_strategy_group_concurrent_tickets",
         "required_leverage",
         "selected_leverage",
         "configured_leverage_at_claim",
@@ -346,6 +363,11 @@ class CapacityClaim(BaseModel):
             or self.expires_at_ms <= self.created_at_ms
         ):
             raise ValueError("CapacityClaim authority and time must be positive")
+        if self.remaining_strategy_group_slots_at_claim != (
+            self.max_strategy_group_concurrent_tickets
+            - self.active_strategy_group_ticket_count_at_claim
+        ):
+            raise ValueError("CapacityClaim strategy-group slot evidence differs")
         if self.entry_order_type is EntryOrderType.MARKET:
             if self.entry_limit_price is not None:
                 raise ValueError("market CapacityClaim forbids a limit price")
@@ -547,6 +569,9 @@ def freeze_capacity_claim(
     margin_mode_at_claim: Literal["cross", "isolated"],
     active_ticket_count_at_claim: int,
     remaining_slots_at_claim: int,
+    active_strategy_group_ticket_count_at_claim: int,
+    max_strategy_group_concurrent_tickets: int,
+    remaining_strategy_group_slots_at_claim: int,
     gross_risk_at_stop_at_claim: Decimal,
     current_reserved_margin_at_claim: Decimal,
     max_ticket_stop_risk_fraction: Decimal,
@@ -607,6 +632,15 @@ def freeze_capacity_claim(
         "margin_mode_at_claim": margin_mode_at_claim,
         "active_ticket_count_at_claim": active_ticket_count_at_claim,
         "remaining_slots_at_claim": remaining_slots_at_claim,
+        "active_strategy_group_ticket_count_at_claim": (
+            active_strategy_group_ticket_count_at_claim
+        ),
+        "max_strategy_group_concurrent_tickets": (
+            max_strategy_group_concurrent_tickets
+        ),
+        "remaining_strategy_group_slots_at_claim": (
+            remaining_strategy_group_slots_at_claim
+        ),
         "gross_risk_at_stop_at_claim": gross_risk_at_stop_at_claim,
         "current_reserved_margin_at_claim": current_reserved_margin_at_claim,
         "max_ticket_stop_risk_fraction": max_ticket_stop_risk_fraction,

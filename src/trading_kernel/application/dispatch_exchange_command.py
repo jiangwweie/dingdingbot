@@ -429,6 +429,15 @@ async def _preflight_new_entry_mutation(
             account_id=domain.account_id,
             exchange_instrument_id=domain.exchange_instrument_id,
         )
+        active_strategy_group_ticket_count = (
+            await uow.entry_admission.count_active_strategy_group_tickets(
+                venue_id=domain.venue_id,
+                account_id=domain.account_id,
+                strategy_group_id=(
+                    aggregate.ticket.identity.runtime.strategy_group_id
+                ),
+            )
+        )
     decision = revalidate_entry_dispatch(
         EntryDispatchPreflightRequest(
             command=current_command,
@@ -451,6 +460,9 @@ async def _preflight_new_entry_mutation(
                 ownership,
                 exchange_instrument_id=domain.exchange_instrument_id,
                 requested_position_side=domain.position_side,
+            ),
+            active_strategy_group_ticket_count=(
+                active_strategy_group_ticket_count
             ),
             now_ms=request.now_ms,
         )

@@ -191,6 +191,13 @@ async def issue_ready_signal(
         profile.venue_id,
         profile.account_id,
     )
+    active_strategy_group_ticket_count = (
+        await uow.entry_admission.count_active_strategy_group_tickets(
+            venue_id=profile.venue_id,
+            account_id=profile.account_id,
+            strategy_group_id=signal.strategy_group_id,
+        )
+    )
     usage = CapacityUsage(
         gross_notional=(
             exposure.gross_notional if exposure else Decimal(0)
@@ -202,6 +209,9 @@ async def issue_ready_signal(
             exposure.current_reserved_margin if exposure else Decimal(0)
         ),
         active_ticket_count=(exposure.active_ticket_count if exposure else 0),
+        active_strategy_group_ticket_count=(
+            active_strategy_group_ticket_count
+        ),
     )
     domain = NettingDomain(
         venue_id=profile.venue_id,
@@ -219,6 +229,9 @@ async def issue_ready_signal(
             owner_policy_id=policy.owner_policy_id,
             policy_version=policy.policy_version,
             max_concurrent_tickets=policy.max_concurrent_tickets,
+            max_strategy_group_concurrent_tickets=(
+                policy.max_strategy_group_concurrent_tickets
+            ),
             max_ticket_stop_risk_fraction=(
                 policy.max_ticket_stop_risk_fraction
             ),
@@ -353,6 +366,9 @@ def _issue_status(status: CapacityClaimStatus) -> IssueTicketStatus:
             IssueTicketStatus.ACTIVE_NETTING_DOMAIN
         ),
         CapacityClaimStatus.BUDGET_EXHAUSTED: IssueTicketStatus.BUDGET_EXHAUSTED,
+        CapacityClaimStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED: (
+            IssueTicketStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED
+        ),
         CapacityClaimStatus.PROTECTION_UNAVAILABLE: (
             IssueTicketStatus.PROTECTION_UNAVAILABLE
         ),

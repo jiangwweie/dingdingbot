@@ -133,6 +133,45 @@ def test_entry_preflight_refuses_a_switched_universe_before_dispatch() -> None:
     assert decision.status is EntryDispatchPreflightStatus.SCOPE_DRIFT
 
 
+def test_entry_preflight_refuses_when_strategy_group_count_exceeds_frozen_limit() -> None:
+    request = _preflight_request(snapshot=_snapshot()).model_copy(
+        update={"active_strategy_group_ticket_count": 3}
+    )
+
+    decision = revalidate_entry_dispatch(request)
+
+    assert (
+        decision.status
+        is EntryDispatchPreflightStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED
+    )
+
+
+def test_entry_preflight_allows_current_ticket_at_strategy_group_limit() -> None:
+    request = _preflight_request(snapshot=_snapshot()).model_copy(
+        update={"active_strategy_group_ticket_count": 2}
+    )
+
+    decision = revalidate_entry_dispatch(request)
+
+    assert decision.status is EntryDispatchPreflightStatus.ALLOWED
+
+
+def test_entry_preflight_refuses_strategy_group_policy_drift() -> None:
+    base = _preflight_request(snapshot=_snapshot())
+    assert base.owner_policy is not None
+    request = base.model_copy(
+        update={
+            "owner_policy": base.owner_policy.model_copy(
+                update={"max_strategy_group_concurrent_tickets": 1}
+            )
+        }
+    )
+
+    decision = revalidate_entry_dispatch(request)
+
+    assert decision.status is EntryDispatchPreflightStatus.POLICY_DRIFT
+
+
 def _preflight_request(*, snapshot):
     claim_decision = build_capacity_claim(
         signal=_long_signal(),
@@ -146,6 +185,7 @@ def _preflight_request(*, snapshot):
             gross_risk_at_stop=Decimal(0),
             current_reserved_margin=Decimal(0),
             active_ticket_count=0,
+            active_strategy_group_ticket_count=0,
         ),
         instrument_rules=_rules(),
         admission_snapshot=_snapshot(),
@@ -201,6 +241,7 @@ def _preflight_request(*, snapshot):
             new_entry_submit_enabled=True,
             priority_rank=1,
             max_concurrent_tickets=3,
+            max_strategy_group_concurrent_tickets=2,
             max_ticket_stop_risk_fraction=Decimal("0.03"),
             max_gross_stop_risk_fraction=Decimal("0.06"),
             max_ticket_initial_margin_fraction=Decimal("0.45"),
@@ -286,5 +327,6 @@ def _preflight_request(*, snapshot):
             exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
             requested_position_side=ticket.identity.netting_domain.position_side,
         ),
+        active_strategy_group_ticket_count=1,
         now_ms=1_010,
     )

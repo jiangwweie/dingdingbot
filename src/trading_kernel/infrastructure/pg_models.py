@@ -546,6 +546,11 @@ owner_policy_current = sa.Table(
         server_default=sa.text("100"),
     ),
     sa.Column("max_concurrent_tickets", sa.Integer, nullable=False),
+    sa.Column(
+        "max_strategy_group_concurrent_tickets",
+        sa.Integer,
+        nullable=False,
+    ),
     sa.Column("max_ticket_stop_risk_fraction", MONEY, nullable=False),
     sa.Column("max_gross_stop_risk_fraction", MONEY, nullable=False),
     sa.Column("max_ticket_initial_margin_fraction", MONEY, nullable=False),
@@ -560,6 +565,10 @@ owner_policy_current = sa.Table(
     sa.CheckConstraint(
         "max_concurrent_tickets > 0",
         name="max_concurrent_tickets_positive",
+    ),
+    sa.CheckConstraint(
+        "max_strategy_group_concurrent_tickets > 0",
+        name="max_strategy_group_concurrent_tickets_positive",
     ),
     sa.CheckConstraint(
         "max_ticket_stop_risk_fraction > 0 "
@@ -907,6 +916,21 @@ capacity_claims = sa.Table(
     sa.Column("margin_mode_at_claim", SHORT_TEXT, nullable=False),
     sa.Column("active_ticket_count_at_claim", sa.Integer, nullable=False),
     sa.Column("remaining_slots_at_claim", sa.Integer, nullable=False),
+    sa.Column(
+        "active_strategy_group_ticket_count_at_claim",
+        sa.Integer,
+        nullable=False,
+    ),
+    sa.Column(
+        "max_strategy_group_concurrent_tickets",
+        sa.Integer,
+        nullable=False,
+    ),
+    sa.Column(
+        "remaining_strategy_group_slots_at_claim",
+        sa.Integer,
+        nullable=False,
+    ),
     sa.Column("gross_risk_at_stop_at_claim", MONEY, nullable=False),
     sa.Column("current_reserved_margin_at_claim", MONEY, nullable=False),
     sa.Column("max_ticket_stop_risk_fraction", MONEY, nullable=False),
@@ -1058,6 +1082,13 @@ sa.Index(
     trade_tickets.c.account_id,
     trade_tickets.c.exchange_instrument_id,
     trade_tickets.c.created_at_ms,
+    trade_tickets.c.terminal_at_ms,
+)
+sa.Index(
+    "ix_brc_trade_tickets_active_strategy_group",
+    trade_tickets.c.venue_id,
+    trade_tickets.c.account_id,
+    trade_tickets.c.strategy_group_id,
     trade_tickets.c.terminal_at_ms,
 )
 

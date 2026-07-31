@@ -121,6 +121,7 @@ class RuntimePolicyState(BaseModel):
     policy_version: int
     new_entry_submit_enabled: bool
     max_concurrent_tickets: int
+    max_strategy_group_concurrent_tickets: int
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
     max_ticket_initial_margin_fraction: Decimal
@@ -154,6 +155,7 @@ class RuntimeDeploymentIdentityResult(BaseModel):
 @dataclass(frozen=True)
 class _DynamicPolicy:
     max_concurrent_tickets: int
+    max_strategy_group_concurrent_tickets: int
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
     max_ticket_initial_margin_fraction: Decimal
@@ -174,6 +176,7 @@ class _ExactRow:
 
 DYNAMIC_POLICY = _DynamicPolicy(
     max_concurrent_tickets=3,
+    max_strategy_group_concurrent_tickets=2,
     max_ticket_stop_risk_fraction=Decimal("0.03"),
     max_gross_stop_risk_fraction=Decimal("0.06"),
     max_ticket_initial_margin_fraction=Decimal("0.45"),
@@ -189,6 +192,7 @@ _POLICY_COMPARE_KEYS = (
     "new_entry_submit_enabled",
     "priority_rank",
     "max_concurrent_tickets",
+    "max_strategy_group_concurrent_tickets",
     "max_ticket_stop_risk_fraction",
     "max_gross_stop_risk_fraction",
     "max_ticket_initial_margin_fraction",
@@ -755,6 +759,9 @@ def _policy_values(
         "new_entry_submit_enabled": new_entry_submit_enabled,
         "priority_rank": 1,
         "max_concurrent_tickets": DYNAMIC_POLICY.max_concurrent_tickets,
+        "max_strategy_group_concurrent_tickets": (
+            DYNAMIC_POLICY.max_strategy_group_concurrent_tickets
+        ),
         "max_ticket_stop_risk_fraction": (
             DYNAMIC_POLICY.max_ticket_stop_risk_fraction
         ),
@@ -860,6 +867,9 @@ def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
         policy_version=int(str(values["policy_version"])),
         new_entry_submit_enabled=bool(values["new_entry_submit_enabled"]),
         max_concurrent_tickets=int(str(values["max_concurrent_tickets"])),
+        max_strategy_group_concurrent_tickets=int(
+            str(values["max_strategy_group_concurrent_tickets"])
+        ),
         max_ticket_stop_risk_fraction=Decimal(
             str(values["max_ticket_stop_risk_fraction"])
         ),

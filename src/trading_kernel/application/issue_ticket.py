@@ -36,6 +36,7 @@ class IssueTicketStatus(StrEnum):
     POLICY_MISSING_OR_STALE = "policy_missing_or_stale"
     POLICY_DISABLED = "policy_disabled"
     BUDGET_EXHAUSTED = "budget_exhausted"
+    STRATEGY_GROUP_CAPACITY_EXHAUSTED = "strategy_group_capacity_exhausted"
     PROTECTION_UNAVAILABLE = "protection_unavailable"
     CAPACITY_CLAIM_MISSING = "capacity_claim_missing"
     ADMISSION_INCIDENT_OPEN = "admission_incident_open"
@@ -107,6 +108,14 @@ async def issue_ticket(
             status=IssueTicketStatus.POLICY_DISABLED,
             ticket_id=None,
         )
+    if (
+        policy.max_strategy_group_concurrent_tickets
+        != claim.max_strategy_group_concurrent_tickets
+    ):
+        return IssueTicketResult(
+            status=IssueTicketStatus.POLICY_MISSING_OR_STALE,
+            ticket_id=None,
+        )
 
     universe = await uow.signals.get_active_universe_member(
         event_spec_id=ticket.identity.runtime.event_spec_id,
@@ -174,6 +183,22 @@ async def issue_ticket(
     ):
         return IssueTicketResult(
             status=IssueTicketStatus.DUPLICATE_SIGNAL,
+            ticket_id=None,
+        )
+
+    active_strategy_group_ticket_count = (
+        await uow.entry_admission.count_active_strategy_group_tickets(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id=ticket.identity.netting_domain.account_id,
+            strategy_group_id=ticket.identity.runtime.strategy_group_id,
+        )
+    )
+    if (
+        active_strategy_group_ticket_count
+        >= policy.max_strategy_group_concurrent_tickets
+    ):
+        return IssueTicketResult(
+            status=IssueTicketStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED,
             ticket_id=None,
         )
 

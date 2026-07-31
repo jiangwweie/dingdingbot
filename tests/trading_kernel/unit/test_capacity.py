@@ -98,7 +98,36 @@ def test_capacity_claim_rejects_reserved_margin_above_its_frozen_ticket_budget()
         CapacityClaim.model_validate(payload)
 
 
-def _build_decision():
+@pytest.mark.parametrize(
+    ("active_strategy_group_ticket_count", "expected_status"),
+    [
+        (0, CapacityClaimStatus.CLAIMED),
+        (1, CapacityClaimStatus.CLAIMED),
+        (2, CapacityClaimStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED),
+    ],
+)
+def test_capacity_claim_enforces_two_active_tickets_per_strategy_group(
+    active_strategy_group_ticket_count: int,
+    expected_status: CapacityClaimStatus,
+) -> None:
+    _, decision = _build_decision(
+        active_strategy_group_ticket_count=active_strategy_group_ticket_count
+    )
+
+    assert decision.status is expected_status
+    if decision.claim is not None:
+        assert (
+            decision.claim.active_strategy_group_ticket_count_at_claim
+            == active_strategy_group_ticket_count
+        )
+        assert decision.claim.max_strategy_group_concurrent_tickets == 2
+        assert (
+            decision.claim.remaining_strategy_group_slots_at_claim
+            == 2 - active_strategy_group_ticket_count
+        )
+
+
+def _build_decision(*, active_strategy_group_ticket_count: int = 0):
     snapshot = _snapshot()
     ownership = AdmissionOwnership()
     decision = build_capacity_claim(
@@ -113,6 +142,9 @@ def _build_decision():
             gross_risk_at_stop=Decimal(0),
             current_reserved_margin=Decimal(0),
             active_ticket_count=0,
+            active_strategy_group_ticket_count=(
+                active_strategy_group_ticket_count
+            ),
         ),
         instrument_rules=_rules(),
         admission_snapshot=snapshot,
@@ -181,6 +213,7 @@ def _policy() -> CapacityPolicy:
         owner_policy_id="policy-main",
         policy_version=7,
         max_concurrent_tickets=3,
+        max_strategy_group_concurrent_tickets=2,
         max_ticket_stop_risk_fraction=Decimal("0.03"),
         max_gross_stop_risk_fraction=Decimal("0.06"),
         max_ticket_initial_margin_fraction=Decimal("0.45"),

@@ -500,6 +500,7 @@ async def test_readonly_certification_reports_exact_runtime_authority(
         "enabled": True,
         "new_entry_submit_enabled": False,
         "max_concurrent_tickets": 3,
+        "max_strategy_group_concurrent_tickets": 2,
         "max_ticket_stop_risk_fraction": "0.03",
         "max_gross_stop_risk_fraction": "0.06",
         "max_ticket_initial_margin_fraction": "0.45",
