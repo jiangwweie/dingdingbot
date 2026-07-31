@@ -1,10 +1,10 @@
 ---
 title: SOR_V3_STRATEGY_GROUP_CAPACITY_COMPATIBLE_MIGRATION_DESIGN
-status: OWNER_REVIEW
+status: OWNER_APPROVED_FOR_IMPLEMENTATION
 date: 2026-07-31
 ---
 
-# SOR v3、同策略两仓与兼容迁移设计
+# SOR v3、同策略两仓与 Flat 兼容迁移设计
 
 ## 决策
 
@@ -15,7 +15,7 @@ date: 2026-07-31
 3. 仅对新的 v3 Ticket 增加 TP1 前 failed-breakout、Session invalidation 和 time-stop；
 4. 在 Owner Policy、CapacityClaim、Entry Preflight 和 Ticket 原子提交四处共同执行 **同一 StrategyGroup 最多两个 Active Ticket**；
 5. PostgreSQL 从当前 v4 schema 通过增量 Alembic revision 前向升级，不再要求清库重建；
-6. PostgreSQL 中现有 Ticket、事件、Command、Reservation 和 Review lineage 全部保留；部署时不要求保留全部活跃仓位，只允许零活跃仓位或一个经过精确核验的 BNB v2 protected Ticket；
+6. PostgreSQL 中现有 Ticket、事件、Command、Reservation 和 Review lineage 全部保留；当前错误语义 exposure 必须在部署前通过官方 Lifecycle 全部终结，schema migration 只在 exchange/internal flat 状态执行；
 7. 迁移后仍只有一条 Trading Kernel 执行链，不增加双写、旧表读取、schema fallback 或平行 worker。
 
 本次不修改 Owner 已批准的账户资本边界：
@@ -32,19 +32,24 @@ max_leverage = 10
 margin_mode = cross
 ```
 
-### Owner 活跃持仓切换决定
+### Owner 持仓与历史证据决定
 
 **数据库兼容迁移**与**活跃持仓兼容切换**是两个不同边界：
 
 - schema 必须前向迁移，保留全部历史 Ticket 和 append-only lineage；
-- Owner 所指的三笔活跃仓位不需要作为一个整体跨版本保留；
-- 非 BNB 活跃 Ticket 必须在 cutover 前通过官方 Lifecycle 自然终结或受控终结；
-- 若旧 BNB Ticket 在 cutover 时仍然活跃、数量和 Stop/TP1 完整一致且不存在
-  unresolved Command/Incident，可作为唯一 protected Ticket 跨版本保留；
-- 若 BNB 已在 cutover 前自然终结，则直接使用 flat compatible-upgrade 路径，
-  不重新建仓，也不为保仓目的延迟部署；
-- 设计文档不冻结易变 Ticket ID，preflight 必须从 PostgreSQL 与交易所只读事实
-  解析当时唯一的 exact BNB Ticket。
+- Owner 所指的三笔当前 exposure 均来自错误的 SOR v2 持续状态语义，不作为
+  SOR v3 有效入场样本，也不跨 schema 保留为活跃仓位；
+- 部署前先 Entry fenced，再由官方 Lifecycle durable-command path 对仍活跃的
+  exact Ticket 自然或受控终结；
+- cutover 必须等待 position/order external flat、Ticket terminal、Reservation 和
+  Netting Domain released、Settlement/Review complete、零 unresolved Command 和
+  零 open Incident；
+- 之前已经终结且具有 Runner/右尾价值的 BNB Ticket 作为历史证据原样保留，
+  不重新建仓、不重写 Signal/Ticket identity；
+- BNB 的入场只有在历史 closed candle 重建证明首次边沿穿越后，才可计入 SOR v3
+  entry evidence；重建前只计入 Lifecycle/Runner/right-tail evidence；
+- 当前三笔终结后的 Review 必须标记错误入场语义，并从 SOR v3 entry-alpha
+  统计中排除，但继续保留执行、保护、退出和经济结果证据。
 
 本次文档更新不授权立即平仓、撤单或修改任何现有保护订单；实际终结动作仍必须
 经过部署执行计划和官方 durable-command Lifecycle 路径。
@@ -228,17 +233,22 @@ SOR-SHORT v3
 BRF2-SHORT v2
 ```
 
-### Retained lifecycle contract
+### Retired historical contract
 
-新增 `retained_ticket_strategy_contracts()`，仅返回仍可能被未终结 Ticket 引用的 SOR v2 contracts。它们：
+本次不新增 `retained_ticket_strategy_contracts()`。部署 hard gate 已要求所有 SOR v2
+Ticket 在 migration 前 terminal、Settlement/Review complete，因此 target runtime
+不需要加载 v2 detector 或 v2 lifecycle contract。
 
-- 不参与新 Runtime Scope、Universe、Observation 或 Entry；
+PostgreSQL 中现有 v2 Strategy Version、Event Spec、Exit Policy、Signal、Ticket、
+Command、Settlement 和 Review 行继续作为 immutable history 保留。它们：
+
+- 不参与新 Runtime Scope、Universe、Observation、Entry 或 Lifecycle；
 - 不进入 Owner Policy `allowed_event_spec_ids`；
-- 只允许通过 Ticket 冻结的 Event Spec 和 Exit Policy 身份读取；
-- 当前最后一个 v2 Ticket 终结前不可删除；
-- v2 Ticket 全部终结并通过 Review 后，在后续迁移删除生产代码支持。
+- 不被 target seed 删除、覆盖或重新解释；
+- 终结后的通用 Trade Review revision 仍可按 Ticket/Review identity 追加，不需要
+  恢复 v2 detector 或策略执行代码。
 
-这不是 schema fallback 或双执行链，而是 immutable Ticket 的版本化生命周期支持。
+这保留的是数据 lineage，不是旧 runtime compatibility surface。
 
 ### PostgreSQL Registry 状态
 
@@ -248,10 +258,11 @@ BRF2-SHORT v2
 | --- | --- | --- |
 | Strategy Version | `retired` | `active` |
 | Event Spec | `retired` | `active` |
-| Exit Policy | `retired` 但 exact Ticket lookup 可读 | `active` |
+| Exit Policy | `retired`，仅历史审计读取 | `active` |
 | Strategy Universe | 当前 v2 Universe 受控退休 | v3 从 Warming 原子切换 Active |
 | New Signal | 禁止 | 允许 |
-| Existing Ticket lifecycle | 允许 | 允许 |
+| Active Ticket lifecycle | migration 前必须为零 | 允许 |
+| Terminal Review revision | 允许 | 允许 |
 
 `brc_event_specs.event_id` 的全局唯一约束改为：
 
@@ -270,7 +281,10 @@ TradeTicket.exit_policy_id
 TradeTicket.exit_policy_semantic_hash
 ```
 
-现有 Claim/Ticket 通过 Event Spec 精确关联当前已有 Exit Policy 回填。新 Ticket 在 Claim 阶段冻结 exact policy identity/hash；Lifecycle 必须按 Ticket 冻结值读取，不按 Registry 当前 active 状态猜测。
+现有 terminal Claim/Ticket 通过 Event Spec 精确关联当前已有 Exit Policy 回填，
+用于 immutable audit。新 Ticket 在 Claim 阶段冻结 exact policy identity/hash；
+Lifecycle 必须按 Ticket 冻结值读取，不按 Registry 当前 active 状态猜测。这项冻结
+解决未来 v3 -> v4 演进问题，不为已终结 v2 恢复运行时代码。
 
 ## SOR v3 Lifecycle
 
@@ -479,9 +493,10 @@ OR other.terminal_at_ms > claim.created_at_ms
 ```
 
 若同毫秒存在多个 Ticket，则按 `ticket_id` 确定稳定次序。Migration 本身不删除
-或终结任何 Ticket；但 official cutover preflight 只接受零活跃 Ticket，或唯一一个
-符合 protected handover 条件的 BNB Ticket。发现第二个活跃 Ticket 时部署保持
-Entry fenced 并停止，不通过 schema mutation 代替 Lifecycle 终结。
+或终结任何 Ticket；official cutover preflight 必须证明活跃 Ticket、Reservation、
+position、open order、unresolved Command 和 open Incident 全部为零。发现任一活跃
+exposure 时部署保持 Entry fenced 并停止，不通过 schema mutation 代替 Lifecycle
+终结。
 
 ### Downgrade 与 fix-forward
 
@@ -496,7 +511,7 @@ Entry fenced 并停止，不通过 schema mutation 代替 Lifecycle 终结。
 | StrategyGroup 上限 | Owner Policy | Claim read + Ticket issue revalidation |
 | Ticket exit plan | Immutable CapacityClaim/Ticket | Ticket issue transaction |
 | Exchange ENTRY/EXIT | Durable Exchange Command | Command commit 后网络 I/O |
-| Existing v2 lifecycle | Ticket frozen Event/Exit Policy identity | 每次 aggregate reduction |
+| Historical semantic classification | Append-only Trade Review revision | terminal Ticket review transaction |
 | 外部仓位和订单 | Exchange readonly truth | Reconciliation transaction |
 
 ## Runtime 所有权
@@ -517,14 +532,16 @@ Entry fenced 并停止，不通过 schema mutation 代替 Lifecycle 终结。
 
 ### Lifecycle Worker
 
-- 按 Ticket 冻结 Exit Policy 读取 v2/v3 精确行为；
+- 按 Ticket 冻结 Exit Policy 读取当前 active Ticket 的精确行为；
 - v3 POSITION_PROTECTED 读取 closed 15m market facts；
 - 所有 EXIT 必须先产生 durable Command。
 
 ### Reconciliation Worker
 
-- 行为不变；
-- 继续处理 v2/v3 Ticket、未知 outcome、Settlement 和 Review；
+- 继续处理 v3 Ticket、未知 outcome、Settlement 和 Review；
+- migration 前负责把所有 v2 Ticket 推进到 terminal、Settlement/Review complete；
+- migration 后允许对 terminal 历史 Ticket 追加通用 Review revision，但不重新执行
+  v2 策略生命周期；
 - 不负责策略容量或 Session 判断。
 
 ## Failure 语义
@@ -564,7 +581,7 @@ Entry fenced 并停止，不通过 schema mutation 代替 Lifecycle 终结。
 2. v3 TP1 前 Short reclaim 产生 EXIT；
 3. v3 Session end 产生 EXIT；
 4. v3 96-bar time-stop 在 POSITION_PROTECTED 生效；
-5. v2 POSITION_PROTECTED 保持现有行为；
+5. migration/deployment preflight 在任一 v2 active Ticket 存在时 fail-closed；
 6. TP1 fill 和失效同时出现时只产生 Runner transition；
 7. 其他五个 Event 不获得 SOR reclaim/session 行为；
 8. EXIT durable-before-dispatch、rejection、unknown outcome 回归通过。
@@ -587,67 +604,117 @@ Entry fenced 并停止，不通过 schema mutation 代替 Lifecycle 终结。
 生产形状 fixture 必须包含：
 
 - v4 Registry、Policy、Universe；
-- 一个受完整 Stop/TP1 保护的 BNB SOR v2 active Ticket；
-- 两个已经 terminal 的历史 SOR v2 Ticket 及其完整 lineage；
-- Active Budget Reservation；
-- Position/Aggregate；
-- accepted ENTRY、Initial Stop、TP1 Command lineage；
-- active Exchange order references；
+- 一个已经 terminal、具有 TP1 -> Break-even -> structural Runner -> terminal
+  lineage 的历史 BNB SOR v2 Ticket；
+- 三个已经 terminal、被归类为错误持续状态入场的 SOR v2 Ticket；
+- 四个 Ticket 的 Signal、Claim、Reservation、Aggregate、Command、fill、Settlement、
+  Review 和 Owner projection 完整 lineage；
+- released Budget Reservation 和 Netting Domain；
+- 零 active Ticket、Position、open order 和 unresolved Command；
 - 零 open Incident。
 
 升级到 `0002` 后验证：
 
 - 所有 row count 和 exact identity 保留；
 - v2 Ticket policy hash 正确回填；
-- v2 Ticket lifecycle 可继续读取；
+- terminal v2 Ticket 不进入 target Lifecycle actionable selector；
+- 历史 BNB 和三笔错误语义 Ticket 可追加 append-only Review revision；
 - Owner Policy 上限为 2；
 - schema head 和 metadata 一致；
 - v3 Registry 可插入且 v2/v3 同 Event ID 共存；
 - migration 期间 recording venue 收到零 mutation；
 - clean empty database 从 base 一次升级到 head 同样通过。
 
+## 历史证据分类
+
+### 已终结 BNB
+
+历史 BNB Ticket、Review 和经济结果原样保留。通过现有 append-only Trade Review
+revision 增加：
+
+```text
+entry_semantics = unverified_against_sor_v3_edge
+evidence_scope = lifecycle,tp1_transition,break_even,structural_runner,right_tail
+entry_alpha_inclusion = excluded_until_candle_reconstruction
+```
+
+随后使用其 exact Signal occurrence 和历史 closed candle 重建：
+
+- 满足 `previous.close <= range_high && latest.close > range_high` 时，Review 新修订
+  可标记为 `sor_v3_edge_compatible_historical_example`；
+- 不满足时仍保留 Runner/right-tail 价值，但不得进入 SOR v3 entry-alpha 样本。
+
+Review revision 不修改旧 Signal、Ticket、Event、Command 或原 Review row。
+
+### 三笔错误语义 Ticket
+
+三笔 exposure 终结并完成 Review 后，追加或生成如下 decision impact：
+
+```text
+entry_semantics = invalid_sor_v2_persistent_state
+entry_alpha_inclusion = excluded
+execution_evidence = retained
+lifecycle_evidence = retained
+economics_evidence = retained
+```
+
+它们用于量化错误语义成本、滑点、保护、退出和资金占用，不与 SOR v3 新样本混合。
+
 ## 部署设计
 
 ### 正式部署契约演进
 
-当前 `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` 的 protected-ticket handover 明确
-禁止 schema change，因此现有脚本不能直接承载本次发布。实现必须增加一个
-**official protected compatible-upgrade mode**，并同步更新该 CURRENT 合同；禁止
-用手工 SSH、临时 SQL 或复用 flat-only 参数绕过合同。
+当前 `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` 的 regular release 禁止 schema
+change，而 destructive rebuild 会删除有价值的历史 BNB 和其他 Ticket lineage。
+实现必须增加一个 **official flat compatible-upgrade mode**，并同步更新该 CURRENT
+合同；禁止用手工 SSH、临时 SQL 或复用 protected-ticket 参数绕过合同。
 
-该模式的活跃仓位基数被 Owner 收窄为：
+该模式只接受：
 
 ```text
 0 active Ticket
-OR
-1 exact BNB protected Ticket
+0 non-flat position domain
+0 open-order domain
+0 unresolved Command
+0 open Incident
+all historical Tickets terminal and reviewed
 ```
 
-它不是通用多 Ticket 带仓迁移能力；出现任何额外活跃 Ticket 都是 cutover hard
-stop。这个限制属于本次 deployment profile，不改变 Trading Kernel 的多持仓
-架构能力。
+它提供的是 flat 数据保留迁移，不是 active-position schema hot upgrade。
 
 该模式只允许：
 
 - exact certified migration chain 的前向升级；
-- exact named protected Ticket 的行级保留和字段回填；
+- 全部 terminal Ticket/lineage 的行级保留和字段回填；
 - Registry/Owner Policy 的版本化 seed；
 - target release 和 runtime identity 的原子切换。
 
-它仍禁止撤单、移 Stop、改 TP1、平仓、改凭证、改资金、改账户模式、扩大标的
-范围以及在新旧 writer 并存时继续。迁移 preservation certification 和 exchange
-readonly certification 是 Entry 解封前硬门。
+它仍禁止在 migration 内撤单、平仓、修改凭证、改资金、改账户模式、扩大标的
+范围以及在新旧 writer 并存时继续。Exposure closure 必须在 migration 前由官方
+Lifecycle 完成；preservation certification 和 exchange readonly flat
+certification 是 Entry 解封前硬门。
+
+### Exposure closure
+
+1. 在任何仓位释放容量前先写入 Entry fence，禁止旧 SOR v2 再次建立 Ticket；
+2. Observation、Lifecycle 和 Reconciliation 保持运行，Entry 停止；
+3. 从当日 PostgreSQL 与 exchange readonly facts 解析所有 exact active Ticket；
+4. 对仍活跃的错误语义 Ticket 使用官方 `ExitRequested -> durable EXIT Command`
+   路径自然或受控终结；
+5. 不直接撤单、不手工反向下单、不 direct SQL 修改 Ticket/Aggregate；
+6. 等待 exchange flat、零 residual order、内部 Ticket terminal、Reservation/Domain
+   released、Settlement/Review complete；
+7. 历史 BNB terminal Ticket 不执行任何 exchange action，只保留 lineage。
 
 ### Preflight
 
 1. 读取 exact production commit/schema；
 2. 读取 PostgreSQL active Ticket、Command、Incident；
-3. authenticated readonly 验证当前 position/order truth；只接受 flat，或唯一
-   BNB Ticket 与其 position、Stop、TP1 精确一致；
+3. authenticated readonly 验证 position/order truth 为全账户 flat；
 4. 验证无 unknown command outcome；
-5. 写入 new ENTRY fence，不撤销 protection/lifecycle authority；
-6. flat 时记录 empty handover manifest；BNB 仍活跃时记录 exact single-Ticket
-   protected handover manifest。
+5. 验证所有历史 Ticket terminal、Reservation/Domain released、Settlement/Review
+   complete；
+6. Entry fence 保持存在，记录 exact historical-preservation manifest。
 
 ### Migration and release switch
 
@@ -659,7 +726,7 @@ readonly certification 是 Entry 解封前硬门。
 6. runtime identity 原子更新到 target commit/schema/seed；
 7. 切换 release symlink；
 8. 启动 Observation、Lifecycle、Reconciliation；
-9. flat 或 exact BNB protected Ticket readonly certification；
+9. PostgreSQL preservation 与 exchange flat readonly certification；
 10. 安装 v3 Warming Universe；
 11. 完成七标的 certification/warming；
 12. 原子退休 v2 Universe、激活 v3 Universe；
@@ -667,10 +734,10 @@ readonly certification 是 Entry 解封前硬门。
 
 ### Postflight
 
-- flat 路径保持零 position/open order；BNB handover 路径的数量、Stop、TP1 和
-  订单 ID 与 preflight 一致；
-- BNB handover 时其 v2 Ticket、Reservation、Netting Domain 仍 active；历史
-  terminal Ticket lineage 保持不变；
+- exchange 保持零 position/open order；
+- 历史 BNB、三笔错误语义 Ticket 及其 terminal lineage 与 preflight exact digest
+  一致；
+- v2 terminal Ticket 不进入 Lifecycle actionable set；
 - v3 Event/Universe identity 唯一且 Active；
 - 新 Signal 只来自 v3；
 - 同策略两个活跃 Ticket 后 Tradeability 显示 `strategy_group_capacity_exhausted`；
@@ -686,7 +753,7 @@ readonly certification 是 Entry 解封前硬门。
   单 head 前向 revision chain；
 - `docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md` 与 implementation plan：
   completed rebuild 仍是历史事实，但不再禁止未来兼容迁移；
-- `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`：加入 official protected
+- `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`：加入 official flat
   compatible-upgrade mode；
 - `docs/current/MAIN_CONTROL_ROADMAP.md`：只在实际部署后记录 production commit、
   schema head、certification 和 runtime snapshot。
@@ -704,9 +771,13 @@ readonly certification 是 Entry 解封前硬门。
 - Ticket 自己生成 Exposure Episode、忽略 Signal Episode 的实现；
 - 只覆盖第五根立即突破的旧 SOR fixture 语义；
 - 只在 Runner 测试 SOR time-stop 的旧测试语义；
-- “只能有一个 migration 文件”的架构测试。
+- “只能有一个 migration 文件”的架构测试；
+- active-position protected schema handover 和相关 fixture；
+- `retained_ticket_strategy_contracts()` 或任何等价的 v2 runtime compatibility
+  概念。
 
-当前 v2 Ticket 终结前保留其 exact detector-free Registry/Exit Policy lifecycle support。终结后另行删除 retained v2 support，不在本次迁移中提前清除。
+v2 PostgreSQL history 保留；v2 detector、Lifecycle contract 和 active execution
+support 不进入 target runtime。
 
 ## 非目标
 
@@ -729,12 +800,14 @@ readonly certification 是 Entry 解封前硬门。
 1. SOR v3 只在首次边沿突破产生一个 Session Episode；
 2. 持续位于区间外不会重复 Signal；
 3. v3 TP1 前 reclaim、Session 和 time-stop 能产生 durable EXIT；
-4. v2 当前 Ticket 语义、仓位和保护不被重写；
+4. migration 前所有 v2 exposure 通过官方链终结，exchange/internal flat；
 5. 同一 StrategyGroup 最多两个新 Active Ticket；
 6. 其他 StrategyGroup 可使用账户剩余第三槽位；
 7. v4 production-shaped database 可无损升级到 `0002`；
 8. base -> head clean upgrade 和 v4 -> head compatible upgrade 均通过；
 9. targeted、integration、full-chain、Ruff、Mypy、architecture audit 和 `git diff --check` 全部通过；
-10. deployment dry-run 与 protected handover rehearsal 不产生 exchange mutation；
+10. deployment dry-run 与 flat compatible-upgrade rehearsal 不产生 exchange mutation；
 11. 没有 dual write、old-schema reader、fallback 或第二执行链；
-12. direct readonly postflight 能证明当前 Ticket、PG 和 exchange truth 一致。
+12. direct readonly postflight 能证明历史 BNB/错误语义 Ticket lineage 保留、v2
+    actionable Ticket 为零、PG 与 exchange 均 flat；
+13. BNB Review 与三笔错误语义 Review 使用 append-only revision 完成证据隔离。
