@@ -104,6 +104,8 @@ regression -> architecture/static gates**。
 5. pending Batch 与 current certification 各自 independently due；
 6. ready query 连接 exact Active scope 和 fresh eligible certification；
 7. failed Warming 只通过 exact audited abandon CLI 终结。
+8. Registry 版本替换时 bootstrap 以刚安装的 exact `universe_version_id` 跟踪 Warming，
+   允许 bounded status 同时展示旧 Active 与新 Warming。
 
 ### Hard Stop
 

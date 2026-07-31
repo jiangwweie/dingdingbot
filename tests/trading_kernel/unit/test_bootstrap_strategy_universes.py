@@ -3,6 +3,11 @@ from __future__ import annotations
 import pytest
 
 import scripts.trading_kernel.bootstrap_strategy_universes as bootstrap
+from src.trading_kernel.application.read_strategy_universe_status import (
+    StrategyUniverseMemberStatus,
+    StrategyUniverseStatusResult,
+    StrategyUniverseVersionStatus,
+)
 
 
 def test_bootstrap_manifest_is_exactly_the_approved_six_events_and_seven_members() -> None:
@@ -36,6 +41,48 @@ def test_bootstrap_refuses_a_registry_that_no_longer_matches_the_fixed_batch(
 
     with pytest.raises(bootstrap.BootstrapBlocked, match="registry_event_manifest"):
         bootstrap._validate_static_manifest()
+
+
+def test_bootstrap_selects_the_installed_version_during_registry_replacement() -> None:
+    member = StrategyUniverseMemberStatus(
+        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+        certification_status="eligible",
+        warm_ready=True,
+        monitor_status="running",
+        blocker_code=None,
+    )
+    status = StrategyUniverseStatusResult(
+        runtime_profile_id="tiny-live-v1",
+        universes=(
+            StrategyUniverseVersionStatus(
+                event_id="SOR-LONG",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                universe_version_id="universe:sor-long:v2:active",
+                semantic_digest="sha256:" + "1" * 64,
+                lifecycle_state="active",
+                current_generation=1,
+                members=(member,),
+            ),
+            StrategyUniverseVersionStatus(
+                event_id="SOR-LONG",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v3",
+                universe_version_id="universe:sor-long:v3:warming",
+                semantic_digest="sha256:" + "2" * 64,
+                lifecycle_state="warming",
+                current_generation=None,
+                members=(member,),
+            ),
+        ),
+    )
+
+    selected = bootstrap._select_bootstrap_universe(
+        status,
+        event_id="SOR-LONG",
+        universe_version_id="universe:sor-long:v3:warming",
+    )
+
+    assert selected.event_spec_id == "event_spec:SOR-001:SOR-LONG:v3"
+    assert selected.lifecycle_state == "warming"
 
 
 def test_prepare_only_cli_creates_the_batch_without_running_full_bootstrap(

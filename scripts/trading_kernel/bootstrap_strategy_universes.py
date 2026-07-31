@@ -30,6 +30,8 @@ from src.trading_kernel.application.install_strategy_universe import (
 )
 from src.trading_kernel.application.read_strategy_universe_status import (
     StrategyUniverseStatusRequest,
+    StrategyUniverseStatusResult,
+    StrategyUniverseVersionStatus,
     read_strategy_universe_status,
 )
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
@@ -70,6 +72,23 @@ class BootstrapAuthority:
     seed_identity: str
     owner_policy_id: str
     owner_policy_version: int
+
+
+def _select_bootstrap_universe(
+    status: StrategyUniverseStatusResult,
+    *,
+    event_id: str,
+    universe_version_id: str,
+) -> StrategyUniverseVersionStatus:
+    exact = tuple(
+        universe
+        for universe in status.universes
+        if universe.event_id == event_id
+        and universe.universe_version_id == universe_version_id
+    )
+    if len(exact) != 1:
+        raise BootstrapBlocked(f"universe_status_identity_conflict:{event_id}")
+    return exact[0]
 
 
 def _validate_static_manifest() -> None:
@@ -365,14 +384,11 @@ async def bootstrap_strategy_universes(
                             event_id=event_id,
                         ),
                     )
-                exact = tuple(
-                    universe
-                    for universe in status.universes
-                    if universe.event_id == event_id
+                current = _select_bootstrap_universe(
+                    status,
+                    event_id=event_id,
+                    universe_version_id=universe_version_id,
                 )
-                if len(exact) != 1:
-                    raise BootstrapBlocked(f"universe_status_identity_conflict:{event_id}")
-                current = exact[0]
                 if tuple(member.exchange_instrument_id for member in current.members) != INITIAL_MEMBERS:
                     raise BootstrapBlocked(f"universe_member_manifest_mismatch:{event_id}")
                 if current.lifecycle_state == "active":

@@ -66,6 +66,8 @@ venue 中暴露；Tokyo 只验证当前外部事实，不承担程序调试职�
 6. exact Warming 可由官方 abandon CLI 终结并释放 slot；
 7. direct SQL 或匿名 slot clearing 不存在；
 8. repeated bootstrap 对 exact completed state 幂等。
+9. Registry 版本替换期间旧 Active 与新 Warming 可同时出现在 bounded status；bootstrap
+   必须按刚安装的 exact `universe_version_id` 跟踪目标，不得按 `event_id` 假设唯一。
 
 ### 4.3 Candidate Admission
 
