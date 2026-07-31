@@ -13,23 +13,14 @@ Deliver one readable multi-StrategyGroup, multi-position trading system from
 natural market Observation through terminal Review, with one clean PostgreSQL
 authority and one Tokyo runtime.
 
-## Active Operability Repair
+## Completed Operability Baseline
 
-The completed P0 baseline does not certify the newly identified scheduling,
-certification, flat-promotion, deployment-recovery, or multi-Ticket
-capacity defects. Their target design, production-shaped verification, and
-ordered execution are owned by:
-
-```text
-docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md
-docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md
-docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md
-```
-
-For those affected subjects, the repair documents own the implementation
-target while current tracked code and direct runtime facts remain higher
-authority until the repair passes acceptance. Completed-baseline statements in
-this plan must not be used as evidence that the active repair is already done.
+Scheduling fairness, continuous certification, flat Entry Promotion,
+phase-aware deployment recovery, StrategyUniverse batch bootstrap, SOR v3, and
+multi-Ticket capacity are implemented, certified, and deployed. Their stable
+semantics belong to the P0 design, experiment profile, and Tokyo deployment
+contract. Exact production identity and the remaining natural-Ticket acceptance
+belong only to `MAIN_CONTROL_ROADMAP.md`.
 
 ## Architecture
 
@@ -65,7 +56,7 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| PostgreSQL revision chain | Complete locally | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity`; single head, empty upgrade, production-shaped preservation and forward-only downgrade rejection certified |
+| PostgreSQL revision chain | Complete and deployed | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity`; single head, empty upgrade, production-shaped preservation and forward-only downgrade rejection certified |
 | Six Strategy Events | Complete | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, BRF2-SHORT |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, deterministic identity, Live/Replay parity |
 | Arbitration and CapacityClaim | Complete | Deterministic priority, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
@@ -74,20 +65,20 @@ settle, and review concurrently.
 | Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |
 | Reconciliation, Settlement, Review | Complete | Exact typed Binance order identities, append-only Review revisions, explicit funding availability, and atomic terminal Owner projection |
 | Runtime ownership | Complete | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
-| StrategyUniverse local capability | Complete locally, not deployed | Versioned 1..10 member pools, readonly certification, Warming with zero Signal, automatic atomic activation, frozen Ticket lineage, bounded CLI and PostgreSQL evidence |
+| StrategyUniverse capability | Complete and deployed | Versioned 1..10 member pools, readonly certification, Warming with zero Signal, automatic atomic activation, frozen Ticket lineage, bounded CLI and PostgreSQL evidence |
 
 Exact production identity, certification, runtime state, and remaining progress
 belong only to `MAIN_CONTROL_ROADMAP.md`.
 
-## StrategyUniverse Repair Test Specification
+## StrategyUniverse Verification Contract
 
-The repair is accepted locally only when every behavior below has direct,
-automated evidence. These are release predicates, not runtime inputs and not a
-substitute for action-time Tokyo readonly facts.
+Every behavior below requires direct automated evidence. These are release
+predicates, not runtime inputs and not a substitute for action-time Tokyo
+readonly facts.
 
 | Boundary | Required local evidence | Rejected outcome |
 | --- | --- | --- |
-| Revision integrity | Disposable PostgreSQL upgrades from empty base to the single head and from production-shaped v4 to v5; exact v4-column preservation digest matches | A branch, schema fallback, old-table reader or changed historical value is accepted |
+| Revision integrity | Disposable PostgreSQL upgrades from empty base to the single head and from production-shaped `0001` to `0002`; exact `0001`-column preservation digest matches | A branch, schema fallback, old-table reader or changed historical value is accepted |
 | Batch bootstrap | The six Registry Events receive the approved fixed initial member set in one bounded run; no operator configures members one Event at a time | A second Warming Universe is required for every Event or member |
 | Warming and readiness | Warming performs readonly market/account certification, produces zero StrategySignal, preserves observation time separately from certification time, and activates only after every member passes | Warming can submit an order, stale evidence activates, or a failed member becomes eligible |
 | Concurrency and recovery | One global Warming slot is enforced; the official `abandon_strategy_universe.py` CLI permanently abandons one exact Warming Universe with an audited reason so the slot is released | A failed Warming state blocks all later deployment work, is changed by direct SQL, or can be silently reused |

@@ -22,9 +22,6 @@ CURRENT_DOCUMENT_ALLOWLIST = {
     "STRATEGY_ENGINEERING_INTAKE_CONTRACT.md",
     "STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md",
     "TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
-    "TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
-    "TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
-    "TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
     "TRADEABILITY_DECISION_CONTRACT.md",
     "strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md",
 }
@@ -36,12 +33,6 @@ ENTRY_DOCUMENTS = (
     "MEMORY.md",
     "docs/README.md",
 )
-ACTIVE_OPERABILITY_REPAIR_DOCUMENTS = (
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
-)
-
 RETIRED_AUTHORITY_MARKERS = (
     "DUAL_POSITION_",
     "P0-ACH",
@@ -50,6 +41,14 @@ RETIRED_AUTHORITY_MARKERS = (
     "brc_account_risk_policy_current",
     "src/application/action_time",
     "src/application/runtime_execution",
+    "Active operability-repair",
+    "Active Operability Repair",
+    "Complete locally, not deployed",
+    "pre-repair deployed model",
+    "becomes production truth only after",
+    "after the active operability repair",
+    "v4 -> v5",
+    "v4-to-v5",
 )
 
 CURRENT_RUNTIME_STATE_DOCUMENT = "docs/current/MAIN_CONTROL_ROADMAP.md"
@@ -60,25 +59,17 @@ VOLATILE_STATE_FREE_DOCUMENTS = (
     "docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md",
     "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md",
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
 )
 RUNTIME_MODEL_DOCUMENTS = (
     CURRENT_RUNTIME_STATE_DOCUMENT,
     "docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md",
     "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md",
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
 )
 SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS = (
     "docs/current/PROJECT_INFORMATION_ARCHITECTURE.md",
     "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md",
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
-    "docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
 )
 
 CURRENT_ACCEPTANCE_STAGE = "Current live acceptance"
@@ -161,15 +152,23 @@ def test_entry_documents_reference_only_existing_current_documents() -> None:
     )
 
 
-def test_active_operability_repair_documents_are_entry_references() -> None:
-    for relative_path in ("AGENTS.md", "README.md", "docs/README.md"):
+def test_completed_operability_repair_is_not_current_authority() -> None:
+    completed_documents = {
+        "TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md",
+        "TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md",
+        "TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md",
+    }
+    actual = {
+        path.name
+        for path in CURRENT_DOCS_ROOT.rglob("*.md")
+    }
+
+    assert completed_documents.isdisjoint(actual)
+
+    for relative_path in ENTRY_DOCUMENTS:
         source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
-        missing = [
-            document
-            for document in ACTIVE_OPERABILITY_REPAIR_DOCUMENTS
-            if document not in source
-        ]
-        assert not missing, f"{relative_path} is missing repair references: {missing}"
+        for document in completed_documents:
+            assert document not in source
 
 
 def test_current_authority_does_not_reintroduce_retired_execution_semantics() -> None:
@@ -252,6 +251,26 @@ def test_runtime_state_document_matches_the_deployed_kernel() -> None:
     assert "765 passed" not in source
     assert "no Tokyo mutation claimed" not in source
     assert RETIRED_ACCEPTANCE_TICKET not in source
+    assert "| Integration branch | `dev` |" in source
+    assert "codex/sor-v3-strategy-capacity-migration-20260731" not in source
+
+
+def test_current_authority_distinguishes_data_migration_from_runtime_compatibility() -> None:
+    required_meaning = {
+        "AGENTS.md": (
+            "preserve certified terminal lineage",
+            "runtime compatibility adapters remain forbidden",
+        ),
+        "docs/current/AI_AGENT_CONSTRAINTS.md": (
+            "preserve certified terminal lineage",
+            "runtime compatibility adapters remain forbidden",
+        ),
+    }
+
+    for relative_path, markers in required_meaning.items():
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        missing = [marker for marker in markers if marker not in source]
+        assert not missing, f"{relative_path} lacks migration boundary: {missing}"
 
 
 def test_stable_documents_do_not_duplicate_volatile_runtime_facts() -> None:

@@ -29,7 +29,7 @@ different Netting Domains progress concurrently.
 
 | Area | Verified state |
 | --- | --- |
-| Branch | `codex/sor-v3-strategy-capacity-migration-20260731` |
+| Integration branch | `dev` |
 | Production commit | `25933926db75f79878bd281746be79b7e5f6cde1` |
 | Production tag | `tokyo-runtime-2026.07.31.1`; annotated, immutable, and verified on `origin` |
 | Production release | `/opt/brc/releases/brc-trading-kernel-25933926db75` |

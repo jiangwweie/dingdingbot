@@ -65,10 +65,10 @@ The official bounded sequence is:
 2. Stage the exact target release and run source-schema plus exchange readonly
    preflight.
 3. Fence Entry, stop all four writers and atomically repeat the flat checks.
-4. Compute and persist a canonical SHA-256 manifest over every v4 table's exact
-   v4 columns; `alembic_version` and v5-only columns are excluded.
+4. Compute and persist a canonical SHA-256 manifest over every frozen `0001`
+   table and column; `alembic_version` and `0002`-only columns are excluded.
 5. Run the single certified Alembic revision without `DROP SCHEMA`.
-6. Recompute the same v4-column manifest and require an exact digest match.
+6. Recompute the same frozen `0001` manifest and require an exact digest match.
 7. In one PostgreSQL transaction, retire SOR v2 Registry authority, activate
    SOR v3, create the next Owner Policy version with unchanged capital limits,
    move scope to v3 and rotate schema/commit/seed capability identity.
@@ -83,7 +83,8 @@ The official bounded sequence is:
 The journaled cutover state machine and `deploy_tokyo_release.py` use the same
 gates and authority transition. They must not evolve into different migration
 semantics. A failure after migration remains Entry-fenced and proceeds by
-target-schema fix-forward; the v4 runtime is never restarted against v5.
+target-schema fix-forward; the `0001` runtime is never restarted against
+`0002`.
 
 ## StrategyUniverse Deployment Gate
 

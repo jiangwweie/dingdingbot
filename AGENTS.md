@@ -1,6 +1,6 @@
 # AGENTS.md - BRC Trading Kernel Operating Guide
 
-Last updated: 2026-07-30
+Last updated: 2026-07-31
 Scope: Tokyo Trading Kernel engineering and operation
 
 ## Authority Order
@@ -21,9 +21,6 @@ docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
 docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md
 docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md
-docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md
-docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md
-docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md
 docs/current/MAIN_CONTROL_ROADMAP.md
 docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md
 docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
@@ -132,7 +129,8 @@ create zero JSON/Markdown files.
 
 - Use test-first red/green/refactor for every production behavior.
 - Delete tests that encode retired semantics; never weaken the new model to
-  satisfy them.
+  satisfy them. Data-compatible forward migrations preserve certified terminal
+  lineage; runtime compatibility adapters remain forbidden.
 - Keep domain code pure and free of SQLAlchemy, venue clients, filesystem,
   subprocess, and web frameworks.
 - Use `decimal.Decimal` for financial values.
@@ -173,19 +171,22 @@ Do not write to the exchange when any of these is true:
 - old and new writers are both capable of mutation;
 - the requested action would bypass the official kernel path.
 
-## Cutover Rule
+## Migration And Cutover Rule
 
-Cutover is destructive and forward-only after acceptance. For the completed
-Tokyo rebuild, the Owner explicitly authorized deleting the BRC application,
-container, PostgreSQL database data, releases, and services without backup,
-while preserving every non-quantitative service. The rebuilt baseline is now
-the only runtime authority; retired program or database generations must not be
-restored.
+The initial Tokyo rebuild was a completed, explicitly authorized destructive
+replacement without a BRC backup. It is historical evidence, not the default
+for later releases. Current schema evolution is stopped, flat, forward-only,
+and preservation-gated: exact migrations preserve certified terminal lineage,
+while active-position handover, dual writes, old-schema readers, fallback, and
+runtime compatibility adapters remain forbidden. Retired program or database
+generations must not be restored as runtime authority.
 
 ## Git Discipline
 
 - `dev` is integration, not a scratch branch.
 - Rebuild work remains on focused `codex/*` branches until reviewed.
+- Strategy research and US-equity branches remain independent product lines and
+  are not merged into `dev` without an explicit Owner integration decision.
 - Preserve unrelated user changes.
 - Do not commit generated runtime output.
 - Do not claim completion before every current gate in

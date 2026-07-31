@@ -120,8 +120,8 @@ risk target, while a third uses only the remaining risk and margin.
 `max_concurrent_tickets` remains a concurrency ceiling rather than a promise of
 three equal positions. Current Reservations, available margin, the profile
 limits, Initial Stop risk, venue minimums, and liquidation distance still bound
-every Ticket. These explicit ticket/gross limits become production truth only
-after the active operability repair passes its certified schema deployment.
+every Ticket. These explicit ticket/gross limits are part of the deployed
+Policy v3 authority recorded by `MAIN_CONTROL_ROADMAP.md`.
 
 ## Transaction And Exchange Model
 
@@ -167,15 +167,14 @@ and schema. A mismatch creates a runtime-scoped Incident and fences that writer;
 readonly observation remains available and the exact certified writer may resume
 durable safety work for already-exposed Tickets.
 
-## Destructive Cutover Model
+## Migration And Historical Cutover Model
 
-For this cutover, the Owner explicitly authorized no backup of BRC program or
-database state. Old BRC services, containers, releases, and PostgreSQL data were
-deleted, including the application data volume, then rebuilt from committed
-code, the tracked schema head, and deterministic Registry/Policy seed. Non-quantitative
-programs and their data were outside scope and had to remain unaffected.
-
-This was a forward-only replacement. The retired application and schema are
+The initial rebuild used an explicitly authorized no-backup replacement of BRC
+program and database state. That completed operation is historical evidence,
+not the default release model. Current schema evolution uses exact, stopped,
+flat, forward-only migrations that preserve certified terminal lineage. Active
+position handover, dual writes, old-schema readers, fallback, and runtime
+compatibility adapters remain forbidden. Retired applications and schemas are
 not rollback authorities.
 
 ## Acceptance

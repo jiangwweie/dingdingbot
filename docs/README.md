@@ -11,9 +11,6 @@ Status: current Trading Kernel authority index
 | `docs/current/AI_AGENT_CONSTRAINTS.md` | Agent implementation and safety constraints |
 | `docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md` | Approved target architecture and invariants |
 | `docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md` | Implementation stages and acceptance checklist |
-| `docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md` | Active repair architecture and defect closure |
-| `docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md` | Production-shaped local verification and Tokyo readonly acceptance |
-| `docs/current/TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md` | Ordered task cards, flat compatible-upgrade procedure, and phase-aware recovery |
 | `docs/current/MAIN_CONTROL_ROADMAP.md` | Sole current production identity, measured state, and critical path |
 | `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` | Regular release, recovery, and resource contract |
 | `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Product objective, experiment-capital premise, and order-capable profile |
@@ -31,9 +28,8 @@ architecture, implementation, and deployment documents link to that snapshot
 instead of copying its commit, tag, certification count, Ticket identity, or
 transient stage.
 
-The P0 rebuild documents own the completed baseline and unchanged kernel
-invariants. The three operability-repair documents own the active target,
-verification, and execution sequence for the identified scheduling,
-certification, promotion, deployment, and capacity defects. Until that repair
-is implemented and certified, current tracked code and direct runtime facts
-remain higher authority than the target design.
+The P0 rebuild documents own the completed implementation baseline, stable
+kernel invariants, and remaining acceptance checklist. Completed repair task
+cards are historical material outside `docs/current`; their stable scheduling,
+certification, promotion, deployment, migration, and capacity semantics are
+consolidated into the P0 design, experiment profile, and deployment contract.

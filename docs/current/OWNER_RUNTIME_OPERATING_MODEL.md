@@ -1,7 +1,7 @@
 ---
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
-last_verified: 2026-07-30
+last_verified: 2026-07-31
 ---
 
 # Owner Runtime Operating Model
@@ -66,7 +66,7 @@ same instrument. New ENTRY admission remains globally serialized. Capacity is
 controlled by current Owner budget policy, not by a hard-coded two-position
 architecture.
 
-The Owner-approved operability-repair policy allows up to three concurrent
+The current Owner-approved production policy allows up to three concurrent
 Tickets with a `0.03` per-Ticket planned stop-risk ceiling, `0.06` gross planned
 stop-risk ceiling, `0.45` per-Ticket initial-margin ceiling, `0.90` gross
 initial-margin utilization ceiling, maximum `10` leverage, and `cross` margin.
@@ -76,7 +76,7 @@ adopts and revalidates that fact without mutating leverage.
 Capacity is demand-based within those ticket and gross ceilings. It normally
 allows two full-risk Tickets and permits a third only when earlier Tickets leave
 enough risk and margin; three equal positions are not promised. The approved
-policy becomes production truth only after the repair's code, schema, seed,
-certification and Tokyo cutover pass. Disabling `new_entry_submit_enabled`
-stops only new ENTRY; it does not remove protection or recovery authority from
-a Ticket that already has exchange exposure.
+Policy v3 is the current production truth recorded by `MAIN_CONTROL_ROADMAP.md`.
+Disabling `new_entry_submit_enabled` stops only new ENTRY; it does not remove
+protection or recovery authority from a Ticket that already has exchange
+exposure.

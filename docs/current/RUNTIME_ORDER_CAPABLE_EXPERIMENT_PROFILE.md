@@ -48,7 +48,7 @@ finite `max_concurrent_tickets`, gross notional, risk, margin, or leverage cap.
 Those values are seeded from the current approved policy and must not be
 invented or expanded during cutover.
 
-The Owner-approved operability-repair profile is:
+The current Owner-approved production profile is:
 
 ```text
 max_concurrent_tickets = 3
@@ -74,11 +74,10 @@ Long/Short and instruments within the same StrategyGroup share the two-Ticket
 limit; another StrategyGroup may use the account's remaining third slot when
 risk and margin remain available.
 
-The pre-repair deployed model still uses `planned_stop_risk_fraction` and one
-gross initial-margin utilization value without the approved explicit ticket and
-gross boundaries. Until the repair code, clean schema, seed, certification and
-Tokyo cutover complete, current tracked code, PostgreSQL and exchange facts
-remain the authority for what production actually enforces.
+The retired policy model that lacked explicit per-Ticket and gross boundaries
+is historical only. Current tracked code, PostgreSQL and exchange facts remain
+the action-time authority for what production enforces; exact deployed identity
+and measured state belong only to `MAIN_CONTROL_ROADMAP.md`.
 
 The `new_entry_submit_enabled` setting controls only new ENTRY; it never removes
 protection, controlled flatten, reconciliation, Settlement, or Review authority

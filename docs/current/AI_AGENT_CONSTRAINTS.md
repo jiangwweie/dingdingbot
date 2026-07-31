@@ -1,20 +1,22 @@
 ---
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
-last_verified: 2026-07-29
+last_verified: 2026-07-31
 ---
 
 # AI Agent Constraints
 
 ## Objective
 
-Agents must move the repository toward one production-capable multi-position
-kernel, one clean PostgreSQL baseline, one Tokyo deployment, and one controlled
-real-funds terminal lifecycle.
+Agents must preserve one production-capable multi-position kernel, one
+unbranched PostgreSQL authority, one Tokyo runtime, and complete the remaining
+controlled real-funds terminal acceptance.
 
 ## Required Engineering Posture
 
-- Prefer deletion and clean replacement over compatibility.
+- Prefer deletion and clean replacement for wrong runtime semantics. Exact
+  data-compatible forward migrations preserve certified terminal lineage;
+  runtime compatibility adapters remain forbidden.
 - Delete or rewrite code, tests, migrations, fixtures, and deployment branches
   whose semantics are wrong or retired. Historical behavior is not a reason to
   add compatibility debt, preserve misleading names, or weaken current
@@ -86,8 +88,8 @@ Completion requires current evidence for:
 4. durable command, protection, exit, recovery, reconciliation, settlement,
    and review;
 5. zero retired production imports and current document references;
-6. one clean schema baseline;
-7. crash-safe and resume-safe destructive cutover;
+6. one unbranched forward schema authority;
+7. crash-safe and resume-safe regular release and flat compatible upgrade;
 8. exact Tokyo commit/schema identity;
 9. one terminal controlled real-funds Ticket;
 10. a production-shaped local clean-rebuild rehearsal;

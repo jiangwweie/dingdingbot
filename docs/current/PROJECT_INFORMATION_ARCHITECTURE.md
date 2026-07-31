@@ -39,9 +39,6 @@ owner; other documents summarize stable meaning and link to that owner.
 | Strategy right-tail evaluation | `STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md` | Medium | Link to the evaluation contract |
 | Target architecture and invariants | `P0_TRADING_KERNEL_REBUILD_DESIGN.md` | Low | Reuse the canonical chain only |
 | Implementation stages and acceptance checklist | `P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md` | Medium | Do not treat as runtime state |
-| Active operability-repair architecture and decisions | `TRADING_KERNEL_OPERABILITY_REPAIR_DESIGN.md` | Medium | Own only the repair target; do not restate production state |
-| Operability-repair verification | `TRADING_KERNEL_OPERABILITY_REPAIR_TEST_SPEC.md` | Medium | Own RED/GREEN, local rehearsal, and readonly acceptance |
-| Operability-repair task cards and deployment sequence | `TRADING_KERNEL_OPERABILITY_REPAIR_EXECUTION_PLAN.md` | Medium | Own order, dependencies, hard stops, and phase recovery |
 | Current commit, tag, certification, runtime state, and blockers | `MAIN_CONTROL_ROADMAP.md` | High | Link; never copy current values |
 | Deployment procedure and resource limits | `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` | Medium | Do not copy current runtime values |
 | Entry navigation | repository `README.md` and `docs/README.md` | Low | Stay short and point to owners |
@@ -51,14 +48,12 @@ identity and measured runtime snapshots. Stable documents must not embed a
 production SHA, dated production tag, exact test count, Ticket ID, or transient
 acceptance-stage name.
 
-The P0 rebuild documents remain the completed baseline authority. The active
-operability-repair design supersedes only the affected target semantics for
-scheduling, certification, Entry promotion, deployment recovery, and capacity.
-It does not claim those semantics are already implemented. Current tracked code
-and direct runtime facts remain higher authority until implementation and
-certification are complete. After final acceptance, the repair's stable results
-must be consolidated into the P0 design, experiment profile, and deployment
-contract; completed task-card material may then be retired from `docs/current`.
+The P0 rebuild documents own the completed implementation baseline and the
+remaining acceptance checklist. Stable scheduling, certification, Entry
+promotion, deployment recovery, migration, and capacity semantics are already
+consolidated into the P0 design, experiment profile, and deployment contract.
+Completed repair task cards are historical material and must not return to
+`docs/current` as a second authority.
 
 ## Current Runtime Authority
 
@@ -71,10 +66,10 @@ is one unbranched forward Alembic chain:
 ```
 
 `0001` is a frozen historical schema snapshot; current runtime metadata owns
-the single head. The exact flat v4 -> v5 operation may preserve terminal history
-through the certified migration, but no runtime reads the old schema, performs
-dual writes, or falls back to v4. The deployed schema identity remains a
-volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.
+the single head. The exact flat `0001 -> 0002` operation preserves certified
+terminal history through the migration, but no runtime reads the old schema,
+performs dual writes, or falls back to `0001`. The deployed schema identity
+remains a volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.
 
 Strategy semantics live in the Registry, while concrete instrument membership,
 certification, warming, current activation, and frozen Signal/Ticket lineage
