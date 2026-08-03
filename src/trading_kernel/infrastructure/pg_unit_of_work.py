@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncTransactio
 from typing_extensions import Self
 
 from src.trading_kernel.application.ports import (
+    AdmissionDecisionRepository,
     AggregateRepository,
     AggregateVersionConflict,
     BudgetRepository,
@@ -72,6 +73,7 @@ from src.trading_kernel.domain.incident_blocking import (
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
 from src.trading_kernel.infrastructure.pg_repositories import (
+    PostgresAdmissionDecisionRepository,
     PostgresAggregateRepository,
     PostgresBudgetRepository,
     PostgresCapacityClaimRepository,
@@ -109,6 +111,7 @@ class PostgresKernelUnitOfWork:
     positions: PositionRepository
     reviews: ReviewRepository
     entry_admission: EntryAdmissionRepository
+    admission_decisions: AdmissionDecisionRepository
     signals: SignalRepository
     strategy_registry: StrategyRegistryRepository
     strategy_universes: StrategyUniverseRepository
@@ -134,6 +137,9 @@ class PostgresKernelUnitOfWork:
         self.positions = PostgresPositionRepository(self._connection)
         self.reviews = PostgresReviewRepository(self._connection)
         self.entry_admission = PostgresEntryAdmissionRepository(self._connection)
+        self.admission_decisions = PostgresAdmissionDecisionRepository(
+            self._connection
+        )
         self.signals = PostgresSignalRepository(self._connection)
         self.strategy_registry = PostgresStrategyRegistryRepository(self._connection)
         self.strategy_universes = PostgresStrategyUniverseRepository(self._connection)

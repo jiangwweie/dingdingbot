@@ -26,6 +26,7 @@ from src.trading_kernel.application.reconciliation_scheduler import (
     ReconciliationActionCandidate,
     ReconciliationActionKind,
 )
+from src.trading_kernel.domain.admission_decision import AdmissionDecision
 from src.trading_kernel.domain.aggregate import (
     RECONCILIATION_POSITION_STATUSES,
     AggregateStatus,
@@ -74,6 +75,7 @@ from src.trading_kernel.domain.post_fill_risk import (
 from src.trading_kernel.domain.ticket import EntryOrderType, TicketStatus, TradeTicket
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
+    admission_decisions,
     budget_reservations,
     capacity_claims,
     entry_lane_current,
@@ -1021,6 +1023,50 @@ class PostgresCapacityClaimRepository:
         )
         row = result.mappings().one_or_none()
         return None if row is None else _capacity_claim_from_row(row)
+
+
+class PostgresAdmissionDecisionRepository:
+    def __init__(self, connection: AsyncConnection) -> None:
+        self._connection = connection
+
+    async def add(self, decision: AdmissionDecision) -> None:
+        await self._connection.execute(
+            sa.insert(admission_decisions).values(
+                _admission_decision_values(decision)
+            )
+        )
+
+    async def get_for_signal(
+        self,
+        signal_event_id: str,
+    ) -> AdmissionDecision | None:
+        row = (
+            await self._connection.execute(
+                sa.select(admission_decisions).where(
+                    admission_decisions.c.signal_event_id == signal_event_id
+                )
+            )
+        ).mappings().one_or_none()
+        return None if row is None else _admission_decision_from_row(row)
+
+    async def list_recent(
+        self,
+        *,
+        limit: int,
+    ) -> tuple[AdmissionDecision, ...]:
+        if limit <= 0 or limit > 256:
+            raise ValueError("AdmissionDecision limit must be between 1 and 256")
+        rows = (
+            await self._connection.execute(
+                sa.select(admission_decisions)
+                .order_by(
+                    admission_decisions.c.decided_at_ms.desc(),
+                    admission_decisions.c.admission_decision_id,
+                )
+                .limit(limit)
+            )
+        ).mappings()
+        return tuple(_admission_decision_from_row(row) for row in rows)
 
 
 class PostgresIncidentRepository:
@@ -2145,6 +2191,66 @@ def _aggregate_values(
         "review_id": aggregate.review_id,
         "updated_at_ms": updated_at_ms or aggregate.ticket.created_at_ms,
     }
+
+
+def _admission_decision_values(
+    decision: AdmissionDecision,
+) -> dict[str, object]:
+    candidate_set = decision.candidate_set.model_dump(mode="json")
+    return {
+        "admission_decision_id": decision.admission_decision_id,
+        "signal_event_id": decision.signal_event_id,
+        "exposure_episode_id": decision.exposure_episode_id,
+        "strategy_group_id": decision.strategy_group_id,
+        "strategy_version_id": decision.strategy_version_id,
+        "event_spec_id": decision.event_spec_id,
+        "universe_version_id": decision.universe_version_id,
+        "universe_semantic_digest": decision.universe_semantic_digest,
+        "runtime_profile_id": decision.runtime_profile_id,
+        "runtime_scope_id": decision.runtime_scope_id,
+        "runtime_scope_version": decision.runtime_scope_version,
+        "owner_policy_id": decision.owner_policy_id,
+        "owner_policy_version": decision.owner_policy_version,
+        "venue_id": decision.venue_id,
+        "account_id": decision.account_id,
+        "exchange_instrument_id": decision.exchange_instrument_id,
+        "position_side": decision.position_side,
+        "exposure_family": decision.exposure_family,
+        "candidate_rank": decision.candidate_rank,
+        "candidate_count": candidate_set["candidate_count"],
+        "candidate_set_digest": candidate_set["candidate_set_digest"],
+        "candidate_set_summary": candidate_set["candidate_set_summary"],
+        "portfolio_usage": decision.portfolio_usage.model_dump(mode="json"),
+        "decision_status": decision.decision_status.value,
+        "first_blocker": decision.first_blocker,
+        "binding_constraint": decision.binding_constraint,
+        "capacity_claim_id": decision.capacity_claim_id,
+        "ticket_id": decision.ticket_id,
+        "entry_admission_snapshot_digest": (
+            decision.entry_admission_snapshot_digest
+        ),
+        "decision_digest": decision.decision_digest,
+        "decided_at_ms": decision.decided_at_ms,
+    }
+
+
+def _admission_decision_from_row(row: RowMapping) -> AdmissionDecision:
+    return AdmissionDecision.model_validate(
+        {
+            **dict(row),
+            "candidate_set": {
+                "ranked_signal_event_ids": tuple(
+                    item["signal_event_id"]
+                    for item in row["candidate_set_summary"]
+                ),
+                "candidate_count": int(row["candidate_count"]),
+                "candidate_set_digest": str(row["candidate_set_digest"]),
+                "candidate_set_summary": row["candidate_set_summary"],
+            },
+            "portfolio_usage": row["portfolio_usage"],
+        },
+        extra="ignore",
+    )
 
 
 def _aggregate_from_row(

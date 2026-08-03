@@ -21,7 +21,16 @@ from src.trading_kernel.application.ports import KernelUnitOfWork
 from src.trading_kernel.domain.account_entry_health import (
     classify_account_entry_health,
 )
-from src.trading_kernel.domain.arbitration import rank_candidates
+from src.trading_kernel.domain.admission_decision import (
+    AdmissionDecisionStatus,
+    AdmissionPortfolioUsage,
+    CandidateSetSnapshot,
+    freeze_admission_decision,
+)
+from src.trading_kernel.domain.arbitration import (
+    freeze_candidate_set,
+    rank_candidates,
+)
 from src.trading_kernel.domain.capacity import (
     CapacityClaimStatus,
     CapacityInstrumentRules,
@@ -32,6 +41,10 @@ from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSna
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
+)
+from src.trading_kernel.domain.strategy_registry import (
+    ExposureFamily,
+    strategy_contract_for,
 )
 from src.trading_kernel.domain.ticket import EntryOrderType
 
@@ -68,6 +81,19 @@ class IssueReadySignalRequest(BaseModel):
         return value
 
 
+class _AdmissionDecisionContext(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    candidate_set: CandidateSetSnapshot
+    exposure_family: ExposureFamily
+    runtime_profile_id: str
+    owner_policy_id: str
+    owner_policy_version: int
+    venue_id: str
+    account_id: str
+    portfolio_usage: AdmissionPortfolioUsage
+
+
 async def issue_ready_signal(
     uow: KernelUnitOfWork,
     request: IssueReadySignalRequest,
@@ -77,6 +103,9 @@ async def issue_ready_signal(
             now_ms=request.now_ms,
             limit=64,
         )
+    )
+    candidate_set = (
+        None if not candidates else freeze_candidate_set(candidates)
     )
     if not candidates or candidates[0].signal.signal_event_id != request.signal_event_id:
         requested_signal = await uow.signals.get(request.signal_event_id)
@@ -213,6 +242,25 @@ async def issue_ready_signal(
             active_strategy_group_ticket_count
         ),
     )
+    contract = strategy_contract_for(signal.event_spec_id)
+    admission_context = _AdmissionDecisionContext(
+        candidate_set=(
+            candidate_set
+            if candidate_set is not None
+            else freeze_candidate_set(candidates)
+        ),
+        exposure_family=contract.exposure_family,
+        runtime_profile_id=profile.runtime_profile_id,
+        owner_policy_id=policy.owner_policy_id,
+        owner_policy_version=policy.policy_version,
+        venue_id=profile.venue_id,
+        account_id=profile.account_id,
+        portfolio_usage=_portfolio_usage(
+            policy=policy,
+            usage=usage,
+            admission_snapshot=request.admission_snapshot,
+        ),
+    )
     domain = NettingDomain(
         venue_id=profile.venue_id,
         account_id=profile.account_id,
@@ -288,6 +336,11 @@ async def issue_ready_signal(
             signal,
             issue_status,
             request.now_ms,
+            admission_context=admission_context,
+            entry_admission_snapshot_digest=(
+                request.admission_snapshot.digest()
+            ),
+            binding_constraint=decision.status.value,
         )
 
     result = await issue_ticket(
@@ -299,6 +352,30 @@ async def issue_ready_signal(
         ),
     )
     if result.status is IssueTicketStatus.ISSUED:
+        if result.ticket_id is None:
+            raise RuntimeError("issued Ticket is missing its identity")
+        await uow.admission_decisions.add(
+            freeze_admission_decision(
+                signal=signal,
+                candidate_set=admission_context.candidate_set,
+                exposure_family=admission_context.exposure_family,
+                runtime_profile_id=admission_context.runtime_profile_id,
+                owner_policy_id=admission_context.owner_policy_id,
+                owner_policy_version=admission_context.owner_policy_version,
+                venue_id=admission_context.venue_id,
+                account_id=admission_context.account_id,
+                portfolio_usage=admission_context.portfolio_usage,
+                decision_status=AdmissionDecisionStatus.ADMITTED,
+                first_blocker=None,
+                binding_constraint=None,
+                capacity_claim_id=decision.claim.capacity_claim_id,
+                ticket_id=result.ticket_id,
+                entry_admission_snapshot_digest=(
+                    request.admission_snapshot.digest()
+                ),
+                decided_at_ms=request.now_ms,
+            )
+        )
         await uow.signals.save_readiness(
             runtime_scope_id=signal.runtime_scope_id,
             readiness_state="processing",
@@ -318,6 +395,10 @@ async def _refuse(
     signal,
     status: IssueTicketStatus,
     now_ms: int,
+    *,
+    admission_context: _AdmissionDecisionContext | None = None,
+    entry_admission_snapshot_digest: str | None = None,
+    binding_constraint: str | None = None,
 ) -> IssueTicketResult:
     blocker = (
         "signal_invalid_or_stale"
@@ -327,6 +408,29 @@ async def _refuse(
         }
         else status.value
     )
+    if admission_context is not None:
+        await uow.admission_decisions.add(
+            freeze_admission_decision(
+                signal=signal,
+                candidate_set=admission_context.candidate_set,
+                exposure_family=admission_context.exposure_family,
+                runtime_profile_id=admission_context.runtime_profile_id,
+                owner_policy_id=admission_context.owner_policy_id,
+                owner_policy_version=admission_context.owner_policy_version,
+                venue_id=admission_context.venue_id,
+                account_id=admission_context.account_id,
+                portfolio_usage=admission_context.portfolio_usage,
+                decision_status=AdmissionDecisionStatus.REJECTED,
+                first_blocker=blocker,
+                binding_constraint=binding_constraint,
+                capacity_claim_id=None,
+                ticket_id=None,
+                entry_admission_snapshot_digest=(
+                    entry_admission_snapshot_digest
+                ),
+                decided_at_ms=now_ms,
+            )
+        )
     await _block_signal(uow, signal, blocker, now_ms)
     return IssueTicketResult(status=status, ticket_id=None)
 
@@ -374,3 +478,47 @@ def _issue_status(status: CapacityClaimStatus) -> IssueTicketStatus:
         ),
     }
     return mapping[status]
+
+
+def _portfolio_usage(
+    *,
+    policy,
+    usage: CapacityUsage,
+    admission_snapshot: EntryAdmissionSnapshot,
+) -> AdmissionPortfolioUsage:
+    account = admission_snapshot.account_risk_snapshot
+    remaining_gross_risk = max(
+        Decimal(0),
+        account.total_wallet_balance * policy.max_gross_stop_risk_fraction
+        - usage.gross_risk_at_stop,
+    )
+    remaining_initial_margin = max(
+        Decimal(0),
+        account.total_margin_balance
+        * policy.max_gross_initial_margin_utilization
+        - max(
+            account.total_initial_margin,
+            usage.current_reserved_margin,
+        ),
+    )
+    return AdmissionPortfolioUsage(
+        active_ticket_count=usage.active_ticket_count,
+        active_family_ticket_count=(
+            usage.active_strategy_group_ticket_count
+        ),
+        gross_risk_at_stop=usage.gross_risk_at_stop,
+        directional_risk_at_stop=Decimal(0),
+        current_reserved_margin=usage.current_reserved_margin,
+        remaining_ticket_slots=max(
+            0,
+            policy.max_concurrent_tickets - usage.active_ticket_count,
+        ),
+        remaining_family_slots=max(
+            0,
+            policy.max_strategy_group_concurrent_tickets
+            - usage.active_strategy_group_ticket_count,
+        ),
+        remaining_gross_stop_risk=remaining_gross_risk,
+        remaining_directional_stop_risk=remaining_gross_risk,
+        remaining_initial_margin=remaining_initial_margin,
+    )

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.trading_kernel.domain.arbitration import EntryCandidate, rank_candidates
+from src.trading_kernel.domain.arbitration import (
+    EntryCandidate,
+    freeze_candidate_set,
+    rank_candidates,
+)
 from tests.trading_kernel.unit.test_signal import _signal
 
 
@@ -41,6 +45,29 @@ def test_arbitration_rejects_unbounded_candidate_batches() -> None:
 
     with pytest.raises(ValueError, match="64"):
         rank_candidates(candidates)
+
+
+def test_candidate_digest_is_input_order_independent_after_ranking() -> None:
+    candidate_a = _candidate(
+        "signal:a",
+        owner=1,
+        event=1_001,
+        observed=1_002,
+    )
+    candidate_b = _candidate(
+        "signal:b",
+        owner=2,
+        event=1_000,
+        observed=1_001,
+    )
+
+    left = freeze_candidate_set((candidate_b, candidate_a))
+    right = freeze_candidate_set((candidate_a, candidate_b))
+
+    assert left == right
+    assert left.ranked_signal_event_ids == ("signal:a", "signal:b")
+    assert left.candidate_count == 2
+    assert left.candidate_set_digest.startswith("sha256:")
 
 
 def _candidate(

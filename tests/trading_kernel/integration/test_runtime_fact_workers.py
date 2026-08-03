@@ -49,6 +49,7 @@ from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
 from src.trading_kernel.infrastructure.pg_models import (
+    exchange_commands,
     owner_policy_current,
     runtime_capabilities_current,
     runtime_incidents,
@@ -165,6 +166,19 @@ class FakeEntryAdmissionFactsSource:
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
 
+
+class UnavailableEntryAdmissionFactsSource:
+    async def read_entry_admission_snapshot(
+        self,
+        request: EntryAdmissionSnapshotRequest,
+    ) -> EntryAdmissionSnapshot:
+        raise TimeoutError(request.exchange_instrument_id)
+
+    async def read_instrument_rules(
+        self,
+        request: InstrumentRulesRequest,
+    ) -> InstrumentRulesFacts:
+        raise TimeoutError(request.exchange_instrument_id)
 
 def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
     return (
@@ -515,6 +529,62 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
     assert rules.projection_version == 2
     assert len(commands) == 1
     assert commands[0].status is ExchangeCommandStatus.ACCEPTED
+
+
+@pytest.mark.asyncio
+async def test_entry_action_facts_timeout_records_infrastructure_decision(
+    runtime_fact_worker_engine,
+) -> None:
+    await _seed_runtime_authority(runtime_fact_worker_engine)
+    signal = _signal(signal_event_id="signal-entry-facts-timeout")
+    async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
+        await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
+                now_ms=1_002,
+            ),
+        )
+
+    result = await run_entry_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
+        RecordingAcceptingVenue(),
+        UnavailableEntryAdmissionFactsSource(),
+        EntryWorkerRequest(
+            worker_id="entry-worker-timeout",
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
+            now_ms=1_003,
+            lease_until_ms=6_003,
+            timeout_seconds=1,
+            admission_snapshot_validity_ms=1_000,
+        ),
+    )
+
+    assert result.status is EntryWorkerStatus.FACTS_UNAVAILABLE
+    async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
+        decision = await uow.admission_decisions.get_for_signal(
+            signal.signal_event_id
+        )
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+        claim = await uow.capacity_claims.get_for_signal(signal.signal_event_id)
+        has_ticket = await uow.entry_admission.has_ticket_for_signal(
+            signal.signal_event_id
+        )
+    assert decision is not None
+    assert decision.decision_status.value == "rejected"
+    assert decision.first_blocker == "observation_unavailable"
+    assert decision.entry_admission_snapshot_digest is None
+    assert readiness is not None
+    assert readiness.first_blocker == "observation_unavailable"
+    assert claim is None
+    assert has_ticket is False
+    async with runtime_fact_worker_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(exchange_commands)
+        ) == 0
 
 
 @pytest.mark.asyncio

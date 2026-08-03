@@ -890,6 +890,105 @@ readiness_current = sa.Table(
     sa.Column("projection_version", sa.BigInteger, nullable=False),
 )
 
+admission_decisions = sa.Table(
+    "brc_admission_decisions",
+    metadata,
+    _id("admission_decision_id", primary_key=True),
+    _id("signal_event_id"),
+    _id("exposure_episode_id"),
+    _id("strategy_group_id"),
+    _id("strategy_version_id"),
+    _id("event_spec_id"),
+    _id("universe_version_id"),
+    sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
+    _id("runtime_profile_id"),
+    _id("runtime_scope_id"),
+    sa.Column("runtime_scope_version", sa.BigInteger, nullable=False),
+    _id("owner_policy_id"),
+    sa.Column("owner_policy_version", sa.BigInteger, nullable=False),
+    _id("venue_id"),
+    _id("account_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("exposure_family", SHORT_TEXT, nullable=False),
+    sa.Column("candidate_rank", sa.Integer, nullable=False),
+    sa.Column("candidate_count", sa.Integer, nullable=False),
+    sa.Column("candidate_set_digest", LONG_TEXT, nullable=False),
+    _json("candidate_set_summary"),
+    _json("portfolio_usage"),
+    sa.Column("decision_status", SHORT_TEXT, nullable=False),
+    sa.Column("first_blocker", LONG_TEXT, nullable=True),
+    sa.Column("binding_constraint", LONG_TEXT, nullable=True),
+    _id("capacity_claim_id", nullable=True),
+    _id("ticket_id", nullable=True),
+    sa.Column("entry_admission_snapshot_digest", LONG_TEXT, nullable=True),
+    sa.Column("decision_digest", LONG_TEXT, nullable=False),
+    _time("decided_at_ms"),
+    sa.UniqueConstraint("signal_event_id"),
+    sa.CheckConstraint(
+        "position_side IN ('long', 'short')",
+        name="position_side_valid",
+    ),
+    sa.CheckConstraint(
+        "exposure_family IN ('long_continuation', 'opening_range', "
+        "'rally_failure_short')",
+        name="exposure_family_valid",
+    ),
+    sa.CheckConstraint(
+        "candidate_rank > 0 AND candidate_count BETWEEN 1 AND 64 "
+        "AND candidate_rank <= candidate_count",
+        name="candidate_shape_valid",
+    ),
+    sa.CheckConstraint(
+        "decision_status IN ('admitted', 'rejected')",
+        name="decision_status_valid",
+    ),
+    sa.CheckConstraint(
+        "(decision_status = 'admitted' AND first_blocker IS NULL "
+        "AND capacity_claim_id IS NOT NULL AND ticket_id IS NOT NULL "
+        "AND entry_admission_snapshot_digest IS NOT NULL) OR "
+        "(decision_status = 'rejected' AND first_blocker IS NOT NULL "
+        "AND capacity_claim_id IS NULL AND ticket_id IS NULL)",
+        name="decision_shape_valid",
+    ),
+    sa.CheckConstraint(
+        "candidate_set_digest ~ '^sha256:[0-9a-f]{64}$' "
+        "AND decision_digest ~ '^sha256:[0-9a-f]{64}$' "
+        "AND universe_semantic_digest ~ '^sha256:[0-9a-f]{64}$' "
+        "AND (entry_admission_snapshot_digest IS NULL OR "
+        "entry_admission_snapshot_digest ~ '^sha256:[0-9a-f]{64}$')",
+        name="digest_shape_valid",
+    ),
+    sa.ForeignKeyConstraint(
+        ["signal_event_id"],
+        ["brc_signal_events.signal_event_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["capacity_claim_id"],
+        ["brc_capacity_claims.capacity_claim_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["ticket_id"],
+        ["brc_trade_tickets.ticket_id"],
+    ),
+)
+
+sa.Index(
+    "ix_brc_admission_decisions_decided_at_ms",
+    admission_decisions.c.decided_at_ms,
+)
+sa.Index(
+    "ix_brc_admission_decisions_first_blocker_decided_at_ms",
+    admission_decisions.c.first_blocker,
+    admission_decisions.c.decided_at_ms,
+)
+sa.Index(
+    "ix_brc_admission_decisions_strategy_event_decided",
+    admission_decisions.c.strategy_group_id,
+    admission_decisions.c.event_spec_id,
+    admission_decisions.c.decided_at_ms,
+)
+
 sa.Index(
     "ix_brc_readiness_current_readiness_state_signal_event_id",
     readiness_current.c.readiness_state,

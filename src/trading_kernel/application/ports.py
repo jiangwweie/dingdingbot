@@ -44,6 +44,7 @@ from src.trading_kernel.application.read_strategy_universe_status import (
 from src.trading_kernel.application.reconciliation_scheduler import (
     ReconciliationActionCandidate,
 )
+from src.trading_kernel.domain.admission_decision import AdmissionDecision
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.capacity import CapacityClaim
@@ -950,7 +951,6 @@ class SignalRepository(Protocol):
         blocker: str,
         updated_at_ms: int,
     ) -> None: ...
-
     async def get_strategy_group(
         self,
         strategy_group_id: str,
@@ -1039,6 +1039,21 @@ class SignalRepository(Protocol):
         runtime_scope_id: str,
         event_spec_id: str,
     ) -> tuple[SignalFactSnapshot, ...] | None: ...
+
+
+class AdmissionDecisionRepository(Protocol):
+    async def add(self, decision: AdmissionDecision) -> None: ...
+
+    async def get_for_signal(
+        self,
+        signal_event_id: str,
+    ) -> AdmissionDecision | None: ...
+
+    async def list_recent(
+        self,
+        *,
+        limit: int,
+    ) -> tuple[AdmissionDecision, ...]: ...
 
 
 class StrategyRegistryRepository(Protocol):
@@ -1316,6 +1331,7 @@ class KernelUnitOfWork(Protocol):
     reviews: ReviewRepository
     monitors: MonitorRepository
     entry_admission: EntryAdmissionRepository
+    admission_decisions: AdmissionDecisionRepository
     signals: SignalRepository
     strategy_registry: StrategyRegistryRepository
     strategy_universes: StrategyUniverseRepository

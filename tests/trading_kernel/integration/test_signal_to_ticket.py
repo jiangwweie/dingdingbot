@@ -41,6 +41,9 @@ from src.trading_kernel.domain.signal import (
     build_signal_fact_digest,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    budget_reservations,
+    capacity_claims,
+    exchange_commands,
     facts_current,
     instrument_certification_current,
     instrument_rules_current,
@@ -53,6 +56,10 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_universe_current,
     strategy_universe_members,
     strategy_universe_versions,
+    trade_tickets,
+)
+from src.trading_kernel.infrastructure.pg_repositories import (
+    PostgresAdmissionDecisionRepository,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
@@ -258,7 +265,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
             await connection.execute(
                 sa.delete(strategy_universe_current).where(
                     strategy_universe_current.c.event_spec_id
-                    == "event_spec:SOR-001:SOR-LONG:v3"
+                    == "event_spec:SOR-001:SOR-LONG:v4"
                 )
             )
             await connection.execute(
@@ -420,11 +427,149 @@ async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
     assert result.ticket_id is not None
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         claim = await uow.capacity_claims.get_for_signal(signal.signal_event_id)
+        decision = await uow.admission_decisions.get_for_signal(
+            signal.signal_event_id
+        )
         readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
     assert claim is not None
+    assert decision is not None
+    assert decision.decision_status.value == "admitted"
+    assert decision.capacity_claim_id == claim.capacity_claim_id
+    assert decision.ticket_id == result.ticket_id
     assert readiness is not None
     assert readiness.readiness_state == "processing"
     assert readiness.first_blocker is None
+
+
+@pytest.mark.asyncio
+async def test_capacity_rejection_records_one_decision_and_no_trading_authority(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal(signal_event_id="signal-budget-rejected")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
+                now_ms=1_001,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
+
+    exhausted_account = AccountRiskSnapshot.create(
+        **{
+            **_admission_snapshot().account_risk_snapshot.model_dump(
+                mode="python",
+                exclude={"snapshot_digest"},
+            ),
+            "available_margin": Decimal(0),
+        }
+    )
+    exhausted_snapshot = EntryAdmissionSnapshot(
+        account_risk_snapshot=exhausted_account,
+        best_bid_price=Decimal("9999.9"),
+        best_ask_price=Decimal(10000),
+        open_orders=(),
+        observed_at_ms=1_001,
+        valid_until_ms=10_000,
+    )
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result = await issue_ready_signal(
+            uow,
+            IssueReadySignalRequest(
+                signal_event_id=signal.signal_event_id,
+                admission_snapshot=exhausted_snapshot,
+                claim_owner="signal-worker-1",
+                runtime_commit="kernel-test-head",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
+                now_ms=1_002,
+            ),
+        )
+
+    assert result.status is IssueTicketStatus.BUDGET_EXHAUSTED
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        decision = await uow.admission_decisions.get_for_signal(
+            signal.signal_event_id
+        )
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+    assert decision is not None
+    assert decision.decision_status.value == "rejected"
+    assert decision.first_blocker == "budget_exhausted"
+    assert decision.capacity_claim_id is None
+    assert decision.ticket_id is None
+    assert readiness is not None
+    assert readiness.first_blocker == "budget_exhausted"
+    async with issue_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(capacity_claims)
+        ) == 0
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(trade_tickets)
+        ) == 0
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(exchange_commands)
+        ) == 0
+
+
+@pytest.mark.asyncio
+async def test_decision_insert_failure_rolls_back_ticket_and_command(
+    issue_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal(signal_event_id="signal-decision-rollback")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
+                now_ms=1_001,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
+
+    async def fail_add(*args, **kwargs) -> None:
+        del args, kwargs
+        raise RuntimeError("injected AdmissionDecision failure")
+
+    monkeypatch.setattr(PostgresAdmissionDecisionRepository, "add", fail_add)
+    with pytest.raises(RuntimeError, match="injected AdmissionDecision"):
+        async with PostgresKernelUnitOfWork(issue_engine) as uow:
+            await issue_ready_signal(
+                uow,
+                IssueReadySignalRequest(
+                    signal_event_id=signal.signal_event_id,
+                    admission_snapshot=_admission_snapshot(),
+                    claim_owner="signal-worker-1",
+                    runtime_commit="kernel-test-head",
+                    schema_revision="0002_sor_v3_strategy_group_capacity",
+                    now_ms=1_002,
+                ),
+            )
+
+    async with issue_engine.connect() as connection:
+        for table in (
+            capacity_claims,
+            trade_tickets,
+            budget_reservations,
+            exchange_commands,
+        ):
+            assert await connection.scalar(
+                sa.select(sa.func.count()).select_from(table)
+            ) == 0
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+        decision = await uow.admission_decisions.get_for_signal(
+            signal.signal_event_id
+        )
+    assert readiness is not None
+    assert readiness.readiness_state == "candidate_ready"
+    assert decision is None
 
 
 @pytest.mark.asyncio
@@ -521,9 +666,9 @@ def _signal(
     occurred_at_ms: int = 1_000,
 ) -> StrategySignal:
     event_spec_id = (
-        "event_spec:SOR-001:SOR-LONG:v3"
+        "event_spec:SOR-001:SOR-LONG:v4"
         if position_side == "long"
-        else "event_spec:SOR-001:SOR-SHORT:v3"
+        else "event_spec:SOR-001:SOR-SHORT:v4"
     )
     facts = _signal_facts(position_side=position_side)
     return StrategySignal(
@@ -532,7 +677,7 @@ def _signal(
         runtime_scope_id=runtime_scope_id,
         runtime_scope_version=4,
         strategy_group_id="SOR-001",
-        strategy_version_id="sgv:SOR-001:v3",
+        strategy_version_id="sgv:SOR-001:v4",
         event_spec_id=event_spec_id,
         universe_version_id="universe:sor-long:4",
         universe_semantic_digest="sha256:" + "a" * 64,
@@ -577,7 +722,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
             sa.insert(strategy_universe_versions).values(
                 universe_version_id="universe:sor-long:4",
                 strategy_group_id="SOR-001",
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v3",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
                 universe_version=4,
                 semantic_digest="sha256:" + "a" * 64,
                 lifecycle_state="active",
@@ -593,7 +738,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
         )
         await connection.execute(
             sa.insert(strategy_universe_current).values(
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v3",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
                 universe_version_id="universe:sor-long:4",
                 semantic_digest="sha256:" + "a" * 64,
                 lifecycle_state="active",
@@ -680,8 +825,8 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
             sa.insert(runtime_scopes_current).values(
                 runtime_scope_id="scope-sor-btc-long",
                 strategy_group_id="SOR-001",
-                strategy_version_id="sgv:SOR-001:v3",
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v3",
+                strategy_version_id="sgv:SOR-001:v4",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
                 runtime_profile_id="tiny-live-v1",
                 owner_policy_id="policy-main",
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",

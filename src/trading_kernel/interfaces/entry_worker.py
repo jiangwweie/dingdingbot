@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -17,7 +18,11 @@ from src.trading_kernel.application.issue_ready_signal import (
     issue_ready_signal,
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus
-from src.trading_kernel.application.ports import UnitOfWorkFactory, VenuePort
+from src.trading_kernel.application.ports import (
+    KernelUnitOfWork,
+    UnitOfWorkFactory,
+    VenuePort,
+)
 from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     EntryFactsSource,
@@ -28,7 +33,17 @@ from src.trading_kernel.application.select_entry_candidate import (
     SelectEntryCandidateStatus,
     select_entry_candidate,
 )
+from src.trading_kernel.domain.admission_decision import (
+    AdmissionDecisionStatus,
+    AdmissionPortfolioUsage,
+    freeze_admission_decision,
+)
+from src.trading_kernel.domain.arbitration import (
+    freeze_candidate_set,
+    rank_candidates,
+)
 from src.trading_kernel.domain.commands import ExchangeCommandKind
+from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 
 
 class EntryWorkerStatus(StrEnum):
@@ -162,13 +177,11 @@ async def run_entry_worker_once(
         )
     except Exception as exc:  # noqa: BLE001 - action facts failure blocks new Entry.
         async with uow_factory() as uow:
-            await uow.signals.save_readiness(
-                runtime_scope_id=signal.runtime_scope_id,
-                readiness_state="blocked",
-                first_blocker="observation_unavailable",
+            await _record_action_facts_unavailable(
+                uow,
                 signal_event_id=signal.signal_event_id,
-                fact_summary={"reason": f"action_facts:{type(exc).__name__}"},
-                updated_at_ms=request.now_ms,
+                failure_type=type(exc).__name__,
+                now_ms=request.now_ms,
             )
         return EntryWorkerResult(status=EntryWorkerStatus.FACTS_UNAVAILABLE)
 
@@ -226,6 +239,105 @@ async def run_entry_worker_once(
         command_id=dispatched.command_id,
         issue_status=issued.status,
         dispatch_status=dispatched.status,
+    )
+
+
+async def _record_action_facts_unavailable(
+    uow: KernelUnitOfWork,
+    *,
+    signal_event_id: str,
+    failure_type: str,
+    now_ms: int,
+) -> None:
+    candidates = rank_candidates(
+        await uow.signals.list_ready_candidates(now_ms=now_ms, limit=64)
+    )
+    if not candidates or candidates[0].signal.signal_event_id != signal_event_id:
+        return
+    signal = candidates[0].signal
+    scope = await uow.signals.get_runtime_scope(signal.runtime_scope_id)
+    profile = (
+        None
+        if scope is None
+        else await uow.signals.get_runtime_profile(scope.runtime_profile_id)
+    )
+    policy = (
+        None
+        if scope is None
+        else await uow.entry_admission.get_owner_policy(scope.owner_policy_id)
+    )
+    if scope is None or profile is None or policy is None:
+        await uow.signals.save_readiness(
+            runtime_scope_id=signal.runtime_scope_id,
+            readiness_state="blocked",
+            first_blocker="observation_unavailable",
+            signal_event_id=signal.signal_event_id,
+            fact_summary={"reason": f"action_facts:{failure_type}"},
+            updated_at_ms=now_ms,
+        )
+        return
+    exposure = await uow.entry_admission.get_account_exposure(
+        profile.venue_id,
+        profile.account_id,
+    )
+    active_family_ticket_count = (
+        await uow.entry_admission.count_active_strategy_group_tickets(
+            venue_id=profile.venue_id,
+            account_id=profile.account_id,
+            strategy_group_id=signal.strategy_group_id,
+        )
+    )
+    active_ticket_count = 0 if exposure is None else exposure.active_ticket_count
+    gross_risk = Decimal(0) if exposure is None else exposure.gross_risk_at_stop
+    reserved_margin = (
+        Decimal(0) if exposure is None else exposure.current_reserved_margin
+    )
+    contract = strategy_contract_for(signal.event_spec_id)
+    await uow.admission_decisions.add(
+        freeze_admission_decision(
+            signal=signal,
+            candidate_set=freeze_candidate_set(candidates),
+            exposure_family=contract.exposure_family,
+            runtime_profile_id=profile.runtime_profile_id,
+            owner_policy_id=policy.owner_policy_id,
+            owner_policy_version=policy.policy_version,
+            venue_id=profile.venue_id,
+            account_id=profile.account_id,
+            portfolio_usage=AdmissionPortfolioUsage(
+                active_ticket_count=active_ticket_count,
+                active_family_ticket_count=active_family_ticket_count,
+                gross_risk_at_stop=gross_risk,
+                directional_risk_at_stop=None,
+                current_reserved_margin=reserved_margin,
+                remaining_ticket_slots=max(
+                    0,
+                    policy.max_concurrent_tickets - active_ticket_count,
+                ),
+                remaining_family_slots=max(
+                    0,
+                    policy.max_strategy_group_concurrent_tickets
+                    - active_family_ticket_count,
+                ),
+                remaining_gross_stop_risk=None,
+                remaining_directional_stop_risk=None,
+                remaining_initial_margin=None,
+            ),
+            decision_status=AdmissionDecisionStatus.REJECTED,
+            first_blocker="observation_unavailable",
+            binding_constraint="action_facts_unavailable",
+            capacity_claim_id=None,
+            ticket_id=None,
+            entry_admission_snapshot_digest=None,
+            decided_at_ms=now_ms,
+        )
+    )
+    await uow.signals.save_readiness(
+        runtime_scope_id=signal.runtime_scope_id,
+        readiness_state="blocked",
+        first_blocker="observation_unavailable",
+        signal_event_id=signal.signal_event_id,
+        fact_summary={"reason": f"action_facts:{failure_type}"},
+        updated_at_ms=now_ms,
     )
 
 
