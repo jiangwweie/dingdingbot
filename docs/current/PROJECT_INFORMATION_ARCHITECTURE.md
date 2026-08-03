@@ -22,8 +22,8 @@ Owner explicit decision
 | --- | --- | --- |
 | Strategy Registry | StrategyGroup, event, side, and version semantics | Current order authority |
 | Owner Policy | Enabled scope, capital, profile, and capacity | Signal truth or exchange outcome |
-| PostgreSQL Current | Runtime scope, facts, readiness, Tickets, aggregates, commands, positions, incidents, monitor state | Historical document interpretation |
-| PostgreSQL Events | Append-only policy, signal, lifecycle, command, and review lineage | Mutable current projection |
+| PostgreSQL Current | Runtime scope, facts, readiness, Exposure Episodes, AdmissionDecisions, Shadow Outcomes, Tickets, aggregates, commands, positions, incidents, monitor state | Historical document interpretation |
+| PostgreSQL Events | Append-only policy, signal, admission, lifecycle, command, and review lineage | Mutable current projection |
 | Exchange Readonly Facts | External account, order, position, and fill truth | Internal policy |
 | Documents | Architecture, contracts, and operating rules | Runtime decisions |
 | Generated Output | Human display and bounded diagnostics | Any production authority |
@@ -63,18 +63,29 @@ is one unbranched forward Alembic chain:
 ```text
 0001_trading_kernel_baseline_v4
 -> 0002_sor_v3_strategy_group_capacity
+-> 0003_portfolio_admission_observability
 ```
 
-`0001` is a frozen historical schema snapshot; current runtime metadata owns
-the single head. The exact flat `0001 -> 0002` operation preserves certified
-terminal history through the migration, but no runtime reads the old schema,
-performs dual writes, or falls back to `0001`. The deployed schema identity
-remains a volatile fact owned only by `MAIN_CONTROL_ROADMAP.md`.
+`0001` is a frozen historical schema snapshot. `0002 -> 0003` is a stopped,
+flat, forward-only preservation-gated upgrade; it retains certified terminal
+lineage while adding Episode, AdmissionDecision, Shadow Outcome, Policy v4,
+and Exposure Family authority. No runtime reads an old schema, performs dual
+writes, falls back, downgrades, or hands active exposure between schemas. The
+deployed schema identity remains a volatile fact owned only by
+`MAIN_CONTROL_ROADMAP.md`.
 
 Strategy semantics live in the Registry, while concrete instrument membership,
 certification, warming, current activation, and frozen Signal/Ticket lineage
 live in PostgreSQL StrategyUniverse projections. Repository Markdown and CLI
 output are never runtime authority.
+
+An Exposure Episode identifies one continuous eligible structure and may own at
+most one Ticket. Every final admission result is an immutable
+`AdmissionDecision`: an admitted Decision freezes its Claim and Ticket lineage;
+a rejected Decision freezes the first blocker and creates no command. A
+`Shadow Outcome` is only bounded, read-only market-excursion evidence for an
+eligible portfolio rejection. It cannot create a Ticket, reserve capital,
+dispatch a command, or write to a venue.
 
 Production runtime must not depend on repository Markdown, generated JSON,
 report directories, local caches, or archived database rows. Current state is

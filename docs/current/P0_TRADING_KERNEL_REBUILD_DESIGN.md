@@ -67,11 +67,12 @@ src/trading_kernel/infrastructure PostgreSQL and venue adapters
 src/trading_kernel/interfaces     bounded runtime and readonly surfaces
 ```
 
-The tracked database head is `0002_sor_v3_strategy_group_capacity`; the frozen
-`0001_trading_kernel_baseline_v4` definition remains only as the source schema
-for the certified forward revision. PostgreSQL owns current runtime truth and
-append-only lifecycle facts. Exchange readonly facts own external truth.
-Repository documents and generated output never own production decisions.
+The forward schema chain is `0001_trading_kernel_baseline_v4 ->
+0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability`.
+The frozen `0001_trading_kernel_baseline_v4` definition remains historical
+source lineage only. PostgreSQL owns current runtime truth and append-only
+lifecycle facts. Exchange readonly facts own external truth. Repository
+documents and generated output never own production decisions.
 
 Strategy Registry owns only immutable Event semantics. PostgreSQL
 StrategyUniverse owns each Event's unordered **1..10** member set,
@@ -96,6 +97,14 @@ The Entry worker revalidates the Claim and atomically commits the Ticket,
 budget reservation, Netting Domain hold, aggregate, first event, and durable
 ENTRY command. Two Signals may coexist, but their Tickets are issued serially.
 
+Every final candidate also owns one immutable `AdmissionDecision`. An admitted
+Decision commits with the CapacityClaim, Ticket, Reservation, Netting Domain
+hold, aggregate, TicketIssued Event, and ENTRY Command. A rejected Decision
+commits with its terminal readiness blocker and has no Ticket, Reservation, or
+Exchange Command. `Shadow Outcome` is an Observation-owned, read-only fixed
+horizon MFE/MAE projection for eligible capacity rejections; it never imports
+Ticket, Command dispatch, or venue-write authority.
+
 ## Dynamic Policy Boundary
 
 `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` owns the approved capacity,
@@ -112,16 +121,14 @@ exchange-configured fact, never emits a leverage-mutation command, and ENTRY
 revalidates that same fact immediately before dispatch. A regular deployment is
 blocked when any supported instrument differs from the approved profile.
 
-An eligible Ticket uses current remaining executable margin only within the
-Owner-approved per-Ticket and gross stop-risk and initial-margin ceilings owned
-by `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md`. The system does not divide
-capital into equal fixed slots: the first two Tickets may reach their full
-risk target, while a third uses only the remaining risk and margin.
-`max_concurrent_tickets` remains a concurrency ceiling rather than a promise of
-three equal positions. Current Reservations, available margin, the profile
-limits, Initial Stop risk, venue minimums, and liquidation distance still bound
-every Ticket. These explicit ticket/gross limits are part of the deployed
-Policy v3 authority recorded by `MAIN_CONTROL_ROADMAP.md`.
+Policy v4 owns three concurrent Tickets, `0.02` maximum planned stop risk per
+Ticket, `0.06` gross stop risk, `0.30` initial margin per Ticket, `0.90` gross
+initial-margin utilization, `0.50` minimum materialization, and `0.04`
+directional stop risk. Registry Events freeze an Exposure Family; Owner Policy
+limits `long_continuation=1`, `opening_range=2`, and
+`rally_failure_short=1`. StrategyGroup capacity is not current admission
+authority. Current Reservations, available margin, Initial Stop risk, venue
+minimums, and liquidation distance still bound every Ticket.
 
 ## Transaction And Exchange Model
 

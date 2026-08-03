@@ -26,6 +26,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
     assert tuple(path.name for path in migration_paths) == (
         "0001_trading_kernel_baseline_v4.py",
         "0002_sor_v3_strategy_group_capacity.py",
+        "0003_portfolio_admission_observability.py",
     )
 
     revisions: dict[str, str | None] = {}
@@ -43,9 +44,13 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0002_sor_v3_strategy_group_capacity": (
             "0001_trading_kernel_baseline_v4"
         ),
+        "0003_portfolio_admission_observability": (
+            "0002_sor_v3_strategy_group_capacity"
+        ),
     }
     assert set(revisions.values()) - {None} == {
-        "0001_trading_kernel_baseline_v4"
+        "0001_trading_kernel_baseline_v4",
+        "0002_sor_v3_strategy_group_capacity",
     }
 
     baseline_source = migration_paths[0].read_text(encoding="utf-8")

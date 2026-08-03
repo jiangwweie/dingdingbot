@@ -317,7 +317,8 @@ def test_current_runtime_documents_do_not_deploy_timer_workers() -> None:
 def test_current_schema_authority_is_the_exact_flat_forward_revision_chain() -> None:
     expected_chain = (
         "0001_trading_kernel_baseline_v4 "
-        "-> 0002_sor_v3_strategy_group_capacity"
+        "-> 0002_sor_v3_strategy_group_capacity "
+        "-> 0003_portfolio_admission_observability"
     )
 
     for relative_path in SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS:
@@ -326,6 +327,43 @@ def test_current_schema_authority_is_the_exact_flat_forward_revision_chain() -> 
         assert expected_chain in normalized, (
             f"{relative_path} does not own the exact forward revision chain"
         )
+
+
+def test_current_documents_converge_on_portfolio_admission_authority() -> None:
+    required_meaning = {
+        "docs/current/PROJECT_INFORMATION_ARCHITECTURE.md": (
+            "AdmissionDecision",
+            "Shadow Outcome",
+        ),
+        "docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md": (
+            "Policy v4",
+            "Exposure Family",
+            "AdmissionDecision",
+            "Shadow Outcome",
+        ),
+        "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md": (
+            "0003_portfolio_admission_observability",
+            "AdmissionDecision",
+            "Shadow Outcome",
+        ),
+        "docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md": (
+            "max_ticket_stop_risk_fraction = 0.02",
+            "min_materialization_ratio = 0.50",
+            "directional_stop_risk_limit_fraction = 0.04",
+        ),
+        "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md": (
+            "0003_portfolio_admission_observability",
+            "fix-forward",
+        ),
+        "docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md": (
+            "fixed_horizon_excursion_v1",
+            "Shadow Outcome",
+        ),
+    }
+    for relative_path, markers in required_meaning.items():
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        missing = [marker for marker in markers if marker not in source]
+        assert not missing, f"{relative_path} lacks portfolio authority: {missing}"
 
 
 def test_current_deployment_authority_has_no_active_handover_or_schema_deletion() -> None:

@@ -47,3 +47,20 @@ def test_current_runtime_has_no_blocking_file_authority() -> None:
         if "blocking_cleanup_required" in item.risk_flags
     ]
     assert blocking == []
+
+
+def test_shadow_projection_runtime_has_no_file_authority() -> None:
+    occurrences = audit.audit_targets(
+        repo_root=audit.REPO_ROOT,
+        targets=[
+            "src/trading_kernel/application/project_shadow_outcome.py",
+            "src/trading_kernel/domain/shadow_outcome.py",
+            "src/trading_kernel/interfaces/observation_worker.py",
+        ],
+    )
+    blocking = [
+        item
+        for item in occurrences
+        if "blocking_cleanup_required" in item.risk_flags
+    ]
+    assert blocking == []

@@ -50,6 +50,16 @@ show both the aggregate result and the contribution of tail outcomes. Missing
 funding or execution evidence remains explicit rather than being treated as
 zero.
 
+## Rejected-Opportunity Evidence
+
+An eligible portfolio-rejected Signal may have one read-only `Shadow Outcome`
+with evaluation kind `fixed_horizon_excursion_v1`. It freezes the admission-time
+entry reference and Initial Stop distance as one R, then records bounded closed
+candle MFE/MAE. It is not a fill, realized PnL, fee/funding/slippage estimate,
+or substitute for a real Ticket lifecycle. Shadow evidence is created only from
+an immutable rejected AdmissionDecision and never creates a Ticket, Capacity
+Claim, Reservation, Exchange Command, or venue mutation.
+
 ## Outcomes
 
 Use one of:

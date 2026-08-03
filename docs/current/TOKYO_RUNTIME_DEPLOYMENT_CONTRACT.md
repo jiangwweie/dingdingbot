@@ -41,11 +41,13 @@ upgrade:
 ```text
 0001_trading_kernel_baseline_v4
 -> 0002_sor_v3_strategy_group_capacity
+-> 0003_portfolio_admission_observability
 ```
 
-It preserves terminal PostgreSQL lineage; it does not preserve an active v2
-runtime. An active-position handover, dual write, v4 reader, schema fallback,
-manual DML conversion and direct SQL lifecycle mutation are forbidden.
+It preserves terminal PostgreSQL lineage from the exact `0002` source; it does
+not preserve an active old-schema runtime. An active-position handover, dual
+write, old-schema reader, downgrade, schema fallback, manual DML conversion and
+direct SQL lifecycle mutation are forbidden.
 
 The compatible-upgrade preflight requires all of the following to be current:
 
@@ -65,13 +67,14 @@ The official bounded sequence is:
 2. Stage the exact target release and run source-schema plus exchange readonly
    preflight.
 3. Fence Entry, stop all four writers and atomically repeat the flat checks.
-4. Compute and persist a canonical SHA-256 manifest over every frozen `0001`
-   table and column; `alembic_version` and `0002`-only columns are excluded.
+4. Compute and persist a canonical SHA-256 manifest over every preserved
+   `0002` source table and column; `alembic_version` and `0003`-only columns
+   are excluded.
 5. Run the single certified Alembic revision without `DROP SCHEMA`.
-6. Recompute the same frozen `0001` manifest and require an exact digest match.
-7. In one PostgreSQL transaction, retire SOR v2 Registry authority, activate
-   SOR v3, create the next Owner Policy version with unchanged capital limits,
-   move scope to v3 and rotate schema/commit/seed capability identity.
+6. Recompute the same frozen `0002` manifest and require an exact digest match.
+7. In one PostgreSQL transaction, install CPM/MPG/MI/BRF2 v3 and SOR v4
+   Registry authority, apply Policy v4 with Entry fenced, and rotate
+   schema/commit/seed capability identity.
 8. Activate the target release and start Observation, Lifecycle and
    Reconciliation while Entry remains fenced.
 9. Run one bounded six-Event StrategyUniverse bootstrap; PostgreSQL may
@@ -83,8 +86,8 @@ The official bounded sequence is:
 The journaled cutover state machine and `deploy_tokyo_release.py` use the same
 gates and authority transition. They must not evolve into different migration
 semantics. A failure after migration remains Entry-fenced and proceeds by
-target-schema fix-forward; the `0001` runtime is never restarted against
-`0002`.
+target-schema fix-forward; the `0002` runtime is never restarted against
+`0003`.
 
 ## StrategyUniverse Deployment Gate
 

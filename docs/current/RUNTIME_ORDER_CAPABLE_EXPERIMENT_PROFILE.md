@@ -52,27 +52,27 @@ The current Owner-approved production profile is:
 
 ```text
 max_concurrent_tickets = 3
-max_strategy_group_concurrent_tickets = 2
-max_ticket_stop_risk_fraction = 0.03
+max_ticket_stop_risk_fraction = 0.02
 max_gross_stop_risk_fraction = 0.06
-max_ticket_initial_margin_fraction = 0.45
+max_ticket_initial_margin_fraction = 0.30
 max_gross_initial_margin_utilization = 0.90
+min_materialization_ratio = 0.50
+directional_stop_risk_limit_fraction = 0.04
 max_leverage = 10
 supported_margin_mode = cross
 ```
 
 Supported exchange instruments use fixed `5x`; the kernel freezes and
 revalidates that account fact and does not submit leverage changes. A Ticket
-may target up to `0.03` planned stop risk but may receive less when its `0.45`
-margin cap, the remaining `0.06` gross stop-risk budget, the remaining `0.90`
-gross margin budget, venue minimums, or current account facts bind. The policy
-therefore normally permits two full-risk Tickets and allows a third only from
-remaining risk and margin; it does not promise three equal positions.
+may target up to `0.02` planned stop risk only when it can materialize at least
+`0.50` of that budget. Its `0.30` margin cap, the remaining `0.06` gross
+stop-risk budget, the remaining `0.90` gross margin budget, the `0.04`
+directional stop-risk budget, venue minimums, and current account facts bind.
 
-The StrategyGroup limit is evaluated per `venue + account + strategy_group`.
-Long/Short and instruments within the same StrategyGroup share the two-Ticket
-limit; another StrategyGroup may use the account's remaining third slot when
-risk and margin remain available.
+Exposure Family is a Registry Event semantic and its limit is Owner Policy
+authority: `long_continuation=1`, `opening_range=2`, and
+`rally_failure_short=1`. StrategyGroup capacity, symbol, and side strings are
+not current admission authority.
 
 The retired policy model that lacked explicit per-Ticket and gross boundaries
 is historical only. Current tracked code, PostgreSQL and exchange facts remain

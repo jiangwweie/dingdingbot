@@ -90,3 +90,26 @@ def test_systemd_contains_only_four_persistent_workers_and_resource_slice() -> N
     }
 
     assert actual == expected
+
+
+def test_shadow_outcome_cannot_import_ticket_command_or_venue_write_authority() -> None:
+    forbidden_imports = (
+        "domain.ticket",
+        "application.issue_ticket",
+        "application.dispatch_exchange_command",
+        "interfaces.entry_worker",
+        "infrastructure.binance_usdm_venue",
+    )
+    violations: list[str] = []
+
+    for path in (REPO_ROOT / "src" / "trading_kernel").rglob("*shadow*.py"):
+        source = path.read_text(encoding="utf-8")
+        for marker in forbidden_imports:
+            if marker in source:
+                violations.append(
+                    f"{path.relative_to(REPO_ROOT).as_posix()}: {marker}"
+                )
+
+    assert not violations, "Shadow Outcome gained exchange-write authority:\n" + "\n".join(
+        sorted(violations)
+    )

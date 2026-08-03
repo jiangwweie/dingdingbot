@@ -56,10 +56,11 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| PostgreSQL revision chain | Complete and deployed | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity`; single head, empty upgrade, production-shaped preservation and forward-only downgrade rejection certified |
-| Six Strategy Events | Complete | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, BRF2-SHORT |
-| Observation and StrategySignal | Complete | Closed candles, bounded Facts, deterministic identity, Live/Replay parity |
-| Arbitration and CapacityClaim | Complete | Deterministic priority, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
+| PostgreSQL revision chain | Complete | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability`; one head, forward-only preservation, and no downgrade or runtime fallback |
+| Six Strategy Events | Complete | CPM/MPG/MI/BRF2 v3 and SOR v4 Registry contracts |
+| Observation and StrategySignal | Complete | Closed candles, bounded Facts, rising-edge or session Exposure Episode identity, deterministic Live/Replay parity |
+| Arbitration and CapacityClaim | Complete | Deterministic priority, Policy v4 Family/directional/materialization limits, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
+| Admission evidence and Shadow Outcome | Complete | One immutable AdmissionDecision per final Signal; eligible capacity rejection can produce one bounded read-only `fixed_horizon_excursion_v1` outcome without Ticket or Command authority |
 | Ticket issuance | Complete | Atomic Claim, budget, domain, Ticket, aggregate, event, and ENTRY command |
 | Venue Truth and recovery | Complete | ENTRY, protection, EXIT, flatten, cancel, timeout and unknown resolution |
 | Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |
@@ -78,7 +79,7 @@ readonly facts.
 
 | Boundary | Required local evidence | Rejected outcome |
 | --- | --- | --- |
-| Revision integrity | Disposable PostgreSQL upgrades from empty base to the single head and from production-shaped `0001` to `0002`; exact `0001`-column preservation digest matches | A branch, schema fallback, old-table reader or changed historical value is accepted |
+| Revision integrity | Disposable PostgreSQL upgrades from empty base to the single head and from production-shaped `0002` to `0003`; exact source-column preservation digest matches | A branch, downgrade, schema fallback, old-table reader, dual write, active handover, or changed historical value is accepted |
 | Batch bootstrap | The six Registry Events receive the approved fixed initial member set in one bounded run; no operator configures members one Event at a time | A second Warming Universe is required for every Event or member |
 | Warming and readiness | Warming performs readonly market/account certification, produces zero StrategySignal, preserves observation time separately from certification time, and activates only after every member passes | Warming can submit an order, stale evidence activates, or a failed member becomes eligible |
 | Concurrency and recovery | One global Warming slot is enforced; the official `abandon_strategy_universe.py` CLI permanently abandons one exact Warming Universe with an audited reason so the slot is released | A failed Warming state blocks all later deployment work, is changed by direct SQL, or can be silently reused |
@@ -127,14 +128,14 @@ safety workers. This bounded regular-release path does not rebuild PostgreSQL
 and does not run the historical destructive cutover.
 
 The one approved schema-changing path is explicit `compatible_upgrade`. It
-accepts only the exact flat `0001` -> `0002` transition, requires zero active
+accepts only the exact flat `0002` -> `0003` transition, requires zero active
 Ticket, position, order, Reservation, Netting Domain, unresolved Command,
 unreviewed terminal Ticket and open Incident, and requires Entry fenced with all
-old writers stopped. It computes the canonical v4-column preservation digest,
-runs the single Alembic revision, verifies the same digest, monotonically moves
-Registry and Owner Policy scope to SOR v3, starts safety workers, completes v3
-Universe bootstrap, and starts Entry last. It is not an active-position handover
-or a runtime compatibility reader.
+old writers stopped. It computes the canonical source-column preservation
+digest, runs the single Alembic revision, verifies the same digest, installs
+CPM/MPG/MI/BRF2 v3 and SOR v4 Registry authority with Policy v4 and Entry
+fenced, starts safety workers, completes Universe bootstrap, and starts Entry
+last. It is not an active-position handover or a runtime compatibility reader.
 
 ## Completed Destructive Cutover
 
