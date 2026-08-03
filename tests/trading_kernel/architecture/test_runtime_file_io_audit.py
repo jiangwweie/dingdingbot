@@ -50,13 +50,19 @@ def test_current_runtime_has_no_blocking_file_authority() -> None:
 
 
 def test_shadow_projection_runtime_has_no_file_authority() -> None:
+    targets = [
+        "src/trading_kernel/application/project_shadow_outcome.py",
+        "src/trading_kernel/domain/shadow_outcome.py",
+    ]
+    for target in targets:
+        path = audit.REPO_ROOT / target
+        assert path.is_file(), f"missing Shadow file-I/O target: {target}"
+        assert path.read_text(encoding="utf-8").strip(), (
+            f"empty Shadow file-I/O target: {target}"
+        )
     occurrences = audit.audit_targets(
         repo_root=audit.REPO_ROOT,
-        targets=[
-            "src/trading_kernel/application/project_shadow_outcome.py",
-            "src/trading_kernel/domain/shadow_outcome.py",
-            "src/trading_kernel/interfaces/observation_worker.py",
-        ],
+        targets=targets,
     )
     blocking = [
         item

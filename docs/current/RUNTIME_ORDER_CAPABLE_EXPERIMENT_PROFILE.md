@@ -45,10 +45,10 @@ unknown_outcome_redispatch = forbidden
 Multi-position capability is not guarded by a product toggle and is not limited
 to two positions in the architecture. Current Owner budget policy may set a
 finite `max_concurrent_tickets`, gross notional, risk, margin, or leverage cap.
-Those values are seeded from the current approved policy and must not be
-invented or expanded during cutover.
+Those values must come from the persisted policy applicable to the deployed
+schema and must not be invented or expanded during cutover.
 
-The current Owner-approved production profile is:
+The approved post-`0003` Policy v4 target contract is:
 
 ```text
 max_concurrent_tickets = 3
@@ -62,6 +62,12 @@ max_leverage = 10
 supported_margin_mode = cross
 ```
 
+This is a release target, not a claim about the active Tokyo deployment. The
+currently deployed Policy v3, schema identity, release identity, and measured
+runtime state remain owned solely by `MAIN_CONTROL_ROADMAP.md` until the
+post-`0003` release completes and that roadmap is refreshed from direct
+production evidence.
+
 Supported exchange instruments use fixed `5x`; the kernel freezes and
 revalidates that account fact and does not submit leverage changes. A Ticket
 may target up to `0.02` planned stop risk only when it can materialize at least
@@ -74,10 +80,12 @@ authority: `long_continuation=1`, `opening_range=2`, and
 `rally_failure_short=1`. StrategyGroup capacity, symbol, and side strings are
 not current admission authority.
 
-The retired policy model that lacked explicit per-Ticket and gross boundaries
-is historical only. Current tracked code, PostgreSQL and exchange facts remain
-the action-time authority for what production enforces; exact deployed identity
-and measured state belong only to `MAIN_CONTROL_ROADMAP.md`.
+The pre-v4 policy model lacks the target contract's explicit Family,
+directional-risk, and materialization boundaries. It remains current only where
+the deployed production identity still says Policy v3. Current tracked code,
+PostgreSQL and exchange facts remain the action-time authority for what
+production enforces; exact deployed identity and measured state belong only to
+`MAIN_CONTROL_ROADMAP.md`.
 
 The `new_entry_submit_enabled` setting controls only new ENTRY; it never removes
 protection, controlled flatten, reconciliation, Settlement, or Review authority

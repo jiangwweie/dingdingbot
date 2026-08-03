@@ -45,9 +45,13 @@ from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_models import (
     admission_decisions,
+    capacity_claims,
+    exchange_commands,
     instrument_certification_current,
+    owner_policy_current,
     runtime_scopes_current,
     shadow_outcomes_current,
+    signal_events,
     trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
@@ -101,6 +105,10 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 
 BNB = "binance-usdm:BNBUSDT:perpetual"
 DOGE = "binance-usdm:DOGEUSDT:perpetual"
+REPLAY_WALLET_BALANCE = Decimal(1_000_000)
+TWO_HOURS_MS = 2 * 3_600_000
+SEVEN_HOURS_MS = 7 * 3_600_000
+NINE_HOURS_FIFTEEN_MINUTES_MS = 9 * 3_600_000 + 15 * 60_000
 
 
 @pytest_asyncio.fixture
@@ -139,8 +147,10 @@ class RecordingReplayMarketSource:
             (DOGE, "4h"): cpm.candles_4h,
             (ETH, "1h"): brf2.candles_1h,
             (ETH, "4h"): brf2.candles_4h,
-            (BTC, "15m"): sor.candles_15m,
         }
+        self._sor_opening = sor.candles_15m[:4]
+        self._sor_filler = sor.candles_15m[4]
+        self._sor_trigger = sor.candles_15m[-1]
         self._offset_ms = 0
         self.calls: list[ClosedCandleRequest] = []
 
@@ -153,6 +163,8 @@ class RecordingReplayMarketSource:
         request: ClosedCandleRequest,
     ) -> tuple[ClosedCandle, ...]:
         self.calls.append(request)
+        if request.exchange_instrument_id == BTC and request.timeframe == "15m":
+            return self._sor_session_candles(request.closed_at_ms)
         return tuple(
             candle.model_copy(
                 update={
@@ -164,6 +176,27 @@ class RecordingReplayMarketSource:
                 (request.exchange_instrument_id, request.timeframe),
                 (),
             )
+        )
+
+    def _sor_session_candles(self, closed_at_ms: int) -> tuple[ClosedCandle, ...]:
+        interval_ms = 900_000
+        session_start_ms = (closed_at_ms // 86_400_000) * 86_400_000
+        candle_count = (closed_at_ms - session_start_ms) // interval_ms
+        assert candle_count >= 5
+        assert session_start_ms + candle_count * interval_ms == closed_at_ms
+        templates = (
+            *self._sor_opening,
+            *(self._sor_filler for _ in range(candle_count - 5)),
+            self._sor_trigger,
+        )
+        return tuple(
+            candle.model_copy(
+                update={
+                    "open_time_ms": session_start_ms + index * interval_ms,
+                    "close_time_ms": session_start_ms + (index + 1) * interval_ms,
+                }
+            )
+            for index, candle in enumerate(templates)
         )
 
 
@@ -271,15 +304,17 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         replay_engine,
         bnb_positions,
         exchange_instrument_id=DOGE,
-        now_ms=NOW_MS + 2 * 3_600_000 - 1,
+        now_ms=NOW_MS + TWO_HOURS_MS - 1,
     )
+    venue_call_count_before_doge = len(venue.calls)
     doge = await _observe_and_admit(
         replay_engine,
         source,
         venue,
         runtime_scope_id=await _active_scope_id(replay_engine, DOGE),
-        offset_ms=2 * 3_600_000,
+        offset_ms=TWO_HOURS_MS,
     )
+    assert len(venue.calls) == venue_call_count_before_doge
     assert doge[:2] == (
         ObservationStatus.SIGNAL_CREATED,
         EntryWorkerStatus.ISSUE_REFUSED,
@@ -288,28 +323,34 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         replay_engine,
         bnb_positions,
         exchange_instrument_id=ETH,
-        now_ms=NOW_MS + 7 * 3_600_000 - 1,
+        now_ms=NOW_MS + SEVEN_HOURS_MS - 1,
     )
     brf2 = await _observe_and_admit(
         replay_engine,
         source,
         venue,
         runtime_scope_id=await _active_scope_id(replay_engine, ETH),
-        offset_ms=7 * 3_600_000,
+        offset_ms=SEVEN_HOURS_MS,
     )
     assert brf2[1] is EntryWorkerStatus.DISPATCHED and brf2[5] is not None, brf2
-    await _release_entry_lane(
+    brf2_positions = await _release_entry_lane(
         replay_engine,
         venue,
         ticket_id=brf2[5],
-        now_ms=NOW_MS + 7 * 3_600_000 + 2_000,
+        now_ms=NOW_MS + SEVEN_HOURS_MS + 2_000,
+    )
+    await _refresh_instrument_certification(
+        replay_engine,
+        brf2_positions,
+        exchange_instrument_id=BTC,
+        now_ms=NOW_MS + NINE_HOURS_FIFTEEN_MINUTES_MS - 1,
     )
     sor = await _observe_and_admit(
         replay_engine,
         source,
         venue,
         runtime_scope_id=await _active_scope_id(replay_engine, BTC),
-        offset_ms=0,
+        offset_ms=NINE_HOURS_FIFTEEN_MINUTES_MS,
     )
 
     assert bnb[0] is ObservationStatus.SIGNAL_CREATED
@@ -330,7 +371,83 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
 
     async with PostgresKernelUnitOfWork(replay_engine) as uow:
         decisions = await uow.admission_decisions.list_recent(limit=8)
+        sor_signal = await uow.signals.get(sor[2])
+    assert sor_signal is not None
+    sor_session_start_ms = (
+        expected_sor_time := NOW_MS + NINE_HOURS_FIFTEEN_MINUTES_MS
+    ) // 86_400_000 * 86_400_000
+    sor_fact_values = {
+        fact.fact_definition_id: fact.value for fact in sor_signal.facts
+    }
+    assert next(
+        value
+        for fact_id, value in sor_fact_values.items()
+        if "session_start_ms_v3" in fact_id
+    ) == str(sor_session_start_ms)
+    assert next(
+        value
+        for fact_id, value in sor_fact_values.items()
+        if "session_end_ms_v3" in fact_id
+    ) == str(sor_session_start_ms + 86_400_000)
+    assert sor_signal.occurred_at_ms == expected_sor_time
     async with replay_engine.connect() as connection:
+        policy = (
+            await connection.execute(sa.select(owner_policy_current))
+        ).mappings().one()
+        signal_rows = tuple(
+            (
+                await connection.execute(
+                    sa.select(signal_events).order_by(signal_events.c.occurred_at_ms)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        decision_rows = tuple(
+            (
+                await connection.execute(
+                    sa.select(admission_decisions).order_by(
+                        admission_decisions.c.decided_at_ms
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+        ticket_rows = tuple(
+            (
+                await connection.execute(
+                    sa.select(trade_tickets).order_by(trade_tickets.c.created_at_ms)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        claim_rows = tuple(
+            (
+                await connection.execute(
+                    sa.select(capacity_claims).order_by(capacity_claims.c.created_at_ms)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        command_rows = tuple(
+            (await connection.execute(sa.select(exchange_commands))).mappings().all()
+        )
+        doge_command_count = await connection.scalar(
+            sa.select(sa.func.count(exchange_commands.c.command_id))
+            .select_from(
+                admission_decisions.outerjoin(
+                    trade_tickets,
+                    admission_decisions.c.ticket_id == trade_tickets.c.ticket_id,
+                ).outerjoin(
+                    exchange_commands,
+                    trade_tickets.c.ticket_id == exchange_commands.c.ticket_id,
+                )
+            )
+            .where(admission_decisions.c.signal_event_id == doge[2])
+        )
         shadow = (
             await connection.execute(
                 sa.select(shadow_outcomes_current).where(
@@ -360,15 +477,75 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         tickets = tuple(active_tickets)
 
     by_instrument = {item.exchange_instrument_id: item for item in decisions}
+    expected_signal_times = (
+        NOW_MS,
+        NOW_MS + TWO_HOURS_MS,
+        NOW_MS + SEVEN_HOURS_MS,
+        NOW_MS + NINE_HOURS_FIFTEEN_MINUTES_MS,
+    )
+    expected_decision_times = tuple(value + 1_000 for value in expected_signal_times)
+    assert tuple(row["exchange_instrument_id"] for row in signal_rows) == (
+        BNB,
+        DOGE,
+        ETH,
+        BTC,
+    )
+    assert tuple(int(row["occurred_at_ms"]) for row in signal_rows) == (
+        expected_signal_times
+    )
+    assert tuple(row["exchange_instrument_id"] for row in decision_rows) == (
+        BNB,
+        DOGE,
+        ETH,
+        BTC,
+    )
+    assert tuple(int(row["decided_at_ms"]) for row in decision_rows) == (
+        expected_decision_times
+    )
+    assert tuple(row["exchange_instrument_id"] for row in ticket_rows) == (
+        BNB,
+        ETH,
+        BTC,
+    )
+    assert tuple(int(row["created_at_ms"]) for row in ticket_rows) == (
+        expected_decision_times[0],
+        expected_decision_times[2],
+        expected_decision_times[3],
+    )
+
+    assert policy["policy_version"] == 4
+    assert policy["max_concurrent_tickets"] == 3
+    assert policy["max_ticket_stop_risk_fraction"] == Decimal("0.02")
+    assert policy["max_gross_stop_risk_fraction"] == Decimal("0.06")
+    assert policy["max_ticket_initial_margin_fraction"] == Decimal("0.30")
+    assert policy["max_gross_initial_margin_utilization"] == Decimal("0.90")
+    assert policy["min_materialization_ratio"] == Decimal("0.50")
+    assert policy["directional_stop_risk_limit_fraction"] == Decimal("0.04")
+    assert policy["family_ticket_limits"] == {
+        "long_continuation": 1,
+        "opening_range": 2,
+        "rally_failure_short": 1,
+    }
+    assert policy["max_leverage"] == 10
+    assert policy["supported_margin_mode"] == "cross"
+
     assert len(tickets) == 3
-    assert sum(ticket.risk_at_stop for ticket in tickets) <= Decimal(60000)
+    assert len(claim_rows) == 3
+    ticket_risk_limit = REPLAY_WALLET_BALANCE * Decimal("0.02")
+    gross_risk_limit = REPLAY_WALLET_BALANCE * Decimal("0.06")
+    ticket_margin_limit = REPLAY_WALLET_BALANCE * Decimal("0.30")
+    gross_margin_limit = REPLAY_WALLET_BALANCE * Decimal("0.90")
+    minimum_materialized_risk = ticket_risk_limit * Decimal("0.50")
+    directional_risk_limit = REPLAY_WALLET_BALANCE * Decimal("0.04")
+    assert sum(ticket.risk_at_stop for ticket in tickets) <= gross_risk_limit
+    assert sum(ticket.reserved_margin for ticket in tickets) <= gross_margin_limit
     assert (
         sum(
             ticket.risk_at_stop
             for ticket in tickets
             if ticket.identity.netting_domain.position_side == "long"
         )
-        <= Decimal(40000)
+        <= directional_risk_limit
     )
     assert (
         sum(
@@ -376,7 +553,7 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
             for ticket in tickets
             if ticket.identity.netting_domain.position_side == "short"
         )
-        <= Decimal(40000)
+        <= directional_risk_limit
     )
     assert sum(
         ticket.exposure_family == "long_continuation" for ticket in tickets
@@ -392,6 +569,54 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
     assert by_instrument[DOGE].first_blocker == "exposure_family_capacity_exhausted"
     assert by_instrument[DOGE].capacity_claim_id is None
     assert by_instrument[DOGE].ticket_id is None
+    assert doge_command_count == 0
+    admitted_ticket_ids = {
+        str(decision.ticket_id)
+        for decision in decisions
+        if decision.decision_status is AdmissionDecisionStatus.ADMITTED
+    }
+    assert {str(row["ticket_id"]) for row in command_rows} == admitted_ticket_ids
+
+    claims_by_ticket_id = {str(row["ticket_id"]): row for row in claim_rows}
+    decisions_by_ticket_id = {
+        str(row["ticket_id"]): row
+        for row in decision_rows
+        if row["ticket_id"] is not None
+    }
+    for ticket_row in ticket_rows:
+        ticket_id = str(ticket_row["ticket_id"])
+        claim = claims_by_ticket_id[ticket_id]
+        decision = decisions_by_ticket_id[ticket_id]
+        assert str(claim["capacity_claim_id"]) == str(ticket_row["capacity_claim_id"])
+        assert str(claim["signal_event_id"]) == str(ticket_row["signal_event_id"])
+        assert str(decision["capacity_claim_id"]) == str(claim["capacity_claim_id"])
+        assert str(decision["signal_event_id"]) == str(ticket_row["signal_event_id"])
+        assert claim["owner_policy_version"] == 4
+        assert ticket_row["owner_policy_version"] == 4
+        assert claim["total_wallet_balance_at_claim"] == REPLAY_WALLET_BALANCE
+        assert claim["max_ticket_stop_risk_fraction"] == Decimal("0.02")
+        assert claim["max_gross_stop_risk_fraction"] == Decimal("0.06")
+        assert claim["max_ticket_initial_margin_fraction"] == Decimal("0.30")
+        assert claim["max_gross_initial_margin_utilization"] == Decimal("0.90")
+        assert claim["min_materialization_ratio"] == Decimal("0.50")
+        assert claim["directional_stop_risk_limit_fraction"] == Decimal("0.04")
+        assert claim["minimum_stop_risk_budget"] == minimum_materialized_risk
+        assert claim["planned_stop_risk_budget"] == ticket_risk_limit
+        assert claim["ticket_margin_budget"] == ticket_margin_limit
+        assert minimum_materialized_risk <= claim["risk_at_stop"] <= ticket_risk_limit
+        assert claim["reserved_margin"] <= ticket_margin_limit
+        assert claim["selected_leverage"] == 5
+        assert claim["configured_leverage_at_claim"] == 5
+        assert claim["exchange_max_leverage"] == 10
+        assert ticket_row["selected_leverage"] == 5
+        assert claim["margin_mode_at_claim"] == "cross"
+        assert ticket_row["margin_mode"] == "cross"
+        assert claim["exposure_family"] == ticket_row["exposure_family"]
+        assert claim["family_ticket_limit"] == {
+            "long_continuation": 1,
+            "opening_range": 2,
+            "rally_failure_short": 1,
+        }[str(ticket_row["exposure_family"])]
     assert shadow is not None
     assert shadow["admission_decision_id"] == by_instrument[DOGE].admission_decision_id
     assert shadow["status"] == "pending"
@@ -441,6 +666,13 @@ async def _seed_replay_runtime(
             uow,
             ArmAcceptancePolicyRequest(armed_at_ms=NOW_MS - 1),
         )
+    async with engine.begin() as connection:
+        promoted = await connection.execute(
+            sa.update(owner_policy_current)
+            .where(owner_policy_current.c.policy_version == 2)
+            .values(policy_version=4)
+        )
+    assert promoted.rowcount == 1
 
 
 async def _install_and_activate(

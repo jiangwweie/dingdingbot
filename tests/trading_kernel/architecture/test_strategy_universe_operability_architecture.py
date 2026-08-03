@@ -4,6 +4,7 @@ import ast
 import inspect
 from pathlib import Path
 
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
     ReconciliationWorkerResult,
@@ -90,7 +91,7 @@ def test_reconciliation_certification_is_a_bounded_safety_worker_concern() -> No
     request = ReconciliationWorkerRequest(
         worker_id="architecture-check",
         runtime_commit="commit-check",
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         now_ms=1,
         timeout_seconds=1,
         unknown_visibility_grace_ms=1,
@@ -99,6 +100,7 @@ def test_reconciliation_certification_is_a_bounded_safety_worker_concern() -> No
     assert request.certification_max_wait_ms == 120_000
     assert request.certification_valid_for_ms == 600_000
     assert request.certification_eligible_check_interval_ms == 300_000
+    assert request.schema_revision == "0003_portfolio_admission_observability"
     assert "housekeeping_status" in ReconciliationWorkerResult.model_fields
     assert (
         "instrument_certification_source"

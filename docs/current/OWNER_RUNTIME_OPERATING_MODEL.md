@@ -66,17 +66,20 @@ same instrument. New ENTRY admission remains globally serialized. Capacity is
 controlled by current Owner budget policy, not by a hard-coded two-position
 architecture.
 
-The current Owner-approved production policy allows up to three concurrent
-Tickets with a `0.03` per-Ticket planned stop-risk ceiling, `0.06` gross planned
-stop-risk ceiling, `0.45` per-Ticket initial-margin ceiling, `0.90` gross
-initial-margin utilization ceiling, maximum `10` leverage, and `cross` margin.
-Supported instruments are operationally configured at fixed `5x`; the kernel
-adopts and revalidates that fact without mutating leverage.
+The currently deployed Policy v3 identity and values are production facts owned
+only by `MAIN_CONTROL_ROADMAP.md`. Stable operating guidance must not describe
+the approved post-`0003` Policy v4 target contract as already deployed.
 
-Capacity is demand-based within those ticket and gross ceilings. It normally
-allows two full-risk Tickets and permits a third only when earlier Tickets leave
-enough risk and margin; three equal positions are not promised. The approved
-Policy v3 is the current production truth recorded by `MAIN_CONTROL_ROADMAP.md`.
-Disabling `new_entry_submit_enabled` stops only new ENTRY; it does not remove
-protection or recovery authority from a Ticket that already has exchange
-exposure.
+After the `0003_portfolio_admission_observability` release is certified and the
+roadmap is refreshed from direct evidence, Policy v4 targets three concurrent
+Tickets, explicit per-Ticket and gross risk and margin limits, directional-risk
+and Exposure Family limits, a minimum materialization ratio, maximum `10`
+leverage, and `cross` margin. Supported instruments remain configured at fixed
+`5x`; the kernel adopts and revalidates that account fact without mutating
+leverage.
+
+Capacity is demand-based within the persisted policy's Ticket, gross,
+directional, Family, and margin ceilings; three equal positions are not
+promised. Disabling `new_entry_submit_enabled` stops only new ENTRY; it does not
+remove protection or recovery authority from a Ticket that already has
+exchange exposure.

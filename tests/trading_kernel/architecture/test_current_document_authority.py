@@ -366,6 +366,37 @@ def test_current_documents_converge_on_portfolio_admission_authority() -> None:
         assert not missing, f"{relative_path} lacks portfolio authority: {missing}"
 
 
+def test_stable_policy_v4_target_is_distinct_from_deployed_policy_v3() -> None:
+    runtime_profile = (
+        REPO_ROOT / "docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md"
+    ).read_text(encoding="utf-8")
+    owner_model = (
+        REPO_ROOT / "docs/current/OWNER_RUNTIME_OPERATING_MODEL.md"
+    ).read_text(encoding="utf-8")
+    roadmap = (REPO_ROOT / CURRENT_RUNTIME_STATE_DOCUMENT).read_text(
+        encoding="utf-8"
+    )
+
+    for relative_path, source in (
+        (
+            "docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md",
+            runtime_profile,
+        ),
+        ("docs/current/OWNER_RUNTIME_OPERATING_MODEL.md", owner_model),
+    ):
+        assert "approved post-`0003` Policy v4 target contract" in source, (
+            f"{relative_path} does not identify Policy v4 as a target contract"
+        )
+        assert "currently deployed Policy v3" in source, (
+            f"{relative_path} does not defer deployed identity to the roadmap"
+        )
+        assert "MAIN_CONTROL_ROADMAP.md" in source
+
+    assert "| Dynamic policy | Policy version `3`;" in roadmap
+    assert "Policy version `4`" not in roadmap
+    assert "0003_portfolio_admission_observability" not in roadmap
+
+
 def test_current_deployment_authority_has_no_active_handover_or_schema_deletion() -> None:
     forbidden = (
         "--protected-ticket-id",

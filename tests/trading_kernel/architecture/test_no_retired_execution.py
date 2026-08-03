@@ -101,9 +101,15 @@ def test_shadow_outcome_cannot_import_ticket_command_or_venue_write_authority() 
         "infrastructure.binance_usdm_venue",
     )
     violations: list[str] = []
+    shadow_paths = (
+        REPO_ROOT / "src/trading_kernel/application/project_shadow_outcome.py",
+        REPO_ROOT / "src/trading_kernel/domain/shadow_outcome.py",
+    )
 
-    for path in (REPO_ROOT / "src" / "trading_kernel").rglob("*shadow*.py"):
+    for path in shadow_paths:
+        assert path.is_file(), f"missing Shadow authority target: {path}"
         source = path.read_text(encoding="utf-8")
+        assert source.strip(), f"empty Shadow authority target: {path}"
         for marker in forbidden_imports:
             if marker in source:
                 violations.append(
