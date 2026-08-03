@@ -23,6 +23,9 @@ from src.trading_kernel.domain.commands import ExchangeCommandKind
 from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from tests.trading_kernel.integration import test_signal_to_ticket as signal_fixture
 from tests.trading_kernel.integration.test_signal_to_ticket import (
     _seed_runtime_authority,
@@ -44,7 +47,7 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_002,
             ),
         )
@@ -67,7 +70,7 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
                 admission_snapshot=_admission_snapshot(),
                 claim_owner="entry-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_004,
             ),
         )
@@ -105,7 +108,7 @@ async def test_capacity_refusal_persists_no_partial_issuance(issue_engine) -> No
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_002,
             ),
         )
@@ -129,7 +132,7 @@ async def test_capacity_refusal_persists_no_partial_issuance(issue_engine) -> No
                 admission_snapshot=stale,
                 claim_owner="entry-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_004,
             ),
         )

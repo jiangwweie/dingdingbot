@@ -38,6 +38,9 @@ from src.trading_kernel.infrastructure.pg_models import (
     trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from src.trading_kernel.interfaces.observation_worker import (
     ObservationWorkerRequest,
     ObservationWorkerStatus,
@@ -67,8 +70,6 @@ async def shadow_engine() -> AsyncGenerator[AsyncEngine, None]:
     engine = create_async_engine(_database_url(database_name))
     try:
         _run_alembic(_database_url(database_name), "upgrade", "head")
-        async with engine.begin() as connection:
-            await connection.run_sync(shadow_outcomes_current.create)
         yield engine
     finally:
         await engine.dispose()
@@ -363,7 +364,7 @@ async def test_capacity_rejection_creates_only_one_pending_shadow_and_no_trading
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_001,
             ),
         )
@@ -383,7 +384,7 @@ async def test_capacity_rejection_creates_only_one_pending_shadow_and_no_trading
                 admission_snapshot=snapshot,
                 claim_owner="shadow-test",
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_002,
             ),
         )
@@ -549,7 +550,7 @@ def _worker_request(*, now_ms: int = 10) -> ObservationWorkerRequest:
     return ObservationWorkerRequest(
         worker_id="shadow-worker",
         runtime_commit="test-commit",
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         now_ms=now_ms,
         lease_until_ms=now_ms + 10,
         timeout_seconds=1,

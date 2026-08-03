@@ -42,6 +42,429 @@ SOURCE_HISTORY_COLUMNS = {
     "brc_trade_events": "event_id ticket_id sequence event_type payload occurred_at_ms",
     "brc_trade_reviews": "review_id ticket_id revision supersedes_review_id outcome metrics decision_impact created_at_ms",
 }
+CERTIFIED_0002_SOURCE_EVENTS = (
+    {
+        "strategy_group_id": "BRF2-001",
+        "display_name": "BRF2 bear rally failure",
+        "strategy_version_id": "sgv:BRF2-001:v2",
+        "strategy_version": 2,
+        "version_event_spec_ids": (
+            "event_spec:BRF2-001:BRF2-SHORT:v2",
+        ),
+        "version_registry_semantic_hash": (
+            "sha256:5c981c7aae2e8d914c27f0cf5611ed0dd0c38b874212ae3f4145a64a78e83e38"
+        ),
+        "version_source": "committed_old_main_program_v2",
+        "event_spec_id": "event_spec:BRF2-001:BRF2-SHORT:v2",
+        "event_id": "BRF2-SHORT",
+        "position_side": "short",
+        "timeframe": "1h",
+        "freshness_window_ms": 3_600_000,
+        "protection_fact_id": "fact:rally_high_reference:v1",
+        "exit_policy_id": "exit-policy:BRF2-001:BRF2-SHORT:right-tail-v1",
+        "event_semantic_hash": (
+            "sha256:93ec2c387c02442bb4f2d4a936aa035a30376cb1a25df194a15a2d4809a1ab66"
+        ),
+        "event_source": "committed_old_main_program_v2",
+        "facts": (
+            (
+                "fact:rally_failure_confirmed:v1",
+                "rally_failure_confirmed",
+                "boolean",
+                3_600_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:short_side_not_disabled:v1",
+                "short_side_not_disabled",
+                "boolean",
+                3_600_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:rally_high_reference:v1",
+                "rally_high_reference",
+                "decimal",
+                3_600_000,
+                "positive_decimal",
+                "protection_reference",
+                True,
+            ),
+            (
+                "fact:strong_uptrend_disable:v1",
+                "strong_uptrend_disable",
+                "boolean",
+                3_600_000,
+                "boolean",
+                "disable",
+                True,
+            ),
+        ),
+        "exit_policy_version": "2026-07-22-v1",
+        "exit_policy_semantic_hash": (
+            "sha256:cfaf3e3ab185ac35a8dadc48aab519dcf75816d2ecb6836fece892612d833f47"
+        ),
+        "runner_reference_fact": "rally_high_reference",
+        "runner_structure_rule": "confirmed_lower_high",
+        "time_stop_bars": None,
+    },
+    {
+        "strategy_group_id": "CPM-RO-001",
+        "display_name": "CPM reclaim pullback recovery",
+        "strategy_version_id": "sgv:CPM-RO-001:v2",
+        "strategy_version": 2,
+        "version_event_spec_ids": (
+            "event_spec:CPM-RO-001:CPM-LONG:v2",
+        ),
+        "version_registry_semantic_hash": (
+            "sha256:5c981c7aae2e8d914c27f0cf5611ed0dd0c38b874212ae3f4145a64a78e83e38"
+        ),
+        "version_source": "committed_old_main_program_v2",
+        "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
+        "event_id": "CPM-LONG",
+        "position_side": "long",
+        "timeframe": "1h",
+        "freshness_window_ms": 3_600_000,
+        "protection_fact_id": "fact:pullback_low_reference:v1",
+        "exit_policy_id": "exit-policy:CPM-RO-001:CPM-LONG:right-tail-v1",
+        "event_semantic_hash": (
+            "sha256:d4a9ceb2c096a13701ca148438d607bee970deef5d658790aa1081f816661a2e"
+        ),
+        "event_source": "committed_old_main_program_v2",
+        "facts": (
+            (
+                "fact:htf_trend_intact:v1",
+                "htf_trend_intact",
+                "boolean",
+                3_600_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:reclaim_confirmed:v1",
+                "reclaim_confirmed",
+                "boolean",
+                3_600_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:pullback_low_reference:v1",
+                "pullback_low_reference",
+                "decimal",
+                3_600_000,
+                "positive_decimal",
+                "protection_reference",
+                True,
+            ),
+        ),
+        "exit_policy_version": "2026-07-22-v1",
+        "exit_policy_semantic_hash": (
+            "sha256:3d67119246c8ff29e47193b88d32e8c43333d39d8cbdd25cf266b7a42871e887"
+        ),
+        "runner_reference_fact": "pullback_low_reference",
+        "runner_structure_rule": "confirmed_higher_low",
+        "time_stop_bars": None,
+    },
+    {
+        "strategy_group_id": "MI-001",
+        "display_name": "MI relative strength impulse",
+        "strategy_version_id": "sgv:MI-001:v2",
+        "strategy_version": 2,
+        "version_event_spec_ids": ("event_spec:MI-001:MI-LONG:v2",),
+        "version_registry_semantic_hash": (
+            "sha256:5c981c7aae2e8d914c27f0cf5611ed0dd0c38b874212ae3f4145a64a78e83e38"
+        ),
+        "version_source": "committed_old_main_program_v2",
+        "event_spec_id": "event_spec:MI-001:MI-LONG:v2",
+        "event_id": "MI-LONG",
+        "position_side": "long",
+        "timeframe": "1h",
+        "freshness_window_ms": 3_600_000,
+        "protection_fact_id": "fact:impulse_invalidation_reference:v1",
+        "exit_policy_id": "exit-policy:MI-001:MI-LONG:right-tail-v1",
+        "event_semantic_hash": (
+            "sha256:533abcf09e68d590f2619507cc5951229bf0a95b18eae8fbf4ae384e21edff0f"
+        ),
+        "event_source": "committed_old_main_program_v2",
+        "facts": (
+            (
+                "fact:impulse_confirmed:v1",
+                "impulse_confirmed",
+                "boolean",
+                3_600_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:relative_strength_confirmed:v1",
+                "relative_strength_confirmed",
+                "boolean",
+                3_600_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:impulse_invalidation_reference:v1",
+                "impulse_invalidation_reference",
+                "decimal",
+                3_600_000,
+                "positive_decimal",
+                "protection_reference",
+                True,
+            ),
+        ),
+        "exit_policy_version": "2026-07-22-v1",
+        "exit_policy_semantic_hash": (
+            "sha256:485125ed39c3997e918d3f358ea38fe353a74696916f64cc44c2f8a5e3ba0cde"
+        ),
+        "runner_reference_fact": "impulse_invalidation_reference",
+        "runner_structure_rule": "confirmed_higher_low",
+        "time_stop_bars": None,
+    },
+    {
+        "strategy_group_id": "MPG-001",
+        "display_name": "MPG momentum persistence",
+        "strategy_version_id": "sgv:MPG-001:v2",
+        "strategy_version": 2,
+        "version_event_spec_ids": ("event_spec:MPG-001:MPG-LONG:v2",),
+        "version_registry_semantic_hash": (
+            "sha256:5c981c7aae2e8d914c27f0cf5611ed0dd0c38b874212ae3f4145a64a78e83e38"
+        ),
+        "version_source": "committed_old_main_program_v2",
+        "event_spec_id": "event_spec:MPG-001:MPG-LONG:v2",
+        "event_id": "MPG-LONG",
+        "position_side": "long",
+        "timeframe": "1h",
+        "freshness_window_ms": 3_600_000,
+        "protection_fact_id": "fact:momentum_floor_reference:v1",
+        "exit_policy_id": "exit-policy:MPG-001:MPG-LONG:right-tail-v1",
+        "event_semantic_hash": (
+            "sha256:e7161b5c5b3fb8f2c6edbb134ea1081f80e55db74304e99a84c1cb20e3b93939"
+        ),
+        "event_source": "committed_old_main_program_v2",
+        "facts": (
+            (
+                "fact:momentum_persistence_confirmed:v1",
+                "momentum_persistence_confirmed",
+                "boolean",
+                3_600_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:leader_strength_confirmed:v1",
+                "leader_strength_confirmed",
+                "boolean",
+                3_600_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:momentum_floor_reference:v1",
+                "momentum_floor_reference",
+                "decimal",
+                3_600_000,
+                "positive_decimal",
+                "protection_reference",
+                True,
+            ),
+        ),
+        "exit_policy_version": "2026-07-22-v1",
+        "exit_policy_semantic_hash": (
+            "sha256:421d7391e90795b434ff953971d240fbb6205d68191ca06cf9cc34ebd6c3f787"
+        ),
+        "runner_reference_fact": "momentum_floor_reference",
+        "runner_structure_rule": "confirmed_higher_low",
+        "time_stop_bars": None,
+    },
+    {
+        "strategy_group_id": "SOR-001",
+        "display_name": "SOR opening range breakout and breakdown",
+        "strategy_version_id": "sgv:SOR-001:v3",
+        "strategy_version": 3,
+        "version_event_spec_ids": (
+            "event_spec:SOR-001:SOR-LONG:v3",
+            "event_spec:SOR-001:SOR-SHORT:v3",
+        ),
+        "version_registry_semantic_hash": (
+            "sha256:d017b33320bea0f40a03dae475f0693f710c5e2c52b9a0e8e90821f4132c5e96"
+        ),
+        "version_source": "committed_strategy_registry_contract",
+        "event_spec_id": "event_spec:SOR-001:SOR-LONG:v3",
+        "event_id": "SOR-LONG",
+        "position_side": "long",
+        "timeframe": "15m",
+        "freshness_window_ms": 900_000,
+        "protection_fact_id": "fact:opening_range_low_reference_v3:v3",
+        "exit_policy_id": "exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1",
+        "event_semantic_hash": (
+            "sha256:e9fbd06ccf63a5b0bd3079f246312bb52bd4cb1c670cc51ed13343701ae2e392"
+        ),
+        "event_source": "committed_strategy_registry_contract",
+        "facts": (
+            (
+                "fact:opening_range_defined_v3:v3",
+                "opening_range_defined_v3",
+                "boolean",
+                900_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:breakout_edge_crossed_v3:v3",
+                "breakout_edge_crossed_v3",
+                "boolean",
+                900_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:opening_range_high_reference_v3:v3",
+                "opening_range_high_reference_v3",
+                "decimal",
+                900_000,
+                "positive_decimal",
+                "lifecycle_reference",
+                True,
+            ),
+            (
+                "fact:opening_range_low_reference_v3:v3",
+                "opening_range_low_reference_v3",
+                "decimal",
+                900_000,
+                "positive_decimal",
+                "protection_reference",
+                True,
+            ),
+            (
+                "fact:session_start_ms_v3:v3",
+                "session_start_ms_v3",
+                "decimal",
+                900_000,
+                "positive_decimal",
+                "identity_reference",
+                True,
+            ),
+            (
+                "fact:session_end_ms_v3:v3",
+                "session_end_ms_v3",
+                "decimal",
+                900_000,
+                "positive_decimal",
+                "lifecycle_reference",
+                True,
+            ),
+        ),
+        "exit_policy_version": "2026-07-31-sor-v3",
+        "exit_policy_semantic_hash": (
+            "sha256:0df1319dba726a769a4a3abe827588e141bcab6b3c83fe5d79d98a109e6a1478"
+        ),
+        "runner_reference_fact": "opening_range_low_reference_v3",
+        "runner_structure_rule": "confirmed_higher_low",
+        "time_stop_bars": 96,
+    },
+    {
+        "strategy_group_id": "SOR-001",
+        "display_name": "SOR opening range breakout and breakdown",
+        "strategy_version_id": "sgv:SOR-001:v3",
+        "strategy_version": 3,
+        "version_event_spec_ids": (
+            "event_spec:SOR-001:SOR-LONG:v3",
+            "event_spec:SOR-001:SOR-SHORT:v3",
+        ),
+        "version_registry_semantic_hash": (
+            "sha256:d017b33320bea0f40a03dae475f0693f710c5e2c52b9a0e8e90821f4132c5e96"
+        ),
+        "version_source": "committed_strategy_registry_contract",
+        "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v3",
+        "event_id": "SOR-SHORT",
+        "position_side": "short",
+        "timeframe": "15m",
+        "freshness_window_ms": 900_000,
+        "protection_fact_id": "fact:opening_range_high_reference_v3:v3",
+        "exit_policy_id": "exit-policy:SOR-001:SOR-SHORT:sor-v3-right-tail-v1",
+        "event_semantic_hash": (
+            "sha256:36ce263f26e1359b1a809683f40b64b0ca8cb98d6ce49d4d79a3bb069a4c1ed5"
+        ),
+        "event_source": "committed_strategy_registry_contract",
+        "facts": (
+            (
+                "fact:opening_range_defined_v3:v3",
+                "opening_range_defined_v3",
+                "boolean",
+                900_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:breakdown_edge_crossed_v3:v3",
+                "breakdown_edge_crossed_v3",
+                "boolean",
+                900_000,
+                "boolean",
+                "condition",
+                True,
+            ),
+            (
+                "fact:opening_range_low_reference_v3:v3",
+                "opening_range_low_reference_v3",
+                "decimal",
+                900_000,
+                "positive_decimal",
+                "lifecycle_reference",
+                True,
+            ),
+            (
+                "fact:opening_range_high_reference_v3:v3",
+                "opening_range_high_reference_v3",
+                "decimal",
+                900_000,
+                "positive_decimal",
+                "protection_reference",
+                True,
+            ),
+            (
+                "fact:session_start_ms_v3:v3",
+                "session_start_ms_v3",
+                "decimal",
+                900_000,
+                "positive_decimal",
+                "identity_reference",
+                True,
+            ),
+            (
+                "fact:session_end_ms_v3:v3",
+                "session_end_ms_v3",
+                "decimal",
+                900_000,
+                "positive_decimal",
+                "lifecycle_reference",
+                True,
+            ),
+        ),
+        "exit_policy_version": "2026-07-31-sor-v3",
+        "exit_policy_semantic_hash": (
+            "sha256:aceb71fb7311263fc4c7163b9314aa521ae279cf140d2a4f586e30d7490565bf"
+        ),
+        "runner_reference_fact": "opening_range_high_reference_v3",
+        "runner_structure_rule": "confirmed_lower_high",
+        "time_stop_bars": 96,
+    },
+)
 
 
 def test_runtime_identity_points_to_portfolio_admission_head() -> None:
@@ -201,6 +624,131 @@ async def test_0002_terminal_source_columns_are_equal_after_0003(
 
     assert result.returncode == 0, result.stderr[-4000:]
     assert await _source_history_manifest(engine, exact_source_shape=False) == before
+
+
+@pytest.mark.asyncio
+async def test_0003_refuses_active_ticket_before_any_schema_or_data_mutation(
+    compatible_migration_engine: AsyncEngine,
+) -> None:
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_trade_tickets "
+                "SET status = 'entry_prepared', terminal_at_ms = NULL "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            )
+        )
+    before = await _pre_upgrade_authority_state(engine)
+
+    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
+
+    assert result.returncode != 0
+    assert "active Ticket" in result.stderr
+    assert await _pre_upgrade_authority_state(engine) == before
+
+
+@pytest.mark.asyncio
+async def test_0003_refuses_source_event_timeframe_drift_before_any_mutation(
+    compatible_migration_engine: AsyncEngine,
+) -> None:
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_event_specs SET timeframe = '1h' "
+                "WHERE event_spec_id = 'event_spec:SOR-001:SOR-LONG:v3'"
+            )
+        )
+    before = await _pre_upgrade_authority_state(engine)
+
+    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
+
+    assert result.returncode != 0
+    assert "certified Registry source" in result.stderr
+    assert await _pre_upgrade_authority_state(engine) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("blocker", "expected_error"),
+    (
+        ("position", "nonzero internal Position"),
+        ("budget_reservation", "active Budget Reservation"),
+        ("netting_domain", "unreleased Netting Domain"),
+        ("entry_lane_status", "ENTRY lane"),
+        ("entry_lane_owner", "ENTRY lane"),
+        ("exchange_command", "unresolved Exchange Command"),
+        ("incident", "open Incident"),
+        ("aggregate_closure", "nonterminal Aggregate closure"),
+    ),
+)
+async def test_0003_refuses_each_nonflat_source_before_any_mutation(
+    compatible_migration_engine: AsyncEngine,
+    blocker: str,
+    expected_error: str,
+) -> None:
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    await _install_nonflat_blocker(engine, blocker)
+    before = await _pre_upgrade_authority_state(engine)
+
+    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert await _pre_upgrade_authority_state(engine) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("drift_sql", "parameters"),
+    (
+        (
+            (
+                "UPDATE brc_event_specs "
+                "SET execution_semantics = CAST(:value AS jsonb) "
+                "WHERE event_spec_id = 'event_spec:SOR-001:SOR-LONG:v3'"
+            ),
+            {"value": '{"source":"drifted"}'},
+        ),
+        (
+            (
+                "UPDATE brc_exit_policies SET policy = CAST(:value AS jsonb) "
+                "WHERE exit_policy_id = "
+                "'exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1'"
+            ),
+            {"value": '{"runner":{"timeframe":"1h"}}'},
+        ),
+        (
+            (
+                "UPDATE brc_exit_policies SET semantic_hash = :value "
+                "WHERE exit_policy_id = "
+                "'exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1'"
+            ),
+            {"value": "sha256:" + "0" * 64},
+        ),
+    ),
+    ids=("execution-semantics", "exit-policy-payload", "exit-policy-hash"),
+)
+async def test_0003_refuses_literal_registry_semantic_drift_before_any_mutation(
+    compatible_migration_engine: AsyncEngine,
+    drift_sql: str,
+    parameters: dict[str, str],
+) -> None:
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    async with engine.begin() as connection:
+        await connection.execute(sa.text(drift_sql), parameters)
+    before = await _pre_upgrade_authority_state(engine)
+
+    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
+
+    assert result.returncode != 0
+    assert "certified Registry source" in result.stderr
+    assert await _pre_upgrade_authority_state(engine) == before
 
 
 @pytest.mark.asyncio
@@ -402,6 +950,51 @@ async def test_0003_installs_vnext_registry_and_retires_exact_source_lineage(
     assert universe_counts == (2, 0)
 
 
+@pytest.mark.asyncio
+async def test_0003_migrated_ticket_indexes_exactly_match_current_metadata(
+    compatible_migration_engine: AsyncEngine,
+) -> None:
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+
+    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
+    assert result.returncode == 0, result.stderr[-4000:]
+
+    async with engine.connect() as connection:
+        indexes = await connection.run_sync(
+            lambda sync: {
+                index["name"]: tuple(index["column_names"])
+                for index in sa.inspect(sync).get_indexes("brc_trade_tickets")
+            }
+        )
+
+    assert indexes == {
+        "ix_brc_trade_tickets_active_directional_risk": (
+            "venue_id",
+            "account_id",
+            "position_side",
+            "terminal_at_ms",
+        ),
+        "ix_brc_trade_tickets_active_family": (
+            "venue_id",
+            "account_id",
+            "exposure_family",
+            "terminal_at_ms",
+        ),
+        "ix_brc_trade_tickets_instrument_window": (
+            "venue_id",
+            "account_id",
+            "exchange_instrument_id",
+            "created_at_ms",
+            "terminal_at_ms",
+        ),
+        "uq_brc_trade_tickets_active_netting_domain_key": (
+            "active_netting_domain_key",
+        ),
+        "uq_brc_trade_tickets_signal_event_id": ("signal_event_id",),
+    }
+
+
 async def _insert_source_policy_v3(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
         await connection.execute(
@@ -443,8 +1036,7 @@ async def _prepare_production_shaped_0002(engine: AsyncEngine) -> None:
     result = _run_migration(_database_url(engine), "upgrade", SOURCE_REVISION)
     assert result.returncode == 0, result.stderr[-4000:]
     async with engine.begin() as connection:
-        await _promote_source_sor_v3_registry(connection)
-        await _insert_source_non_sor_v2_registry(connection)
+        await _install_certified_0002_registry(connection)
         await connection.execute(
             sa.text(
                 "UPDATE brc_owner_policy_current SET policy_version = 3, "
@@ -496,145 +1088,7 @@ async def _prepare_production_shaped_0002(engine: AsyncEngine) -> None:
         await _insert_terminal_chain_rows(connection)
 
 
-async def _insert_source_non_sor_v2_registry(connection: Any) -> None:
-    source_rows = (
-        (
-            "BRF2-001",
-            "BRF2 bear rally failure",
-            "BRF2-SHORT",
-            "short",
-            "fact:rally-high:v2",
-        ),
-        (
-            "CPM-RO-001",
-            "CPM reclaim pullback recovery",
-            "CPM-LONG",
-            "long",
-            "fact:pullback-low:v2",
-        ),
-        (
-            "MI-001",
-            "MI relative strength impulse",
-            "MI-LONG",
-            "long",
-            "fact:impulse-low:v2",
-        ),
-        (
-            "MPG-001",
-            "MPG momentum persistence",
-            "MPG-LONG",
-            "long",
-            "fact:momentum-low:v2",
-        ),
-    )
-    for index, (
-        strategy_group_id,
-        display_name,
-        event_id,
-        position_side,
-        protection_fact_id,
-    ) in enumerate(source_rows, start=1):
-        strategy_version_id = f"sgv:{strategy_group_id}:v2"
-        event_spec_id = f"event_spec:{strategy_group_id}:{event_id}:v2"
-        exit_policy_id = f"exit-policy:{strategy_group_id}:{event_id}:right-tail-v1"
-        await connection.execute(
-            sa.text(
-                "INSERT INTO brc_strategy_groups VALUES "
-                "(:group_id,:display_name,:version_id,'active',1000)"
-            ),
-            {
-                "group_id": strategy_group_id,
-                "display_name": display_name,
-                "version_id": strategy_version_id,
-            },
-        )
-        await connection.execute(
-            sa.text(
-                "INSERT INTO brc_strategy_versions VALUES "
-                "(:version_id,:group_id,2,'{}'::jsonb,'active',1000)"
-            ),
-            {"version_id": strategy_version_id, "group_id": strategy_group_id},
-        )
-        await connection.execute(
-            sa.text(
-                "INSERT INTO brc_event_specs VALUES "
-                "(:event_spec_id,:version_id,:event_id,:position_side,'1h',"
-                "3600000,'trigger_candle_close_time_ms','market',"
-                ":protection_fact_id,:exit_policy_id,'{}'::jsonb,'active',1000)"
-            ),
-            {
-                "event_spec_id": event_spec_id,
-                "version_id": strategy_version_id,
-                "event_id": event_id,
-                "position_side": position_side,
-                "protection_fact_id": protection_fact_id,
-                "exit_policy_id": exit_policy_id,
-            },
-        )
-        await connection.execute(
-            sa.text(
-                "INSERT INTO brc_exit_policies VALUES "
-                "(:exit_policy_id,'right-tail-v1',:event_spec_id,:position_side,"
-                "'{}'::jsonb,:semantic_hash,'active',1000)"
-            ),
-            {
-                "exit_policy_id": exit_policy_id,
-                "event_spec_id": event_spec_id,
-                "position_side": position_side,
-                "semantic_hash": "sha256:" + str(index) * 64,
-            },
-        )
-
-
-async def _promote_source_sor_v3_registry(connection: Any) -> None:
-    await connection.execute(
-        sa.text(
-            "INSERT INTO brc_fact_definitions VALUES "
-            "('fact:range-low:v3','range_low_v3','decimal',900000,'{}'::jsonb),"
-            "('fact:range-high:v3','range_high_v3','decimal',900000,'{}'::jsonb)"
-        )
-    )
-    await connection.execute(
-        sa.text(
-            "INSERT INTO brc_strategy_versions VALUES "
-            "('sgv:SOR-001:v3','SOR-001',3,'{}'::jsonb,'active',1000)"
-        )
-    )
-    for event_id, side, protection in (
-        ("SOR-LONG", "long", "fact:range-low:v3"),
-        ("SOR-SHORT", "short", "fact:range-high:v3"),
-    ):
-        event_spec_id = f"event_spec:SOR-001:{event_id}:v3"
-        policy_id = f"exit-policy:SOR-001:{event_id}:sor-v3-right-tail-v1"
-        policy_hash = "sha256:" + ("f" if side == "long" else "e") * 64
-        await connection.execute(
-            sa.text(
-                "INSERT INTO brc_event_specs VALUES "
-                "(:event_spec_id,'sgv:SOR-001:v3',:event_id,:side,'15m',"
-                "900000,'trigger_candle_close_time_ms','market',:protection,"
-                ":policy_id,'{}'::jsonb,'active',1000)"
-            ),
-            {
-                "event_spec_id": event_spec_id,
-                "event_id": event_id,
-                "side": side,
-                "protection": protection,
-                "policy_id": policy_id,
-            },
-        )
-        await connection.execute(
-            sa.text(
-                "INSERT INTO brc_exit_policies VALUES "
-                "(:policy_id,'sor-v3-right-tail-v1',:event_spec_id,:side,"
-                "'{}'::jsonb,:policy_hash,'active',1000)"
-            ),
-            {
-                "policy_id": policy_id,
-                "event_spec_id": event_spec_id,
-                "side": side,
-                "policy_hash": policy_hash,
-            },
-        )
+async def _install_certified_0002_registry(connection: Any) -> None:
     for statement in (
         (
             "UPDATE brc_exit_policies SET status = 'retired' "
@@ -649,11 +1103,153 @@ async def _promote_source_sor_v3_registry(connection: Any) -> None:
             "WHERE strategy_version_id = 'sgv:SOR-001:v2'"
         ),
         (
-            "UPDATE brc_strategy_groups SET active_version_id = 'sgv:SOR-001:v3', "
+            "UPDATE brc_strategy_groups SET "
+            "display_name = 'SOR opening range breakout and breakdown', "
+            "active_version_id = 'sgv:SOR-001:v3', status = 'active', "
             "updated_at_ms = 1000 WHERE strategy_group_id = 'SOR-001'"
         ),
     ):
         await connection.execute(sa.text(statement))
+
+    groups: dict[str, dict[str, object]] = {}
+    versions: dict[str, dict[str, object]] = {}
+    facts: dict[str, dict[str, object]] = {}
+    event_facts: list[dict[str, object]] = []
+    events: list[dict[str, object]] = []
+    policies: list[dict[str, object]] = []
+    for event in CERTIFIED_0002_SOURCE_EVENTS:
+        strategy_group_id = str(event["strategy_group_id"])
+        strategy_version_id = str(event["strategy_version_id"])
+        event_spec_id = str(event["event_spec_id"])
+        groups[strategy_group_id] = {
+            "strategy_group_id": strategy_group_id,
+            "display_name": event["display_name"],
+            "active_version_id": strategy_version_id,
+            "status": "active",
+            "updated_at_ms": 1_000,
+        }
+        versions[strategy_version_id] = {
+            "strategy_version_id": strategy_version_id,
+            "strategy_group_id": strategy_group_id,
+            "version": event["strategy_version"],
+            "semantics": {
+                "event_spec_ids": list(event["version_event_spec_ids"]),
+                "registry_semantic_hash": event[
+                    "version_registry_semantic_hash"
+                ],
+                "source": event["version_source"],
+            },
+            "status": "active",
+            "created_at_ms": 1_000,
+        }
+        events.append(
+            {
+                "event_spec_id": event_spec_id,
+                "strategy_version_id": strategy_version_id,
+                "event_id": event["event_id"],
+                "position_side": event["position_side"],
+                "timeframe": event["timeframe"],
+                "freshness_window_ms": event["freshness_window_ms"],
+                "event_time_authority": "trigger_candle_close_time_ms",
+                "entry_order_type": "market",
+                "protection_reference_fact_definition_id": event[
+                    "protection_fact_id"
+                ],
+                "exit_policy_id": event["exit_policy_id"],
+                "execution_semantics": {
+                    "event_semantic_hash": event["event_semantic_hash"],
+                    "signal_grade": "trial_grade_signal",
+                    "source": event["event_source"],
+                },
+                "status": "active",
+                "created_at_ms": 1_000,
+            }
+        )
+        for (
+            fact_id,
+            fact_name,
+            value_type,
+            freshness_ms,
+            satisfaction,
+            role,
+            required,
+        ) in event["facts"]:
+            facts[str(fact_id)] = {
+                "fact_definition_id": fact_id,
+                "fact_name": fact_name,
+                "value_type": value_type,
+                "freshness_ms": freshness_ms,
+                "validation": {"satisfaction": satisfaction},
+            }
+            event_facts.append(
+                {
+                    "event_spec_id": event_spec_id,
+                    "fact_definition_id": fact_id,
+                    "role": role,
+                    "required": required,
+                }
+            )
+        policies.append(
+            {
+                "exit_policy_id": event["exit_policy_id"],
+                "exit_policy_version": event["exit_policy_version"],
+                "event_spec_id": event_spec_id,
+                "position_side": event["position_side"],
+                "policy": _certified_0002_exit_policy_payload(event),
+                "semantic_hash": event["exit_policy_semantic_hash"],
+                "status": "active",
+                "created_at_ms": 1_000,
+            }
+        )
+
+    await connection.execute(
+        sa.insert(pg_models.strategy_groups),
+        [row for key, row in groups.items() if key != "SOR-001"],
+    )
+    await connection.execute(sa.insert(pg_models.strategy_versions), list(versions.values()))
+    await connection.execute(sa.insert(pg_models.fact_definitions), list(facts.values()))
+    await connection.execute(sa.insert(pg_models.event_specs), events)
+    await connection.execute(sa.insert(pg_models.exit_policies), policies)
+    await connection.execute(sa.insert(pg_models.event_required_facts), event_facts)
+
+
+def _certified_0002_exit_policy_payload(
+    event: Mapping[str, object],
+) -> dict[str, object]:
+    time_stop_bars = event["time_stop_bars"]
+    return {
+        "exit_policy_id": event["exit_policy_id"],
+        "exit_policy_version": event["exit_policy_version"],
+        "event_spec_id": event["event_spec_id"],
+        "event_id": event["event_id"],
+        "position_side": event["position_side"],
+        "tp1": {
+            "reward_multiple": "1",
+            "quantity_fraction": "0.5",
+            "execution_style": "limit_gtc",
+            "market_fallback_allowed": False,
+        },
+        "break_even_floor": {
+            "exit_fee_basis": "conservative_taker",
+            "slippage_buffer_ticks": 2,
+            "minimum_improvement_ticks": 2,
+        },
+        "runner": {
+            "kind": "structural_atr",
+            "timeframe": event["timeframe"],
+            "structure_rule": event["runner_structure_rule"],
+            "structure_reference_fact": event["runner_reference_fact"],
+            "structure_window_bars": 4,
+            "atr_period": 14,
+            "atr_buffer_multiple": "0.5",
+            "minimum_improvement_ticks": 2,
+        },
+        "time_stop": (
+            None
+            if time_stop_bars is None
+            else {"max_holding_bars": time_stop_bars}
+        ),
+    }
 
 
 async def _insert_terminal_chain_rows(connection: Any) -> None:
@@ -694,7 +1290,9 @@ async def _insert_terminal_chain_rows(connection: Any) -> None:
         runtime_scope_id="scope-v3-terminal",
         fact_digest="sha256:" + "8" * 64,
         exit_policy_id="exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1",
-        exit_policy_semantic_hash="sha256:" + "f" * 64,
+        exit_policy_semantic_hash=(
+            "sha256:0df1319dba726a769a4a3abe827588e141bcab6b3c83fe5d79d98a109e6a1478"
+        ),
         active_strategy_group_ticket_count_at_claim=0,
         max_strategy_group_concurrent_tickets=2,
         remaining_strategy_group_slots_at_claim=2,
@@ -713,7 +1311,9 @@ async def _insert_terminal_chain_rows(connection: Any) -> None:
         runtime_scope_id="scope-v3-terminal",
         fact_digest="sha256:" + "8" * 64,
         exit_policy_id="exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1",
-        exit_policy_semantic_hash="sha256:" + "f" * 64,
+        exit_policy_semantic_hash=(
+            "sha256:0df1319dba726a769a4a3abe827588e141bcab6b3c83fe5d79d98a109e6a1478"
+        ),
         decision_digest="sha256:" + "7" * 64,
         status="terminal",
         active_netting_domain_key=None,
@@ -758,6 +1358,81 @@ async def _insert_terminal_chain_rows(connection: Any) -> None:
         await connection.execute(sa.text(statement))
 
 
+async def _install_nonflat_blocker(engine: AsyncEngine, blocker: str) -> None:
+    statements: dict[str, tuple[str, dict[str, object]]] = {
+        "position": (
+            (
+                "INSERT INTO brc_positions_current ("
+                "netting_domain_key,ticket_id,venue_id,account_id,"
+                "exchange_instrument_id,position_side,quantity,average_entry_price,"
+                "venue_reported_liquidation_price,"
+                "venue_reported_liquidation_observation_status,observed_at_ms,"
+                "projection_version) VALUES ("
+                "'position-domain','ticket-v3-terminal','binance-usdm','account-main',"
+                "'binance-usdm:BTCUSDT:perpetual','long',1,100,NULL,"
+                "'not_reported',5000,1)"
+            ),
+            {},
+        ),
+        "budget_reservation": (
+            (
+                "UPDATE brc_budget_reservations SET status = 'active', "
+                "released_at_ms = NULL "
+                "WHERE budget_reservation_id = 'reservation-v3-terminal'"
+            ),
+            {},
+        ),
+        "netting_domain": (
+            (
+                "UPDATE brc_trade_tickets "
+                "SET active_netting_domain_key = netting_domain_key "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            ),
+            {},
+        ),
+        "entry_lane_status": (
+            (
+                "INSERT INTO brc_entry_lane_current VALUES ("
+                "'global-entry','ticket-v3-terminal',NULL,'claimed',"
+                "5000,6000,'migration-test-owner',1)"
+            ),
+            {},
+        ),
+        "entry_lane_owner": (
+            (
+                "INSERT INTO brc_entry_lane_current VALUES ("
+                "'global-entry',NULL,NULL,'idle',NULL,NULL,'stale-owner',1)"
+            ),
+            {},
+        ),
+        "exchange_command": (
+            (
+                "UPDATE brc_exchange_commands SET status = 'outcome_unknown', "
+                "result_payload = NULL, completed_at_ms = NULL "
+                "WHERE command_id = 'command-v3-terminal-entry'"
+            ),
+            {},
+        ),
+        "incident": (
+            (
+                "UPDATE brc_runtime_incidents SET status = 'open', "
+                "resolved_at_ms = NULL WHERE incident_id = 'incident-v2-2'"
+            ),
+            {},
+        ),
+        "aggregate_closure": (
+            (
+                "UPDATE brc_trade_aggregates SET status = 'protected' "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            ),
+            {},
+        ),
+    }
+    statement, parameters = statements[blocker]
+    async with engine.begin() as connection:
+        await connection.execute(sa.text(statement), parameters)
+
+
 async def _source_history_manifest(
     engine: AsyncEngine,
     *,
@@ -799,6 +1474,64 @@ async def _source_history_manifest(
                 )
             )
     return {"columns": expected_columns, "rows": rows}
+
+
+async def _pre_upgrade_authority_state(engine: AsyncEngine) -> dict[str, object]:
+    async with engine.connect() as connection:
+        inspector_state = await connection.run_sync(
+            lambda sync: {
+                "tables": tuple(sorted(sa.inspect(sync).get_table_names())),
+                "policy_columns": tuple(
+                    column["name"]
+                    for column in sa.inspect(sync).get_columns(
+                        "brc_owner_policy_current"
+                    )
+                ),
+                "claim_columns": tuple(
+                    column["name"]
+                    for column in sa.inspect(sync).get_columns(
+                        "brc_capacity_claims"
+                    )
+                ),
+                "ticket_columns": tuple(
+                    column["name"]
+                    for column in sa.inspect(sync).get_columns(
+                        "brc_trade_tickets"
+                    )
+                ),
+            }
+        )
+        revision = await connection.scalar(
+            sa.text("SELECT version_num FROM alembic_version")
+        )
+        groups = tuple(
+            (
+                await connection.execute(
+                    sa.text(
+                        "SELECT strategy_group_id, display_name, "
+                        "active_version_id, status, updated_at_ms "
+                        "FROM brc_strategy_groups ORDER BY strategy_group_id"
+                    )
+                )
+            ).all()
+        )
+        policy = tuple(
+            (
+                await connection.execute(
+                    sa.text(
+                        "SELECT owner_policy_id, policy_version, enabled, "
+                        "new_entry_submit_enabled, scope, updated_at_ms "
+                        "FROM brc_owner_policy_current ORDER BY owner_policy_id"
+                    )
+                )
+            ).all()
+        )
+    return {
+        **inspector_state,
+        "revision": revision,
+        "groups": groups,
+        "policy": policy,
+    }
 
 
 def _canonical_value(value: Any) -> Any:

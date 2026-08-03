@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -21,6 +23,17 @@ MONEY = sa.Numeric(38, 18)
 REGISTRY_SEMANTIC_HASH = (
     "sha256:97a5214e5d4b94726ad6b4e9dc91f95ba8964d34de6b1c73d09f814578152723"
 )
+CERTIFIED_0002_REGISTRY_MANIFEST_HASH = (
+    "sha256:377111e413bb8d69808e6d976d56ed976a3e833a9690ee4c01256173628fd4a4"
+)
+CERTIFIED_0002_REGISTRY_MANIFEST_COUNTS = {
+    "groups": 5,
+    "versions": 5,
+    "events": 6,
+    "facts": 20,
+    "event_facts": 25,
+    "policies": 6,
+}
 
 _REGISTRY_VNEXT_EVENTS = (
     {
@@ -210,6 +223,7 @@ _REGISTRY_VNEXT_EVENTS = (
 def upgrade() -> None:
     """Add the rising-edge Episode current projection."""
 
+    _assert_exact_flat_certified_0002_source()
     _install_registry_vnext()
     _upgrade_portfolio_admission_policy_v4()
 
@@ -270,6 +284,206 @@ def upgrade() -> None:
     )
     _create_admission_decisions()
     _create_shadow_outcomes()
+
+
+def _assert_exact_flat_certified_0002_source() -> None:
+    """Fence every source authority before the first schema or data mutation."""
+
+    bind = op.get_bind()
+    source_revision = bind.execute(
+        sa.text("SELECT version_num FROM alembic_version")
+    ).scalar_one()
+    if source_revision != down_revision:
+        raise RuntimeError("0003 requires exact source revision 0002")
+
+    bind.execute(
+        sa.text(
+            """
+            LOCK TABLE
+                brc_strategy_groups,
+                brc_strategy_versions,
+                brc_event_specs,
+                brc_fact_definitions,
+                brc_event_required_facts,
+                brc_exit_policies,
+                brc_owner_policy_current,
+                brc_owner_policy_events,
+                brc_trade_tickets,
+                brc_trade_aggregates,
+                brc_positions_current,
+                brc_budget_reservations,
+                brc_entry_lane_current,
+                brc_exchange_commands,
+                brc_runtime_incidents
+            IN SHARE ROW EXCLUSIVE MODE
+            """
+        )
+    )
+    blockers = (
+        (
+            "active Ticket",
+            (
+                "SELECT EXISTS (SELECT 1 FROM brc_trade_tickets "
+                "WHERE terminal_at_ms IS NULL OR status <> 'terminal')"
+            ),
+        ),
+        (
+            "nonzero internal Position",
+            (
+                "SELECT EXISTS (SELECT 1 FROM brc_positions_current "
+                "WHERE quantity <> 0)"
+            ),
+        ),
+        (
+            "active Budget Reservation",
+            (
+                "SELECT EXISTS (SELECT 1 FROM brc_budget_reservations "
+                "WHERE released_at_ms IS NULL OR status <> 'released')"
+            ),
+        ),
+        (
+            "unreleased Netting Domain",
+            (
+                "SELECT EXISTS (SELECT 1 FROM brc_trade_tickets "
+                "WHERE active_netting_domain_key IS NOT NULL)"
+            ),
+        ),
+        (
+            "ENTRY lane",
+            (
+                "SELECT EXISTS (SELECT 1 FROM brc_entry_lane_current "
+                "WHERE status <> 'idle' OR ticket_id IS NOT NULL "
+                "OR signal_event_id IS NOT NULL OR claimed_at_ms IS NOT NULL "
+                "OR lease_until_ms IS NOT NULL OR claim_owner IS NOT NULL)"
+            ),
+        ),
+        (
+            "unresolved Exchange Command",
+            (
+                "SELECT EXISTS (SELECT 1 FROM brc_exchange_commands "
+                "WHERE status IN "
+                "('prepared','dispatch_started','claimed','outcome_unknown'))"
+            ),
+        ),
+        (
+            "open Incident",
+            (
+                "SELECT EXISTS (SELECT 1 FROM brc_runtime_incidents "
+                "WHERE status <> 'resolved')"
+            ),
+        ),
+        (
+            "nonterminal Aggregate closure",
+            (
+                "SELECT EXISTS (SELECT 1 FROM brc_trade_aggregates "
+                "WHERE status <> 'terminal' OR entry_lane_held = true "
+                "OR position_qty <> 0 OR protected_qty <> 0 "
+                "OR active_stop_exchange_order_id IS NOT NULL "
+                "OR pending_replaced_stop_exchange_order_id IS NOT NULL "
+                "OR pending_cancel_exchange_order_id IS NOT NULL)"
+            ),
+        ),
+    )
+    for label, query in blockers:
+        if bool(bind.execute(sa.text(query)).scalar_one()):
+            raise RuntimeError(f"0003 requires flat source: {label}")
+
+    _assert_literal_certified_0002_registry(bind)
+    source_index_count = int(
+        bind.execute(
+            sa.text(
+                """
+                SELECT count(*)
+                  FROM pg_indexes
+                 WHERE schemaname = current_schema()
+                   AND tablename = 'brc_trade_tickets'
+                   AND indexname =
+                       'ix_brc_trade_tickets_active_strategy_group'
+                """
+            )
+        ).scalar_one()
+    )
+    if source_index_count != 1:
+        raise RuntimeError("0003 requires exact certified 0002 Ticket index source")
+
+
+def _assert_literal_certified_0002_registry(bind: sa.Connection) -> None:
+    """Compare every certified semantic column to one independent source digest."""
+
+    manifest_queries = {
+        "groups": """
+            SELECT strategy_group_id, display_name, active_version_id, status
+              FROM brc_strategy_groups
+             WHERE status = 'active'
+          ORDER BY strategy_group_id
+        """,
+        "versions": """
+            SELECT strategy_version_id, strategy_group_id, version,
+                   semantics, status
+              FROM brc_strategy_versions
+             WHERE status = 'active'
+          ORDER BY strategy_version_id
+        """,
+        "events": """
+            SELECT event_spec_id, strategy_version_id, event_id,
+                   position_side, timeframe, freshness_window_ms,
+                   event_time_authority, entry_order_type,
+                   protection_reference_fact_definition_id,
+                   exit_policy_id, execution_semantics, status
+              FROM brc_event_specs
+             WHERE status = 'active'
+          ORDER BY event_spec_id
+        """,
+        "facts": """
+            SELECT fact.fact_definition_id, fact.fact_name, fact.value_type,
+                   fact.freshness_ms, fact.validation
+              FROM brc_fact_definitions AS fact
+             WHERE EXISTS (
+                    SELECT 1
+                      FROM brc_event_required_facts AS link
+                      JOIN brc_event_specs AS event
+                        ON event.event_spec_id = link.event_spec_id
+                       AND event.status = 'active'
+                     WHERE link.fact_definition_id = fact.fact_definition_id
+                  )
+          ORDER BY fact.fact_definition_id
+        """,
+        "event_facts": """
+            SELECT link.event_spec_id, link.fact_definition_id,
+                   link.role, link.required
+              FROM brc_event_required_facts AS link
+              JOIN brc_event_specs AS event
+                ON event.event_spec_id = link.event_spec_id
+               AND event.status = 'active'
+          ORDER BY link.event_spec_id, link.fact_definition_id
+        """,
+        "policies": """
+            SELECT exit_policy_id, exit_policy_version, event_spec_id,
+                   position_side, policy, semantic_hash, status
+              FROM brc_exit_policies
+             WHERE status = 'active'
+          ORDER BY exit_policy_id
+        """,
+    }
+    manifest = {
+        name: [dict(row) for row in bind.execute(sa.text(query)).mappings()]
+        for name, query in manifest_queries.items()
+    }
+    counts = {name: len(rows) for name, rows in manifest.items()}
+    if not any(counts.values()):
+        return
+    encoded = json.dumps(
+        manifest,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+    if (
+        counts != CERTIFIED_0002_REGISTRY_MANIFEST_COUNTS
+        or digest != CERTIFIED_0002_REGISTRY_MANIFEST_HASH
+    ):
+        raise RuntimeError("0003 requires the exact literal certified Registry source")
 
 
 def _install_registry_vnext() -> None:
@@ -698,6 +912,10 @@ def _upgrade_portfolio_admission_policy_v4() -> None:
             sa.Column("minimum_stop_risk_budget", MONEY, nullable=True),
         )
     _backfill_terminal_exposure_families()
+    op.drop_index(
+        "ix_brc_trade_tickets_active_strategy_group",
+        table_name="brc_trade_tickets",
+    )
     op.create_index(
         "ix_brc_trade_tickets_active_family",
         "brc_trade_tickets",
