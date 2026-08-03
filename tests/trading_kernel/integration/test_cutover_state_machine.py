@@ -6,7 +6,7 @@ import sys
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 from uuid import uuid4
 
 import asyncpg
@@ -45,6 +45,10 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     build_runtime_seed_identity,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+    TradingKernelSchemaRevision,
+)
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
     SAFE_DATABASE,
@@ -53,9 +57,9 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-BASELINE_SCHEMA_REVISION: Literal["0002_sor_v3_strategy_group_capacity"] = (
-    "0002_sor_v3_strategy_group_capacity"
-)
+TARGET_SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
+
+
 @pytest_asyncio.fixture
 async def journal_database_url() -> AsyncGenerator[str, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
@@ -78,7 +82,7 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
     plan = _plan()
 
     assert plan.target_commit == "a" * 40
-    assert plan.target_schema_revision == "0002_sor_v3_strategy_group_capacity"
+    assert plan.target_schema_revision == TARGET_SCHEMA_REVISION
     assert plan.target_seed_identity.startswith("sha256:")
     assert "exchange_instrument_ids" not in CutoverPlan.model_fields
     assert CUTOVER_PHASES == (
@@ -408,7 +412,7 @@ async def test_readonly_certification_reports_exact_runtime_authority(
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
                     schema_revision=cast(
-                        Literal["0002_sor_v3_strategy_group_capacity"],
+                        TradingKernelSchemaRevision,
                         plan.target_schema_revision,
                     ),
                     seeded_at_ms=1_000,
@@ -440,11 +444,17 @@ async def test_readonly_certification_reports_exact_runtime_authority(
         "enabled": True,
         "new_entry_submit_enabled": False,
         "max_concurrent_tickets": 3,
-        "max_strategy_group_concurrent_tickets": 2,
-        "max_ticket_stop_risk_fraction": "0.03",
+        "family_ticket_limits": {
+            "long_continuation": 1,
+            "opening_range": 2,
+            "rally_failure_short": 1,
+        },
+        "max_ticket_stop_risk_fraction": "0.02",
         "max_gross_stop_risk_fraction": "0.06",
-        "max_ticket_initial_margin_fraction": "0.45",
+        "max_ticket_initial_margin_fraction": "0.3",
         "max_gross_initial_margin_utilization": "0.9",
+        "directional_stop_risk_limit_fraction": "0.04",
+        "min_materialization_ratio": "0.5",
         "max_leverage": 10,
         "supported_margin_mode": "cross",
         "post_stop_stress_multiple": "2",
@@ -483,7 +493,7 @@ async def test_readonly_certification_accepts_enabled_exchange_commands_under_co
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
                     schema_revision=cast(
-                        Literal["0002_sor_v3_strategy_group_capacity"],
+                        TradingKernelSchemaRevision,
                         plan.target_schema_revision,
                     ),
                     seeded_at_ms=1_000,
@@ -794,7 +804,7 @@ class LocalPostgresCutoverAdapter:
                     account_id=plan.account_id,
                     runtime_commit=plan.target_commit,
                     schema_revision=cast(
-                        Literal["0002_sor_v3_strategy_group_capacity"],
+                        TradingKernelSchemaRevision,
                         plan.target_schema_revision,
                     ),
                     seeded_at_ms=1_000,
@@ -849,7 +859,7 @@ class LocalPostgresCutoverAdapter:
 
 def _plan(**changes: object) -> CutoverPlan:
     runtime_commit = "a" * 40
-    schema_revision = BASELINE_SCHEMA_REVISION
+    schema_revision = TARGET_SCHEMA_REVISION
     seed_identity = build_runtime_seed_identity(
         RuntimeAuthoritySeedRequest(
             account_id="subaccount-main",

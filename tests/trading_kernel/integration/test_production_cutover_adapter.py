@@ -11,6 +11,9 @@ from scripts.trading_kernel.verify_flat_cutover import (
     CutoverFacts,
     CutoverPlan,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 
 
 def _production_adapter_module() -> ModuleType:
@@ -984,7 +987,7 @@ def _plan() -> CutoverPlan:
         runtime_profile_id="tiny-live-v1",
         application_schema="public",
         target_commit="a" * 40,
-        target_schema_revision="0002_sor_v3_strategy_group_capacity",
+        target_schema_revision=CURRENT_SCHEMA_REVISION,
         target_seed_identity="sha256:" + "b" * 64,
         target_release_id="brc-trading-kernel-aaaaaaaaaaaa",
     )

@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from scripts.trading_kernel.deploy_tokyo_release import (
+    COMPATIBLE_SOURCE_SCHEMA_REVISION,
+    SCHEMA_REVISION,
+)
+from scripts.trading_kernel.verify_schema import COMPATIBLE_SOURCE_REVISION
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_ROOTS = (
     REPO_ROOT / "src/trading_kernel",
@@ -68,5 +74,31 @@ def test_kernel_has_no_legacy_or_compatibility_module_surface() -> None:
 
     assert not violations, (
         "legacy or compatibility module would create a parallel kernel surface: "
+        + ", ".join(violations)
+    )
+
+
+def test_flat_upgrade_has_one_exact_0002_to_0003_authority() -> None:
+    assert COMPATIBLE_SOURCE_SCHEMA_REVISION == (
+        "0002_sor_v3_strategy_group_capacity"
+    )
+    assert COMPATIBLE_SOURCE_REVISION == COMPATIBLE_SOURCE_SCHEMA_REVISION
+    assert SCHEMA_REVISION == "0003_portfolio_admission_observability"
+
+
+def test_retired_0001_source_is_not_a_regular_deployment_compatibility_path() -> None:
+    retired_source = "0001_trading_kernel_baseline_v4"
+    violations = [
+        relative_path
+        for relative_path in (
+            "scripts/trading_kernel/deploy_tokyo_release.py",
+            "scripts/trading_kernel/verify_schema.py",
+            "scripts/trading_kernel/certify_readonly.py",
+        )
+        if retired_source in (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+    ]
+
+    assert not violations, (
+        "retired 0001 source remains in the current deployment path: "
         + ", ".join(violations)
     )

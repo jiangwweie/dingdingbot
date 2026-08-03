@@ -20,10 +20,11 @@ TARGET_COMMIT = "a" * 40
 CURRENT_COMMIT = "b" * 40
 CURRENT_RELEASE = "/opt/brc/releases/brc-trading-kernel-bbbbbbbbbbbb"
 TARGET_RELEASE = "/opt/brc/releases/brc-trading-kernel-aaaaaaaaaaaa"
-SOURCE_SCHEMA_REVISION = "0001_trading_kernel_baseline_v4"
-TARGET_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
+SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
+TARGET_SCHEMA_REVISION = "0003_portfolio_admission_observability"
 SEED_IDENTITY = "sha256:" + "c" * 64
 PRESERVATION_DIGEST = "sha256:" + "d" * 64
+REGISTRY_DIGEST = "sha256:" + "f" * 64
 TARGET_EXCHANGE_INSTRUMENT_IDS = (
     "binance-usdm:ADAUSDT:perpetual",
     "binance-usdm:BNBUSDT:perpetual",
@@ -39,12 +40,12 @@ def test_regular_plan_freezes_current_schema_without_operator_probe_scope() -> N
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=TARGET_SCHEMA_REVISION,
         expected_configured_leverage=5,
         enable_entry=False,
     )
 
-    assert plan.schema_revision == "0002_sor_v3_strategy_group_capacity"
+    assert plan.schema_revision == TARGET_SCHEMA_REVISION
     assert "exchange_instrument_ids" not in plan.__dataclass_fields__
 
 
@@ -60,7 +61,7 @@ def test_regular_plan_rejects_a_schema_change() -> None:
         )
 
 
-def test_compatible_upgrade_accepts_only_the_exact_flat_v4_to_v5_path() -> None:
+def test_dep_002_compatible_upgrade_accepts_only_exact_0002_to_0003() -> None:
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
@@ -74,7 +75,7 @@ def test_compatible_upgrade_accepts_only_the_exact_flat_v4_to_v5_path() -> None:
     assert plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
     assert plan.source_schema_revision == SOURCE_SCHEMA_REVISION
 
-    with pytest.raises(ValueError, match="exact v4 source"):
+    with pytest.raises(ValueError, match="exact 0002 source"):
         DeploymentPlan(
             target_commit=TARGET_COMMIT,
             target_release=TARGET_RELEASE,
@@ -84,6 +85,11 @@ def test_compatible_upgrade_accepts_only_the_exact_flat_v4_to_v5_path() -> None:
             expected_configured_leverage=5,
             enable_entry=False,
         )
+
+
+def test_dep_003_portfolio_admission_upgrade_rejects_enable_entry() -> None:
+    with pytest.raises(ValueError, match="keep ENTRY disabled"):
+        _compatible_plan(enable_entry=True)
 
 
 def test_compatible_upgrade_cannot_reuse_active_position_handover() -> None:
@@ -100,16 +106,24 @@ def test_compatible_upgrade_cannot_reuse_active_position_handover() -> None:
         )
 
 
-def test_compatible_upgrade_migrates_only_after_final_flat_recheck() -> None:
+def test_mig_007_compatible_upgrade_migrates_only_after_final_flat_recheck() -> None:
     backend = FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION)
-    plan = _compatible_plan(enable_entry=True)
+    plan = _compatible_plan(enable_entry=False)
 
     result = deploy_tokyo_release(backend, plan)
 
     assert result.status == "pass"
-    assert result.entry_enabled is True
+    assert result.entry_enabled is False
     assert backend.calls.index(("fence_entry",)) < backend.calls.index(
         ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
+    )
+    assert backend.calls.index(("stop_services", SAFETY_SERVICES)) < (
+        backend.calls.index(("migration_writers_stopped_and_entry_fenced",))
+    )
+    assert backend.calls.index(("migration_writers_stopped_and_entry_fenced",)) < (
+        backend.calls.index(
+            ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
+        )
     )
     final_source_check = max(
         index
@@ -129,9 +143,19 @@ def test_compatible_upgrade_migrates_only_after_final_flat_recheck() -> None:
         SOURCE_SCHEMA_REVISION,
         PRESERVATION_DIGEST,
     ) in backend.calls
-    assert backend.calls.index(("bootstrap_strategy_universes", TARGET_RELEASE)) < (
-        backend.calls.index(("start_services", (ENTRY_SERVICE,)))
+    bootstrap_index = backend.calls.index(
+        ("bootstrap_strategy_universes", TARGET_RELEASE)
     )
+    target_postflight_index = max(
+        index
+        for index, call in enumerate(backend.calls[: bootstrap_index + 2])
+        if call == ("certify_flat", TARGET_RELEASE)
+    )
+    safety_start_index = backend.calls.index(("start_services", SAFETY_SERVICES))
+    assert bootstrap_index < target_postflight_index < safety_start_index
+    assert ("start_services", (ENTRY_SERVICE,)) not in backend.calls
+    assert backend.active_services == set(SAFETY_SERVICES)
+    assert backend.entry_is_inactive_disabled_and_fenced()
 
 
 @pytest.mark.parametrize(
@@ -145,7 +169,7 @@ def test_compatible_upgrade_migrates_only_after_final_flat_recheck() -> None:
         ("open_incidents", "open Incident"),
     ],
 )
-def test_compatible_upgrade_source_gate_blocks_before_service_stop(
+def test_dep_007_compatible_upgrade_source_gate_blocks_before_service_stop(
     source_gate: str,
     expected_message: str,
 ) -> None:
@@ -161,18 +185,132 @@ def test_compatible_upgrade_source_gate_blocks_before_service_stop(
     assert not any(call[0] == "migrate_schema" for call in backend.calls)
 
 
-def test_compatible_upgrade_preservation_mismatch_keeps_entry_fenced() -> None:
+def test_mig_008_preservation_mismatch_keeps_entry_fenced() -> None:
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
         preservation_matches=False,
     )
 
     with pytest.raises(DeploymentBlocked, match="preservation digest"):
-        deploy_tokyo_release(backend, _compatible_plan(enable_entry=True))
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
 
     assert backend.entry_fenced is True
     assert not any(call == ("unfence_entry",) for call in backend.calls)
     assert not any(call == ("start_services", (ENTRY_SERVICE,)) for call in backend.calls)
+
+
+def test_mig_009_wrong_source_blocks_before_service_mutation() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision="0001_trading_kernel_baseline_v4",
+    )
+
+    with pytest.raises(DeploymentBlocked, match="source schema revision"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert not any(call[0] in {"fence_entry", "stop_services"} for call in backend.calls)
+    assert not any(call[0] == "migrate_schema" for call in backend.calls)
+
+
+def test_migration_requires_four_stopped_writers_disabled_entry_and_fence() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        migration_stop_prerequisite=False,
+    )
+
+    with pytest.raises(DeploymentBlocked, match="migration writer stop prerequisite"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert ("fence_entry",) in backend.calls
+    assert ("stop_services", SAFETY_SERVICES) in backend.calls
+    assert not any(call[0] == "migrate_schema" for call in backend.calls)
+
+
+def test_dep_004_missing_target_safety_worker_fails_with_entry_fenced() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        omitted_safety_service=SAFETY_SERVICES[-1],
+    )
+
+    with pytest.raises(DeploymentBlocked, match="safety services"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert backend.entry_fenced is True
+    assert ENTRY_SERVICE not in backend.active_services
+
+
+@pytest.mark.parametrize(
+    ("postflight_drift", "expected_message"),
+    [
+        ("policy", "Policy v4"),
+        ("registry", "Registry identity"),
+        ("universe", "Universe identity"),
+        ("universe_digest", "Universe identity"),
+        ("batch", "Certification Batch"),
+        ("schema", "schema revision"),
+        ("seed", "Seed identity"),
+    ],
+)
+def test_dep_005_exact_target_identity_drift_blocks_postflight(
+    postflight_drift: str,
+    expected_message: str,
+) -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        postflight_drift=postflight_drift,
+    )
+
+    with pytest.raises(DeploymentBlocked, match=expected_message):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert backend.entry_fenced is True
+    assert ENTRY_SERVICE not in backend.active_services
+
+
+def test_dep_006_pending_shadow_does_not_authorize_entry() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        shadow_pending_count=3,
+    )
+
+    result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert result.status == "pass"
+    assert backend.active_services == set(SAFETY_SERVICES)
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_compatible_postflight_rejects_active_only_vnext_universe_stage() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        universe_stage="active",
+    )
+
+    with pytest.raises(DeploymentBlocked, match="Warming Universe stage"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert backend.entry_fenced is True
+    assert ENTRY_SERVICE not in backend.active_services
+
+
+def test_compatible_upgrade_resumes_target_fix_forward_idempotently() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=TARGET_SCHEMA_REVISION,
+        current_release=CURRENT_RELEASE,
+        preservation_verified=True,
+        target_release_exists=True,
+    )
+    backend.runtime_commit = TARGET_COMMIT
+    backend.active_services = {SAFETY_SERVICES[0]}
+    backend.entry_fenced = True
+    backend.entry_enabled = False
+
+    result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert result.status == "pass"
+    assert not any(call[0] == "install_release" for call in backend.calls)
+    assert not any(call[0] == "migrate_schema" for call in backend.calls)
+    assert backend.active_services == set(SAFETY_SERVICES)
+    assert backend.entry_is_inactive_disabled_and_fenced()
 
 
 def test_regular_release_uses_database_derived_probe_manifest() -> None:
@@ -180,7 +318,7 @@ def test_regular_release_uses_database_derived_probe_manifest() -> None:
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=TARGET_SCHEMA_REVISION,
         expected_configured_leverage=5,
         enable_entry=False,
     )
@@ -285,6 +423,35 @@ def test_ssh_probe_exchange_has_no_operator_instrument_arguments(
     assert calls == [(TARGET_RELEASE, "scripts/trading_kernel/probe_production_runtime.py")]
 
 
+def test_ssh_compatible_bootstrap_prepares_warming_batch_without_active_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = SshTokyoReleaseBackend(
+        target="tokyo",
+        repo_root=Path("."),
+        timeout_seconds=30,
+    )
+    calls: list[tuple[object, ...]] = []
+
+    def release_command(release: str, *args: str) -> object:
+        calls.append((release, *args))
+        return object()
+
+    monkeypatch.setattr(backend, "_release_command", release_command)
+
+    backend.bootstrap_strategy_universes(TARGET_RELEASE)
+
+    assert calls == [
+        (
+            TARGET_RELEASE,
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            "tiny-live-v1",
+            "--prepare-certification-batch-only",
+        )
+    ]
+
+
 def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
     backend = FakeDeploymentBackend()
 
@@ -307,13 +474,13 @@ def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
             "deploy_identity",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0002_sor_v3_strategy_group_capacity",
+            TARGET_SCHEMA_REVISION,
         ),
         (
             "activate_release",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0002_sor_v3_strategy_group_capacity",
+            TARGET_SCHEMA_REVISION,
             SEED_IDENTITY,
         ),
         ("read_current_release",),
@@ -410,14 +577,14 @@ def test_closure_only_release_recovers_only_the_exact_pending_ticket() -> None:
             "deploy_closure_identity",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0002_sor_v3_strategy_group_capacity",
+            TARGET_SCHEMA_REVISION,
             ticket_id,
         ),
         (
             "activate_release",
             TARGET_RELEASE,
             TARGET_COMMIT,
-            "0002_sor_v3_strategy_group_capacity",
+            TARGET_SCHEMA_REVISION,
             SEED_IDENTITY,
         ),
         ("read_current_release",),
@@ -440,7 +607,7 @@ def _plan(
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=TARGET_SCHEMA_REVISION,
         expected_configured_leverage=5,
         enable_entry=enable_entry,
         closure_ticket_id=closure_ticket_id,
@@ -472,6 +639,14 @@ class FakeDeploymentBackend:
         source_schema_revision: str = TARGET_SCHEMA_REVISION,
         source_gate: str | None = None,
         preservation_matches: bool = True,
+        preservation_verified: bool = False,
+        migration_stop_prerequisite: bool = True,
+        omitted_safety_service: str | None = None,
+        postflight_drift: str | None = None,
+        shadow_pending_count: int = 0,
+        universe_stage: str = "warming",
+        current_release: str = CURRENT_RELEASE,
+        target_release_exists: bool = False,
         certification_gate_failure: tuple[int, str] | None = None,
         probe_non_flat_failure_call: int | None = None,
         fail_at: str | None = None,
@@ -489,20 +664,34 @@ class FakeDeploymentBackend:
         self.source_schema_revision = source_schema_revision
         self.source_gate = source_gate
         self.preservation_matches = preservation_matches
+        self.preservation_is_verified = preservation_verified
+        self.migration_stop_prerequisite = migration_stop_prerequisite
+        self.omitted_safety_service = omitted_safety_service
+        self.postflight_drift = postflight_drift
+        self.shadow_pending_count = shadow_pending_count
+        self.universe_stage = universe_stage
         self.certification_gate_failure = certification_gate_failure
         self.probe_non_flat_failure_call = probe_non_flat_failure_call
         self.fail_at = fail_at
         self.calls: list[tuple[object, ...]] = []
-        self.current_release = CURRENT_RELEASE
+        self.current_release = current_release
+        self.target_release_exists = (
+            target_release_exists or current_release == TARGET_RELEASE
+        )
         self.runtime_commit = CURRENT_COMMIT
         self.active_services = set(ALL_SERVICES)
         self.entry_fenced = False
+        self.entry_enabled = True
         self.certification_call_count = 0
         self.probe_call_count = 0
 
     def read_current_release(self) -> str:
         self.calls.append(("read_current_release",))
         return self.current_release
+
+    def release_exists(self, release: str) -> bool:
+        self.calls.append(("release_exists", release))
+        return self.target_release_exists and release == TARGET_RELEASE
 
     def certify_flat(self, release: str) -> Mapping[str, object]:
         self.calls.append(("certify_flat", release))
@@ -514,7 +703,7 @@ class FakeDeploymentBackend:
             "certification_batch_pass": True,
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
-                "schema_revision": "0002_sor_v3_strategy_group_capacity",
+                "schema_revision": TARGET_SCHEMA_REVISION,
                 "seed_identity": SEED_IDENTITY,
             },
             "active_counts": {
@@ -523,7 +712,67 @@ class FakeDeploymentBackend:
                 "positions": 0,
                 "incidents": 0,
             },
+            "owner_policy": {
+                "policy_version": 4,
+                "new_entry_submit_enabled": False,
+            },
+            "registry_identity": {
+                "status": "pass",
+                "expected_semantic_hash": REGISTRY_DIGEST,
+                "metadata_semantic_hash": REGISTRY_DIGEST,
+            },
+            "strategy_universe": {
+                "identity_status": "pass",
+                "semantic_digest_status": "pass",
+                "deployment_stage": self.universe_stage,
+                "shadow_pending_count": self.shadow_pending_count,
+            },
+            "seed_identity": {
+                "status": "pass",
+                "expected": SEED_IDENTITY,
+                "actual": SEED_IDENTITY,
+            },
+            "compatible_certification_batch_pass": True,
         }
+        if self.postflight_drift == "policy":
+            payload["owner_policy"] = {
+                "policy_version": 5,
+                "new_entry_submit_enabled": True,
+            }
+        elif self.postflight_drift == "registry":
+            payload["registry_identity"] = {
+                "status": "fail",
+                "expected_semantic_hash": REGISTRY_DIGEST,
+                "metadata_semantic_hash": "sha256:" + "0" * 64,
+            }
+        elif self.postflight_drift == "universe":
+            payload["strategy_universe"] = {
+                "identity_status": "fail",
+                "semantic_digest_status": "fail",
+                "deployment_stage": self.universe_stage,
+                "shadow_pending_count": self.shadow_pending_count,
+            }
+        elif self.postflight_drift == "universe_digest":
+            payload["strategy_universe"] = {
+                "identity_status": "pass",
+                "semantic_digest_status": "fail",
+                "deployment_stage": self.universe_stage,
+                "shadow_pending_count": self.shadow_pending_count,
+            }
+        elif self.postflight_drift == "batch":
+            payload["compatible_certification_batch_pass"] = False
+        elif self.postflight_drift == "schema":
+            payload["runtime_identity"] = {
+                "runtime_commit": self.runtime_commit,
+                "schema_revision": SOURCE_SCHEMA_REVISION,
+                "seed_identity": SEED_IDENTITY,
+            }
+        elif self.postflight_drift == "seed":
+            payload["seed_identity"] = {
+                "status": "fail",
+                "expected": SEED_IDENTITY,
+                "actual": "sha256:" + "0" * 64,
+            }
         if (
             self.certification_gate_failure is not None
             and self.certification_gate_failure[0] == self.certification_call_count
@@ -541,7 +790,7 @@ class FakeDeploymentBackend:
             "status": "pass",
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
-                "schema_revision": "0002_sor_v3_strategy_group_capacity",
+                "schema_revision": TARGET_SCHEMA_REVISION,
                 "seed_identity": SEED_IDENTITY,
             },
             "active_counts": {
@@ -607,6 +856,8 @@ class FakeDeploymentBackend:
             "unreviewed_terminal_tickets": 0,
             "unresolved_commands": 0,
             "open_incidents": 0,
+            "busy_entry_lane": 0,
+            "nonterminal_aggregates": 0,
         }
         if self.source_gate is not None:
             gates[self.source_gate] = 1
@@ -640,12 +891,34 @@ class FakeDeploymentBackend:
         self.calls.append(("stop_services", services))
         self.active_services.difference_update(services)
 
+    def inspect_schema(self, release: str) -> Mapping[str, object]:
+        self.calls.append(("inspect_schema", release))
+        return {
+            "status": (
+                "pass"
+                if self.source_schema_revision
+                in {SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION}
+                else "fail"
+            ),
+            "alembic_revision": self.source_schema_revision,
+        }
+
+    def migration_writers_stopped_and_entry_fenced(self) -> bool:
+        self.calls.append(("migration_writers_stopped_and_entry_fenced",))
+        return bool(
+            self.migration_stop_prerequisite
+            and not self.active_services.intersection(ALL_SERVICES)
+            and self.entry_fenced
+            and not self.entry_enabled
+        )
+
     def services_active(self, services: tuple[str, ...]) -> frozenset[str]:
         self.calls.append(("services_active", services))
         return frozenset(self.active_services.intersection(services))
 
     def install_release(self, commit: str, release: str) -> None:
         self.calls.append(("install_release", commit, release))
+        self.target_release_exists = True
 
     def deploy_identity(
         self,
@@ -700,6 +973,21 @@ class FakeDeploymentBackend:
             "alembic_revision": TARGET_SCHEMA_REVISION,
             "preservation_manifest": {"digest": digest},
         }
+
+    def persist_preservation_digest(self, release: str, digest: str) -> None:
+        self.calls.append(("persist_preservation_digest", release, digest))
+
+    def read_preservation_digest(self, release: str) -> str:
+        self.calls.append(("read_preservation_digest", release))
+        return PRESERVATION_DIGEST
+
+    def mark_preservation_verified(self, release: str, digest: str) -> None:
+        self.calls.append(("mark_preservation_verified", release, digest))
+        self.preservation_is_verified = True
+
+    def preservation_verified(self, release: str, digest: str) -> bool:
+        self.calls.append(("preservation_verified", release, digest))
+        return self.preservation_is_verified
 
     def deploy_compatible_identity(
         self,
@@ -764,7 +1052,12 @@ class FakeDeploymentBackend:
 
     def start_services(self, services: tuple[str, ...]) -> None:
         self.calls.append(("start_services", services))
-        self.active_services.update(services)
+        started = set(services)
+        if self.omitted_safety_service is not None:
+            started.discard(self.omitted_safety_service)
+        self.active_services.update(started)
+        if ENTRY_SERVICE in services:
+            self.entry_enabled = True
 
     def bootstrap_strategy_universes(self, release: str) -> None:
         self.calls.append(("bootstrap_strategy_universes", release))
@@ -773,6 +1066,7 @@ class FakeDeploymentBackend:
         self.calls.append(("fence_entry",))
         self.active_services.discard(ENTRY_SERVICE)
         self.entry_fenced = True
+        self.entry_enabled = False
 
     def unfence_entry(self) -> None:
         self.calls.append(("unfence_entry",))
@@ -780,4 +1074,8 @@ class FakeDeploymentBackend:
 
     def entry_is_inactive_disabled_and_fenced(self) -> bool:
         self.calls.append(("entry_is_inactive_disabled_and_fenced",))
-        return ENTRY_SERVICE not in self.active_services and self.entry_fenced
+        return (
+            ENTRY_SERVICE not in self.active_services
+            and not self.entry_enabled
+            and self.entry_fenced
+        )

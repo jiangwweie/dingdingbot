@@ -26,7 +26,7 @@ from src.trading_kernel.infrastructure.runtime_identity import (
 )
 
 SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
-COMPATIBLE_SOURCE_SCHEMA_REVISION = "0001_trading_kernel_baseline_v4"
+COMPATIBLE_SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
 EXPECTED_CONFIGURED_LEVERAGE = 5
 RELEASE_ROOT = "/opt/brc/releases"
 CURRENT_RELEASE = "/opt/brc/current"
@@ -88,11 +88,13 @@ class DeploymentPlan:
                 raise ValueError("regular deployment cannot change schema revision")
         elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
             if self.source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
-                raise ValueError("compatible upgrade requires the exact v4 source")
+                raise ValueError("compatible upgrade requires the exact 0002 source")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("compatible upgrade requires the current schema head")
             if self.closure_ticket_id is not None:
                 raise ValueError("compatible upgrade requires fully terminal history")
+            if self.enable_entry:
+                raise ValueError("compatible upgrade must keep ENTRY disabled")
         else:
             raise ValueError("unsupported deployment mode")
         if self.expected_configured_leverage != EXPECTED_CONFIGURED_LEVERAGE:
@@ -117,6 +119,10 @@ class DeploymentResult:
 class TokyoReleaseBackend(Protocol):
     def read_current_release(self) -> str: ...
 
+    def release_exists(self, release: str) -> bool: ...
+
+    def inspect_schema(self, release: str) -> Mapping[str, object]: ...
+
     def certify_flat(self, release: str) -> Mapping[str, object]: ...
 
     def certify_closure(
@@ -138,6 +144,8 @@ class TokyoReleaseBackend(Protocol):
     def stop_services(self, services: tuple[str, ...]) -> None: ...
 
     def services_active(self, services: tuple[str, ...]) -> frozenset[str]: ...
+
+    def migration_writers_stopped_and_entry_fenced(self) -> bool: ...
 
     def install_release(self, commit: str, release: str) -> None: ...
 
@@ -161,6 +169,14 @@ class TokyoReleaseBackend(Protocol):
         source_schema_revision: str,
         expected_digest: str,
     ) -> Mapping[str, object]: ...
+
+    def persist_preservation_digest(self, release: str, digest: str) -> None: ...
+
+    def read_preservation_digest(self, release: str) -> str: ...
+
+    def mark_preservation_verified(self, release: str, digest: str) -> None: ...
+
+    def preservation_verified(self, release: str, digest: str) -> bool: ...
 
     def deploy_compatible_identity(
         self,
@@ -200,20 +216,13 @@ def deploy_tokyo_release(
     backend: TokyoReleaseBackend,
     plan: DeploymentPlan,
 ) -> DeploymentResult:
+    if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
+        return _deploy_compatible_upgrade(backend, plan)
     current_release = backend.read_current_release()
     if current_release == plan.target_release:
         raise DeploymentBlocked("target release is already current")
     backend.install_release(plan.target_commit, plan.target_release)
-    preservation_digest: str | None = None
-    if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
-        source_certification, _, current_identity = _read_compatible_source_facts(
-            backend,
-            plan,
-            exchange_probe_release=current_release,
-        )
-        preservation_digest = _require_preservation_digest(source_certification)
-    else:
-        _, _, current_identity = _read_release_facts(backend, plan)
+    _, _, current_identity = _read_release_facts(backend, plan)
     _require_marker(
         backend,
         current_release,
@@ -224,11 +233,10 @@ def deploy_tokyo_release(
         backend,
         current_release,
         ".brc-schema-revision",
-        plan.source_schema_revision or plan.schema_revision,
+        plan.schema_revision,
     )
 
     services_stopped = False
-    schema_migrated = False
     identity_rotated = False
     target_release_activated = False
     try:
@@ -242,45 +250,11 @@ def deploy_tokyo_release(
                 + ",".join(sorted(active_after_stop))
             )
 
-        if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
-            final_source, _, final_identity = _read_compatible_source_facts(
-                backend,
-                plan,
-                exchange_probe_release=current_release,
-            )
-            if final_identity != current_identity:
-                raise DeploymentBlocked("source runtime identity changed during cutover")
-            if _require_preservation_digest(final_source) != preservation_digest:
-                raise DeploymentBlocked("source preservation digest changed during cutover")
-            if preservation_digest is None:
-                raise DeploymentBlocked("source preservation digest is missing")
-            backend.migrate_schema(
-                plan.target_release,
-                plan.source_schema_revision or "",
-                plan.schema_revision,
-            )
-            schema_migrated = True
-            preservation = backend.verify_preservation(
-                plan.target_release,
-                plan.source_schema_revision or "",
-                preservation_digest,
-            )
-            _require_preservation_verification(
-                preservation,
-                target_schema_revision=plan.schema_revision,
-                expected_digest=preservation_digest,
-            )
-        elif plan.closure_ticket_id is not None:
+        if plan.closure_ticket_id is not None:
             _read_release_facts(backend, plan)
 
         deployment_identity = (
-            backend.deploy_compatible_identity(
-                plan.target_release,
-                plan.target_commit,
-                plan.schema_revision,
-            )
-            if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
-            else backend.deploy_closure_identity(
+            backend.deploy_closure_identity(
                 plan.target_release,
                 plan.target_commit,
                 plan.schema_revision,
@@ -315,8 +289,6 @@ def deploy_tokyo_release(
             _require_marker(backend, plan.target_release, marker, expected)
 
         backend.start_services(SAFETY_SERVICES)
-        if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
-            backend.bootstrap_strategy_universes(plan.target_release)
         _require_target_postflight(backend, plan, seed_identity=seed_identity)
         if plan.enable_entry:
             backend.start_services((ENTRY_SERVICE,))
@@ -340,7 +312,7 @@ def deploy_tokyo_release(
         if services_stopped:
             backend.fence_entry()
             if target_release_activated or (
-                not schema_migrated and not identity_rotated
+                not identity_rotated
             ):
                 backend.start_services(SAFETY_SERVICES)
         raise
@@ -352,6 +324,161 @@ def deploy_tokyo_release(
         schema_revision=plan.schema_revision,
         configured_leverage=plan.expected_configured_leverage,
         entry_enabled=plan.enable_entry,
+        mode=plan.mode,
+    )
+
+
+def _deploy_compatible_upgrade(
+    backend: TokyoReleaseBackend,
+    plan: DeploymentPlan,
+) -> DeploymentResult:
+    current_release = backend.read_current_release()
+    if not backend.release_exists(plan.target_release):
+        backend.install_release(plan.target_commit, plan.target_release)
+
+    schema_state = backend.inspect_schema(plan.target_release)
+    database_revision = str(schema_state.get("alembic_revision", ""))
+    if schema_state.get("status") != "pass" or database_revision not in {
+        COMPATIBLE_SOURCE_SCHEMA_REVISION,
+        plan.schema_revision,
+    }:
+        raise DeploymentBlocked("compatible source schema revision differs")
+
+    preservation_digest: str
+    source_identity: dict[str, str] | None = None
+    if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
+        source_certification, _, source_identity = _read_compatible_source_facts(
+            backend,
+            plan,
+            exchange_probe_release=current_release,
+        )
+        preservation_digest = _require_preservation_digest(source_certification)
+        _require_marker(
+            backend,
+            current_release,
+            ".brc-runtime-commit",
+            source_identity["runtime_commit"],
+        )
+        _require_marker(
+            backend,
+            current_release,
+            ".brc-schema-revision",
+            COMPATIBLE_SOURCE_SCHEMA_REVISION,
+        )
+    else:
+        preservation_digest = backend.read_preservation_digest(plan.target_release)
+        if not _SEED_IDENTITY.fullmatch(preservation_digest):
+            raise DeploymentBlocked("persisted preservation digest is invalid")
+
+    transition_started = False
+    schema_migrated = database_revision == plan.schema_revision
+    identity_rotated = False
+    target_release_activated = current_release == plan.target_release
+    try:
+        backend.fence_entry()
+        transition_started = True
+        backend.stop_services(SAFETY_SERVICES)
+        if not backend.migration_writers_stopped_and_entry_fenced():
+            raise DeploymentBlocked(
+                "migration writer stop prerequisite is not satisfied"
+            )
+
+        if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
+            final_source, _, final_identity = _read_compatible_source_facts(
+                backend,
+                plan,
+                exchange_probe_release=current_release,
+            )
+            if final_identity != source_identity:
+                raise DeploymentBlocked("source runtime identity changed during cutover")
+            if _require_preservation_digest(final_source) != preservation_digest:
+                raise DeploymentBlocked("source preservation digest changed during cutover")
+            backend.persist_preservation_digest(
+                plan.target_release,
+                preservation_digest,
+            )
+            backend.migrate_schema(
+                plan.target_release,
+                COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                plan.schema_revision,
+            )
+            schema_migrated = True
+
+        if not backend.preservation_verified(
+            plan.target_release,
+            preservation_digest,
+        ):
+            preservation = backend.verify_preservation(
+                plan.target_release,
+                COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                preservation_digest,
+            )
+            _require_preservation_verification(
+                preservation,
+                target_schema_revision=plan.schema_revision,
+                expected_digest=preservation_digest,
+            )
+            backend.mark_preservation_verified(
+                plan.target_release,
+                preservation_digest,
+            )
+
+        deployment_identity = backend.deploy_compatible_identity(
+            plan.target_release,
+            plan.target_commit,
+            plan.schema_revision,
+        )
+        seed_identity = _require_deployment_identity(deployment_identity, plan)
+        identity_rotated = True
+        backend.activate_release(
+            plan.target_release,
+            plan.target_commit,
+            plan.schema_revision,
+            seed_identity,
+        )
+        target_release_activated = True
+        if backend.read_current_release() != plan.target_release:
+            raise DeploymentBlocked("current release symlink differs from target")
+        for marker, expected in (
+            (".brc-runtime-commit", plan.target_commit),
+            (".brc-schema-revision", plan.schema_revision),
+            (".brc-seed-identity", seed_identity),
+        ):
+            _require_marker(backend, plan.target_release, marker, expected)
+
+        backend.bootstrap_strategy_universes(plan.target_release)
+        _require_target_postflight(
+            backend,
+            plan,
+            seed_identity=seed_identity,
+        )
+        backend.start_services(SAFETY_SERVICES)
+        active_safety = backend.services_active(ALL_SERVICES)
+        if active_safety != frozenset(SAFETY_SERVICES):
+            raise DeploymentBlocked("target safety services are not all active")
+        if not backend.entry_is_inactive_disabled_and_fenced():
+            raise DeploymentBlocked(
+                "portfolio admission upgrade did not retain the ENTRY fence"
+            )
+        active_services = backend.services_active(ALL_SERVICES)
+        if active_services != frozenset(SAFETY_SERVICES):
+            raise DeploymentBlocked("target safety services differ from release plan")
+    except Exception:
+        if transition_started:
+            backend.fence_entry()
+            if target_release_activated or (
+                not schema_migrated and not identity_rotated
+            ):
+                backend.start_services(SAFETY_SERVICES)
+        raise
+
+    return DeploymentResult(
+        status="pass",
+        target_commit=plan.target_commit,
+        target_release=plan.target_release,
+        schema_revision=plan.schema_revision,
+        configured_leverage=plan.expected_configured_leverage,
+        entry_enabled=False,
         mode=plan.mode,
     )
 
@@ -385,6 +512,9 @@ def _read_release_facts(
             certification,
             probe,
             expected_leverage=plan.expected_configured_leverage,
+            compatible_upgrade=(
+                plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
+            ),
         ),
     )
 
@@ -418,13 +548,65 @@ def _require_target_postflight(
     *,
     seed_identity: str,
 ) -> None:
-    _, _, target_identity = _read_release_facts(backend, plan)
+    certification, _, target_identity = _read_release_facts(backend, plan)
     if target_identity != {
         "runtime_commit": plan.target_commit,
         "schema_revision": plan.schema_revision,
         "seed_identity": seed_identity,
     }:
         raise DeploymentBlocked("deployed runtime identity differs from target")
+    if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
+        _require_portfolio_admission_postflight(
+            certification,
+            seed_identity=seed_identity,
+        )
+
+
+def _require_portfolio_admission_postflight(
+    certification: Mapping[str, object],
+    *,
+    seed_identity: str,
+) -> None:
+    owner_policy = certification.get("owner_policy")
+    if (
+        not isinstance(owner_policy, Mapping)
+        or int(str(owner_policy.get("policy_version", -1))) != 4
+        or owner_policy.get("new_entry_submit_enabled") is not False
+    ):
+        raise DeploymentBlocked("exact Policy v4 with ENTRY disabled is missing")
+    registry_identity = certification.get("registry_identity")
+    if (
+        not isinstance(registry_identity, Mapping)
+        or registry_identity.get("status") != "pass"
+        or registry_identity.get("metadata_semantic_hash")
+        != registry_identity.get("expected_semantic_hash")
+    ):
+        raise DeploymentBlocked("exact Registry identity differs")
+    strategy_universe = certification.get("strategy_universe")
+    if (
+        not isinstance(strategy_universe, Mapping)
+        or strategy_universe.get("identity_status") != "pass"
+        or strategy_universe.get("semantic_digest_status") != "pass"
+    ):
+        raise DeploymentBlocked("exact Universe identity differs")
+    if strategy_universe.get("deployment_stage") != "warming":
+        raise DeploymentBlocked("exact Warming Universe stage is missing")
+    if certification.get("compatible_certification_batch_pass") is not True:
+        raise DeploymentBlocked("exact Certification Batch identity differs")
+    runtime_identity = certification.get("runtime_identity")
+    if (
+        not isinstance(runtime_identity, Mapping)
+        or runtime_identity.get("schema_revision") != SCHEMA_REVISION
+    ):
+        raise DeploymentBlocked("exact target schema revision differs")
+    seed = certification.get("seed_identity")
+    if (
+        not isinstance(seed, Mapping)
+        or seed.get("status") != "pass"
+        or seed.get("expected") != seed_identity
+        or seed.get("actual") != seed_identity
+    ):
+        raise DeploymentBlocked("exact Seed identity differs")
 
 
 def _require_compatible_source_facts(
@@ -449,6 +631,8 @@ def _require_compatible_source_facts(
         ("unreviewed_terminal_tickets", "terminal Ticket Review"),
         ("unresolved_commands", "unresolved Exchange Command"),
         ("open_incidents", "open Incident"),
+        ("busy_entry_lane", "ENTRY lane"),
+        ("nonterminal_aggregates", "Aggregate closure"),
     )
     for key, label in blockers:
         if int(str(migration_gate.get(key, -1))) != 0:
@@ -500,13 +684,24 @@ def _require_release_facts(
     probe: Mapping[str, object],
     *,
     expected_leverage: int,
+    compatible_upgrade: bool = False,
 ) -> dict[str, str]:
     if certification.get("status") != "pass":
         raise DeploymentBlocked("database flat certification failed")
     required_gates = (
-        ("universe_bootstrap_pass", "StrategyUniverse bootstrap certification failed"),
-        ("certification_batch_pass", "Certification Batch certification failed"),
-        ("flatness_pass", "database flatness gate failed"),
+        (("flatness_pass", "database flatness gate failed"),)
+        if compatible_upgrade
+        else (
+            (
+                "universe_bootstrap_pass",
+                "StrategyUniverse bootstrap certification failed",
+            ),
+            (
+                "certification_batch_pass",
+                "Certification Batch certification failed",
+            ),
+            ("flatness_pass", "database flatness gate failed"),
+        )
     )
     for key, message in required_gates:
         if certification.get(key) is not True:
@@ -524,11 +719,11 @@ def _require_release_facts(
         key: str(runtime_identity.get(key, ""))
         for key in ("runtime_commit", "schema_revision", "seed_identity")
     }
-    if (
-        not _COMMIT.fullmatch(identity["runtime_commit"])
-        or identity["schema_revision"] != SCHEMA_REVISION
-        or not _SEED_IDENTITY.fullmatch(identity["seed_identity"])
-    ):
+    if not _COMMIT.fullmatch(identity["runtime_commit"]):
+        raise DeploymentBlocked("database runtime identity is invalid")
+    if identity["schema_revision"] != SCHEMA_REVISION:
+        raise DeploymentBlocked("exact target schema revision differs")
+    if not _SEED_IDENTITY.fullmatch(identity["seed_identity"]):
         raise DeploymentBlocked("database runtime identity is invalid")
 
     if probe.get("venue_id") != "binance-usdm":
@@ -737,6 +932,20 @@ class SshTokyoReleaseBackend:
             ("sudo", "readlink", "-f", CURRENT_RELEASE)
         ).stdout
 
+    def release_exists(self, release: str) -> bool:
+        return (
+            self._remote(("sudo", "test", "-d", release), check=False).returncode
+            == 0
+        )
+
+    def inspect_schema(self, release: str) -> Mapping[str, object]:
+        return self._release_json(
+            release,
+            "scripts/trading_kernel/verify_schema.py",
+            "--deployment-revision",
+            check=False,
+        )
+
     def certify_flat(self, release: str) -> Mapping[str, object]:
         return self._release_json(
             release,
@@ -791,6 +1000,21 @@ class SshTokyoReleaseBackend:
             == 0
         }
         return frozenset(active)
+
+    def migration_writers_stopped_and_entry_fenced(self) -> bool:
+        return bool(
+            not self.services_active(ALL_SERVICES)
+            and self._remote(
+                ("sudo", "test", "-f", WRITE_FENCE),
+                check=False,
+            ).returncode
+            == 0
+            and self._remote(
+                ("sudo", "systemctl", "is-enabled", "--quiet", ENTRY_SERVICE),
+                check=False,
+            ).returncode
+            != 0
+        )
 
     def install_release(self, commit: str, release: str) -> None:
         self._remote(("sudo", "rm", "-rf", release))
@@ -869,6 +1093,37 @@ class SshTokyoReleaseBackend:
             expected_digest,
         )
 
+    def persist_preservation_digest(self, release: str, digest: str) -> None:
+        self._write_release_marker(
+            release,
+            ".brc-0002-preservation-digest",
+            digest,
+        )
+
+    def read_preservation_digest(self, release: str) -> str:
+        return self.read_release_marker(
+            release,
+            ".brc-0002-preservation-digest",
+        )
+
+    def mark_preservation_verified(self, release: str, digest: str) -> None:
+        self._write_release_marker(
+            release,
+            ".brc-0002-preservation-verified",
+            digest,
+        )
+
+    def preservation_verified(self, release: str, digest: str) -> bool:
+        result = self._remote(
+            (
+                "sudo",
+                "cat",
+                f"{release}/.brc-0002-preservation-verified",
+            ),
+            check=False,
+        )
+        return result.returncode == 0 and result.stdout == digest
+
     def deploy_compatible_identity(
         self,
         release: str,
@@ -916,20 +1171,7 @@ class SshTokyoReleaseBackend:
             (".brc-schema-revision", schema_revision),
             (".brc-seed-identity", seed_identity),
         ):
-            self._remote(
-                (
-                    "sudo",
-                    "python3",
-                    "-c",
-                    (
-                        "from pathlib import Path; import sys; "
-                        "Path(sys.argv[1]).write_text(sys.argv[2], "
-                        "encoding='utf-8')"
-                    ),
-                    f"{release}/{marker}",
-                    value,
-                )
-            )
+            self._write_release_marker(release, marker, value)
         for key, value in (
             ("TRADING_KERNEL_RUNTIME_COMMIT", commit),
             ("TRADING_KERNEL_SCHEMA_REVISION", schema_revision),
@@ -971,10 +1213,7 @@ class SshTokyoReleaseBackend:
             "scripts/trading_kernel/bootstrap_strategy_universes.py",
             "--runtime-profile-id",
             "tiny-live-v1",
-            "--wait-timeout-ms",
-            "900000",
-            "--poll-interval-ms",
-            "5000",
+            "--prepare-certification-batch-only",
         )
 
     def unfence_entry(self) -> None:
@@ -1023,6 +1262,7 @@ class SshTokyoReleaseBackend:
         release: str,
         script: str,
         *args: str,
+        check: bool = True,
     ) -> Mapping[str, object]:
         executable = shlex.join(
             (f"{release}/.venv/bin/python", f"{release}/{script}", *args)
@@ -1032,12 +1272,33 @@ class SshTokyoReleaseBackend:
             f"set +a; exec {executable}"
         )
         result = self._remote(
-            ("sudo", "-u", "brc", "/bin/bash", "-lc", command)
+            ("sudo", "-u", "brc", "/bin/bash", "-lc", command),
+            check=check,
         )
         payload = json.loads(result.stdout)
         if not isinstance(payload, Mapping):
             raise TypeError("Tokyo release command did not return a JSON object")
         return payload
+
+    def _write_release_marker(
+        self,
+        release: str,
+        marker: str,
+        value: str,
+    ) -> None:
+        self._remote(
+            (
+                "sudo",
+                "python3",
+                "-c",
+                (
+                    "from pathlib import Path; import sys; "
+                    "Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')"
+                ),
+                f"{release}/{marker}",
+                value,
+            )
+        )
 
     def _release_command(
         self,

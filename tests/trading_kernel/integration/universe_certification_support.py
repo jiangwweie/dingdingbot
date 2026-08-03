@@ -7,7 +7,6 @@ import sys
 from collections.abc import AsyncGenerator
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
 from uuid import uuid4
 
 import asyncpg
@@ -48,6 +47,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -62,9 +64,7 @@ MEMBERS = (
 )
 NOW_MS = 1_800_000_010_000
 RUNTIME_COMMIT = "task-7-test"
-SCHEMA_REVISION: Literal["0002_sor_v3_strategy_group_capacity"] = (
-    "0002_sor_v3_strategy_group_capacity"
-)
+SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
 
 
 @pytest_asyncio.fixture

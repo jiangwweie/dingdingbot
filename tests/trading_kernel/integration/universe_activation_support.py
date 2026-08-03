@@ -6,7 +6,7 @@ import subprocess
 import sys
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import TypedDict
 from uuid import uuid4
 
 import asyncpg
@@ -45,6 +45,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from tests.trading_kernel.unit.detectors.fixtures import mpg_long_snapshot
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -72,9 +75,7 @@ REPLACEMENT_MEMBERS = (
     "binance-usdm:OPUSDT:perpetual",
 )
 NOW_MS = 1_800_000_100_000
-SCHEMA_REVISION: Literal["0002_sor_v3_strategy_group_capacity"] = (
-    "0002_sor_v3_strategy_group_capacity"
-)
+SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
 _READINESS_DIGEST = "sha256:" + ("a" * 64)
 _FACTS_DIGEST = "sha256:" + ("b" * 64)
 _RULES_DIGEST = "sha256:" + ("c" * 64)

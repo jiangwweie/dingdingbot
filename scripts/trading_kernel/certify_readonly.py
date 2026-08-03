@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
 
@@ -21,15 +22,22 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_FIRST_BATCH_INSTRUMENT_IDS,
+    APPROVED_UNIVERSE_EVENT_SPECS,
 )
 from src.trading_kernel.domain.instrument_certification import (
     build_certification_manifest_digest,
 )
-from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.domain.strategy_registry import (
+    build_registry_semantic_hash,
+    registered_strategy_contracts,
+)
+from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 from src.trading_kernel.infrastructure.pg_models import metadata
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     DYNAMIC_POLICY,
     OWNER_POLICY_ID,
+    RuntimeAuthoritySeedRequest,
+    build_runtime_seed_identity,
 )
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
@@ -55,6 +63,14 @@ _DECIMAL_POLICY_FIELDS = frozenset(
         "post_stop_stress_multiple",
         "max_post_fill_stop_risk_overrun_fraction",
     }
+)
+_COMPATIBLE_SOURCE_EVENT_SPECS = (
+    ("BRF2-001", "event_spec:BRF2-001:BRF2-SHORT:v2"),
+    ("CPM-RO-001", "event_spec:CPM-RO-001:CPM-LONG:v2"),
+    ("MI-001", "event_spec:MI-001:MI-LONG:v2"),
+    ("MPG-001", "event_spec:MPG-001:MPG-LONG:v2"),
+    ("SOR-001", "event_spec:SOR-001:SOR-LONG:v3"),
+    ("SOR-001", "event_spec:SOR-001:SOR-SHORT:v3"),
 )
 
 
@@ -83,6 +99,44 @@ def _certification_batch_policy_stage_matches(
         current_policy_version == batch_policy_version + 1
         and new_entry_submit_enabled
     )
+
+
+def _universe_manifest_matches(
+    manifest: Sequence[Mapping[str, object]],
+    *,
+    expected_event_specs: Sequence[tuple[str, str]],
+    expected_member_ids: tuple[str, ...],
+) -> bool:
+    expected_group_by_event = {
+        event_spec_id: strategy_group_id
+        for strategy_group_id, event_spec_id in expected_event_specs
+    }
+    if tuple(str(row.get("event_spec_id", "")) for row in manifest) != tuple(
+        sorted(expected_group_by_event)
+    ):
+        return False
+    for row in manifest:
+        event_spec_id = str(row.get("event_spec_id", ""))
+        raw_member_ids = row.get("member_ids")
+        if not isinstance(raw_member_ids, (list, tuple)):
+            return False
+        member_ids = tuple(str(member_id) for member_id in raw_member_ids)
+        if member_ids != expected_member_ids:
+            return False
+        try:
+            expected_digest = build_strategy_universe(
+                universe_version_id="certification:expected",
+                strategy_group_id=expected_group_by_event[event_spec_id],
+                event_spec_id=event_spec_id,
+                universe_version=1,
+                exchange_instrument_ids=member_ids,
+                installed_at_ms=1,
+            ).semantic_digest
+        except (KeyError, TypeError, ValueError):
+            return False
+        if str(row.get("semantic_digest", "")) != expected_digest:
+            return False
+    return True
 
 
 def _closure_ticket_manifest(
@@ -189,6 +243,26 @@ async def _certify(
                     )
                 ).mappings()
             }
+            registry_metadata_hash = str(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT metadata_value FROM brc_schema_metadata "
+                            "WHERE metadata_key = 'registry_semantic_hash'"
+                        )
+                    )
+                ).scalar_one_or_none()
+                or ""
+            )
+            runtime_profile_row = (
+                await connection.execute(
+                    text(
+                        "SELECT runtime_profile_id, account_id "
+                        "FROM brc_runtime_profiles "
+                        "WHERE runtime_profile_id = 'tiny-live-v1'"
+                    )
+                )
+            ).mappings().one_or_none()
             actual_tables = {
                 str(name)
                 for name in (
@@ -318,6 +392,68 @@ async def _certify(
                     )
                 )
             ).one()
+            active_universe_rows = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT current.event_spec_id,
+                               current.universe_version_id,
+                               current.semantic_digest,
+                               array_agg(
+                                   member.exchange_instrument_id
+                                   ORDER BY member.exchange_instrument_id
+                               ) AS member_ids
+                          FROM brc_strategy_universe_current current
+                          JOIN brc_strategy_universe_versions version
+                            ON version.universe_version_id =
+                               current.universe_version_id
+                          JOIN brc_strategy_universe_members member
+                            ON member.universe_version_id =
+                               current.universe_version_id
+                         WHERE current.lifecycle_state = 'active'
+                           AND version.lifecycle_state = 'active'
+                         GROUP BY current.event_spec_id,
+                                  current.universe_version_id,
+                                  current.semantic_digest
+                         ORDER BY current.event_spec_id
+                        """
+                    )
+                )
+            ).mappings().all()
+            warming_universe_rows = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT version.event_spec_id,
+                               version.universe_version_id,
+                               version.semantic_digest,
+                               array_agg(
+                                   member.exchange_instrument_id
+                                   ORDER BY member.exchange_instrument_id
+                               ) AS member_ids
+                          FROM brc_strategy_universe_versions version
+                          JOIN brc_strategy_universe_members member
+                            ON member.universe_version_id =
+                               version.universe_version_id
+                         WHERE version.lifecycle_state = 'warming'
+                         GROUP BY version.event_spec_id,
+                                  version.universe_version_id,
+                                  version.semantic_digest
+                         ORDER BY version.event_spec_id
+                        """
+                    )
+                )
+            ).mappings().all()
+            shadow_pending_count = int(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT count(*) FROM brc_shadow_outcomes_current "
+                            "WHERE status IN ('pending', 'claimed')"
+                        )
+                    )
+                ).scalar_one()
+            )
             capabilities = {
                 str(row["capability_key"]): bool(row["enabled"])
                 for row in (
@@ -435,6 +571,33 @@ async def _certify(
                         """
                     ),
                     {"now_ms": effective_now_ms},
+                )
+            ).mappings().one_or_none()
+            compatible_batch_row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT batch.certification_batch_id,
+                               batch.runtime_profile_id,
+                               batch.target_commit,
+                               batch.target_schema_revision,
+                               batch.target_seed_identity,
+                               batch.owner_policy_id,
+                               batch.owner_policy_version,
+                               batch.manifest_digest,
+                               batch.status,
+                               count(member.exchange_instrument_id) AS member_count
+                          FROM brc_instrument_certification_batches batch
+                          JOIN brc_instrument_certification_batch_members member
+                            ON member.certification_batch_id =
+                               batch.certification_batch_id
+                         WHERE batch.status IN ('pending', 'completed')
+                         GROUP BY batch.certification_batch_id
+                         ORDER BY batch.started_at_ms DESC,
+                                  batch.certification_batch_id
+                         LIMIT 1
+                        """
+                    )
                 )
             ).mappings().one_or_none()
             integrity_orphans = int(
@@ -686,6 +849,7 @@ async def _certify(
             "retired": int(universe_counts[7]),
         },
         "temporarily_unavailable_certification_count": int(universe_counts[8]),
+        "shadow_pending_count": shadow_pending_count,
     }
     owner_policy = (
         None
@@ -778,9 +942,35 @@ async def _certify(
         and unresolved_commands == 0
         and open_incidents == 0
     )
-    expected_event_spec_ids = tuple(
-        sorted(contract.event_spec_id for contract in registered_strategy_contracts())
+    registered_contracts = registered_strategy_contracts()
+    expected_event_specs = tuple(
+        sorted(
+            (
+                (contract.strategy_group_id, contract.event_spec_id)
+                for contract in registered_contracts
+            ),
+            key=lambda identity: identity[1],
+        )
     )
+    expected_event_spec_ids = tuple(
+        event_spec_id for _strategy_group_id, event_spec_id in expected_event_specs
+    )
+    expected_strategy_group_by_event = {
+        event_spec_id: strategy_group_id
+        for strategy_group_id, event_spec_id in expected_event_specs
+    }
+    expected_registry_hash = build_registry_semantic_hash(
+        registered_contracts
+    )
+    registry_identity = {
+        "status": (
+            "pass"
+            if registry_metadata_hash == expected_registry_hash
+            else "fail"
+        ),
+        "expected_semantic_hash": expected_registry_hash,
+        "metadata_semantic_hash": registry_metadata_hash,
+    }
     policy_scope = None if owner_policy_row is None else owner_policy_row["scope"]
     policy_events = (
         ()
@@ -796,10 +986,96 @@ async def _certify(
     expected_manifest_digest = build_certification_manifest_digest(
         APPROVED_FIRST_BATCH_INSTRUMENT_IDS
     )
+    expected_member_ids = tuple(sorted(APPROVED_FIRST_BATCH_INSTRUMENT_IDS))
     runtime_profile_id = (
         None
         if not isinstance(policy_scope, dict)
         else policy_scope.get("runtime_profile_id")
+    )
+    active_universe_manifest = [
+        {
+            "event_spec_id": str(row["event_spec_id"]),
+            "universe_version_id": str(row["universe_version_id"]),
+            "semantic_digest": str(row["semantic_digest"]),
+            "member_ids": list(row["member_ids"]),
+        }
+        for row in active_universe_rows
+    ]
+    universe_identity_pass = _universe_manifest_matches(
+        active_universe_manifest,
+        expected_event_specs=expected_event_specs,
+        expected_member_ids=expected_member_ids,
+    )
+    warming_universe_manifest = [
+        {
+            "event_spec_id": str(row["event_spec_id"]),
+            "universe_version_id": str(row["universe_version_id"]),
+            "semantic_digest": str(row["semantic_digest"]),
+            "member_ids": list(row["member_ids"]),
+        }
+        for row in warming_universe_rows
+    ]
+    compatible_batch_pass = bool(
+        compatible_batch_row is not None
+        and compatible_batch_row["runtime_profile_id"] == runtime_profile_id
+        and compatible_batch_row["target_commit"]
+        == runtime_identity.get("runtime_commit")
+        and compatible_batch_row["target_schema_revision"]
+        == runtime_identity.get("schema_revision")
+        and compatible_batch_row["target_seed_identity"]
+        == runtime_identity.get("seed_identity")
+        and compatible_batch_row["owner_policy_id"] == OWNER_POLICY_ID
+        and owner_policy_row is not None
+        and int(compatible_batch_row["owner_policy_version"]) == 4
+        and int(owner_policy_row["policy_version"]) == 4
+        and owner_policy_row["new_entry_submit_enabled"] is False
+        and compatible_batch_row["manifest_digest"] == expected_manifest_digest
+        and int(compatible_batch_row["member_count"])
+        == len(APPROVED_FIRST_BATCH_INSTRUMENT_IDS)
+    )
+    compatible_active_universe_pass = _universe_manifest_matches(
+        active_universe_manifest,
+        expected_event_specs=_COMPATIBLE_SOURCE_EVENT_SPECS,
+        expected_member_ids=expected_member_ids,
+    )
+    first_vnext_event_spec_id = APPROVED_UNIVERSE_EVENT_SPECS[0][1]
+    compatible_warming_universe_pass = _universe_manifest_matches(
+        warming_universe_manifest,
+        expected_event_specs=(
+            (
+                expected_strategy_group_by_event[first_vnext_event_spec_id],
+                first_vnext_event_spec_id,
+            ),
+        ),
+        expected_member_ids=expected_member_ids,
+    )
+    compatible_universe_identity_pass = bool(
+        compatible_active_universe_pass
+        and compatible_warming_universe_pass
+        and compatible_batch_pass
+    )
+    deployment_stage = (
+        "warming"
+        if compatible_universe_identity_pass
+        else "active"
+        if universe_identity_pass
+        else "invalid"
+    )
+    strategy_universe["identity_status"] = (
+        "pass"
+        if compatible_universe_identity_pass or universe_identity_pass
+        else "fail"
+    )
+    strategy_universe["semantic_digest_status"] = (
+        "pass"
+        if compatible_universe_identity_pass or universe_identity_pass
+        else "fail"
+    )
+    strategy_universe["deployment_stage"] = deployment_stage
+    strategy_universe["active_manifest"] = active_universe_manifest
+    strategy_universe["warming_manifest"] = warming_universe_manifest
+    strategy_universe["approved_vnext_event_spec_ids"] = list(
+        expected_event_spec_ids
     )
     certification_batch_pass = bool(
         certification_batch_row is not None
@@ -852,6 +1128,36 @@ async def _certify(
         and owner_policy_row["new_entry_submit_enabled"] is False
         and capabilities.get("exchange_commands") is False
     )
+    expected_seed_identity = ""
+    if runtime_profile_row is not None:
+        expected_seed_identity = build_runtime_seed_identity(
+            RuntimeAuthoritySeedRequest(
+                account_id=str(runtime_profile_row["account_id"]),
+                runtime_commit=str(runtime_identity.get("runtime_commit", "missing")),
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                seeded_at_ms=1,
+            )
+        )
+    actual_seed_identity = str(runtime_identity.get("seed_identity", ""))
+    seed_identity = {
+        "status": (
+            "pass"
+            if expected_seed_identity == actual_seed_identity
+            else "fail"
+        ),
+        "expected": expected_seed_identity,
+        "actual": actual_seed_identity,
+    }
+    portfolio_admission_postflight_pass = bool(
+        compatible_universe_identity_pass
+        and flatness_pass
+        and owner_policy_row is not None
+        and int(owner_policy_row["policy_version"]) == 4
+        and owner_policy_row["new_entry_submit_enabled"] is False
+        and registry_identity["status"] == "pass"
+        and seed_identity["status"] == "pass"
+        and runtime_identity.get("schema_revision") == EXPECTED_ALEMBIC_REVISION
+    )
     closure_is_valid = (
         normalized_closure_ticket_id is None
         or (
@@ -886,6 +1192,11 @@ async def _certify(
         "table_allowlist": table_allowlist,
         "runtime_scope_count": runtime_scope_count,
         "strategy_universe": strategy_universe,
+        "registry_identity": registry_identity,
+        "seed_identity": seed_identity,
+        "portfolio_admission_postflight_pass": (
+            portfolio_admission_postflight_pass
+        ),
         "database_integrity_pass": database_integrity_pass,
         "flatness_pass": flatness_pass,
         "universe_bootstrap_pass": universe_bootstrap_pass,
@@ -902,6 +1213,10 @@ async def _certify(
             if certification_batch_row is None
             else dict(certification_batch_row)
         ),
+        "compatible_certification_batch": (
+            None if compatible_batch_row is None else dict(compatible_batch_row)
+        ),
+        "compatible_certification_batch_pass": compatible_batch_pass,
         "certification_batch_pass": certification_batch_pass,
         "capabilities": capabilities,
         "owner_policy": owner_policy,
