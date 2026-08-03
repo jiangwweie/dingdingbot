@@ -30,6 +30,7 @@ def produce_strategy_signal(
     scope: RuntimeScopeSnapshot,
     detector_result: DetectorResult,
     persisted_facts: tuple[SignalFactSnapshot, ...],
+    exposure_episode_id: str | None = None,
 ) -> StrategySignal:
     if not detector_result.triggered or detector_result.occurred_at_ms is None:
         raise ValueError("StrategySignal requires a triggered detector result")
@@ -62,22 +63,32 @@ def produce_strategy_signal(
         for fact in facts
         if fact.role == "identity_reference"
     )
-    episode_payload = {
-        "event_spec_id": contract.event_spec_id,
-        "exchange_instrument_id": scope.exchange_instrument_id,
-        "position_side": contract.position_side,
-        "identity_references": (
-            identity_references if identity_references else (str(occurred_at_ms),)
-        ),
-    }
-    episode_canonical = json.dumps(
-        episode_payload,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    exposure_episode_id = f"episode:{sha256(episode_canonical).hexdigest()}"
+    if contract.episode_policy == "rising_edge":
+        normalized_episode_id = str(exposure_episode_id or "").strip()
+        if not normalized_episode_id.startswith("episode:"):
+            raise ValueError("rising-edge Signal requires an explicit Episode identity")
+        if identity_references:
+            raise ValueError("rising-edge Signal forbids identity-reference facts")
+        resolved_episode_id = normalized_episode_id
+    else:
+        if exposure_episode_id is not None:
+            raise ValueError("session-reference Signal owns its Episode identity")
+        if not identity_references:
+            raise ValueError("session-reference Signal requires identity facts")
+        episode_payload = {
+            "event_spec_id": contract.event_spec_id,
+            "exchange_instrument_id": scope.exchange_instrument_id,
+            "position_side": contract.position_side,
+            "identity_references": identity_references,
+        }
+        episode_canonical = json.dumps(
+            episode_payload,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        resolved_episode_id = f"episode:{sha256(episode_canonical).hexdigest()}"
     identity_payload = {
-        "exposure_episode_id": exposure_episode_id,
+        "exposure_episode_id": resolved_episode_id,
     }
     canonical = json.dumps(
         identity_payload,
@@ -87,7 +98,7 @@ def produce_strategy_signal(
     signal_event_id = f"signal:{sha256(canonical).hexdigest()}"
     return StrategySignal(
         signal_event_id=signal_event_id,
-        exposure_episode_id=exposure_episode_id,
+        exposure_episode_id=resolved_episode_id,
         runtime_scope_id=scope.runtime_scope_id,
         runtime_scope_version=scope.scope_version,
         strategy_group_id=contract.strategy_group_id,

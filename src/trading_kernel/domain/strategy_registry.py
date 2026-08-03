@@ -21,6 +21,12 @@ FactRole = Literal[
 ]
 Timeframe = Literal["15m", "1h"]
 PositionSide = Literal["long", "short"]
+EpisodePolicy = Literal["rising_edge", "session_reference"]
+ExposureFamily = Literal[
+    "long_continuation",
+    "opening_range",
+    "rally_failure_short",
+]
 
 
 class RegistrySeedConflict(RuntimeError):
@@ -103,6 +109,9 @@ class RegisteredStrategyContract(BaseModel):
     freshness_window_ms: int
     event_time_authority: Literal["trigger_candle_close_time_ms"]
     entry_order_type: EntryOrderType
+    episode_policy: EpisodePolicy
+    exposure_family: ExposureFamily
+    shadow_horizon_bars: int
     protection_reference_fact: str
     pre_tp1_reclaim_reference_fact: str | None = None
     exposure_session_end_reference_fact: str | None = None
@@ -146,6 +155,13 @@ class RegisteredStrategyContract(BaseModel):
             raise ValueError("strategy freshness window must be positive")
         return value
 
+    @field_validator("shadow_horizon_bars")
+    @classmethod
+    def _require_positive_shadow_horizon(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("shadow horizon bars must be positive")
+        return value
+
     @model_validator(mode="after")
     def _validate_contract(self) -> RegisteredStrategyContract:
         version_match = re.fullmatch(
@@ -181,6 +197,18 @@ class RegisteredStrategyContract(BaseModel):
         ]
         if reference_facts != [self.protection_reference_fact]:
             raise ValueError("contract requires exactly one protection reference fact")
+        identity_references = [
+            item.fact_name
+            for item in self.required_facts
+            if item.role == "identity_reference"
+        ]
+        if self.episode_policy == "session_reference":
+            if len(identity_references) != 1:
+                raise ValueError(
+                    "session-reference Event requires exactly one identity fact"
+                )
+        elif identity_references:
+            raise ValueError("rising-edge Event forbids identity-reference facts")
         pre_tp1_names = (
             self.pre_tp1_reclaim_reference_fact,
             self.exposure_session_end_reference_fact,
@@ -236,6 +264,11 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
                 ("pullback_low_reference", "protection_reference"),
             ),
             protection_reference_fact="pullback_low_reference",
+            episode_policy="rising_edge",
+            exposure_family="long_continuation",
+            shadow_horizon_bars=24,
+            semantic_version=3,
+            exit_policy_variant="portfolio-admission-v1",
         ),
         _contract(
             strategy_group_id="MPG-001",
@@ -248,6 +281,11 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
                 ("momentum_floor_reference", "protection_reference"),
             ),
             protection_reference_fact="momentum_floor_reference",
+            episode_policy="rising_edge",
+            exposure_family="long_continuation",
+            shadow_horizon_bars=24,
+            semantic_version=3,
+            exit_policy_variant="portfolio-admission-v1",
         ),
         _contract(
             strategy_group_id="MI-001",
@@ -260,6 +298,11 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
                 ("impulse_invalidation_reference", "protection_reference"),
             ),
             protection_reference_fact="impulse_invalidation_reference",
+            episode_policy="rising_edge",
+            exposure_family="long_continuation",
+            shadow_horizon_bars=24,
+            semantic_version=3,
+            exit_policy_variant="portfolio-admission-v1",
         ),
         _contract(
             strategy_group_id="SOR-001",
@@ -277,9 +320,12 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
             protection_reference_fact="opening_range_low_reference_v3",
             pre_tp1_reclaim_reference_fact="opening_range_high_reference_v3",
             exposure_session_end_reference_fact="session_end_ms_v3",
-            semantic_version=3,
+            episode_policy="session_reference",
+            exposure_family="opening_range",
+            shadow_horizon_bars=96,
+            semantic_version=4,
             fact_version=3,
-            exit_policy_variant="sor-v3-right-tail-v1",
+            exit_policy_variant="portfolio-admission-v1",
         ),
         _contract(
             strategy_group_id="SOR-001",
@@ -297,9 +343,12 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
             protection_reference_fact="opening_range_high_reference_v3",
             pre_tp1_reclaim_reference_fact="opening_range_low_reference_v3",
             exposure_session_end_reference_fact="session_end_ms_v3",
-            semantic_version=3,
+            episode_policy="session_reference",
+            exposure_family="opening_range",
+            shadow_horizon_bars=96,
+            semantic_version=4,
             fact_version=3,
-            exit_policy_variant="sor-v3-right-tail-v1",
+            exit_policy_variant="portfolio-admission-v1",
         ),
         _contract(
             strategy_group_id="BRF2-001",
@@ -313,6 +362,11 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
             ),
             protection_reference_fact="rally_high_reference",
             disable_fact_names=("strong_uptrend_disable",),
+            episode_policy="rising_edge",
+            exposure_family="rally_failure_short",
+            shadow_horizon_bars=24,
+            semantic_version=3,
+            exit_policy_variant="portfolio-admission-v1",
         ),
     )
 
@@ -368,11 +422,14 @@ def _contract(
         ...,
     ],
     protection_reference_fact: str,
+    episode_policy: EpisodePolicy,
+    exposure_family: ExposureFamily,
+    shadow_horizon_bars: int,
     pre_tp1_reclaim_reference_fact: str | None = None,
     exposure_session_end_reference_fact: str | None = None,
     disable_fact_names: tuple[str, ...] = (),
     status: Literal["active", "disabled"] = "active",
-    semantic_version: int = 2,
+    semantic_version: int,
     fact_version: int = 1,
     exit_policy_variant: str = "right-tail-v1",
 ) -> RegisteredStrategyContract:
@@ -389,6 +446,9 @@ def _contract(
         freshness_window_ms=freshness_window_ms,
         event_time_authority="trigger_candle_close_time_ms",
         entry_order_type=EntryOrderType.MARKET,
+        episode_policy=episode_policy,
+        exposure_family=exposure_family,
+        shadow_horizon_bars=shadow_horizon_bars,
         protection_reference_fact=protection_reference_fact,
         pre_tp1_reclaim_reference_fact=pre_tp1_reclaim_reference_fact,
         exposure_session_end_reference_fact=(

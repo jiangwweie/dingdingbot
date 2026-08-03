@@ -20,7 +20,7 @@ def test_every_registered_event_has_one_deterministic_detector() -> None:
         detector = detector_for(contract.event_spec_id)
         assert detector.event_spec_id == contract.event_spec_id
 
-    detector = detector_for("event_spec:SOR-001:SOR-LONG:v3")
+    detector = detector_for("event_spec:SOR-001:SOR-LONG:v4")
     snapshot = sor_snapshot(side="long")
     assert detector.evaluate(snapshot) == detector.evaluate(snapshot)
 
@@ -30,7 +30,7 @@ def test_detector_accepts_a_canonical_instrument_not_hard_coded_in_registry() ->
         update={"exchange_instrument_id": "binance-usdm:DOGEUSDT:perpetual"}
     )
 
-    result = detector_for("event_spec:CPM-RO-001:CPM-LONG:v2").evaluate(snapshot)
+    result = detector_for("event_spec:CPM-RO-001:CPM-LONG:v3").evaluate(snapshot)
 
     assert result.status is DetectorStatus.TRIGGERED
 
@@ -39,32 +39,32 @@ def test_detector_accepts_a_canonical_instrument_not_hard_coded_in_registry() ->
     ("event_spec_id", "snapshot_factory", "protection_fact"),
     [
         (
-            "event_spec:CPM-RO-001:CPM-LONG:v2",
+            "event_spec:CPM-RO-001:CPM-LONG:v3",
             cpm_long_snapshot,
             "pullback_low_reference",
         ),
         (
-            "event_spec:MPG-001:MPG-LONG:v2",
+            "event_spec:MPG-001:MPG-LONG:v3",
             mpg_long_snapshot,
             "momentum_floor_reference",
         ),
         (
-            "event_spec:MI-001:MI-LONG:v2",
+            "event_spec:MI-001:MI-LONG:v3",
             mi_long_snapshot,
             "impulse_invalidation_reference",
         ),
         (
-            "event_spec:SOR-001:SOR-LONG:v3",
+            "event_spec:SOR-001:SOR-LONG:v4",
             lambda: sor_snapshot(side="long"),
             "opening_range_low_reference_v3",
         ),
         (
-            "event_spec:SOR-001:SOR-SHORT:v3",
+            "event_spec:SOR-001:SOR-SHORT:v4",
             lambda: sor_snapshot(side="short"),
             "opening_range_high_reference_v3",
         ),
         (
-            "event_spec:BRF2-001:BRF2-SHORT:v2",
+            "event_spec:BRF2-001:BRF2-SHORT:v3",
             brf2_short_snapshot,
             "rally_high_reference",
         ),
@@ -100,9 +100,9 @@ def test_each_registered_event_emits_exact_triggered_fact_bundle(
 
 
 @pytest.mark.parametrize("side", ["long", "short"])
-def test_sor_v3_requires_a_first_edge_crossing(side: str) -> None:
+def test_sor_v4_requires_a_first_edge_crossing(side: str) -> None:
     event_id = "SOR-LONG" if side == "long" else "SOR-SHORT"
-    detector = detector_for(f"event_spec:SOR-001:{event_id}:v3")
+    detector = detector_for(f"event_spec:SOR-001:{event_id}:v4")
 
     first_crossing = detector.evaluate(sor_snapshot(side=side))
     persistent_outside = detector.evaluate(
@@ -114,9 +114,9 @@ def test_sor_v3_requires_a_first_edge_crossing(side: str) -> None:
 
 
 @pytest.mark.parametrize("side", ["long", "short"])
-def test_sor_v3_emits_session_identity_and_lifecycle_references(side: str) -> None:
+def test_sor_v4_emits_session_identity_and_lifecycle_references(side: str) -> None:
     event_id = "SOR-LONG" if side == "long" else "SOR-SHORT"
-    result = detector_for(f"event_spec:SOR-001:{event_id}:v3").evaluate(
+    result = detector_for(f"event_spec:SOR-001:{event_id}:v4").evaluate(
         sor_snapshot(side=side)
     )
 

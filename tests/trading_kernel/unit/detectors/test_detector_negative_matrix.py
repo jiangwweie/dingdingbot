@@ -26,7 +26,7 @@ def test_insufficient_market_windows_are_invalid_not_no_action() -> None:
     insufficient = source.model_copy(update={"candles_1h": source.candles_1h[1:]})
 
     result = detector_for(
-        "event_spec:CPM-RO-001:CPM-LONG:v2"
+        "event_spec:CPM-RO-001:CPM-LONG:v3"
     ).evaluate(insufficient)
 
     assert result.status is DetectorStatus.INVALID
@@ -36,7 +36,7 @@ def test_insufficient_market_windows_are_invalid_not_no_action() -> None:
 
 def test_cpm_computed_false_facts_are_not_triggered() -> None:
     result = detector_for(
-        "event_spec:CPM-RO-001:CPM-LONG:v2"
+        "event_spec:CPM-RO-001:CPM-LONG:v3"
     ).evaluate(cpm_flat_snapshot())
 
     assert result.status is DetectorStatus.NOT_TRIGGERED
@@ -45,7 +45,7 @@ def test_cpm_computed_false_facts_are_not_triggered() -> None:
 
 
 def test_mpg_missing_or_stale_comparative_strength_is_invalid() -> None:
-    event_spec_id = "event_spec:MPG-001:MPG-LONG:v2"
+    event_spec_id = "event_spec:MPG-001:MPG-LONG:v3"
     missing = mpg_long_snapshot().model_copy(update={"comparative_strength": None})
     stale = mpg_long_snapshot(comparative_valid_until_ms=NOW_MS)
 
@@ -59,7 +59,7 @@ def test_mpg_missing_or_stale_comparative_strength_is_invalid() -> None:
 
 def test_mpg_market_no_action_does_not_require_comparative_snapshot() -> None:
     result = detector_for(
-        "event_spec:MPG-001:MPG-LONG:v2"
+        "event_spec:MPG-001:MPG-LONG:v3"
     ).evaluate(mpg_flat_snapshot())
 
     assert result.status is DetectorStatus.NOT_TRIGGERED
@@ -74,7 +74,7 @@ def test_mpg_market_no_action_does_not_require_comparative_snapshot() -> None:
 
 def test_mpg_nonleader_is_computed_not_triggered() -> None:
     result = detector_for(
-        "event_spec:MPG-001:MPG-LONG:v2"
+        "event_spec:MPG-001:MPG-LONG:v3"
     ).evaluate(mpg_long_snapshot(candidate_rank=2))
 
     assert result.status is DetectorStatus.NOT_TRIGGERED
@@ -83,7 +83,7 @@ def test_mpg_nonleader_is_computed_not_triggered() -> None:
 
 
 def test_mi_below_threshold_and_nonleader_are_not_triggered() -> None:
-    event_spec_id = "event_spec:MI-001:MI-LONG:v2"
+    event_spec_id = "event_spec:MI-001:MI-LONG:v3"
     below = detector_for(event_spec_id).evaluate(mi_flat_snapshot())
     nonleader = detector_for(event_spec_id).evaluate(
         mi_long_snapshot(candidate_rank=2)
@@ -103,7 +103,7 @@ def test_mi_below_threshold_and_nonleader_are_not_triggered() -> None:
 
 def test_mi_comparative_return_mismatch_is_invalid() -> None:
     result = detector_for(
-        "event_spec:MI-001:MI-LONG:v2"
+        "event_spec:MI-001:MI-LONG:v3"
     ).evaluate(mi_long_snapshot(candidate_return_pct=Decimal(99)))
 
     assert result.status is DetectorStatus.INVALID
@@ -113,8 +113,8 @@ def test_mi_comparative_return_mismatch_is_invalid() -> None:
 @pytest.mark.parametrize(
     ("event_spec_id", "event_fact"),
     [
-        ("event_spec:SOR-001:SOR-LONG:v3", "breakout_edge_crossed_v3"),
-        ("event_spec:SOR-001:SOR-SHORT:v3", "breakdown_edge_crossed_v3"),
+        ("event_spec:SOR-001:SOR-LONG:v4", "breakout_edge_crossed_v3"),
+        ("event_spec:SOR-001:SOR-SHORT:v4", "breakdown_edge_crossed_v3"),
     ],
 )
 def test_sor_intact_range_is_not_triggered(
@@ -130,7 +130,7 @@ def test_sor_intact_range_is_not_triggered(
 
 def test_brf2_strong_uptrend_disable_prevents_short_signal() -> None:
     result = detector_for(
-        "event_spec:BRF2-001:BRF2-SHORT:v2"
+        "event_spec:BRF2-001:BRF2-SHORT:v3"
     ).evaluate(brf2_short_snapshot(strong_uptrend=True))
 
     assert result.status is DetectorStatus.NOT_TRIGGERED

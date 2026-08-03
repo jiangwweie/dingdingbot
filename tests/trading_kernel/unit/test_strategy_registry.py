@@ -93,9 +93,34 @@ def test_registry_preserves_exact_active_semantic_contracts_without_membership()
 
 def test_registry_uses_exact_versioned_semantic_identities() -> None:
     for contract in registered_strategy_contracts():
-        version = 3 if contract.strategy_group_id == "SOR-001" else 2
+        version = 4 if contract.strategy_group_id == "SOR-001" else 3
         assert contract.strategy_version_id == f"sgv:{contract.strategy_group_id}:v{version}"
         assert contract.event_spec_id == f"event_spec:{contract.strategy_group_id}:{contract.event_id}:v{version}"
+
+
+def test_registry_freezes_episode_family_and_shadow_semantics() -> None:
+    contracts = {item.event_id: item for item in registered_strategy_contracts()}
+
+    for event_id in ("CPM-LONG", "MPG-LONG", "MI-LONG"):
+        assert contracts[event_id].episode_policy == "rising_edge"
+        assert contracts[event_id].exposure_family == "long_continuation"
+        assert contracts[event_id].shadow_horizon_bars == 24
+
+    assert contracts["BRF2-SHORT"].episode_policy == "rising_edge"
+    assert contracts["BRF2-SHORT"].exposure_family == "rally_failure_short"
+    assert contracts["BRF2-SHORT"].shadow_horizon_bars == 24
+
+    for event_id in ("SOR-LONG", "SOR-SHORT"):
+        assert contracts[event_id].episode_policy == "session_reference"
+        assert contracts[event_id].exposure_family == "opening_range"
+        assert contracts[event_id].shadow_horizon_bars == 96
+
+
+def test_registry_new_event_versions_use_new_exit_policy_identities() -> None:
+    contracts = registered_strategy_contracts()
+
+    assert len({item.exit_policy_id for item in contracts}) == len(contracts)
+    assert all("portfolio-admission-v1" in item.exit_policy_id for item in contracts)
 
 
 def test_registry_fact_roles_are_generic_and_type_safe() -> None:
