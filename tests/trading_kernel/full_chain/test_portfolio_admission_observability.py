@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import uuid4
@@ -44,12 +45,17 @@ from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_models import (
+    account_exposure_current,
     admission_decisions,
     capacity_claims,
+    entry_lane_current,
     exchange_commands,
     instrument_certification_current,
     owner_policy_current,
+    owner_policy_events,
+    runtime_profiles,
     runtime_scopes_current,
+    schema_metadata,
     shadow_outcomes_current,
     signal_events,
     trade_tickets,
@@ -60,7 +66,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
     arm_acceptance_policy,
-    seed_runtime_authority,
+    deploy_compatible_upgrade_identity,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.interfaces.entry_worker import (
@@ -91,6 +97,15 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _database_url,
     _run_alembic,
 )
+from tests.trading_kernel.integration.test_portfolio_admission_flat_compatible_deployment import (
+    _install_source_runtime_identity,
+)
+from tests.trading_kernel.integration.test_portfolio_admission_observability_migration import (
+    _prepare_production_shaped_0002,
+)
+from tests.trading_kernel.integration.test_sor_v3_compatible_migration import (
+    V4_REVISION,
+)
 from tests.trading_kernel.integration.universe_certification_support import (
     RecordingReadonlyCertificationSource,
 )
@@ -109,6 +124,11 @@ REPLAY_WALLET_BALANCE = Decimal(1_000_000)
 TWO_HOURS_MS = 2 * 3_600_000
 SEVEN_HOURS_MS = 7 * 3_600_000
 NINE_HOURS_FIFTEEN_MINUTES_MS = 9 * 3_600_000 + 15 * 60_000
+CERTIFIED_0002_REGISTRY_MANIFEST_HASH = str(
+    importlib.import_module(
+        "migrations.trading_kernel.versions.0003_portfolio_admission_observability"
+    ).CERTIFIED_0002_REGISTRY_MANIFEST_HASH
+)
 
 
 @pytest_asyncio.fixture
@@ -118,9 +138,82 @@ async def replay_engine() -> AsyncGenerator[AsyncEngine, None]:
     admin = await asyncpg.connect(ADMIN_DSN)
     await admin.execute(f'CREATE DATABASE "{database_name}"')
     database_url = _database_url(database_name)
-    _run_alembic(database_url, "upgrade", "head")
+    _run_alembic(database_url, "upgrade", V4_REVISION)
     engine = create_async_engine(database_url)
     try:
+        await _prepare_production_shaped_0002(engine)
+        await _install_source_runtime_identity(engine)
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.insert(account_exposure_current).values(
+                    venue_id="binance-usdm",
+                    account_id="subaccount-source-test",
+                    gross_notional=Decimal(0),
+                    gross_risk_at_stop=Decimal(0),
+                    current_reserved_margin=Decimal(0),
+                    active_ticket_count=0,
+                    projection_version=0,
+                    updated_at_ms=1_000,
+                )
+            )
+            await connection.execute(
+                sa.insert(entry_lane_current).values(
+                    lane_id="global-entry",
+                    ticket_id=None,
+                    signal_event_id=None,
+                    status="idle",
+                    claimed_at_ms=None,
+                    lease_until_ms=None,
+                    claim_owner=None,
+                    version=0,
+                )
+            )
+            await connection.execute(
+                sa.insert(schema_metadata).values(
+                    metadata_key="registry_semantic_hash",
+                    metadata_value=CERTIFIED_0002_REGISTRY_MANIFEST_HASH,
+                    updated_at_ms=1_000,
+                )
+            )
+        _run_alembic(database_url, "upgrade", CURRENT_SCHEMA_REVISION)
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            deployed = await deploy_compatible_upgrade_identity(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id="subaccount-source-test",
+                    runtime_commit="kernel-test-head",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
+                    seeded_at_ms=NOW_MS - 10_000_000,
+                ),
+            )
+        assert deployed.refreshed_existing_authority is True
+        async with engine.connect() as connection:
+            profile = (
+                await connection.execute(sa.select(runtime_profiles))
+            ).mappings().one()
+            metadata = dict(
+                (
+                    await connection.execute(
+                        sa.select(
+                            schema_metadata.c.metadata_key,
+                            schema_metadata.c.metadata_value,
+                        )
+                    )
+                ).all()
+            )
+        assert profile["runtime_profile_id"] == "tiny-live-v1"
+        assert profile["venue_id"] == "binance-usdm"
+        assert profile["account_id"] == "subaccount-source-test"
+        assert profile["position_mode"] == "independent_sides"
+        assert set(metadata) == {
+            "registry_semantic_hash",
+            "runtime_commit",
+            "schema_revision",
+            "seed_identity",
+        }
+        assert metadata["runtime_commit"] == "kernel-test-head"
+        assert metadata["schema_revision"] == CURRENT_SCHEMA_REVISION
+        assert metadata["seed_identity"] == deployed.runtime_seed_semantic_hash
         yield engine
     finally:
         await engine.dispose()
@@ -285,6 +378,7 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
     source = RecordingReplayMarketSource()
     await _seed_replay_runtime(replay_engine, source)
     venue = CertifiedVenue()
+    replay_baseline_command_ids = await _exchange_command_ids(replay_engine)
 
     bnb = await _observe_and_admit(
         replay_engine,
@@ -307,6 +401,7 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         now_ms=NOW_MS + TWO_HOURS_MS - 1,
     )
     venue_call_count_before_doge = len(venue.calls)
+    command_ids_before_doge = await _exchange_command_ids(replay_engine)
     doge = await _observe_and_admit(
         replay_engine,
         source,
@@ -315,6 +410,7 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         offset_ms=TWO_HOURS_MS,
     )
     assert len(venue.calls) == venue_call_count_before_doge
+    assert await _exchange_command_ids(replay_engine) == command_ids_before_doge
     assert doge[:2] == (
         ObservationStatus.SIGNAL_CREATED,
         EntryWorkerStatus.ISSUE_REFUSED,
@@ -372,6 +468,17 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
     async with PostgresKernelUnitOfWork(replay_engine) as uow:
         decisions = await uow.admission_decisions.list_recent(limit=8)
         sor_signal = await uow.signals.get(sor[2])
+    decision_signal_ids = tuple(decision.signal_event_id for decision in decisions)
+    admitted_decision_ticket_ids = tuple(
+        str(decision.ticket_id)
+        for decision in decisions
+        if decision.ticket_id is not None
+    )
+    admitted_decision_claim_ids = tuple(
+        str(decision.capacity_claim_id)
+        for decision in decisions
+        if decision.capacity_claim_id is not None
+    )
     assert sor_signal is not None
     sor_session_start_ms = (
         expected_sor_time := NOW_MS + NINE_HOURS_FIFTEEN_MINUTES_MS
@@ -394,10 +501,23 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         policy = (
             await connection.execute(sa.select(owner_policy_current))
         ).mappings().one()
+        policy_events = tuple(
+            (
+                await connection.execute(
+                    sa.select(owner_policy_events).order_by(
+                        owner_policy_events.c.policy_version
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
         signal_rows = tuple(
             (
                 await connection.execute(
-                    sa.select(signal_events).order_by(signal_events.c.occurred_at_ms)
+                    sa.select(signal_events)
+                    .where(signal_events.c.signal_event_id.in_(decision_signal_ids))
+                    .order_by(signal_events.c.occurred_at_ms)
                 )
             )
             .mappings()
@@ -417,7 +537,9 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         ticket_rows = tuple(
             (
                 await connection.execute(
-                    sa.select(trade_tickets).order_by(trade_tickets.c.created_at_ms)
+                    sa.select(trade_tickets)
+                    .where(trade_tickets.c.ticket_id.in_(admitted_decision_ticket_ids))
+                    .order_by(trade_tickets.c.created_at_ms)
                 )
             )
             .mappings()
@@ -426,7 +548,13 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         claim_rows = tuple(
             (
                 await connection.execute(
-                    sa.select(capacity_claims).order_by(capacity_claims.c.created_at_ms)
+                    sa.select(capacity_claims)
+                    .where(
+                        capacity_claims.c.capacity_claim_id.in_(
+                            admitted_decision_claim_ids
+                        )
+                    )
+                    .order_by(capacity_claims.c.created_at_ms)
                 )
             )
             .mappings()
@@ -434,19 +562,6 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         )
         command_rows = tuple(
             (await connection.execute(sa.select(exchange_commands))).mappings().all()
-        )
-        doge_command_count = await connection.scalar(
-            sa.select(sa.func.count(exchange_commands.c.command_id))
-            .select_from(
-                admission_decisions.outerjoin(
-                    trade_tickets,
-                    admission_decisions.c.ticket_id == trade_tickets.c.ticket_id,
-                ).outerjoin(
-                    exchange_commands,
-                    trade_tickets.c.ticket_id == exchange_commands.c.ticket_id,
-                )
-            )
-            .where(admission_decisions.c.signal_event_id == doge[2])
         )
         shadow = (
             await connection.execute(
@@ -513,7 +628,58 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         expected_decision_times[3],
     )
 
-    assert policy["policy_version"] == 4
+    assert tuple(int(row["policy_version"]) for row in policy_events) == (4, 5)
+    migration_policy_event, armed_policy_event = policy_events
+    assert migration_policy_event["owner_policy_event_id"] == (
+        "policy-event:policy-main:v4"
+    )
+    assert migration_policy_event["operation"] == (
+        "compatible_upgrade_portfolio_admission_v4"
+    )
+    assert armed_policy_event["owner_policy_event_id"] == "policy-event:policy-main:v5"
+    assert armed_policy_event["operation"] == "arm_acceptance_ticket"
+    for event, version, submit_enabled in (
+        (migration_policy_event, 4, False),
+        (armed_policy_event, 5, True),
+    ):
+        payload = event["payload"]
+        assert payload["policy_version"] == version
+        assert payload["enabled"] is True
+        assert payload["new_entry_submit_enabled"] is submit_enabled
+        assert payload["priority_rank"] == 1
+        assert payload["max_concurrent_tickets"] == 3
+        assert payload["family_ticket_limits"] == {
+            "long_continuation": 1,
+            "opening_range": 2,
+            "rally_failure_short": 1,
+        }
+        assert Decimal(str(payload["max_ticket_stop_risk_fraction"])) == Decimal(
+            "0.02"
+        )
+        assert Decimal(str(payload["max_gross_stop_risk_fraction"])) == Decimal(
+            "0.06"
+        )
+        assert Decimal(str(payload["max_ticket_initial_margin_fraction"])) == (
+            Decimal("0.30")
+        )
+        assert Decimal(
+            str(payload["max_gross_initial_margin_utilization"])
+        ) == Decimal("0.90")
+        assert Decimal(
+            str(payload["directional_stop_risk_limit_fraction"])
+        ) == Decimal("0.04")
+        assert Decimal(str(payload["min_materialization_ratio"])) == Decimal(
+            "0.50"
+        )
+        assert payload["max_leverage"] == 10
+        assert payload["supported_margin_mode"] == "cross"
+    assert int(migration_policy_event["created_at_ms"]) < int(
+        armed_policy_event["created_at_ms"]
+    )
+
+    assert policy["policy_version"] == 5
+    assert policy["enabled"] is True
+    assert policy["new_entry_submit_enabled"] is True
     assert policy["max_concurrent_tickets"] == 3
     assert policy["max_ticket_stop_risk_fraction"] == Decimal("0.02")
     assert policy["max_gross_stop_risk_fraction"] == Decimal("0.06")
@@ -569,13 +735,19 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
     assert by_instrument[DOGE].first_blocker == "exposure_family_capacity_exhausted"
     assert by_instrument[DOGE].capacity_claim_id is None
     assert by_instrument[DOGE].ticket_id is None
-    assert doge_command_count == 0
     admitted_ticket_ids = {
         str(decision.ticket_id)
         for decision in decisions
         if decision.decision_status is AdmissionDecisionStatus.ADMITTED
     }
-    assert {str(row["ticket_id"]) for row in command_rows} == admitted_ticket_ids
+    replay_command_rows = tuple(
+        row
+        for row in command_rows
+        if str(row["command_id"]) not in replay_baseline_command_ids
+    )
+    assert {str(row["ticket_id"]) for row in replay_command_rows} == (
+        admitted_ticket_ids
+    )
 
     claims_by_ticket_id = {str(row["ticket_id"]): row for row in claim_rows}
     decisions_by_ticket_id = {
@@ -591,8 +763,9 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         assert str(claim["signal_event_id"]) == str(ticket_row["signal_event_id"])
         assert str(decision["capacity_claim_id"]) == str(claim["capacity_claim_id"])
         assert str(decision["signal_event_id"]) == str(ticket_row["signal_event_id"])
-        assert claim["owner_policy_version"] == 4
-        assert ticket_row["owner_policy_version"] == 4
+        assert decision["owner_policy_version"] == 5
+        assert claim["owner_policy_version"] == 5
+        assert ticket_row["owner_policy_version"] == 5
         assert claim["total_wallet_balance_at_claim"] == REPLAY_WALLET_BALANCE
         assert claim["max_ticket_stop_risk_fraction"] == Decimal("0.02")
         assert claim["max_gross_stop_risk_fraction"] == Decimal("0.06")
@@ -627,7 +800,9 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
             sa.select(sa.func.count()).select_from(admission_decisions)
         ) == 4
         assert await connection.scalar(
-            sa.select(sa.func.count()).select_from(trade_tickets)
+            sa.select(sa.func.count())
+            .select_from(trade_tickets)
+            .where(trade_tickets.c.ticket_id.in_(admitted_decision_ticket_ids))
         ) == 3
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(shadow_outcomes_current)
@@ -638,17 +813,6 @@ async def _seed_replay_runtime(
     engine: AsyncEngine,
     source: RecordingReplayMarketSource,
 ) -> None:
-    async with PostgresKernelUnitOfWork(engine) as uow:
-        await seed_runtime_authority(
-            uow,
-            RuntimeAuthoritySeedRequest(
-                account_id="account-portfolio-replay",
-                runtime_commit="kernel-test-head",
-                schema_revision=CURRENT_SCHEMA_REVISION,
-                seeded_at_ms=NOW_MS - 10_000_000,
-            ),
-        )
-
     for event_id, members in (
         ("CPM-LONG", (BNB, DOGE)),
         ("BRF2-SHORT", (ETH,)),
@@ -666,13 +830,6 @@ async def _seed_replay_runtime(
             uow,
             ArmAcceptancePolicyRequest(armed_at_ms=NOW_MS - 1),
         )
-    async with engine.begin() as connection:
-        promoted = await connection.execute(
-            sa.update(owner_policy_current)
-            .where(owner_policy_current.c.policy_version == 2)
-            .values(policy_version=4)
-        )
-    assert promoted.rowcount == 1
 
 
 async def _install_and_activate(
@@ -870,6 +1027,18 @@ async def _active_scope_id(engine: AsyncEngine, instrument_id: str) -> str:
         )
     assert scope_id is not None
     return str(scope_id)
+
+
+async def _exchange_command_ids(engine: AsyncEngine) -> tuple[str, ...]:
+    async with engine.connect() as connection:
+        return tuple(
+            str(command_id)
+            for command_id in await connection.scalars(
+                sa.select(exchange_commands.c.command_id).order_by(
+                    exchange_commands.c.command_id
+                )
+            )
+        )
 
 
 async def _release_entry_lane(
