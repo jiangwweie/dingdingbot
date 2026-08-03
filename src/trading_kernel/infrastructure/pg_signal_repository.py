@@ -29,6 +29,7 @@ from src.trading_kernel.application.ports import (
 )
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
+from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -37,6 +38,7 @@ from src.trading_kernel.domain.strategy_universe import StrategyUniverseVersion
 from src.trading_kernel.infrastructure.pg_models import (
     event_required_facts,
     event_specs,
+    exposure_episode_current,
     facts_current,
     instrument_certification_current,
     instrument_rules_current,
@@ -161,6 +163,71 @@ class PostgresSignalRepository:
                 )
             )
         return tuple(persisted)
+
+    async def lock_exposure_episode(
+        self,
+        episode_domain_key: str,
+    ) -> ExposureEpisodeState | None:
+        normalized_key = str(episode_domain_key or "").strip()
+        if not normalized_key:
+            raise ValueError("Episode domain key must be non-blank")
+        await self._connection.execute(
+            sa.select(
+                sa.func.pg_advisory_xact_lock(
+                    sa.func.hashtextextended(normalized_key, 0)
+                )
+            )
+        )
+        row = (
+            await self._connection.execute(
+                sa.select(exposure_episode_current)
+                .where(
+                    exposure_episode_current.c.episode_domain_key
+                    == normalized_key
+                )
+                .with_for_update()
+            )
+        ).mappings().one_or_none()
+        return (
+            None
+            if row is None
+            else ExposureEpisodeState.model_validate(row, extra="ignore")
+        )
+
+    async def save_exposure_episode(
+        self,
+        state: ExposureEpisodeState,
+        *,
+        expected_version: int,
+    ) -> None:
+        if expected_version < 0:
+            raise ValueError("Episode expected version cannot be negative")
+        if state.projection_version != expected_version + 1:
+            raise ValueError("Episode projection version is not monotonic")
+        values = state.model_dump(mode="python")
+        if expected_version == 0:
+            result = await self._connection.execute(
+                pg_insert(exposure_episode_current)
+                .values(**values)
+                .on_conflict_do_nothing(
+                    index_elements=[
+                        exposure_episode_current.c.episode_domain_key
+                    ]
+                )
+            )
+        else:
+            result = await self._connection.execute(
+                sa.update(exposure_episode_current)
+                .where(
+                    exposure_episode_current.c.episode_domain_key
+                    == state.episode_domain_key,
+                    exposure_episode_current.c.projection_version
+                    == expected_version,
+                )
+                .values(**values)
+            )
+        if result.rowcount != 1:
+            raise RuntimeError("Exposure Episode authority changed")
 
     async def get_next_ready(self, *, now_ms: int) -> StrategySignal | None:
         return await self._get_next_candidate_ready(

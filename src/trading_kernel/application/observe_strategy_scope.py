@@ -36,6 +36,10 @@ from src.trading_kernel.application.project_comparative_universe import (
     serialize_comparative_projection,
 )
 from src.trading_kernel.domain.detector import DetectorStatus
+from src.trading_kernel.domain.exposure_episode import (
+    advance_exposure_episode,
+    build_episode_domain_key,
+)
 from src.trading_kernel.domain.market import (
     ClosedCandle,
     MarketSnapshot,
@@ -450,6 +454,19 @@ async def observe_strategy_scope(
                 current_fact_count=0,
             )
 
+        current_episode = None
+        if (
+            scope.lifecycle_state == "active"
+            and contract.episode_policy == "rising_edge"
+        ):
+            episode_domain_key = build_episode_domain_key(
+                event_spec_id=contract.event_spec_id,
+                exchange_instrument_id=scope.exchange_instrument_id,
+                position_side=contract.position_side,
+            )
+            current_episode = await uow.signals.lock_exposure_episode(
+                episode_domain_key
+            )
         persisted_facts = await uow.signals.upsert_current_facts(
             runtime_scope_id=scope.runtime_scope_id,
             facts=detector_result.facts,
@@ -489,6 +506,30 @@ async def observe_strategy_scope(
                 signal_event_id=None,
                 current_fact_count=len(persisted_facts),
             )
+        exposure_episode_id = None
+        if contract.episode_policy == "rising_edge":
+            episode_transition = advance_exposure_episode(
+                contract=contract,
+                current=current_episode,
+                detector_status=detector_result.status,
+                occurred_at_ms=(
+                    detector_result.occurred_at_ms
+                    if detector_result.status is DetectorStatus.TRIGGERED
+                    else None
+                ),
+                observed_at_ms=request.trigger_candle_close_time_ms,
+                exchange_instrument_id=scope.exchange_instrument_id,
+            )
+            if episode_transition.current is not current_episode:
+                await uow.signals.save_exposure_episode(
+                    episode_transition.current,
+                    expected_version=(
+                        0
+                        if current_episode is None
+                        else current_episode.projection_version
+                    ),
+                )
+            exposure_episode_id = episode_transition.exposure_episode_id
         if detector_result.status is DetectorStatus.NOT_TRIGGERED:
             await uow.signals.save_readiness(
                 runtime_scope_id=scope.runtime_scope_id,
@@ -515,6 +556,7 @@ async def observe_strategy_scope(
             scope=scope,
             detector_result=detector_result,
             persisted_facts=persisted_facts,
+            exposure_episode_id=exposure_episode_id,
         )
         ingest_result = await ingest_signal(
             uow,

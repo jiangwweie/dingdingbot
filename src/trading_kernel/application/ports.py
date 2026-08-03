@@ -59,6 +59,7 @@ from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBrack
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.exit_policy import ExitPolicy
+from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertification,
@@ -861,6 +862,18 @@ class SignalRepository(Protocol):
         runtime_scope_id: str,
         facts: tuple[SignalFactSnapshot, ...],
     ) -> tuple[SignalFactSnapshot, ...]: ...
+
+    async def lock_exposure_episode(
+        self,
+        episode_domain_key: str,
+    ) -> ExposureEpisodeState | None: ...
+
+    async def save_exposure_episode(
+        self,
+        state: ExposureEpisodeState,
+        *,
+        expected_version: int,
+    ) -> None: ...
 
     async def get_next_ready(
         self,

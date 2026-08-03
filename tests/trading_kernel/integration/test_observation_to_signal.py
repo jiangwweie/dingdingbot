@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import uuid4
@@ -15,10 +16,11 @@ import src.trading_kernel.application.observe_strategy_scope as observation_modu
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
 from src.trading_kernel.application.observe_strategy_scope import (
     ObservationRequest,
+    ObservationResult,
     ObservationStatus,
     observe_strategy_scope,
 )
-from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.market import ClosedCandle, MarketSnapshot
 from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 from src.trading_kernel.infrastructure.pg_models import (
     comparative_projection_current,
@@ -59,6 +61,7 @@ from tests.trading_kernel.unit.detectors.fixtures import (
     SOL,
     SUI,
     brf2_short_snapshot,
+    cpm_flat_snapshot,
     cpm_long_snapshot,
     flat_candles,
     mpg_long_snapshot,
@@ -364,6 +367,177 @@ async def test_sor_same_session_recross_keeps_one_exposure_episode(
 
 
 @pytest.mark.asyncio
+async def test_cpm_continuous_trigger_reuses_one_rising_edge_episode(
+    observation_engine: AsyncEngine,
+) -> None:
+    await _seed_six_scopes(observation_engine)
+    snapshot = cpm_long_snapshot()
+    first = await _observe_cpm(
+        observation_engine,
+        snapshot,
+        trigger_ms=NOW_MS,
+    )
+    continuous = await _observe_cpm(
+        observation_engine,
+        snapshot,
+        trigger_ms=NOW_MS + 3_600_000,
+    )
+
+    assert first.status is ObservationStatus.SIGNAL_CREATED
+    assert continuous.status is ObservationStatus.DUPLICATE_SIGNAL
+    assert continuous.signal_event_id == first.signal_event_id
+    async with observation_engine.connect() as connection:
+        rows = (
+            await connection.execute(
+                sa.select(
+                    signal_events.c.signal_event_id,
+                    signal_events.c.exposure_episode_id,
+                ).where(signal_events.c.strategy_group_id == "CPM-RO-001")
+            )
+        ).all()
+        episode = (
+            await connection.execute(
+                sa.text(
+                    "SELECT state, exposure_episode_id, projection_version "
+                    "FROM brc_exposure_episode_current"
+                )
+            )
+        ).mappings().one()
+    assert len(rows) == 1
+    assert episode["state"] == "triggered"
+    assert episode["exposure_episode_id"] == rows[0].exposure_episode_id
+    assert episode["projection_version"] == 2
+
+
+@pytest.mark.asyncio
+async def test_cpm_false_closed_bar_rearms_the_next_trigger(
+    observation_engine: AsyncEngine,
+) -> None:
+    await _seed_six_scopes(observation_engine)
+    triggered = cpm_long_snapshot()
+    flat = cpm_flat_snapshot()
+
+    first = await _observe_cpm(
+        observation_engine,
+        triggered,
+        trigger_ms=NOW_MS,
+    )
+    absent = await _observe_cpm(
+        observation_engine,
+        flat,
+        trigger_ms=NOW_MS + 3_600_000,
+    )
+    second = await _observe_cpm(
+        observation_engine,
+        triggered,
+        trigger_ms=NOW_MS + 7_200_000,
+    )
+
+    assert first.status is ObservationStatus.SIGNAL_CREATED
+    assert absent.status is ObservationStatus.NO_SIGNAL
+    assert second.status is ObservationStatus.SIGNAL_CREATED
+    assert second.signal_event_id != first.signal_event_id
+    async with observation_engine.connect() as connection:
+        episode_ids = (
+            await connection.execute(
+                sa.select(signal_events.c.exposure_episode_id)
+                .where(signal_events.c.strategy_group_id == "CPM-RO-001")
+                .order_by(signal_events.c.occurred_at_ms)
+            )
+        ).scalars().all()
+        episode = (
+            await connection.execute(
+                sa.text(
+                    "SELECT state, exposure_episode_id, rearmed_at_ms, "
+                    "projection_version FROM brc_exposure_episode_current"
+                )
+            )
+        ).mappings().one()
+    assert len(episode_ids) == 2
+    assert episode_ids[0] != episode_ids[1]
+    assert episode["state"] == "triggered"
+    assert episode["exposure_episode_id"] == episode_ids[1]
+    assert episode["rearmed_at_ms"] == NOW_MS + 3_600_000
+    assert episode["projection_version"] == 3
+
+
+@pytest.mark.asyncio
+async def test_concurrent_cpm_observations_create_at_most_one_episode(
+    observation_engine: AsyncEngine,
+) -> None:
+    await _seed_six_scopes(observation_engine)
+    snapshot = cpm_long_snapshot()
+
+    left, right = await asyncio.gather(
+        _observe_cpm(observation_engine, snapshot, trigger_ms=NOW_MS),
+        _observe_cpm(observation_engine, snapshot, trigger_ms=NOW_MS),
+    )
+
+    assert {left.status, right.status} == {
+        ObservationStatus.SIGNAL_CREATED,
+        ObservationStatus.DUPLICATE_SIGNAL,
+    }
+    assert left.signal_event_id == right.signal_event_id
+    async with observation_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(signal_events)
+        ) == 1
+        episode = (
+            await connection.execute(
+                sa.text(
+                    "SELECT exposure_episode_id, projection_version "
+                    "FROM brc_exposure_episode_current"
+                )
+            )
+        ).mappings().one()
+    assert episode["projection_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_observation_does_not_rearm_cpm_episode(
+    observation_engine: AsyncEngine,
+) -> None:
+    await _seed_six_scopes(observation_engine)
+    snapshot = cpm_long_snapshot()
+    first = await _observe_cpm(
+        observation_engine,
+        snapshot,
+        trigger_ms=NOW_MS,
+    )
+    invalid = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        TimeoutMarketSource(),
+        ObservationRequest(
+            runtime_scope_id="scope-cpm-eth-long",
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
+            trigger_candle_close_time_ms=NOW_MS + 3_600_000,
+        ),
+    )
+    resumed = await _observe_cpm(
+        observation_engine,
+        snapshot,
+        trigger_ms=NOW_MS + 7_200_000,
+    )
+
+    assert first.status is ObservationStatus.SIGNAL_CREATED
+    assert invalid.status is ObservationStatus.INVALID
+    assert resumed.status is ObservationStatus.DUPLICATE_SIGNAL
+    assert resumed.signal_event_id == first.signal_event_id
+    async with observation_engine.connect() as connection:
+        episode = (
+            await connection.execute(
+                sa.text(
+                    "SELECT exposure_episode_id, state, projection_version "
+                    "FROM brc_exposure_episode_current"
+                )
+            )
+        ).mappings().one()
+    assert episode["state"] == "triggered"
+    assert episode["projection_version"] == 2
+
+
+@pytest.mark.asyncio
 async def test_market_timeout_fails_closed_as_observation_unavailable(
     observation_engine: AsyncEngine,
 ) -> None:
@@ -521,10 +695,61 @@ async def test_all_six_registered_events_produce_signals_through_observation(
         ) == 25
 
 
+async def _observe_cpm(
+    engine: AsyncEngine,
+    snapshot: MarketSnapshot,
+    *,
+    trigger_ms: int,
+) -> ObservationResult:
+    shifted = _shift_snapshot(snapshot, delta_ms=trigger_ms - NOW_MS)
+    return await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(engine),
+        FakeMarketSource(
+            {
+                (shifted.exchange_instrument_id, "1h"): shifted.candles_1h,
+                (shifted.exchange_instrument_id, "4h"): shifted.candles_4h,
+            }
+        ),
+        ObservationRequest(
+            runtime_scope_id="scope-cpm-eth-long",
+            runtime_commit="kernel-test-head",
+            schema_revision="0002_sor_v3_strategy_group_capacity",
+            trigger_candle_close_time_ms=trigger_ms,
+        ),
+    )
+
+
+def _shift_snapshot(
+    snapshot: MarketSnapshot,
+    *,
+    delta_ms: int,
+) -> MarketSnapshot:
+    def shift(candles: tuple[ClosedCandle, ...]) -> tuple[ClosedCandle, ...]:
+        return tuple(
+            candle.model_copy(
+                update={
+                    "open_time_ms": candle.open_time_ms + delta_ms,
+                    "close_time_ms": candle.close_time_ms + delta_ms,
+                }
+            )
+            for candle in candles
+        )
+
+    return snapshot.model_copy(
+        update={
+            "trigger_candle_close_time_ms": (
+                snapshot.trigger_candle_close_time_ms + delta_ms
+            ),
+            "candles_1h": shift(snapshot.candles_1h),
+            "candles_4h": shift(snapshot.candles_4h),
+        }
+    )
+
+
 async def _seed_sor_scope(engine: AsyncEngine) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
-    event_spec_id = "event_spec:SOR-001:SOR-LONG:v3"
+    event_spec_id = "event_spec:SOR-001:SOR-LONG:v4"
     universe_version_id, universe_digest = _universe_identity(
         strategy_group_id="SOR-001",
         event_spec_id=event_spec_id,
@@ -543,7 +768,7 @@ async def _seed_sor_scope(engine: AsyncEngine) -> None:
             sa.insert(runtime_scopes_current).values(
                 runtime_scope_id="scope-sor-eth-long",
                 strategy_group_id="SOR-001",
-                strategy_version_id="sgv:SOR-001:v3",
+                strategy_version_id="sgv:SOR-001:v4",
                 event_spec_id=event_spec_id,
                 runtime_profile_id="profile-observation-only",
                 owner_policy_id="policy-observation-only",
@@ -581,8 +806,8 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
         (
             "scope-cpm-eth-long",
             "CPM-RO-001",
-            "sgv:CPM-RO-001:v2",
-            "event_spec:CPM-RO-001:CPM-LONG:v2",
+            "sgv:CPM-RO-001:v3",
+            "event_spec:CPM-RO-001:CPM-LONG:v3",
             ETH,
             "long",
             (ETH,),
@@ -590,8 +815,8 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
         (
             "scope-mpg-sol-long",
             "MPG-001",
-            "sgv:MPG-001:v2",
-            "event_spec:MPG-001:MPG-LONG:v2",
+            "sgv:MPG-001:v3",
+            "event_spec:MPG-001:MPG-LONG:v3",
             SOL,
             "long",
             (SOL, OP, AVAX, SUI),
@@ -599,8 +824,8 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
         (
             "scope-mi-sol-long",
             "MI-001",
-            "sgv:MI-001:v2",
-            "event_spec:MI-001:MI-LONG:v2",
+            "sgv:MI-001:v3",
+            "event_spec:MI-001:MI-LONG:v3",
             SOL,
             "long",
             (SOL, OP, AVAX, SUI),
@@ -608,8 +833,8 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
         (
             "scope-sor-avax-long",
             "SOR-001",
-            "sgv:SOR-001:v3",
-            "event_spec:SOR-001:SOR-LONG:v3",
+            "sgv:SOR-001:v4",
+            "event_spec:SOR-001:SOR-LONG:v4",
             AVAX,
             "long",
             (AVAX,),
@@ -617,8 +842,8 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
         (
             "scope-sor-btc-short",
             "SOR-001",
-            "sgv:SOR-001:v3",
-            "event_spec:SOR-001:SOR-SHORT:v3",
+            "sgv:SOR-001:v4",
+            "event_spec:SOR-001:SOR-SHORT:v4",
             BTC,
             "short",
             (BTC,),
@@ -626,8 +851,8 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
         (
             "scope-brf2-btc-short",
             "BRF2-001",
-            "sgv:BRF2-001:v2",
-            "event_spec:BRF2-001:BRF2-SHORT:v2",
+            "sgv:BRF2-001:v3",
+            "event_spec:BRF2-001:BRF2-SHORT:v3",
             BTC,
             "short",
             (BTC,),

@@ -747,6 +747,57 @@ facts_current = sa.Table(
     sa.UniqueConstraint("runtime_scope_id", "fact_definition_id"),
 )
 
+exposure_episode_current = sa.Table(
+    "brc_exposure_episode_current",
+    metadata,
+    _id("episode_domain_key", primary_key=True),
+    _id("event_spec_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("episode_policy", SHORT_TEXT, nullable=False),
+    sa.Column("state", SHORT_TEXT, nullable=False),
+    _id("exposure_episode_id", nullable=True),
+    _time("triggered_at_ms", nullable=True),
+    _time("rearmed_at_ms", nullable=True),
+    _time("last_observed_at_ms"),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.CheckConstraint(
+        "position_side IN ('long', 'short')",
+        name="position_side_valid",
+    ),
+    sa.CheckConstraint(
+        "episode_policy = 'rising_edge'",
+        name="episode_policy_valid",
+    ),
+    sa.CheckConstraint(
+        "state IN ('armed', 'triggered')",
+        name="state_valid",
+    ),
+    sa.CheckConstraint(
+        "projection_version > 0 AND last_observed_at_ms > 0",
+        name="version_and_observation_positive",
+    ),
+    sa.CheckConstraint(
+        "rearmed_at_ms IS NULL OR rearmed_at_ms > 0",
+        name="rearmed_time_valid",
+    ),
+    sa.CheckConstraint(
+        "(state = 'triggered' AND exposure_episode_id IS NOT NULL "
+        "AND triggered_at_ms IS NOT NULL AND triggered_at_ms > 0) OR "
+        "(state = 'armed' AND exposure_episode_id IS NULL "
+        "AND triggered_at_ms IS NULL)",
+        name="state_shape_valid",
+    ),
+    sa.ForeignKeyConstraint(
+        ["event_spec_id"],
+        ["brc_event_specs.event_spec_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["exchange_instrument_id"],
+        ["brc_instruments.exchange_instrument_id"],
+    ),
+)
+
 signal_events = sa.Table(
     "brc_signal_events",
     metadata,
