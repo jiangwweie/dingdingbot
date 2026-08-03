@@ -351,6 +351,41 @@ async def test_expired_candidate_is_terminally_blocked(
 
 
 @pytest.mark.asyncio
+async def test_candidate_selection_repairs_expired_ready_projection(
+    issue_engine: AsyncEngine,
+) -> None:
+    """Catches expired Signals remaining visible as current candidate-ready state."""
+
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal(signal_event_id="signal-expired-projection")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
+                now_ms=1_001,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        selected = await select_entry_candidate(
+            uow,
+            SelectEntryCandidateRequest(now_ms=signal.expires_at_ms),
+        )
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+
+    assert selected.status is SelectEntryCandidateStatus.NO_CANDIDATE
+    assert selected.candidate is None
+    assert readiness is not None
+    assert readiness.signal_event_id == signal.signal_event_id
+    assert readiness.readiness_state == "blocked"
+    assert readiness.first_blocker == "signal_invalid_or_stale"
+
+
+@pytest.mark.asyncio
 async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
     issue_engine: AsyncEngine,
 ) -> None:
