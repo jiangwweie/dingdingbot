@@ -495,31 +495,34 @@ def _deploy_compatible_upgrade(
         active_services = backend.services_active(ALL_SERVICES)
         if active_services != frozenset(SAFETY_SERVICES):
             raise DeploymentBlocked("target safety services differ from release plan")
-    except Exception:
-        if transition_started:
-            backend.fence_entry()
-            if schema_migrated:
-                target_activated = (
-                    backend.read_current_release() == plan.target_release
-                )
-                if not target_activated:
-                    backend.activate_release(
-                        plan.target_release,
-                        plan.target_commit,
-                        plan.schema_revision,
-                        recovery_seed_identity,
-                    )
+    except Exception as original_error:
+        try:
+            if transition_started:
+                backend.fence_entry()
+                if schema_migrated:
                     target_activated = (
                         backend.read_current_release() == plan.target_release
                     )
-            if schema_migrated and target_activated:
-                active_target_safety = backend.services_active(ALL_SERVICES)
-                if (
-                    not target_safety_started
-                    or active_target_safety != frozenset(SAFETY_SERVICES)
-                ):
-                    backend.start_services(SAFETY_SERVICES)
-                    target_safety_started = True
+                    if not target_activated:
+                        backend.activate_release(
+                            plan.target_release,
+                            plan.target_commit,
+                            plan.schema_revision,
+                            recovery_seed_identity,
+                        )
+                        target_activated = (
+                            backend.read_current_release() == plan.target_release
+                        )
+                if schema_migrated and target_activated:
+                    active_target_safety = backend.services_active(ALL_SERVICES)
+                    if (
+                        not target_safety_started
+                        or active_target_safety != frozenset(SAFETY_SERVICES)
+                    ):
+                        backend.start_services(SAFETY_SERVICES)
+                        target_safety_started = True
+        except Exception as recovery_error:
+            raise original_error from recovery_error
         raise
 
     return DeploymentResult(

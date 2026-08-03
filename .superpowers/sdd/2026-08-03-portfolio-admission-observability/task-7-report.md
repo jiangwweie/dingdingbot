@@ -89,3 +89,35 @@ Fresh Round 3 verification: amended deployment unit plus compatible-upgrade inte
 
 - A separate exploratory command including `test_strategy_universe_scripts.py` produced **5 setup errors** because that historical fixture still passes schema revision 0002 into the current 0003-only `RuntimeAuthoritySeedRequest`; the other **15 tests** in that command passed. This is previously identified current-runtime fixture debt outside Task 7 and production code was not weakened to support it.
 - The database identity proof depends on readonly access to PostgreSQL `pg_control_system()`; the disposable PostgreSQL role used by the production-shaped integration test has that access. Tokyo must satisfy the same readonly permission before a real compatible deployment, and any permission failure is a safe deployment block.
+
+## Round 4 review-fix — preserve migration failure through target recovery failure
+
+### Residual finding and root cause
+
+- After a remote migration unknown outcome, exact readonly reinspect of `0003_portfolio_admission_observability` correctly authorized target fix-forward.
+- The outer deployment exception handler did not retain the original migration exception while running target recovery. A secondary failure from recovery `read_current_release`, `activate_release`, `services_active`, or `start_services` therefore replaced the migration unknown-outcome exception.
+
+### TDD evidence
+
+| Gate | RED evidence | GREEN evidence |
+| --- | --- | --- |
+| Recovery activation failure | Focused command collected **2** tests and both failed because `simulated target recovery failure` was primary instead of the exact migration exception object | The original migration exception remains primary and the activation error is its exact `__cause__` |
+| Recovery safety-start failure | The same focused RED proved a failed safety-worker start also replaced the migration exception | The original migration exception remains primary and the start error is its exact `__cause__` |
+
+The production change is limited to retaining `original_error` in the existing compatible-upgrade exception handler and raising `original_error from recovery_error` if fenced target recovery fails. The migration is not resent, Entry remains inactive/disabled/fenced, and no 0002 worker is started.
+
+### Fresh Round 4 verification
+
+| Gate | Result |
+| --- | --- |
+| Focused RED before production change | **2 failed, 50 deselected** for the expected primary-exception identity mismatch |
+| Focused GREEN after production change | **2 passed, 50 deselected** |
+| Amended deployment unit plus compatible-upgrade integration | **61 passed in 16.80s** |
+| Ruff on changed production/test files | **All checks passed** |
+| Mypy on kernel source and scripts | **Success: no issues found in 116 source files** |
+| `git diff --check` | **passed** |
+
+### Round 4 safety and concerns
+
+- No Tokyo deployment, production operation, database mutation, service action, Entry enablement, exchange write, downgrade, fallback, or migration resend was performed.
+- No new concern was identified within the Round 4 scope.

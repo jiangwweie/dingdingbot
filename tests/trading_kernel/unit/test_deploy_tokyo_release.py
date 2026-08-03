@@ -268,6 +268,54 @@ def test_migration_unknown_outcome_confirmed_0003_enters_target_fix_forward() ->
     assert backend.entry_is_inactive_disabled_and_fenced()
 
 
+def test_migration_unknown_outcome_remains_primary_when_target_recovery_activation_fails(
+) -> None:
+    """Catches a target activation error replacing the migration outcome."""
+
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        fail_at="migrate_schema_unknown_0003_recovery_activation_failure",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert exc_info.value is backend.migration_unknown_outcome_error
+    assert str(exc_info.value) == "simulated migration unknown outcome"
+    assert exc_info.value.__cause__ is backend.target_recovery_error
+    assert str(exc_info.value.__cause__) == "simulated target recovery failure"
+    assert sum(call[0] == "migrate_schema" for call in backend.calls) == 1
+    assert not any(call[0] == "start_services" for call in backend.calls)
+    assert backend.current_release == CURRENT_RELEASE
+    assert backend.active_services == set()
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_migration_unknown_outcome_remains_primary_when_target_recovery_start_fails(
+) -> None:
+    """Catches a target safety start error replacing the migration outcome."""
+
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        fail_at="migrate_schema_unknown_0003_recovery_start_failure",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert exc_info.value is backend.migration_unknown_outcome_error
+    assert str(exc_info.value) == "simulated migration unknown outcome"
+    assert exc_info.value.__cause__ is backend.target_recovery_error
+    assert str(exc_info.value.__cause__) == "simulated target recovery failure"
+    assert sum(call[0] == "migrate_schema" for call in backend.calls) == 1
+    assert not any(
+        call == ("start_services", (ENTRY_SERVICE,)) for call in backend.calls
+    )
+    assert backend.current_release == TARGET_RELEASE
+    assert backend.active_services == set()
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
 def test_migration_unknown_outcome_unconfirmed_keeps_all_workers_stopped() -> None:
     """Catches guessing a migration result from a failed schema inspection."""
 
@@ -978,6 +1026,12 @@ class FakeDeploymentBackend:
         self.certification_gate_failure = certification_gate_failure
         self.probe_non_flat_failure_call = probe_non_flat_failure_call
         self.fail_at = fail_at
+        self.migration_unknown_outcome_error = RuntimeError(
+            "simulated migration unknown outcome"
+        )
+        self.target_recovery_error = RuntimeError(
+            "simulated target recovery failure"
+        )
         self.calls: list[tuple[object, ...]] = []
         self.current_release = current_release
         self.target_release_exists = (
@@ -1314,6 +1368,12 @@ class FakeDeploymentBackend:
         if self.fail_at == "migrate_schema_unknown_0003":
             self.source_schema_revision = target_schema_revision
             raise RuntimeError("simulated migration unknown outcome")
+        if self.fail_at in {
+            "migrate_schema_unknown_0003_recovery_activation_failure",
+            "migrate_schema_unknown_0003_recovery_start_failure",
+        }:
+            self.source_schema_revision = target_schema_revision
+            raise self.migration_unknown_outcome_error
         if self.fail_at == "migrate_schema_unknown_revision":
             self.source_schema_revision = "0004_unknown"
             raise RuntimeError("simulated migration unknown outcome")
@@ -1426,12 +1486,22 @@ class FakeDeploymentBackend:
         )
         if self.fail_at == "activate_release":
             raise RuntimeError("simulated activation failure")
+        if (
+            self.fail_at
+            == "migrate_schema_unknown_0003_recovery_activation_failure"
+        ):
+            raise self.target_recovery_error
         self.current_release = release
         if self.fail_at == "activate_release_partial":
             raise RuntimeError("simulated partial activation failure")
 
     def start_services(self, services: tuple[str, ...]) -> None:
         self.calls.append(("start_services", services))
+        if (
+            self.fail_at == "migrate_schema_unknown_0003_recovery_start_failure"
+            and services == SAFETY_SERVICES
+        ):
+            raise self.target_recovery_error
         started = set(services)
         if self.omitted_safety_service is not None:
             started.discard(self.omitted_safety_service)
