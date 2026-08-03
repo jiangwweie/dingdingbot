@@ -11,19 +11,27 @@ from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationRequest,
     advance_strategy_universe,
 )
-from src.trading_kernel.application.market_ports import PublicMarketSource
+from src.trading_kernel.application.market_ports import (
+    ClosedCandleRequest,
+    PublicMarketSource,
+)
 from src.trading_kernel.application.observe_strategy_scope import (
     ObservationRequest,
     ObservationStatus,
     observe_strategy_scope,
 )
 from src.trading_kernel.application.ports import UnitOfWorkFactory
+from src.trading_kernel.application.project_shadow_outcome import (
+    project_claimed_shadow_outcome,
+)
 
 
 class ObservationWorkerStatus(StrEnum):
     NO_WORK = "no_work"
     OBSERVED = "observed"
     RETRY_SCHEDULED = "retry_scheduled"
+    SHADOW_COMPLETED = "shadow_completed"
+    SHADOW_RETRY_SCHEDULED = "shadow_retry_scheduled"
 
 
 class ObservationWorkerRequest(BaseModel):
@@ -67,6 +75,7 @@ class ObservationWorkerResult(BaseModel):
     trigger_candle_close_time_ms: int | None = None
     observation_status: ObservationStatus | None = None
     detail: str | None = None
+    shadow_outcome_id: str | None = None
 
 
 async def run_observation_worker_once(
@@ -81,7 +90,11 @@ async def run_observation_worker_once(
             lease_until_ms=request.lease_until_ms,
         )
     if claim is None:
-        return ObservationWorkerResult(status=ObservationWorkerStatus.NO_WORK)
+        return await _run_one_due_shadow(
+            uow_factory,
+            market_source,
+            request,
+        )
 
     try:
         observation = await asyncio.wait_for(
@@ -163,3 +176,64 @@ async def run_observation_worker_once(
         observation_status=observation.status,
         detail=observation.detector_reason,
     )
+
+
+async def _run_one_due_shadow(
+    uow_factory: UnitOfWorkFactory,
+    market_source: PublicMarketSource,
+    request: ObservationWorkerRequest,
+) -> ObservationWorkerResult:
+    """Project at most one completed read-only horizon on an idle tick."""
+
+    async with uow_factory() as uow:
+        claim = await uow.shadow_outcomes.claim_one_due(
+            worker_id=request.worker_id,
+            now_ms=request.now_ms,
+            lease_until_ms=request.lease_until_ms,
+        )
+    if claim is None:
+        return ObservationWorkerResult(status=ObservationWorkerStatus.NO_WORK)
+
+    limit = _shadow_candle_limit(claim.timeframe)
+    try:
+        candles = await asyncio.wait_for(
+            market_source.fetch_closed_candles(
+                ClosedCandleRequest(
+                    exchange_instrument_id=claim.exchange_instrument_id,
+                    timeframe=claim.timeframe,
+                    limit=limit,
+                    closed_at_ms=claim.horizon_end_ms,
+                )
+            ),
+            timeout=request.timeout_seconds,
+        )
+        await project_claimed_shadow_outcome(
+            uow_factory,
+            claim,
+            candles,
+            worker_id=request.worker_id,
+            completed_at_ms=request.now_ms,
+        )
+    except Exception as exc:  # noqa: BLE001 - source failure retains retry authority.
+        async with uow_factory() as uow:
+            await uow.shadow_outcomes.release_expired_claim(
+                spec=claim,
+                worker_id=request.worker_id,
+            )
+        return ObservationWorkerResult(
+            status=ObservationWorkerStatus.SHADOW_RETRY_SCHEDULED,
+            detail=type(exc).__name__,
+            shadow_outcome_id=claim.shadow_outcome_id,
+        )
+    return ObservationWorkerResult(
+        status=ObservationWorkerStatus.SHADOW_COMPLETED,
+        shadow_outcome_id=claim.shadow_outcome_id,
+    )
+
+
+def _shadow_candle_limit(timeframe: str) -> int:
+    if timeframe == "1h":
+        return 24
+    if timeframe == "15m":
+        return 96
+    raise ValueError("Shadow Outcome supports only 1h and 15m")

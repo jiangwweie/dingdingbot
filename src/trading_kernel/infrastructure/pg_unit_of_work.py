@@ -22,6 +22,7 @@ from src.trading_kernel.application.ports import (
     PositionRepository,
     ReviewRepository,
     RuntimeIncidentRecord,
+    ShadowOutcomeRepository,
     SignalRepository,
     StrategyRegistryRepository,
     StrategyUniverseRepository,
@@ -84,6 +85,7 @@ from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresMonitorRepository,
     PostgresPositionRepository,
     PostgresReviewRepository,
+    PostgresShadowOutcomeRepository,
     PostgresTicketRepository,
 )
 from src.trading_kernel.infrastructure.pg_signal_repository import (
@@ -112,6 +114,7 @@ class PostgresKernelUnitOfWork:
     reviews: ReviewRepository
     entry_admission: EntryAdmissionRepository
     admission_decisions: AdmissionDecisionRepository
+    shadow_outcomes: ShadowOutcomeRepository
     signals: SignalRepository
     strategy_registry: StrategyRegistryRepository
     strategy_universes: StrategyUniverseRepository
@@ -140,6 +143,7 @@ class PostgresKernelUnitOfWork:
         self.admission_decisions = PostgresAdmissionDecisionRepository(
             self._connection
         )
+        self.shadow_outcomes = PostgresShadowOutcomeRepository(self._connection)
         self.signals = PostgresSignalRepository(self._connection)
         self.strategy_registry = PostgresStrategyRegistryRepository(self._connection)
         self.strategy_universes = PostgresStrategyUniverseRepository(self._connection)

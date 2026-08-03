@@ -73,6 +73,11 @@ from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
     PostFillRiskStatus,
 )
+from src.trading_kernel.domain.shadow_outcome import (
+    SHADOW_EVALUATION_KIND,
+    ShadowOutcomeProjection,
+    ShadowOutcomeSpec,
+)
 from src.trading_kernel.domain.ticket import EntryOrderType, TicketStatus, TradeTicket
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
@@ -86,6 +91,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     owner_policy_current,
     positions_current,
     runtime_incidents,
+    shadow_outcomes_current,
     trade_aggregates,
     trade_events,
     trade_reviews,
@@ -1158,6 +1164,149 @@ class PostgresAdmissionDecisionRepository:
             )
         ).mappings()
         return tuple(_admission_decision_from_row(row) for row in rows)
+
+
+class PostgresShadowOutcomeRepository:
+    """Bounded current projection for immutable rejected-admission evidence."""
+
+    def __init__(self, connection: AsyncConnection) -> None:
+        self._connection = connection
+
+    async def add_pending(self, spec: ShadowOutcomeSpec) -> None:
+        statement = pg_insert(shadow_outcomes_current).values(
+            _shadow_outcome_pending_values(spec)
+        )
+        await self._connection.execute(
+            statement.on_conflict_do_nothing(
+                index_elements=[shadow_outcomes_current.c.admission_decision_id]
+            )
+        )
+
+    async def claim_one_due(
+        self,
+        *,
+        worker_id: str,
+        now_ms: int,
+        lease_until_ms: int,
+    ) -> ShadowOutcomeSpec | None:
+        row = (
+            await self._connection.execute(
+                sa.select(shadow_outcomes_current)
+                .where(
+                    sa.or_(
+                        sa.and_(
+                            shadow_outcomes_current.c.status == "pending",
+                            shadow_outcomes_current.c.horizon_end_ms <= now_ms,
+                        ),
+                        sa.and_(
+                            shadow_outcomes_current.c.status == "claimed",
+                            shadow_outcomes_current.c.lease_until_ms <= now_ms,
+                        ),
+                    )
+                )
+                .order_by(
+                    shadow_outcomes_current.c.horizon_end_ms,
+                    shadow_outcomes_current.c.shadow_outcome_id,
+                )
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        shadow_id = str(row["shadow_outcome_id"])
+        await self._connection.execute(
+            sa.update(shadow_outcomes_current)
+            .where(shadow_outcomes_current.c.shadow_outcome_id == shadow_id)
+            .values(
+                status="claimed",
+                claim_owner=worker_id,
+                lease_until_ms=lease_until_ms,
+                projection_version=shadow_outcomes_current.c.projection_version + 1,
+            )
+        )
+        return _shadow_outcome_spec_from_row(row)
+
+    async def complete(
+        self,
+        *,
+        spec: ShadowOutcomeSpec,
+        projection: ShadowOutcomeProjection,
+        worker_id: str,
+        completed_at_ms: int,
+    ) -> None:
+        if projection.evaluation_kind != SHADOW_EVALUATION_KIND:
+            raise ValueError("unsupported Shadow evaluation kind")
+        await self._connection.execute(
+            sa.update(shadow_outcomes_current)
+            .where(
+                shadow_outcomes_current.c.shadow_outcome_id == spec.shadow_outcome_id,
+                shadow_outcomes_current.c.status == "claimed",
+                shadow_outcomes_current.c.claim_owner == worker_id,
+            )
+            .values(
+                status="completed",
+                claim_owner=None,
+                lease_until_ms=None,
+                max_favorable_price=projection.max_favorable_price,
+                max_adverse_price=projection.max_adverse_price,
+                mfe_r=projection.mfe_r,
+                mae_r=projection.mae_r,
+                observed_through_ms=projection.observed_through_ms,
+                completion_reason="fixed_horizon_observed",
+                completed_at_ms=completed_at_ms,
+                projection_version=shadow_outcomes_current.c.projection_version + 1,
+            )
+        )
+
+    async def mark_unavailable(
+        self,
+        *,
+        spec: ShadowOutcomeSpec,
+        worker_id: str,
+        reason: str,
+        completed_at_ms: int,
+    ) -> None:
+        normalized_reason = str(reason or "").strip()
+        if not normalized_reason:
+            raise ValueError("unavailable Shadow reason must be non-blank")
+        await self._connection.execute(
+            sa.update(shadow_outcomes_current)
+            .where(
+                shadow_outcomes_current.c.shadow_outcome_id == spec.shadow_outcome_id,
+                shadow_outcomes_current.c.status == "claimed",
+                shadow_outcomes_current.c.claim_owner == worker_id,
+            )
+            .values(
+                status="unavailable",
+                claim_owner=None,
+                lease_until_ms=None,
+                completion_reason=normalized_reason,
+                completed_at_ms=completed_at_ms,
+                projection_version=shadow_outcomes_current.c.projection_version + 1,
+            )
+        )
+
+    async def release_expired_claim(
+        self,
+        *,
+        spec: ShadowOutcomeSpec,
+        worker_id: str,
+    ) -> None:
+        await self._connection.execute(
+            sa.update(shadow_outcomes_current)
+            .where(
+                shadow_outcomes_current.c.shadow_outcome_id == spec.shadow_outcome_id,
+                shadow_outcomes_current.c.status == "claimed",
+                shadow_outcomes_current.c.claim_owner == worker_id,
+            )
+            .values(
+                status="pending",
+                claim_owner=None,
+                lease_until_ms=None,
+                projection_version=shadow_outcomes_current.c.projection_version + 1,
+            )
+        )
 
 
 class PostgresIncidentRepository:
@@ -2402,6 +2551,49 @@ def _admission_decision_from_row(row: RowMapping) -> AdmissionDecision:
             "portfolio_usage": row["portfolio_usage"],
         },
         extra="ignore",
+    )
+
+
+def _shadow_outcome_pending_values(spec: ShadowOutcomeSpec) -> dict[str, object]:
+    return {
+        "shadow_outcome_id": spec.shadow_outcome_id,
+        "admission_decision_id": spec.admission_decision_id,
+        "status": "pending",
+        "evaluation_kind": SHADOW_EVALUATION_KIND,
+        "exchange_instrument_id": spec.exchange_instrument_id,
+        "position_side": spec.position_side,
+        "timeframe": spec.timeframe,
+        "entry_reference_price": spec.entry_reference_price,
+        "initial_stop_price": spec.initial_stop_price,
+        "initial_risk_per_unit": spec.initial_risk_per_unit,
+        "horizon_start_ms": spec.horizon_start_ms,
+        "horizon_end_ms": spec.horizon_end_ms,
+        "claim_owner": None,
+        "lease_until_ms": None,
+        "max_favorable_price": None,
+        "max_adverse_price": None,
+        "mfe_r": None,
+        "mae_r": None,
+        "observed_through_ms": None,
+        "completion_reason": None,
+        "projection_version": 1,
+        "created_at_ms": spec.created_at_ms,
+        "completed_at_ms": None,
+    }
+
+
+def _shadow_outcome_spec_from_row(row: RowMapping) -> ShadowOutcomeSpec:
+    return ShadowOutcomeSpec(
+        shadow_outcome_id=str(row["shadow_outcome_id"]),
+        admission_decision_id=str(row["admission_decision_id"]),
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
+        position_side=cast(Literal["long", "short"], str(row["position_side"])),
+        timeframe=cast(Literal["1h", "15m"], str(row["timeframe"])),
+        entry_reference_price=Decimal(row["entry_reference_price"]),
+        initial_stop_price=Decimal(row["initial_stop_price"]),
+        horizon_start_ms=int(row["horizon_start_ms"]),
+        horizon_end_ms=int(row["horizon_end_ms"]),
+        created_at_ms=int(row["created_at_ms"]),
     )
 
 

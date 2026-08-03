@@ -68,6 +68,10 @@ from src.trading_kernel.domain.instrument_certification import (
 from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import Reduction
+from src.trading_kernel.domain.shadow_outcome import (
+    ShadowOutcomeProjection,
+    ShadowOutcomeSpec,
+)
 from src.trading_kernel.domain.signal import SignalFactSnapshot, StrategySignal
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
@@ -1066,6 +1070,43 @@ class AdmissionDecisionRepository(Protocol):
     ) -> tuple[AdmissionDecision, ...]: ...
 
 
+class ShadowOutcomeRepository(Protocol):
+    async def add_pending(self, spec: ShadowOutcomeSpec) -> None: ...
+
+    async def claim_one_due(
+        self,
+        *,
+        worker_id: str,
+        now_ms: int,
+        lease_until_ms: int,
+    ) -> ShadowOutcomeSpec | None: ...
+
+    async def complete(
+        self,
+        *,
+        spec: ShadowOutcomeSpec,
+        projection: ShadowOutcomeProjection,
+        worker_id: str,
+        completed_at_ms: int,
+    ) -> None: ...
+
+    async def mark_unavailable(
+        self,
+        *,
+        spec: ShadowOutcomeSpec,
+        worker_id: str,
+        reason: str,
+        completed_at_ms: int,
+    ) -> None: ...
+
+    async def release_expired_claim(
+        self,
+        *,
+        spec: ShadowOutcomeSpec,
+        worker_id: str,
+    ) -> None: ...
+
+
 class StrategyRegistryRepository(Protocol):
     async def seed_exact(
         self,
@@ -1342,6 +1383,7 @@ class KernelUnitOfWork(Protocol):
     monitors: MonitorRepository
     entry_admission: EntryAdmissionRepository
     admission_decisions: AdmissionDecisionRepository
+    shadow_outcomes: ShadowOutcomeRepository
     signals: SignalRepository
     strategy_registry: StrategyRegistryRepository
     strategy_universes: StrategyUniverseRepository

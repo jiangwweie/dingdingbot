@@ -18,6 +18,9 @@ from src.trading_kernel.application.issue_ticket import (
     issue_ticket,
 )
 from src.trading_kernel.application.ports import KernelUnitOfWork
+from src.trading_kernel.application.project_shadow_outcome import (
+    pending_shadow_spec_for_rejection,
+)
 from src.trading_kernel.domain.account_entry_health import (
     classify_account_entry_health,
 )
@@ -348,6 +351,7 @@ async def issue_ready_signal(
                 request.admission_snapshot.digest()
             ),
             binding_constraint=decision.status.value,
+            admission_snapshot=request.admission_snapshot,
         )
 
     result = await issue_ticket(
@@ -367,6 +371,7 @@ async def issue_ready_signal(
             admission_context=admission_context,
             entry_admission_snapshot_digest=request.admission_snapshot.digest(),
             binding_constraint=result.status.value,
+            admission_snapshot=request.admission_snapshot,
         )
     if result.status is IssueTicketStatus.ISSUED:
         if result.ticket_id is None:
@@ -416,6 +421,7 @@ async def _refuse(
     admission_context: _AdmissionDecisionContext | None = None,
     entry_admission_snapshot_digest: str | None = None,
     binding_constraint: str | None = None,
+    admission_snapshot: EntryAdmissionSnapshot | None = None,
 ) -> IssueTicketResult:
     blocker = (
         "signal_invalid_or_stale"
@@ -426,28 +432,33 @@ async def _refuse(
         else status.value
     )
     if admission_context is not None:
-        await uow.admission_decisions.add(
-            freeze_admission_decision(
-                signal=signal,
-                candidate_set=admission_context.candidate_set,
-                exposure_family=admission_context.exposure_family,
-                runtime_profile_id=admission_context.runtime_profile_id,
-                owner_policy_id=admission_context.owner_policy_id,
-                owner_policy_version=admission_context.owner_policy_version,
-                venue_id=admission_context.venue_id,
-                account_id=admission_context.account_id,
-                portfolio_usage=admission_context.portfolio_usage,
-                decision_status=AdmissionDecisionStatus.REJECTED,
-                first_blocker=blocker,
-                binding_constraint=binding_constraint,
-                capacity_claim_id=None,
-                ticket_id=None,
-                entry_admission_snapshot_digest=(
-                    entry_admission_snapshot_digest
-                ),
-                decided_at_ms=now_ms,
-            )
+        decision = freeze_admission_decision(
+            signal=signal,
+            candidate_set=admission_context.candidate_set,
+            exposure_family=admission_context.exposure_family,
+            runtime_profile_id=admission_context.runtime_profile_id,
+            owner_policy_id=admission_context.owner_policy_id,
+            owner_policy_version=admission_context.owner_policy_version,
+            venue_id=admission_context.venue_id,
+            account_id=admission_context.account_id,
+            portfolio_usage=admission_context.portfolio_usage,
+            decision_status=AdmissionDecisionStatus.REJECTED,
+            first_blocker=blocker,
+            binding_constraint=binding_constraint,
+            capacity_claim_id=None,
+            ticket_id=None,
+            entry_admission_snapshot_digest=entry_admission_snapshot_digest,
+            decided_at_ms=now_ms,
         )
+        await uow.admission_decisions.add(decision)
+        if admission_snapshot is not None:
+            shadow = pending_shadow_spec_for_rejection(
+                decision=decision,
+                signal=signal,
+                admission_snapshot=admission_snapshot,
+            )
+            if shadow is not None:
+                await uow.shadow_outcomes.add_pending(shadow)
     await _block_signal(uow, signal, blocker, now_ms)
     return IssueTicketResult(status=status, ticket_id=None)
 

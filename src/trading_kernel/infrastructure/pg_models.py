@@ -973,6 +973,65 @@ admission_decisions = sa.Table(
     ),
 )
 
+shadow_outcomes_current = sa.Table(
+    "brc_shadow_outcomes_current",
+    metadata,
+    _id("shadow_outcome_id", primary_key=True),
+    _id("admission_decision_id"),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    sa.Column("evaluation_kind", SHORT_TEXT, nullable=False),
+    _id("exchange_instrument_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("timeframe", SHORT_TEXT, nullable=False),
+    sa.Column("entry_reference_price", MONEY, nullable=False),
+    sa.Column("initial_stop_price", MONEY, nullable=False),
+    sa.Column("initial_risk_per_unit", MONEY, nullable=False),
+    _time("horizon_start_ms"),
+    _time("horizon_end_ms"),
+    _id("claim_owner", nullable=True),
+    _time("lease_until_ms", nullable=True),
+    sa.Column("max_favorable_price", MONEY, nullable=True),
+    sa.Column("max_adverse_price", MONEY, nullable=True),
+    sa.Column("mfe_r", MONEY, nullable=True),
+    sa.Column("mae_r", MONEY, nullable=True),
+    _time("observed_through_ms", nullable=True),
+    sa.Column("completion_reason", LONG_TEXT, nullable=True),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    _time("created_at_ms"),
+    _time("completed_at_ms", nullable=True),
+    sa.UniqueConstraint("admission_decision_id"),
+    sa.CheckConstraint(
+        "status IN ('pending', 'claimed', 'completed', 'unavailable')",
+        name="status_valid",
+    ),
+    sa.CheckConstraint(
+        "evaluation_kind = 'fixed_horizon_excursion_v1'",
+        name="evaluation_kind_valid",
+    ),
+    sa.CheckConstraint("position_side IN ('long', 'short')", name="side_valid"),
+    sa.CheckConstraint("timeframe IN ('15m', '1h')", name="timeframe_valid"),
+    sa.CheckConstraint(
+        "initial_risk_per_unit > 0 AND horizon_end_ms > horizon_start_ms",
+        name="risk_horizon_valid",
+    ),
+    sa.CheckConstraint(
+        "(status = 'claimed' AND claim_owner IS NOT NULL AND lease_until_ms IS NOT NULL "
+        "AND completed_at_ms IS NULL) OR "
+        "(status = 'pending' AND claim_owner IS NULL AND lease_until_ms IS NULL "
+        "AND completed_at_ms IS NULL) OR "
+        "(status IN ('completed', 'unavailable') AND claim_owner IS NULL "
+        "AND lease_until_ms IS NULL AND completed_at_ms IS NOT NULL)",
+        name="lease_shape_valid",
+    ),
+)
+
+sa.Index(
+    "ix_brc_shadow_outcomes_current_due",
+    shadow_outcomes_current.c.status,
+    shadow_outcomes_current.c.horizon_end_ms,
+    shadow_outcomes_current.c.lease_until_ms,
+)
+
 sa.Index(
     "ix_brc_admission_decisions_decided_at_ms",
     admission_decisions.c.decided_at_ms,
