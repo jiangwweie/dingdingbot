@@ -200,25 +200,129 @@ def test_mig_008_preservation_mismatch_keeps_entry_fenced() -> None:
     assert not any(call == ("start_services", (ENTRY_SERVICE,)) for call in backend.calls)
 
 
-def test_pre_0003_migration_failure_does_not_start_target_services() -> None:
-    """Catches starting target workers before the target schema/release is active."""
+def test_migration_unknown_outcome_confirmed_0002_keeps_all_workers_stopped() -> None:
+    """Catches treating a failed SSH result as proof that migration can be resent."""
 
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
-        fail_at="migrate_schema",
+        fail_at="migrate_schema_unknown_0002",
     )
 
-    with pytest.raises(RuntimeError, match="simulated migration failure"):
+    with pytest.raises(RuntimeError, match="simulated migration unknown outcome"):
         deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
 
     migration = backend.calls.index(
         ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
     )
+    recovery_inspection = backend.calls.index(
+        ("inspect_schema", TARGET_RELEASE),
+        migration + 1,
+    )
+    assert migration < recovery_inspection
+    assert sum(call[0] == "migrate_schema" for call in backend.calls) == 1
     assert not any(
         call == ("start_services", SAFETY_SERVICES)
         for call in backend.calls[migration + 1 :]
     )
-    assert backend.entry_fenced is True
+    assert not any(call[0] == "activate_release" for call in backend.calls)
+    assert backend.active_services == set()
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_migration_unknown_outcome_confirmed_0003_enters_target_fix_forward() -> None:
+    """Catches leaving a committed 0003 stopped after an SSH outcome is unknown."""
+
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        fail_at="migrate_schema_unknown_0003",
+    )
+
+    with pytest.raises(RuntimeError, match="simulated migration unknown outcome"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    migration = backend.calls.index(
+        ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
+    )
+    recovery_inspection = backend.calls.index(
+        ("inspect_schema", TARGET_RELEASE),
+        migration + 1,
+    )
+    recovery_activation = backend.calls.index(
+        (
+            "activate_release",
+            TARGET_RELEASE,
+            TARGET_COMMIT,
+            TARGET_SCHEMA_REVISION,
+            SEED_IDENTITY,
+        ),
+        recovery_inspection + 1,
+    )
+    recovery_start = backend.calls.index(
+        ("start_services", SAFETY_SERVICES),
+        recovery_activation + 1,
+    )
+    assert migration < recovery_inspection < recovery_activation < recovery_start
+    assert sum(call[0] == "migrate_schema" for call in backend.calls) == 1
+    assert backend.current_release == TARGET_RELEASE
+    assert backend.active_services == set(SAFETY_SERVICES)
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_migration_unknown_outcome_unconfirmed_keeps_all_workers_stopped() -> None:
+    """Catches guessing a migration result from a failed schema inspection."""
+
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        fail_at="migrate_schema_unknown_revision",
+    )
+
+    with pytest.raises(RuntimeError, match="simulated migration unknown outcome"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    migration = backend.calls.index(
+        ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
+    )
+    recovery_inspection = backend.calls.index(
+        ("inspect_schema", TARGET_RELEASE),
+        migration + 1,
+    )
+    assert migration < recovery_inspection
+    assert sum(call[0] == "migrate_schema" for call in backend.calls) == 1
+    assert not any(call[0] == "activate_release" for call in backend.calls)
+    assert not any(call[0] == "start_services" for call in backend.calls)
+    assert backend.active_services == set()
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_migration_inspection_failure_preserves_original_unknown_outcome() -> None:
+    """Catches replacing the migration outcome with a secondary inspect error."""
+
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        fail_at="migrate_schema_inspection_failure",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="simulated migration unknown outcome",
+    ) as exc_info:
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    migration = backend.calls.index(
+        ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
+    )
+    recovery_inspection = backend.calls.index(
+        ("inspect_schema", TARGET_RELEASE),
+        migration + 1,
+    )
+    assert migration < recovery_inspection
+    assert sum(call[0] == "migrate_schema" for call in backend.calls) == 1
+    assert not any(call[0] == "activate_release" for call in backend.calls)
+    assert not any(call[0] == "start_services" for call in backend.calls)
+    assert backend.active_services == set()
+    assert backend.entry_is_inactive_disabled_and_fenced()
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert str(exc_info.value.__cause__) == "simulated schema inspection failure"
 
 
 def test_post_activation_bootstrap_failure_restores_target_safety_workers() -> None:
@@ -1142,6 +1246,11 @@ class FakeDeploymentBackend:
 
     def inspect_schema(self, release: str) -> Mapping[str, object]:
         self.calls.append(("inspect_schema", release))
+        if (
+            self.fail_at == "migrate_schema_inspection_failure"
+            and any(call[0] == "migrate_schema" for call in self.calls)
+        ):
+            raise RuntimeError("simulated schema inspection failure")
         return {
             "status": (
                 "pass"
@@ -1200,8 +1309,16 @@ class FakeDeploymentBackend:
                 target_schema_revision,
             )
         )
-        if self.fail_at == "migrate_schema":
-            raise RuntimeError("simulated migration failure")
+        if self.fail_at == "migrate_schema_unknown_0002":
+            raise RuntimeError("simulated migration unknown outcome")
+        if self.fail_at == "migrate_schema_unknown_0003":
+            self.source_schema_revision = target_schema_revision
+            raise RuntimeError("simulated migration unknown outcome")
+        if self.fail_at == "migrate_schema_unknown_revision":
+            self.source_schema_revision = "0004_unknown"
+            raise RuntimeError("simulated migration unknown outcome")
+        if self.fail_at == "migrate_schema_inspection_failure":
+            raise RuntimeError("simulated migration unknown outcome")
         self.source_schema_revision = target_schema_revision
 
     def verify_preservation(

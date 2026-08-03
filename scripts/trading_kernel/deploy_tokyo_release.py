@@ -413,12 +413,27 @@ def _deploy_compatible_upgrade(
                 plan.target_release,
                 preservation_digest,
             )
-            backend.migrate_schema(
-                plan.target_release,
-                COMPATIBLE_SOURCE_SCHEMA_REVISION,
-                plan.schema_revision,
-            )
-            schema_migrated = True
+            try:
+                backend.migrate_schema(
+                    plan.target_release,
+                    COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                    plan.schema_revision,
+                )
+            except Exception as migration_error:
+                try:
+                    migration_schema_state = backend.inspect_schema(
+                        plan.target_release
+                    )
+                except Exception as inspection_error:
+                    raise migration_error from inspection_error
+                schema_migrated = bool(
+                    migration_schema_state.get("status") == "pass"
+                    and migration_schema_state.get("alembic_revision")
+                    == plan.schema_revision
+                )
+                raise
+            else:
+                schema_migrated = True
 
         if not backend.preservation_verified(
             plan.target_release,

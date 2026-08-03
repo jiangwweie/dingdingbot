@@ -36,6 +36,9 @@
 5. **Fix-forward failure posture**
    - Explicit `target_activated` and `target_safety_started` states separate pre-target and post-target recovery.
    - Failure before a successful `0003` migration keeps Entry fenced and does not start target services.
+   - An SSH migration error is treated as an unknown outcome: while all writers remain stopped and Entry fenced, the target release performs one exact readonly schema inspection and never resends the migration.
+   - Exact inspected `0003` enters target Runtime-Fenced fix-forward; exact `0002`, failed inspection status, or any other revision leaves every worker stopped and preserves the migration exception.
+   - If the readonly inspection itself raises, the original migration unknown-outcome exception remains primary and the inspection error is retained only as its cause.
    - Once `0003` exists, preservation or identity failure activates the target release with the last known Seed identity, so target workers rely on the Runtime Fence until target identity is certified.
    - Partial activation recovery reads the actual current-release symlink instead of trusting an in-process flag, then restores the three target safety workers while Entry remains inactive, disabled, and fenced.
    - Schema downgrade, 0002 worker restart on 0003, dual write, old-schema reader, and runtime fallback remain forbidden.
@@ -58,6 +61,17 @@
 | Partial target activation | The same RED command failed because the symlink had changed but `target_activated` remained false, so no safety worker restarted | Recovery rereads the current-release symlink and restores the target safety workers without starting Entry |
 
 Fresh Round 2 verification: amended deployment unit plus compatible-upgrade integration **56 passed in 16.45s**; Ruff passed; Mypy reported **116 source files** clean; `git diff --check` passed.
+
+### Round 3 review-fix evidence
+
+| Gate | RED evidence | GREEN evidence |
+| --- | --- | --- |
+| Migration unknown outcome | Focused command collected **3**, with **3 failed** because no post-error schema inspection occurred | Exact `0002`, exact `0003`, and unconfirmed revision branches all pass; migration is called exactly once in every branch |
+| Target fix-forward authorization | Committed `0003` was indistinguishable from pre-commit failure after SSH disconnect | Only `status=pass` plus exact target revision starts target safety workers; Entry remains inactive, disabled, and fenced |
+| Fail-closed ambiguity | Source or unknown schema state had no explicit readonly recovery evidence | Exact `0002`, failed status, or another revision starts no worker, performs no activation, preserves the original exception, and never resends migration |
+| Inspection failure priority | A separate focused RED failed because the secondary schema-inspection error replaced the original migration unknown outcome | The migration exception remains primary, the inspection error is chained as its cause, and all workers remain stopped |
+
+Fresh Round 3 verification: amended deployment unit plus compatible-upgrade integration **59 passed in 16.43s**; Ruff passed; Mypy reported **116 source files** clean; `git diff --check` passed.
 
 ### Fresh final verification
 
