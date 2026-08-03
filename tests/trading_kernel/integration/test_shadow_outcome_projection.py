@@ -28,6 +28,7 @@ from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.domain.shadow_outcome import (
     ShadowOutcomeProjection,
     ShadowOutcomeSpec,
+    evaluate_fixed_horizon_excursion,
 )
 from src.trading_kernel.infrastructure.pg_models import (
     budget_reservations,
@@ -207,7 +208,7 @@ async def test_idle_worker_releases_empty_historical_window_for_retry(
 
 
 @pytest.mark.asyncio
-async def test_expired_same_worker_claim_cannot_complete_or_release_new_claim(
+async def test_expired_same_worker_claim_cannot_mutate_new_claim(
     shadow_engine: AsyncEngine,
 ) -> None:
     spec = _hour_spec()
@@ -229,6 +230,10 @@ async def test_expired_same_worker_claim_cannot_complete_or_release_new_claim(
     assert stale_claim is not None
     assert replacement_claim is not None
     assert stale_claim.claim_token != replacement_claim.claim_token
+    projection = evaluate_fixed_horizon_excursion(
+        spec,
+        _complete_hour_candles(spec),
+    )
     with pytest.raises(RuntimeError, match="lost Shadow claim"):
         await project_claimed_shadow_outcome(
             lambda: PostgresKernelUnitOfWork(shadow_engine),
@@ -238,7 +243,34 @@ async def test_expired_same_worker_claim_cannot_complete_or_release_new_claim(
         )
     async with PostgresKernelUnitOfWork(shadow_engine) as uow:
         with pytest.raises(RuntimeError, match="lost Shadow claim"):
+            await uow.shadow_outcomes.mark_unavailable(
+                claim=stale_claim,
+                reason="zero_initial_risk_distance",
+                completed_at_ms=spec.horizon_end_ms,
+            )
+        with pytest.raises(RuntimeError, match="lost Shadow claim"):
             await uow.shadow_outcomes.release_expired_claim(claim=stale_claim)
+
+    wrong_lease_claim = replacement_claim.model_copy(
+        update={"lease_until_ms": replacement_claim.lease_until_ms - 1}
+    )
+    async with PostgresKernelUnitOfWork(shadow_engine) as uow:
+        with pytest.raises(RuntimeError, match="lost Shadow claim"):
+            await uow.shadow_outcomes.complete(
+                claim=wrong_lease_claim,
+                projection=projection,
+                completed_at_ms=spec.horizon_end_ms,
+            )
+        with pytest.raises(RuntimeError, match="lost Shadow claim"):
+            await uow.shadow_outcomes.mark_unavailable(
+                claim=wrong_lease_claim,
+                reason="zero_initial_risk_distance",
+                completed_at_ms=spec.horizon_end_ms,
+            )
+        with pytest.raises(RuntimeError, match="lost Shadow claim"):
+            await uow.shadow_outcomes.release_expired_claim(
+                claim=wrong_lease_claim
+            )
     async with shadow_engine.connect() as connection:
         row = (
             await connection.execute(
@@ -249,7 +281,9 @@ async def test_expired_same_worker_claim_cannot_complete_or_release_new_claim(
             )
         ).mappings().one()
     assert row["status"] == "claimed"
+    assert row["claim_owner"] == replacement_claim.claim_owner
     assert row["claim_token"] == replacement_claim.claim_token
+    assert row["lease_until_ms"] == replacement_claim.lease_until_ms
 
 
 @pytest.mark.asyncio
@@ -259,14 +293,16 @@ async def test_zero_risk_shadow_is_terminally_unavailable_with_explicit_reason(
     spec = _hour_spec(initial_stop_price=Decimal(100))
     async with PostgresKernelUnitOfWork(shadow_engine) as uow:
         await uow.shadow_outcomes.add_pending(spec)
+    source = _FailIfFetchedSource()
 
     result = await run_observation_worker_once(
         lambda: PostgresKernelUnitOfWork(shadow_engine),
-        _CompleteHistoricalSource(),
+        source,
         _worker_request(now_ms=spec.horizon_end_ms),
     )
 
     assert result.status is ObservationWorkerStatus.SHADOW_COMPLETED
+    assert source.calls == 0
     async with shadow_engine.connect() as connection:
         row = (
             await connection.execute(
@@ -278,8 +314,11 @@ async def test_zero_risk_shadow_is_terminally_unavailable_with_explicit_reason(
         ).mappings().one()
     assert row["status"] == "unavailable"
     assert row["completion_reason"] == "zero_initial_risk_distance"
+    assert row["max_favorable_price"] is None
+    assert row["max_adverse_price"] is None
     assert row["mfe_r"] is None
     assert row["mae_r"] is None
+    assert row["observed_through_ms"] is None
 
 
 @pytest.mark.asyncio
@@ -584,6 +623,15 @@ class _PartialHistoricalSource(_CompleteHistoricalSource):
 class _EmptyHistoricalSource:
     async def fetch_closed_candles(self, request):
         return ()
+
+
+class _FailIfFetchedSource:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def fetch_closed_candles(self, request):
+        self.calls += 1
+        raise AssertionError("zero-risk Shadow must not fetch market data")
 
 
 class _FakeUow:

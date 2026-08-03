@@ -24,6 +24,7 @@ from src.trading_kernel.application.ports import UnitOfWorkFactory
 from src.trading_kernel.application.project_shadow_outcome import (
     project_claimed_shadow_outcome,
 )
+from src.trading_kernel.domain.market import ClosedCandle
 
 
 class ObservationWorkerStatus(StrEnum):
@@ -194,20 +195,24 @@ async def _run_one_due_shadow(
     if claim is None:
         return ObservationWorkerResult(status=ObservationWorkerStatus.NO_WORK)
 
-    limit = _shadow_candle_limit(claim.spec.timeframe)
     try:
-        candles = await asyncio.wait_for(
-            market_source.fetch_closed_candles(
-                ClosedCandleRequest(
-                    exchange_instrument_id=claim.spec.exchange_instrument_id,
-                    timeframe=claim.spec.timeframe,
-                    limit=limit,
-                    closed_at_ms=claim.spec.horizon_end_ms,
-                    since_ms=claim.spec.horizon_start_ms,
-                )
-            ),
-            timeout=request.timeout_seconds,
-        )
+        candles: tuple[ClosedCandle, ...]
+        if claim.spec.initial_risk_per_unit <= 0:
+            candles = ()
+        else:
+            limit = _shadow_candle_limit(claim.spec.timeframe)
+            candles = await asyncio.wait_for(
+                market_source.fetch_closed_candles(
+                    ClosedCandleRequest(
+                        exchange_instrument_id=claim.spec.exchange_instrument_id,
+                        timeframe=claim.spec.timeframe,
+                        limit=limit,
+                        closed_at_ms=claim.spec.horizon_end_ms,
+                        since_ms=claim.spec.horizon_start_ms,
+                    )
+                ),
+                timeout=request.timeout_seconds,
+            )
         terminal = await project_claimed_shadow_outcome(
             uow_factory,
             claim,

@@ -105,6 +105,14 @@ async def project_claimed_shadow_outcome(
 ) -> bool:
     """Persist a terminal read-only projection after market I/O already ended."""
 
+    if claim.spec.initial_risk_per_unit <= 0:
+        async with uow_factory() as uow:
+            await uow.shadow_outcomes.mark_unavailable(
+                claim=claim,
+                reason="zero_initial_risk_distance",
+                completed_at_ms=completed_at_ms,
+            )
+        return True
     if not has_complete_closed_candle_sequence(claim.spec, candles):
         async with uow_factory() as uow:
             await uow.shadow_outcomes.release_expired_claim(claim=claim)

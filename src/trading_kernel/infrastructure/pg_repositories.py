@@ -1232,6 +1232,7 @@ class PostgresShadowOutcomeRepository:
         )
         return ShadowOutcomeClaim(
             spec=_shadow_outcome_spec_from_row(row),
+            claim_owner=worker_id,
             claim_token=claim_token,
             projection_version=projection_version,
             lease_until_ms=lease_until_ms,
@@ -1263,9 +1264,11 @@ class PostgresShadowOutcomeRepository:
                 shadow_outcomes_current.c.shadow_outcome_id
                 == claim.spec.shadow_outcome_id,
                 shadow_outcomes_current.c.status == "claimed",
+                shadow_outcomes_current.c.claim_owner == claim.claim_owner,
                 shadow_outcomes_current.c.claim_token == claim.claim_token,
                 shadow_outcomes_current.c.projection_version
                 == claim.projection_version,
+                shadow_outcomes_current.c.lease_until_ms == claim.lease_until_ms,
             )
             .values(
                 status="completed",
@@ -1300,9 +1303,11 @@ class PostgresShadowOutcomeRepository:
                 shadow_outcomes_current.c.shadow_outcome_id
                 == claim.spec.shadow_outcome_id,
                 shadow_outcomes_current.c.status == "claimed",
+                shadow_outcomes_current.c.claim_owner == claim.claim_owner,
                 shadow_outcomes_current.c.claim_token == claim.claim_token,
                 shadow_outcomes_current.c.projection_version
                 == claim.projection_version,
+                shadow_outcomes_current.c.lease_until_ms == claim.lease_until_ms,
             )
             .values(
                 status="unavailable",
@@ -1327,9 +1332,11 @@ class PostgresShadowOutcomeRepository:
                 shadow_outcomes_current.c.shadow_outcome_id
                 == claim.spec.shadow_outcome_id,
                 shadow_outcomes_current.c.status == "claimed",
+                shadow_outcomes_current.c.claim_owner == claim.claim_owner,
                 shadow_outcomes_current.c.claim_token == claim.claim_token,
                 shadow_outcomes_current.c.projection_version
                 == claim.projection_version,
+                shadow_outcomes_current.c.lease_until_ms == claim.lease_until_ms,
             )
             .values(
                 status="pending",

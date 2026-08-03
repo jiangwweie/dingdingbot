@@ -81,16 +81,17 @@ class ShadowOutcomeClaim(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     spec: ShadowOutcomeSpec
+    claim_owner: str
     claim_token: str
     projection_version: int
     lease_until_ms: int
 
-    @field_validator("claim_token", mode="before")
+    @field_validator("claim_owner", "claim_token", mode="before")
     @classmethod
-    def _require_claim_token(cls, value: object) -> str:
+    def _require_claim_identity(cls, value: object) -> str:
         normalized = str(value or "").strip()
         if not normalized:
-            raise ValueError("Shadow claim token must be non-blank")
+            raise ValueError("Shadow claim identities must be non-blank")
         return normalized
 
     @model_validator(mode="after")
