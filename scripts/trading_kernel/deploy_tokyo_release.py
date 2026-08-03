@@ -345,6 +345,7 @@ def _deploy_compatible_upgrade(
         raise DeploymentBlocked("compatible source schema revision differs")
 
     preservation_digest: str
+    recovery_seed_identity: str
     source_identity: dict[str, str] | None = None
     if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
         source_certification, _, source_identity = _read_compatible_source_facts(
@@ -373,12 +374,20 @@ def _deploy_compatible_upgrade(
             != source_identity["seed_identity"]
         ):
             raise DeploymentBlocked("exact source Seed marker differs")
+        recovery_seed_identity = source_identity["seed_identity"]
     else:
         preservation_digest = backend.read_preservation_digest(plan.target_release)
         if not _SEED_IDENTITY.fullmatch(preservation_digest):
             raise DeploymentBlocked("persisted preservation digest is invalid")
+        recovery_seed_identity = backend.read_release_marker(
+            current_release,
+            ".brc-seed-identity",
+        )
+        if not _SEED_IDENTITY.fullmatch(recovery_seed_identity):
+            raise DeploymentBlocked("current release Seed marker is invalid")
 
     transition_started = False
+    schema_migrated = database_revision == plan.schema_revision
     target_activated = current_release == plan.target_release
     target_safety_started = False
     try:
@@ -409,6 +418,7 @@ def _deploy_compatible_upgrade(
                 COMPATIBLE_SOURCE_SCHEMA_REVISION,
                 plan.schema_revision,
             )
+            schema_migrated = True
 
         if not backend.preservation_verified(
             plan.target_release,
@@ -435,6 +445,7 @@ def _deploy_compatible_upgrade(
             plan.schema_revision,
         )
         seed_identity = _require_deployment_identity(deployment_identity, plan)
+        recovery_seed_identity = seed_identity
         backend.activate_release(
             plan.target_release,
             plan.target_commit,
@@ -472,7 +483,21 @@ def _deploy_compatible_upgrade(
     except Exception:
         if transition_started:
             backend.fence_entry()
-            if target_activated:
+            if schema_migrated:
+                target_activated = (
+                    backend.read_current_release() == plan.target_release
+                )
+                if not target_activated:
+                    backend.activate_release(
+                        plan.target_release,
+                        plan.target_commit,
+                        plan.schema_revision,
+                        recovery_seed_identity,
+                    )
+                    target_activated = (
+                        backend.read_current_release() == plan.target_release
+                    )
+            if schema_migrated and target_activated:
                 active_target_safety = backend.services_active(ALL_SERVICES)
                 if (
                     not target_safety_started

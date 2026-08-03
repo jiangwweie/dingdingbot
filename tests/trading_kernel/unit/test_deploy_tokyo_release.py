@@ -254,6 +254,74 @@ def test_post_activation_bootstrap_failure_restores_target_safety_workers() -> N
     assert backend.entry_is_inactive_disabled_and_fenced()
 
 
+def test_post_migration_preservation_failure_enters_fenced_target_fix_forward() -> None:
+    """Catches leaving 0003 without target safety or restarting 0002 workers."""
+
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        fail_at="verify_preservation",
+    )
+
+    with pytest.raises(RuntimeError, match="simulated preservation failure"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    migration = backend.calls.index(
+        ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
+    )
+    recovery_activation = max(
+        index
+        for index, call in enumerate(backend.calls)
+        if call
+        == (
+            "activate_release",
+            TARGET_RELEASE,
+            TARGET_COMMIT,
+            TARGET_SCHEMA_REVISION,
+            SEED_IDENTITY,
+        )
+    )
+    recovery_start = max(
+        index
+        for index, call in enumerate(backend.calls)
+        if call == ("start_services", SAFETY_SERVICES)
+    )
+    assert migration < recovery_activation < recovery_start
+    assert backend.current_release == TARGET_RELEASE
+    assert backend.active_services == set(SAFETY_SERVICES)
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_partial_target_activation_failure_recovers_target_safety_workers() -> None:
+    """Catches trusting a flag when activation changed the symlink before failing."""
+
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        fail_at="activate_release_partial",
+    )
+
+    with pytest.raises(RuntimeError, match="simulated partial activation failure"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    activation = backend.calls.index(
+        (
+            "activate_release",
+            TARGET_RELEASE,
+            TARGET_COMMIT,
+            TARGET_SCHEMA_REVISION,
+            SEED_IDENTITY,
+        )
+    )
+    recovery_start = max(
+        index
+        for index, call in enumerate(backend.calls)
+        if call == ("start_services", SAFETY_SERVICES)
+    )
+    assert activation < recovery_start
+    assert backend.current_release == TARGET_RELEASE
+    assert backend.active_services == set(SAFETY_SERVICES)
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
 def test_mig_009_wrong_source_blocks_before_service_mutation() -> None:
     backend = FakeDeploymentBackend(
         source_schema_revision="0001_trading_kernel_baseline_v4",
@@ -1150,6 +1218,8 @@ class FakeDeploymentBackend:
                 expected_digest,
             )
         )
+        if self.fail_at == "verify_preservation":
+            raise RuntimeError("simulated preservation failure")
         digest = expected_digest if self.preservation_matches else "sha256:" + "e" * 64
         return {
             "status": "pass" if self.preservation_matches else "fail",
@@ -1240,6 +1310,8 @@ class FakeDeploymentBackend:
         if self.fail_at == "activate_release":
             raise RuntimeError("simulated activation failure")
         self.current_release = release
+        if self.fail_at == "activate_release_partial":
+            raise RuntimeError("simulated partial activation failure")
 
     def start_services(self, services: tuple[str, ...]) -> None:
         self.calls.append(("start_services", services))

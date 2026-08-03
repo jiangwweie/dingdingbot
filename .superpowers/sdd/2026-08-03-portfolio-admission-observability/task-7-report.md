@@ -35,8 +35,9 @@
 
 5. **Fix-forward failure posture**
    - Explicit `target_activated` and `target_safety_started` states separate pre-target and post-target recovery.
-   - Failure before target activation keeps Entry fenced and does not start target services.
-   - Failure after target activation checks and restores the three target safety workers while Entry remains inactive, disabled, and fenced.
+   - Failure before a successful `0003` migration keeps Entry fenced and does not start target services.
+   - Once `0003` exists, preservation or identity failure activates the target release with the last known Seed identity, so target workers rely on the Runtime Fence until target identity is certified.
+   - Partial activation recovery reads the actual current-release symlink instead of trusting an in-process flag, then restores the three target safety workers while Entry remains inactive, disabled, and fenced.
    - Schema downgrade, 0002 worker restart on 0003, dual write, old-schema reader, and runtime fallback remain forbidden.
 
 ### RED / GREEN evidence
@@ -48,6 +49,15 @@
 | Live Registry drift | Metadata remained correct while a live EventSpec row changed; certification lacked `live_semantic_hash` and failed the new contract | Target integration test passes and returns live/expected hashes with `status=fail` after drift |
 | PostgreSQL-bound proof | Integration test failed because record/verify proof functions did not exist | Record, verify, and restored-identity mismatch test passes |
 | Batch member replacement | Mutation check removed live member checks and the regression test failed with `certification_batch_pass=True` | Restored live digest/member checks; focused test **1 passed** |
+
+### Round 2 review-fix evidence
+
+| Gate | RED evidence | GREEN evidence |
+| --- | --- | --- |
+| Post-migration preservation failure | Focused command collected **2**, with **2 failed**; no target activation was attempted after successful migration | Target release is activated with the last known Seed identity, all three safety workers start, and Entry remains inactive, disabled, and fenced |
+| Partial target activation | The same RED command failed because the symlink had changed but `target_activated` remained false, so no safety worker restarted | Recovery rereads the current-release symlink and restores the target safety workers without starting Entry |
+
+Fresh Round 2 verification: amended deployment unit plus compatible-upgrade integration **56 passed in 16.45s**; Ruff passed; Mypy reported **116 source files** clean; `git diff --check` passed.
 
 ### Fresh final verification
 
