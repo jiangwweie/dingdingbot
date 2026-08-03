@@ -24,6 +24,9 @@ from scripts.trading_kernel.bootstrap_strategy_universes import (
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
 from src.trading_kernel.application.observe_strategy_scope import ObservationStatus
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.strategy_registry import (
+    registered_strategy_contracts,
+)
 from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
     instrument_certification_batch_members,
@@ -41,6 +44,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RUNTIME_PROFILE_ID,
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
+)
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
 )
 from src.trading_kernel.interfaces.observation_worker import (
     ObservationWorkerRequest,
@@ -70,7 +76,7 @@ ADMIN_DSN = os.getenv(
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 RUNTIME_COMMIT = "strategy-universe-rehearsal"
-SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
+SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
 
 
 class RecordingWarmMarket:
@@ -102,6 +108,26 @@ class VirtualClock:
     def advance(self, milliseconds: int = 1) -> int:
         self.now += milliseconds
         return self.now
+
+
+def test_static_batch_manifest_rejects_registry_event_version_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contracts = registered_strategy_contracts()
+    drifted = contracts[0].model_copy(
+        update={
+            "strategy_version_id": "sgv:CPM-RO-001:v4",
+            "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v4",
+        }
+    )
+    monkeypatch.setattr(
+        bootstrap_module,
+        "registered_strategy_contracts",
+        lambda: (drifted, *contracts[1:]),
+    )
+
+    with pytest.raises(BootstrapBlocked, match="registry_event_manifest_mismatch"):
+        bootstrap_module._validate_static_manifest()
 
 
 @pytest.mark.asyncio
@@ -192,7 +218,7 @@ async def test_six_event_batch_bootstrap_is_idempotent_and_uses_worker_boundarie
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-batch-bootstrap-test",
                     runtime_commit=RUNTIME_COMMIT,
-                    schema_revision="0002_sor_v3_strategy_group_capacity",
+                    schema_revision=SCHEMA_REVISION,
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
             )
@@ -235,6 +261,14 @@ async def test_six_event_batch_bootstrap_is_idempotent_and_uses_worker_boundarie
             "SOR-SHORT",
             "BRF2-SHORT",
         )
+        assert tuple(result.event_spec_id for result in first) == (
+            "event_spec:CPM-RO-001:CPM-LONG:v3",
+            "event_spec:MPG-001:MPG-LONG:v3",
+            "event_spec:MI-001:MI-LONG:v3",
+            "event_spec:SOR-001:SOR-LONG:v4",
+            "event_spec:SOR-001:SOR-SHORT:v4",
+            "event_spec:BRF2-001:BRF2-SHORT:v3",
+        )
         assert tuple(result.status for result in second) == (
             "already_active",
         ) * 6
@@ -245,6 +279,14 @@ async def test_six_event_batch_bootstrap_is_idempotent_and_uses_worker_boundarie
             "active_scopes": 42,
             "warming_scopes": 0,
             "active_members": tuple(INITIAL_MEMBERS),
+            "active_event_spec_ids": (
+                "event_spec:BRF2-001:BRF2-SHORT:v3",
+                "event_spec:CPM-RO-001:CPM-LONG:v3",
+                "event_spec:MI-001:MI-LONG:v3",
+                "event_spec:MPG-001:MPG-LONG:v3",
+                "event_spec:SOR-001:SOR-LONG:v4",
+                "event_spec:SOR-001:SOR-SHORT:v4",
+            ),
             "completed_certification_batches": 1,
             "eligible_certification_batch_members": 7,
             "signals": 0,
@@ -523,6 +565,18 @@ def _reconciliation_request(now_ms: int) -> ReconciliationWorkerRequest:
 
 async def _snapshot(engine: AsyncEngine) -> dict[str, object]:
     async with engine.connect() as connection:
+        active_event_spec_ids = tuple(
+            str(value)
+            for value in (
+                await connection.execute(
+                    sa.select(strategy_universe_versions.c.event_spec_id)
+                    .where(
+                        strategy_universe_versions.c.lifecycle_state == "active"
+                    )
+                    .order_by(strategy_universe_versions.c.event_spec_id)
+                )
+            ).scalars()
+        )
         active_members = tuple(
             row[0]
             for row in (
@@ -578,6 +632,7 @@ async def _snapshot(engine: AsyncEngine) -> dict[str, object]:
                 or 0
             ),
             "active_members": active_members,
+            "active_event_spec_ids": active_event_spec_ids,
             "completed_certification_batches": int(
                 await connection.scalar(
                     sa.select(sa.func.count())

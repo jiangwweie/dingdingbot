@@ -49,7 +49,7 @@ OWNER_POLICY_ID = "policy-main"
 GLOBAL_ENTRY_LANE_ID = "global-entry"
 VENUE_ID = "binance-usdm"
 POSITION_MODE = "independent_sides"
-COMPATIBLE_SOURCE_SCHEMA_REVISION = "0001_trading_kernel_baseline_v4"
+COMPATIBLE_SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
 
 
 class RuntimeAuthoritySeedConflict(RuntimeError):
@@ -420,7 +420,7 @@ async def deploy_compatible_upgrade_identity(
     uow: PostgresKernelUnitOfWork,
     request: RuntimeAuthoritySeedRequest,
 ) -> RuntimeDeploymentIdentityResult:
-    """Move one exact flat v4 authority to the current Registry and schema."""
+    """Rotate one exact migrated Policy v4 authority to current identity."""
 
     connection = uow._require_connection()
     metadata_rows = {
@@ -435,26 +435,24 @@ async def deploy_compatible_upgrade_identity(
         return await _deploy_runtime_identity(uow, request)
     if metadata_rows.get("schema_revision") != COMPATIBLE_SOURCE_SCHEMA_REVISION:
         raise RuntimeAuthorityTransitionRefused(
-            "compatible identity requires the exact v4 source authority"
+            "compatible identity requires the exact 0002 source authority"
         )
 
     await _require_flat_compatible_upgrade_activity(connection)
     current_policy = dict(await _lock_policy(connection))
-    current_version = int(str(current_policy["policy_version"]))
-    current_submit_enabled = bool(current_policy["new_entry_submit_enabled"])
     target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
-    source_event_spec_ids = tuple(
-        event_spec_id.replace(":v4", ":v2").replace(":v3", ":v2")
-        for event_spec_id in target_event_spec_ids
-    )
     if not _policy_matches(
         current_policy,
-        version=current_version,
-        new_entry_submit_enabled=current_submit_enabled,
-        allowed_event_spec_ids=source_event_spec_ids,
-    ):
+        version=4,
+        new_entry_submit_enabled=False,
+        allowed_event_spec_ids=target_event_spec_ids,
+    ) or current_policy["max_strategy_group_concurrent_tickets"] is not None:
         raise RuntimeAuthorityTransitionRefused(
-            "compatible identity source Owner Policy differs from approved capital"
+            "compatible identity requires exact migrated Policy v4"
+        )
+    if bool(current_policy["new_entry_submit_enabled"]):
+        raise RuntimeAuthorityTransitionRefused(
+            "compatible identity cannot re-enable new ENTRY"
         )
     if request.seeded_at_ms <= int(str(current_policy["updated_at_ms"])):
         raise RuntimeAuthorityTransitionRefused(
@@ -468,38 +466,14 @@ async def deploy_compatible_upgrade_identity(
         registry_semantic_hash=registry.registry_semantic_hash,
         allowed_event_spec_ids=target_event_spec_ids,
     )
-    target_policy_version = current_version + 1
-    target_policy = _policy_values(
-        version=target_policy_version,
-        new_entry_submit_enabled=current_submit_enabled,
+    if not _policy_matches(
+        current_policy,
+        version=4,
+        new_entry_submit_enabled=False,
         allowed_event_spec_ids=target_event_spec_ids,
-        updated_at_ms=request.seeded_at_ms,
-    )
-    await _insert_exact(
-        connection,
-        _ExactRow(
-            owner_policy_events,
-            "owner_policy_event_id",
-            _policy_event(
-                version=target_policy_version,
-                operation="compatible_upgrade_sor_v3",
-                policy=target_policy,
-                occurred_at_ms=request.seeded_at_ms,
-            ),
-            ("owner_policy_id", "policy_version", "operation", "payload"),
-        ),
-    )
-    updated_policy = await connection.execute(
-        sa.update(owner_policy_current)
-        .where(
-            owner_policy_current.c.owner_policy_id == OWNER_POLICY_ID,
-            owner_policy_current.c.policy_version == current_version,
-        )
-        .values(target_policy)
-    )
-    if updated_policy.rowcount != 1:
+    ):
         raise RuntimeAuthorityTransitionRefused(
-            "compatible Owner Policy transition lost optimistic authority"
+            "compatible identity Registry seed changed migrated Policy authority"
         )
 
     profile = (

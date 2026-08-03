@@ -12,6 +12,9 @@ import asyncpg
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from tests.trading_kernel.integration.test_schema_baseline import EXPECTED_TABLES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -20,7 +23,7 @@ ADMIN_DSN = os.getenv(
     "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
-HEAD_REVISION = "0002_sor_v3_strategy_group_capacity"
+HEAD_REVISION = CURRENT_SCHEMA_REVISION
 
 
 @pytest.mark.asyncio
@@ -54,7 +57,7 @@ async def test_empty_postgres_upgrades_from_frozen_v4_baseline_to_head() -> None
 
         result = _run_alembic(database_url, "downgrade", "base")
         assert result.returncode != 0
-        assert "forward-only baseline" in result.stderr
+        assert "fix-forward" in result.stderr
     finally:
         await _drop_database(admin, database_name)
         await admin.close()

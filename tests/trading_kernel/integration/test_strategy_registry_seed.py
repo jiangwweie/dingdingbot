@@ -32,6 +32,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     RegistrySeedConflict,
     seed_strategy_registry,
@@ -128,18 +131,24 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         assert await connection.scalar(sa.select(sa.func.count()).select_from(owner_policy_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(instruments)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(exit_policies)) == 6
-        sor_version = (
-            await connection.execute(
+        current_versions = dict(
+            (
+                await connection.execute(
                 sa.select(
-                    strategy_versions.c.version,
-                    strategy_versions.c.status,
-                ).where(
-                    strategy_versions.c.strategy_version_id
-                    == "sgv:SOR-001:v3"
+                    strategy_versions.c.strategy_group_id,
+                    strategy_versions.c.strategy_version_id,
+                ).where(strategy_versions.c.status == "active")
+                .order_by(strategy_versions.c.strategy_group_id)
                 )
-            )
-        ).one()
-        assert sor_version == (3, "active")
+            ).all()
+        )
+        assert current_versions == {
+            "BRF2-001": "sgv:BRF2-001:v3",
+            "CPM-RO-001": "sgv:CPM-RO-001:v3",
+            "MI-001": "sgv:MI-001:v3",
+            "MPG-001": "sgv:MPG-001:v3",
+            "SOR-001": "sgv:SOR-001:v4",
+        }
 
 
 @pytest.mark.asyncio
@@ -156,7 +165,7 @@ async def test_strategy_seed_fails_closed_on_existing_semantic_conflict(
             .values(timeframe="1h")
         )
 
-    with pytest.raises(RegistrySeedConflict, match="event_spec:SOR-001:SOR-LONG:v3"):
+    with pytest.raises(RegistrySeedConflict, match="event_spec:SOR-001:SOR-LONG:v4"):
         async with PostgresKernelUnitOfWork(registry_engine) as uow:
             await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)
 
@@ -193,7 +202,7 @@ async def test_strategy_seed_fails_closed_on_exit_policy_semantic_conflict(
     async with registry_engine.begin() as connection:
         await connection.execute(
             sa.update(exit_policies)
-            .where(exit_policies.c.event_spec_id == "event_spec:SOR-001:SOR-LONG:v3")
+            .where(exit_policies.c.event_spec_id == "event_spec:SOR-001:SOR-LONG:v4")
             .values(semantic_hash="sha256:" + "0" * 64)
         )
 
@@ -203,11 +212,11 @@ async def test_strategy_seed_fails_closed_on_exit_policy_semantic_conflict(
 
 
 @pytest.mark.asyncio
-async def test_strategy_seed_monotonically_retires_v2_sor_and_activates_v3(
+async def test_strategy_seed_monotonically_retires_source_sor_v3_and_activates_v4(
     registry_engine: AsyncEngine,
 ) -> None:
     async with registry_engine.begin() as connection:
-        await _insert_legacy_sor_v2_registry(connection)
+        await _insert_source_sor_v3_registry(connection)
 
     async with PostgresKernelUnitOfWork(registry_engine) as uow:
         first = await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
@@ -258,22 +267,22 @@ async def test_strategy_seed_monotonically_retires_v2_sor_and_activates_v3(
             )
         ).all()
 
-    assert group["active_version_id"] == "sgv:SOR-001:v3"
+    assert group["active_version_id"] == "sgv:SOR-001:v4"
     assert versions == [
-        ("sgv:SOR-001:v2", 2, "retired"),
-        ("sgv:SOR-001:v3", 3, "active"),
+        ("sgv:SOR-001:v3", 3, "retired"),
+        ("sgv:SOR-001:v4", 4, "active"),
     ]
     assert events == [
-        ("event_spec:SOR-001:SOR-LONG:v2", "retired"),
-        ("event_spec:SOR-001:SOR-LONG:v3", "active"),
-        ("event_spec:SOR-001:SOR-SHORT:v2", "retired"),
-        ("event_spec:SOR-001:SOR-SHORT:v3", "active"),
+        ("event_spec:SOR-001:SOR-LONG:v3", "retired"),
+        ("event_spec:SOR-001:SOR-LONG:v4", "active"),
+        ("event_spec:SOR-001:SOR-SHORT:v3", "retired"),
+        ("event_spec:SOR-001:SOR-SHORT:v4", "active"),
     ]
     assert policies == [
-        ("exit-policy:SOR-001:SOR-LONG:right-tail-v1", "retired"),
-        ("exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1", "active"),
-        ("exit-policy:SOR-001:SOR-SHORT:right-tail-v1", "retired"),
-        ("exit-policy:SOR-001:SOR-SHORT:sor-v3-right-tail-v1", "active"),
+        ("exit-policy:SOR-001:SOR-LONG:portfolio-admission-v1", "active"),
+        ("exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1", "retired"),
+        ("exit-policy:SOR-001:SOR-SHORT:portfolio-admission-v1", "active"),
+        ("exit-policy:SOR-001:SOR-SHORT:sor-v3-right-tail-v1", "retired"),
     ]
     assert first.inserted_strategy_group_count == 4
     assert first.inserted_strategy_version_count == 5
@@ -282,11 +291,11 @@ async def test_strategy_seed_monotonically_retires_v2_sor_and_activates_v3(
 
 
 @pytest.mark.asyncio
-async def test_universe_install_resolves_the_active_v3_registry_pointer(
+async def test_universe_install_resolves_the_active_v4_registry_pointer(
     registry_engine: AsyncEngine,
 ) -> None:
     async with registry_engine.begin() as connection:
-        await _insert_legacy_sor_v2_registry(connection)
+        await _insert_source_sor_v3_registry(connection)
 
     async with PostgresKernelUnitOfWork(registry_engine) as uow:
         await seed_runtime_authority(
@@ -294,7 +303,7 @@ async def test_universe_install_resolves_the_active_v3_registry_pointer(
             RuntimeAuthoritySeedRequest(
                 account_id="subaccount-registry-upgrade-test",
                 runtime_commit="registry-upgrade-test",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 seeded_at_ms=1_800_000_000_000,
             ),
         )
@@ -304,7 +313,7 @@ async def test_universe_install_resolves_the_active_v3_registry_pointer(
             event_id="SOR-LONG",
         )
 
-    assert context.event_spec_id == "event_spec:SOR-001:SOR-LONG:v3"
+    assert context.event_spec_id == "event_spec:SOR-001:SOR-LONG:v4"
 
 
 @pytest.mark.asyncio
@@ -312,7 +321,7 @@ async def test_strategy_seed_rejects_an_extra_active_version_outside_the_pointer
     registry_engine: AsyncEngine,
 ) -> None:
     async with registry_engine.begin() as connection:
-        await _insert_legacy_sor_v2_registry(connection)
+        await _insert_source_sor_v3_registry(connection)
         await connection.execute(
             sa.insert(strategy_versions).values(
                 strategy_version_id="sgv:SOR-001:v1",
@@ -334,12 +343,12 @@ async def test_strategy_seed_rejects_partial_historical_policy_authority(
     registry_engine: AsyncEngine,
 ) -> None:
     async with registry_engine.begin() as connection:
-        await _insert_legacy_sor_v2_registry(connection)
+        await _insert_source_sor_v3_registry(connection)
         await connection.execute(
             sa.update(exit_policies)
             .where(
                 exit_policies.c.exit_policy_id
-                == "exit-policy:SOR-001:SOR-SHORT:right-tail-v1"
+                == "exit-policy:SOR-001:SOR-SHORT:sor-v3-right-tail-v1"
             )
             .values(status="retired")
         )
@@ -349,106 +358,30 @@ async def test_strategy_seed_rejects_partial_historical_policy_authority(
             await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
 
 
-@pytest.mark.asyncio
-async def test_strategy_seed_accepts_only_the_exact_legacy_v2_semantics_shape(
-    registry_engine: AsyncEngine,
-) -> None:
-    async with PostgresKernelUnitOfWork(registry_engine) as uow:
-        await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
-    async with registry_engine.begin() as connection:
-        semantics = (
-            await connection.execute(
-                sa.select(strategy_versions.c.semantics).where(
-                    strategy_versions.c.strategy_version_id
-                    == "sgv:CPM-RO-001:v2"
-                )
-            )
-        ).scalar_one()
-        await connection.execute(
-            sa.update(strategy_versions)
-            .where(
-                strategy_versions.c.strategy_version_id
-                == "sgv:CPM-RO-001:v2"
-            )
-            .values(semantics={**semantics, "unexpected_authority": True})
-        )
-
-    with pytest.raises(RegistrySeedConflict, match="sgv:CPM-RO-001:v2"):
-        async with PostgresKernelUnitOfWork(registry_engine) as uow:
-            await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)
-
-
-@pytest.mark.asyncio
-async def test_strategy_seed_accepts_exact_production_v2_event_semantics(
-    registry_engine: AsyncEngine,
-) -> None:
-    production_hashes = {
-        "event_spec:BRF2-001:BRF2-SHORT:v2": (
-            "sha256:93ec2c387c02442bb4f2d4a936aa035a30376cb1a25d"
-            "f194a15a2d4809a1ab66"
-        ),
-        "event_spec:CPM-RO-001:CPM-LONG:v2": (
-            "sha256:d4a9ceb2c096a13701ca148438d607bee970deef5d658"
-            "790aa1081f816661a2e"
-        ),
-        "event_spec:MI-001:MI-LONG:v2": (
-            "sha256:533abcf09e68d590f2619507cc5951229bf0a95b18eae"
-            "8fbf4ae384e21edff0f"
-        ),
-        "event_spec:MPG-001:MPG-LONG:v2": (
-            "sha256:e7161b5c5b3fb8f2c6edbb134ea1081f80e55db74304"
-            "e99a84c1cb20e3b93939"
-        ),
-    }
-    async with PostgresKernelUnitOfWork(registry_engine) as uow:
-        await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
-    async with registry_engine.begin() as connection:
-        for event_spec_id, event_semantic_hash in production_hashes.items():
-            await connection.execute(
-                sa.update(event_specs)
-                .where(event_specs.c.event_spec_id == event_spec_id)
-                .values(
-                    execution_semantics={
-                        "event_semantic_hash": event_semantic_hash,
-                        "signal_grade": "trial_grade_signal",
-                        "source": "committed_old_main_program_v2",
-                    }
-                )
-            )
-
-    async with PostgresKernelUnitOfWork(registry_engine) as uow:
-        result = await seed_strategy_registry(
-            uow,
-            seeded_at_ms=1_800_000_000_001,
-        )
-
-    assert result.total_inserted_count == 0
-
-
-async def _insert_legacy_sor_v2_registry(
+async def _insert_source_sor_v3_registry(
     connection: AsyncConnection,
 ) -> None:
     await connection.execute(
         sa.insert(strategy_groups).values(
             strategy_group_id="SOR-001",
             display_name="SOR opening range breakout and breakdown",
-            active_version_id="sgv:SOR-001:v2",
+            active_version_id="sgv:SOR-001:v3",
             status="active",
             updated_at_ms=900,
         )
     )
     await connection.execute(
         sa.insert(strategy_versions).values(
-            strategy_version_id="sgv:SOR-001:v2",
+            strategy_version_id="sgv:SOR-001:v3",
             strategy_group_id="SOR-001",
-            version=2,
+            version=3,
             semantics={
                 "event_spec_ids": [
-                    "event_spec:SOR-001:SOR-LONG:v2",
-                    "event_spec:SOR-001:SOR-SHORT:v2",
+                    "event_spec:SOR-001:SOR-LONG:v3",
+                    "event_spec:SOR-001:SOR-SHORT:v3",
                 ],
                 "registry_semantic_hash": "sha256:" + "1" * 64,
-                "source": "committed_old_main_program_v2",
+                "source": "committed_strategy_registry_contract",
             },
             status="active",
             created_at_ms=900,
@@ -458,12 +391,12 @@ async def _insert_legacy_sor_v2_registry(
         ("SOR-LONG", "long"),
         ("SOR-SHORT", "short"),
     ):
-        event_spec_id = f"event_spec:SOR-001:{event_id}:v2"
-        exit_policy_id = f"exit-policy:SOR-001:{event_id}:right-tail-v1"
+        event_spec_id = f"event_spec:SOR-001:{event_id}:v3"
+        exit_policy_id = f"exit-policy:SOR-001:{event_id}:sor-v3-right-tail-v1"
         await connection.execute(
             sa.insert(event_specs).values(
                 event_spec_id=event_spec_id,
-                strategy_version_id="sgv:SOR-001:v2",
+                strategy_version_id="sgv:SOR-001:v3",
                 event_id=event_id,
                 position_side=position_side,
                 timeframe="15m",
@@ -482,7 +415,7 @@ async def _insert_legacy_sor_v2_registry(
         await connection.execute(
             sa.insert(exit_policies).values(
                 exit_policy_id=exit_policy_id,
-                exit_policy_version="right-tail-v1",
+                exit_policy_version="sor-v3-right-tail-v1",
                 event_spec_id=event_spec_id,
                 position_side=position_side,
                 policy={},

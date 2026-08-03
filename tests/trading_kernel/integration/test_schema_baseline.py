@@ -6,6 +6,7 @@ from src.trading_kernel.infrastructure.pg_models import metadata
 
 EXPECTED_TABLES = {
     "brc_account_exposure_current",
+    "brc_admission_decisions",
     "brc_budget_reservations",
     "brc_capacity_claims",
     "brc_entry_lane_current",
@@ -13,6 +14,7 @@ EXPECTED_TABLES = {
     "brc_event_required_facts",
     "brc_event_specs",
     "brc_exchange_commands",
+    "brc_exposure_episode_current",
     "brc_fact_definitions",
     "brc_facts_current",
     "brc_instrument_rules_current",
@@ -32,6 +34,7 @@ EXPECTED_TABLES = {
     "brc_runtime_profiles",
     "brc_runtime_scopes_current",
     "brc_schema_metadata",
+    "brc_shadow_outcomes_current",
     "brc_comparative_projection_current",
     "brc_signal_events",
     "brc_signal_fact_snapshots",
@@ -329,7 +332,7 @@ def test_candidate_selector_has_bounded_ordering_indexes() -> None:
     ) in _index_column_sets(signals)
 
 
-def test_review_funding_attribution_has_bounded_instrument_window_index() -> None:
+def test_ticket_selectors_have_bounded_instrument_family_and_direction_indexes() -> None:
     tickets = metadata.tables["brc_trade_tickets"]
 
     assert (
@@ -342,7 +345,13 @@ def test_review_funding_attribution_has_bounded_instrument_window_index() -> Non
     assert (
         "venue_id",
         "account_id",
-        "strategy_group_id",
+        "exposure_family",
+        "terminal_at_ms",
+    ) in _index_column_sets(tickets)
+    assert (
+        "venue_id",
+        "account_id",
+        "position_side",
         "terminal_at_ms",
     ) in _index_column_sets(tickets)
 
@@ -358,10 +367,13 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
     assert {
         "new_entry_submit_enabled",
         "max_strategy_group_concurrent_tickets",
+        "family_ticket_limits",
         "max_ticket_stop_risk_fraction",
         "max_gross_stop_risk_fraction",
         "max_ticket_initial_margin_fraction",
         "max_gross_initial_margin_utilization",
+        "directional_stop_risk_limit_fraction",
+        "min_materialization_ratio",
         "max_leverage",
         "supported_margin_mode",
         "post_stop_stress_multiple",
@@ -378,7 +390,6 @@ def test_owner_capacity_policy_has_dynamic_budget_columns_and_constraints() -> N
     }.isdisjoint(policies.c.keys())
     assert "priority_rank > 0" in check_sql
     assert "max_concurrent_tickets > 0" in check_sql
-    assert "max_strategy_group_concurrent_tickets > 0" in check_sql
     assert (
         "max_ticket_stop_risk_fraction > 0 "
         "AND max_ticket_stop_risk_fraction < 1"

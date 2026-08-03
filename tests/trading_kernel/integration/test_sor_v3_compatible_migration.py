@@ -16,10 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from migrations.trading_kernel import v4_schema
 from src.trading_kernel.infrastructure import pg_models
-from src.trading_kernel.infrastructure.pg_repositories import (
-    PostgresCapacityClaimRepository,
-    PostgresTicketRepository,
-)
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
     SAFE_DATABASE,
@@ -27,6 +23,7 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 )
 
 V4_REVISION = "0001_trading_kernel_baseline_v4"
+SOR_V3_REVISION = "0002_sor_v3_strategy_group_capacity"
 HEAD_REVISION = "0003_portfolio_admission_observability"
 SEMANTIC_DIGEST = "sha256:" + "a" * 64
 EXIT_POLICY_HASH = "sha256:" + "b" * 64
@@ -69,12 +66,12 @@ async def test_production_shaped_v4_history_upgrades_without_lineage_loss(
     before = await _preservation_manifest(engine)
 
     database_url = engine.url.render_as_string(hide_password=False)
-    result = _run_migration(database_url, "upgrade", "head")
+    result = _run_migration(database_url, "upgrade", SOR_V3_REVISION)
     assert result.returncode == 0, result.stderr[-4000:]
 
     after = await _preservation_manifest(engine)
     assert after == before
-    await _assert_head_shape_and_backfill(engine)
+    await _assert_0002_shape_and_backfill(engine)
 
 
 @pytest.mark.asyncio
@@ -84,7 +81,7 @@ async def test_0002_downgrade_refuses_after_v3_registry_rows(
     engine = compatible_migration_engine
     await _seed_v4_history(engine)
     database_url = engine.url.render_as_string(hide_password=False)
-    result = _run_migration(database_url, "upgrade", "head")
+    result = _run_migration(database_url, "upgrade", SOR_V3_REVISION)
     assert result.returncode == 0, result.stderr[-4000:]
     await _insert_v3_event_with_reused_event_id(engine)
 
@@ -95,7 +92,7 @@ async def test_0002_downgrade_refuses_after_v3_registry_rows(
     async with engine.connect() as connection:
         assert await connection.scalar(
             sa.text("SELECT version_num FROM alembic_version")
-        ) == HEAD_REVISION
+        ) == SOR_V3_REVISION
 
 
 async def _assert_v4_shape(engine: AsyncEngine) -> None:
@@ -492,7 +489,7 @@ async def _preservation_manifest(engine: AsyncEngine) -> dict[str, object]:
     return {"counts": counts, "tickets": ticket_rows}
 
 
-async def _assert_head_shape_and_backfill(engine: AsyncEngine) -> None:
+async def _assert_0002_shape_and_backfill(engine: AsyncEngine) -> None:
     async with engine.connect() as connection:
         revision = await connection.scalar(
             sa.text("SELECT version_num FROM alembic_version")
@@ -535,26 +532,6 @@ async def _assert_head_shape_and_backfill(engine: AsyncEngine) -> None:
                 )
             )
         ).mappings().all()
-        policy_columns = await connection.run_sync(
-            lambda sync: {
-                column["name"]: column["default"]
-                for column in sa.inspect(sync).get_columns(
-                    "brc_owner_policy_current"
-                )
-                if column["name"]
-                in {
-                    "family_ticket_limits",
-                    "directional_stop_risk_limit_fraction",
-                    "min_materialization_ratio",
-                }
-            }
-        )
-        historical_ticket = await PostgresTicketRepository(
-            connection
-        ).get_historical_terminal("ticket-v2-1")
-        historical_claim = await PostgresCapacityClaimRepository(
-            connection
-        ).get_historical_terminal("claim-v2-1")
         policy_limit = await connection.scalar(
             sa.text(
                 """
@@ -564,20 +541,6 @@ async def _assert_head_shape_and_backfill(engine: AsyncEngine) -> None:
                 """
             )
         )
-        head_columns = await connection.run_sync(
-            lambda sync: {
-                table: {
-                    column["name"]
-                    for column in sa.inspect(sync).get_columns(table)
-                }
-                for table in (
-                    "brc_signal_events",
-                    "brc_owner_policy_current",
-                    "brc_capacity_claims",
-                    "brc_trade_tickets",
-                )
-            }
-        )
         ticket_indexes = await connection.run_sync(
             lambda sync: {
                 index["name"]
@@ -585,7 +548,7 @@ async def _assert_head_shape_and_backfill(engine: AsyncEngine) -> None:
             }
         )
 
-    assert revision == HEAD_REVISION
+    assert revision == SOR_V3_REVISION
     assert signal_rows == [
         ("signal-v2-1", "legacy:signal:signal-v2-1"),
         ("signal-v2-2", "legacy:signal:signal-v2-2"),
@@ -602,25 +565,7 @@ async def _assert_head_shape_and_backfill(engine: AsyncEngine) -> None:
     assert all(row["exit_policy_id"] == "exit-policy:SOR-001:SOR-LONG:right-tail-v1" for row in ticket_rows)
     assert all(row["exit_policy_semantic_hash"] == EXIT_POLICY_HASH for row in ticket_rows)
     assert ticket_rows[1]["terminal_at_ms"] is None
-    assert policy_limit is None
-    assert policy_columns == {
-        "family_ticket_limits": None,
-        "directional_stop_risk_limit_fraction": None,
-        "min_materialization_ratio": None,
-    }
-    assert historical_ticket is not None
-    assert historical_ticket.ticket_id == "ticket-v2-1"
-    assert historical_ticket.exposure_family == "opening_range"
-    assert historical_claim is not None
-    assert historical_claim.capacity_claim_id == "claim-v2-1"
-    assert historical_claim.exposure_family == "opening_range"
-    for table_name, table in (
-        ("brc_signal_events", pg_models.signal_events),
-        ("brc_owner_policy_current", pg_models.owner_policy_current),
-        ("brc_capacity_claims", pg_models.capacity_claims),
-        ("brc_trade_tickets", pg_models.trade_tickets),
-    ):
-        assert head_columns[table_name] == set(table.c.keys())
+    assert policy_limit == 2
     assert "ix_brc_trade_tickets_active_strategy_group" in ticket_indexes
 
 

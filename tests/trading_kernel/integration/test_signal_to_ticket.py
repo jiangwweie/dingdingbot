@@ -63,6 +63,9 @@ from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresEntryAdmissionRepository,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
@@ -109,7 +112,7 @@ async def test_ingest_persists_signal_and_fact_lineage_without_ticket_terms(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_001,
             ),
         )
@@ -179,7 +182,7 @@ async def test_signal_ingest_does_not_consume_action_time_capital_authority(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_001,
             ),
         )
@@ -198,7 +201,7 @@ async def test_duplicate_strategy_signal_is_exactly_idempotent(
     request = IngestSignalRequest(
         signal=signal,
         runtime_commit="kernel-test-head",
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         now_ms=1_001,
     )
 
@@ -308,7 +311,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit=runtime_commit,
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=now_ms,
             ),
         )
@@ -331,7 +334,7 @@ async def test_expired_candidate_is_terminally_blocked(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_001,
             ),
         )
@@ -345,7 +348,7 @@ async def test_expired_candidate_is_terminally_blocked(
                 admission_snapshot=_admission_snapshot(),
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=signal.expires_at_ms,
             ),
         )
@@ -372,7 +375,7 @@ async def test_candidate_selection_repairs_expired_ready_projection(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_001,
             ),
         )
@@ -416,7 +419,7 @@ async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_001,
             ),
         )
@@ -430,7 +433,7 @@ async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
                 admission_snapshot=snapshot,
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_002,
             ),
         )
@@ -465,7 +468,7 @@ async def test_capacity_rejection_records_one_decision_and_no_trading_authority(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_001,
             ),
         )
@@ -497,7 +500,7 @@ async def test_capacity_rejection_records_one_decision_and_no_trading_authority(
                 admission_snapshot=exhausted_snapshot,
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_002,
             ),
         )
@@ -540,7 +543,7 @@ async def test_locked_family_rejection_records_decision_without_claim_or_ticket(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_001,
             ),
         )
@@ -578,7 +581,7 @@ async def test_locked_family_rejection_records_decision_without_claim_or_ticket(
                     admission_snapshot=admission_snapshot,
                     claim_owner="signal-worker-1",
                     runtime_commit="kernel-test-head",
-                    schema_revision="0002_sor_v3_strategy_group_capacity",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
                     now_ms=1_002,
                 ),
             )
@@ -626,7 +629,7 @@ async def test_decision_insert_failure_rolls_back_ticket_and_command(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_001,
             ),
         )
@@ -646,7 +649,7 @@ async def test_decision_insert_failure_rolls_back_ticket_and_command(
                     admission_snapshot=_admission_snapshot(),
                     claim_owner="signal-worker-1",
                     runtime_commit="kernel-test-head",
-                    schema_revision="0002_sor_v3_strategy_group_capacity",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
                     now_ms=1_002,
                 ),
             )
@@ -701,7 +704,7 @@ async def test_stale_certification_pauses_candidate_until_same_signal_recovers(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 now_ms=1_001,
             ),
         )
@@ -960,7 +963,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 certification={},
                 updated_at_ms=1_000,
             )

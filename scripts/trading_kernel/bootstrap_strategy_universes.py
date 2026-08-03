@@ -37,6 +37,7 @@ from src.trading_kernel.application.read_strategy_universe_status import (
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_FIRST_BATCH_INSTRUMENT_IDS,
     APPROVED_UNIVERSE_EVENT_ORDER,
+    APPROVED_UNIVERSE_EVENT_SPECS,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
@@ -50,6 +51,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
 )
 
 EVENT_ORDER = APPROVED_UNIVERSE_EVENT_ORDER
+EVENT_SPEC_BY_EVENT_ID = dict(APPROVED_UNIVERSE_EVENT_SPECS)
 INITIAL_MEMBERS = APPROVED_FIRST_BATCH_INSTRUMENT_IDS
 CERTIFICATION_PROMOTION_WINDOW_MS = 120_000
 
@@ -61,6 +63,7 @@ class BootstrapBlocked(RuntimeError):
 @dataclass(frozen=True)
 class BootstrapResult:
     event_id: str
+    event_spec_id: str
     status: str
     universe_version_id: str
 
@@ -93,7 +96,11 @@ def _select_bootstrap_universe(
 
 def _validate_static_manifest() -> None:
     contracts = {contract.event_id: contract for contract in registered_strategy_contracts()}
-    if tuple(event_id for event_id in EVENT_ORDER if event_id in contracts) != EVENT_ORDER:
+    if tuple(EVENT_SPEC_BY_EVENT_ID) != EVENT_ORDER or {
+        event_id: contracts[event_id].event_spec_id
+        for event_id in EVENT_ORDER
+        if event_id in contracts
+    } != EVENT_SPEC_BY_EVENT_ID:
         raise BootstrapBlocked("registry_event_manifest_mismatch")
     if len(INITIAL_MEMBERS) != 7 or len(set(INITIAL_MEMBERS)) != 7:
         raise BootstrapBlocked("initial_member_manifest_invalid")
@@ -106,8 +113,9 @@ async def _validate_database_authority(
     *,
     runtime_profile_id: str,
 ) -> BootstrapAuthority:
-    contracts = {contract.event_id: contract for contract in registered_strategy_contracts()}
-    expected_event_specs = tuple(contracts[event_id].event_spec_id for event_id in EVENT_ORDER)
+    expected_event_specs = tuple(
+        EVENT_SPEC_BY_EVENT_ID[event_id] for event_id in EVENT_ORDER
+    )
     async with engine.connect() as connection:
         event_rows = (
             await connection.execute(
@@ -156,7 +164,7 @@ async def _validate_database_authority(
         str(row["event_id"]): str(row["event_spec_id"]) for row in event_rows
     }
     if actual_event_specs != {
-        event_id: contracts[event_id].event_spec_id for event_id in EVENT_ORDER
+        event_id: EVENT_SPEC_BY_EVENT_ID[event_id] for event_id in EVENT_ORDER
     }:
         raise BootstrapBlocked("registry_event_authority_mismatch")
     if len(policy_rows) != 1:
@@ -315,6 +323,8 @@ async def prepare_certification_batch(
             )
         if prepared.universe is None:
             raise BootstrapBlocked("warming_universe_slot_occupied")
+        if prepared.universe.event_spec_id != EVENT_SPEC_BY_EVENT_ID[EVENT_ORDER[0]]:
+            raise BootstrapBlocked("warming_universe_event_spec_mismatch")
         return await _ensure_certification_batch(
             engine,
             runtime_profile_id=runtime_profile_id,
@@ -364,6 +374,11 @@ async def bootstrap_strategy_universes(
                 )
             if installed.universe is None:
                 raise BootstrapBlocked("warming_universe_slot_occupied")
+            expected_event_spec_id = EVENT_SPEC_BY_EVENT_ID[event_id]
+            if installed.universe.event_spec_id != expected_event_spec_id:
+                raise BootstrapBlocked(
+                    f"warming_universe_event_spec_mismatch:{event_id}"
+                )
             if certification_batch_id is None:
                 certification_batch_id = await _ensure_certification_batch(
                     engine,
@@ -391,11 +406,16 @@ async def bootstrap_strategy_universes(
                 )
                 if tuple(member.exchange_instrument_id for member in current.members) != INITIAL_MEMBERS:
                     raise BootstrapBlocked(f"universe_member_manifest_mismatch:{event_id}")
+                if current.event_spec_id != expected_event_spec_id:
+                    raise BootstrapBlocked(
+                        f"universe_event_spec_mismatch:{event_id}"
+                    )
                 if current.lifecycle_state == "active":
                     installed = installed.model_copy(update={"lifecycle_state": "active"})
             results.append(
                 BootstrapResult(
                     event_id=event_id,
+                    event_spec_id=expected_event_spec_id,
                     status=installed.status.value,
                     universe_version_id=universe_version_id,
                 )

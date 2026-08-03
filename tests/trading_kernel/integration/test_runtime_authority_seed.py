@@ -45,9 +45,6 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _database_url,
     _run_alembic,
 )
-from tests.trading_kernel.integration.test_strategy_registry_seed import (
-    _insert_legacy_sor_v2_registry,
-)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _TICKET_STRATEGY_GROUP_ID = "CPM-RO-001"
@@ -157,7 +154,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         seeded_at_ms=1_800_000_000_000,
     )
 
@@ -277,7 +274,7 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
             ).mappings()
         }
         assert metadata_rows["runtime_commit"] == "commit-acceptance"
-        assert metadata_rows["schema_revision"] == "0002_sor_v3_strategy_group_capacity"
+        assert metadata_rows["schema_revision"] == CURRENT_SCHEMA_REVISION
         assert metadata_rows["registry_semantic_hash"].startswith("sha256:")
         assert metadata_rows["seed_identity"].startswith("sha256:")
 
@@ -290,7 +287,7 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -349,29 +346,28 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
 
 
 @pytest.mark.asyncio
-async def test_compatible_identity_monotonically_moves_v2_authority_to_v3(
+async def test_compatible_identity_rotates_exact_migrated_v4_authority(
     runtime_seed_engine: AsyncEngine,
 ) -> None:
     runtime_seed = _runtime_seed_module()
-    source_revision = "0001_trading_kernel_baseline_v4"
+    source_revision = "0002_sor_v3_strategy_group_capacity"
     source_commit = "b" * 40
     source_seed = "sha256:" + "9" * 64
-    allowed_v2 = (
-        "event_spec:BRF2-001:BRF2-SHORT:v2",
-        "event_spec:CPM-RO-001:CPM-LONG:v2",
-        "event_spec:MI-001:MI-LONG:v2",
-        "event_spec:MPG-001:MPG-LONG:v2",
-        "event_spec:SOR-001:SOR-LONG:v2",
-        "event_spec:SOR-001:SOR-SHORT:v2",
+    allowed_vnext = (
+        "event_spec:BRF2-001:BRF2-SHORT:v3",
+        "event_spec:CPM-RO-001:CPM-LONG:v3",
+        "event_spec:MI-001:MI-LONG:v3",
+        "event_spec:MPG-001:MPG-LONG:v3",
+        "event_spec:SOR-001:SOR-LONG:v4",
+        "event_spec:SOR-001:SOR-SHORT:v4",
     )
     policy = runtime_seed._policy_values(
-        version=2,
-        new_entry_submit_enabled=True,
-        allowed_event_spec_ids=allowed_v2,
+        version=4,
+        new_entry_submit_enabled=False,
+        allowed_event_spec_ids=allowed_vnext,
         updated_at_ms=1_800_000_000_000,
     )
     async with runtime_seed_engine.begin() as connection:
-        await _insert_legacy_sor_v2_registry(connection)
         await connection.execute(
             sa.insert(runtime_profiles).values(
                 runtime_profile_id="tiny-live-v1",
@@ -386,11 +382,11 @@ async def test_compatible_identity_monotonically_moves_v2_authority_to_v3(
         await connection.execute(sa.insert(owner_policy_current).values(policy))
         await connection.execute(
             sa.insert(owner_policy_events).values(
-                owner_policy_event_id="policy-event:policy-main:v2",
+                owner_policy_event_id="policy-event:policy-main:v4",
                 owner_policy_id="policy-main",
-                policy_version=2,
-                operation="arm_acceptance_ticket",
-                payload={"source": "v2"},
+                policy_version=4,
+                operation="compatible_upgrade_portfolio_admission_v4",
+                payload={"source": "0003_migration"},
                 created_at_ms=1_800_000_000_000,
             )
         )
@@ -484,8 +480,8 @@ async def test_compatible_identity_monotonically_moves_v2_authority_to_v3(
                 )
             ).all()
         )
-    assert current["policy_version"] == 3
-    assert current["new_entry_submit_enabled"] is True
+    assert current["policy_version"] == 4
+    assert current["new_entry_submit_enabled"] is False
     assert current["max_concurrent_tickets"] == 3
     assert current["max_strategy_group_concurrent_tickets"] is None
     assert current["max_ticket_stop_risk_fraction"] == Decimal("0.02")
@@ -502,23 +498,10 @@ async def test_compatible_identity_monotonically_moves_v2_authority_to_v3(
         "event_spec:SOR-001:SOR-LONG:v4",
         "event_spec:SOR-001:SOR-SHORT:v4",
     ]
-    assert events == [2, 3]
+    assert events == [4]
     assert metadata_rows["runtime_commit"] == "a" * 40
     assert metadata_rows["schema_revision"] == CURRENT_SCHEMA_REVISION
     assert metadata_rows["seed_identity"] == result.runtime_seed_semantic_hash
-
-    await _insert_terminal_reviewed_ticket(runtime_seed_engine)
-    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
-        promoted = await runtime_seed.promote_full_policy(
-            uow,
-            runtime_seed.PromoteFullPolicyRequest(
-                acceptance_ticket_id="ticket-acceptance",
-                promoted_at_ms=1_800_000_000_300,
-            ),
-        )
-    assert promoted.policy_version == 4
-    assert promoted.new_entry_submit_enabled is True
-
 
 @pytest.mark.asyncio
 async def test_recovery_identity_refuses_a_runtime_without_one_unknown_leverage_ticket(
@@ -528,7 +511,7 @@ async def test_recovery_identity_refuses_a_runtime_without_one_unknown_leverage_
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -559,7 +542,7 @@ async def test_closure_identity_rotates_only_one_exact_released_pending_ticket(
     initial = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -589,7 +572,7 @@ async def test_readonly_certification_emits_exact_pending_closure_manifest(
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="a" * 40,
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
@@ -629,7 +612,7 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     seed_request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
         runtime_commit="commit-acceptance",
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         seeded_at_ms=1_800_000_000_000,
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
