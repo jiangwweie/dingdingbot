@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from enum import StrEnum
+from typing import Final
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+
+FIXED_EXCHANGE_CONFIGURED_LEVERAGE: Final[int] = 5
 
 
 class CapacitySizingStatus(StrEnum):
@@ -165,7 +168,11 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
 
     if request.active_ticket_count >= request.max_concurrent_tickets:
         return _refused(CapacitySizingStatus.COUNT_EXHAUSTED)
-    if request.configured_leverage > request.permitted_max_leverage:
+    if (
+        request.configured_leverage != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+        or FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+        > request.permitted_max_leverage
+    ):
         return _refused(CapacitySizingStatus.INVALID_FACTS)
 
     remaining_slots = request.max_concurrent_tickets - request.active_ticket_count
@@ -231,7 +238,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
             rounding=ROUND_CEILING
         )
     )
-    leverages = (request.configured_leverage,)
+    leverages = (FIXED_EXCHANGE_CONFIGURED_LEVERAGE,)
     candidates: list[CapacitySizingSelection] = []
     venue_minimum_unmet = False
     exit_plan_unexecutable = False

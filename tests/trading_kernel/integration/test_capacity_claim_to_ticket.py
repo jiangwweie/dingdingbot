@@ -153,7 +153,7 @@ def _admission_snapshot() -> EntryAdmissionSnapshot:
             margin_mode="cross",
             exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
             mark_price=Decimal(10000),
-            configured_leverage=10,
+            configured_leverage=5,
             total_wallet_balance=Decimal(1000),
             total_margin_balance=Decimal(1000),
             total_initial_margin=Decimal(0),

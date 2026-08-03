@@ -27,7 +27,6 @@ from src.trading_kernel.domain.capacity import freeze_capacity_claim
 from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     OrderCommandPayload,
-    SetLeverageCommandPayload,
 )
 from src.trading_kernel.domain.cross_margin_stress import (
     AccountRiskSnapshot,
@@ -94,7 +93,7 @@ async def issue_engine() -> AsyncGenerator[AsyncEngine, None]:
 async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
     issue_engine: AsyncEngine,
 ) -> None:
-    ticket = _ticket(leverage_change_required=True)
+    ticket = _ticket(leverage_change_required=False)
     await _seed_policy(issue_engine)
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
@@ -136,11 +135,10 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
     assert exposure.gross_notional == ticket.notional
     assert exposure.active_ticket_count == 1
     assert [(command.kind, command.generation) for command in commands] == [
-        (ExchangeCommandKind.SET_LEVERAGE, 1)
+        (ExchangeCommandKind.ENTRY, 1)
     ]
-    assert isinstance(commands[0].payload, SetLeverageCommandPayload)
-    assert commands[0].venue_client_order_id is None
-    assert commands[0].payload.leverage_fact_digest == _expected_leverage_fact_digest(
+    assert isinstance(commands[0].payload, OrderCommandPayload)
+    assert commands[0].payload.leverage_verification_digest == _expected_leverage_fact_digest(
         claim=_issue_request(
             ticket=ticket,
             now_ms=1_001,

@@ -16,6 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from migrations.trading_kernel import v4_schema
 from src.trading_kernel.infrastructure import pg_models
+from src.trading_kernel.infrastructure.pg_repositories import (
+    PostgresCapacityClaimRepository,
+    PostgresTicketRepository,
+)
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
     SAFE_DATABASE,
@@ -23,7 +27,7 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 )
 
 V4_REVISION = "0001_trading_kernel_baseline_v4"
-HEAD_REVISION = "0002_sor_v3_strategy_group_capacity"
+HEAD_REVISION = "0003_portfolio_admission_observability"
 SEMANTIC_DIGEST = "sha256:" + "a" * 64
 EXIT_POLICY_HASH = "sha256:" + "b" * 64
 FACT_DIGEST = "sha256:" + "c" * 64
@@ -531,6 +535,26 @@ async def _assert_head_shape_and_backfill(engine: AsyncEngine) -> None:
                 )
             )
         ).mappings().all()
+        policy_columns = await connection.run_sync(
+            lambda sync: {
+                column["name"]: column["default"]
+                for column in sa.inspect(sync).get_columns(
+                    "brc_owner_policy_current"
+                )
+                if column["name"]
+                in {
+                    "family_ticket_limits",
+                    "directional_stop_risk_limit_fraction",
+                    "min_materialization_ratio",
+                }
+            }
+        )
+        historical_ticket = await PostgresTicketRepository(
+            connection
+        ).get_historical_terminal("ticket-v2-1")
+        historical_claim = await PostgresCapacityClaimRepository(
+            connection
+        ).get_historical_terminal("claim-v2-1")
         policy_limit = await connection.scalar(
             sa.text(
                 """
@@ -578,7 +602,18 @@ async def _assert_head_shape_and_backfill(engine: AsyncEngine) -> None:
     assert all(row["exit_policy_id"] == "exit-policy:SOR-001:SOR-LONG:right-tail-v1" for row in ticket_rows)
     assert all(row["exit_policy_semantic_hash"] == EXIT_POLICY_HASH for row in ticket_rows)
     assert ticket_rows[1]["terminal_at_ms"] is None
-    assert policy_limit == 2
+    assert policy_limit is None
+    assert policy_columns == {
+        "family_ticket_limits": None,
+        "directional_stop_risk_limit_fraction": None,
+        "min_materialization_ratio": None,
+    }
+    assert historical_ticket is not None
+    assert historical_ticket.ticket_id == "ticket-v2-1"
+    assert historical_ticket.exposure_family == "opening_range"
+    assert historical_claim is not None
+    assert historical_claim.capacity_claim_id == "claim-v2-1"
+    assert historical_claim.exposure_family == "opening_range"
     for table_name, table in (
         ("brc_signal_events", pg_models.signal_events),
         ("brc_owner_policy_current", pg_models.owner_policy_current),

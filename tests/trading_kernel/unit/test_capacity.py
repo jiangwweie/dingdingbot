@@ -142,12 +142,28 @@ def test_capacity_claim_rejects_exhausted_directional_risk() -> None:
     assert decision.claim is None
 
 
+def test_capacity_claim_rejects_action_time_leverage_drift_from_fixed_profile() -> None:
+    _, decision = _build_decision(configured_leverage=10)
+
+    assert decision.status is CapacityClaimStatus.ACTION_FACTS_INVALID_OR_STALE
+    assert decision.claim is None
+
+
 def _build_decision(
     *,
     active_family_ticket_count: int = 0,
     directional_risk_at_stop: Decimal = Decimal(0),
+    configured_leverage: int = 5,
 ):
     snapshot = _snapshot()
+    risk_values = snapshot.account_risk_snapshot.model_dump(
+        mode="python",
+        exclude={"snapshot_digest"},
+    )
+    risk_values["configured_leverage"] = configured_leverage
+    snapshot = snapshot.model_copy(
+        update={"account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)}
+    )
     ownership = AdmissionOwnership()
     decision = build_capacity_claim(
         signal=_long_signal(),

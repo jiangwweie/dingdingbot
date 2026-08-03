@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Literal, cast
 
 import sqlalchemy as sa
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -99,6 +99,27 @@ _EVENT_MODELS = {
 _COMMAND_PAYLOAD_ADAPTER: TypeAdapter[CommandPayload] = TypeAdapter(CommandPayload)
 
 
+class HistoricalTerminalTicket(BaseModel):
+    """Read-only terminal Ticket projection that has no v4 action authority."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    ticket_id: str
+    capacity_claim_id: str
+    exposure_family: ExposureFamily
+    terminal_at_ms: int
+
+
+class HistoricalTerminalCapacityClaim(BaseModel):
+    """Read-only terminal Claim projection that has no v4 action authority."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    capacity_claim_id: str
+    ticket_id: str
+    exposure_family: ExposureFamily
+
+
 def _accepted_exchange_order_id(row: RowMapping) -> str:
     payload = row["result_payload"]
     if not isinstance(payload, dict):
@@ -121,7 +142,36 @@ class PostgresTicketRepository:
             sa.select(trade_tickets).where(trade_tickets.c.ticket_id == ticket_id)
         )
         row = result.mappings().one_or_none()
-        return None if row is None else _ticket_from_row(row)
+        if row is None or _is_historical_terminal_ticket(row):
+            return None
+        return _ticket_from_row(row)
+
+    async def get_historical_terminal(
+        self,
+        ticket_id: str,
+    ) -> HistoricalTerminalTicket | None:
+        result = await self._connection.execute(
+            sa.select(
+                trade_tickets.c.ticket_id,
+                trade_tickets.c.capacity_claim_id,
+                trade_tickets.c.exposure_family,
+                trade_tickets.c.terminal_at_ms,
+            ).where(
+                trade_tickets.c.ticket_id == ticket_id,
+                trade_tickets.c.terminal_at_ms.is_not(None),
+                trade_tickets.c.exposure_family.is_not(None),
+                trade_tickets.c.minimum_stop_risk_budget.is_(None),
+            )
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return HistoricalTerminalTicket(
+            ticket_id=str(row["ticket_id"]),
+            capacity_claim_id=str(row["capacity_claim_id"]),
+            exposure_family=_exposure_family(row["exposure_family"]),
+            terminal_at_ms=int(row["terminal_at_ms"]),
+        )
 
     async def mark_terminal(
         self,
@@ -429,6 +479,8 @@ class PostgresAggregateRepository:
             return None
         ticket = await self._tickets.get(ticket_id)
         if ticket is None:
+            if await self._tickets.get_historical_terminal(ticket_id) is not None:
+                return None
             raise RuntimeError("aggregate exists without immutable Ticket")
         return _aggregate_from_row(row, ticket)
 
@@ -1015,6 +1067,36 @@ class PostgresCapacityClaimRepository:
     async def get_for_ticket(self, ticket_id: str) -> CapacityClaim | None:
         return await self._get(capacity_claims.c.ticket_id == ticket_id)
 
+    async def get_historical_terminal(
+        self,
+        capacity_claim_id: str,
+    ) -> HistoricalTerminalCapacityClaim | None:
+        result = await self._connection.execute(
+            sa.select(
+                capacity_claims.c.capacity_claim_id,
+                capacity_claims.c.ticket_id,
+                capacity_claims.c.exposure_family,
+            )
+            .join(
+                trade_tickets,
+                trade_tickets.c.ticket_id == capacity_claims.c.ticket_id,
+            )
+            .where(
+                capacity_claims.c.capacity_claim_id == capacity_claim_id,
+                trade_tickets.c.terminal_at_ms.is_not(None),
+                capacity_claims.c.exposure_family.is_not(None),
+                capacity_claims.c.minimum_stop_risk_budget.is_(None),
+            )
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return HistoricalTerminalCapacityClaim(
+            capacity_claim_id=str(row["capacity_claim_id"]),
+            ticket_id=str(row["ticket_id"]),
+            exposure_family=_exposure_family(row["exposure_family"]),
+        )
+
     async def _get(
         self,
         predicate: sa.ColumnElement[bool],
@@ -1023,7 +1105,15 @@ class PostgresCapacityClaimRepository:
             sa.select(capacity_claims).where(predicate)
         )
         row = result.mappings().one_or_none()
-        return None if row is None else _capacity_claim_from_row(row)
+        if row is None:
+            return None
+        if row["minimum_stop_risk_budget"] is None:
+            historical = await self.get_historical_terminal(
+                str(row["capacity_claim_id"])
+            )
+            if historical is not None:
+                return None
+        return _capacity_claim_from_row(row)
 
 
 class PostgresAdmissionDecisionRepository:
@@ -2469,3 +2559,10 @@ def _exposure_family(value: object) -> ExposureFamily:
     }:
         return cast(ExposureFamily, normalized)
     raise RuntimeError(f"invalid persisted exposure family: {normalized!r}")
+
+
+def _is_historical_terminal_ticket(row: RowMapping) -> bool:
+    return (
+        row["terminal_at_ms"] is not None
+        and row["minimum_stop_risk_budget"] is None
+    )

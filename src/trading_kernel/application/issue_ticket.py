@@ -16,6 +16,9 @@ from src.trading_kernel.application.strategy_authority import (
     strategy_authority_matches_ticket,
 )
 from src.trading_kernel.domain.capacity import CapacityClaim
+from src.trading_kernel.domain.capacity_sizing import (
+    FIXED_EXCHANGE_CONFIGURED_LEVERAGE,
+)
 from src.trading_kernel.domain.events import TicketIssued
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.ticket import TradeTicket
@@ -117,6 +120,16 @@ async def issue_ticket(
     ):
         return IssueTicketResult(
             status=IssueTicketStatus.POLICY_MISSING_OR_STALE,
+            ticket_id=None,
+        )
+    if (
+        ticket.selected_leverage != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+        or claim.configured_leverage_at_claim
+        != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+        or ticket.leverage_change_required
+    ):
+        return IssueTicketResult(
+            status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
             ticket_id=None,
         )
 

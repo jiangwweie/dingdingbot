@@ -212,7 +212,7 @@ def _request(**changes: object) -> CapacitySizingRequest:
         "directional_stop_risk_limit_fraction": Decimal("0.04"),
         "min_materialization_ratio": Decimal("0.50"),
         "permitted_max_leverage": 10,
-        "configured_leverage": 10,
+        "configured_leverage": 5,
         "entry_reference_price": Decimal(100),
         "initial_stop_price": Decimal("97.5"),
         "quantity_step": Decimal("0.1"),

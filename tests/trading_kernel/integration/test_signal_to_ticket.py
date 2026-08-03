@@ -60,6 +60,7 @@ from src.trading_kernel.infrastructure.pg_models import (
 )
 from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresAdmissionDecisionRepository,
+    PostgresEntryAdmissionRepository,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
@@ -403,7 +404,7 @@ async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
         mode="python",
         exclude={"snapshot_digest"},
     )
-    risk_values["configured_leverage"] = 10
+    risk_values["configured_leverage"] = 5
     snapshot = snapshot.model_copy(
         update={
             "account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)
@@ -477,6 +478,7 @@ async def test_capacity_rejection_records_one_decision_and_no_trading_authority(
                 exclude={"snapshot_digest"},
             ),
             "available_margin": Decimal(0),
+            "configured_leverage": 5,
         }
     )
     exhausted_snapshot = EntryAdmissionSnapshot(
@@ -523,6 +525,92 @@ async def test_capacity_rejection_records_one_decision_and_no_trading_authority(
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(exchange_commands)
         ) == 0
+
+
+@pytest.mark.asyncio
+async def test_locked_family_rejection_records_decision_without_claim_or_ticket(
+    issue_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal(signal_event_id="signal-locked-family-rejected")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0002_sor_v3_strategy_group_capacity",
+                now_ms=1_001,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
+
+    original_count = PostgresEntryAdmissionRepository.count_active_family_tickets
+    family_count_calls = 0
+
+    async def count_family_at_lock(*args, **kwargs) -> int:
+        nonlocal family_count_calls
+        family_count_calls += 1
+        if family_count_calls == 1:
+            return 0
+        return 2
+
+    monkeypatch.setattr(
+        PostgresEntryAdmissionRepository,
+        "count_active_family_tickets",
+        count_family_at_lock,
+    )
+    risk_values = _admission_snapshot().account_risk_snapshot.model_dump(
+        mode="python",
+        exclude={"snapshot_digest"},
+    )
+    risk_values["configured_leverage"] = 5
+    admission_snapshot = _admission_snapshot().model_copy(
+        update={"account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)}
+    )
+    try:
+        async with PostgresKernelUnitOfWork(issue_engine) as uow:
+            result = await issue_ready_signal(
+                uow,
+                IssueReadySignalRequest(
+                    signal_event_id=signal.signal_event_id,
+                    admission_snapshot=admission_snapshot,
+                    claim_owner="signal-worker-1",
+                    runtime_commit="kernel-test-head",
+                    schema_revision="0002_sor_v3_strategy_group_capacity",
+                    now_ms=1_002,
+                ),
+            )
+    finally:
+        monkeypatch.setattr(
+            PostgresEntryAdmissionRepository,
+            "count_active_family_tickets",
+            original_count,
+        )
+
+    assert result.status is IssueTicketStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
+    assert family_count_calls == 2
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        decision = await uow.admission_decisions.get_for_signal(
+            signal.signal_event_id
+        )
+    assert decision is not None
+    assert decision.decision_status.value == "rejected"
+    assert decision.first_blocker == "exposure_family_capacity_exhausted"
+    assert decision.binding_constraint == "exposure_family_capacity_exhausted"
+    assert decision.capacity_claim_id is None
+    assert decision.ticket_id is None
+    async with issue_engine.connect() as connection:
+        for table in (
+            capacity_claims,
+            trade_tickets,
+            budget_reservations,
+            exchange_commands,
+        ):
+            assert await connection.scalar(
+                sa.select(sa.func.count()).select_from(table)
+            ) == 0
 
 
 @pytest.mark.asyncio

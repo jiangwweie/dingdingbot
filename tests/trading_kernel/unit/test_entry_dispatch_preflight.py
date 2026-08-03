@@ -29,6 +29,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandStatus,
     OrderCommandPayload,
+    SetLeverageCommandPayload,
     build_command_id,
     build_venue_client_order_id,
 )
@@ -176,6 +177,77 @@ def test_entry_preflight_refuses_family_policy_drift() -> None:
     decision = revalidate_entry_dispatch(request)
 
     assert decision.status is EntryDispatchPreflightStatus.POLICY_DRIFT
+
+
+def test_entry_preflight_refuses_forged_ten_x_claim_even_when_policy_allows_ten_x() -> None:
+    base = _preflight_request(snapshot=_snapshot())
+    claim = base.capacity_claim.model_copy(
+        update={
+            "required_leverage": 10,
+            "selected_leverage": 10,
+            "configured_leverage_at_claim": 10,
+        }
+    )
+    ticket = claim.to_ticket()
+    risk_values = base.admission_snapshot.account_risk_snapshot.model_dump(
+        mode="python",
+        exclude={"snapshot_digest"},
+    )
+    risk_values["configured_leverage"] = 10
+    snapshot = base.admission_snapshot.model_copy(
+        update={"account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)}
+    )
+    command = base.command.model_copy(
+        update={
+            "ticket_identity": ticket.identity,
+            "payload": base.command.payload.model_copy(
+                update={"required_configured_leverage": 10}
+            ),
+        }
+    )
+    request = base.model_copy(
+        update={
+            "command": command,
+            "ticket": ticket,
+            "capacity_claim": claim,
+            "admission_snapshot": snapshot,
+            "account_entry_health": classify_account_entry_health(
+                snapshot, AdmissionOwnership()
+            ),
+            "instrument_entry_health": classify_instrument_entry_health(
+                snapshot,
+                AdmissionOwnership(),
+                exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+                requested_position_side=ticket.identity.netting_domain.position_side,
+            ),
+        }
+    )
+
+    decision = revalidate_entry_dispatch(request)
+
+    assert decision.status is EntryDispatchPreflightStatus.LEVERAGE_MISMATCH
+
+
+def test_entry_preflight_refuses_set_leverage_command_under_fixed_profile() -> None:
+    base = _preflight_request(snapshot=_snapshot())
+    command = base.command.model_copy(
+        update={
+            "kind": ExchangeCommandKind.SET_LEVERAGE,
+            "venue_client_order_id": None,
+            "payload": SetLeverageCommandPayload(
+                desired_leverage=5,
+                owner_policy_version=base.ticket.owner_policy_version,
+                entry_admission_snapshot_digest=(
+                    base.capacity_claim.entry_admission_snapshot_digest
+                ),
+                leverage_fact_digest="sha256:" + "a" * 64,
+            ),
+        }
+    )
+
+    decision = revalidate_entry_dispatch(base.model_copy(update={"command": command}))
+
+    assert decision.status is EntryDispatchPreflightStatus.LEVERAGE_MISMATCH
 
 
 def _preflight_request(*, snapshot):

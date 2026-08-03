@@ -88,16 +88,48 @@ def _upgrade_portfolio_admission_policy_v4() -> None:
         sa.Column(
             "family_ticket_limits",
             JSONB(),
-            nullable=False,
-            server_default=sa.text(
-                "'{\"long_continuation\": 1, \"opening_range\": 2, \"rally_failure_short\": 1}'::jsonb"
-            ),
+            nullable=True,
+        ),
+    )
+    op.add_column(
+        "brc_owner_policy_current",
+        sa.Column(
+            "directional_stop_risk_limit_fraction",
+            sa.Numeric(36, 18),
+            nullable=True,
+        ),
+    )
+    op.add_column(
+        "brc_owner_policy_current",
+        sa.Column(
+            "min_materialization_ratio",
+            sa.Numeric(36, 18),
+            nullable=True,
         ),
     )
     op.alter_column(
         "brc_owner_policy_current",
         "max_strategy_group_concurrent_tickets",
         nullable=True,
+        server_default=None,
+    )
+    _backfill_exact_v3_policy_to_v4()
+    op.alter_column(
+        "brc_owner_policy_current",
+        "family_ticket_limits",
+        nullable=False,
+        server_default=None,
+    )
+    op.alter_column(
+        "brc_owner_policy_current",
+        "directional_stop_risk_limit_fraction",
+        nullable=False,
+        server_default=None,
+    )
+    op.alter_column(
+        "brc_owner_policy_current",
+        "min_materialization_ratio",
+        nullable=False,
         server_default=None,
     )
     for column_name in (
@@ -111,24 +143,6 @@ def _upgrade_portfolio_admission_policy_v4() -> None:
             nullable=True,
             server_default=None,
         )
-    op.add_column(
-        "brc_owner_policy_current",
-        sa.Column(
-            "directional_stop_risk_limit_fraction",
-            sa.Numeric(36, 18),
-            nullable=False,
-            server_default="0.04",
-        ),
-    )
-    op.add_column(
-        "brc_owner_policy_current",
-        sa.Column(
-            "min_materialization_ratio",
-            sa.Numeric(36, 18),
-            nullable=False,
-            server_default="0.50",
-        ),
-    )
     for table_name in ("brc_capacity_claims", "brc_trade_tickets"):
         op.add_column(
             table_name,
@@ -158,6 +172,7 @@ def _upgrade_portfolio_admission_policy_v4() -> None:
             table_name,
             sa.Column("minimum_stop_risk_budget", sa.Numeric(36, 18), nullable=True),
         )
+    _backfill_terminal_exposure_families()
     op.create_index(
         "ix_brc_trade_tickets_active_family",
         "brc_trade_tickets",
@@ -167,6 +182,102 @@ def _upgrade_portfolio_admission_policy_v4() -> None:
         "ix_brc_trade_tickets_active_directional_risk",
         "brc_trade_tickets",
         ["venue_id", "account_id", "position_side", "terminal_at_ms"],
+    )
+
+
+def _backfill_exact_v3_policy_to_v4() -> None:
+    """Migrate only the exact former deployed capacity profile once."""
+
+    op.execute(
+        sa.text(
+            """
+            UPDATE brc_owner_policy_current
+               SET family_ticket_limits =
+                       '{"long_continuation": 1, "opening_range": 2, "rally_failure_short": 1}'::jsonb,
+                   directional_stop_risk_limit_fraction = 0.04,
+                   min_materialization_ratio = 0.50
+             WHERE family_ticket_limits IS NULL
+               AND directional_stop_risk_limit_fraction IS NULL
+               AND min_materialization_ratio IS NULL
+               AND max_concurrent_tickets = 3
+               AND max_strategy_group_concurrent_tickets = 2
+               AND max_ticket_stop_risk_fraction = 0.03
+               AND max_gross_stop_risk_fraction = 0.06
+               AND max_ticket_initial_margin_fraction = 0.45
+               AND max_gross_initial_margin_utilization = 0.90
+               AND max_leverage = 10
+               AND supported_margin_mode = 'cross'
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            UPDATE brc_owner_policy_current
+               SET max_strategy_group_concurrent_tickets = NULL
+             WHERE family_ticket_limits =
+                       '{"long_continuation": 1, "opening_range": 2, "rally_failure_short": 1}'::jsonb
+               AND directional_stop_risk_limit_fraction = 0.04
+               AND min_materialization_ratio = 0.50
+               AND max_concurrent_tickets = 3
+               AND max_strategy_group_concurrent_tickets = 2
+               AND max_ticket_stop_risk_fraction = 0.03
+               AND max_gross_stop_risk_fraction = 0.06
+               AND max_ticket_initial_margin_fraction = 0.45
+               AND max_gross_initial_margin_utilization = 0.90
+               AND max_leverage = 10
+               AND supported_margin_mode = 'cross'
+            """
+        )
+    )
+
+
+def _backfill_terminal_exposure_families() -> None:
+    """Recover only Family semantics derivable from historical Event identity."""
+
+    family_case = """
+        CASE event_specs.event_id
+            WHEN 'CPM-LONG' THEN 'long_continuation'
+            WHEN 'MPG-LONG' THEN 'long_continuation'
+            WHEN 'MI-LONG' THEN 'long_continuation'
+            WHEN 'SOR-LONG' THEN 'opening_range'
+            WHEN 'SOR-SHORT' THEN 'opening_range'
+            WHEN 'BRF2-SHORT' THEN 'rally_failure_short'
+        END
+    """
+    op.execute(
+        sa.text(
+            f"""
+            UPDATE brc_trade_tickets AS target
+               SET exposure_family = {family_case}
+              FROM brc_event_specs AS event_specs
+             WHERE target.exposure_family IS NULL
+               AND target.event_spec_id = event_specs.event_spec_id
+               AND target.terminal_at_ms IS NOT NULL
+               AND event_specs.event_id IN (
+                   'CPM-LONG', 'MPG-LONG', 'MI-LONG',
+                   'SOR-LONG', 'SOR-SHORT', 'BRF2-SHORT'
+               )
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            f"""
+            UPDATE brc_capacity_claims AS target
+               SET exposure_family = {family_case}
+              FROM brc_event_specs AS event_specs,
+                   brc_trade_tickets AS ticket
+             WHERE target.exposure_family IS NULL
+               AND target.event_spec_id = event_specs.event_spec_id
+               AND ticket.ticket_id = target.ticket_id
+               AND ticket.terminal_at_ms IS NOT NULL
+               AND event_specs.event_id IN (
+                   'CPM-LONG', 'MPG-LONG', 'MI-LONG',
+                   'SOR-LONG', 'SOR-SHORT', 'BRF2-SHORT'
+               )
+            """
+        )
     )
 
 

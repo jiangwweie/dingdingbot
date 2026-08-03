@@ -25,6 +25,9 @@ from src.trading_kernel.domain.account_entry_health import (
     AccountEntryHealthStatus,
 )
 from src.trading_kernel.domain.capacity import CapacityClaim
+from src.trading_kernel.domain.capacity_sizing import (
+    FIXED_EXCHANGE_CONFIGURED_LEVERAGE,
+)
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
@@ -66,7 +69,6 @@ class EntryDispatchPreflightStatus(StrEnum):
     QUOTE_RISK = "quote_risk"
     STRESS_FAILED = "stress_failed"
     LEVERAGE_MISMATCH = "leverage_mismatch"
-    SET_LEVERAGE_INSTRUMENT_NOT_FLAT = "set_leverage_instrument_not_flat"
 
 
 class EntryDispatchPreflightRequest(BaseModel):
@@ -146,6 +148,14 @@ def revalidate_entry_dispatch(
     account_risk = snapshot.account_risk_snapshot
     domain = ticket.identity.netting_domain
 
+    if (
+        ticket.selected_leverage != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+        or claim.configured_leverage_at_claim
+        != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+        or account_risk.configured_leverage
+        != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+    ):
+        return _refused(EntryDispatchPreflightStatus.LEVERAGE_MISMATCH)
     if not _command_matches_ticket_and_claim(command, ticket, claim):
         return _refused(EntryDispatchPreflightStatus.COMMAND_MISMATCH)
     if request.now_ms >= command.deadline_at_ms or request.now_ms >= claim.expires_at_ms:
@@ -262,12 +272,6 @@ def revalidate_entry_dispatch(
     if account_risk.exchange_instrument_id != domain.exchange_instrument_id:
         return _refused(EntryDispatchPreflightStatus.SCOPE_DRIFT)
     if command.kind is ExchangeCommandKind.SET_LEVERAGE:
-        if not _exact_instrument_is_flat_and_order_free(snapshot, ticket):
-            return _refused(
-                EntryDispatchPreflightStatus.SET_LEVERAGE_INSTRUMENT_NOT_FLAT
-            )
-        return _allowed()
-    if account_risk.configured_leverage != ticket.selected_leverage:
         return _refused(EntryDispatchPreflightStatus.LEVERAGE_MISMATCH)
     return _allowed()
 
@@ -296,7 +300,9 @@ def _command_matches_ticket_and_claim(
         )
     return (
         isinstance(command.payload, OrderCommandPayload)
-        and command.payload.required_configured_leverage == ticket.selected_leverage
+        and ticket.selected_leverage == FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+        and command.payload.required_configured_leverage
+        == FIXED_EXCHANGE_CONFIGURED_LEVERAGE
     )
 
 
@@ -420,19 +426,6 @@ def _netting_domain_is_flat_and_order_free(
         order.exchange_instrument_id == domain.exchange_instrument_id
         and order.position_side == domain.position_side
         for order in snapshot.open_orders
-    )
-
-
-def _exact_instrument_is_flat_and_order_free(
-    snapshot: EntryAdmissionSnapshot,
-    ticket: TradeTicket,
-) -> bool:
-    instrument_id = ticket.identity.netting_domain.exchange_instrument_id
-    return not any(
-        position.exchange_instrument_id == instrument_id and position.quantity > 0
-        for position in snapshot.account_risk_snapshot.account_positions
-    ) and not any(
-        order.exchange_instrument_id == instrument_id for order in snapshot.open_orders
     )
 
 

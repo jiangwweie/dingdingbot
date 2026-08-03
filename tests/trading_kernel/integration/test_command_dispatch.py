@@ -27,7 +27,6 @@ from src.trading_kernel.application.issue_ticket import IssueTicketStatus, issue
 from src.trading_kernel.application.ports import (
     MonitorOwnerStatus,
     VenueCommandRequest,
-    VenueMutationFailure,
     VenueSetLeverageRequest,
 )
 from src.trading_kernel.application.project_owner_state import (
@@ -382,53 +381,6 @@ class CountingKindAwareAcceptingVenue(KindAwareAcceptingVenue):
         return await super().execute(request)
 
 
-class LeverageThenEntryVenue:
-    def __init__(self) -> None:
-        self.mutations: list[str] = []
-
-    async def set_leverage(
-        self, request: VenueSetLeverageRequest
-    ) -> SetLeverageCommandResult:
-        self.mutations.append("set_leverage")
-        return SetLeverageCommandResult(
-            exchange_configured_leverage=request.payload.desired_leverage,
-            leverage_verified_at_ms=2_000,
-            leverage_verification_digest="sha256:" + "4" * 64,
-        )
-
-    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
-        self.mutations.append("create_order")
-        return ExchangeCommandResult(
-            status=ExchangeCommandStatus.ACCEPTED,
-            observed_at_ms=2_100,
-            exchange_order_id="venue-entry-1",
-        )
-
-
-class LeverageReadbackMismatchVenue(LeverageThenEntryVenue):
-    async def set_leverage(
-        self, request: VenueSetLeverageRequest
-    ) -> SetLeverageCommandResult:
-        self.mutations.append("set_leverage")
-        return SetLeverageCommandResult(
-            exchange_configured_leverage=request.payload.desired_leverage - 1,
-            leverage_verified_at_ms=2_000,
-            leverage_verification_digest="sha256:" + "5" * 64,
-        )
-
-
-class CodedLeverageFailureVenue:
-    async def set_leverage(
-        self, request: VenueSetLeverageRequest
-    ) -> SetLeverageCommandResult:
-        del request
-        raise VenueMutationFailure("exchange_code_-4164")
-
-    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
-        del request
-        raise AssertionError("SET_LEVERAGE must not create an order")
-
-
 @pytest.mark.asyncio
 async def test_entry_without_action_time_facts_is_rejected_before_venue(
     dispatch_engine: AsyncEngine,
@@ -467,41 +419,6 @@ async def test_entry_without_action_time_facts_is_rejected_before_venue(
     assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
     assert owner_projection is not None
     assert owner_projection.owner_status is MonitorOwnerStatus.COMPLETED
-
-
-@pytest.mark.asyncio
-async def test_set_leverage_without_action_time_facts_is_rejected_before_venue(
-    dispatch_engine: AsyncEngine,
-) -> None:
-    ticket = _ticket(leverage_change_required=True)
-    await _seed_policy(dispatch_engine)
-    await _issue(dispatch_engine, ticket)
-    venue = CountingEntryVenue()
-
-    result = await dispatch_one_command(
-        lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        venue,
-        DispatchCommandRequest(
-            worker_id="leverage-dispatcher",
-            ticket_id=ticket.identity.ticket_id,
-            now_ms=1_100,
-            lease_until_ms=6_100,
-            timeout_seconds=1,
-            runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
-            admission_snapshot_validity_ms=1_000,
-        ),
-        entry_facts_source=None,
-    )
-
-    assert result.status is DispatchCommandStatus.SUPERSEDED
-    assert venue.calls == 0
-    assert venue.leverage_calls == 0
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        command = await uow.exchange_commands.get(result.command_id or "")
-        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
-    assert command is not None and command.status is ExchangeCommandStatus.REJECTED
-    assert aggregate is not None and aggregate.status is AggregateStatus.LEVERAGE_REJECTED
 
 
 @pytest.mark.asyncio
@@ -668,24 +585,6 @@ async def test_universe_pointer_switch_after_preflight_is_fenced_by_claimed_entr
     ("command_kind", "command_status", "switch_allowed"),
     [
         pytest.param(
-            ExchangeCommandKind.SET_LEVERAGE,
-            ExchangeCommandStatus.PREPARED,
-            False,
-            id="set-leverage-prepared-blocks",
-        ),
-        pytest.param(
-            ExchangeCommandKind.SET_LEVERAGE,
-            ExchangeCommandStatus.CLAIMED,
-            False,
-            id="set-leverage-claimed-blocks",
-        ),
-        pytest.param(
-            ExchangeCommandKind.SET_LEVERAGE,
-            ExchangeCommandStatus.OUTCOME_UNKNOWN,
-            False,
-            id="set-leverage-outcome-unknown-blocks",
-        ),
-        pytest.param(
             ExchangeCommandKind.ENTRY,
             ExchangeCommandStatus.PREPARED,
             False,
@@ -718,9 +617,7 @@ async def test_universe_pointer_fence_uses_entry_mutation_state_matrix(
     command_status: ExchangeCommandStatus,
     switch_allowed: bool,
 ) -> None:
-    ticket = _ticket(
-        leverage_change_required=command_kind is ExchangeCommandKind.SET_LEVERAGE
-    )
+    ticket = _ticket()
     await _seed_policy(dispatch_engine)
     await _issue(dispatch_engine, ticket)
     await _seed_replacement_universe(dispatch_engine, ticket)
@@ -770,126 +667,6 @@ async def test_universe_pointer_fence_uses_entry_mutation_state_matrix(
         else ticket.universe_version_id
     )
     assert current_version_id == expected_version_id
-
-
-@pytest.mark.asyncio
-async def test_confirmed_leverage_creates_first_entry_command_in_later_transaction(
-    dispatch_engine: AsyncEngine,
-) -> None:
-    ticket = _ticket(leverage_change_required=True)
-    await _seed_policy(dispatch_engine)
-    await _issue(dispatch_engine, ticket)
-    venue = LeverageThenEntryVenue()
-
-    first = await dispatch_one_command(
-        lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        venue,
-        DispatchCommandRequest(
-            worker_id="leverage-dispatcher",
-            ticket_id=ticket.identity.ticket_id,
-            now_ms=1_100,
-            lease_until_ms=6_100,
-            timeout_seconds=1,
-            runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
-            admission_snapshot_validity_ms=1_000,
-        ),
-        entry_facts_source=PreflightFacts(configured_leverage=4),
-    )
-
-    assert first.status is DispatchCommandStatus.ACCEPTED
-    assert venue.mutations == ["set_leverage"]
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        commands = await uow.exchange_commands.list_for_ticket(
-            ticket.identity.ticket_id
-        )
-        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
-    assert [(item.kind, item.generation) for item in commands] == [
-        (ExchangeCommandKind.SET_LEVERAGE, 1),
-        (ExchangeCommandKind.ENTRY, 1),
-    ]
-    assert aggregate is not None
-    assert aggregate.status is AggregateStatus.LEVERAGE_CONFIRMED
-
-
-@pytest.mark.asyncio
-async def test_leverage_readback_mismatch_becomes_unknown_without_entry_or_resend(
-    dispatch_engine: AsyncEngine,
-) -> None:
-    ticket = _ticket(leverage_change_required=True)
-    await _seed_policy(dispatch_engine)
-    await _issue(dispatch_engine, ticket)
-    venue = LeverageReadbackMismatchVenue()
-
-    result = await dispatch_one_command(
-        lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        venue,
-        DispatchCommandRequest(
-            worker_id="leverage-dispatcher",
-            ticket_id=ticket.identity.ticket_id,
-            now_ms=1_100,
-            lease_until_ms=6_100,
-            timeout_seconds=1,
-            runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
-            admission_snapshot_validity_ms=1_000,
-        ),
-        entry_facts_source=PreflightFacts(configured_leverage=4),
-    )
-
-    assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
-    assert venue.mutations == ["set_leverage"]
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        commands = await uow.exchange_commands.list_for_ticket(
-            ticket.identity.ticket_id
-        )
-        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
-    assert [(item.kind, item.status) for item in commands] == [
-        (ExchangeCommandKind.SET_LEVERAGE, ExchangeCommandStatus.OUTCOME_UNKNOWN)
-    ]
-    assert aggregate is not None
-    assert aggregate.status is AggregateStatus.LEVERAGE_OUTCOME_UNKNOWN
-
-
-@pytest.mark.asyncio
-async def test_coded_leverage_failure_persists_sanitized_reason(
-    dispatch_engine: AsyncEngine,
-) -> None:
-    ticket = _ticket(leverage_change_required=True)
-    await _seed_policy(dispatch_engine)
-    await _issue(dispatch_engine, ticket)
-
-    result = await dispatch_one_command(
-        lambda: PostgresKernelUnitOfWork(dispatch_engine),
-        CodedLeverageFailureVenue(),
-        DispatchCommandRequest(
-            worker_id="leverage-dispatcher",
-            ticket_id=ticket.identity.ticket_id,
-            now_ms=1_100,
-            lease_until_ms=6_100,
-            timeout_seconds=1,
-            runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
-            admission_snapshot_validity_ms=1_000,
-        ),
-        entry_facts_source=PreflightFacts(configured_leverage=4),
-    )
-
-    assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
-    assert result.command_id is not None
-    async with dispatch_engine.connect() as connection:
-        payload = await connection.scalar(
-            sa.select(exchange_commands.c.result_payload).where(
-                exchange_commands.c.command_id == result.command_id
-            )
-        )
-    assert payload == {
-        "status": "outcome_unknown",
-        "observed_at_ms": 1_100,
-        "exchange_order_id": None,
-        "reason": "venue_error:exchange_code_-4164",
-        "venue_payload": {},
-    }
 
 
 @pytest.mark.asyncio

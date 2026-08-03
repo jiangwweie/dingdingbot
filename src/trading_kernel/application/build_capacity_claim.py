@@ -17,6 +17,7 @@ from src.trading_kernel.domain.capacity import (
     freeze_capacity_claim,
 )
 from src.trading_kernel.domain.capacity_sizing import (
+    FIXED_EXCHANGE_CONFIGURED_LEVERAGE,
     CapacitySizingRequest,
     CapacitySizingStatus,
     select_capacity_candidate,
@@ -81,8 +82,10 @@ def build_capacity_claim(
         position_mode != "independent_sides"
         or account_risk.position_mode != "independent_sides"
         or account_risk.margin_mode != policy.supported_margin_mode
+        or account_risk.configured_leverage
+        != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
     ):
-        return _refused(CapacityClaimStatus.ACCOUNT_MODE_INVALID)
+        return _refused(CapacityClaimStatus.ACTION_FACTS_INVALID_OR_STALE)
     snapshot_digest = admission_snapshot.digest()
     if (
         account_entry_health.entry_admission_snapshot_digest != snapshot_digest

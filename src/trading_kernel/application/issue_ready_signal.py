@@ -358,6 +358,16 @@ async def issue_ready_signal(
             claim_owner=request.claim_owner,
         ),
     )
+    if result.status is not IssueTicketStatus.ISSUED:
+        return await _refuse(
+            uow,
+            signal,
+            result.status,
+            request.now_ms,
+            admission_context=admission_context,
+            entry_admission_snapshot_digest=request.admission_snapshot.digest(),
+            binding_constraint=result.status.value,
+        )
     if result.status is IssueTicketStatus.ISSUED:
         if result.ticket_id is None:
             raise RuntimeError("issued Ticket is missing its identity")
