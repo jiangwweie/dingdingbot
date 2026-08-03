@@ -118,12 +118,12 @@ shadow_horizon_bars: positive int
 
 | Event | 新版本 | Episode Policy | Re-arm 条件 | Exposure Family | Shadow 窗口 |
 |---|---|---|---|---|---:|
-| CPM-LONG | v2 | rising_edge | 一个有效闭合 1h Observation 为 NOT_TRIGGERED 后，后续首次 TRIGGERED | long_continuation | 24 根 1h |
-| MPG-LONG | v2 | rising_edge | 同上 | long_continuation | 24 根 1h |
-| MI-LONG | v2 | rising_edge | 同上 | long_continuation | 24 根 1h |
-| BRF2-SHORT | v2 | rising_edge | 同上 | rally_failure_short | 24 根 1h |
-| SOR-LONG | v3 | session_reference | 新 Session 的 `session_start_ms_v3` | opening_range | 到冻结 Session 结束 |
-| SOR-SHORT | v3 | session_reference | 新 Session 的 `session_start_ms_v3` | opening_range | 到冻结 Session 结束 |
+| CPM-LONG | v3 | rising_edge | 一个有效闭合 1h Observation 为 NOT_TRIGGERED 后，后续首次 TRIGGERED | long_continuation | 24 根 1h |
+| MPG-LONG | v3 | rising_edge | 同上 | long_continuation | 24 根 1h |
+| MI-LONG | v3 | rising_edge | 同上 | long_continuation | 24 根 1h |
+| BRF2-SHORT | v3 | rising_edge | 同上 | rally_failure_short | 24 根 1h |
+| SOR-LONG | v4 | session_reference | 新 Session 的 `session_start_ms_v3` | opening_range | 到冻结 Session 结束 |
+| SOR-SHORT | v4 | session_reference | 新 Session 的 `session_start_ms_v3` | opening_range | 到冻结 Session 结束 |
 
 无效 Observation、市场超时、Registry 不一致和 Warming 不得重新武装 Episode。
 
@@ -386,13 +386,13 @@ minimum_stop_risk_budget
 1. 新增 Episode、AdmissionDecision、Shadow Outcome 表；
 2. 扩展 EventSpec、Owner Policy、CapacityClaim 和 Ticket；
 3. 以确定映射回填所有历史 Event/Ticket Family；
-4. 安装 CPM/MPG/MI/BRF2 v2 Registry rows，保留旧版本历史；
+4. 安装 CPM/MPG/MI/BRF2 v3 与 SOR v4 Registry/ExitPolicy rows，保留现有非 SOR v2 和 SOR v3 历史；
 5. 将 Policy 单调升级到 v4，并保持 `new_entry_submit_enabled=false`；
 6. 不重写历史 Signal、Episode、Claim、Ticket、Command、Settlement 或 Review；
 7. 从 source `0002` 计算保存清单，升级后逐列验证 source 数据完全一致；
 8. 禁止 downgrade、dual write、old-schema reader 和 schema fallback。
 
-新版本 Active Universe bootstrap 在安全 workers 启动后进行，Entry 继续 fenced。旧 v1 Universe 退役，新 v2 Universe 激活后才能通过 Promotion。
+新版本 Active Universe bootstrap 在安全 workers 启动后进行，Entry 继续 fenced。现有非 SOR v2 与 SOR v3 Universe 退役，新 v3/v4 Universe 激活后才能通过 Promotion。
 
 ## 9. 部署与恢复
 

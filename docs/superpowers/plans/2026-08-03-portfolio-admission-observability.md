@@ -75,7 +75,7 @@ Expected: all Episode tests pass.
 Assert exact current contracts:
 
 ```python
-assert contract_map["CPM-LONG"].strategy_version_id == "sgv:CPM-RO-001:v2"
+assert contract_map["CPM-LONG"].strategy_version_id == "sgv:CPM-RO-001:v3"
 assert contract_map["CPM-LONG"].episode_policy == "rising_edge"
 assert contract_map["CPM-LONG"].exposure_family == "long_continuation"
 assert contract_map["SOR-SHORT"].episode_policy == "session_reference"
@@ -90,7 +90,7 @@ Expected: failures for missing Registry fields and old v1 identities.
 
 - [ ] **Step 7: Implement Registry vNext and producer contract**
 
-Add required non-default fields `episode_policy`, `exposure_family`, and `shadow_horizon_bars`. Bump CPM/MPG/MI/BRF2 to v2; retain SOR v3. Keep detector calculations unchanged. `produce_strategy_signal` must reject a missing explicit Episode ID for `rising_edge` and reject an explicit ID for `session_reference`.
+Add required non-default fields `episode_policy`, `exposure_family`, and `shadow_horizon_bars`. Bump CPM/MPG/MI/BRF2 from v2 to v3 and SOR from v3 to v4. Assign new ExitPolicy identities to every new Event version while keeping lifecycle calculations unchanged. `produce_strategy_signal` must reject a missing explicit Episode ID for `rising_edge` and reject an explicit ID for `session_reference`.
 
 - [ ] **Step 8: Verify Registry and Live/Replay GREEN**
 
@@ -389,7 +389,7 @@ git commit -m "feat(kernel): project bounded shadow outcomes"
 **Interfaces:**
 - Set `CURRENT_SCHEMA_REVISION = "0003_portfolio_admission_observability"`.
 - Migration upgrades only from exact `0002_sor_v3_strategy_group_capacity` and raises on downgrade.
-- Registry current contracts become CPM/MPG/MI/BRF2 v2 and SOR v3.
+- Registry current contracts become CPM/MPG/MI/BRF2 v3 and SOR v4; existing non SOR v2 and SOR v3 remain historical lineage.
 
 - [ ] **Step 1: Write RED migration tests MIG-001 through MIG-006**
 
@@ -403,7 +403,7 @@ Expected: Alembic cannot resolve revision `0003_portfolio_admission_observabilit
 
 - [ ] **Step 3: Implement 0003 DDL/data migration**
 
-Add new tables and columns, deterministically backfill Family, insert v2 Registry lineage, retire old current pointers without deleting history, migrate Policy to v4 with Entry disabled, and define `downgrade()` to raise `RuntimeError`.
+Add new tables and columns, deterministically backfill Family, insert non SOR v3 and SOR v4 Registry/ExitPolicy lineage, retire old current pointers without deleting history, migrate Policy to v4 with Entry disabled, and define `downgrade()` to raise `RuntimeError`.
 
 - [ ] **Step 4: Update seed and six-Universe batch identity**
 

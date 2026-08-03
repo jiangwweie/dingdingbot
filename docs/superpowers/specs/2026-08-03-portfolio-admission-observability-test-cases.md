@@ -18,12 +18,12 @@
 
 | ID | 缺陷变异 | 输入 | 预期断言 |
 |---|---|---|---|
-| EPI-001 | 连续 true 每小时创建新 Episode | CPM v2 连续两个闭合 1h 都 TRIGGERED | 第二次复用同一 Episode；Signal insert 为 duplicate |
-| EPI-002 | false 未重新武装 | CPM v2 true→false→true | 第三次创建新的 Episode ID |
+| EPI-001 | 连续 true 每小时创建新 Episode | CPM v3 连续两个闭合 1h 都 TRIGGERED | 第二次复用同一 Episode；Signal insert 为 duplicate |
+| EPI-002 | false 未重新武装 | CPM v3 true→false→true | 第三次创建新的 Episode ID |
 | EPI-003 | 无效 Observation 错误 re-arm | true→INVALID→true | 仍复用原 Episode |
 | EPI-004 | Warming 污染 Episode state | Warming TRIGGERED/NOT_TRIGGERED | Episode projection 零写入 |
-| EPI-005 | Universe replacement 重置连续 Episode | 同 Event v2、同 instrument，Universe replacement 后继续 true | Episode ID 不变 |
-| EPI-006 | Event version replacement 复用旧 Episode | CPM v1→v2 | v2 domain 与 v1 不同 |
+| EPI-005 | Universe replacement 重置连续 Episode | 同 Event v3、同 instrument，Universe replacement 后继续 true | Episode ID 不变 |
+| EPI-006 | Event version replacement 复用旧 Episode | CPM v2→v3 | v3 domain 与 v2 不同 |
 | EPI-007 | SOR recross 创建新 Episode | 同一 Session inside→recross | 仍为同一 Session Episode |
 | EPI-008 | SOR 新 Session 没有 re-arm | 次日 Session | 新 Episode ID |
 | EPI-009 | Live/Replay Episode reducer 不一致 | 同一 closed-candle 序列 | 状态和 Episode ID 完全一致 |
@@ -138,7 +138,7 @@ CPM BNB true 00:00
 |---|---|---|---|
 | MIG-001 | empty PostgreSQL | upgrade head | `0003_portfolio_admission_observability` |
 | MIG-002 | production-shaped 0002 terminal history | upgrade 0003 | source-column manifest 完全一致 |
-| MIG-003 | production-shaped 0002 | upgrade | v1/v2/v3 Registry lineage均可解析，当前版本指向 vNext |
+| MIG-003 | production-shaped 0002 | upgrade | 非 SOR v2/v3 与 SOR v3/v4 Registry/ExitPolicy lineage 均可解析，当前版本指向 vNext |
 | MIG-004 | production-shaped 0002 | upgrade | Policy v4 且 Entry disabled |
 | MIG-005 | production-shaped 0002 | upgrade | 历史 Ticket/Claim Family 确定回填，金融字段不变 |
 | MIG-006 | 0003 | downgrade 0002 | 明确拒绝 |
