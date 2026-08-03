@@ -96,7 +96,7 @@ class CcxtBinancePublicMarketSource:
         request: ClosedCandleRequest,
     ) -> object:
         operation = self._exchange.fetch_ohlcv
-        args = (symbol, request.timeframe, None, request.limit + 1)
+        args = (symbol, request.timeframe, request.since_ms, request.limit + 1)
         if inspect.iscoroutinefunction(operation):
             return await operation(*args)
         return await asyncio.to_thread(operation, *args)

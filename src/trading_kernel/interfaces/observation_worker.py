@@ -194,40 +194,45 @@ async def _run_one_due_shadow(
     if claim is None:
         return ObservationWorkerResult(status=ObservationWorkerStatus.NO_WORK)
 
-    limit = _shadow_candle_limit(claim.timeframe)
+    limit = _shadow_candle_limit(claim.spec.timeframe)
     try:
         candles = await asyncio.wait_for(
             market_source.fetch_closed_candles(
                 ClosedCandleRequest(
-                    exchange_instrument_id=claim.exchange_instrument_id,
-                    timeframe=claim.timeframe,
+                    exchange_instrument_id=claim.spec.exchange_instrument_id,
+                    timeframe=claim.spec.timeframe,
                     limit=limit,
-                    closed_at_ms=claim.horizon_end_ms,
+                    closed_at_ms=claim.spec.horizon_end_ms,
+                    since_ms=claim.spec.horizon_start_ms,
                 )
             ),
             timeout=request.timeout_seconds,
         )
-        await project_claimed_shadow_outcome(
+        terminal = await project_claimed_shadow_outcome(
             uow_factory,
             claim,
             candles,
-            worker_id=request.worker_id,
             completed_at_ms=request.now_ms,
         )
     except Exception as exc:  # noqa: BLE001 - source failure retains retry authority.
         async with uow_factory() as uow:
             await uow.shadow_outcomes.release_expired_claim(
-                spec=claim,
-                worker_id=request.worker_id,
+                claim=claim,
             )
         return ObservationWorkerResult(
             status=ObservationWorkerStatus.SHADOW_RETRY_SCHEDULED,
             detail=type(exc).__name__,
-            shadow_outcome_id=claim.shadow_outcome_id,
+            shadow_outcome_id=claim.spec.shadow_outcome_id,
+        )
+    if not terminal:
+        return ObservationWorkerResult(
+            status=ObservationWorkerStatus.SHADOW_RETRY_SCHEDULED,
+            detail="incomplete_historical_window",
+            shadow_outcome_id=claim.spec.shadow_outcome_id,
         )
     return ObservationWorkerResult(
         status=ObservationWorkerStatus.SHADOW_COMPLETED,
-        shadow_outcome_id=claim.shadow_outcome_id,
+        shadow_outcome_id=claim.spec.shadow_outcome_id,
     )
 
 

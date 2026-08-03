@@ -989,6 +989,7 @@ shadow_outcomes_current = sa.Table(
     _time("horizon_start_ms"),
     _time("horizon_end_ms"),
     _id("claim_owner", nullable=True),
+    _id("claim_token", nullable=True),
     _time("lease_until_ms", nullable=True),
     sa.Column("max_favorable_price", MONEY, nullable=True),
     sa.Column("max_adverse_price", MONEY, nullable=True),
@@ -1011,16 +1012,30 @@ shadow_outcomes_current = sa.Table(
     sa.CheckConstraint("position_side IN ('long', 'short')", name="side_valid"),
     sa.CheckConstraint("timeframe IN ('15m', '1h')", name="timeframe_valid"),
     sa.CheckConstraint(
-        "initial_risk_per_unit > 0 AND horizon_end_ms > horizon_start_ms",
+        "initial_risk_per_unit >= 0 AND horizon_end_ms > horizon_start_ms",
         name="risk_horizon_valid",
     ),
     sa.CheckConstraint(
-        "(status = 'claimed' AND claim_owner IS NOT NULL AND lease_until_ms IS NOT NULL "
-        "AND completed_at_ms IS NULL) OR "
-        "(status = 'pending' AND claim_owner IS NULL AND lease_until_ms IS NULL "
-        "AND completed_at_ms IS NULL) OR "
-        "(status IN ('completed', 'unavailable') AND claim_owner IS NULL "
-        "AND lease_until_ms IS NULL AND completed_at_ms IS NOT NULL)",
+        "(status = 'claimed' AND claim_owner IS NOT NULL AND claim_token IS NOT NULL "
+        "AND lease_until_ms IS NOT NULL AND completed_at_ms IS NULL "
+        "AND max_favorable_price IS NULL AND max_adverse_price IS NULL "
+        "AND mfe_r IS NULL AND mae_r IS NULL AND observed_through_ms IS NULL "
+        "AND completion_reason IS NULL) OR "
+        "(status = 'pending' AND claim_owner IS NULL AND claim_token IS NULL "
+        "AND lease_until_ms IS NULL AND completed_at_ms IS NULL "
+        "AND max_favorable_price IS NULL AND max_adverse_price IS NULL "
+        "AND mfe_r IS NULL AND mae_r IS NULL AND observed_through_ms IS NULL "
+        "AND completion_reason IS NULL) OR "
+        "(status = 'completed' AND claim_owner IS NULL AND claim_token IS NULL "
+        "AND lease_until_ms IS NULL AND completed_at_ms IS NOT NULL "
+        "AND max_favorable_price IS NOT NULL AND max_adverse_price IS NOT NULL "
+        "AND mfe_r IS NOT NULL AND mae_r IS NOT NULL "
+        "AND observed_through_ms IS NOT NULL AND completion_reason IS NOT NULL) OR "
+        "(status = 'unavailable' AND claim_owner IS NULL AND claim_token IS NULL "
+        "AND lease_until_ms IS NULL AND completed_at_ms IS NOT NULL "
+        "AND max_favorable_price IS NULL AND max_adverse_price IS NULL "
+        "AND mfe_r IS NULL AND mae_r IS NULL AND observed_through_ms IS NULL "
+        "AND completion_reason IS NOT NULL)",
         name="lease_shape_valid",
     ),
 )

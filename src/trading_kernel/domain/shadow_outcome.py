@@ -8,7 +8,7 @@ from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from src.trading_kernel.domain.market import ClosedCandle, Timeframe
+from src.trading_kernel.domain.market import ClosedCandle
 
 SHADOW_EVALUATION_KIND: Final = "fixed_horizon_excursion_v1"
 
@@ -20,6 +20,10 @@ class ShadowOutcomeStatus(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+class ShadowOutcomeUnavailable(ValueError):
+    """Frozen Shadow evidence cannot produce a valid excursion projection."""
+
+
 class ShadowOutcomeSpec(BaseModel):
     """Frozen references required to evaluate one read-only opportunity."""
 
@@ -29,7 +33,7 @@ class ShadowOutcomeSpec(BaseModel):
     admission_decision_id: str
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
-    timeframe: Timeframe
+    timeframe: Literal["15m", "1h"]
     entry_reference_price: Decimal
     initial_stop_price: Decimal
     horizon_start_ms: int
@@ -64,13 +68,36 @@ class ShadowOutcomeSpec(BaseModel):
             or self.created_at_ms <= 0
         ):
             raise ValueError("shadow horizon and creation time must be positive")
-        if self.initial_risk_per_unit <= 0:
-            raise ValueError("shadow initial risk distance must be positive")
         return self
 
     @property
     def initial_risk_per_unit(self) -> Decimal:
         return abs(self.entry_reference_price - self.initial_stop_price)
+
+
+class ShadowOutcomeClaim(BaseModel):
+    """One exact leased attempt to project a frozen Shadow specification."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    spec: ShadowOutcomeSpec
+    claim_token: str
+    projection_version: int
+    lease_until_ms: int
+
+    @field_validator("claim_token", mode="before")
+    @classmethod
+    def _require_claim_token(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("Shadow claim token must be non-blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_claim(self) -> ShadowOutcomeClaim:
+        if self.projection_version <= 0 or self.lease_until_ms <= 0:
+            raise ValueError("Shadow claim version and lease must be positive")
+        return self
 
 
 class ShadowOutcomeProjection(BaseModel):
@@ -94,8 +121,6 @@ class ShadowOutcomeProjection(BaseModel):
             self.mae_r,
             self.observed_through_ms,
         )
-        if all(value is None for value in values):
-            return self
         if any(value is None for value in values):
             raise ValueError("shadow projection values must be complete together")
         if self.mfe_r is not None and self.mfe_r < 0:
@@ -111,20 +136,15 @@ def evaluate_fixed_horizon_excursion(
 ) -> ShadowOutcomeProjection:
     """Evaluate MFE/MAE from closed candles in the immutable horizon only."""
 
+    if spec.initial_risk_per_unit <= 0:
+        raise ShadowOutcomeUnavailable("zero_initial_risk_distance")
     selected = tuple(
         candle
         for candle in candles
         if spec.horizon_start_ms < candle.close_time_ms <= spec.horizon_end_ms
     )
     if not selected:
-        return ShadowOutcomeProjection(
-            evaluation_kind=SHADOW_EVALUATION_KIND,
-            max_favorable_price=None,
-            max_adverse_price=None,
-            mfe_r=None,
-            mae_r=None,
-            observed_through_ms=None,
-        )
+        raise ShadowOutcomeUnavailable("no_closed_candles_in_horizon")
     if spec.position_side == "long":
         favorable = max(candle.high for candle in selected)
         adverse = min(candle.low for candle in selected)
@@ -155,3 +175,27 @@ def evaluate_fixed_horizon_excursion(
         mae_r=mae_r,
         observed_through_ms=max(candle.close_time_ms for candle in selected),
     )
+
+
+def has_complete_closed_candle_sequence(
+    spec: ShadowOutcomeSpec,
+    candles: tuple[ClosedCandle, ...],
+) -> bool:
+    """Require every expected closed bar in the frozen horizon exactly once."""
+
+    duration_ms = 3_600_000 if spec.timeframe == "1h" else 900_000
+    if (spec.horizon_end_ms - spec.horizon_start_ms) % duration_ms != 0:
+        return False
+    expected = tuple(
+        range(
+            spec.horizon_start_ms + duration_ms,
+            spec.horizon_end_ms + 1,
+            duration_ms,
+        )
+    )
+    actual = tuple(
+        candle.close_time_ms
+        for candle in candles
+        if spec.horizon_start_ms < candle.close_time_ms <= spec.horizon_end_ms
+    )
+    return actual == expected

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.market import ClosedCandle, Timeframe
 
@@ -16,6 +16,7 @@ class ClosedCandleRequest(BaseModel):
     timeframe: Timeframe
     limit: int
     closed_at_ms: int
+    since_ms: int | None = None
 
     @field_validator("exchange_instrument_id", mode="before")
     @classmethod
@@ -38,6 +39,19 @@ class ClosedCandleRequest(BaseModel):
         if value <= 0:
             raise ValueError("closed_at_ms must be positive")
         return value
+
+    @field_validator("since_ms")
+    @classmethod
+    def _require_optional_positive_since(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("since_ms must be positive when supplied")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_since_window(self) -> ClosedCandleRequest:
+        if self.since_ms is not None and self.since_ms >= self.closed_at_ms:
+            raise ValueError("since_ms must precede closed_at_ms")
+        return self
 
 
 class PublicMarketSource(Protocol):

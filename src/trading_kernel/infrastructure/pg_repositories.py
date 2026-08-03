@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Literal, cast
+from uuid import uuid4
 
 import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict, TypeAdapter
@@ -75,6 +76,7 @@ from src.trading_kernel.domain.post_fill_risk import (
 )
 from src.trading_kernel.domain.shadow_outcome import (
     SHADOW_EVALUATION_KIND,
+    ShadowOutcomeClaim,
     ShadowOutcomeProjection,
     ShadowOutcomeSpec,
 )
@@ -1188,7 +1190,7 @@ class PostgresShadowOutcomeRepository:
         worker_id: str,
         now_ms: int,
         lease_until_ms: int,
-    ) -> ShadowOutcomeSpec | None:
+    ) -> ShadowOutcomeClaim | None:
         row = (
             await self._connection.execute(
                 sa.select(shadow_outcomes_current)
@@ -1215,38 +1217,60 @@ class PostgresShadowOutcomeRepository:
         if row is None:
             return None
         shadow_id = str(row["shadow_outcome_id"])
+        claim_token = f"shadow-claim:{uuid4().hex}"
+        projection_version = int(row["projection_version"]) + 1
         await self._connection.execute(
             sa.update(shadow_outcomes_current)
             .where(shadow_outcomes_current.c.shadow_outcome_id == shadow_id)
             .values(
                 status="claimed",
                 claim_owner=worker_id,
+                claim_token=claim_token,
                 lease_until_ms=lease_until_ms,
-                projection_version=shadow_outcomes_current.c.projection_version + 1,
+                projection_version=projection_version,
             )
         )
-        return _shadow_outcome_spec_from_row(row)
+        return ShadowOutcomeClaim(
+            spec=_shadow_outcome_spec_from_row(row),
+            claim_token=claim_token,
+            projection_version=projection_version,
+            lease_until_ms=lease_until_ms,
+        )
 
     async def complete(
         self,
         *,
-        spec: ShadowOutcomeSpec,
+        claim: ShadowOutcomeClaim,
         projection: ShadowOutcomeProjection,
-        worker_id: str,
         completed_at_ms: int,
     ) -> None:
         if projection.evaluation_kind != SHADOW_EVALUATION_KIND:
             raise ValueError("unsupported Shadow evaluation kind")
-        await self._connection.execute(
+        if any(
+            value is None
+            for value in (
+                projection.max_favorable_price,
+                projection.max_adverse_price,
+                projection.mfe_r,
+                projection.mae_r,
+                projection.observed_through_ms,
+            )
+        ):
+            raise ValueError("completed Shadow projection must be complete")
+        result = await self._connection.execute(
             sa.update(shadow_outcomes_current)
             .where(
-                shadow_outcomes_current.c.shadow_outcome_id == spec.shadow_outcome_id,
+                shadow_outcomes_current.c.shadow_outcome_id
+                == claim.spec.shadow_outcome_id,
                 shadow_outcomes_current.c.status == "claimed",
-                shadow_outcomes_current.c.claim_owner == worker_id,
+                shadow_outcomes_current.c.claim_token == claim.claim_token,
+                shadow_outcomes_current.c.projection_version
+                == claim.projection_version,
             )
             .values(
                 status="completed",
                 claim_owner=None,
+                claim_token=None,
                 lease_until_ms=None,
                 max_favorable_price=projection.max_favorable_price,
                 max_adverse_price=projection.max_adverse_price,
@@ -1258,55 +1282,83 @@ class PostgresShadowOutcomeRepository:
                 projection_version=shadow_outcomes_current.c.projection_version + 1,
             )
         )
+        await self._require_claim_affected_or_terminal(claim, result.rowcount)
 
     async def mark_unavailable(
         self,
         *,
-        spec: ShadowOutcomeSpec,
-        worker_id: str,
+        claim: ShadowOutcomeClaim,
         reason: str,
         completed_at_ms: int,
     ) -> None:
         normalized_reason = str(reason or "").strip()
         if not normalized_reason:
             raise ValueError("unavailable Shadow reason must be non-blank")
-        await self._connection.execute(
+        result = await self._connection.execute(
             sa.update(shadow_outcomes_current)
             .where(
-                shadow_outcomes_current.c.shadow_outcome_id == spec.shadow_outcome_id,
+                shadow_outcomes_current.c.shadow_outcome_id
+                == claim.spec.shadow_outcome_id,
                 shadow_outcomes_current.c.status == "claimed",
-                shadow_outcomes_current.c.claim_owner == worker_id,
+                shadow_outcomes_current.c.claim_token == claim.claim_token,
+                shadow_outcomes_current.c.projection_version
+                == claim.projection_version,
             )
             .values(
                 status="unavailable",
                 claim_owner=None,
+                claim_token=None,
                 lease_until_ms=None,
                 completion_reason=normalized_reason,
                 completed_at_ms=completed_at_ms,
                 projection_version=shadow_outcomes_current.c.projection_version + 1,
             )
         )
+        await self._require_claim_affected_or_terminal(claim, result.rowcount)
 
     async def release_expired_claim(
         self,
         *,
-        spec: ShadowOutcomeSpec,
-        worker_id: str,
+        claim: ShadowOutcomeClaim,
     ) -> None:
-        await self._connection.execute(
+        result = await self._connection.execute(
             sa.update(shadow_outcomes_current)
             .where(
-                shadow_outcomes_current.c.shadow_outcome_id == spec.shadow_outcome_id,
+                shadow_outcomes_current.c.shadow_outcome_id
+                == claim.spec.shadow_outcome_id,
                 shadow_outcomes_current.c.status == "claimed",
-                shadow_outcomes_current.c.claim_owner == worker_id,
+                shadow_outcomes_current.c.claim_token == claim.claim_token,
+                shadow_outcomes_current.c.projection_version
+                == claim.projection_version,
             )
             .values(
                 status="pending",
                 claim_owner=None,
+                claim_token=None,
                 lease_until_ms=None,
                 projection_version=shadow_outcomes_current.c.projection_version + 1,
             )
         )
+        await self._require_claim_affected_or_terminal(claim, result.rowcount)
+
+    async def _require_claim_affected_or_terminal(
+        self,
+        claim: ShadowOutcomeClaim,
+        rowcount: int,
+    ) -> None:
+        if rowcount == 1:
+            return
+        row = (
+            await self._connection.execute(
+                sa.select(shadow_outcomes_current.c.status).where(
+                    shadow_outcomes_current.c.shadow_outcome_id
+                    == claim.spec.shadow_outcome_id
+                )
+            )
+        ).mappings().one_or_none()
+        if row is not None and str(row["status"]) in {"completed", "unavailable"}:
+            return
+        raise RuntimeError("lost Shadow claim")
 
 
 class PostgresIncidentRepository:
@@ -2569,6 +2621,7 @@ def _shadow_outcome_pending_values(spec: ShadowOutcomeSpec) -> dict[str, object]
         "horizon_start_ms": spec.horizon_start_ms,
         "horizon_end_ms": spec.horizon_end_ms,
         "claim_owner": None,
+        "claim_token": None,
         "lease_until_ms": None,
         "max_favorable_price": None,
         "max_adverse_price": None,

@@ -20,6 +20,15 @@ def test_each_runtime_transition_has_one_worker_owner() -> None:
     }
 
 
+def test_observation_worker_owns_idle_only_shadow_projection() -> None:
+    assert observation_worker.ObservationWorkerStatus.SHADOW_COMPLETED.value == (
+        "shadow_completed"
+    )
+    assert observation_worker.ObservationWorkerStatus.SHADOW_RETRY_SCHEDULED.value == (
+        "shadow_retry_scheduled"
+    )
+
+
 def test_combined_runtime_orchestrator_is_retired() -> None:
     assert not hasattr(runtime, "run_runtime_once")
     assert not (REPO_ROOT / "scripts/trading_kernel/run_worker_once.py").exists()

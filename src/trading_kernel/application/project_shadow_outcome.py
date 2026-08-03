@@ -15,8 +15,11 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
 )
 from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.domain.shadow_outcome import (
+    ShadowOutcomeClaim,
     ShadowOutcomeSpec,
+    ShadowOutcomeUnavailable,
     evaluate_fixed_horizon_excursion,
+    has_complete_closed_candle_sequence,
 )
 from src.trading_kernel.domain.signal import StrategySignal
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
@@ -95,30 +98,34 @@ def pending_shadow_spec_for_rejection(
 
 async def project_claimed_shadow_outcome(
     uow_factory: UnitOfWorkFactory,
-    spec: ShadowOutcomeSpec,
+    claim: ShadowOutcomeClaim,
     candles: tuple[ClosedCandle, ...],
     *,
-    worker_id: str,
     completed_at_ms: int,
-) -> None:
+) -> bool:
     """Persist a terminal read-only projection after market I/O already ended."""
 
-    projection = evaluate_fixed_horizon_excursion(spec, candles)
-    async with uow_factory() as uow:
-        if projection.observed_through_ms is None:
+    if not has_complete_closed_candle_sequence(claim.spec, candles):
+        async with uow_factory() as uow:
+            await uow.shadow_outcomes.release_expired_claim(claim=claim)
+        return False
+    try:
+        projection = evaluate_fixed_horizon_excursion(claim.spec, candles)
+    except ShadowOutcomeUnavailable as exc:
+        async with uow_factory() as uow:
             await uow.shadow_outcomes.mark_unavailable(
-                spec=spec,
-                worker_id=worker_id,
-                reason="no_closed_candles_in_horizon",
+                claim=claim,
+                reason=str(exc),
                 completed_at_ms=completed_at_ms,
             )
-            return
+        return True
+    async with uow_factory() as uow:
         await uow.shadow_outcomes.complete(
-            spec=spec,
+            claim=claim,
             projection=projection,
-            worker_id=worker_id,
             completed_at_ms=completed_at_ms,
         )
+    return True
 
 
 def _protection_reference(signal: StrategySignal) -> Decimal | None:
@@ -139,9 +146,9 @@ def _valid_stop_direction(
     initial_stop_price: Decimal,
 ) -> bool:
     return (
-        initial_stop_price < entry_reference_price
+        initial_stop_price <= entry_reference_price
         if position_side == "long"
-        else initial_stop_price > entry_reference_price
+        else initial_stop_price >= entry_reference_price
     )
 
 

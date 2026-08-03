@@ -16,7 +16,7 @@ from src.trading_kernel.infrastructure.binance_public_market_source import (
 class FakeExchange:
     def __init__(self, rows: list[list[object]]) -> None:
         self.rows = rows
-        self.calls: list[tuple[str, str, int]] = []
+        self.calls: list[tuple[str, str, int | None, int]] = []
 
     def fetch_ohlcv(
         self,
@@ -25,7 +25,7 @@ class FakeExchange:
         since=None,
         limit: int | None = None,
     ) -> list[list[object]]:
-        self.calls.append((symbol, timeframe, int(limit or 0)))
+        self.calls.append((symbol, timeframe, since, int(limit or 0)))
         return self.rows
 
     async def close(self) -> None:
@@ -92,7 +92,28 @@ async def test_public_source_returns_only_last_requested_closed_candles() -> Non
 
     assert len(candles) == 5
     assert candles[-1].close_time_ms == closed_at_ms
-    assert exchange.calls == [("ETH/USDT:USDT", "15m", 6)]
+    assert exchange.calls == [("ETH/USDT:USDT", "15m", None, 6)]
+
+
+@pytest.mark.asyncio
+async def test_public_source_forwards_frozen_historical_since_bound() -> None:
+    exchange = FakeExchange([])
+    source = CcxtBinancePublicMarketSource(
+        exchange=exchange,
+        timeout_seconds=1,
+    )
+
+    await source.fetch_closed_candles(
+        ClosedCandleRequest(
+            exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+            timeframe="1h",
+            limit=24,
+            closed_at_ms=90_000_000,
+            since_ms=3_600_000,
+        )
+    )
+
+    assert exchange.calls == [("ETH/USDT:USDT", "1h", 3_600_000, 25)]
 
 
 @pytest.mark.asyncio

@@ -69,6 +69,7 @@ from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.shadow_outcome import (
+    ShadowOutcomeClaim,
     ShadowOutcomeProjection,
     ShadowOutcomeSpec,
 )
@@ -1079,22 +1080,20 @@ class ShadowOutcomeRepository(Protocol):
         worker_id: str,
         now_ms: int,
         lease_until_ms: int,
-    ) -> ShadowOutcomeSpec | None: ...
+    ) -> ShadowOutcomeClaim | None: ...
 
     async def complete(
         self,
         *,
-        spec: ShadowOutcomeSpec,
+        claim: ShadowOutcomeClaim,
         projection: ShadowOutcomeProjection,
-        worker_id: str,
         completed_at_ms: int,
     ) -> None: ...
 
     async def mark_unavailable(
         self,
         *,
-        spec: ShadowOutcomeSpec,
-        worker_id: str,
+        claim: ShadowOutcomeClaim,
         reason: str,
         completed_at_ms: int,
     ) -> None: ...
@@ -1102,8 +1101,7 @@ class ShadowOutcomeRepository(Protocol):
     async def release_expired_claim(
         self,
         *,
-        spec: ShadowOutcomeSpec,
-        worker_id: str,
+        claim: ShadowOutcomeClaim,
     ) -> None: ...
 
 
