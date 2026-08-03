@@ -45,6 +45,7 @@ from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
 from src.trading_kernel.infrastructure.pg_models import (
     event_specs,
     exchange_commands,
+    exposure_episode_current,
     facts_current,
     readiness_current,
     runtime_scopes_current,
@@ -324,6 +325,25 @@ async def test_all_warming_members_become_ready_without_signal_chain(
         "commands": 0,
         "facts": expected_fact_count,
     }
+
+
+@pytest.mark.asyncio
+async def test_epi_004_warming_writes_zero_episode_projection(
+    warming_engine: AsyncEngine,
+) -> None:
+    scope = (await _warming_scopes(warming_engine))[0]
+
+    result = await _observe(
+        warming_engine,
+        _triggering_source(warming_engine, MEMBERS),
+        scope["runtime_scope_id"],
+    )
+
+    assert result.status is ObservationStatus.WARMED
+    async with warming_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(exposure_episode_current)
+        ) == 0
 
 
 @pytest.mark.asyncio

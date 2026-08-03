@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 
 import pytest
@@ -9,6 +10,7 @@ from src.trading_kernel.application.ingest_signal import (
     IngestSignalRequest,
     ingest_signal,
 )
+from src.trading_kernel.application.issue_ticket import IssueTicketStatus
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
@@ -28,6 +30,11 @@ from src.trading_kernel.application.runtime_facts import (
     PositionSnapshotRequest,
 )
 from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
+from src.trading_kernel.application.select_entry_candidate import (
+    SelectEntryCandidateRequest,
+    SelectEntryCandidateStatus,
+    select_entry_candidate,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
@@ -103,7 +110,7 @@ class FakeEntryAdmissionFactsSource:
                 margin_mode="cross",
                 exchange_instrument_id=request.exchange_instrument_id,
                 mark_price=Decimal(10000),
-                configured_leverage=10,
+                configured_leverage=5,
                 total_wallet_balance=Decimal(1000),
                 total_margin_balance=Decimal(1000),
                 total_initial_margin=Decimal(0),
@@ -155,7 +162,7 @@ class FakeEntryAdmissionFactsSource:
             margin_mode="cross",
             exchange_instrument_id=request.exchange_instrument_id,
             mark_price=Decimal(10000),
-            configured_leverage=10,
+            configured_leverage=5,
             total_wallet_balance=Decimal(1000),
             total_margin_balance=Decimal(1000),
             total_initial_margin=Decimal(0),
@@ -165,6 +172,45 @@ class FakeEntryAdmissionFactsSource:
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
+
+
+class CandidateSupersedingFactsSource(FakeEntryAdmissionFactsSource):
+    def __init__(self, engine, higher_rank_signal) -> None:
+        super().__init__()
+        self._engine = engine
+        self._higher_rank_signal = higher_rank_signal
+        self._injected = False
+        self._lock = asyncio.Lock()
+
+    async def _inject_higher_rank_candidate_once(self) -> None:
+        async with self._lock:
+            if self._injected:
+                return
+            async with PostgresKernelUnitOfWork(self._engine) as uow:
+                await ingest_signal(
+                    uow,
+                    IngestSignalRequest(
+                        signal=self._higher_rank_signal,
+                        runtime_commit="kernel-test-head",
+                        schema_revision="0003_portfolio_admission_observability",
+                        now_ms=1_002,
+                    ),
+                )
+            self._injected = True
+
+    async def read_entry_admission_snapshot(
+        self,
+        request: EntryAdmissionSnapshotRequest,
+    ) -> EntryAdmissionSnapshot:
+        await self._inject_higher_rank_candidate_once()
+        return await super().read_entry_admission_snapshot(request)
+
+    async def read_instrument_rules(
+        self,
+        request: InstrumentRulesRequest,
+    ) -> InstrumentRulesFacts:
+        await self._inject_higher_rank_candidate_once()
+        return await super().read_instrument_rules(request)
 
 
 class UnavailableEntryAdmissionFactsSource:
@@ -294,7 +340,7 @@ async def _enable_exchange_commands(engine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision="0003_portfolio_admission_observability",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -312,7 +358,7 @@ async def test_expected_readonly_command_fence_resolves_prior_identity_incident(
                 capability_key="exchange_commands",
                 enabled=False,
                 certified_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision="0003_portfolio_admission_observability",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -322,14 +368,14 @@ async def test_expected_readonly_command_fence_resolves_prior_identity_incident(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         worker_id="lifecycle-worker-1",
         runtime_commit="wrong-commit",
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision="0003_portfolio_admission_observability",
         observed_at_ms=1_001,
     )
     readonly = await runtime_writer_is_certified(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         worker_id="lifecycle-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision="0003_portfolio_admission_observability",
         observed_at_ms=1_002,
     )
 
@@ -488,7 +534,7 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision="0003_portfolio_admission_observability",
                 now_ms=1_002,
             ),
         )
@@ -502,7 +548,7 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
+            schema_revision="0003_portfolio_admission_observability",
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
@@ -543,7 +589,7 @@ async def test_entry_action_facts_timeout_records_infrastructure_decision(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision="0003_portfolio_admission_observability",
                 now_ms=1_002,
             ),
         )
@@ -555,7 +601,7 @@ async def test_entry_action_facts_timeout_records_infrastructure_decision(
         EntryWorkerRequest(
             worker_id="entry-worker-timeout",
             runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
+            schema_revision="0003_portfolio_admission_observability",
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
@@ -588,6 +634,74 @@ async def test_entry_action_facts_timeout_records_infrastructure_decision(
 
 
 @pytest.mark.asyncio
+async def test_adm_010_higher_candidate_during_network_read_supersedes_original(
+    runtime_fact_worker_engine,
+) -> None:
+    await _seed_runtime_authority(runtime_fact_worker_engine)
+    original = _signal(
+        signal_event_id="signal-adm-010-original",
+        occurred_at_ms=1_000,
+    )
+    higher_rank = _signal(
+        signal_event_id="signal-adm-010-a-higher",
+        occurred_at_ms=1_000,
+    )
+    async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
+        await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=original,
+                runtime_commit="kernel-test-head",
+                schema_revision="0003_portfolio_admission_observability",
+                now_ms=1_002,
+            ),
+        )
+    venue = RecordingAcceptingVenue()
+
+    result = await run_entry_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
+        venue,
+        CandidateSupersedingFactsSource(
+            runtime_fact_worker_engine,
+            higher_rank,
+        ),
+        EntryWorkerRequest(
+            worker_id="entry-worker-adm-010",
+            runtime_commit="kernel-test-head",
+            schema_revision="0003_portfolio_admission_observability",
+            now_ms=1_003,
+            lease_until_ms=6_003,
+            timeout_seconds=1,
+            admission_snapshot_validity_ms=1_000,
+        ),
+    )
+
+    assert result.status is EntryWorkerStatus.ISSUE_REFUSED
+    assert result.issue_status is IssueTicketStatus.NO_READY_SIGNAL
+    assert venue.command_kinds == []
+    async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
+        original_decision = await uow.admission_decisions.get_for_signal(
+            original.signal_event_id
+        )
+        original_claim = await uow.capacity_claims.get_for_signal(
+            original.signal_event_id
+        )
+        original_has_ticket = await uow.entry_admission.has_ticket_for_signal(
+            original.signal_event_id
+        )
+        selected = await select_entry_candidate(
+            uow,
+            SelectEntryCandidateRequest(now_ms=1_003),
+        )
+    assert original_decision is None
+    assert original_claim is None
+    assert original_has_ticket is False
+    assert selected.status is SelectEntryCandidateStatus.SELECTED
+    assert selected.candidate is not None
+    assert selected.candidate.signal.signal_event_id == higher_rank.signal_event_id
+
+
+@pytest.mark.asyncio
 async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
     runtime_fact_worker_engine,
 ) -> None:
@@ -600,7 +714,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision="0003_portfolio_admission_observability",
                 now_ms=1_002,
             ),
         )
@@ -611,7 +725,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
+            schema_revision="0003_portfolio_admission_observability",
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
@@ -631,7 +745,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
     reconciliation_request = ReconciliationWorkerRequest(
         worker_id="reconciliation-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision="0003_portfolio_admission_observability",
         now_ms=1_006,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
@@ -682,7 +796,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
             IngestSignalRequest(
                 signal=signal,
                 runtime_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision="0003_portfolio_admission_observability",
                 now_ms=1_002,
             ),
         )
@@ -694,7 +808,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         EntryWorkerRequest(
             worker_id="entry-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
+            schema_revision="0003_portfolio_admission_observability",
             now_ms=1_003,
             lease_until_ms=6_003,
             timeout_seconds=1,
@@ -722,7 +836,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         ReconciliationWorkerRequest(
             worker_id="reconciliation-worker-1",
             runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
+            schema_revision="0003_portfolio_admission_observability",
             now_ms=1_007,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
@@ -745,7 +859,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     worker_request = LifecycleWorkerRequest(
         worker_id="lifecycle-worker-1",
         runtime_commit="kernel-test-head",
-        schema_revision="0002_sor_v3_strategy_group_capacity",
+        schema_revision="0003_portfolio_admission_observability",
         now_ms=1_008,
         lease_until_ms=6_008,
         timeout_seconds=1,

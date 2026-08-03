@@ -55,7 +55,15 @@ class FamilyTicketLimits(BaseModel):
         return value
 
     def for_family(self, exposure_family: ExposureFamily) -> int:
-        return int(getattr(self, exposure_family))
+        limits = {
+            "long_continuation": self.long_continuation,
+            "opening_range": self.opening_range,
+            "rally_failure_short": self.rally_failure_short,
+        }
+        try:
+            return limits[exposure_family]
+        except KeyError as exc:
+            raise ValueError("unknown Exposure Family") from exc
 
 
 class CapacityPolicy(BaseModel):

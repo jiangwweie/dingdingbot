@@ -38,6 +38,7 @@ def test_admission_decision_digest_binds_policy_usage_and_candidate_set() -> Non
     changed_candidates = _rejected_decision(
         include_second_candidate=True
     )
+    changed_family = _rejected_decision(exposure_family="long_continuation")
 
     assert len(
         {
@@ -45,8 +46,30 @@ def test_admission_decision_digest_binds_policy_usage_and_candidate_set() -> Non
             changed_policy.decision_digest,
             changed_usage.decision_digest,
             changed_candidates.decision_digest,
+            changed_family.decision_digest,
         }
-    ) == 4
+    ) == 5
+
+
+def test_adm_011_decision_digest_binds_exposure_family() -> None:
+    opening_range = _rejected_decision(exposure_family="opening_range")
+    long_continuation = _rejected_decision(
+        exposure_family="long_continuation"
+    )
+
+    assert opening_range.decision_digest != long_continuation.decision_digest
+
+
+def test_adm_012_decision_rejects_untyped_extra_fields() -> None:
+    decision = _rejected_decision()
+
+    with pytest.raises(ValidationError, match="extra"):
+        AdmissionDecision.model_validate(
+            {
+                **decision.model_dump(mode="python"),
+                "untyped_debug_context": "forbidden",
+            }
+        )
 
 
 def test_admitted_decision_requires_claim_ticket_and_snapshot_digest() -> None:
@@ -81,6 +104,7 @@ def _rejected_decision(
     owner_policy_version: int = 3,
     usage: AdmissionPortfolioUsage | None = None,
     include_second_candidate: bool = False,
+    exposure_family: str = "opening_range",
 ) -> AdmissionDecision:
     signal = _signal()
     candidates = [EntryCandidate(signal=signal, owner_policy_priority=1)]
@@ -100,7 +124,7 @@ def _rejected_decision(
     return freeze_admission_decision(
         signal=signal,
         candidate_set=freeze_candidate_set(tuple(candidates)),
-        exposure_family="opening_range",
+        exposure_family=exposure_family,
         runtime_profile_id="tiny-live-v1",
         owner_policy_id="policy-live-v3",
         owner_policy_version=owner_policy_version,

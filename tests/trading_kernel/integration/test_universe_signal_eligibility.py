@@ -58,7 +58,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                 IngestSignalRequest(
                     signal=signal,
                     runtime_commit="commit-test",
-                    schema_revision="0002_sor_v3_strategy_group_capacity",
+                    schema_revision="0003_portfolio_admission_observability",
                     now_ms=1_010,
                 ),
             )
@@ -86,7 +86,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                         update={"signal_event_id": "signal:old-universe-after-switch"}
                     ),
                     runtime_commit="commit-test",
-                    schema_revision="0002_sor_v3_strategy_group_capacity",
+                    schema_revision="0003_portfolio_admission_observability",
                     now_ms=1_011,
                 ),
             )
@@ -206,14 +206,19 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             owner_policy_id, policy_version, enabled, new_entry_submit_enabled,
             priority_rank, max_concurrent_tickets,
             max_strategy_group_concurrent_tickets,
+            family_ticket_limits,
             max_ticket_stop_risk_fraction, max_gross_stop_risk_fraction,
             max_ticket_initial_margin_fraction,
-            max_gross_initial_margin_utilization, max_leverage,
+            max_gross_initial_margin_utilization,
+            directional_stop_risk_limit_fraction,
+            min_materialization_ratio, max_leverage,
             supported_margin_mode,
             post_stop_stress_multiple,
             max_post_fill_stop_risk_overrun_fraction, scope, updated_at_ms
         ) VALUES (
-            'policy-a', 1, true, true, 7, 3, 2, 0.03, 0.06, 0.45, 0.9, 5,
+            'policy-a', 1, true, true, 7, 3, NULL,
+            '{"long_continuation":1,"opening_range":2,"rally_failure_short":1}'::jsonb,
+            0.02, 0.06, 0.30, 0.9, 0.04, 0.50, 10,
             'cross', 2, 0.1, '{}'::jsonb, 1000
         );
         INSERT INTO brc_runtime_scopes_current (
@@ -241,7 +246,7 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             certification, updated_at_ms
         ) VALUES (
             'strategy_signal_ingest', true, 'commit-test',
-            '0002_sor_v3_strategy_group_capacity', '{}'::jsonb, 1000
+            '0003_portfolio_admission_observability', '{}'::jsonb, 1000
         )
         """
     await conn.execute(

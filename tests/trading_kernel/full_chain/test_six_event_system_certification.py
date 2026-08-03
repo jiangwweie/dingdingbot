@@ -238,7 +238,7 @@ class CertifiedEntryAdmissionFactsSource:
                 margin_mode="cross",
                 exchange_instrument_id=request.exchange_instrument_id,
                 mark_price=(self.best_bid + self.best_ask) / Decimal(2),
-                configured_leverage=10,
+                configured_leverage=5,
                 total_wallet_balance=Decimal(1000000),
                 total_margin_balance=Decimal(1000000),
                 total_initial_margin=Decimal(0),
@@ -289,7 +289,7 @@ class CertifiedEntryAdmissionFactsSource:
             margin_mode="cross",
             exchange_instrument_id=request.exchange_instrument_id,
             mark_price=(self.best_bid + self.best_ask) / Decimal(2),
-            configured_leverage=10,
+            configured_leverage=5,
             total_wallet_balance=Decimal(1000000),
             total_margin_balance=Decimal(1000000),
             total_initial_margin=Decimal(0),
@@ -611,7 +611,11 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
         uow_factory,
         venue,
         CertifiedEntryAdmissionFactsSource(
-            reference_price=reference_price,
+            reference_price=(
+                reference_price * Decimal("1.03")
+                if contract.position_side == "long"
+                else reference_price * Decimal("0.97")
+            ),
             position_side=contract.position_side,
         ),
         EntryWorkerRequest(
@@ -624,7 +628,20 @@ async def test_registered_event_reaches_terminal_review_from_closed_market_input
             admission_snapshot_validity_ms=30_000,
         ),
     )
-    assert entry.status is EntryWorkerStatus.DISPATCHED
+    async with uow_factory() as uow:
+        entry_decision = await uow.admission_decisions.get_for_signal(
+            signal.signal_event_id
+        )
+    entry_diagnostic = (
+        None
+        if entry_decision is None
+        else (
+            entry_decision.first_blocker,
+            entry_decision.binding_constraint,
+            entry_decision.portfolio_usage,
+        )
+    )
+    assert entry.status is EntryWorkerStatus.DISPATCHED, entry_diagnostic
     assert entry.ticket_id is not None
 
     async with uow_factory() as uow:

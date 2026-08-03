@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Iterator
-from typing import Literal
 from uuid import uuid4
 
 import asyncpg  # type: ignore[import-untyped]
@@ -62,9 +61,7 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-13-query-bounds"
-SCHEMA_REVISION: Literal["0002_sor_v3_strategy_group_capacity"] = (
-    "0002_sor_v3_strategy_group_capacity"
-)
+SCHEMA_REVISION = "0003_portfolio_admission_observability"
 ACTIVE_MEMBERS = tuple(
     f"binance-usdm:{symbol}USDT:perpetual"
     for symbol in (

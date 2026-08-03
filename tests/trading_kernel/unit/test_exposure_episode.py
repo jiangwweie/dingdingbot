@@ -129,6 +129,34 @@ def test_event_version_is_part_of_episode_domain_and_identity() -> None:
     assert current.exposure_episode_id != historical.exposure_episode_id
 
 
+def test_epi_005_universe_replacement_preserves_continuous_episode() -> None:
+    contract = _contract("CPM-LONG")
+    before_replacement = advance_exposure_episode(
+        contract=contract,
+        current=None,
+        detector_status=DetectorStatus.TRIGGERED,
+        occurred_at_ms=1_000,
+        observed_at_ms=1_000,
+        exchange_instrument_id=ETH,
+    )
+
+    after_replacement = advance_exposure_episode(
+        contract=contract,
+        current=before_replacement.current,
+        detector_status=DetectorStatus.TRIGGERED,
+        occurred_at_ms=2_000,
+        observed_at_ms=2_000,
+        exchange_instrument_id=ETH,
+    )
+
+    assert after_replacement.created_new_episode is False
+    assert (
+        after_replacement.exposure_episode_id
+        == before_replacement.exposure_episode_id
+    )
+    assert after_replacement.current.projection_version == 2
+
+
 def _contract(event_id: str):
     return next(
         item for item in registered_strategy_contracts() if item.event_id == event_id

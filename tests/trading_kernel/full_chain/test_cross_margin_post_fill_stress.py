@@ -171,11 +171,11 @@ class TicketPreflightFacts(PreflightFacts):
                 exchange_instrument_id=request.exchange_instrument_id,
                 mark_price=ticket.entry_reference_price,
                 configured_leverage=ticket.selected_leverage,
-                total_wallet_balance=Decimal(100),
-                total_margin_balance=Decimal(100),
+                total_wallet_balance=Decimal(300),
+                total_margin_balance=Decimal(300),
                 total_initial_margin=Decimal(10),
                 total_maintenance_margin=Decimal(1),
-                available_margin=Decimal(90),
+                available_margin=Decimal(290),
                 account_positions=(),
                 observed_at_ms=request.observed_at_ms,
                 valid_until_ms=request.observed_at_ms + request.valid_for_ms,
@@ -243,13 +243,15 @@ async def test_raw_liquidation_observation_never_controls_post_fill_decision(
     ticket = (
         _ticket(
             entry_reference_price=Decimal("6.60"),
-            quantity=Decimal(10),
-            notional=Decimal(66),
-            reserved_margin=Decimal("13.2"),
-            risk_at_stop=Decimal("2.17"),
+            quantity=Decimal(20),
+            notional=Decimal(132),
+            reserved_margin=Decimal("26.4"),
+            planned_stop_risk_budget=Decimal("4.34"),
+            post_fill_stop_risk_limit=Decimal("4.774"),
+            risk_at_stop=Decimal("4.34"),
             initial_stop_price=Decimal("6.383"),
             take_profit_prices=(Decimal(7),),
-            take_profit_quantities=(Decimal(5),),
+            take_profit_quantities=(Decimal(10),),
         )
         if case_name == "avax_direction_inconsistent"
         else _ticket()
@@ -574,7 +576,7 @@ async def _reach_post_fill_pending(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
+            schema_revision="0003_portfolio_admission_observability",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=TicketPreflightFacts(ticket),
@@ -648,7 +650,7 @@ async def _run_post_fill_worker(
         ReconciliationWorkerRequest(
             worker_id="post-fill-reconciliation",
             runtime_commit="kernel-test-head",
-            schema_revision="0002_sor_v3_strategy_group_capacity",
+            schema_revision="0003_portfolio_admission_observability",
             now_ms=now_ms,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,

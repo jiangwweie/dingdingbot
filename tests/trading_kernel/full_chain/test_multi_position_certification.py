@@ -458,7 +458,9 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision="0002_sor_v3_strategy_group_capacity" if entry else None,
+            schema_revision=(
+                "0003_portfolio_admission_observability" if entry else None
+            ),
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
@@ -500,6 +502,12 @@ def _ticket_for_domain(
         "runtime_scope_id": runtime_scope_id,
         "fact_digest": "sha256:" + "3" * 64,
     }
+    if runtime.strategy_group_id == "SOR-001":
+        terms.update(exposure_family="opening_range", family_ticket_limit=2)
+    elif runtime.strategy_group_id == "BRF2-001":
+        terms.update(exposure_family="rally_failure_short", family_ticket_limit=1)
+    else:
+        terms.update(exposure_family="long_continuation", family_ticket_limit=1)
     if runtime.event_spec_id != template.identity.runtime.event_spec_id:
         terms.update(
             {
@@ -529,11 +537,18 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 new_entry_submit_enabled=True,
                 priority_rank=1,
                 max_concurrent_tickets=3,
-                max_strategy_group_concurrent_tickets=2,
-                max_ticket_stop_risk_fraction="0.03",
+                max_strategy_group_concurrent_tickets=None,
+                family_ticket_limits={
+                    "long_continuation": 1,
+                    "opening_range": 2,
+                    "rally_failure_short": 1,
+                },
+                max_ticket_stop_risk_fraction="0.02",
                 max_gross_stop_risk_fraction="0.06",
-                max_ticket_initial_margin_fraction="0.45",
+                max_ticket_initial_margin_fraction="0.30",
                 max_gross_initial_margin_utilization="0.90",
+                directional_stop_risk_limit_fraction="0.04",
+                min_materialization_ratio="0.50",
                 max_leverage=10,
                 supported_margin_mode="cross",
                 post_stop_stress_multiple="2.0",
@@ -547,7 +562,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0002_sor_v3_strategy_group_capacity",
+                schema_revision="0003_portfolio_admission_observability",
                 certification={},
                 updated_at_ms=1_000,
             )

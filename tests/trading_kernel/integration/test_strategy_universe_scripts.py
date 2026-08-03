@@ -40,7 +40,7 @@ ADMIN_DSN = os.getenv(
     "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
-CANONICAL_EVENT_SPEC_ID = "event_spec:SOR-001:SOR-LONG:v3"
+CANONICAL_EVENT_SPEC_ID = "event_spec:SOR-001:SOR-LONG:v4"
 NOW_MS = 1_800_001_000_000
 
 
@@ -61,7 +61,7 @@ async def script_database_url() -> AsyncGenerator[str, None]:
                 RuntimeAuthoritySeedRequest(
                     account_id="sensitive-account-id",
                     runtime_commit="task-12-local-test",
-                    schema_revision="0002_sor_v3_strategy_group_capacity",
+                    schema_revision="0003_portfolio_admission_observability",
                     seeded_at_ms=NOW_MS - 1_000,
                 ),
             )
@@ -193,7 +193,23 @@ async def test_readonly_certification_accepts_only_structurally_consistent_unive
         await engine.dispose()
 
     assert coherent["status"] == "pass"
-    assert coherent["strategy_universe"] == {
+    coherent_universe = coherent["strategy_universe"]
+    assert isinstance(coherent_universe, dict)
+    assert {
+        key: coherent_universe[key]
+        for key in (
+            "version_count",
+            "current_count",
+            "member_count",
+            "scope_count",
+            "integrity_violation_count",
+            "scope_lifecycle_counts",
+            "temporarily_unavailable_certification_count",
+            "shadow_pending_count",
+            "active_current_count",
+            "warming_count",
+        )
+    } == {
         "version_count": 1,
         "current_count": 0,
         "member_count": 2,
@@ -205,7 +221,14 @@ async def test_readonly_certification_accepts_only_structurally_consistent_unive
             "retired": 0,
         },
         "temporarily_unavailable_certification_count": 0,
+        "shadow_pending_count": 0,
+        "active_current_count": 0,
+        "warming_count": 1,
     }
+    assert coherent_universe["identity_status"] == "fail"
+    assert coherent_universe["deployment_stage"] == "invalid"
+    assert coherent_universe["active_manifest"] == []
+    assert len(coherent_universe["warming_manifest"]) == 1
     assert inconsistent["status"] == "fail"
     inconsistent_universe = inconsistent["strategy_universe"]
     assert isinstance(inconsistent_universe, dict)

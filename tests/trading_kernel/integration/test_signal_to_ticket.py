@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Literal
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ import sqlalchemy as sa
 from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
+import src.trading_kernel.application.issue_ready_signal as issue_ready_signal_module
 from src.trading_kernel.application.ingest_signal import (
     IngestSignalRequest,
     IngestSignalStatus,
@@ -527,6 +529,219 @@ async def test_capacity_rejection_records_one_decision_and_no_trading_authority(
         ) == 0
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(exchange_commands)
+        ) == 0
+
+
+@pytest.mark.asyncio
+async def test_adm_003_reprocessing_signal_keeps_one_final_decision(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal(signal_event_id="signal-adm-003")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                now_ms=1_001,
+            ),
+        )
+    account = AccountRiskSnapshot.create(
+        **{
+            **_admission_snapshot().account_risk_snapshot.model_dump(
+                mode="python",
+                exclude={"snapshot_digest"},
+            ),
+            "available_margin": Decimal(0),
+            "configured_leverage": 5,
+        }
+    )
+    snapshot = EntryAdmissionSnapshot(
+        account_risk_snapshot=account,
+        best_bid_price=Decimal("9999.9"),
+        best_ask_price=Decimal(10000),
+        open_orders=(),
+        observed_at_ms=1_001,
+        valid_until_ms=10_000,
+    )
+    request = IssueReadySignalRequest(
+        signal_event_id=signal.signal_event_id,
+        admission_snapshot=snapshot,
+        claim_owner="signal-worker-adm-003",
+        runtime_commit="kernel-test-head",
+        schema_revision=CURRENT_SCHEMA_REVISION,
+        now_ms=1_002,
+    )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        first = await issue_ready_signal(uow, request)
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        second = await issue_ready_signal(uow, request)
+
+    assert first.status is IssueTicketStatus.BUDGET_EXHAUSTED
+    assert second.status is IssueTicketStatus.NO_READY_SIGNAL
+    async with issue_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.text(
+                "SELECT count(*) FROM brc_admission_decisions "
+                "WHERE signal_event_id = :signal_event_id"
+            ),
+            {"signal_event_id": signal.signal_event_id},
+        ) == 1
+
+
+@pytest.mark.asyncio
+async def test_adm_008_action_time_policy_mismatch_commits_decision_and_readiness(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal(signal_event_id="signal-adm-008")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                now_ms=1_001,
+            ),
+        )
+    risk_values = _admission_snapshot().account_risk_snapshot.model_dump(
+        mode="python",
+        exclude={"snapshot_digest"},
+    )
+    risk_values["configured_leverage"] = 10
+    mismatch_snapshot = _admission_snapshot().model_copy(
+        update={"account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)}
+    )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result = await issue_ready_signal(
+            uow,
+            IssueReadySignalRequest(
+                signal_event_id=signal.signal_event_id,
+                admission_snapshot=mismatch_snapshot,
+                claim_owner="signal-worker-adm-008",
+                runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                now_ms=1_002,
+            ),
+        )
+
+    assert result.status is IssueTicketStatus.SIGNAL_INVALID_OR_STALE
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        decision = await uow.admission_decisions.get_for_signal(
+            signal.signal_event_id
+        )
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+    assert decision is not None
+    assert decision.first_blocker == "signal_invalid_or_stale"
+    assert readiness is not None
+    assert readiness.readiness_state == "blocked"
+    assert readiness.first_blocker == "signal_invalid_or_stale"
+
+
+@pytest.mark.asyncio
+async def test_adm_008_decision_failure_rolls_back_mismatch_readiness(
+    issue_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal(signal_event_id="signal-adm-008-rollback")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                now_ms=1_001,
+            ),
+        )
+    risk_values = _admission_snapshot().account_risk_snapshot.model_dump(
+        mode="python",
+        exclude={"snapshot_digest"},
+    )
+    risk_values["configured_leverage"] = 10
+    mismatch_snapshot = _admission_snapshot().model_copy(
+        update={"account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)}
+    )
+
+    async def fail_add(*args, **kwargs) -> None:
+        del args, kwargs
+        raise RuntimeError("injected ADM-008 Decision failure")
+
+    monkeypatch.setattr(PostgresAdmissionDecisionRepository, "add", fail_add)
+    with pytest.raises(RuntimeError, match="ADM-008"):
+        async with PostgresKernelUnitOfWork(issue_engine) as uow:
+            await issue_ready_signal(
+                uow,
+                IssueReadySignalRequest(
+                    signal_event_id=signal.signal_event_id,
+                    admission_snapshot=mismatch_snapshot,
+                    claim_owner="signal-worker-adm-008",
+                    runtime_commit="kernel-test-head",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
+                    now_ms=1_002,
+                ),
+            )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        decision = await uow.admission_decisions.get_for_signal(
+            signal.signal_event_id
+        )
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+    assert decision is None
+    assert readiness is not None
+    assert readiness.readiness_state == "candidate_ready"
+    assert readiness.first_blocker is None
+
+
+@pytest.mark.asyncio
+async def test_cap_014_unknown_registry_family_fails_closed_without_claim(
+    issue_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal(signal_event_id="signal-cap-014")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                now_ms=1_001,
+            ),
+        )
+    monkeypatch.setattr(
+        issue_ready_signal_module,
+        "strategy_contract_for",
+        lambda event_spec_id: SimpleNamespace(
+            event_spec_id=event_spec_id,
+            exposure_family="unknown_family",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Exposure Family"):
+        async with PostgresKernelUnitOfWork(issue_engine) as uow:
+            await issue_ready_signal(
+                uow,
+                IssueReadySignalRequest(
+                    signal_event_id=signal.signal_event_id,
+                    admission_snapshot=_admission_snapshot(),
+                    claim_owner="signal-worker-cap-014",
+                    runtime_commit="kernel-test-head",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
+                    now_ms=1_002,
+                ),
+            )
+
+    async with issue_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(capacity_claims)
         ) == 0
 
 

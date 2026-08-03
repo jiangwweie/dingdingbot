@@ -116,6 +116,19 @@ def test_directional_stop_risk_caps_the_new_ticket() -> None:
     assert exhausted.selected is None
 
 
+def test_cap_004_opposite_direction_ignores_exhausted_long_direction() -> None:
+    decision = select_capacity_candidate(
+        _request(
+            gross_risk_at_stop=Decimal(40),
+            directional_risk_at_stop=Decimal(0),
+        )
+    )
+
+    assert decision.status is CapacitySizingStatus.SELECTED
+    assert decision.selected is not None
+    assert decision.selected.ticket_stop_risk_budget == Decimal(20)
+
+
 @pytest.mark.parametrize(
     ("gross_risk_at_stop", "expected_status"),
     [

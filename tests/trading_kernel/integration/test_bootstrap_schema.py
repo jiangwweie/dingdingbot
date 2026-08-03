@@ -78,7 +78,7 @@ async def test_bootstrap_schema_creates_only_the_clean_kernel_baseline() -> None
             assert tables == EXPECTED_TABLES | {"alembic_version"}
             assert {"venue_id", "account_id"}.issubset(exposure_columns)
             assert exposure_primary_key == {"venue_id", "account_id"}
-            assert revision == "0002_sor_v3_strategy_group_capacity"
+            assert revision == "0003_portfolio_admission_observability"
         finally:
             await engine.dispose()
     finally:

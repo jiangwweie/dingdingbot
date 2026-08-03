@@ -123,6 +123,10 @@ def _active_ticket(
             ),
             "exit_policy_id": policy.exit_policy_id,
             "exit_policy_semantic_hash": policy.semantic_hash(),
+            "exposure_family": contract.exposure_family,
+            "family_ticket_limit": (
+                2 if contract.exposure_family == "opening_range" else 1
+            ),
             "pre_tp1_reclaim_price": (
                 original.pre_tp1_reclaim_price if event_id.startswith("SOR-") else None
             ),

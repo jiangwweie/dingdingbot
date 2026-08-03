@@ -5,7 +5,11 @@ from src.trading_kernel.application.produce_strategy_signal import (
     evaluate_strategy_snapshot,
     produce_strategy_signal,
 )
-from src.trading_kernel.domain.exposure_episode import build_exposure_episode_id
+from src.trading_kernel.domain.detector import DetectorStatus
+from src.trading_kernel.domain.exposure_episode import (
+    advance_exposure_episode,
+    build_exposure_episode_id,
+)
 from src.trading_kernel.domain.market import MarketSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from tests.trading_kernel.unit.detectors.fixtures import cpm_long_snapshot, sor_snapshot
@@ -163,3 +167,99 @@ def test_sor_live_and_replay_share_one_session_episode_and_fifteen_minute_expiry
 
     assert live == replay
     assert live.expires_at_ms == live.occurred_at_ms + 900_000
+
+
+def test_epi_008_sor_new_session_creates_new_episode_identity() -> None:
+    contract = next(
+        item for item in registered_strategy_contracts() if item.event_id == "SOR-LONG"
+    )
+    first_snapshot = sor_snapshot(side="long")
+    first = evaluate_strategy_snapshot(contract, first_snapshot)
+    one_day_ms = 86_400_000
+    next_snapshot = first_snapshot.model_copy(
+        update={
+            "trigger_candle_close_time_ms": (
+                first_snapshot.trigger_candle_close_time_ms + one_day_ms
+            ),
+            "candles_15m": tuple(
+                candle.model_copy(
+                    update={
+                        "open_time_ms": candle.open_time_ms + one_day_ms,
+                        "close_time_ms": candle.close_time_ms + one_day_ms,
+                    }
+                )
+                for candle in first_snapshot.candles_15m
+            ),
+        }
+    )
+    second = evaluate_strategy_snapshot(contract, next_snapshot)
+    scope = RuntimeScopeSnapshot(
+        runtime_scope_id="scope-sor-eth-long",
+        strategy_group_id=contract.strategy_group_id,
+        strategy_version_id=contract.strategy_version_id,
+        event_spec_id=contract.event_spec_id,
+        runtime_profile_id="profile-observation-only",
+        owner_policy_id="policy-observation-only",
+        exchange_instrument_id=first_snapshot.exchange_instrument_id,
+        position_side="long",
+        universe_version_id="universe:SOR-LONG:3",
+        universe_semantic_digest="sha256:" + "a" * 64,
+        lifecycle_state="active",
+        observation_enabled=True,
+        entry_enabled=True,
+        scope_version=1,
+        observation_generation=0,
+    )
+
+    first_signal = produce_strategy_signal(
+        contract=contract,
+        scope=scope,
+        detector_result=first,
+        persisted_facts=first.facts,
+    )
+    second_signal = produce_strategy_signal(
+        contract=contract,
+        scope=scope,
+        detector_result=second,
+        persisted_facts=second.facts,
+    )
+
+    assert second_signal.occurred_at_ms == first_signal.occurred_at_ms + one_day_ms
+    assert second_signal.exposure_episode_id != first_signal.exposure_episode_id
+
+
+def test_epi_009_live_and_replay_reduce_identical_episode_sequence() -> None:
+    contract = next(
+        item for item in registered_strategy_contracts() if item.event_id == "CPM-LONG"
+    )
+    sequence = (
+        (DetectorStatus.TRIGGERED, 1_000),
+        (DetectorStatus.TRIGGERED, 2_000),
+        (DetectorStatus.NOT_TRIGGERED, 3_000),
+        (DetectorStatus.TRIGGERED, 4_000),
+    )
+
+    def reduce_sequence():
+        current = None
+        results = []
+        for status, observed_at_ms in sequence:
+            result = advance_exposure_episode(
+                contract=contract,
+                current=current,
+                detector_status=status,
+                occurred_at_ms=(
+                    observed_at_ms if status is DetectorStatus.TRIGGERED else None
+                ),
+                observed_at_ms=observed_at_ms,
+                exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+            )
+            current = result.current
+            results.append(result)
+        return tuple(results)
+
+    live = reduce_sequence()
+    replay = reduce_sequence()
+
+    assert replay == live
+    assert replay[-1].exposure_episode_id != replay[0].exposure_episode_id
+    assert replay[-1].current.projection_version == 4
