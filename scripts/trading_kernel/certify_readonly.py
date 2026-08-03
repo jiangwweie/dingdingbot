@@ -11,10 +11,11 @@ import sys
 import time
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -22,12 +23,13 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_FIRST_BATCH_INSTRUMENT_IDS,
-    APPROVED_UNIVERSE_EVENT_SPECS,
 )
+from src.trading_kernel.domain.exit_policy import registered_exit_policies
 from src.trading_kernel.domain.instrument_certification import (
     build_certification_manifest_digest,
 )
 from src.trading_kernel.domain.strategy_registry import (
+    RegisteredStrategyContract,
     build_registry_semantic_hash,
     registered_strategy_contracts,
 )
@@ -64,16 +66,6 @@ _DECIMAL_POLICY_FIELDS = frozenset(
         "max_post_fill_stop_risk_overrun_fraction",
     }
 )
-_COMPATIBLE_SOURCE_EVENT_SPECS = (
-    ("BRF2-001", "event_spec:BRF2-001:BRF2-SHORT:v2"),
-    ("CPM-RO-001", "event_spec:CPM-RO-001:CPM-LONG:v2"),
-    ("MI-001", "event_spec:MI-001:MI-LONG:v2"),
-    ("MPG-001", "event_spec:MPG-001:MPG-LONG:v2"),
-    ("SOR-001", "event_spec:SOR-001:SOR-LONG:v3"),
-    ("SOR-001", "event_spec:SOR-001:SOR-SHORT:v3"),
-)
-
-
 def _canonical_decimal(value: object) -> str:
     return format(Decimal(str(value)).normalize(), "f")
 
@@ -137,6 +129,236 @@ def _universe_manifest_matches(
         if str(row.get("semantic_digest", "")) != expected_digest:
             return False
     return True
+
+
+def _registry_manifest_hash(manifest: Mapping[str, object]) -> str:
+    encoded = json.dumps(
+        manifest,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"sha256:{sha256(encoded).hexdigest()}"
+
+
+def _certification_batch_manifest(
+    row: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    if row is None:
+        return None
+    raw_member_ids = row.get("member_ids")
+    if not isinstance(raw_member_ids, (list, tuple)):
+        member_ids: tuple[str, ...] = ()
+        live_manifest_digest = ""
+    else:
+        member_ids = tuple(str(value) for value in raw_member_ids)
+        try:
+            live_manifest_digest = build_certification_manifest_digest(member_ids)
+        except ValueError:
+            live_manifest_digest = ""
+    return {
+        **dict(row),
+        "member_ids": list(member_ids),
+        "live_manifest_digest": live_manifest_digest,
+    }
+
+
+def _expected_registry_manifest() -> dict[str, object]:
+    contracts = registered_strategy_contracts()
+    registry_hash = build_registry_semantic_hash(contracts)
+    contracts_by_group: dict[str, list[RegisteredStrategyContract]] = {}
+    for contract in contracts:
+        contracts_by_group.setdefault(contract.strategy_group_id, []).append(contract)
+    groups = []
+    versions = []
+    for strategy_group_id, group_contracts in sorted(contracts_by_group.items()):
+        active_version_ids = {
+            contract.strategy_version_id for contract in group_contracts
+        }
+        if len(active_version_ids) != 1:
+            raise ValueError("registered group must own one active version")
+        active_version_id = next(iter(active_version_ids))
+        groups.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "active_version_id": active_version_id,
+                "status": "active",
+            }
+        )
+        versions.append(
+            {
+                "strategy_version_id": active_version_id,
+                "strategy_group_id": strategy_group_id,
+                "version": group_contracts[0].semantic_version,
+                "semantics": {
+                    "event_spec_ids": sorted(
+                        contract.event_spec_id for contract in group_contracts
+                    ),
+                    "registry_semantic_hash": registry_hash,
+                    "source": "committed_strategy_registry_contract",
+                },
+                "status": "active",
+            }
+        )
+    facts_by_id = {
+        fact.fact_definition_id: fact
+        for contract in contracts
+        for fact in (*contract.required_facts, *contract.disable_facts)
+    }
+    events = []
+    event_facts: list[dict[str, object]] = []
+    for contract in sorted(contracts, key=lambda item: item.event_spec_id):
+        protection_fact_id = next(
+            fact.fact_definition_id
+            for fact in contract.required_facts
+            if fact.fact_name == contract.protection_reference_fact
+        )
+        events.append(
+            {
+                "event_spec_id": contract.event_spec_id,
+                "strategy_version_id": contract.strategy_version_id,
+                "event_id": contract.event_id,
+                "position_side": contract.position_side,
+                "timeframe": contract.timeframe,
+                "freshness_window_ms": contract.freshness_window_ms,
+                "event_time_authority": contract.event_time_authority,
+                "entry_order_type": contract.entry_order_type.value,
+                "protection_reference_fact_definition_id": protection_fact_id,
+                "exit_policy_id": contract.exit_policy_id,
+                "execution_semantics": {
+                    "event_semantic_hash": build_registry_semantic_hash((contract,)),
+                    "signal_grade": "trial_grade_signal",
+                    "source": "committed_strategy_registry_contract",
+                },
+                "status": contract.status,
+            }
+        )
+        event_facts.extend(
+            {
+                "event_spec_id": contract.event_spec_id,
+                "fact_definition_id": fact.fact_definition_id,
+                "role": fact.role,
+                "required": True,
+            }
+            for fact in (*contract.required_facts, *contract.disable_facts)
+        )
+    policy_by_event = {
+        policy.event_spec_id: policy for policy in registered_exit_policies()
+    }
+    policies = [
+        {
+            "exit_policy_id": policy_by_event[contract.event_spec_id].exit_policy_id,
+            "exit_policy_version": policy_by_event[
+                contract.event_spec_id
+            ].exit_policy_version,
+            "event_spec_id": contract.event_spec_id,
+            "position_side": contract.position_side,
+            "policy": policy_by_event[contract.event_spec_id].model_dump(mode="json"),
+            "semantic_hash": policy_by_event[
+                contract.event_spec_id
+            ].semantic_hash(),
+            "status": contract.status,
+        }
+        for contract in sorted(contracts, key=lambda item: item.event_spec_id)
+    ]
+    return {
+        "groups": groups,
+        "versions": sorted(
+            versions,
+            key=lambda row: str(row["strategy_version_id"]),
+        ),
+        "events": events,
+        "facts": [
+            {
+                "fact_definition_id": fact.fact_definition_id,
+                "fact_name": fact.fact_name,
+                "value_type": fact.value_type,
+                "freshness_ms": fact.freshness_ms,
+                "validation": {
+                    "satisfaction": (
+                        "positive_decimal"
+                        if fact.value_type == "decimal"
+                        else "boolean"
+                    )
+                },
+            }
+            for _fact_id, fact in sorted(facts_by_id.items())
+        ],
+        "event_facts": sorted(
+            event_facts,
+            key=lambda row: (row["event_spec_id"], row["fact_definition_id"]),
+        ),
+        "policies": policies,
+    }
+
+
+async def _live_registry_manifest(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    queries = {
+        "groups": """
+            SELECT strategy_group_id, active_version_id, status
+              FROM brc_strategy_groups
+             WHERE status = 'active'
+          ORDER BY strategy_group_id
+        """,
+        "versions": """
+            SELECT strategy_version_id, strategy_group_id, version,
+                   semantics, status
+              FROM brc_strategy_versions
+             WHERE status = 'active'
+          ORDER BY strategy_version_id
+        """,
+        "events": """
+            SELECT event_spec_id, strategy_version_id, event_id,
+                   position_side, timeframe, freshness_window_ms,
+                   event_time_authority, entry_order_type,
+                   protection_reference_fact_definition_id,
+                   exit_policy_id, execution_semantics, status
+              FROM brc_event_specs
+             WHERE status = 'active'
+          ORDER BY event_spec_id
+        """,
+        "facts": """
+            SELECT fact.fact_definition_id, fact.fact_name, fact.value_type,
+                   fact.freshness_ms, fact.validation
+              FROM brc_fact_definitions AS fact
+             WHERE EXISTS (
+                    SELECT 1
+                      FROM brc_event_required_facts AS link
+                      JOIN brc_event_specs AS event
+                        ON event.event_spec_id = link.event_spec_id
+                       AND event.status = 'active'
+                     WHERE link.fact_definition_id = fact.fact_definition_id
+                  )
+          ORDER BY fact.fact_definition_id
+        """,
+        "event_facts": """
+            SELECT link.event_spec_id, link.fact_definition_id,
+                   link.role, link.required
+              FROM brc_event_required_facts AS link
+              JOIN brc_event_specs AS event
+                ON event.event_spec_id = link.event_spec_id
+               AND event.status = 'active'
+          ORDER BY link.event_spec_id, link.fact_definition_id
+        """,
+        "policies": """
+            SELECT exit_policy_id, exit_policy_version, event_spec_id,
+                   position_side, policy, semantic_hash, status
+              FROM brc_exit_policies
+             WHERE status = 'active'
+          ORDER BY event_spec_id
+        """,
+    }
+    return {
+        name: [
+            dict(row)
+            for row in (
+                await connection.execute(text(query))
+            ).mappings()
+        ]
+        for name, query in queries.items()
+    }
 
 
 def _closure_ticket_manifest(
@@ -214,6 +436,12 @@ async def _certify(
     effective_now_ms = int(time.time() * 1_000) if now_ms is None else now_ms
     if effective_now_ms <= 0:
         raise ValueError("certification time must be positive")
+    registered_contracts = registered_strategy_contracts()
+    expected_registry_hash = build_registry_semantic_hash(registered_contracts)
+    expected_registry_manifest = _expected_registry_manifest()
+    expected_live_registry_hash = _registry_manifest_hash(
+        expected_registry_manifest
+    )
     engine = create_async_engine(database_url)
     try:
         async with engine.connect() as connection:
@@ -254,6 +482,7 @@ async def _certify(
                 ).scalar_one_or_none()
                 or ""
             )
+            live_registry_manifest = await _live_registry_manifest(connection)
             runtime_profile_row = (
                 await connection.execute(
                     text(
@@ -555,6 +784,10 @@ async def _certify(
                                batch.completed_at_ms,
                                batch.valid_until_ms,
                                count(member.exchange_instrument_id) AS member_count,
+                               array_agg(
+                                   member.exchange_instrument_id
+                                   ORDER BY member.exchange_instrument_id
+                               ) AS member_ids,
                                count(*) FILTER (
                                    WHERE member.status = 'eligible'
                                ) AS eligible_member_count
@@ -586,7 +819,11 @@ async def _certify(
                                batch.owner_policy_version,
                                batch.manifest_digest,
                                batch.status,
-                               count(member.exchange_instrument_id) AS member_count
+                               count(member.exchange_instrument_id) AS member_count,
+                               array_agg(
+                                   member.exchange_instrument_id
+                                   ORDER BY member.exchange_instrument_id
+                               ) AS member_ids
                           FROM brc_instrument_certification_batches batch
                           JOIN brc_instrument_certification_batch_members member
                             ON member.certification_batch_id =
@@ -942,7 +1179,6 @@ async def _certify(
         and unresolved_commands == 0
         and open_incidents == 0
     )
-    registered_contracts = registered_strategy_contracts()
     expected_event_specs = tuple(
         sorted(
             (
@@ -955,21 +1191,18 @@ async def _certify(
     expected_event_spec_ids = tuple(
         event_spec_id for _strategy_group_id, event_spec_id in expected_event_specs
     )
-    expected_strategy_group_by_event = {
-        event_spec_id: strategy_group_id
-        for strategy_group_id, event_spec_id in expected_event_specs
-    }
-    expected_registry_hash = build_registry_semantic_hash(
-        registered_contracts
-    )
+    live_registry_hash = _registry_manifest_hash(live_registry_manifest)
     registry_identity = {
         "status": (
             "pass"
             if registry_metadata_hash == expected_registry_hash
+            and live_registry_hash == expected_live_registry_hash
             else "fail"
         ),
         "expected_semantic_hash": expected_registry_hash,
         "metadata_semantic_hash": registry_metadata_hash,
+        "expected_live_semantic_hash": expected_live_registry_hash,
+        "live_semantic_hash": live_registry_hash,
     }
     policy_scope = None if owner_policy_row is None else owner_policy_row["scope"]
     policy_events = (
@@ -987,6 +1220,12 @@ async def _certify(
         APPROVED_FIRST_BATCH_INSTRUMENT_IDS
     )
     expected_member_ids = tuple(sorted(APPROVED_FIRST_BATCH_INSTRUMENT_IDS))
+    certification_batch = _certification_batch_manifest(
+        None if certification_batch_row is None else dict(certification_batch_row)
+    )
+    compatible_batch = _certification_batch_manifest(
+        None if compatible_batch_row is None else dict(compatible_batch_row)
+    )
     runtime_profile_id = (
         None
         if not isinstance(policy_scope, dict)
@@ -1016,93 +1255,73 @@ async def _certify(
         for row in warming_universe_rows
     ]
     compatible_batch_pass = bool(
-        compatible_batch_row is not None
-        and compatible_batch_row["runtime_profile_id"] == runtime_profile_id
-        and compatible_batch_row["target_commit"]
+        compatible_batch is not None
+        and compatible_batch["runtime_profile_id"] == runtime_profile_id
+        and compatible_batch["target_commit"]
         == runtime_identity.get("runtime_commit")
-        and compatible_batch_row["target_schema_revision"]
+        and compatible_batch["target_schema_revision"]
         == runtime_identity.get("schema_revision")
-        and compatible_batch_row["target_seed_identity"]
+        and compatible_batch["target_seed_identity"]
         == runtime_identity.get("seed_identity")
-        and compatible_batch_row["owner_policy_id"] == OWNER_POLICY_ID
+        and compatible_batch["owner_policy_id"] == OWNER_POLICY_ID
         and owner_policy_row is not None
-        and int(compatible_batch_row["owner_policy_version"]) == 4
+        and int(str(compatible_batch["owner_policy_version"])) == 4
         and int(owner_policy_row["policy_version"]) == 4
         and owner_policy_row["new_entry_submit_enabled"] is False
-        and compatible_batch_row["manifest_digest"] == expected_manifest_digest
-        and int(compatible_batch_row["member_count"])
+        and compatible_batch["manifest_digest"] == expected_manifest_digest
+        and compatible_batch["live_manifest_digest"] == expected_manifest_digest
+        and compatible_batch["member_ids"] == list(expected_member_ids)
+        and int(str(compatible_batch["member_count"]))
         == len(APPROVED_FIRST_BATCH_INSTRUMENT_IDS)
     )
-    compatible_active_universe_pass = _universe_manifest_matches(
-        active_universe_manifest,
-        expected_event_specs=_COMPATIBLE_SOURCE_EVENT_SPECS,
-        expected_member_ids=expected_member_ids,
-    )
-    first_vnext_event_spec_id = APPROVED_UNIVERSE_EVENT_SPECS[0][1]
-    compatible_warming_universe_pass = _universe_manifest_matches(
-        warming_universe_manifest,
-        expected_event_specs=(
-            (
-                expected_strategy_group_by_event[first_vnext_event_spec_id],
-                first_vnext_event_spec_id,
-            ),
-        ),
-        expected_member_ids=expected_member_ids,
-    )
-    compatible_universe_identity_pass = bool(
-        compatible_active_universe_pass
-        and compatible_warming_universe_pass
-        and compatible_batch_pass
-    )
     deployment_stage = (
-        "warming"
-        if compatible_universe_identity_pass
-        else "active"
-        if universe_identity_pass
+        "active"
+        if universe_identity_pass and not warming_universe_manifest
         else "invalid"
     )
     strategy_universe["identity_status"] = (
-        "pass"
-        if compatible_universe_identity_pass or universe_identity_pass
-        else "fail"
+        "pass" if universe_identity_pass else "fail"
     )
     strategy_universe["semantic_digest_status"] = (
-        "pass"
-        if compatible_universe_identity_pass or universe_identity_pass
-        else "fail"
+        "pass" if universe_identity_pass else "fail"
     )
     strategy_universe["deployment_stage"] = deployment_stage
+    strategy_universe["active_current_count"] = active_current_count
+    strategy_universe["warming_count"] = len(warming_universe_manifest)
     strategy_universe["active_manifest"] = active_universe_manifest
     strategy_universe["warming_manifest"] = warming_universe_manifest
     strategy_universe["approved_vnext_event_spec_ids"] = list(
         expected_event_spec_ids
     )
     certification_batch_pass = bool(
-        certification_batch_row is not None
-        and certification_batch_row["runtime_profile_id"] == runtime_profile_id
-        and certification_batch_row["target_commit"]
+        certification_batch is not None
+        and certification_batch["runtime_profile_id"] == runtime_profile_id
+        and certification_batch["target_commit"]
         == runtime_identity.get("runtime_commit")
-        and certification_batch_row["target_schema_revision"]
+        and certification_batch["target_schema_revision"]
         == runtime_identity.get("schema_revision")
-        and certification_batch_row["target_seed_identity"]
+        and certification_batch["target_seed_identity"]
         == runtime_identity.get("seed_identity")
-        and certification_batch_row["owner_policy_id"] == OWNER_POLICY_ID
+        and certification_batch["owner_policy_id"] == OWNER_POLICY_ID
         and owner_policy_row is not None
         and _certification_batch_policy_stage_matches(
             batch_policy_version=int(
-                certification_batch_row["owner_policy_version"]
+                str(certification_batch["owner_policy_version"])
             ),
             current_policy_version=int(owner_policy_row["policy_version"]),
             new_entry_submit_enabled=bool(
                 owner_policy_row["new_entry_submit_enabled"]
             ),
         )
-        and certification_batch_row["manifest_digest"]
+        and certification_batch["manifest_digest"]
         == expected_manifest_digest
-        and certification_batch_row["status"] == "completed"
-        and int(certification_batch_row["member_count"])
+        and certification_batch["live_manifest_digest"]
+        == expected_manifest_digest
+        and certification_batch["member_ids"] == list(expected_member_ids)
+        and certification_batch["status"] == "completed"
+        and int(str(certification_batch["member_count"]))
         == len(APPROVED_FIRST_BATCH_INSTRUMENT_IDS)
-        and int(certification_batch_row["eligible_member_count"])
+        and int(str(certification_batch["eligible_member_count"]))
         == len(APPROVED_FIRST_BATCH_INSTRUMENT_IDS)
     )
     universe_bootstrap_pass = (
@@ -1110,6 +1329,7 @@ async def _certify(
         and active_current_count == 6
         and active_scope_count == 42
         and warming_scope_count == 0
+        and not warming_universe_manifest
         and active_member_count == 7
         and certification_batch_pass
         and policy_events == expected_event_spec_ids
@@ -1149,7 +1369,9 @@ async def _certify(
         "actual": actual_seed_identity,
     }
     portfolio_admission_postflight_pass = bool(
-        compatible_universe_identity_pass
+        universe_identity_pass
+        and universe_bootstrap_pass
+        and certification_batch_pass
         and flatness_pass
         and owner_policy_row is not None
         and int(owner_policy_row["policy_version"]) == 4
@@ -1209,12 +1431,10 @@ async def _certify(
             "eligible_fresh_certifications": eligible_fresh_certification_count,
         },
         "certification_batch": (
-            None
-            if certification_batch_row is None
-            else dict(certification_batch_row)
+            certification_batch
         ),
         "compatible_certification_batch": (
-            None if compatible_batch_row is None else dict(compatible_batch_row)
+            compatible_batch
         ),
         "compatible_certification_batch_pass": compatible_batch_pass,
         "certification_batch_pass": certification_batch_pass,

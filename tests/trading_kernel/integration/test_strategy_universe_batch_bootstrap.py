@@ -21,6 +21,7 @@ from scripts.trading_kernel.bootstrap_strategy_universes import (
     BootstrapBlocked,
     bootstrap_strategy_universes,
 )
+from scripts.trading_kernel.certify_readonly import _certify
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
 from src.trading_kernel.application.observe_strategy_scope import ObservationStatus
 from src.trading_kernel.domain.market import ClosedCandle
@@ -31,6 +32,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
     instrument_certification_batch_members,
     instrument_certification_batches,
+    instruments,
     runtime_scopes_current,
     signal_events,
     strategy_universe_current,
@@ -299,6 +301,115 @@ async def test_six_event_batch_bootstrap_is_idempotent_and_uses_worker_boundarie
         assert market.requests
         assert certification.mutation_calls == []
         assert market.mutation_calls == []
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        await _drop_database(admin, database_name)
+        await admin.close()
+
+
+@pytest.mark.asyncio
+async def test_readonly_certification_recomputes_batch_manifest_from_member_rows() -> None:
+    """Catches accepting seven substituted members from a stale stored digest."""
+
+    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
+    assert SAFE_DATABASE.fullmatch(database_name)
+    admin = await asyncpg.connect(ADMIN_DSN)
+    engine: AsyncEngine | None = None
+    try:
+        await admin.execute(f'CREATE DATABASE "{database_name}"')
+        database_url = _database_url(database_name)
+        _run_alembic(database_url)
+        engine = create_async_engine(database_url)
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id="subaccount-batch-drift-test",
+                    runtime_commit=RUNTIME_COMMIT,
+                    schema_revision=SCHEMA_REVISION,
+                    seeded_at_ms=NOW_MS - 10_000,
+                ),
+            )
+        clock = VirtualClock()
+        market = RecordingWarmMarket()
+        certification = RecordingReadonlyCertificationSource(engine)
+        await bootstrap_strategy_universes(
+            database_url,
+            runtime_profile_id=RUNTIME_PROFILE_ID,
+            now_ms=clock.read,
+            wait_timeout_ms=60_000,
+            poll_interval_ms=1,
+            sleep=_worker_driving_sleep(
+                engine=engine,
+                clock=clock,
+                market=market,
+                certification=certification,
+            ),
+        )
+        certification_now_ms = clock.read()
+        baseline = await _certify(
+            database_url,
+            require_flat=True,
+            now_ms=certification_now_ms,
+        )
+        assert baseline["certification_batch_pass"] is True
+
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.insert(instruments).values(
+                    exchange_instrument_id="binance-usdm:AVAXUSDT:perpetual",
+                    venue_id="binance-usdm",
+                    asset_class="crypto",
+                    venue_symbol="AVAXUSDT",
+                    contract_kind="perpetual",
+                    status="active",
+                )
+            )
+            batch_id = str(
+                (
+                    await connection.execute(
+                        sa.select(
+                            instrument_certification_batches.c.certification_batch_id
+                        ).where(instrument_certification_batches.c.status == "completed")
+                    )
+                ).scalar_one()
+            )
+            await connection.execute(
+                sa.text(
+                    "ALTER TABLE brc_instrument_certification_batch_members "
+                    "DISABLE TRIGGER trg_brc_certification_batch_member_result"
+                )
+            )
+            await connection.execute(
+                sa.update(instrument_certification_batch_members)
+                .where(
+                    instrument_certification_batch_members.c.certification_batch_id
+                    == batch_id,
+                    instrument_certification_batch_members.c.exchange_instrument_id
+                    == "binance-usdm:ADAUSDT:perpetual",
+                )
+                .values(
+                    exchange_instrument_id="binance-usdm:AVAXUSDT:perpetual"
+                )
+            )
+            await connection.execute(
+                sa.text(
+                    "ALTER TABLE brc_instrument_certification_batch_members "
+                    "ENABLE TRIGGER trg_brc_certification_batch_member_result"
+                )
+            )
+
+        drifted = await _certify(
+            database_url,
+            require_flat=True,
+            now_ms=certification_now_ms,
+        )
+        batch = drifted["certification_batch"]
+        assert isinstance(batch, dict)
+        assert batch["member_count"] == 7
+        assert batch["live_manifest_digest"] != batch["manifest_digest"]
+        assert drifted["certification_batch_pass"] is False
     finally:
         if engine is not None:
             await engine.dispose()

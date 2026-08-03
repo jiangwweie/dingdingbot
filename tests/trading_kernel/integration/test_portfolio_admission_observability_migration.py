@@ -1040,7 +1040,7 @@ async def _prepare_production_shaped_0002(engine: AsyncEngine) -> None:
         await connection.execute(
             sa.text(
                 "UPDATE brc_owner_policy_current SET policy_version = 3, "
-                "new_entry_submit_enabled = true, "
+                "new_entry_submit_enabled = false, "
                 "scope = '{\"runtime_profile_id\":\"tiny-live-v1\","
                 "\"allowed_event_spec_ids\":["
                 "\"event_spec:BRF2-001:BRF2-SHORT:v2\","
@@ -1050,6 +1050,30 @@ async def _prepare_production_shaped_0002(engine: AsyncEngine) -> None:
                 "\"event_spec:SOR-001:SOR-LONG:v3\","
                 "\"event_spec:SOR-001:SOR-SHORT:v3\"]}'::jsonb, "
                 "updated_at_ms = 1000 WHERE owner_policy_id = 'policy-main'"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                "INSERT INTO brc_runtime_profiles "
+                "(runtime_profile_id, venue_id, account_id, environment, "
+                "position_mode, status, updated_at_ms) VALUES "
+                "('tiny-live-v1', 'binance-usdm', 'subaccount-source-test', "
+                "'live', 'independent_sides', 'active', 1000)"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                "INSERT INTO brc_runtime_capabilities_current "
+                "(capability_key, enabled, certified_commit, schema_revision, "
+                "certification, updated_at_ms) VALUES "
+                "('exchange_commands', false, "
+                "'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', "
+                "'0002_sor_v3_strategy_group_capacity', "
+                "'{\"stage\":\"observation_only\"}'::jsonb, 1000), "
+                "('strategy_signal_ingest', true, "
+                "'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', "
+                "'0002_sor_v3_strategy_group_capacity', "
+                "'{\"stage\":\"observation_only\"}'::jsonb, 1000)"
             )
         )
         await connection.execute(

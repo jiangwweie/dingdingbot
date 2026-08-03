@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+import scripts.trading_kernel.verify_schema as schema_verifier
+from scripts.trading_kernel.certify_readonly import _certify
 from scripts.trading_kernel.verify_schema import (
     _verify_compatible_source,
     _verify_preservation,
+)
+from src.trading_kernel.domain.strategy_registry import (
+    build_registry_semantic_hash,
+    registered_strategy_contracts,
 )
 from tests.trading_kernel.integration.test_portfolio_admission_observability_migration import (
     SOURCE_REVISION,
@@ -100,6 +107,57 @@ async def test_mig_008_manifest_covers_every_0002_table_column_and_value(
     assert target["preservation_manifest"] == manifest
 
 
+@pytest.mark.parametrize("source_drift", ("registry", "policy", "profile", "capability"))
+async def test_compatible_source_requires_exact_live_0002_authority(
+    compatible_migration_engine: AsyncEngine,
+    source_drift: str,
+) -> None:
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    await _install_source_runtime_identity(engine)
+    database_url = _database_url(engine)
+
+    baseline = await _verify_compatible_source(database_url, SOURCE_REVISION)
+
+    assert baseline["status"] == "pass", baseline
+    for key in (
+        "registry_identity",
+        "owner_policy",
+        "runtime_profile",
+        "capabilities",
+        "account_mode",
+    ):
+        authority = baseline[key]
+        assert isinstance(authority, dict)
+        assert authority["status"] == "pass", authority
+
+    statements = {
+        "registry": (
+            "UPDATE brc_event_specs SET freshness_window_ms = "
+            "freshness_window_ms + 1 WHERE event_spec_id = "
+            "'event_spec:CPM-RO-001:CPM-LONG:v2'"
+        ),
+        "policy": (
+            "UPDATE brc_owner_policy_current SET "
+            "new_entry_submit_enabled = true"
+        ),
+        "profile": (
+            "UPDATE brc_runtime_profiles SET position_mode = 'one_way' "
+            "WHERE runtime_profile_id = 'tiny-live-v1'"
+        ),
+        "capability": (
+            "UPDATE brc_runtime_capabilities_current SET enabled = true "
+            "WHERE capability_key = 'exchange_commands'"
+        ),
+    }
+    async with engine.begin() as connection:
+        await connection.execute(sa.text(statements[source_drift]))
+
+    drifted = await _verify_compatible_source(database_url, SOURCE_REVISION)
+
+    assert drifted["status"] == "fail"
+
+
 async def test_mig_008_one_changed_0002_value_breaks_equivalence(
     compatible_migration_engine: AsyncEngine,
 ) -> None:
@@ -128,6 +186,109 @@ async def test_mig_008_one_changed_0002_value_breaks_equivalence(
 
     assert target["status"] == "fail"
     assert target["preservation_manifest"]["digest"] != digest
+
+
+async def test_postflight_recomputes_registry_identity_from_live_rows(
+    compatible_migration_engine: AsyncEngine,
+) -> None:
+    """Catches trusting registry_semantic_hash metadata after one live-row drift."""
+
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    await _install_source_runtime_identity(engine)
+    database_url = _database_url(engine)
+    result = _run_migration(database_url, "upgrade", HEAD_REVISION)
+    assert result.returncode == 0, result.stderr[-4000:]
+    expected_registry_hash = build_registry_semantic_hash(
+        registered_strategy_contracts()
+    )
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "INSERT INTO brc_schema_metadata "
+                "(metadata_key, metadata_value, updated_at_ms) "
+                "VALUES ('registry_semantic_hash', :value, 1000) "
+                "ON CONFLICT (metadata_key) DO UPDATE "
+                "SET metadata_value = EXCLUDED.metadata_value, "
+                "updated_at_ms = EXCLUDED.updated_at_ms"
+            ),
+            {"value": expected_registry_hash},
+        )
+
+    baseline = await _certify(database_url, require_flat=True, now_ms=10_000)
+    baseline_registry = baseline["registry_identity"]
+    assert isinstance(baseline_registry, dict)
+    assert baseline_registry["status"] == "pass", baseline_registry
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_event_specs SET freshness_window_ms = "
+                "freshness_window_ms + 1 "
+                "WHERE event_spec_id = 'event_spec:CPM-RO-001:CPM-LONG:v3'"
+            )
+        )
+
+    drifted = await _certify(database_url, require_flat=True, now_ms=10_000)
+    drifted_registry = drifted["registry_identity"]
+    assert isinstance(drifted_registry, dict)
+    assert drifted_registry["metadata_semantic_hash"] == baseline_registry[
+        "metadata_semantic_hash"
+    ]
+    assert drifted_registry["live_semantic_hash"] != drifted_registry[
+        "expected_live_semantic_hash"
+    ]
+    assert drifted_registry["status"] == "fail"
+
+
+async def test_preservation_proof_is_persisted_in_postgresql_and_identity_bound(
+    compatible_migration_engine: AsyncEngine,
+) -> None:
+    """Catches treating a release-local marker as proof for any target database."""
+
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    await _install_source_runtime_identity(engine)
+    database_url = _database_url(engine)
+    source = await _verify_compatible_source(database_url, SOURCE_REVISION)
+    digest = str(source["preservation_manifest"]["digest"])
+    result = _run_migration(database_url, "upgrade", HEAD_REVISION)
+    assert result.returncode == 0, result.stderr[-4000:]
+
+    recorded = await schema_verifier._record_preservation_proof(
+        database_url,
+        source_revision=SOURCE_REVISION,
+        expected_digest=digest,
+    )
+
+    assert recorded["status"] == "pass", recorded
+    proof = recorded["preservation_proof"]
+    assert isinstance(proof, dict)
+    proof_digest = str(proof["proof_digest"])
+    verified = await schema_verifier._verify_preservation_proof(
+        database_url,
+        source_revision=SOURCE_REVISION,
+        expected_digest=digest,
+        expected_proof_digest=proof_digest,
+    )
+    assert verified["status"] == "pass", verified
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_schema_metadata SET metadata_value = "
+                "'postgresql:restored-cluster:999999' "
+                "WHERE metadata_key = 'preservation_database_identity'"
+            )
+        )
+
+    restored_database = await schema_verifier._verify_preservation_proof(
+        database_url,
+        source_revision=SOURCE_REVISION,
+        expected_digest=digest,
+        expected_proof_digest=proof_digest,
+    )
+    assert restored_database["status"] == "fail"
 
 
 async def _install_source_runtime_identity(engine: AsyncEngine) -> None:

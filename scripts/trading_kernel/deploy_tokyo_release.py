@@ -365,15 +365,22 @@ def _deploy_compatible_upgrade(
             ".brc-schema-revision",
             COMPATIBLE_SOURCE_SCHEMA_REVISION,
         )
+        if (
+            backend.read_release_marker(
+                current_release,
+                ".brc-seed-identity",
+            )
+            != source_identity["seed_identity"]
+        ):
+            raise DeploymentBlocked("exact source Seed marker differs")
     else:
         preservation_digest = backend.read_preservation_digest(plan.target_release)
         if not _SEED_IDENTITY.fullmatch(preservation_digest):
             raise DeploymentBlocked("persisted preservation digest is invalid")
 
     transition_started = False
-    schema_migrated = database_revision == plan.schema_revision
-    identity_rotated = False
-    target_release_activated = current_release == plan.target_release
+    target_activated = current_release == plan.target_release
+    target_safety_started = False
     try:
         backend.fence_entry()
         transition_started = True
@@ -402,7 +409,6 @@ def _deploy_compatible_upgrade(
                 COMPATIBLE_SOURCE_SCHEMA_REVISION,
                 plan.schema_revision,
             )
-            schema_migrated = True
 
         if not backend.preservation_verified(
             plan.target_release,
@@ -429,14 +435,13 @@ def _deploy_compatible_upgrade(
             plan.schema_revision,
         )
         seed_identity = _require_deployment_identity(deployment_identity, plan)
-        identity_rotated = True
         backend.activate_release(
             plan.target_release,
             plan.target_commit,
             plan.schema_revision,
             seed_identity,
         )
-        target_release_activated = True
+        target_activated = True
         if backend.read_current_release() != plan.target_release:
             raise DeploymentBlocked("current release symlink differs from target")
         for marker, expected in (
@@ -446,16 +451,17 @@ def _deploy_compatible_upgrade(
         ):
             _require_marker(backend, plan.target_release, marker, expected)
 
+        backend.start_services(SAFETY_SERVICES)
+        target_safety_started = True
+        active_safety = backend.services_active(ALL_SERVICES)
+        if active_safety != frozenset(SAFETY_SERVICES):
+            raise DeploymentBlocked("target safety services are not all active")
         backend.bootstrap_strategy_universes(plan.target_release)
         _require_target_postflight(
             backend,
             plan,
             seed_identity=seed_identity,
         )
-        backend.start_services(SAFETY_SERVICES)
-        active_safety = backend.services_active(ALL_SERVICES)
-        if active_safety != frozenset(SAFETY_SERVICES):
-            raise DeploymentBlocked("target safety services are not all active")
         if not backend.entry_is_inactive_disabled_and_fenced():
             raise DeploymentBlocked(
                 "portfolio admission upgrade did not retain the ENTRY fence"
@@ -466,10 +472,14 @@ def _deploy_compatible_upgrade(
     except Exception:
         if transition_started:
             backend.fence_entry()
-            if target_release_activated or (
-                not schema_migrated and not identity_rotated
-            ):
-                backend.start_services(SAFETY_SERVICES)
+            if target_activated:
+                active_target_safety = backend.services_active(ALL_SERVICES)
+                if (
+                    not target_safety_started
+                    or active_target_safety != frozenset(SAFETY_SERVICES)
+                ):
+                    backend.start_services(SAFETY_SERVICES)
+                    target_safety_started = True
         raise
 
     return DeploymentResult(
@@ -580,6 +590,8 @@ def _require_portfolio_admission_postflight(
         or registry_identity.get("status") != "pass"
         or registry_identity.get("metadata_semantic_hash")
         != registry_identity.get("expected_semantic_hash")
+        or registry_identity.get("live_semantic_hash")
+        != registry_identity.get("expected_live_semantic_hash")
     ):
         raise DeploymentBlocked("exact Registry identity differs")
     strategy_universe = certification.get("strategy_universe")
@@ -589,9 +601,16 @@ def _require_portfolio_admission_postflight(
         or strategy_universe.get("semantic_digest_status") != "pass"
     ):
         raise DeploymentBlocked("exact Universe identity differs")
-    if strategy_universe.get("deployment_stage") != "warming":
-        raise DeploymentBlocked("exact Warming Universe stage is missing")
-    if certification.get("compatible_certification_batch_pass") is not True:
+    if strategy_universe.get("deployment_stage") != "active":
+        raise DeploymentBlocked("exact six Active Universes are missing")
+    if (
+        int(str(strategy_universe.get("active_current_count", -1))) != 6
+        or int(str(strategy_universe.get("warming_count", -1))) != 0
+    ):
+        raise DeploymentBlocked("exact six Active Universes are missing")
+    if certification.get("universe_bootstrap_pass") is not True:
+        raise DeploymentBlocked("exact six Active Universes are missing")
+    if certification.get("certification_batch_pass") is not True:
         raise DeploymentBlocked("exact Certification Batch identity differs")
     runtime_identity = certification.get("runtime_identity")
     if (
@@ -650,6 +669,43 @@ def _require_compatible_source_facts(
         or not _SEED_IDENTITY.fullmatch(identity["seed_identity"])
     ):
         raise DeploymentBlocked("compatible source runtime identity is invalid")
+    registry_identity = certification.get("registry_identity")
+    if (
+        not isinstance(registry_identity, Mapping)
+        or registry_identity.get("status") != "pass"
+        or registry_identity.get("live_semantic_hash")
+        != registry_identity.get("expected_semantic_hash")
+    ):
+        raise DeploymentBlocked("exact source Registry identity differs")
+    owner_policy = certification.get("owner_policy")
+    if (
+        not isinstance(owner_policy, Mapping)
+        or owner_policy.get("status") != "pass"
+        or int(str(owner_policy.get("policy_version", -1))) != 3
+        or owner_policy.get("new_entry_submit_enabled") is not False
+    ):
+        raise DeploymentBlocked("exact source Policy v3 with ENTRY disabled is missing")
+    runtime_profile = certification.get("runtime_profile")
+    if (
+        not isinstance(runtime_profile, Mapping)
+        or runtime_profile.get("status") != "pass"
+    ):
+        raise DeploymentBlocked("exact source runtime profile differs")
+    capabilities = certification.get("capabilities")
+    if (
+        not isinstance(capabilities, Mapping)
+        or capabilities.get("status") != "pass"
+        or capabilities.get("exchange_commands") is not False
+    ):
+        raise DeploymentBlocked("exact source capability authority differs")
+    account_mode = certification.get("account_mode")
+    if (
+        not isinstance(account_mode, Mapping)
+        or account_mode.get("status") != "pass"
+        or account_mode.get("position_mode") != "independent_sides"
+        or account_mode.get("margin_mode") != "cross"
+    ):
+        raise DeploymentBlocked("exact source account mode differs")
     _require_preservation_digest(certification)
     _require_flat_exchange_facts(probe, expected_leverage=expected_leverage)
     return identity
@@ -1107,10 +1163,25 @@ class SshTokyoReleaseBackend:
         )
 
     def mark_preservation_verified(self, release: str, digest: str) -> None:
+        payload = self._release_json(
+            release,
+            "scripts/trading_kernel/verify_schema.py",
+            "--preserve-source-revision",
+            COMPATIBLE_SOURCE_SCHEMA_REVISION,
+            "--expected-preservation-digest",
+            digest,
+            "--record-preservation-proof",
+        )
+        proof = payload.get("preservation_proof")
+        if not isinstance(proof, Mapping):
+            raise DeploymentBlocked("database-bound preservation proof is missing")
+        proof_digest = str(proof.get("proof_digest", ""))
+        if not _SEED_IDENTITY.fullmatch(proof_digest):
+            raise DeploymentBlocked("database-bound preservation proof is invalid")
         self._write_release_marker(
             release,
             ".brc-0002-preservation-verified",
-            digest,
+            proof_digest,
         )
 
     def preservation_verified(self, release: str, digest: str) -> bool:
@@ -1122,7 +1193,31 @@ class SshTokyoReleaseBackend:
             ),
             check=False,
         )
-        return result.returncode == 0 and result.stdout == digest
+        if result.returncode != 0:
+            return False
+        proof_digest = result.stdout
+        if not _SEED_IDENTITY.fullmatch(proof_digest):
+            raise DeploymentBlocked("database-bound preservation proof marker is invalid")
+        payload = self._release_json(
+            release,
+            "scripts/trading_kernel/verify_schema.py",
+            "--preserve-source-revision",
+            COMPATIBLE_SOURCE_SCHEMA_REVISION,
+            "--expected-preservation-digest",
+            digest,
+            "--verify-preservation-proof",
+            "--expected-preservation-proof-digest",
+            proof_digest,
+            check=False,
+        )
+        proof = payload.get("preservation_proof")
+        if (
+            payload.get("status") != "pass"
+            or not isinstance(proof, Mapping)
+            or proof.get("proof_digest") != proof_digest
+        ):
+            raise DeploymentBlocked("database-bound preservation proof differs")
+        return True
 
     def deploy_compatible_identity(
         self,
@@ -1213,7 +1308,6 @@ class SshTokyoReleaseBackend:
             "scripts/trading_kernel/bootstrap_strategy_universes.py",
             "--runtime-profile-id",
             "tiny-live-v1",
-            "--prepare-certification-batch-only",
         )
 
     def unfence_entry(self) -> None:
