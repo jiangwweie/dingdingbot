@@ -17,6 +17,7 @@ from pydantic import JsonValue
 from src.trading_kernel.application.certify_universe_instrument import (
     InstrumentCertificationReadRequest,
     InstrumentCertificationSnapshot,
+    InstrumentCertificationSnapshotContradiction,
     InstrumentCertificationTransientFailure,
 )
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
@@ -213,10 +214,6 @@ _AUTHORITATIVE_REJECTION_TYPES = {
 }
 _ORDER_NOT_FOUND_TYPES = {"OrderNotFound"}
 _EXCHANGE_CODE = re.compile(r'["\']code["\']\s*:\s*(-?[0-9]{1,6})')
-
-
-class InstrumentCertificationSnapshotContradiction(RuntimeError):
-    """Kernel ownership projection contradicts authenticated Venue quantity."""
 
 
 class CcxtVenueAdapter:

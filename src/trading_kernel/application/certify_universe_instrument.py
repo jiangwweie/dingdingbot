@@ -83,6 +83,21 @@ class InstrumentCertificationTransientFailure(RuntimeError):
     """Explicitly retryable readonly Venue/network failure."""
 
 
+class InstrumentCertificationSnapshotContradiction(RuntimeError):
+    """Authenticated Venue quantity contradicts current Kernel ownership."""
+
+    def __init__(
+        self,
+        reason: Literal[
+            "owned_position_projection_missing",
+            "projected_position_exceeds_venue",
+            "projected_position_domain_unowned",
+        ],
+    ) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class CertifyUniverseInstrumentRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -166,6 +181,23 @@ async def certify_universe_instrument(
             required_margin_mode=request.required_margin_mode,
             valid_for_ms=request.valid_for_ms,
         )
+    except InstrumentCertificationSnapshotContradiction as exc:
+        certification = InstrumentCertification(
+            status="temporarily_unavailable",
+            blocker_code=exc.reason,
+            facts_digest=canonical_digest(
+                {
+                    "runtime_profile_id": target.runtime_profile_id,
+                    "exchange_instrument_id": target.exchange_instrument_id,
+                    "status": "temporarily_unavailable",
+                    "blocker_code": exc.reason,
+                    "observed_at_ms": request.now_ms,
+                }
+            ),
+            observed_at_ms=request.now_ms,
+            valid_until_ms=request.now_ms + request.transient_retry_interval_ms,
+        )
+        snapshot = None
     except (
         TimeoutError,
         ConnectionError,

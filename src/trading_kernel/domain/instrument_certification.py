@@ -25,6 +25,9 @@ InstrumentCertificationBlockerCode = Literal[
     "unowned_position",
     "unowned_open_order",
     "readonly_facts_unavailable",
+    "owned_position_projection_missing",
+    "projected_position_exceeds_venue",
+    "projected_position_domain_unowned",
 ]
 
 

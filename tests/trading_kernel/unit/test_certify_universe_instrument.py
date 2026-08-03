@@ -21,6 +21,9 @@ from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnershi
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertificationFacts,
 )
+from src.trading_kernel.infrastructure.venue_adapter import (
+    InstrumentCertificationSnapshotContradiction,
+)
 
 
 class _State:
@@ -238,6 +241,33 @@ async def test_transient_read_failure_releases_claim_without_owner_monitor() -> 
 
     assert result.certification.status == "temporarily_unavailable"
     assert result.certification.blocker_code == "readonly_facts_unavailable"
+    assert state.rules == []
+    assert state.monitors == []
+    assert state.persisted[0]["next_check_at_ms"] == 31_000
+
+
+@pytest.mark.asyncio
+async def test_projection_contradiction_blocks_only_the_instrument_and_releases_claim() -> None:
+    """Catches an ownership contradiction escaping and killing Reconciliation."""
+
+    state = _State()
+
+    result = await certify_universe_instrument(
+        state.factory,
+        _ReadonlySource(
+            state,
+            error=InstrumentCertificationSnapshotContradiction(
+                "projected_position_exceeds_venue"
+            ),
+        ),
+        _request(),
+    )
+
+    assert result.certification.status == "temporarily_unavailable"
+    assert (
+        result.certification.blocker_code
+        == "projected_position_exceeds_venue"
+    )
     assert state.rules == []
     assert state.monitors == []
     assert state.persisted[0]["next_check_at_ms"] == 31_000
