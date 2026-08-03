@@ -398,6 +398,17 @@ async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
 ) -> None:
     await _seed_runtime_authority(issue_engine)
     signal = _signal()
+    snapshot = _admission_snapshot()
+    risk_values = snapshot.account_risk_snapshot.model_dump(
+        mode="python",
+        exclude={"snapshot_digest"},
+    )
+    risk_values["configured_leverage"] = 10
+    snapshot = snapshot.model_copy(
+        update={
+            "account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)
+        }
+    )
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         ingested = await ingest_signal(
             uow,
@@ -415,7 +426,7 @@ async def test_issues_ticket_with_finite_terminal_bracket_in_stress_range(
             uow,
             IssueReadySignalRequest(
                 signal_event_id=signal.signal_event_id,
-                admission_snapshot=_admission_snapshot(),
+                admission_snapshot=snapshot,
                 claim_owner="signal-worker-1",
                 runtime_commit="kernel-test-head",
                 schema_revision="0002_sor_v3_strategy_group_capacity",
@@ -778,10 +789,17 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 priority_rank=1,
                 max_concurrent_tickets=8,
                 max_strategy_group_concurrent_tickets=2,
-                max_ticket_stop_risk_fraction=Decimal("0.03"),
+                family_ticket_limits={
+                    "long_continuation": 1,
+                    "opening_range": 2,
+                    "rally_failure_short": 1,
+                },
+                max_ticket_stop_risk_fraction=Decimal("0.02"),
                 max_gross_stop_risk_fraction=Decimal("0.06"),
-                max_ticket_initial_margin_fraction=Decimal("0.45"),
+                max_ticket_initial_margin_fraction=Decimal("0.30"),
                 max_gross_initial_margin_utilization=Decimal("0.90"),
+                directional_stop_risk_limit_fraction=Decimal("0.04"),
+                min_materialization_ratio=Decimal("0.50"),
                 max_leverage=10,
                 supported_margin_mode="cross",
                 post_stop_stress_multiple=Decimal("2.0"),

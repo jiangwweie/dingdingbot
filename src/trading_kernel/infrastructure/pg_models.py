@@ -547,15 +547,19 @@ owner_policy_current = sa.Table(
         server_default=sa.text("100"),
     ),
     sa.Column("max_concurrent_tickets", sa.Integer, nullable=False),
+    # Retained only for historical v3 rows; current projections ignore it.
     sa.Column(
         "max_strategy_group_concurrent_tickets",
         sa.Integer,
-        nullable=False,
+        nullable=True,
     ),
+    _json("family_ticket_limits"),
     sa.Column("max_ticket_stop_risk_fraction", MONEY, nullable=False),
     sa.Column("max_gross_stop_risk_fraction", MONEY, nullable=False),
     sa.Column("max_ticket_initial_margin_fraction", MONEY, nullable=False),
     sa.Column("max_gross_initial_margin_utilization", MONEY, nullable=False),
+    sa.Column("directional_stop_risk_limit_fraction", MONEY, nullable=False),
+    sa.Column("min_materialization_ratio", MONEY, nullable=False),
     sa.Column("max_leverage", sa.Integer, nullable=False),
     sa.Column("supported_margin_mode", SHORT_TEXT, nullable=False),
     sa.Column("post_stop_stress_multiple", MONEY, nullable=False),
@@ -566,10 +570,6 @@ owner_policy_current = sa.Table(
     sa.CheckConstraint(
         "max_concurrent_tickets > 0",
         name="max_concurrent_tickets_positive",
-    ),
-    sa.CheckConstraint(
-        "max_strategy_group_concurrent_tickets > 0",
-        name="max_strategy_group_concurrent_tickets_positive",
     ),
     sa.CheckConstraint(
         "max_ticket_stop_risk_fraction > 0 "
@@ -1067,27 +1067,35 @@ capacity_claims = sa.Table(
     sa.Column("margin_mode_at_claim", SHORT_TEXT, nullable=False),
     sa.Column("active_ticket_count_at_claim", sa.Integer, nullable=False),
     sa.Column("remaining_slots_at_claim", sa.Integer, nullable=False),
+    # These nullable columns preserve pre-v4 Claim rows and receive no new writes.
     sa.Column(
         "active_strategy_group_ticket_count_at_claim",
         sa.Integer,
-        nullable=False,
+        nullable=True,
     ),
     sa.Column(
         "max_strategy_group_concurrent_tickets",
         sa.Integer,
-        nullable=False,
+        nullable=True,
     ),
     sa.Column(
         "remaining_strategy_group_slots_at_claim",
         sa.Integer,
-        nullable=False,
+        nullable=True,
     ),
+    sa.Column("exposure_family", SHORT_TEXT, nullable=False),
+    sa.Column("active_family_ticket_count_at_claim", sa.Integer, nullable=False),
+    sa.Column("family_ticket_limit", sa.Integer, nullable=False),
     sa.Column("gross_risk_at_stop_at_claim", MONEY, nullable=False),
+    sa.Column("directional_risk_at_stop_at_claim", MONEY, nullable=False),
     sa.Column("current_reserved_margin_at_claim", MONEY, nullable=False),
     sa.Column("max_ticket_stop_risk_fraction", MONEY, nullable=False),
     sa.Column("max_gross_stop_risk_fraction", MONEY, nullable=False),
+    sa.Column("directional_stop_risk_limit_fraction", MONEY, nullable=False),
     sa.Column("max_ticket_initial_margin_fraction", MONEY, nullable=False),
     sa.Column("max_gross_initial_margin_utilization", MONEY, nullable=False),
+    sa.Column("min_materialization_ratio", MONEY, nullable=False),
+    sa.Column("minimum_stop_risk_budget", MONEY, nullable=False),
     sa.Column("planned_stop_risk_budget", MONEY, nullable=False),
     sa.Column("max_post_fill_stop_risk_overrun_fraction", MONEY, nullable=False),
     sa.Column("post_fill_stop_risk_limit", MONEY, nullable=False),
@@ -1174,6 +1182,13 @@ trade_tickets = sa.Table(
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
     sa.Column("active_netting_domain_key", LONG_TEXT, nullable=True),
+    sa.Column("exposure_family", SHORT_TEXT, nullable=False),
+    sa.Column("active_family_ticket_count_at_claim", sa.Integer, nullable=False),
+    sa.Column("family_ticket_limit", sa.Integer, nullable=False),
+    sa.Column("directional_risk_at_stop_at_claim", MONEY, nullable=False),
+    sa.Column("directional_stop_risk_limit_fraction", MONEY, nullable=False),
+    sa.Column("min_materialization_ratio", MONEY, nullable=False),
+    sa.Column("minimum_stop_risk_budget", MONEY, nullable=False),
     _id("exit_policy_id"),
     sa.Column("exit_policy_semantic_hash", LONG_TEXT, nullable=False),
     sa.Column("entry_reference_price", MONEY, nullable=False),
@@ -1236,10 +1251,17 @@ sa.Index(
     trade_tickets.c.terminal_at_ms,
 )
 sa.Index(
-    "ix_brc_trade_tickets_active_strategy_group",
+    "ix_brc_trade_tickets_active_family",
     trade_tickets.c.venue_id,
     trade_tickets.c.account_id,
-    trade_tickets.c.strategy_group_id,
+    trade_tickets.c.exposure_family,
+    trade_tickets.c.terminal_at_ms,
+)
+sa.Index(
+    "ix_brc_trade_tickets_active_directional_risk",
+    trade_tickets.c.venue_id,
+    trade_tickets.c.account_id,
+    trade_tickets.c.position_side,
     trade_tickets.c.terminal_at_ms,
 )
 

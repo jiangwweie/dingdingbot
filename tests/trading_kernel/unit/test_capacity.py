@@ -13,6 +13,7 @@ from src.trading_kernel.domain.capacity import (
     CapacityInstrumentRules,
     CapacityPolicy,
     CapacityUsage,
+    FamilyTicketLimits,
     build_capacity_claim_digest,
 )
 from src.trading_kernel.domain.cross_margin_stress import (
@@ -43,13 +44,20 @@ def test_capacity_claim_freezes_configured_leverage_and_demand_based_margin() ->
     assert decision.claim is not None
     claim = decision.claim
     assert claim.selected_leverage == 5
-    assert claim.planned_stop_risk_budget == Decimal(30)
-    assert claim.max_ticket_stop_risk_fraction == Decimal("0.03")
+    assert claim.planned_stop_risk_budget == Decimal(20)
+    assert claim.max_ticket_stop_risk_fraction == Decimal("0.02")
     assert claim.max_gross_stop_risk_fraction == Decimal("0.06")
-    assert claim.max_ticket_initial_margin_fraction == Decimal("0.45")
+    assert claim.max_ticket_initial_margin_fraction == Decimal("0.30")
     assert claim.max_gross_initial_margin_utilization == Decimal("0.90")
-    assert claim.post_fill_stop_risk_limit == Decimal(33)
-    assert claim.reserved_margin == Decimal(240)
+    assert claim.post_fill_stop_risk_limit == Decimal(22)
+    assert claim.reserved_margin == Decimal(160)
+    assert claim.exposure_family == "opening_range"
+    assert claim.active_family_ticket_count_at_claim == 0
+    assert claim.family_ticket_limit == 2
+    assert claim.directional_risk_at_stop_at_claim == Decimal(0)
+    assert claim.directional_stop_risk_limit_fraction == Decimal("0.04")
+    assert claim.min_materialization_ratio == Decimal("0.50")
+    assert claim.minimum_stop_risk_budget == Decimal(10)
     assert claim.cross_margin_stress_evidence.proof.status == "passed"
     assert (
         claim.cross_margin_stress_evidence.proof.proof_digest
@@ -99,35 +107,46 @@ def test_capacity_claim_rejects_reserved_margin_above_its_frozen_ticket_budget()
 
 
 @pytest.mark.parametrize(
-    ("active_strategy_group_ticket_count", "expected_status"),
+    ("active_family_ticket_count", "expected_status"),
     [
         (0, CapacityClaimStatus.CLAIMED),
         (1, CapacityClaimStatus.CLAIMED),
-        (2, CapacityClaimStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED),
+        (2, CapacityClaimStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED),
     ],
 )
-def test_capacity_claim_enforces_two_active_tickets_per_strategy_group(
-    active_strategy_group_ticket_count: int,
+def test_capacity_claim_enforces_opening_range_family_limit(
+    active_family_ticket_count: int,
     expected_status: CapacityClaimStatus,
 ) -> None:
     _, decision = _build_decision(
-        active_strategy_group_ticket_count=active_strategy_group_ticket_count
+        active_family_ticket_count=active_family_ticket_count
     )
 
     assert decision.status is expected_status
     if decision.claim is not None:
         assert (
-            decision.claim.active_strategy_group_ticket_count_at_claim
-            == active_strategy_group_ticket_count
+            decision.claim.active_family_ticket_count_at_claim
+            == active_family_ticket_count
         )
-        assert decision.claim.max_strategy_group_concurrent_tickets == 2
+        assert decision.claim.family_ticket_limit == 2
         assert (
-            decision.claim.remaining_strategy_group_slots_at_claim
-            == 2 - active_strategy_group_ticket_count
+            decision.claim.remaining_family_slots_at_claim
+            == 2 - active_family_ticket_count
         )
 
 
-def _build_decision(*, active_strategy_group_ticket_count: int = 0):
+def test_capacity_claim_rejects_exhausted_directional_risk() -> None:
+    _, decision = _build_decision(directional_risk_at_stop=Decimal(40))
+
+    assert decision.status is CapacityClaimStatus.DIRECTIONAL_RISK_EXHAUSTED
+    assert decision.claim is None
+
+
+def _build_decision(
+    *,
+    active_family_ticket_count: int = 0,
+    directional_risk_at_stop: Decimal = Decimal(0),
+):
     snapshot = _snapshot()
     ownership = AdmissionOwnership()
     decision = build_capacity_claim(
@@ -142,9 +161,8 @@ def _build_decision(*, active_strategy_group_ticket_count: int = 0):
             gross_risk_at_stop=Decimal(0),
             current_reserved_margin=Decimal(0),
             active_ticket_count=0,
-            active_strategy_group_ticket_count=(
-                active_strategy_group_ticket_count
-            ),
+            active_family_ticket_count=active_family_ticket_count,
+            directional_risk_at_stop=directional_risk_at_stop,
         ),
         instrument_rules=_rules(),
         admission_snapshot=snapshot,
@@ -213,15 +231,21 @@ def _policy() -> CapacityPolicy:
         owner_policy_id="policy-main",
         policy_version=7,
         max_concurrent_tickets=3,
-        max_strategy_group_concurrent_tickets=2,
-        max_ticket_stop_risk_fraction=Decimal("0.03"),
+        family_ticket_limits=FamilyTicketLimits(
+            long_continuation=1,
+            opening_range=2,
+            rally_failure_short=1,
+        ),
+        max_ticket_stop_risk_fraction=Decimal("0.02"),
         max_gross_stop_risk_fraction=Decimal("0.06"),
-        max_ticket_initial_margin_fraction=Decimal("0.45"),
+        max_ticket_initial_margin_fraction=Decimal("0.30"),
         max_gross_initial_margin_utilization=Decimal("0.90"),
         max_leverage=10,
         supported_margin_mode="cross",
         post_stop_stress_multiple=Decimal(2),
         max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
+        directional_stop_risk_limit_fraction=Decimal("0.04"),
+        min_materialization_ratio=Decimal("0.50"),
     )
 
 

@@ -32,7 +32,7 @@ from src.trading_kernel.domain.aggregate import (
     AggregateStatus,
     TradeAggregate,
 )
-from src.trading_kernel.domain.capacity import CapacityClaim
+from src.trading_kernel.domain.capacity import CapacityClaim, FamilyTicketLimits
 from src.trading_kernel.domain.commands import (
     CommandPayload,
     ExchangeCommand,
@@ -52,6 +52,7 @@ from src.trading_kernel.domain.events import (
     TicketIssued,
     TradeEvent,
 )
+from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.identities import (
     NettingDomain,
     RuntimeIdentity,
@@ -1391,8 +1392,8 @@ class PostgresEntryAdmissionRepository:
             new_entry_submit_enabled=bool(row["new_entry_submit_enabled"]),
             priority_rank=int(row["priority_rank"]),
             max_concurrent_tickets=int(row["max_concurrent_tickets"]),
-            max_strategy_group_concurrent_tickets=int(
-                row["max_strategy_group_concurrent_tickets"]
+            family_ticket_limits=FamilyTicketLimits.model_validate(
+                row["family_ticket_limits"]
             ),
             max_ticket_stop_risk_fraction=Decimal(
                 row["max_ticket_stop_risk_fraction"]
@@ -1406,6 +1407,10 @@ class PostgresEntryAdmissionRepository:
             max_gross_initial_margin_utilization=Decimal(
                 row["max_gross_initial_margin_utilization"]
             ),
+            directional_stop_risk_limit_fraction=Decimal(
+                row["directional_stop_risk_limit_fraction"]
+            ),
+            min_materialization_ratio=Decimal(row["min_materialization_ratio"]),
             max_leverage=int(row["max_leverage"]),
             supported_margin_mode=cast(Literal["cross"], supported_margin_mode),
             post_stop_stress_multiple=Decimal(row["post_stop_stress_multiple"]),
@@ -1432,12 +1437,12 @@ class PostgresEntryAdmissionRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def count_active_strategy_group_tickets(
+    async def count_active_family_tickets(
         self,
         *,
         venue_id: str,
         account_id: str,
-        strategy_group_id: str,
+        exposure_family: str,
     ) -> int:
         result = await self._connection.execute(
             sa.select(sa.func.count())
@@ -1445,11 +1450,30 @@ class PostgresEntryAdmissionRepository:
             .where(
                 trade_tickets.c.venue_id == venue_id,
                 trade_tickets.c.account_id == account_id,
-                trade_tickets.c.strategy_group_id == strategy_group_id,
+                trade_tickets.c.exposure_family == exposure_family,
                 trade_tickets.c.terminal_at_ms.is_(None),
             )
         )
         return int(result.scalar_one())
+
+    async def sum_active_directional_stop_risk(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+        position_side: Literal["long", "short"],
+    ) -> Decimal:
+        result = await self._connection.execute(
+            sa.select(
+                sa.func.coalesce(sa.func.sum(trade_tickets.c.risk_at_stop), 0)
+            ).where(
+                trade_tickets.c.venue_id == venue_id,
+                trade_tickets.c.account_id == account_id,
+                trade_tickets.c.position_side == position_side,
+                trade_tickets.c.terminal_at_ms.is_(None),
+            )
+        )
+        return Decimal(result.scalar_one())
 
     async def read_admission_ownership(
         self,
@@ -1780,6 +1804,19 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
         "position_side": identity.netting_domain.position_side,
         "netting_domain_key": identity.netting_domain.key(),
         "active_netting_domain_key": identity.netting_domain.key(),
+        "exposure_family": ticket.exposure_family,
+        "active_family_ticket_count_at_claim": (
+            ticket.active_family_ticket_count_at_claim
+        ),
+        "family_ticket_limit": ticket.family_ticket_limit,
+        "directional_risk_at_stop_at_claim": (
+            ticket.directional_risk_at_stop_at_claim
+        ),
+        "directional_stop_risk_limit_fraction": (
+            ticket.directional_stop_risk_limit_fraction
+        ),
+        "min_materialization_ratio": ticket.min_materialization_ratio,
+        "minimum_stop_risk_budget": ticket.minimum_stop_risk_budget,
         "entry_reference_price": ticket.entry_reference_price,
         "quantity": ticket.quantity,
         "notional": ticket.notional,
@@ -1847,6 +1884,19 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         universe_version_id=str(row["universe_version_id"]),
         universe_semantic_digest=str(row["universe_semantic_digest"]),
         fact_digest=str(row["fact_digest"]),
+        exposure_family=_exposure_family(row["exposure_family"]),
+        active_family_ticket_count_at_claim=int(
+            row["active_family_ticket_count_at_claim"]
+        ),
+        family_ticket_limit=int(row["family_ticket_limit"]),
+        directional_risk_at_stop_at_claim=Decimal(
+            row["directional_risk_at_stop_at_claim"]
+        ),
+        directional_stop_risk_limit_fraction=Decimal(
+            row["directional_stop_risk_limit_fraction"]
+        ),
+        min_materialization_ratio=Decimal(row["min_materialization_ratio"]),
+        minimum_stop_risk_budget=Decimal(row["minimum_stop_risk_budget"]),
         exit_policy_id=str(row["exit_policy_id"]),
         exit_policy_semantic_hash=str(row["exit_policy_semantic_hash"]),
         capacity_claim_id=str(row["capacity_claim_id"]),
@@ -1939,16 +1989,15 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "margin_mode_at_claim": claim.margin_mode_at_claim,
         "active_ticket_count_at_claim": claim.active_ticket_count_at_claim,
         "remaining_slots_at_claim": claim.remaining_slots_at_claim,
-        "active_strategy_group_ticket_count_at_claim": (
-            claim.active_strategy_group_ticket_count_at_claim
+        "exposure_family": claim.exposure_family,
+        "active_family_ticket_count_at_claim": (
+            claim.active_family_ticket_count_at_claim
         ),
-        "max_strategy_group_concurrent_tickets": (
-            claim.max_strategy_group_concurrent_tickets
-        ),
-        "remaining_strategy_group_slots_at_claim": (
-            claim.remaining_strategy_group_slots_at_claim
-        ),
+        "family_ticket_limit": claim.family_ticket_limit,
         "gross_risk_at_stop_at_claim": claim.gross_risk_at_stop_at_claim,
+        "directional_risk_at_stop_at_claim": (
+            claim.directional_risk_at_stop_at_claim
+        ),
         "current_reserved_margin_at_claim": (
             claim.current_reserved_margin_at_claim
         ),
@@ -1958,12 +2007,17 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "max_gross_stop_risk_fraction": (
             claim.max_gross_stop_risk_fraction
         ),
+        "directional_stop_risk_limit_fraction": (
+            claim.directional_stop_risk_limit_fraction
+        ),
         "max_ticket_initial_margin_fraction": (
             claim.max_ticket_initial_margin_fraction
         ),
         "max_gross_initial_margin_utilization": (
             claim.max_gross_initial_margin_utilization
         ),
+        "min_materialization_ratio": claim.min_materialization_ratio,
+        "minimum_stop_risk_budget": claim.minimum_stop_risk_budget,
         "planned_stop_risk_budget": claim.planned_stop_risk_budget,
         "max_post_fill_stop_risk_overrun_fraction": (
             claim.max_post_fill_stop_risk_overrun_fraction
@@ -2062,17 +2116,20 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         ),
         active_ticket_count_at_claim=int(row["active_ticket_count_at_claim"]),
         remaining_slots_at_claim=int(row["remaining_slots_at_claim"]),
-        active_strategy_group_ticket_count_at_claim=int(
-            row["active_strategy_group_ticket_count_at_claim"]
+        exposure_family=_exposure_family(row["exposure_family"]),
+        active_family_ticket_count_at_claim=int(
+            row["active_family_ticket_count_at_claim"]
         ),
-        max_strategy_group_concurrent_tickets=int(
-            row["max_strategy_group_concurrent_tickets"]
-        ),
-        remaining_strategy_group_slots_at_claim=int(
-            row["remaining_strategy_group_slots_at_claim"]
+        family_ticket_limit=int(row["family_ticket_limit"]),
+        remaining_family_slots_at_claim=(
+            int(row["family_ticket_limit"])
+            - int(row["active_family_ticket_count_at_claim"])
         ),
         gross_risk_at_stop_at_claim=Decimal(
             row["gross_risk_at_stop_at_claim"]
+        ),
+        directional_risk_at_stop_at_claim=Decimal(
+            row["directional_risk_at_stop_at_claim"]
         ),
         current_reserved_margin_at_claim=Decimal(
             row["current_reserved_margin_at_claim"]
@@ -2083,12 +2140,17 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         max_gross_stop_risk_fraction=Decimal(
             row["max_gross_stop_risk_fraction"]
         ),
+        directional_stop_risk_limit_fraction=Decimal(
+            row["directional_stop_risk_limit_fraction"]
+        ),
         max_ticket_initial_margin_fraction=Decimal(
             row["max_ticket_initial_margin_fraction"]
         ),
         max_gross_initial_margin_utilization=Decimal(
             row["max_gross_initial_margin_utilization"]
         ),
+        min_materialization_ratio=Decimal(row["min_materialization_ratio"]),
+        minimum_stop_risk_budget=Decimal(row["minimum_stop_risk_budget"]),
         planned_stop_risk_budget=Decimal(row["planned_stop_risk_budget"]),
         max_post_fill_stop_risk_overrun_fraction=Decimal(
             row["max_post_fill_stop_risk_overrun_fraction"]
@@ -2396,3 +2458,14 @@ def _position_side(value: object) -> Literal["long", "short"]:
     if normalized == "short":
         return "short"
     raise RuntimeError(f"invalid persisted position side: {normalized!r}")
+
+
+def _exposure_family(value: object) -> ExposureFamily:
+    normalized = str(value)
+    if normalized in {
+        "long_continuation",
+        "opening_range",
+        "rally_failure_short",
+    }:
+        return cast(ExposureFamily, normalized)
+    raise RuntimeError(f"invalid persisted exposure family: {normalized!r}")

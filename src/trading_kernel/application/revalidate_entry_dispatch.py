@@ -60,8 +60,8 @@ class EntryDispatchPreflightStatus(StrEnum):
     OWNERSHIP_CONFLICT = "ownership_conflict"
     WALLET_RISK_DRIFT = "wallet_risk_drift"
     MARGIN_DRIFT = "margin_drift"
-    STRATEGY_GROUP_CAPACITY_EXHAUSTED = (
-        "strategy_group_capacity_exhausted"
+    EXPOSURE_FAMILY_CAPACITY_EXHAUSTED = (
+        "exposure_family_capacity_exhausted"
     )
     QUOTE_RISK = "quote_risk"
     STRESS_FAILED = "stress_failed"
@@ -90,7 +90,8 @@ class EntryDispatchPreflightRequest(BaseModel):
     instrument_rules: InstrumentRulesFacts
     account_entry_health: AccountEntryHealth
     instrument_entry_health: InstrumentEntryHealth
-    active_strategy_group_ticket_count: int
+    active_family_ticket_count: int
+    active_directional_risk_at_stop: Decimal
     now_ms: int
 
     @field_validator("runtime_commit", "schema_revision", mode="before")
@@ -101,11 +102,18 @@ class EntryDispatchPreflightRequest(BaseModel):
             raise ValueError("dispatch runtime identity must be non-blank")
         return normalized
 
-    @field_validator("active_strategy_group_ticket_count")
+    @field_validator("active_family_ticket_count")
     @classmethod
-    def _require_nonnegative_strategy_group_count(cls, value: int) -> int:
+    def _require_nonnegative_family_count(cls, value: int) -> int:
         if value < 0:
-            raise ValueError("active strategy-group Ticket count cannot be negative")
+            raise ValueError("active Family Ticket count cannot be negative")
+        return value
+
+    @field_validator("active_directional_risk_at_stop")
+    @classmethod
+    def _require_nonnegative_directional_risk(cls, value: Decimal) -> Decimal:
+        if value < 0:
+            raise ValueError("active directional stop risk cannot be negative")
         return value
 
     @field_validator("now_ms")
@@ -148,11 +156,11 @@ def revalidate_entry_dispatch(
     if not request.owner_policy.new_entry_submit_enabled:
         return _refused(EntryDispatchPreflightStatus.NEW_ENTRY_DISABLED)
     if (
-        request.active_strategy_group_ticket_count
-        > request.owner_policy.max_strategy_group_concurrent_tickets
+        request.active_family_ticket_count
+        > ticket.family_ticket_limit
     ):
         return _refused(
-            EntryDispatchPreflightStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED
+            EntryDispatchPreflightStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
         )
     if not _scope_matches(request.runtime_scope, ticket):
         return _refused(EntryDispatchPreflightStatus.SCOPE_DRIFT)
@@ -205,6 +213,12 @@ def revalidate_entry_dispatch(
     ) or claim.gross_risk_at_stop_at_claim + ticket.risk_at_stop > (
         account_risk.total_wallet_balance
         * request.owner_policy.max_gross_stop_risk_fraction
+    ):
+        return _refused(EntryDispatchPreflightStatus.WALLET_RISK_DRIFT)
+    if (
+        request.active_directional_risk_at_stop
+        > account_risk.total_wallet_balance
+        * request.owner_policy.directional_stop_risk_limit_fraction
     ):
         return _refused(EntryDispatchPreflightStatus.WALLET_RISK_DRIFT)
     ticket_margin_limit = (
@@ -298,8 +312,8 @@ def _policy_matches(
         and policy.enabled
         and ticket.selected_leverage <= policy.max_leverage
         and ticket.margin_mode == policy.supported_margin_mode
-        and claim.max_strategy_group_concurrent_tickets
-        == policy.max_strategy_group_concurrent_tickets
+        and claim.family_ticket_limit
+        == policy.family_ticket_limits.for_family(ticket.exposure_family)
         and claim.max_ticket_stop_risk_fraction
         == policy.max_ticket_stop_risk_fraction
         and claim.max_gross_stop_risk_fraction
@@ -308,6 +322,10 @@ def _policy_matches(
         == policy.max_ticket_initial_margin_fraction
         and claim.max_gross_initial_margin_utilization
         == policy.max_gross_initial_margin_utilization
+        and claim.directional_stop_risk_limit_fraction
+        == policy.directional_stop_risk_limit_fraction
+        and claim.min_materialization_ratio == policy.min_materialization_ratio
+        and ticket.minimum_stop_risk_budget == claim.minimum_stop_risk_budget
     )
 
 

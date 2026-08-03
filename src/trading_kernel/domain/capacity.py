@@ -16,6 +16,7 @@ from src.trading_kernel.domain.cross_margin_stress import (
     CrossMarginStressStatus,
     MaintenanceMarginBracket,
 )
+from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
 
@@ -32,8 +33,29 @@ class CapacityClaimStatus(StrEnum):
     INSTRUMENT_RULES_INVALID = "instrument_rules_invalid"
     NETTING_DOMAIN_OCCUPIED = "netting_domain_occupied"
     BUDGET_EXHAUSTED = "budget_exhausted"
-    STRATEGY_GROUP_CAPACITY_EXHAUSTED = "strategy_group_capacity_exhausted"
+    EXPOSURE_FAMILY_CAPACITY_EXHAUSTED = (
+        "exposure_family_capacity_exhausted"
+    )
+    DIRECTIONAL_RISK_EXHAUSTED = "directional_risk_exhausted"
     PROTECTION_UNAVAILABLE = "protection_unavailable"
+
+
+class FamilyTicketLimits(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    long_continuation: int
+    opening_range: int
+    rally_failure_short: int
+
+    @field_validator("*")
+    @classmethod
+    def _require_positive_limit(cls, value: int) -> int:
+        if isinstance(value, bool) or value <= 0:
+            raise ValueError("Family Ticket limits must be positive")
+        return value
+
+    def for_family(self, exposure_family: ExposureFamily) -> int:
+        return int(getattr(self, exposure_family))
 
 
 class CapacityPolicy(BaseModel):
@@ -42,11 +64,13 @@ class CapacityPolicy(BaseModel):
     owner_policy_id: str
     policy_version: int
     max_concurrent_tickets: int
-    max_strategy_group_concurrent_tickets: int
+    family_ticket_limits: FamilyTicketLimits
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
     max_ticket_initial_margin_fraction: Decimal
     max_gross_initial_margin_utilization: Decimal
+    directional_stop_risk_limit_fraction: Decimal
+    min_materialization_ratio: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
     post_stop_stress_multiple: Decimal
@@ -63,7 +87,6 @@ class CapacityPolicy(BaseModel):
     @field_validator(
         "policy_version",
         "max_concurrent_tickets",
-        "max_strategy_group_concurrent_tickets",
         "max_leverage",
     )
     @classmethod
@@ -75,8 +98,10 @@ class CapacityPolicy(BaseModel):
     @field_validator(
         "max_ticket_stop_risk_fraction",
         "max_gross_stop_risk_fraction",
+        "directional_stop_risk_limit_fraction",
         "max_ticket_initial_margin_fraction",
         "max_gross_initial_margin_utilization",
+        "min_materialization_ratio",
     )
     @classmethod
     def _require_policy_fraction(cls, value: Decimal) -> Decimal:
@@ -108,12 +133,14 @@ class CapacityUsage(BaseModel):
     gross_risk_at_stop: Decimal
     current_reserved_margin: Decimal
     active_ticket_count: int
-    active_strategy_group_ticket_count: int
+    active_family_ticket_count: int
+    directional_risk_at_stop: Decimal
 
     @field_validator(
         "gross_notional",
         "gross_risk_at_stop",
         "current_reserved_margin",
+        "directional_risk_at_stop",
     )
     @classmethod
     def _require_nonnegative_decimal(cls, value: Decimal) -> Decimal:
@@ -123,7 +150,7 @@ class CapacityUsage(BaseModel):
 
     @field_validator(
         "active_ticket_count",
-        "active_strategy_group_ticket_count",
+        "active_family_ticket_count",
     )
     @classmethod
     def _require_nonnegative_count(cls, value: int) -> int:
@@ -208,15 +235,20 @@ class CapacityClaim(BaseModel):
     margin_mode_at_claim: Literal["cross", "isolated"]
     active_ticket_count_at_claim: int
     remaining_slots_at_claim: int
-    active_strategy_group_ticket_count_at_claim: int
-    max_strategy_group_concurrent_tickets: int
-    remaining_strategy_group_slots_at_claim: int
+    exposure_family: ExposureFamily
+    active_family_ticket_count_at_claim: int
+    family_ticket_limit: int
+    remaining_family_slots_at_claim: int
     gross_risk_at_stop_at_claim: Decimal
+    directional_risk_at_stop_at_claim: Decimal
     current_reserved_margin_at_claim: Decimal
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
+    directional_stop_risk_limit_fraction: Decimal
     max_ticket_initial_margin_fraction: Decimal
     max_gross_initial_margin_utilization: Decimal
+    min_materialization_ratio: Decimal
+    minimum_stop_risk_budget: Decimal
     planned_stop_risk_budget: Decimal
     max_post_fill_stop_risk_overrun_fraction: Decimal
     post_fill_stop_risk_limit: Decimal
@@ -285,8 +317,10 @@ class CapacityClaim(BaseModel):
         "mark_price_at_claim",
         "max_ticket_stop_risk_fraction",
         "max_gross_stop_risk_fraction",
+        "directional_stop_risk_limit_fraction",
         "max_ticket_initial_margin_fraction",
         "max_gross_initial_margin_utilization",
+        "min_materialization_ratio",
         "planned_stop_risk_budget",
         "post_fill_stop_risk_limit",
         "post_stop_stress_multiple",
@@ -303,6 +337,7 @@ class CapacityClaim(BaseModel):
         "total_initial_margin_at_claim",
         "total_maintenance_margin_at_claim",
         "gross_risk_at_stop_at_claim",
+        "directional_risk_at_stop_at_claim",
         "current_reserved_margin_at_claim",
     )
     @classmethod
@@ -330,8 +365,8 @@ class CapacityClaim(BaseModel):
 
     @field_validator(
         "active_ticket_count_at_claim",
-        "active_strategy_group_ticket_count_at_claim",
-        "remaining_strategy_group_slots_at_claim",
+        "active_family_ticket_count_at_claim",
+        "remaining_family_slots_at_claim",
     )
     @classmethod
     def _require_nonnegative_count(cls, value: int) -> int:
@@ -341,7 +376,7 @@ class CapacityClaim(BaseModel):
 
     @field_validator(
         "remaining_slots_at_claim",
-        "max_strategy_group_concurrent_tickets",
+        "family_ticket_limit",
         "required_leverage",
         "selected_leverage",
         "configured_leverage_at_claim",
@@ -363,11 +398,11 @@ class CapacityClaim(BaseModel):
             or self.expires_at_ms <= self.created_at_ms
         ):
             raise ValueError("CapacityClaim authority and time must be positive")
-        if self.remaining_strategy_group_slots_at_claim != (
-            self.max_strategy_group_concurrent_tickets
-            - self.active_strategy_group_ticket_count_at_claim
+        if self.remaining_family_slots_at_claim != (
+            self.family_ticket_limit
+            - self.active_family_ticket_count_at_claim
         ):
-            raise ValueError("CapacityClaim strategy-group slot evidence differs")
+            raise ValueError("CapacityClaim Family slot evidence differs")
         if self.entry_order_type is EntryOrderType.MARKET:
             if self.entry_limit_price is not None:
                 raise ValueError("market CapacityClaim forbids a limit price")
@@ -408,6 +443,24 @@ class CapacityClaim(BaseModel):
         )
         if self.planned_stop_risk_budget > remaining_gross_risk:
             raise ValueError("CapacityClaim exceeds remaining gross stop risk")
+        remaining_directional_risk = (
+            self.total_wallet_balance_at_claim
+            * self.directional_stop_risk_limit_fraction
+            - self.directional_risk_at_stop_at_claim
+        )
+        if self.planned_stop_risk_budget > remaining_directional_risk:
+            raise ValueError(
+                "CapacityClaim exceeds remaining directional stop risk"
+            )
+        expected_minimum = (
+            self.total_wallet_balance_at_claim
+            * self.max_ticket_stop_risk_fraction
+            * self.min_materialization_ratio
+        )
+        if self.minimum_stop_risk_budget != expected_minimum:
+            raise ValueError("CapacityClaim minimum materialization differs")
+        if self.risk_at_stop < self.minimum_stop_risk_budget:
+            raise ValueError("CapacityClaim is below minimum materialization")
         if self.ticket_margin_budget > (
             self.total_margin_balance_at_claim
             * self.max_ticket_initial_margin_fraction
@@ -495,6 +548,19 @@ class CapacityClaim(BaseModel):
             universe_version_id=self.universe_version_id,
             universe_semantic_digest=self.universe_semantic_digest,
             fact_digest=self.fact_digest,
+            exposure_family=self.exposure_family,
+            active_family_ticket_count_at_claim=(
+                self.active_family_ticket_count_at_claim
+            ),
+            family_ticket_limit=self.family_ticket_limit,
+            directional_risk_at_stop_at_claim=(
+                self.directional_risk_at_stop_at_claim
+            ),
+            directional_stop_risk_limit_fraction=(
+                self.directional_stop_risk_limit_fraction
+            ),
+            min_materialization_ratio=self.min_materialization_ratio,
+            minimum_stop_risk_budget=self.minimum_stop_risk_budget,
             exit_policy_id=self.exit_policy_id,
             exit_policy_semantic_hash=self.exit_policy_semantic_hash,
             capacity_claim_id=self.capacity_claim_id,
@@ -569,15 +635,20 @@ def freeze_capacity_claim(
     margin_mode_at_claim: Literal["cross", "isolated"],
     active_ticket_count_at_claim: int,
     remaining_slots_at_claim: int,
-    active_strategy_group_ticket_count_at_claim: int,
-    max_strategy_group_concurrent_tickets: int,
-    remaining_strategy_group_slots_at_claim: int,
+    exposure_family: ExposureFamily,
+    active_family_ticket_count_at_claim: int,
+    family_ticket_limit: int,
+    remaining_family_slots_at_claim: int,
     gross_risk_at_stop_at_claim: Decimal,
+    directional_risk_at_stop_at_claim: Decimal,
     current_reserved_margin_at_claim: Decimal,
     max_ticket_stop_risk_fraction: Decimal,
     max_gross_stop_risk_fraction: Decimal,
+    directional_stop_risk_limit_fraction: Decimal,
     max_ticket_initial_margin_fraction: Decimal,
     max_gross_initial_margin_utilization: Decimal,
+    min_materialization_ratio: Decimal,
+    minimum_stop_risk_budget: Decimal,
     planned_stop_risk_budget: Decimal,
     max_post_fill_stop_risk_overrun_fraction: Decimal,
     post_fill_stop_risk_limit: Decimal,
@@ -632,25 +703,30 @@ def freeze_capacity_claim(
         "margin_mode_at_claim": margin_mode_at_claim,
         "active_ticket_count_at_claim": active_ticket_count_at_claim,
         "remaining_slots_at_claim": remaining_slots_at_claim,
-        "active_strategy_group_ticket_count_at_claim": (
-            active_strategy_group_ticket_count_at_claim
+        "exposure_family": exposure_family,
+        "active_family_ticket_count_at_claim": (
+            active_family_ticket_count_at_claim
         ),
-        "max_strategy_group_concurrent_tickets": (
-            max_strategy_group_concurrent_tickets
-        ),
-        "remaining_strategy_group_slots_at_claim": (
-            remaining_strategy_group_slots_at_claim
-        ),
+        "family_ticket_limit": family_ticket_limit,
+        "remaining_family_slots_at_claim": remaining_family_slots_at_claim,
         "gross_risk_at_stop_at_claim": gross_risk_at_stop_at_claim,
+        "directional_risk_at_stop_at_claim": (
+            directional_risk_at_stop_at_claim
+        ),
         "current_reserved_margin_at_claim": current_reserved_margin_at_claim,
         "max_ticket_stop_risk_fraction": max_ticket_stop_risk_fraction,
         "max_gross_stop_risk_fraction": max_gross_stop_risk_fraction,
+        "directional_stop_risk_limit_fraction": (
+            directional_stop_risk_limit_fraction
+        ),
         "max_ticket_initial_margin_fraction": (
             max_ticket_initial_margin_fraction
         ),
         "max_gross_initial_margin_utilization": (
             max_gross_initial_margin_utilization
         ),
+        "min_materialization_ratio": min_materialization_ratio,
+        "minimum_stop_risk_budget": minimum_stop_risk_budget,
         "planned_stop_risk_budget": planned_stop_risk_budget,
         "max_post_fill_stop_risk_overrun_fraction": (
             max_post_fill_stop_risk_overrun_fraction
@@ -751,7 +827,9 @@ def _normalize_claim_decimals_for_storage(
         "total_initial_margin_at_claim",
         "total_maintenance_margin_at_claim",
         "gross_risk_at_stop_at_claim",
+        "directional_risk_at_stop_at_claim",
         "current_reserved_margin_at_claim",
+        "minimum_stop_risk_budget",
         "planned_stop_risk_budget",
         "post_fill_stop_risk_limit",
         "reserved_margin",

@@ -511,11 +511,11 @@ async def test_long_and_short_are_independent_default_netting_domains(
 
 
 @pytest.mark.asyncio
-async def test_strategy_group_capacity_merges_long_short_and_rejects_third_without_artifacts(
+async def test_exposure_family_capacity_merges_long_short_and_rejects_third_without_artifacts(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_policy(issue_engine)
-    first = _ticket(risk_at_stop=Decimal(1), reserved_margin=Decimal(20))
+    first = _ticket(risk_at_stop=Decimal(3), reserved_margin=Decimal(20))
     second_base = _ticket_for_signal(
         "signal-strategy-2",
         "episode-strategy-2",
@@ -527,7 +527,7 @@ async def test_strategy_group_capacity_merges_long_short_and_rejects_third_witho
         universe_version_id=second_base.universe_version_id,
         initial_stop_price=second_base.initial_stop_price,
         take_profit_prices=second_base.take_profit_prices,
-        risk_at_stop=Decimal(1),
+        risk_at_stop=Decimal(3),
         reserved_margin=Decimal(20),
     )
     third = _ticket_for_instrument(
@@ -535,7 +535,7 @@ async def test_strategy_group_capacity_merges_long_short_and_rejects_third_witho
         "episode-strategy-3",
         exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
         runtime_scope_id="scope-sor-eth-long",
-        risk_at_stop=Decimal(1),
+        risk_at_stop=Decimal(3),
         reserved_margin=Decimal(20),
     )
     await _seed_ticket_runtime_scope(issue_engine, third)
@@ -554,7 +554,7 @@ async def test_strategy_group_capacity_merges_long_short_and_rejects_third_witho
 
     assert (
         refused.status
-        is IssueTicketStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED
+        is IssueTicketStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
     )
     await _assert_no_durable_entry_state(
         issue_engine,
@@ -567,7 +567,7 @@ async def test_two_sor_tickets_and_one_other_strategy_can_fill_account_capacity(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_policy(issue_engine)
-    first = _ticket(risk_at_stop=Decimal(1), reserved_margin=Decimal(20))
+    first = _ticket(risk_at_stop=Decimal(3), reserved_margin=Decimal(20))
     second_base = _ticket_for_signal(
         "signal-account-2",
         "episode-account-2",
@@ -579,7 +579,7 @@ async def test_two_sor_tickets_and_one_other_strategy_can_fill_account_capacity(
         universe_version_id=second_base.universe_version_id,
         initial_stop_price=second_base.initial_stop_price,
         take_profit_prices=second_base.take_profit_prices,
-        risk_at_stop=Decimal(1),
+        risk_at_stop=Decimal(3),
         reserved_margin=Decimal(20),
     )
     third = _ticket_for_strategy_group(
@@ -590,7 +590,7 @@ async def test_two_sor_tickets_and_one_other_strategy_can_fill_account_capacity(
         event_spec_id="mi-long-v2",
         exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
         runtime_scope_id="scope-mi-eth-long",
-        risk_at_stop=Decimal(1),
+        risk_at_stop=Decimal(3),
         reserved_margin=Decimal(20),
     )
     await _seed_ticket_runtime_scope(issue_engine, third)
@@ -617,7 +617,7 @@ async def test_two_sor_tickets_and_one_other_strategy_can_fill_account_capacity(
 
 
 @pytest.mark.asyncio
-async def test_strategy_group_active_count_is_isolated_by_venue_and_account(
+async def test_exposure_family_active_count_is_isolated_by_venue_and_account(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_policy(issue_engine)
@@ -625,23 +625,23 @@ async def test_strategy_group_active_count_is_isolated_by_venue_and_account(
     await _issue_and_release_lane(issue_engine, ticket)
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        exact = await uow.entry_admission.count_active_strategy_group_tickets(
+        exact = await uow.entry_admission.count_active_family_tickets(
             venue_id=ticket.identity.netting_domain.venue_id,
             account_id=ticket.identity.netting_domain.account_id,
-            strategy_group_id=ticket.identity.runtime.strategy_group_id,
+            exposure_family=ticket.exposure_family,
         )
         other_account = (
-            await uow.entry_admission.count_active_strategy_group_tickets(
+            await uow.entry_admission.count_active_family_tickets(
                 venue_id=ticket.identity.netting_domain.venue_id,
                 account_id="other-account",
-                strategy_group_id=ticket.identity.runtime.strategy_group_id,
+                exposure_family=ticket.exposure_family,
             )
         )
         other_venue = (
-            await uow.entry_admission.count_active_strategy_group_tickets(
+            await uow.entry_admission.count_active_family_tickets(
                 venue_id="other-venue",
                 account_id=ticket.identity.netting_domain.account_id,
-                strategy_group_id=ticket.identity.runtime.strategy_group_id,
+                exposure_family=ticket.exposure_family,
             )
         )
 
@@ -651,7 +651,7 @@ async def test_strategy_group_active_count_is_isolated_by_venue_and_account(
 
 
 @pytest.mark.asyncio
-async def test_strategy_group_active_count_excludes_terminal_tickets(
+async def test_exposure_family_active_count_excludes_terminal_tickets(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_policy(issue_engine)
@@ -670,10 +670,10 @@ async def test_strategy_group_active_count_excludes_terminal_tickets(
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         active_count = (
-            await uow.entry_admission.count_active_strategy_group_tickets(
+            await uow.entry_admission.count_active_family_tickets(
                 venue_id=ticket.identity.netting_domain.venue_id,
                 account_id=ticket.identity.netting_domain.account_id,
-                strategy_group_id=ticket.identity.runtime.strategy_group_id,
+                exposure_family=ticket.exposure_family,
             )
         )
 
@@ -681,7 +681,7 @@ async def test_strategy_group_active_count_excludes_terminal_tickets(
 
 
 @pytest.mark.asyncio
-async def test_stale_claims_cannot_exceed_gross_stop_risk_after_atomic_revalidation(
+async def test_three_current_v4_claims_can_use_gross_stop_risk_capacity(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_policy(issue_engine)
@@ -705,13 +705,13 @@ async def test_stale_claims_cannot_exceed_gross_stop_risk_after_atomic_revalidat
         ticket=second,
         now_ms=1_002,
         claim_owner="worker-risk-2",
-        stress_balance=Decimal(100),
+        stress_balance=Decimal(300),
     )
     third_request = _issue_request(
         ticket=third,
         now_ms=1_003,
         claim_owner="worker-risk-3",
-        stress_balance=Decimal(100),
+        stress_balance=Decimal(300),
     )
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
@@ -721,7 +721,7 @@ async def test_stale_claims_cannot_exceed_gross_stop_risk_after_atomic_revalidat
                 ticket=first,
                 now_ms=1_001,
                 claim_owner="worker-risk-1",
-                stress_balance=Decimal(100),
+                stress_balance=Decimal(300),
             ),
         )
     assert first_result.status is IssueTicketStatus.ISSUED
@@ -738,18 +738,18 @@ async def test_stale_claims_cannot_exceed_gross_stop_risk_after_atomic_revalidat
             first.identity.netting_domain.account_id,
         )
 
-    assert third_result.status is IssueTicketStatus.BUDGET_EXHAUSTED
+    assert third_result.status is IssueTicketStatus.ISSUED
     assert exposure is not None
-    assert exposure.gross_risk_at_stop == Decimal(6)
-    assert exposure.active_ticket_count == 2
+    assert exposure.gross_risk_at_stop == Decimal(9)
+    assert exposure.active_ticket_count == 3
 
 
 @pytest.mark.asyncio
-async def test_stale_claims_cannot_exceed_gross_margin_after_atomic_revalidation(
+async def test_three_current_v4_claims_can_use_gross_margin_capacity(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_policy(issue_engine)
-    first = _ticket(risk_at_stop=Decimal(1), reserved_margin=Decimal(45))
+    first = _ticket(risk_at_stop=Decimal(3), reserved_margin=Decimal(45))
     second_base = _ticket_for_signal(
         "signal-margin-2",
         "episode-margin-2",
@@ -761,7 +761,7 @@ async def test_stale_claims_cannot_exceed_gross_margin_after_atomic_revalidation
         universe_version_id=second_base.universe_version_id,
         initial_stop_price=second_base.initial_stop_price,
         take_profit_prices=second_base.take_profit_prices,
-        risk_at_stop=Decimal(1),
+        risk_at_stop=Decimal(3),
         reserved_margin=Decimal(45),
     )
     third = _ticket_for_strategy_group(
@@ -772,7 +772,7 @@ async def test_stale_claims_cannot_exceed_gross_margin_after_atomic_revalidation
         event_spec_id="mi-long-v2",
         exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
         runtime_scope_id="scope-mi-eth-long",
-        risk_at_stop=Decimal(1),
+        risk_at_stop=Decimal(3),
         reserved_margin=Decimal(45),
     )
     await _seed_ticket_runtime_scope(issue_engine, third)
@@ -780,14 +780,14 @@ async def test_stale_claims_cannot_exceed_gross_margin_after_atomic_revalidation
         ticket=second,
         now_ms=1_002,
         claim_owner="worker-margin-2",
-        stress_balance=Decimal(100),
+        stress_balance=Decimal(300),
         ticket_margin_budget=Decimal(45),
     )
     third_request = _issue_request(
         ticket=third,
         now_ms=1_003,
         claim_owner="worker-margin-3",
-        stress_balance=Decimal(100),
+        stress_balance=Decimal(300),
         ticket_margin_budget=Decimal(45),
     )
 
@@ -798,7 +798,7 @@ async def test_stale_claims_cannot_exceed_gross_margin_after_atomic_revalidation
                 ticket=first,
                 now_ms=1_001,
                 claim_owner="worker-margin-1",
-                stress_balance=Decimal(100),
+                stress_balance=Decimal(300),
                 ticket_margin_budget=Decimal(45),
             ),
         )
@@ -817,11 +817,11 @@ async def test_stale_claims_cannot_exceed_gross_margin_after_atomic_revalidation
             first.identity.netting_domain.account_id,
         )
 
-    assert third_result.status is IssueTicketStatus.BUDGET_EXHAUSTED
+    assert third_result.status is IssueTicketStatus.ISSUED
     assert exposure is not None
-    assert exposure.current_reserved_margin == Decimal(90)
-    assert exposure.gross_risk_at_stop == Decimal(2)
-    assert exposure.active_ticket_count == 2
+    assert exposure.current_reserved_margin == Decimal(135)
+    assert exposure.gross_risk_at_stop == Decimal(9)
+    assert exposure.active_ticket_count == 3
 
 
 @pytest.mark.asyncio
@@ -896,10 +896,17 @@ async def _seed_policy(
                 priority_rank=1,
                 max_concurrent_tickets=max_concurrent_tickets,
                 max_strategy_group_concurrent_tickets=2,
-                max_ticket_stop_risk_fraction="0.03",
+                family_ticket_limits={
+                    "long_continuation": 1,
+                    "opening_range": 2,
+                    "rally_failure_short": 1,
+                },
+                max_ticket_stop_risk_fraction="0.02",
                 max_gross_stop_risk_fraction="0.06",
-                max_ticket_initial_margin_fraction="0.45",
+                max_ticket_initial_margin_fraction="0.30",
                 max_gross_initial_margin_utilization="0.90",
+                directional_stop_risk_limit_fraction="0.04",
+                min_materialization_ratio="0.50",
                 max_leverage=10,
                 supported_margin_mode="cross",
                 post_stop_stress_multiple="2.0",
@@ -1156,6 +1163,12 @@ def _ticket_for_strategy_group(
         "runtime_scope_id": runtime_scope_id,
         "universe_version_id": f"universe:{event_spec_id}:1",
         "exit_policy_id": f"exit-policy:{event_spec_id}",
+        "exposure_family": (
+            "opening_range"
+            if strategy_group_id == "SOR-001"
+            else "long_continuation"
+        ),
+        "family_ticket_limit": 2 if strategy_group_id == "SOR-001" else 1,
         "pre_tp1_reclaim_price": None,
         "exposure_session_end_ms": None,
     }
@@ -1177,7 +1190,7 @@ def _issue_request(
         else ticket.selected_leverage
     )
     resolved_stress_balance = (
-        max(Decimal(100), ticket.notional * Decimal(10))
+        Decimal(300)
         if stress_balance is None
         else stress_balance
     )
@@ -1216,14 +1229,19 @@ def _issue_request(
             margin_mode_at_claim=ticket.margin_mode,
             active_ticket_count_at_claim=0,
             remaining_slots_at_claim=3,
-            active_strategy_group_ticket_count_at_claim=0,
-            max_strategy_group_concurrent_tickets=2,
-            remaining_strategy_group_slots_at_claim=2,
+            exposure_family=ticket.exposure_family,
+            active_family_ticket_count_at_claim=0,
+            family_ticket_limit=ticket.family_ticket_limit,
+            remaining_family_slots_at_claim=ticket.family_ticket_limit,
             gross_risk_at_stop_at_claim=Decimal(0),
+            directional_risk_at_stop_at_claim=Decimal(0),
             current_reserved_margin_at_claim=Decimal(0),
-            max_ticket_stop_risk_fraction=Decimal("0.03"),
+            max_ticket_stop_risk_fraction=Decimal("0.02"),
             max_gross_stop_risk_fraction=Decimal("0.06"),
-            max_ticket_initial_margin_fraction=Decimal("0.45"),
+            directional_stop_risk_limit_fraction=Decimal("0.04"),
+            max_ticket_initial_margin_fraction=Decimal("0.30"),
+            min_materialization_ratio=Decimal("0.50"),
+            minimum_stop_risk_budget=Decimal(3),
             planned_stop_risk_budget=ticket.planned_stop_risk_budget,
             max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
             post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,

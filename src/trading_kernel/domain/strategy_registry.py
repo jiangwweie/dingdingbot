@@ -9,6 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.ticket import EntryOrderType
 
 FactValueType = Literal["boolean", "decimal"]
@@ -22,11 +23,6 @@ FactRole = Literal[
 Timeframe = Literal["15m", "1h"]
 PositionSide = Literal["long", "short"]
 EpisodePolicy = Literal["rising_edge", "session_reference"]
-ExposureFamily = Literal[
-    "long_continuation",
-    "opening_range",
-    "rally_failure_short",
-]
 
 
 class RegistrySeedConflict(RuntimeError):

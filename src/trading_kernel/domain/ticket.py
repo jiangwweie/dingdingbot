@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.identities import (
     NettingDomain,
     RuntimeIdentity,
@@ -47,6 +48,13 @@ class TradeTicket(BaseModel):
     universe_version_id: str
     universe_semantic_digest: str
     fact_digest: str
+    exposure_family: ExposureFamily
+    active_family_ticket_count_at_claim: int
+    family_ticket_limit: int
+    directional_risk_at_stop_at_claim: Decimal
+    directional_stop_risk_limit_fraction: Decimal
+    min_materialization_ratio: Decimal
+    minimum_stop_risk_budget: Decimal
     exit_policy_id: str
     exit_policy_semantic_hash: str
     capacity_claim_id: str
@@ -120,6 +128,9 @@ class TradeTicket(BaseModel):
         "entry_reference_price",
         "initial_stop_price",
         "post_stop_stress_multiple",
+        "directional_stop_risk_limit_fraction",
+        "min_materialization_ratio",
+        "minimum_stop_risk_budget",
     )
     @classmethod
     def _require_positive_decimal(cls, value: Decimal) -> Decimal:
@@ -127,7 +138,7 @@ class TradeTicket(BaseModel):
             raise ValueError("financial value must be positive")
         return value
 
-    @field_validator("risk_at_stop")
+    @field_validator("risk_at_stop", "directional_risk_at_stop_at_claim")
     @classmethod
     def _require_nonnegative_risk(cls, value: Decimal) -> Decimal:
         if value < 0:
@@ -149,6 +160,22 @@ class TradeTicket(BaseModel):
     def _require_positive_integer_leverage(cls, value: int) -> int:
         if isinstance(value, bool) or value <= 0:
             raise ValueError("selected leverage must be a positive integer")
+        return value
+
+    @field_validator(
+        "active_family_ticket_count_at_claim",
+    )
+    @classmethod
+    def _require_nonnegative_count(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("active Family Ticket count cannot be negative")
+        return value
+
+    @field_validator("family_ticket_limit")
+    @classmethod
+    def _require_positive_family_limit(cls, value: int) -> int:
+        if isinstance(value, bool) or value <= 0:
+            raise ValueError("Family Ticket limit must be positive")
         return value
 
     @field_validator("take_profit_prices")
@@ -188,6 +215,10 @@ class TradeTicket(BaseModel):
             raise ValueError("Ticket stop risk cannot exceed planned risk budget")
         if self.post_fill_stop_risk_limit < self.planned_stop_risk_budget:
             raise ValueError("Ticket post-fill stop risk limit cannot undercut plan")
+        if self.active_family_ticket_count_at_claim >= self.family_ticket_limit:
+            raise ValueError("Ticket Family capacity was exhausted at claim")
+        if self.risk_at_stop < self.minimum_stop_risk_budget:
+            raise ValueError("Ticket is below minimum materialization")
         if (self.pre_tp1_reclaim_price is None) != (
             self.exposure_session_end_ms is None
         ):

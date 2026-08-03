@@ -38,14 +38,12 @@ from src.trading_kernel.domain.capacity import (
     CapacityUsage,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
+from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
 )
-from src.trading_kernel.domain.strategy_registry import (
-    ExposureFamily,
-    strategy_contract_for,
-)
+from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.domain.ticket import EntryOrderType
 
 
@@ -220,11 +218,19 @@ async def issue_ready_signal(
         profile.venue_id,
         profile.account_id,
     )
-    active_strategy_group_ticket_count = (
-        await uow.entry_admission.count_active_strategy_group_tickets(
+    contract = strategy_contract_for(signal.event_spec_id)
+    active_family_ticket_count = (
+        await uow.entry_admission.count_active_family_tickets(
             venue_id=profile.venue_id,
             account_id=profile.account_id,
-            strategy_group_id=signal.strategy_group_id,
+            exposure_family=contract.exposure_family,
+        )
+    )
+    directional_risk_at_stop = (
+        await uow.entry_admission.sum_active_directional_stop_risk(
+            venue_id=profile.venue_id,
+            account_id=profile.account_id,
+            position_side=signal.position_side,
         )
     )
     usage = CapacityUsage(
@@ -238,11 +244,9 @@ async def issue_ready_signal(
             exposure.current_reserved_margin if exposure else Decimal(0)
         ),
         active_ticket_count=(exposure.active_ticket_count if exposure else 0),
-        active_strategy_group_ticket_count=(
-            active_strategy_group_ticket_count
-        ),
+        active_family_ticket_count=active_family_ticket_count,
+        directional_risk_at_stop=directional_risk_at_stop,
     )
-    contract = strategy_contract_for(signal.event_spec_id)
     admission_context = _AdmissionDecisionContext(
         candidate_set=(
             candidate_set
@@ -259,6 +263,7 @@ async def issue_ready_signal(
             policy=policy,
             usage=usage,
             admission_snapshot=request.admission_snapshot,
+            exposure_family=contract.exposure_family,
         ),
     )
     domain = NettingDomain(
@@ -277,9 +282,7 @@ async def issue_ready_signal(
             owner_policy_id=policy.owner_policy_id,
             policy_version=policy.policy_version,
             max_concurrent_tickets=policy.max_concurrent_tickets,
-            max_strategy_group_concurrent_tickets=(
-                policy.max_strategy_group_concurrent_tickets
-            ),
+            family_ticket_limits=policy.family_ticket_limits,
             max_ticket_stop_risk_fraction=(
                 policy.max_ticket_stop_risk_fraction
             ),
@@ -292,6 +295,10 @@ async def issue_ready_signal(
             max_gross_initial_margin_utilization=(
                 policy.max_gross_initial_margin_utilization
             ),
+            directional_stop_risk_limit_fraction=(
+                policy.directional_stop_risk_limit_fraction
+            ),
+            min_materialization_ratio=policy.min_materialization_ratio,
             max_leverage=policy.max_leverage,
             supported_margin_mode=policy.supported_margin_mode,
             post_stop_stress_multiple=policy.post_stop_stress_multiple,
@@ -470,8 +477,11 @@ def _issue_status(status: CapacityClaimStatus) -> IssueTicketStatus:
             IssueTicketStatus.ACTIVE_NETTING_DOMAIN
         ),
         CapacityClaimStatus.BUDGET_EXHAUSTED: IssueTicketStatus.BUDGET_EXHAUSTED,
-        CapacityClaimStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED: (
-            IssueTicketStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED
+        CapacityClaimStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED: (
+            IssueTicketStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
+        ),
+        CapacityClaimStatus.DIRECTIONAL_RISK_EXHAUSTED: (
+            IssueTicketStatus.BUDGET_EXHAUSTED
         ),
         CapacityClaimStatus.PROTECTION_UNAVAILABLE: (
             IssueTicketStatus.PROTECTION_UNAVAILABLE
@@ -485,6 +495,7 @@ def _portfolio_usage(
     policy,
     usage: CapacityUsage,
     admission_snapshot: EntryAdmissionSnapshot,
+    exposure_family: ExposureFamily,
 ) -> AdmissionPortfolioUsage:
     account = admission_snapshot.account_risk_snapshot
     remaining_gross_risk = max(
@@ -504,10 +515,10 @@ def _portfolio_usage(
     return AdmissionPortfolioUsage(
         active_ticket_count=usage.active_ticket_count,
         active_family_ticket_count=(
-            usage.active_strategy_group_ticket_count
+            usage.active_family_ticket_count
         ),
         gross_risk_at_stop=usage.gross_risk_at_stop,
-        directional_risk_at_stop=Decimal(0),
+        directional_risk_at_stop=usage.directional_risk_at_stop,
         current_reserved_margin=usage.current_reserved_margin,
         remaining_ticket_slots=max(
             0,
@@ -515,10 +526,15 @@ def _portfolio_usage(
         ),
         remaining_family_slots=max(
             0,
-            policy.max_strategy_group_concurrent_tickets
-            - usage.active_strategy_group_ticket_count,
+            policy.family_ticket_limits.for_family(exposure_family)
+            - usage.active_family_ticket_count,
         ),
         remaining_gross_stop_risk=remaining_gross_risk,
-        remaining_directional_stop_risk=remaining_gross_risk,
+        remaining_directional_stop_risk=max(
+            Decimal(0),
+            account.total_wallet_balance
+            * policy.directional_stop_risk_limit_fraction
+            - usage.directional_risk_at_stop,
+        ),
         remaining_initial_margin=remaining_initial_margin,
     )

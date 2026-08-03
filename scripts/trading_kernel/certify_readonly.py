@@ -50,6 +50,8 @@ _DECIMAL_POLICY_FIELDS = frozenset(
         "max_gross_stop_risk_fraction",
         "max_ticket_initial_margin_fraction",
         "max_gross_initial_margin_utilization",
+        "directional_stop_risk_limit_fraction",
+        "min_materialization_ratio",
         "post_stop_stress_multiple",
         "max_post_fill_stop_risk_overrun_fraction",
     }
@@ -339,11 +341,13 @@ async def _certify(
                                enabled,
                                new_entry_submit_enabled,
                                max_concurrent_tickets,
-                               max_strategy_group_concurrent_tickets,
+                               family_ticket_limits,
                                max_ticket_stop_risk_fraction,
                                max_gross_stop_risk_fraction,
                                max_ticket_initial_margin_fraction,
                                max_gross_initial_margin_utilization,
+                               directional_stop_risk_limit_fraction,
+                               min_materialization_ratio,
                                max_leverage,
                                supported_margin_mode,
                                post_stop_stress_multiple,
@@ -707,12 +711,8 @@ async def _certify(
             isinstance(owner_policy_row["new_entry_submit_enabled"], bool),
             int(owner_policy_row["max_concurrent_tickets"])
             == DYNAMIC_POLICY.max_concurrent_tickets,
-            int(
-                owner_policy_row[
-                    "max_strategy_group_concurrent_tickets"
-                ]
-            )
-            == DYNAMIC_POLICY.max_strategy_group_concurrent_tickets,
+            owner_policy_row["family_ticket_limits"]
+            == DYNAMIC_POLICY.family_ticket_limits.model_dump(),
             Decimal(str(owner_policy_row["max_ticket_stop_risk_fraction"]))
             == DYNAMIC_POLICY.max_ticket_stop_risk_fraction,
             Decimal(str(owner_policy_row["max_gross_stop_risk_fraction"]))
@@ -725,6 +725,12 @@ async def _certify(
                 str(owner_policy_row["max_gross_initial_margin_utilization"])
             )
             == DYNAMIC_POLICY.max_gross_initial_margin_utilization,
+            Decimal(
+                str(owner_policy_row["directional_stop_risk_limit_fraction"])
+            )
+            == DYNAMIC_POLICY.directional_stop_risk_limit_fraction,
+            Decimal(str(owner_policy_row["min_materialization_ratio"]))
+            == DYNAMIC_POLICY.min_materialization_ratio,
             int(owner_policy_row["max_leverage"]) == DYNAMIC_POLICY.max_leverage,
             owner_policy_row["supported_margin_mode"]
             == DYNAMIC_POLICY.supported_margin_mode,

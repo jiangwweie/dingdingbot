@@ -20,6 +20,8 @@ SHORT_TEXT = sa.String(96)
 def upgrade() -> None:
     """Add the rising-edge Episode current projection."""
 
+    _upgrade_portfolio_admission_policy_v4()
+
     op.create_table(
         "brc_exposure_episode_current",
         sa.Column("episode_domain_key", ID, nullable=False),
@@ -76,6 +78,96 @@ def upgrade() -> None:
         ),
     )
     _create_admission_decisions()
+
+
+def _upgrade_portfolio_admission_policy_v4() -> None:
+    """Extend the un-deployed 0003 head with current Policy v4 lineage."""
+
+    op.add_column(
+        "brc_owner_policy_current",
+        sa.Column(
+            "family_ticket_limits",
+            JSONB(),
+            nullable=False,
+            server_default=sa.text(
+                "'{\"long_continuation\": 1, \"opening_range\": 2, \"rally_failure_short\": 1}'::jsonb"
+            ),
+        ),
+    )
+    op.alter_column(
+        "brc_owner_policy_current",
+        "max_strategy_group_concurrent_tickets",
+        nullable=True,
+        server_default=None,
+    )
+    for column_name in (
+        "active_strategy_group_ticket_count_at_claim",
+        "max_strategy_group_concurrent_tickets",
+        "remaining_strategy_group_slots_at_claim",
+    ):
+        op.alter_column(
+            "brc_capacity_claims",
+            column_name,
+            nullable=True,
+            server_default=None,
+        )
+    op.add_column(
+        "brc_owner_policy_current",
+        sa.Column(
+            "directional_stop_risk_limit_fraction",
+            sa.Numeric(36, 18),
+            nullable=False,
+            server_default="0.04",
+        ),
+    )
+    op.add_column(
+        "brc_owner_policy_current",
+        sa.Column(
+            "min_materialization_ratio",
+            sa.Numeric(36, 18),
+            nullable=False,
+            server_default="0.50",
+        ),
+    )
+    for table_name in ("brc_capacity_claims", "brc_trade_tickets"):
+        op.add_column(
+            table_name,
+            sa.Column("exposure_family", SHORT_TEXT, nullable=True),
+        )
+        op.add_column(
+            table_name,
+            sa.Column("active_family_ticket_count_at_claim", sa.Integer(), nullable=True),
+        )
+        op.add_column(
+            table_name,
+            sa.Column("family_ticket_limit", sa.Integer(), nullable=True),
+        )
+        op.add_column(
+            table_name,
+            sa.Column("directional_risk_at_stop_at_claim", sa.Numeric(36, 18), nullable=True),
+        )
+        op.add_column(
+            table_name,
+            sa.Column("directional_stop_risk_limit_fraction", sa.Numeric(36, 18), nullable=True),
+        )
+        op.add_column(
+            table_name,
+            sa.Column("min_materialization_ratio", sa.Numeric(36, 18), nullable=True),
+        )
+        op.add_column(
+            table_name,
+            sa.Column("minimum_stop_risk_budget", sa.Numeric(36, 18), nullable=True),
+        )
+    op.create_index(
+        "ix_brc_trade_tickets_active_family",
+        "brc_trade_tickets",
+        ["venue_id", "account_id", "exposure_family", "terminal_at_ms"],
+    )
+    op.create_index(
+        "ix_brc_trade_tickets_active_directional_risk",
+        "brc_trade_tickets",
+        ["venue_id", "account_id", "position_side", "terminal_at_ms"],
+    )
 
 
 def _create_admission_decisions() -> None:

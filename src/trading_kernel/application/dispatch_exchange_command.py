@@ -429,13 +429,18 @@ async def _preflight_new_entry_mutation(
             account_id=domain.account_id,
             exchange_instrument_id=domain.exchange_instrument_id,
         )
-        active_strategy_group_ticket_count = (
-            await uow.entry_admission.count_active_strategy_group_tickets(
+        active_family_ticket_count = (
+            await uow.entry_admission.count_active_family_tickets(
                 venue_id=domain.venue_id,
                 account_id=domain.account_id,
-                strategy_group_id=(
-                    aggregate.ticket.identity.runtime.strategy_group_id
-                ),
+                exposure_family=aggregate.ticket.exposure_family,
+            )
+        )
+        active_directional_risk_at_stop = (
+            await uow.entry_admission.sum_active_directional_stop_risk(
+                venue_id=domain.venue_id,
+                account_id=domain.account_id,
+                position_side=domain.position_side,
             )
         )
     decision = revalidate_entry_dispatch(
@@ -461,9 +466,8 @@ async def _preflight_new_entry_mutation(
                 exchange_instrument_id=domain.exchange_instrument_id,
                 requested_position_side=domain.position_side,
             ),
-            active_strategy_group_ticket_count=(
-                active_strategy_group_ticket_count
-            ),
+            active_family_ticket_count=active_family_ticket_count,
+            active_directional_risk_at_stop=active_directional_risk_at_stop,
             now_ms=request.now_ms,
         )
     )

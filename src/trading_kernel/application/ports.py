@@ -47,7 +47,7 @@ from src.trading_kernel.application.reconciliation_scheduler import (
 from src.trading_kernel.domain.admission_decision import AdmissionDecision
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
-from src.trading_kernel.domain.capacity import CapacityClaim
+from src.trading_kernel.domain.capacity import CapacityClaim, FamilyTicketLimits
 from src.trading_kernel.domain.commands import (
     CommandPayload,
     ExchangeCommand,
@@ -210,11 +210,13 @@ class OwnerPolicySnapshot(BaseModel):
     new_entry_submit_enabled: bool
     priority_rank: int
     max_concurrent_tickets: int
-    max_strategy_group_concurrent_tickets: int
+    family_ticket_limits: FamilyTicketLimits
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
     max_ticket_initial_margin_fraction: Decimal
     max_gross_initial_margin_utilization: Decimal
+    directional_stop_risk_limit_fraction: Decimal
+    min_materialization_ratio: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
     post_stop_stress_multiple: Decimal
@@ -786,13 +788,21 @@ class EntryAdmissionRepository(Protocol):
 
     async def has_ticket_for_signal(self, signal_event_id: str) -> bool: ...
 
-    async def count_active_strategy_group_tickets(
+    async def count_active_family_tickets(
         self,
         *,
         venue_id: str,
         account_id: str,
-        strategy_group_id: str,
+        exposure_family: str,
     ) -> int: ...
+
+    async def sum_active_directional_stop_risk(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+        position_side: Literal["long", "short"],
+    ) -> Decimal: ...
 
     async def read_admission_ownership(
         self,

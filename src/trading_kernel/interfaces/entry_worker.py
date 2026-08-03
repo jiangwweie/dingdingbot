@@ -280,11 +280,19 @@ async def _record_action_facts_unavailable(
         profile.venue_id,
         profile.account_id,
     )
+    contract = strategy_contract_for(signal.event_spec_id)
     active_family_ticket_count = (
-        await uow.entry_admission.count_active_strategy_group_tickets(
+        await uow.entry_admission.count_active_family_tickets(
             venue_id=profile.venue_id,
             account_id=profile.account_id,
-            strategy_group_id=signal.strategy_group_id,
+            exposure_family=contract.exposure_family,
+        )
+    )
+    directional_risk_at_stop = (
+        await uow.entry_admission.sum_active_directional_stop_risk(
+            venue_id=profile.venue_id,
+            account_id=profile.account_id,
+            position_side=signal.position_side,
         )
     )
     active_ticket_count = 0 if exposure is None else exposure.active_ticket_count
@@ -292,7 +300,6 @@ async def _record_action_facts_unavailable(
     reserved_margin = (
         Decimal(0) if exposure is None else exposure.current_reserved_margin
     )
-    contract = strategy_contract_for(signal.event_spec_id)
     await uow.admission_decisions.add(
         freeze_admission_decision(
             signal=signal,
@@ -307,7 +314,7 @@ async def _record_action_facts_unavailable(
                 active_ticket_count=active_ticket_count,
                 active_family_ticket_count=active_family_ticket_count,
                 gross_risk_at_stop=gross_risk,
-                directional_risk_at_stop=None,
+                directional_risk_at_stop=directional_risk_at_stop,
                 current_reserved_margin=reserved_margin,
                 remaining_ticket_slots=max(
                     0,
@@ -315,7 +322,7 @@ async def _record_action_facts_unavailable(
                 ),
                 remaining_family_slots=max(
                     0,
-                    policy.max_strategy_group_concurrent_tickets
+                    policy.family_ticket_limits.for_family(contract.exposure_family)
                     - active_family_ticket_count,
                 ),
                 remaining_gross_stop_risk=None,

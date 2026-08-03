@@ -100,13 +100,24 @@ def build_capacity_claim(
         return _refused(CapacityClaimStatus.BUDGET_EXHAUSTED)
     if netting_domain_occupied:
         return _refused(CapacityClaimStatus.NETTING_DOMAIN_OCCUPIED)
+    if usage.active_ticket_count >= policy.max_concurrent_tickets:
+        return _refused(CapacityClaimStatus.BUDGET_EXHAUSTED)
+    contract = strategy_contract_for(signal.event_spec_id)
+    family_ticket_limit = policy.family_ticket_limits.for_family(
+        contract.exposure_family
+    )
     if (
-        usage.active_strategy_group_ticket_count
-        >= policy.max_strategy_group_concurrent_tickets
+        usage.active_family_ticket_count
+        >= family_ticket_limit
     ):
         return _refused(
-            CapacityClaimStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED
+            CapacityClaimStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
         )
+    if usage.directional_risk_at_stop >= (
+        account_risk.total_wallet_balance
+        * policy.directional_stop_risk_limit_fraction
+    ):
+        return _refused(CapacityClaimStatus.DIRECTIONAL_RISK_EXHAUSTED)
 
     entry_price = (
         admission_snapshot.best_ask_price
@@ -130,7 +141,6 @@ def build_capacity_claim(
 
     if account_risk.exchange_instrument_id != signal.exchange_instrument_id:
         return _refused(CapacityClaimStatus.SCOPE_OR_POLICY_MISMATCH)
-    contract = strategy_contract_for(signal.event_spec_id)
     exit_policy = exit_policy_for(signal.event_spec_id)
     pre_tp1_reclaim_price = _contract_decimal_fact(
         signal,
@@ -156,6 +166,7 @@ def build_capacity_claim(
             total_initial_margin=account_risk.total_initial_margin,
             current_reserved_margin=usage.current_reserved_margin,
             gross_risk_at_stop=usage.gross_risk_at_stop,
+            directional_risk_at_stop=usage.directional_risk_at_stop,
             available_margin=account_risk.available_margin,
             active_ticket_count=usage.active_ticket_count,
             max_concurrent_tickets=policy.max_concurrent_tickets,
@@ -171,6 +182,10 @@ def build_capacity_claim(
             max_gross_initial_margin_utilization=(
                 policy.max_gross_initial_margin_utilization
             ),
+            directional_stop_risk_limit_fraction=(
+                policy.directional_stop_risk_limit_fraction
+            ),
+            min_materialization_ratio=policy.min_materialization_ratio,
             permitted_max_leverage=min(
                 policy.max_leverage,
                 instrument_rules.exchange_max_leverage,
@@ -290,28 +305,32 @@ def build_capacity_claim(
         margin_mode_at_claim=account_risk.margin_mode,
         active_ticket_count_at_claim=usage.active_ticket_count,
         remaining_slots_at_claim=selected.remaining_slots,
-        active_strategy_group_ticket_count_at_claim=(
-            usage.active_strategy_group_ticket_count
+        exposure_family=contract.exposure_family,
+        active_family_ticket_count_at_claim=(
+            usage.active_family_ticket_count
         ),
-        max_strategy_group_concurrent_tickets=(
-            policy.max_strategy_group_concurrent_tickets
-        ),
-        remaining_strategy_group_slots_at_claim=(
-            policy.max_strategy_group_concurrent_tickets
-            - usage.active_strategy_group_ticket_count
+        family_ticket_limit=family_ticket_limit,
+        remaining_family_slots_at_claim=(
+            family_ticket_limit - usage.active_family_ticket_count
         ),
         gross_risk_at_stop_at_claim=usage.gross_risk_at_stop,
+        directional_risk_at_stop_at_claim=usage.directional_risk_at_stop,
         current_reserved_margin_at_claim=usage.current_reserved_margin,
         max_ticket_stop_risk_fraction=(
             policy.max_ticket_stop_risk_fraction
         ),
         max_gross_stop_risk_fraction=policy.max_gross_stop_risk_fraction,
+        directional_stop_risk_limit_fraction=(
+            policy.directional_stop_risk_limit_fraction
+        ),
         max_ticket_initial_margin_fraction=(
             policy.max_ticket_initial_margin_fraction
         ),
         max_gross_initial_margin_utilization=(
             policy.max_gross_initial_margin_utilization
         ),
+        min_materialization_ratio=policy.min_materialization_ratio,
+        minimum_stop_risk_budget=selected.minimum_stop_risk_budget,
         planned_stop_risk_budget=selected.ticket_stop_risk_budget,
         max_post_fill_stop_risk_overrun_fraction=(
             policy.max_post_fill_stop_risk_overrun_fraction
@@ -350,12 +369,15 @@ def build_capacity_claim(
 
 
 def _sizing_refusal(status: CapacitySizingStatus) -> CapacityClaimStatus:
+    if status is CapacitySizingStatus.DIRECTIONAL_RISK_EXHAUSTED:
+        return CapacityClaimStatus.DIRECTIONAL_RISK_EXHAUSTED
     if status in {
         CapacitySizingStatus.COUNT_EXHAUSTED,
         CapacitySizingStatus.STOP_RISK_EXHAUSTED,
         CapacitySizingStatus.MARGIN_EXHAUSTED,
         CapacitySizingStatus.VENUE_MINIMUM_UNMET,
         CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE,
+        CapacitySizingStatus.MINIMUM_MATERIALIZATION_UNMET,
     }:
         return CapacityClaimStatus.BUDGET_EXHAUSTED
     return CapacityClaimStatus.INSTRUMENT_RULES_INVALID

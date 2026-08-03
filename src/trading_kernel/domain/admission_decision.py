@@ -10,8 +10,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.signal import StrategySignal
-from src.trading_kernel.domain.strategy_registry import ExposureFamily
 
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 

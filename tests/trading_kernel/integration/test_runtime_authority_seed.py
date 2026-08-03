@@ -172,11 +172,17 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     assert first.new_entry_submit_enabled is False
     assert first.policy_version == 1
     assert first.max_concurrent_tickets == 3
-    assert first.max_strategy_group_concurrent_tickets == 2
-    assert first.max_ticket_stop_risk_fraction == Decimal("0.03")
+    assert first.family_ticket_limits.model_dump() == {
+        "long_continuation": 1,
+        "opening_range": 2,
+        "rally_failure_short": 1,
+    }
+    assert first.max_ticket_stop_risk_fraction == Decimal("0.02")
     assert first.max_gross_stop_risk_fraction == Decimal("0.06")
-    assert first.max_ticket_initial_margin_fraction == Decimal("0.45")
+    assert first.max_ticket_initial_margin_fraction == Decimal("0.30")
     assert first.max_gross_initial_margin_utilization == Decimal("0.90")
+    assert first.directional_stop_risk_limit_fraction == Decimal("0.04")
+    assert first.min_materialization_ratio == Decimal("0.50")
     assert first.max_leverage == 10
     assert first.supported_margin_mode == "cross"
     assert first.post_stop_stress_multiple == Decimal("2.0")
@@ -196,11 +202,18 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         assert policy["enabled"] is True
         assert policy["new_entry_submit_enabled"] is False
         assert policy["max_concurrent_tickets"] == 3
-        assert policy["max_strategy_group_concurrent_tickets"] == 2
-        assert Decimal(policy["max_ticket_stop_risk_fraction"]) == Decimal("0.03")
+        assert policy["family_ticket_limits"] == {
+            "long_continuation": 1,
+            "opening_range": 2,
+            "rally_failure_short": 1,
+        }
+        assert policy["max_strategy_group_concurrent_tickets"] is None
+        assert Decimal(policy["max_ticket_stop_risk_fraction"]) == Decimal("0.02")
         assert Decimal(policy["max_gross_stop_risk_fraction"]) == Decimal("0.06")
-        assert Decimal(policy["max_ticket_initial_margin_fraction"]) == Decimal("0.45")
+        assert Decimal(policy["max_ticket_initial_margin_fraction"]) == Decimal("0.30")
         assert Decimal(policy["max_gross_initial_margin_utilization"]) == Decimal("0.90")
+        assert Decimal(policy["directional_stop_risk_limit_fraction"]) == Decimal("0.04")
+        assert Decimal(policy["min_materialization_ratio"]) == Decimal("0.50")
         assert policy["max_leverage"] == 10
         assert policy["supported_margin_mode"] == "cross"
         assert Decimal(
@@ -212,12 +225,12 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
         assert policy["scope"] == {
             "runtime_profile_id": "tiny-live-v1",
             "allowed_event_spec_ids": [
-                "event_spec:BRF2-001:BRF2-SHORT:v2",
-                "event_spec:CPM-RO-001:CPM-LONG:v2",
-                "event_spec:MI-001:MI-LONG:v2",
-                "event_spec:MPG-001:MPG-LONG:v2",
-                "event_spec:SOR-001:SOR-LONG:v3",
-                "event_spec:SOR-001:SOR-SHORT:v3",
+                "event_spec:BRF2-001:BRF2-SHORT:v3",
+                "event_spec:CPM-RO-001:CPM-LONG:v3",
+                "event_spec:MI-001:MI-LONG:v3",
+                "event_spec:MPG-001:MPG-LONG:v3",
+                "event_spec:SOR-001:SOR-LONG:v4",
+                "event_spec:SOR-001:SOR-SHORT:v4",
             ],
         }
 
@@ -474,20 +487,20 @@ async def test_compatible_identity_monotonically_moves_v2_authority_to_v3(
     assert current["policy_version"] == 3
     assert current["new_entry_submit_enabled"] is True
     assert current["max_concurrent_tickets"] == 3
-    assert current["max_strategy_group_concurrent_tickets"] == 2
-    assert current["max_ticket_stop_risk_fraction"] == Decimal("0.03")
+    assert current["max_strategy_group_concurrent_tickets"] is None
+    assert current["max_ticket_stop_risk_fraction"] == Decimal("0.02")
     assert current["max_gross_stop_risk_fraction"] == Decimal("0.06")
-    assert current["max_ticket_initial_margin_fraction"] == Decimal("0.45")
+    assert current["max_ticket_initial_margin_fraction"] == Decimal("0.30")
     assert current["max_gross_initial_margin_utilization"] == Decimal("0.90")
     assert current["max_leverage"] == 10
     assert current["supported_margin_mode"] == "cross"
     assert current["scope"]["allowed_event_spec_ids"] == [
-        "event_spec:BRF2-001:BRF2-SHORT:v2",
-        "event_spec:CPM-RO-001:CPM-LONG:v2",
-        "event_spec:MI-001:MI-LONG:v2",
-        "event_spec:MPG-001:MPG-LONG:v2",
-        "event_spec:SOR-001:SOR-LONG:v3",
-        "event_spec:SOR-001:SOR-SHORT:v3",
+        "event_spec:BRF2-001:BRF2-SHORT:v3",
+        "event_spec:CPM-RO-001:CPM-LONG:v3",
+        "event_spec:MI-001:MI-LONG:v3",
+        "event_spec:MPG-001:MPG-LONG:v3",
+        "event_spec:SOR-001:SOR-LONG:v4",
+        "event_spec:SOR-001:SOR-SHORT:v4",
     ]
     assert events == [2, 3]
     assert metadata_rows["runtime_commit"] == "a" * 40
@@ -589,7 +602,7 @@ async def test_readonly_certification_emits_exact_pending_closure_manifest(
         closure_ticket_id="ticket:closure",
     )
 
-    assert payload["status"] == "pass"
+    assert payload["status"] == "pass", payload
     assert payload["closure_ticket"] == {
         "ticket_id": "ticket:closure",
         "aggregate_status": "settlement_pending",
@@ -638,10 +651,10 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     assert armed.policy_version == 2
     assert armed.new_entry_submit_enabled is True
     assert armed.max_concurrent_tickets == 3
-    assert armed.max_strategy_group_concurrent_tickets == 2
-    assert armed.max_ticket_stop_risk_fraction == Decimal("0.03")
+    assert armed.family_ticket_limits.opening_range == 2
+    assert armed.max_ticket_stop_risk_fraction == Decimal("0.02")
     assert armed.max_gross_stop_risk_fraction == Decimal("0.06")
-    assert armed.max_ticket_initial_margin_fraction == Decimal("0.45")
+    assert armed.max_ticket_initial_margin_fraction == Decimal("0.30")
     assert armed.max_gross_initial_margin_utilization == Decimal("0.90")
     assert armed.max_leverage == 10
     assert armed.model_dump(
@@ -675,10 +688,10 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
     assert promoted.policy_version == 3
     assert promoted.new_entry_submit_enabled is True
     assert promoted.max_concurrent_tickets == 3
-    assert promoted.max_strategy_group_concurrent_tickets == 2
-    assert promoted.max_ticket_stop_risk_fraction == Decimal("0.03")
+    assert promoted.family_ticket_limits.opening_range == 2
+    assert promoted.max_ticket_stop_risk_fraction == Decimal("0.02")
     assert promoted.max_gross_stop_risk_fraction == Decimal("0.06")
-    assert promoted.max_ticket_initial_margin_fraction == Decimal("0.45")
+    assert promoted.max_ticket_initial_margin_fraction == Decimal("0.30")
     assert promoted.max_gross_initial_margin_utilization == Decimal("0.90")
     assert promoted.max_leverage == 10
     assert promoted.supported_margin_mode == "cross"

@@ -23,7 +23,7 @@ from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
 from src.trading_kernel.domain.account_entry_health import (
     classify_account_entry_health,
 )
-from src.trading_kernel.domain.capacity import CapacityUsage
+from src.trading_kernel.domain.capacity import CapacityUsage, FamilyTicketLimits
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
@@ -133,22 +133,22 @@ def test_entry_preflight_refuses_a_switched_universe_before_dispatch() -> None:
     assert decision.status is EntryDispatchPreflightStatus.SCOPE_DRIFT
 
 
-def test_entry_preflight_refuses_when_strategy_group_count_exceeds_frozen_limit() -> None:
+def test_entry_preflight_refuses_when_family_count_exceeds_frozen_limit() -> None:
     request = _preflight_request(snapshot=_snapshot()).model_copy(
-        update={"active_strategy_group_ticket_count": 3}
+        update={"active_family_ticket_count": 3}
     )
 
     decision = revalidate_entry_dispatch(request)
 
     assert (
         decision.status
-        is EntryDispatchPreflightStatus.STRATEGY_GROUP_CAPACITY_EXHAUSTED
+        is EntryDispatchPreflightStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
     )
 
 
-def test_entry_preflight_allows_current_ticket_at_strategy_group_limit() -> None:
+def test_entry_preflight_allows_current_ticket_at_family_limit() -> None:
     request = _preflight_request(snapshot=_snapshot()).model_copy(
-        update={"active_strategy_group_ticket_count": 2}
+        update={"active_family_ticket_count": 2}
     )
 
     decision = revalidate_entry_dispatch(request)
@@ -156,13 +156,19 @@ def test_entry_preflight_allows_current_ticket_at_strategy_group_limit() -> None
     assert decision.status is EntryDispatchPreflightStatus.ALLOWED
 
 
-def test_entry_preflight_refuses_strategy_group_policy_drift() -> None:
+def test_entry_preflight_refuses_family_policy_drift() -> None:
     base = _preflight_request(snapshot=_snapshot())
     assert base.owner_policy is not None
     request = base.model_copy(
         update={
             "owner_policy": base.owner_policy.model_copy(
-                update={"max_strategy_group_concurrent_tickets": 1}
+                update={
+                    "family_ticket_limits": FamilyTicketLimits(
+                        long_continuation=1,
+                        opening_range=1,
+                        rally_failure_short=1,
+                    )
+                }
             )
         }
     )
@@ -185,7 +191,8 @@ def _preflight_request(*, snapshot):
             gross_risk_at_stop=Decimal(0),
             current_reserved_margin=Decimal(0),
             active_ticket_count=0,
-            active_strategy_group_ticket_count=0,
+            active_family_ticket_count=0,
+            directional_risk_at_stop=Decimal(0),
         ),
         instrument_rules=_rules(),
         admission_snapshot=_snapshot(),
@@ -241,11 +248,17 @@ def _preflight_request(*, snapshot):
             new_entry_submit_enabled=True,
             priority_rank=1,
             max_concurrent_tickets=3,
-            max_strategy_group_concurrent_tickets=2,
-            max_ticket_stop_risk_fraction=Decimal("0.03"),
+            family_ticket_limits=FamilyTicketLimits(
+                long_continuation=1,
+                opening_range=2,
+                rally_failure_short=1,
+            ),
+            max_ticket_stop_risk_fraction=Decimal("0.02"),
             max_gross_stop_risk_fraction=Decimal("0.06"),
-            max_ticket_initial_margin_fraction=Decimal("0.45"),
+            max_ticket_initial_margin_fraction=Decimal("0.30"),
             max_gross_initial_margin_utilization=Decimal("0.90"),
+            directional_stop_risk_limit_fraction=Decimal("0.04"),
+            min_materialization_ratio=Decimal("0.50"),
             max_leverage=10,
             supported_margin_mode="cross",
             post_stop_stress_multiple=Decimal(2),
@@ -327,6 +340,7 @@ def _preflight_request(*, snapshot):
             exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
             requested_position_side=ticket.identity.netting_domain.position_side,
         ),
-        active_strategy_group_ticket_count=1,
+        active_family_ticket_count=1,
+        active_directional_risk_at_stop=ticket.risk_at_stop,
         now_ms=1_010,
     )

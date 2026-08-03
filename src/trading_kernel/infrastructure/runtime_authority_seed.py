@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from src.trading_kernel.domain.capacity import FamilyTicketLimits
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     build_registry_semantic_hash,
@@ -125,11 +126,13 @@ class RuntimePolicyState(BaseModel):
     policy_version: int
     new_entry_submit_enabled: bool
     max_concurrent_tickets: int
-    max_strategy_group_concurrent_tickets: int
+    family_ticket_limits: FamilyTicketLimits
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
     max_ticket_initial_margin_fraction: Decimal
     max_gross_initial_margin_utilization: Decimal
+    directional_stop_risk_limit_fraction: Decimal
+    min_materialization_ratio: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
     post_stop_stress_multiple: Decimal
@@ -159,11 +162,13 @@ class RuntimeDeploymentIdentityResult(BaseModel):
 @dataclass(frozen=True)
 class _DynamicPolicy:
     max_concurrent_tickets: int
-    max_strategy_group_concurrent_tickets: int
+    family_ticket_limits: FamilyTicketLimits
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
     max_ticket_initial_margin_fraction: Decimal
     max_gross_initial_margin_utilization: Decimal
+    directional_stop_risk_limit_fraction: Decimal
+    min_materialization_ratio: Decimal
     max_leverage: int
     supported_margin_mode: Literal["cross"]
     post_stop_stress_multiple: Decimal
@@ -180,11 +185,17 @@ class _ExactRow:
 
 DYNAMIC_POLICY = _DynamicPolicy(
     max_concurrent_tickets=3,
-    max_strategy_group_concurrent_tickets=2,
-    max_ticket_stop_risk_fraction=Decimal("0.03"),
+    family_ticket_limits=FamilyTicketLimits(
+        long_continuation=1,
+        opening_range=2,
+        rally_failure_short=1,
+    ),
+    max_ticket_stop_risk_fraction=Decimal("0.02"),
     max_gross_stop_risk_fraction=Decimal("0.06"),
-    max_ticket_initial_margin_fraction=Decimal("0.45"),
+    max_ticket_initial_margin_fraction=Decimal("0.30"),
     max_gross_initial_margin_utilization=Decimal("0.90"),
+    directional_stop_risk_limit_fraction=Decimal("0.04"),
+    min_materialization_ratio=Decimal("0.50"),
     max_leverage=10,
     supported_margin_mode="cross",
     post_stop_stress_multiple=Decimal("2.0"),
@@ -196,11 +207,13 @@ _POLICY_COMPARE_KEYS = (
     "new_entry_submit_enabled",
     "priority_rank",
     "max_concurrent_tickets",
-    "max_strategy_group_concurrent_tickets",
+    "family_ticket_limits",
     "max_ticket_stop_risk_fraction",
     "max_gross_stop_risk_fraction",
     "max_ticket_initial_margin_fraction",
     "max_gross_initial_margin_utilization",
+    "directional_stop_risk_limit_fraction",
+    "min_materialization_ratio",
     "max_leverage",
     "supported_margin_mode",
     "post_stop_stress_multiple",
@@ -431,13 +444,7 @@ async def deploy_compatible_upgrade_identity(
     current_submit_enabled = bool(current_policy["new_entry_submit_enabled"])
     target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
     source_event_spec_ids = tuple(
-        event_spec_id.replace(
-            "event_spec:SOR-001:SOR-LONG:v3",
-            "event_spec:SOR-001:SOR-LONG:v2",
-        ).replace(
-            "event_spec:SOR-001:SOR-SHORT:v3",
-            "event_spec:SOR-001:SOR-SHORT:v2",
-        )
+        event_spec_id.replace(":v4", ":v2").replace(":v3", ":v2")
         for event_spec_id in target_event_spec_ids
     )
     if not _policy_matches(
@@ -903,9 +910,7 @@ def _policy_values(
         "new_entry_submit_enabled": new_entry_submit_enabled,
         "priority_rank": 1,
         "max_concurrent_tickets": DYNAMIC_POLICY.max_concurrent_tickets,
-        "max_strategy_group_concurrent_tickets": (
-            DYNAMIC_POLICY.max_strategy_group_concurrent_tickets
-        ),
+        "family_ticket_limits": DYNAMIC_POLICY.family_ticket_limits.model_dump(),
         "max_ticket_stop_risk_fraction": (
             DYNAMIC_POLICY.max_ticket_stop_risk_fraction
         ),
@@ -918,6 +923,10 @@ def _policy_values(
         "max_gross_initial_margin_utilization": (
             DYNAMIC_POLICY.max_gross_initial_margin_utilization
         ),
+        "directional_stop_risk_limit_fraction": (
+            DYNAMIC_POLICY.directional_stop_risk_limit_fraction
+        ),
+        "min_materialization_ratio": DYNAMIC_POLICY.min_materialization_ratio,
         "max_leverage": DYNAMIC_POLICY.max_leverage,
         "supported_margin_mode": DYNAMIC_POLICY.supported_margin_mode,
         "post_stop_stress_multiple": (
@@ -1011,8 +1020,8 @@ def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
         policy_version=int(str(values["policy_version"])),
         new_entry_submit_enabled=bool(values["new_entry_submit_enabled"]),
         max_concurrent_tickets=int(str(values["max_concurrent_tickets"])),
-        max_strategy_group_concurrent_tickets=int(
-            str(values["max_strategy_group_concurrent_tickets"])
+        family_ticket_limits=FamilyTicketLimits.model_validate(
+            values["family_ticket_limits"]
         ),
         max_ticket_stop_risk_fraction=Decimal(
             str(values["max_ticket_stop_risk_fraction"])
@@ -1025,6 +1034,12 @@ def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
         ),
         max_gross_initial_margin_utilization=Decimal(
             str(values["max_gross_initial_margin_utilization"])
+        ),
+        directional_stop_risk_limit_fraction=Decimal(
+            str(values["directional_stop_risk_limit_fraction"])
+        ),
+        min_materialization_ratio=Decimal(
+            str(values["min_materialization_ratio"])
         ),
         max_leverage=int(str(values["max_leverage"])),
         supported_margin_mode=cast(Literal["cross"], supported_margin_mode),

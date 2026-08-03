@@ -12,9 +12,11 @@ class CapacitySizingStatus(StrEnum):
     SELECTED = "selected"
     COUNT_EXHAUSTED = "count_exhausted"
     STOP_RISK_EXHAUSTED = "stop_risk_exhausted"
+    DIRECTIONAL_RISK_EXHAUSTED = "directional_risk_exhausted"
     MARGIN_EXHAUSTED = "margin_exhausted"
     VENUE_MINIMUM_UNMET = "venue_minimum_unmet"
     EXIT_PLAN_UNEXECUTABLE = "exit_plan_unexecutable"
+    MINIMUM_MATERIALIZATION_UNMET = "minimum_materialization_unmet"
     INVALID_FACTS = "invalid_facts"
 
 
@@ -28,6 +30,7 @@ class CapacitySizingRequest(BaseModel):
     total_initial_margin: Decimal
     current_reserved_margin: Decimal
     gross_risk_at_stop: Decimal
+    directional_risk_at_stop: Decimal
     available_margin: Decimal
     active_ticket_count: int
     max_concurrent_tickets: int
@@ -35,6 +38,8 @@ class CapacitySizingRequest(BaseModel):
     max_gross_stop_risk_fraction: Decimal
     max_ticket_initial_margin_fraction: Decimal
     max_gross_initial_margin_utilization: Decimal
+    directional_stop_risk_limit_fraction: Decimal
+    min_materialization_ratio: Decimal
     permitted_max_leverage: int
     configured_leverage: int
     entry_reference_price: Decimal
@@ -50,6 +55,7 @@ class CapacitySizingRequest(BaseModel):
         "total_initial_margin",
         "current_reserved_margin",
         "gross_risk_at_stop",
+        "directional_risk_at_stop",
         "available_margin",
     )
     @classmethod
@@ -76,6 +82,8 @@ class CapacitySizingRequest(BaseModel):
         "max_gross_stop_risk_fraction",
         "max_ticket_initial_margin_fraction",
         "max_gross_initial_margin_utilization",
+        "directional_stop_risk_limit_fraction",
+        "min_materialization_ratio",
     )
     @classmethod
     def _require_fraction(cls, value: Decimal) -> Decimal:
@@ -120,6 +128,9 @@ class CapacitySizingSelection(BaseModel):
     remaining_slots: int
     ticket_stop_risk_budget: Decimal
     remaining_gross_stop_risk: Decimal
+    remaining_directional_stop_risk: Decimal
+    minimum_stop_risk_budget: Decimal
+    materialization_ratio: Decimal
     remaining_gross_margin: Decimal
     remaining_executable_margin: Decimal
     ticket_margin_budget: Decimal
@@ -163,12 +174,26 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
         - request.gross_risk_at_stop,
         Decimal(0),
     )
+    remaining_directional_stop_risk = max(
+        request.total_wallet_balance
+        * request.directional_stop_risk_limit_fraction
+        - request.directional_risk_at_stop,
+        Decimal(0),
+    )
     ticket_stop_risk_budget = min(
         request.total_wallet_balance * request.max_ticket_stop_risk_fraction,
         remaining_gross_stop_risk,
+        remaining_directional_stop_risk,
     )
     if ticket_stop_risk_budget <= 0:
+        if remaining_directional_stop_risk <= 0:
+            return _refused(CapacitySizingStatus.DIRECTIONAL_RISK_EXHAUSTED)
         return _refused(CapacitySizingStatus.STOP_RISK_EXHAUSTED)
+    minimum_stop_risk_budget = (
+        request.total_wallet_balance
+        * request.max_ticket_stop_risk_fraction
+        * request.min_materialization_ratio
+    )
 
     gross_initial_margin_limit = (
         request.total_margin_balance
@@ -216,6 +241,10 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
             remaining_slots=remaining_slots,
             ticket_stop_risk_budget=ticket_stop_risk_budget,
             remaining_gross_stop_risk=remaining_gross_stop_risk,
+            remaining_directional_stop_risk=(
+                remaining_directional_stop_risk
+            ),
+            minimum_stop_risk_budget=minimum_stop_risk_budget,
             remaining_gross_margin=remaining_gross_margin,
             remaining_executable_margin=remaining_executable_margin,
             ticket_margin_budget=ticket_margin_budget,
@@ -248,6 +277,10 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
             ),
         )
     )
+    if selected.planned_stop_risk < minimum_stop_risk_budget:
+        return _refused(
+            CapacitySizingStatus.MINIMUM_MATERIALIZATION_UNMET
+        )
     return CapacitySizingDecision(
         status=CapacitySizingStatus.SELECTED,
         selected=selected,
@@ -260,6 +293,8 @@ def _evaluate_candidate(
     remaining_slots: int,
     ticket_stop_risk_budget: Decimal,
     remaining_gross_stop_risk: Decimal,
+    remaining_directional_stop_risk: Decimal,
+    minimum_stop_risk_budget: Decimal,
     remaining_gross_margin: Decimal,
     remaining_executable_margin: Decimal,
     ticket_margin_budget: Decimal,
@@ -293,6 +328,15 @@ def _evaluate_candidate(
         remaining_slots=remaining_slots,
         ticket_stop_risk_budget=ticket_stop_risk_budget,
         remaining_gross_stop_risk=remaining_gross_stop_risk,
+        remaining_directional_stop_risk=remaining_directional_stop_risk,
+        minimum_stop_risk_budget=minimum_stop_risk_budget,
+        materialization_ratio=(
+            planned_stop_risk
+            / (
+                request.total_wallet_balance
+                * request.max_ticket_stop_risk_fraction
+            )
+        ),
         remaining_gross_margin=remaining_gross_margin,
         remaining_executable_margin=remaining_executable_margin,
         ticket_margin_budget=ticket_margin_budget,
