@@ -24,6 +24,7 @@ TARGET_COMMIT = "a" * 40
 CURRENT_COMMIT = "b" * 40
 CURRENT_RELEASE = "/opt/brc/releases/brc-trading-kernel-bbbbbbbbbbbb"
 TARGET_RELEASE = "/opt/brc/releases/brc-trading-kernel-aaaaaaaaaaaa"
+RECOVERY_RELEASE = "/opt/brc/releases/brc-trading-kernel-cccccccccccc"
 SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
 TARGET_SCHEMA_REVISION = "0003_portfolio_admission_observability"
 SEED_IDENTITY = "sha256:" + "c" * 64
@@ -398,6 +399,20 @@ def test_migration_unknown_outcome_confirmed_0003_enters_target_fix_forward() ->
     assert backend.current_release == TARGET_RELEASE
     assert backend.active_services == set(SAFETY_SERVICES)
     assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_target_schema_fix_forward_reads_preservation_from_current_release() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=TARGET_SCHEMA_REVISION,
+        current_release=RECOVERY_RELEASE,
+        entry_gate_ready=True,
+    )
+
+    result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert result.status == "pass"
+    assert ("read_preservation_digest", RECOVERY_RELEASE) in backend.calls
+    assert ("read_preservation_digest", TARGET_RELEASE) not in backend.calls
 
 
 def test_migration_unknown_outcome_remains_primary_when_target_recovery_activation_fails(

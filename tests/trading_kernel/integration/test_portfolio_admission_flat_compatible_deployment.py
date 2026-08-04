@@ -14,6 +14,12 @@ from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
     registered_strategy_contracts,
 )
+from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_authority_seed import (
+    RuntimeAuthoritySeedRequest,
+    deploy_compatible_upgrade_identity,
+)
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from tests.trading_kernel.integration.test_portfolio_admission_observability_migration import (
     SOURCE_REVISION,
     _database_url,
@@ -129,6 +135,57 @@ async def test_no_exposure_terminal_rejection_needs_no_fabricated_review(
     assert source["migration_gate"]["unreviewed_terminal_tickets"] == 0
     assert source["migration_gate"]["nonterminal_aggregates"] == 0
     assert result.returncode == 0, result.stderr[-4000:]
+
+
+@pytest.mark.parametrize(
+    "status",
+    ("leverage_rejected", "entry_rejected", "entry_reconciled_absent"),
+)
+async def test_no_exposure_terminal_rejection_allows_target_identity_rotation(
+    compatible_migration_engine: AsyncEngine,
+    status: str,
+) -> None:
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    await _install_source_runtime_identity(engine)
+    await _make_no_exposure_terminal_rejection(engine, status=status)
+    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
+    assert result.returncode == 0, result.stderr[-4000:]
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "INSERT INTO brc_account_exposure_current "
+                "(venue_id, account_id, gross_notional, gross_risk_at_stop, "
+                "current_reserved_margin, active_ticket_count, "
+                "projection_version, updated_at_ms) VALUES "
+                "('binance-usdm', 'subaccount-source-test', 0, 0, 0, 0, 0, 9000)"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                "INSERT INTO brc_entry_lane_current "
+                "(lane_id, ticket_id, signal_event_id, status, claimed_at_ms, "
+                "lease_until_ms, claim_owner, version) VALUES "
+                "('global-entry', NULL, NULL, 'idle', NULL, NULL, NULL, 0) "
+                "ON CONFLICT (lane_id) DO UPDATE SET ticket_id = NULL, "
+                "signal_event_id = NULL, status = 'idle', claimed_at_ms = NULL, "
+                "lease_until_ms = NULL, claim_owner = NULL"
+            )
+        )
+
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        deployed = await deploy_compatible_upgrade_identity(
+            uow,
+            RuntimeAuthoritySeedRequest(
+                account_id="subaccount-source-test",
+                runtime_commit="a" * 40,
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                seeded_at_ms=10_000,
+            ),
+        )
+
+    assert deployed.runtime_commit == "a" * 40
+    assert deployed.schema_revision == CURRENT_SCHEMA_REVISION
 
 
 async def test_exposure_terminal_ticket_without_review_remains_blocked(
@@ -362,6 +419,9 @@ async def test_preservation_proof_is_persisted_in_postgresql_and_identity_bound(
 
 async def _install_source_runtime_identity(engine: AsyncEngine) -> None:
     values = {
+        "registry_semantic_hash": (
+            schema_verifier._CERTIFIED_0002_REGISTRY_MANIFEST_HASH
+        ),
         "runtime_commit": "b" * 40,
         "schema_revision": SOURCE_REVISION,
         "seed_identity": "sha256:" + "c" * 64,

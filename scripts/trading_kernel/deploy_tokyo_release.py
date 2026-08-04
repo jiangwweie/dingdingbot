@@ -466,7 +466,7 @@ def _deploy_compatible_upgrade(
             raise DeploymentBlocked("exact source Seed marker differs")
         recovery_seed_identity = source_identity["seed_identity"]
     else:
-        preservation_digest = backend.read_preservation_digest(plan.target_release)
+        preservation_digest = backend.read_preservation_digest(current_release)
         if not _SEED_IDENTITY.fullmatch(preservation_digest):
             raise DeploymentBlocked("persisted preservation digest is invalid")
         recovery_seed_identity = backend.read_release_marker(

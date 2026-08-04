@@ -1139,8 +1139,17 @@ async def _require_flat_compatible_upgrade_activity(
         ),
         (
             await connection.scalar(
-                sa.select(sa.func.count()).select_from(trade_tickets).where(
+                sa.select(sa.func.count())
+                .select_from(
+                    trade_tickets.join(
+                        trade_aggregates,
+                        trade_aggregates.c.ticket_id == trade_tickets.c.ticket_id,
+                    )
+                )
+                .where(
                     trade_tickets.c.terminal_at_ms.is_not(None),
+                    trade_tickets.c.status == "terminal",
+                    trade_aggregates.c.status == "terminal",
                     ~sa.exists(
                         sa.select(trade_reviews.c.review_id).where(
                             trade_reviews.c.ticket_id == trade_tickets.c.ticket_id
