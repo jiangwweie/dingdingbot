@@ -551,6 +551,15 @@ class AggregateRepository(Protocol):
 
     async def get_for_update(self, ticket_id: str) -> TradeAggregate | None: ...
 
+    async def list_active_ticket_ids(
+        self,
+        *,
+        runtime_profile_id: str,
+        venue_id: str,
+        account_id: str,
+        limit: int,
+    ) -> tuple[str, ...]: ...
+
     async def get_next_for_statuses(
         self,
         statuses: tuple[AggregateStatus, ...],

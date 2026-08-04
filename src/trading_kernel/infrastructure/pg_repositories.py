@@ -280,6 +280,39 @@ class PostgresAggregateRepository:
     async def get_for_update(self, ticket_id: str) -> TradeAggregate | None:
         return await self._get(ticket_id, for_update=True)
 
+    async def list_active_ticket_ids(
+        self,
+        *,
+        runtime_profile_id: str,
+        venue_id: str,
+        account_id: str,
+        limit: int,
+    ) -> tuple[str, ...]:
+        if not runtime_profile_id.strip() or not venue_id.strip() or not account_id.strip():
+            raise ValueError("active Ticket scope identities must be non-blank")
+        if limit <= 0 or limit > 3:
+            raise ValueError("active Ticket selection limit must be 1 through 3")
+        rows = (
+            await self._connection.execute(
+                sa.select(trade_aggregates.c.ticket_id)
+                .join(
+                    trade_tickets,
+                    trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
+                )
+                .where(
+                    trade_tickets.c.runtime_profile_id == runtime_profile_id,
+                    trade_tickets.c.venue_id == venue_id,
+                    trade_tickets.c.account_id == account_id,
+                    trade_tickets.c.terminal_at_ms.is_(None),
+                )
+                .order_by(trade_aggregates.c.ticket_id)
+                .limit(limit + 1)
+            )
+        ).scalars().all()
+        if len(rows) > limit:
+            raise RuntimeError("active Ticket set exceeds Controlled Exit bound")
+        return tuple(str(ticket_id) for ticket_id in rows)
+
     async def get_next_for_statuses(
         self,
         statuses: tuple[AggregateStatus, ...],
