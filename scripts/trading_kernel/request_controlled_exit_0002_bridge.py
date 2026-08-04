@@ -137,7 +137,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         reason = f"deployment_drain:{authorization_id}:{target_commit}"
         eligible_values = context.get("eligible_ticket_ids")
         if not isinstance(eligible_values, list):
-            raise ValueError("bridge eligible Ticket set is invalid")
+            raise TypeError("bridge eligible Ticket set is invalid")
         for value in eligible_values:
             ticket_id = str(value)
             async with PostgresKernelUnitOfWork(engine) as uow:
