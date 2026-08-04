@@ -179,14 +179,20 @@ CPM BNB true 00:00
 实现过程中按任务运行 focused RED/GREEN；最终至少运行：
 
 ```text
-pytest tests/trading_kernel/unit -q
+python3 scripts/trading_kernel/certify_release_candidate.py --commit <exact-sha>
+```
+
+该命令对同一精确提交只执行一次非重叠认证集：
+
+```text
+pytest tests/trading_kernel/unit tests/trading_kernel/architecture -q
 pytest tests/trading_kernel/integration -q
 pytest tests/trading_kernel/full_chain -q
-pytest tests/trading_kernel/architecture -q
-pytest tests/trading_kernel -q
 ruff check src/trading_kernel scripts/trading_kernel tests/trading_kernel migrations/trading_kernel
 mypy src/trading_kernel scripts/trading_kernel
 git diff --check
 ```
+
+不得先执行各目录后再追加 `pytest tests/trading_kernel -q`；后者会完整重复前三项。部署等待与同 SHA 重试只刷新 PostgreSQL、systemd、release marker 与 Binance 实时事实，并复用精确提交绑定的本地认证 manifest。
 
 若 PostgreSQL、Binance 或本机依赖导致某项不能运行，必须明确报告实际跳过项，不得用 focused tests 推断全部通过。

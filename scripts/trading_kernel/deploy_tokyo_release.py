@@ -21,6 +21,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.trading_kernel.certify_release_candidate import (
+    validate_release_certification,
+)
 from scripts.trading_kernel.deployment_control import (
     DeploymentDrainBlocked,
     run_deployment_drain,
@@ -1769,6 +1772,7 @@ def _resolve_commit(reference: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     commit = _resolve_commit(args.commit)
+    validate_release_certification(REPO_ROOT, commit)
     plan = DeploymentPlan(
         target_commit=commit,
         target_release=f"{RELEASE_ROOT}/brc-trading-kernel-{commit[:12]}",

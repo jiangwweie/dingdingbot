@@ -1,7 +1,7 @@
 ---
 title: TOKYO_RUNTIME_DEPLOYMENT_CONTRACT
 status: CURRENT
-last_verified: 2026-07-31
+last_verified: 2026-08-04
 ---
 
 # Tokyo Runtime Deployment Contract
@@ -27,11 +27,63 @@ configured `5x` leverage for all supported instruments, then stops the old
 workers and switches the release. Schema rebuild and destructive cutover
 checks are outside this regular-release path.
 
+Every exact Release Commit must first pass one local, non-overlapping
+certification through `certify_release_candidate.py`. The resulting manifest is
+stored outside the worktree and is bound to the exact commit, schema, Registry,
+Owner Policy semantics, runtime-authority semantics, and command set. Repeating
+a deployment or waiting for flatness on the same SHA reuses that manifest and
+refreshes only PostgreSQL, systemd, release-marker, and exchange facts. A code,
+identity, command-set, or worktree change invalidates reuse.
+
 After a normal switch, Observation, Lifecycle, and Reconciliation start first.
 Readonly database and exchange certification repeats against the target
 release. Entry starts last only when explicitly requested and every postflight
 gate passes. A failure after service stop writes the Entry fence and restores
 the three safety workers for fix-forward recovery.
+
+## Controlled Exit And Deployment Drain
+
+Controlled Exit is a permanent source-runtime capability. With an immutable
+Owner authorization, it may request exit for the complete bounded active
+Ticket set through the existing `request_exit()` application boundary. The
+operator cannot supply Ticket, account, instrument, side, quantity, order type,
+or price. The exact current Lifecycle worker remains the only exchange writer;
+it dispatches the durable reduce-only EXIT Command, and Reconciliation owns
+external-flat confirmation, protection cleanup, capital release, Settlement,
+and Review.
+
+`deployment_drain` is explicit and opt-in; normal deployment never drains
+implicitly. Its immutable reason is:
+
+```text
+deployment_drain:<authorization_id>:<exact-target-commit>
+```
+
+The deployment control plane follows one phase model:
+
+```text
+orient
+-> optional drain
+-> flat cutover
+-> target verify
+-> seal
+```
+
+During Drain, Entry is stopped, disabled, and write-fenced while Observation,
+Lifecycle, and Reconciliation remain active under the exact source identity.
+Eligible `position_protected` and `runner_protected` Tickets receive one request
+each in stable identity order. Existing EXIT/Reconciliation/Settlement/Review
+progress is resumed without creating a second command. Rejection, unknown
+outcome, Incident, protection contradiction, internal/exchange contradiction,
+residual quantity/order, or timeout blocks migration and leaves the source
+safety workers active.
+
+The first `0002 -> 0003` use streams a reviewed bridge over SSH stdin to
+`/opt/brc/current/.venv/bin/python`. The bridge is not installed on the server,
+contains no reducer, venue client, exchange mutation, or lifecycle DML, and may
+call only the exact source release `request_exit()` use case. Once `0003` is
+current, the release contains the native Controlled Exit CLI. Neither form is
+an old-schema worker or an active-position handover.
 
 ## Flat Compatible Upgrade
 
@@ -54,7 +106,9 @@ The compatible-upgrade preflight requires all of the following to be current:
 1. zero nonterminal Ticket and zero non-flat projected or exchange position;
 2. zero open exchange order or internal protection residue;
 3. zero active Budget Reservation and released Netting Domains;
-4. every terminal Ticket has Settlement/Review evidence;
+4. every exposure-bearing `terminal / terminal` Ticket has Settlement/Review
+   evidence; exact no-exposure terminal rejection pairs do not fabricate trade
+   economics;
 5. zero unresolved Exchange Command and zero open Incident;
 6. Entry is fenced and every old writer is stopped before the final check;
 7. source revision, target revision, commit, account, venue and policy identity
@@ -62,11 +116,14 @@ The compatible-upgrade preflight requires all of the following to be current:
 
 The official bounded sequence is:
 
-1. Use the Lifecycle and Reconciliation chain to terminate every old exposure;
-   migration never substitutes for an EXIT or settlement operation.
-2. Stage the exact target release and run source-schema plus exchange readonly
-   preflight.
-3. Fence Entry, stop all four writers and atomically repeat the flat checks.
+1. Orient: validate the exact local certification, target commit, source
+   release/schema identity, Entry fence, safety workers, PostgreSQL, and
+   exchange facts.
+2. Optional Drain: with explicit authorization, request source-owned exits and
+   wait for normal Lifecycle/Reconciliation closure. Migration never
+   substitutes for an EXIT, protection cleanup, Settlement, or Review.
+3. Flat cutover: stage the exact target release, repeat source-schema and
+   exchange flat checks, stop all four writers, and atomically repeat them.
 4. Compute and persist a canonical SHA-256 manifest over every preserved
    `0002` source table and column; `alembic_version` and `0003`-only columns
    are excluded.
@@ -80,8 +137,20 @@ The official bounded sequence is:
 9. Run one bounded six-Event StrategyUniverse bootstrap; PostgreSQL may
    serialize the Warming slot internally, but the operator does not install
    Events one at a time.
-10. Repeat database, history, exchange, Universe, worker and identity postflight;
-    start Entry last and remove the fence only when explicitly requested.
+10. Target verify: repeat database, history, exchange, Universe, worker and
+    identity postflight while Entry remains inactive, disabled, and fenced.
+11. Seal: create the immutable production tag and record the directly verified
+    release state only after all postflight evidence passes. Entry is a separate
+    explicit promotion and is never enabled by a schema-changing deployment.
+
+The terminal source classifier is exact. `terminal / terminal` denotes an
+exposure lifecycle and requires a current Review. The only terminal pairs that
+may omit Settlement/Review economics are `leverage_rejected /
+leverage_rejected`, `entry_rejected / entry_rejected`, and
+`entry_reconciled_absent / entry_reconciled_absent`, each with a terminal
+timestamp and zero position, protection, order identity, Reservation, Netting
+Domain, Entry lane, unresolved Command, and open Incident. The source verifier,
+Alembic atomic guard, and Tokyo cutover inspection use this same distinction.
 
 The journaled cutover state machine and `deploy_tokyo_release.py` use the same
 gates and authority transition. They must not evolve into different migration
