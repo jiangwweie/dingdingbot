@@ -52,6 +52,15 @@ POSITION_MODE = "independent_sides"
 COMPATIBLE_SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
 _RUNTIME_FENCE_INCIDENT_ID = "incident:runtime-fence"
 _RUNTIME_FENCE_INCIDENT_KIND = "runtime_identity_mismatch"
+_PRESERVATION_METADATA_KEYS = frozenset(
+    {
+        "preservation_source_revision",
+        "preservation_target_revision",
+        "preservation_digest",
+        "preservation_database_identity",
+        "preservation_proof_digest",
+    }
+)
 
 
 class RuntimeAuthoritySeedConflict(RuntimeError):
@@ -552,7 +561,12 @@ async def deploy_compatible_upgrade_identity(
         "schema_revision": request.schema_revision,
         "seed_identity": seed_identity,
     }
-    if set(metadata_rows) != set(metadata_targets):
+    metadata_keys = frozenset(metadata_rows)
+    identity_keys = frozenset(metadata_targets)
+    if metadata_keys not in {
+        identity_keys,
+        identity_keys | _PRESERVATION_METADATA_KEYS,
+    }:
         raise RuntimeAuthorityTransitionRefused(
             "compatible runtime metadata identity set differs"
         )

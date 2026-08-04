@@ -557,6 +557,20 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
                     ("runtime_commit", source_commit),
                     ("schema_revision", source_revision),
                     ("seed_identity", source_seed),
+                    (
+                        "preservation_source_revision",
+                        "0002_sor_v3_strategy_group_capacity",
+                    ),
+                    (
+                        "preservation_target_revision",
+                        CURRENT_SCHEMA_REVISION,
+                    ),
+                    ("preservation_digest", "sha256:" + "6" * 64),
+                    (
+                        "preservation_database_identity",
+                        "postgresql:7665555261146054689:16384",
+                    ),
+                    ("preservation_proof_digest", "sha256:" + "7" * 64),
                 )
             ],
         )
@@ -643,6 +657,13 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
     assert metadata_rows["runtime_commit"] == "a" * 40
     assert metadata_rows["schema_revision"] == CURRENT_SCHEMA_REVISION
     assert metadata_rows["seed_identity"] == result.runtime_seed_semantic_hash
+    assert metadata_rows["preservation_source_revision"] == source_revision
+    assert metadata_rows["preservation_target_revision"] == CURRENT_SCHEMA_REVISION
+    assert metadata_rows["preservation_digest"] == "sha256:" + "6" * 64
+    assert metadata_rows["preservation_database_identity"] == (
+        "postgresql:7665555261146054689:16384"
+    )
+    assert metadata_rows["preservation_proof_digest"] == "sha256:" + "7" * 64
     assert incident == {
         "status": "resolved",
         "resolved_at_ms": 1_800_000_000_100,
