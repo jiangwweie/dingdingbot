@@ -71,6 +71,11 @@ orient
 
 During Drain, Entry is stopped, disabled, and write-fenced while Observation,
 Lifecycle, and Reconciliation remain active under the exact source identity.
+The exact source Policy v3 retains its certified
+`new_entry_submit_enabled=true`; it is not mutated to represent an operational
+deployment fence. The stopped and disabled Entry service plus the write fence
+own that boundary. Target Policy v4 is installed with
+`new_entry_submit_enabled=false` only after the flat migration begins.
 Eligible `position_protected` and `runner_protected` Tickets receive one request
 each in stable identity order. Existing EXIT/Reconciliation/Settlement/Review
 progress is resumed without creating a second command. Rejection, unknown

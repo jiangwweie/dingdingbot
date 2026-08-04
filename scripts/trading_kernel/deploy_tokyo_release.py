@@ -419,6 +419,10 @@ def _deploy_compatible_upgrade(
     plan: DeploymentPlan,
 ) -> DeploymentResult:
     current_release = backend.read_current_release()
+    if not backend.entry_is_inactive_disabled_and_fenced():
+        raise DeploymentBlocked(
+            "compatible upgrade requires ENTRY inactive disabled and fenced"
+        )
     if not backend.release_exists(plan.target_release):
         backend.install_release(plan.target_commit, plan.target_release)
 
@@ -811,9 +815,9 @@ def _require_compatible_source_facts(
         not isinstance(owner_policy, Mapping)
         or owner_policy.get("status") != "pass"
         or int(str(owner_policy.get("policy_version", -1))) != 3
-        or owner_policy.get("new_entry_submit_enabled") is not False
+        or owner_policy.get("new_entry_submit_enabled") is not True
     ):
-        raise DeploymentBlocked("exact source Policy v3 with ENTRY disabled is missing")
+        raise DeploymentBlocked("exact source Policy v3 identity differs")
     runtime_profile = certification.get("runtime_profile")
     if (
         not isinstance(runtime_profile, Mapping)

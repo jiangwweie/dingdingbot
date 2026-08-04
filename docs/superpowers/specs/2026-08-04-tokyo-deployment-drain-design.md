@@ -208,6 +208,12 @@ release `request_exit()` application use case through the current release
 4. keep Observation, Lifecycle, and Reconciliation active under the exact
    source identity.
 
+Source Policy v3 remains the exact certified production policy with
+`new_entry_submit_enabled=true`. Deployment Drain does not mutate Policy to
+represent runtime fencing; systemd stopped+disabled state and the write fence
+own that operational boundary. The compatible upgrade later installs target
+Policy v4 with new ENTRY disabled.
+
 No source safety worker is stopped during drain.
 
 ### Phase 3: Request Source-Owned Exit

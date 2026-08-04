@@ -208,7 +208,7 @@ async def test_compatible_source_requires_exact_live_0002_authority(
         ),
         "policy": (
             "UPDATE brc_owner_policy_current SET "
-            "new_entry_submit_enabled = true"
+            "new_entry_submit_enabled = false"
         ),
         "profile": (
             "UPDATE brc_runtime_profiles SET position_mode = 'one_way' "

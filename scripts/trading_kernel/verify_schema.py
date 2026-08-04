@@ -794,7 +794,7 @@ async def _certified_0002_owner_policy(
         and row["owner_policy_id"] == OWNER_POLICY_ID
         and int(str(row["policy_version"])) == 3
         and row["enabled"] is True
-        and row["new_entry_submit_enabled"] is False
+        and row["new_entry_submit_enabled"] is True
         and int(str(row["priority_rank"])) == 1
         and int(str(row["max_concurrent_tickets"])) == 3
         and int(str(row["max_strategy_group_concurrent_tickets"])) == 2
@@ -1045,7 +1045,7 @@ def _project_source_row(
         row.update(
             {
                 "policy_version": 3,
-                "new_entry_submit_enabled": False,
+                "new_entry_submit_enabled": True,
                 "max_strategy_group_concurrent_tickets": 2,
                 "max_ticket_stop_risk_fraction": Decimal(
                     "0.030000000000000000"

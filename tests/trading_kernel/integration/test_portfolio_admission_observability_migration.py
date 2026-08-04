@@ -1040,7 +1040,7 @@ async def _prepare_production_shaped_0002(engine: AsyncEngine) -> None:
         await connection.execute(
             sa.text(
                 "UPDATE brc_owner_policy_current SET policy_version = 3, "
-                "new_entry_submit_enabled = false, "
+                "new_entry_submit_enabled = true, "
                 "scope = '{\"runtime_profile_id\":\"tiny-live-v1\","
                 "\"allowed_event_spec_ids\":["
                 "\"event_spec:BRF2-001:BRF2-SHORT:v2\","

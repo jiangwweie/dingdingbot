@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Mapping
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -43,6 +44,19 @@ _TERMINAL = frozenset(
 _UNRESOLVED_COMMAND_STATUSES = frozenset(
     {"prepared", "claimed", "outcome_unknown"}
 )
+
+
+def _source_policy_ticket_bound(policy: Mapping[str, object] | None) -> int:
+    if (
+        policy is None
+        or policy["enabled"] is not True
+        or policy["new_entry_submit_enabled"] is not True
+    ):
+        raise ValueError("source Owner Policy differs")
+    max_active_tickets = min(int(str(policy["max_concurrent_tickets"])), 3)
+    if max_active_tickets <= 0:
+        raise ValueError("source Ticket bound is invalid")
+    return max_active_tickets
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -247,15 +261,7 @@ async def _inspect_source_context(
             )
         )
     ).mappings().one_or_none()
-    if (
-        policy is None
-        or policy["enabled"] is not True
-        or policy["new_entry_submit_enabled"] is not False
-    ):
-        raise ValueError("source Owner Policy differs")
-    max_active_tickets = min(int(policy["max_concurrent_tickets"]), 3)
-    if max_active_tickets <= 0:
-        raise ValueError("source Ticket bound is invalid")
+    max_active_tickets = _source_policy_ticket_bound(policy)
     ticket_ids = tuple(
         str(value)
         for value in (

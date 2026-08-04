@@ -163,6 +163,19 @@ def test_active_source_without_explicit_drain_remains_blocked() -> None:
     assert not any(call[0] == "migrate_schema" for call in backend.calls)
 
 
+def test_compatible_upgrade_requires_operational_entry_gate_before_target_install() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        entry_gate_ready=False,
+    )
+
+    with pytest.raises(DeploymentBlocked, match="inactive disabled and fenced"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert not any(call[0] == "install_release" for call in backend.calls)
+    assert not any(call[0] == "migrate_schema" for call in backend.calls)
+
+
 def test_compatible_upgrade_cannot_reuse_active_position_handover() -> None:
     with pytest.raises(TypeError, match="protected_ticket_ids"):
         DeploymentPlan(
@@ -547,6 +560,7 @@ def test_partial_target_activation_failure_recovers_target_safety_workers() -> N
 def test_mig_009_wrong_source_blocks_before_service_mutation() -> None:
     backend = FakeDeploymentBackend(
         source_schema_revision="0001_trading_kernel_baseline_v4",
+        entry_gate_ready=True,
     )
 
     with pytest.raises(DeploymentBlocked, match="source schema revision"):
@@ -1074,6 +1088,7 @@ class FakeDeploymentBackend:
         probe_non_flat_failure_call: int | None = None,
         drain_status: str = "flat",
         fail_at: str | None = None,
+        entry_gate_ready: bool | None = None,
     ) -> None:
         self.configured_leverage = configured_leverage
         self.closure_ticket_id = closure_ticket_id
@@ -1117,9 +1132,13 @@ class FakeDeploymentBackend:
             target_release_exists or current_release == TARGET_RELEASE
         )
         self.runtime_commit = CURRENT_COMMIT
-        self.active_services = set(ALL_SERVICES)
-        self.entry_fenced = False
-        self.entry_enabled = True
+        if entry_gate_ready is None:
+            entry_gate_ready = source_schema_revision == SOURCE_SCHEMA_REVISION
+        self.active_services = set(
+            SAFETY_SERVICES if entry_gate_ready else ALL_SERVICES
+        )
+        self.entry_fenced = entry_gate_ready
+        self.entry_enabled = not entry_gate_ready
         self.certification_call_count = 0
         self.probe_call_count = 0
 
@@ -1328,7 +1347,7 @@ class FakeDeploymentBackend:
             "owner_policy": {
                 "status": "pass",
                 "policy_version": 3,
-                "new_entry_submit_enabled": False,
+                "new_entry_submit_enabled": True,
             },
             "runtime_profile": {"status": "pass"},
             "capabilities": {
@@ -1351,7 +1370,7 @@ class FakeDeploymentBackend:
             payload["owner_policy"] = {
                 "status": "fail",
                 "policy_version": 3,
-                "new_entry_submit_enabled": True,
+                "new_entry_submit_enabled": False,
             }
         return payload
 

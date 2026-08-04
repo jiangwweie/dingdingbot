@@ -990,6 +990,7 @@ def _backfill_exact_v3_policy_to_v4() -> None:
                AND min_materialization_ratio IS NULL
                AND policy_version = 3
                AND enabled = true
+               AND new_entry_submit_enabled = true
                AND max_concurrent_tickets = 3
                AND max_strategy_group_concurrent_tickets = 2
                AND max_ticket_stop_risk_fraction = 0.03
