@@ -172,6 +172,21 @@ async def test_no_exposure_terminal_rejection_allows_target_identity_rotation(
                 "lease_until_ms = NULL, claim_owner = NULL"
             )
         )
+        await connection.execute(
+            sa.text(
+                "INSERT INTO brc_schema_metadata "
+                "(metadata_key, metadata_value, updated_at_ms) VALUES "
+                "('registry_semantic_hash', :registry_hash, 9000) "
+                "ON CONFLICT (metadata_key) DO UPDATE SET "
+                "metadata_value = EXCLUDED.metadata_value, "
+                "updated_at_ms = EXCLUDED.updated_at_ms"
+            ),
+            {
+                "registry_hash": (
+                    schema_verifier._CERTIFIED_0002_REGISTRY_MANIFEST_HASH
+                )
+            },
+        )
 
     async with PostgresKernelUnitOfWork(engine) as uow:
         deployed = await deploy_compatible_upgrade_identity(
@@ -419,9 +434,6 @@ async def test_preservation_proof_is_persisted_in_postgresql_and_identity_bound(
 
 async def _install_source_runtime_identity(engine: AsyncEngine) -> None:
     values = {
-        "registry_semantic_hash": (
-            schema_verifier._CERTIFIED_0002_REGISTRY_MANIFEST_HASH
-        ),
         "runtime_commit": "b" * 40,
         "schema_revision": SOURCE_REVISION,
         "seed_identity": "sha256:" + "c" * 64,
