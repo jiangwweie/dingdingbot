@@ -50,6 +50,8 @@ GLOBAL_ENTRY_LANE_ID = "global-entry"
 VENUE_ID = "binance-usdm"
 POSITION_MODE = "independent_sides"
 COMPATIBLE_SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
+_RUNTIME_FENCE_INCIDENT_ID = "incident:runtime-fence"
+_RUNTIME_FENCE_INCIDENT_KIND = "runtime_identity_mismatch"
 
 
 class RuntimeAuthoritySeedConflict(RuntimeError):
@@ -432,13 +434,20 @@ async def deploy_compatible_upgrade_identity(
         ).mappings()
     }
     if metadata_rows.get("schema_revision") == request.schema_revision:
-        return await _deploy_runtime_identity(uow, request)
+        return await _deploy_runtime_identity(
+            uow,
+            request,
+            allow_compatible_runtime_fence=True,
+        )
     if metadata_rows.get("schema_revision") != COMPATIBLE_SOURCE_SCHEMA_REVISION:
         raise RuntimeAuthorityTransitionRefused(
             "compatible identity requires the exact 0002 source authority"
         )
 
-    await _require_flat_compatible_upgrade_activity(connection)
+    await _require_flat_compatible_upgrade_activity(
+        connection,
+        allow_compatible_runtime_fence=True,
+    )
     current_policy = dict(await _lock_policy(connection))
     target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
     if not _policy_matches(
@@ -558,6 +567,11 @@ async def deploy_compatible_upgrade_identity(
                 "compatible runtime metadata update was lost"
             )
 
+    await _resolve_compatible_runtime_fence(
+        connection,
+        resolved_at_ms=request.seeded_at_ms,
+    )
+
     return RuntimeDeploymentIdentityResult(
         runtime_commit=request.runtime_commit,
         schema_revision=request.schema_revision,
@@ -608,6 +622,7 @@ async def _deploy_runtime_identity(
     *,
     recovery_ticket_id: str | None = None,
     closure_ticket_id: str | None = None,
+    allow_compatible_runtime_fence: bool = False,
 ) -> RuntimeDeploymentIdentityResult:
     """Install the exact identity after a flat or narrowly safe recovery gate."""
 
@@ -649,7 +664,10 @@ async def _deploy_runtime_identity(
             account_id=request.account_id,
         )
     elif recovery_ticket_id is None:
-        await _require_zero_runtime_activity(connection)
+        await _require_zero_runtime_activity(
+            connection,
+            allow_compatible_runtime_fence=allow_compatible_runtime_fence,
+        )
     else:
         await _require_recovery_identity_activity(
             connection,
@@ -747,6 +765,11 @@ async def _deploy_runtime_identity(
             raise RuntimeAuthoritySeedConflict(
                 "runtime capability deployment identity update was lost"
             )
+    if allow_compatible_runtime_fence:
+        await _resolve_compatible_runtime_fence(
+            connection,
+            resolved_at_ms=request.seeded_at_ms,
+        )
     return RuntimeDeploymentIdentityResult(
         runtime_commit=request.runtime_commit,
         schema_revision=request.schema_revision,
@@ -1039,7 +1062,11 @@ async def _lock_policy(connection: AsyncConnection) -> RowMapping:
     return row
 
 
-async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
+async def _require_zero_runtime_activity(
+    connection: AsyncConnection,
+    *,
+    allow_compatible_runtime_fence: bool = False,
+) -> None:
     exposures = (
         await connection.execute(
             sa.select(account_exposure_current).with_for_update(
@@ -1082,11 +1109,13 @@ async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
             trade_tickets.c.terminal_at_ms.is_(None)
         )
     )
-    open_incidents = await connection.scalar(
-        sa.select(sa.func.count()).select_from(runtime_incidents).where(
-            runtime_incidents.c.status != "resolved"
+    open_incidents = (
+        await connection.execute(
+            sa.select(runtime_incidents).where(
+                runtime_incidents.c.status != "resolved"
+            ).with_for_update(of=runtime_incidents)
         )
-    )
+    ).mappings().all()
     unresolved_commands = await connection.scalar(
         sa.select(sa.func.count()).select_from(exchange_commands).where(
             exchange_commands.c.status.in_(
@@ -1098,7 +1127,18 @@ async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
         raise RuntimeAuthorityTransitionRefused(
             "runtime transition requires zero active Tickets"
         )
-    if int(open_incidents or 0) != 0:
+    exact_runtime_fence = bool(
+        len(open_incidents) == 1
+        and open_incidents[0]["incident_id"] == _RUNTIME_FENCE_INCIDENT_ID
+        and open_incidents[0]["ticket_id"] is None
+        and open_incidents[0]["incident_kind"] == _RUNTIME_FENCE_INCIDENT_KIND
+        and open_incidents[0]["first_blocker"] == _RUNTIME_FENCE_INCIDENT_KIND
+        and open_incidents[0]["entry_block_scope"] == "runtime"
+        and open_incidents[0]["entry_block_key"] == "global"
+    )
+    if open_incidents and not (
+        allow_compatible_runtime_fence and exact_runtime_fence
+    ):
         raise RuntimeAuthorityTransitionRefused(
             "runtime transition requires zero open Incidents"
         )
@@ -1110,8 +1150,13 @@ async def _require_zero_runtime_activity(connection: AsyncConnection) -> None:
 
 async def _require_flat_compatible_upgrade_activity(
     connection: AsyncConnection,
+    *,
+    allow_compatible_runtime_fence: bool = False,
 ) -> None:
-    await _require_zero_runtime_activity(connection)
+    await _require_zero_runtime_activity(
+        connection,
+        allow_compatible_runtime_fence=allow_compatible_runtime_fence,
+    )
     checks = (
         (
             await connection.scalar(
@@ -1163,6 +1208,26 @@ async def _require_flat_compatible_upgrade_activity(
     for count, message in checks:
         if int(count or 0) != 0:
             raise RuntimeAuthorityTransitionRefused(message)
+
+
+async def _resolve_compatible_runtime_fence(
+    connection: AsyncConnection,
+    *,
+    resolved_at_ms: int,
+) -> None:
+    await connection.execute(
+        sa.update(runtime_incidents)
+        .where(
+            runtime_incidents.c.incident_id == _RUNTIME_FENCE_INCIDENT_ID,
+            runtime_incidents.c.incident_kind == _RUNTIME_FENCE_INCIDENT_KIND,
+            runtime_incidents.c.status == "open",
+            runtime_incidents.c.ticket_id.is_(None),
+            runtime_incidents.c.first_blocker == _RUNTIME_FENCE_INCIDENT_KIND,
+            runtime_incidents.c.entry_block_scope == "runtime",
+            runtime_incidents.c.entry_block_key == "global",
+        )
+        .values(status="resolved", resolved_at_ms=resolved_at_ms)
+    )
 
 
 async def _require_closure_identity_activity(

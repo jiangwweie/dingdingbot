@@ -432,6 +432,47 @@ async def test_preservation_proof_is_persisted_in_postgresql_and_identity_bound(
     assert restored_database["status"] == "fail"
 
 
+async def test_historical_preservation_proof_survives_runtime_projection_change(
+    compatible_migration_engine: AsyncEngine,
+) -> None:
+    """Catches re-scanning mutable current projections during 0003 fix-forward."""
+
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    await _install_source_runtime_identity(engine)
+    database_url = _database_url(engine)
+    source = await _verify_compatible_source(database_url, SOURCE_REVISION)
+    digest = str(source["preservation_manifest"]["digest"])
+    result = _run_migration(database_url, "upgrade", HEAD_REVISION)
+    assert result.returncode == 0, result.stderr[-4000:]
+
+    recorded = await schema_verifier._record_preservation_proof(
+        database_url,
+        source_revision=SOURCE_REVISION,
+        expected_digest=digest,
+    )
+    proof = recorded["preservation_proof"]
+    assert isinstance(proof, dict)
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_schema_metadata SET metadata_value = :runtime_commit "
+                "WHERE metadata_key = 'runtime_commit'"
+            ),
+            {"runtime_commit": "d" * 40},
+        )
+
+    verified = await schema_verifier._verify_preservation_proof(
+        database_url,
+        source_revision=SOURCE_REVISION,
+        expected_digest=digest,
+        expected_proof_digest=str(proof["proof_digest"]),
+    )
+
+    assert verified["status"] == "pass", verified
+
+
 async def _install_source_runtime_identity(engine: AsyncEngine) -> None:
     values = {
         "runtime_commit": "b" * 40,

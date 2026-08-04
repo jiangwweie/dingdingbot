@@ -154,6 +154,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Verify the stored database-bound preservation proof.",
     )
     parser.add_argument(
+        "--verify-stored-preservation-proof",
+        action="store_true",
+        help="Verify only the immutable stored proof without re-scanning projections.",
+    )
+    parser.add_argument(
         "--expected-preservation-proof-digest",
         help="Release marker proof digest expected from PostgreSQL metadata.",
     )
@@ -404,40 +409,56 @@ async def _verify_preservation_proof(
         raise ValueError("expected preservation digest must be an exact sha256 identity")
     if not _is_sha256_identity(expected_proof_digest):
         raise ValueError("expected preservation proof must be an exact sha256 identity")
+    stored_verification = await _verify_stored_preservation_proof(database_url)
+    proof = stored_verification["preservation_proof"]
+    assert isinstance(proof, Mapping)
+    passed = bool(
+        stored_verification["status"] == "pass"
+        and proof["preservation_digest"] == expected_digest
+        and proof["proof_digest"] == expected_proof_digest
+    )
+    return {
+        **stored_verification,
+        "status": "pass" if passed else "fail",
+        "expected_preservation_digest": expected_digest,
+        "expected_preservation_proof_digest": expected_proof_digest,
+    }
+
+
+async def _verify_stored_preservation_proof(
+    database_url: str,
+) -> dict[str, object]:
     engine = _create_engine(database_url)
     try:
         async with engine.connect() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
-            manifest = await _source_preservation_manifest(
-                connection,
-                revision=revision,
-            )
             database_identity = await _database_identity(connection)
-            proof = _build_preservation_proof(
-                source_revision=source_revision,
-                target_revision=revision,
-                preservation_digest=expected_digest,
-                database_identity=database_identity,
-            )
             stored = await _preservation_proof_metadata(connection, for_update=False)
             await connection.rollback()
     finally:
         await engine.dispose()
-    expected_metadata = _preservation_proof_metadata_values(proof)
+    complete = set(stored) == set(_PRESERVATION_PROOF_METADATA_KEYS)
+    proof = _build_preservation_proof(
+        source_revision=stored.get("preservation_source_revision", ""),
+        target_revision=stored.get("preservation_target_revision", ""),
+        preservation_digest=stored.get("preservation_digest", ""),
+        database_identity=stored.get("preservation_database_identity", ""),
+    )
     passed = bool(
-        revision == EXPECTED_ALEMBIC_REVISION
-        and manifest["digest"] == expected_digest
-        and proof["proof_digest"] == expected_proof_digest
-        and stored == expected_metadata
+        complete
+        and revision == EXPECTED_ALEMBIC_REVISION
+        and proof["source_revision"] == COMPATIBLE_SOURCE_REVISION
+        and proof["target_revision"] == EXPECTED_ALEMBIC_REVISION
+        and _is_sha256_identity(str(proof["preservation_digest"]))
+        and proof["database_identity"] == database_identity
+        and _is_sha256_identity(stored.get("preservation_proof_digest", ""))
+        and proof["proof_digest"] == stored.get("preservation_proof_digest")
     )
     return {
         "schema": SCHEMA,
         "status": "pass" if passed else "fail",
         "alembic_revision": revision,
-        "expected_preservation_digest": expected_digest,
-        "expected_preservation_proof_digest": expected_proof_digest,
-        "preservation_manifest": manifest,
         "preservation_proof": proof,
         "stored_preservation_proof": stored,
     }
@@ -1150,6 +1171,7 @@ def main(argv: list[str] | None = None) -> int:
             or args.expected_preservation_digest
             or args.record_preservation_proof
             or args.verify_preservation_proof
+            or args.verify_stored_preservation_proof
             or args.expected_preservation_proof_digest
         ):
             raise ValueError("schema verification mode is ambiguous")
@@ -1160,6 +1182,7 @@ def main(argv: list[str] | None = None) -> int:
             or args.expected_preservation_digest
             or args.record_preservation_proof
             or args.verify_preservation_proof
+            or args.verify_stored_preservation_proof
             or args.expected_preservation_proof_digest
         ):
             raise ValueError("schema verification mode is ambiguous")
@@ -1172,8 +1195,15 @@ def main(argv: list[str] | None = None) -> int:
     elif args.preserve_source_revision:
         if not args.expected_preservation_digest:
             raise ValueError("post-migration preservation requires an expected digest")
-        if args.record_preservation_proof and args.verify_preservation_proof:
+        if (
+            int(args.record_preservation_proof)
+            + int(args.verify_preservation_proof)
+            + int(args.verify_stored_preservation_proof)
+            > 1
+        ):
             raise ValueError("preservation proof mode is ambiguous")
+        if args.verify_stored_preservation_proof:
+            raise ValueError("stored proof verification requires no source revision")
         if args.record_preservation_proof:
             if args.expected_preservation_proof_digest:
                 raise ValueError("recording proof forbids an expected proof digest")
@@ -1207,11 +1237,21 @@ def main(argv: list[str] | None = None) -> int:
                     expected_digest=str(args.expected_preservation_digest),
                 )
             )
+    elif args.verify_stored_preservation_proof:
+        if (
+            args.expected_preservation_digest
+            or args.expected_preservation_proof_digest
+            or args.record_preservation_proof
+            or args.verify_preservation_proof
+        ):
+            raise ValueError("stored proof verification mode is ambiguous")
+        payload = asyncio.run(_verify_stored_preservation_proof(database_url))
     elif args.expected_preservation_digest:
         raise ValueError("expected preservation digest requires a source revision")
     elif (
         args.record_preservation_proof
         or args.verify_preservation_proof
+        or args.verify_stored_preservation_proof
         or args.expected_preservation_proof_digest
     ):
         raise ValueError("preservation proof requires a source revision")

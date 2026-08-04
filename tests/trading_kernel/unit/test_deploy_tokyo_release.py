@@ -401,7 +401,9 @@ def test_migration_unknown_outcome_confirmed_0003_enters_target_fix_forward() ->
     assert backend.entry_is_inactive_disabled_and_fenced()
 
 
-def test_target_schema_fix_forward_reads_preservation_from_current_release() -> None:
+def test_target_schema_fix_forward_recovers_database_bound_proof_markers() -> None:
+    """Catches requiring a lost release-local marker after 0003 already committed."""
+
     backend = FakeDeploymentBackend(
         source_schema_revision=TARGET_SCHEMA_REVISION,
         current_release=RECOVERY_RELEASE,
@@ -411,8 +413,9 @@ def test_target_schema_fix_forward_reads_preservation_from_current_release() -> 
     result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
 
     assert result.status == "pass"
-    assert ("read_preservation_digest", RECOVERY_RELEASE) in backend.calls
-    assert ("read_preservation_digest", TARGET_RELEASE) not in backend.calls
+    assert ("recover_preservation_proof", TARGET_RELEASE) in backend.calls
+    assert not any(call[0] == "read_preservation_digest" for call in backend.calls)
+    assert not any(call[0] == "verify_preservation" for call in backend.calls)
 
 
 def test_migration_unknown_outcome_remains_primary_when_target_recovery_activation_fails(
@@ -1649,6 +1652,21 @@ class FakeDeploymentBackend:
             self.preservation_is_verified
             and self.preservation_database_proof_matches
         )
+
+    def recover_preservation_proof(self, release: str) -> Mapping[str, object]:
+        self.calls.append(("recover_preservation_proof", release))
+        self.preservation_is_verified = True
+        return {
+            "status": "pass",
+            "alembic_revision": TARGET_SCHEMA_REVISION,
+            "preservation_proof": {
+                "source_revision": SOURCE_SCHEMA_REVISION,
+                "target_revision": TARGET_SCHEMA_REVISION,
+                "preservation_digest": PRESERVATION_DIGEST,
+                "database_identity": "postgresql:123:456",
+                "proof_digest": "sha256:" + "9" * 64,
+            },
+        }
 
     def deploy_compatible_identity(
         self,

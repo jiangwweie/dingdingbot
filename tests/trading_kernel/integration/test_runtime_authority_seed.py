@@ -25,6 +25,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     owner_policy_current,
     owner_policy_events,
     runtime_capabilities_current,
+    runtime_incidents,
     runtime_profiles,
     runtime_scopes_current,
     schema_metadata,
@@ -346,6 +347,118 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
 
 
 @pytest.mark.asyncio
+async def test_compatible_fix_forward_resolves_only_exact_runtime_fence(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    """Catches the target identity transition being blocked by its own fence."""
+
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision=CURRENT_SCHEMA_REVISION,
+        seeded_at_ms=1_800_000_000_000,
+    )
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    async with runtime_seed_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(runtime_incidents).values(
+                incident_id="incident:runtime-fence",
+                ticket_id=None,
+                incident_kind="runtime_identity_mismatch",
+                status="open",
+                first_blocker="runtime_identity_mismatch",
+                entry_block_scope="runtime",
+                entry_block_key="global",
+                details={
+                    "worker_id": "tokyo-lifecycle-1",
+                    "runtime_commit": "a" * 40,
+                    "schema_revision": CURRENT_SCHEMA_REVISION,
+                },
+                opened_at_ms=1_800_000_000_050,
+                resolved_at_ms=None,
+            )
+        )
+
+    refreshed = initial.model_copy(
+        update={
+            "runtime_commit": "b" * 40,
+            "seeded_at_ms": 1_800_000_000_100,
+        }
+    )
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        result = await runtime_seed.deploy_compatible_upgrade_identity(
+            uow,
+            refreshed,
+        )
+
+    assert result.runtime_commit == "b" * 40
+    async with runtime_seed_engine.connect() as connection:
+        incident = (
+            await connection.execute(
+                sa.select(
+                    runtime_incidents.c.status,
+                    runtime_incidents.c.resolved_at_ms,
+                ).where(
+                    runtime_incidents.c.incident_id == "incident:runtime-fence"
+                )
+            )
+        ).mappings().one()
+    assert incident == {
+        "status": "resolved",
+        "resolved_at_ms": 1_800_000_000_100,
+    }
+
+
+@pytest.mark.asyncio
+async def test_compatible_fix_forward_rejects_any_other_open_incident(
+    runtime_seed_engine: AsyncEngine,
+) -> None:
+    """Catches broad Incident bypass in the target-schema recovery path."""
+
+    runtime_seed = _runtime_seed_module()
+    initial = runtime_seed.RuntimeAuthoritySeedRequest(
+        account_id="subaccount-main",
+        runtime_commit="a" * 40,
+        schema_revision=CURRENT_SCHEMA_REVISION,
+        seeded_at_ms=1_800_000_000_000,
+    )
+    async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+        await runtime_seed.deploy_runtime_identity(uow, initial)
+    async with runtime_seed_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(runtime_incidents).values(
+                incident_id="incident:other",
+                ticket_id=None,
+                incident_kind="other_runtime_failure",
+                status="open",
+                first_blocker="other_runtime_failure",
+                entry_block_scope="runtime",
+                entry_block_key="global",
+                details={},
+                opened_at_ms=1_800_000_000_050,
+                resolved_at_ms=None,
+            )
+        )
+
+    with pytest.raises(
+        runtime_seed.RuntimeAuthorityTransitionRefused,
+        match="zero open Incidents",
+    ):
+        async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
+            await runtime_seed.deploy_compatible_upgrade_identity(
+                uow,
+                initial.model_copy(
+                    update={
+                        "runtime_commit": "b" * 40,
+                        "seeded_at_ms": 1_800_000_000_100,
+                    }
+                ),
+            )
+
+
+@pytest.mark.asyncio
 async def test_compatible_identity_rotates_exact_migrated_v4_authority(
     runtime_seed_engine: AsyncEngine,
 ) -> None:
@@ -447,6 +560,24 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
                 )
             ],
         )
+        await connection.execute(
+            sa.insert(runtime_incidents).values(
+                incident_id="incident:runtime-fence",
+                ticket_id=None,
+                incident_kind="runtime_identity_mismatch",
+                status="open",
+                first_blocker="runtime_identity_mismatch",
+                entry_block_scope="runtime",
+                entry_block_key="global",
+                details={
+                    "worker_id": "tokyo-lifecycle-1",
+                    "runtime_commit": source_commit,
+                    "schema_revision": CURRENT_SCHEMA_REVISION,
+                },
+                opened_at_ms=1_800_000_000_050,
+                resolved_at_ms=None,
+            )
+        )
 
     request = runtime_seed.RuntimeAuthoritySeedRequest(
         account_id="subaccount-main",
@@ -480,6 +611,16 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
                 )
             ).all()
         )
+        incident = (
+            await connection.execute(
+                sa.select(
+                    runtime_incidents.c.status,
+                    runtime_incidents.c.resolved_at_ms,
+                ).where(
+                    runtime_incidents.c.incident_id == "incident:runtime-fence"
+                )
+            )
+        ).mappings().one()
     assert current["policy_version"] == 4
     assert current["new_entry_submit_enabled"] is False
     assert current["max_concurrent_tickets"] == 3
@@ -502,6 +643,10 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
     assert metadata_rows["runtime_commit"] == "a" * 40
     assert metadata_rows["schema_revision"] == CURRENT_SCHEMA_REVISION
     assert metadata_rows["seed_identity"] == result.runtime_seed_semantic_hash
+    assert incident == {
+        "status": "resolved",
+        "resolved_at_ms": 1_800_000_000_100,
+    }
 
 @pytest.mark.asyncio
 async def test_recovery_identity_refuses_a_runtime_without_one_unknown_leverage_ticket(

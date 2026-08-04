@@ -214,6 +214,8 @@ class TokyoReleaseBackend(Protocol):
 
     def preservation_verified(self, release: str, digest: str) -> bool: ...
 
+    def recover_preservation_proof(self, release: str) -> Mapping[str, object]: ...
+
     def deploy_compatible_identity(
         self,
         release: str,
@@ -466,9 +468,7 @@ def _deploy_compatible_upgrade(
             raise DeploymentBlocked("exact source Seed marker differs")
         recovery_seed_identity = source_identity["seed_identity"]
     else:
-        preservation_digest = backend.read_preservation_digest(current_release)
-        if not _SEED_IDENTITY.fullmatch(preservation_digest):
-            raise DeploymentBlocked("persisted preservation digest is invalid")
+        preservation_digest = None
         recovery_seed_identity = backend.read_release_marker(
             current_release,
             ".brc-seed-identity",
@@ -525,6 +525,14 @@ def _deploy_compatible_upgrade(
                 raise
             else:
                 schema_migrated = True
+        else:
+            preservation_proof = backend.recover_preservation_proof(
+                plan.target_release
+            )
+            preservation_digest = _require_historical_preservation_proof(
+                preservation_proof,
+                target_schema_revision=plan.schema_revision,
+            )
 
         if preservation_digest is None:
             raise DeploymentBlocked("source preservation digest is missing")
@@ -882,6 +890,27 @@ def _require_preservation_verification(
         raise DeploymentBlocked("compatible target schema revision differs")
     if _require_preservation_digest(payload) != expected_digest:
         raise DeploymentBlocked("history preservation digest differs")
+
+
+def _require_historical_preservation_proof(
+    payload: Mapping[str, object],
+    *,
+    target_schema_revision: str,
+) -> str:
+    proof = payload.get("preservation_proof")
+    if payload.get("status") != "pass" or not isinstance(proof, Mapping):
+        raise DeploymentBlocked("database-bound preservation proof differs")
+    digest = str(proof.get("preservation_digest", ""))
+    proof_digest = str(proof.get("proof_digest", ""))
+    if (
+        proof.get("source_revision") != COMPATIBLE_SOURCE_SCHEMA_REVISION
+        or proof.get("target_revision") != target_schema_revision
+        or payload.get("alembic_revision") != target_schema_revision
+        or not _SEED_IDENTITY.fullmatch(digest)
+        or not _SEED_IDENTITY.fullmatch(proof_digest)
+    ):
+        raise DeploymentBlocked("database-bound preservation proof differs")
+    return digest
 
 
 def _require_release_facts(
@@ -1367,6 +1396,32 @@ class SshTokyoReleaseBackend:
         ):
             raise DeploymentBlocked("database-bound preservation proof differs")
         return True
+
+    def recover_preservation_proof(self, release: str) -> Mapping[str, object]:
+        payload = self._release_json(
+            release,
+            "scripts/trading_kernel/verify_schema.py",
+            "--verify-stored-preservation-proof",
+            check=False,
+        )
+        digest = _require_historical_preservation_proof(
+            payload,
+            target_schema_revision=SCHEMA_REVISION,
+        )
+        proof = payload["preservation_proof"]
+        assert isinstance(proof, Mapping)
+        proof_digest = str(proof["proof_digest"])
+        self._write_release_marker(
+            release,
+            ".brc-0002-preservation-digest",
+            digest,
+        )
+        self._write_release_marker(
+            release,
+            ".brc-0002-preservation-verified",
+            proof_digest,
+        )
+        return payload
 
     def deploy_compatible_identity(
         self,
