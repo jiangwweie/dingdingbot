@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from scripts.trading_kernel.bootstrap_strategy_universes import (
@@ -115,7 +116,7 @@ class RecordingPromotionBackend:
 
 
 def test_entry_promotion_rehearses_arm_failure_resume_and_idempotence() -> None:
-    """Exercise the exact Entry promotion order against a six-Event local DB."""
+    """Exercise promotion with compatible-upgrade safety capability already on."""
 
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
@@ -211,6 +212,14 @@ async def _seed_and_bootstrap(database_name: str, database_url: str) -> None:
                 certification=certification,
             ),
         )
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.text(
+                    "UPDATE brc_runtime_capabilities_current "
+                    "SET enabled = true "
+                    "WHERE capability_key = 'exchange_commands'"
+                )
+            )
     finally:
         if engine is not None:
             await engine.dispose()

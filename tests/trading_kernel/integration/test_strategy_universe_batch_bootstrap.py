@@ -36,6 +36,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_scopes_current,
     signal_events,
     strategy_universe_current,
+    strategy_universe_members,
     strategy_universe_versions,
     trade_tickets,
 )
@@ -472,8 +473,8 @@ async def test_six_event_batch_uses_one_total_wait_budget() -> None:
 
 
 @pytest.mark.asyncio
-async def test_expired_completed_batch_is_replaced_and_awaited_without_reinstalling_universes() -> None:
-    """A promotion retry owns a new immutable Batch and waits for worker evidence."""
+async def test_active_manifest_refresh_replaces_an_expired_batch_without_reinstalling_universes() -> None:
+    """Catches Batch renewal that changes any Active Universe or runtime scope."""
 
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
@@ -515,25 +516,45 @@ async def test_expired_completed_batch_is_replaced_and_awaited_without_reinstall
         assert len(first_batches) == 1
         first_market_call_count = len(market.requests)
         clock.now = first_batches[0][1] + 1
+        before_refresh = await _snapshot(engine)
 
-        retried = await bootstrap_strategy_universes(
+        refreshed_batch_id = await bootstrap_module.refresh_active_certification_batch(
             database_url,
             runtime_profile_id=RUNTIME_PROFILE_ID,
             now_ms=clock.read,
-            wait_timeout_ms=60_000,
-            poll_interval_ms=1,
-            sleep=_certification_batch_refresh_sleep(
-                engine=engine,
-                clock=clock,
-                certification=certification,
-            ),
         )
+        retried_batch_id = await bootstrap_module.refresh_active_certification_batch(
+            database_url,
+            runtime_profile_id=RUNTIME_PROFILE_ID,
+            now_ms=clock.read,
+        )
+        after_refresh = await _snapshot(engine)
+
+        await _certification_batch_refresh_sleep(
+            engine=engine,
+            clock=clock,
+            certification=certification,
+        )(0)
         refreshed_batches = await _completed_batch_rows(engine)
         snapshot = await _snapshot(engine)
 
-        assert tuple(result.status for result in retried) == ("already_active",) * 6
+        assert retried_batch_id == refreshed_batch_id
+        for key in (
+            "active_versions",
+            "warming_versions",
+            "current_universes",
+            "active_scopes",
+            "warming_scopes",
+            "active_members",
+            "active_event_spec_ids",
+            "signals",
+            "tickets",
+            "commands",
+        ):
+            assert after_refresh[key] == before_refresh[key]
         assert len(refreshed_batches) == 2
-        assert refreshed_batches[0][0] != refreshed_batches[1][0]
+        assert refreshed_batches[0][0] != refreshed_batch_id
+        assert refreshed_batches[1][0] == refreshed_batch_id
         assert refreshed_batches[1][1] > clock.read()
         assert snapshot["active_versions"] == 6
         assert snapshot["warming_versions"] == 0
@@ -543,6 +564,111 @@ async def test_expired_completed_batch_is_replaced_and_awaited_without_reinstall
         assert snapshot["commands"] == 0
         assert len(market.requests) == first_market_call_count
         assert certification.mutation_calls == []
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        await _drop_database(admin, database_name)
+        await admin.close()
+
+
+@pytest.mark.asyncio
+async def test_active_manifest_refresh_rejects_member_drift_and_warming_universe() -> None:
+    """Catches refreshing a Batch from any non-exact current Universe state."""
+
+    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
+    assert SAFE_DATABASE.fullmatch(database_name)
+    admin = await asyncpg.connect(ADMIN_DSN)
+    engine: AsyncEngine | None = None
+    avax = "binance-usdm:AVAXUSDT:perpetual"
+    try:
+        await admin.execute(f'CREATE DATABASE "{database_name}"')
+        database_url = _database_url(database_name)
+        _run_alembic(database_url)
+        engine = create_async_engine(database_url)
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id="subaccount-batch-refresh-block-test",
+                    runtime_commit=RUNTIME_COMMIT,
+                    schema_revision=SCHEMA_REVISION,
+                    seeded_at_ms=NOW_MS - 10_000,
+                ),
+            )
+
+        clock = VirtualClock()
+        market = RecordingWarmMarket()
+        certification = RecordingReadonlyCertificationSource(engine)
+        await bootstrap_strategy_universes(
+            database_url,
+            runtime_profile_id=RUNTIME_PROFILE_ID,
+            now_ms=clock.read,
+            wait_timeout_ms=60_000,
+            poll_interval_ms=1,
+            sleep=_worker_driving_sleep(
+                engine=engine,
+                clock=clock,
+                market=market,
+                certification=certification,
+            ),
+        )
+
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.insert(instruments).values(
+                    exchange_instrument_id=avax,
+                    venue_id="binance-usdm",
+                    asset_class="crypto",
+                    venue_symbol="AVAXUSDT",
+                    contract_kind="perpetual",
+                    status="active",
+                )
+            )
+            cpm_universe_version_id = str(
+                await connection.scalar(
+                    sa.select(strategy_universe_current.c.universe_version_id)
+                    .where(
+                        strategy_universe_current.c.event_spec_id
+                        == bootstrap_module.EVENT_SPEC_BY_EVENT_ID["CPM-LONG"]
+                    )
+                )
+            )
+            await connection.execute(
+                sa.insert(strategy_universe_members).values(
+                    universe_version_id=cpm_universe_version_id,
+                    exchange_instrument_id=avax,
+                )
+            )
+
+        with pytest.raises(
+            BootstrapBlocked,
+            match="active_universe_member_manifest_mismatch:CPM-LONG",
+        ):
+            await bootstrap_module.refresh_active_certification_batch(
+                database_url,
+                runtime_profile_id=RUNTIME_PROFILE_ID,
+                now_ms=clock.read,
+            )
+
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            warming = await bootstrap_module.configure_strategy_universe(
+                uow,
+                bootstrap_module.UniverseConfigurationRequest(
+                    runtime_profile_id=RUNTIME_PROFILE_ID,
+                    event_id="CPM-LONG",
+                    exchange_instrument_ids=(*INITIAL_MEMBERS[1:], avax),
+                    installed_at_ms=clock.advance(),
+                ),
+            )
+        assert warming.universe is not None
+        assert warming.lifecycle_state == "warming"
+
+        with pytest.raises(BootstrapBlocked, match="warming_universe_present"):
+            await bootstrap_module.refresh_active_certification_batch(
+                database_url,
+                runtime_profile_id=RUNTIME_PROFILE_ID,
+                now_ms=clock.read,
+            )
     finally:
         if engine is not None:
             await engine.dispose()

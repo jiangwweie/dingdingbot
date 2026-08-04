@@ -291,6 +291,104 @@ async def _read_certification_batch_state(
     return str(row[0]), None if row[1] is None else str(row[1])
 
 
+async def _validate_active_universe_manifest(engine: AsyncEngine) -> None:
+    async with engine.connect() as connection:
+        rows = (
+            await connection.execute(
+                text(
+                    "SELECT event.event_id, current.event_spec_id, "
+                    "current.universe_version_id, "
+                    "current.lifecycle_state AS current_lifecycle_state, "
+                    "version.lifecycle_state AS version_lifecycle_state, "
+                    "array_agg(member.exchange_instrument_id "
+                    "ORDER BY member.exchange_instrument_id) AS members "
+                    "FROM brc_strategy_universe_current AS current "
+                    "JOIN brc_strategy_universe_versions AS version "
+                    "ON version.universe_version_id = current.universe_version_id "
+                    "AND version.event_spec_id = current.event_spec_id "
+                    "AND version.semantic_digest = current.semantic_digest "
+                    "JOIN brc_event_specs AS event "
+                    "ON event.event_spec_id = current.event_spec_id "
+                    "JOIN brc_strategy_universe_members AS member "
+                    "ON member.universe_version_id = current.universe_version_id "
+                    "GROUP BY event.event_id, current.event_spec_id, "
+                    "current.universe_version_id, current.lifecycle_state, "
+                    "version.lifecycle_state"
+                )
+            )
+        ).mappings().all()
+        active_version_count = int(
+            await connection.scalar(
+                text(
+                    "SELECT count(*) FROM brc_strategy_universe_versions "
+                    "WHERE lifecycle_state = 'active'"
+                )
+            )
+            or 0
+        )
+        warming_version_count = int(
+            await connection.scalar(
+                text(
+                    "SELECT count(*) FROM brc_strategy_universe_versions "
+                    "WHERE lifecycle_state = 'warming'"
+                )
+            )
+            or 0
+        )
+
+    if warming_version_count != 0:
+        raise BootstrapBlocked("warming_universe_present")
+    if len(rows) != len(EVENT_ORDER) or active_version_count != len(EVENT_ORDER):
+        raise BootstrapBlocked("active_universe_manifest_mismatch")
+    row_by_event = {str(row["event_id"]): row for row in rows}
+    if set(row_by_event) != set(EVENT_ORDER):
+        raise BootstrapBlocked("active_universe_manifest_mismatch")
+    for event_id in EVENT_ORDER:
+        row = row_by_event[event_id]
+        if (
+            str(row["event_spec_id"]) != EVENT_SPEC_BY_EVENT_ID[event_id]
+            or str(row["current_lifecycle_state"]) != "active"
+            or str(row["version_lifecycle_state"]) != "active"
+        ):
+            raise BootstrapBlocked(
+                f"active_universe_identity_mismatch:{event_id}"
+            )
+        if tuple(str(member) for member in row["members"]) != INITIAL_MEMBERS:
+            raise BootstrapBlocked(
+                f"active_universe_member_manifest_mismatch:{event_id}"
+            )
+
+
+async def refresh_active_certification_batch(
+    database_url: str,
+    *,
+    runtime_profile_id: str,
+    now_ms: Callable[[], int],
+) -> str:
+    """Create or reuse a Batch from the exact current Active Universe manifest."""
+
+    if not database_url.startswith("postgresql+asyncpg://"):
+        raise ValueError("database URL must use postgresql+asyncpg")
+    if not runtime_profile_id.strip():
+        raise ValueError("runtime profile identity must be non-blank")
+    _validate_static_manifest()
+    engine = create_async_engine(database_url)
+    try:
+        authority = await _validate_database_authority(
+            engine,
+            runtime_profile_id=runtime_profile_id,
+        )
+        await _validate_active_universe_manifest(engine)
+        return await _ensure_certification_batch(
+            engine,
+            runtime_profile_id=runtime_profile_id,
+            authority=authority,
+            started_at_ms=now_ms(),
+        )
+    finally:
+        await engine.dispose()
+
+
 async def prepare_certification_batch(
     database_url: str,
     *,
@@ -448,8 +546,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-profile-id", required=True)
     parser.add_argument("--wait-timeout-ms", type=int, default=300_000)
     parser.add_argument("--poll-interval-ms", type=int, default=5_000)
-    parser.add_argument(
+    certification_batch_mode = parser.add_mutually_exclusive_group()
+    certification_batch_mode.add_argument(
         "--prepare-certification-batch-only",
+        action="store_true",
+    )
+    certification_batch_mode.add_argument(
+        "--refresh-active-certification-batch-only",
         action="store_true",
     )
     return parser
@@ -468,6 +571,19 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(
                 "status=prepared certification_batch_id="
+                + certification_batch_id
+            )
+            return 0
+        if args.refresh_active_certification_batch_only:
+            certification_batch_id = asyncio.run(
+                refresh_active_certification_batch(
+                    str(args.database_url),
+                    runtime_profile_id=str(args.runtime_profile_id),
+                    now_ms=lambda: int(time.time() * 1_000),
+                )
+            )
+            print(
+                "status=refreshed certification_batch_id="
                 + certification_batch_id
             )
             return 0

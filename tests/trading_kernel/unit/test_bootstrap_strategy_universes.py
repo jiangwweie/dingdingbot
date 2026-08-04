@@ -124,3 +124,66 @@ def test_prepare_only_cli_creates_the_batch_without_running_full_bootstrap(
     assert capsys.readouterr().out.strip() == (
         "status=prepared certification_batch_id=certification-batch:test"
     )
+
+
+def test_refresh_only_cli_uses_the_exact_active_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Catches refreshing an expired Batch through Universe reinstallation."""
+
+    calls: list[tuple[str, str]] = []
+
+    async def refresh(
+        database_url: str,
+        *,
+        runtime_profile_id: str,
+        now_ms,
+    ) -> str:
+        assert now_ms() > 0
+        calls.append((database_url, runtime_profile_id))
+        return "certification-batch:refreshed"
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("refresh-only mode must not install a Universe")
+
+    monkeypatch.setattr(
+        bootstrap,
+        "refresh_active_certification_batch",
+        refresh,
+        raising=False,
+    )
+    monkeypatch.setattr(bootstrap, "prepare_certification_batch", forbidden)
+    monkeypatch.setattr(bootstrap, "bootstrap_strategy_universes", forbidden)
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            "postgresql+asyncpg://localhost/test",
+            "--runtime-profile-id",
+            "tiny-live-v1",
+            "--refresh-active-certification-batch-only",
+        ]
+    )
+
+    assert result == 0
+    assert calls == [
+        ("postgresql+asyncpg://localhost/test", "tiny-live-v1")
+    ]
+    assert capsys.readouterr().out.strip() == (
+        "status=refreshed certification_batch_id=certification-batch:refreshed"
+    )
+
+
+def test_certification_batch_only_modes_are_mutually_exclusive() -> None:
+    """Catches ambiguous CLI execution of prepare and Active refresh together."""
+
+    with pytest.raises(SystemExit):
+        bootstrap._parser().parse_args(
+            [
+                "--runtime-profile-id",
+                "tiny-live-v1",
+                "--prepare-certification-batch-only",
+                "--refresh-active-certification-batch-only",
+            ]
+        )

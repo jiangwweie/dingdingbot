@@ -1346,7 +1346,6 @@ async def _certify(
         and flatness_pass
         and owner_policy_row is not None
         and owner_policy_row["new_entry_submit_enabled"] is False
-        and capabilities.get("exchange_commands") is False
     )
     expected_seed_identity = ""
     if runtime_profile_row is not None:
