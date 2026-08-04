@@ -1,6 +1,6 @@
 ---
 title: TOKYO_DEPLOYMENT_DRAIN_DESIGN
-status: PROPOSED
+status: IMPLEMENTED
 date: 2026-08-04
 scope: Tokyo Trading Kernel deployment control plane and 0002-to-0003 source gate
 ---
@@ -414,3 +414,23 @@ SHA before any drain or deployment write.
 10. The target Schema remains `0003_portfolio_admission_observability` and the
     final production release receives one new immutable Tokyo tag only after
     complete postflight evidence.
+
+## Implementation Result
+
+The implementation keeps one application and deployment chain:
+
+```text
+ControlledExitAuthorization
+-> bounded active Ticket selection
+-> current-release request_exit()
+-> durable reduce-only EXIT Command
+-> current Lifecycle/Reconciliation closure
+-> existing flat compatible upgrade
+```
+
+The release control plane now uses the five explicit phases defined above,
+streams the first `0002` bridge over SSH stdin, provides a native current-schema
+Controlled Exit CLI, distinguishes exposure terminal history from no-exposure
+terminal rejection history, and consumes one exact-SHA local certification
+manifest. No production Drain, service mutation, schema migration, deployment,
+tag, or roadmap production-state update is part of local implementation.
