@@ -366,7 +366,7 @@ def test_current_documents_converge_on_portfolio_admission_authority() -> None:
         assert not missing, f"{relative_path} lacks portfolio authority: {missing}"
 
 
-def test_stable_policy_v4_target_is_distinct_from_deployed_policy_v3() -> None:
+def test_stable_policy_v4_contract_defers_deployed_identity_to_roadmap() -> None:
     runtime_profile = (
         REPO_ROOT / "docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md"
     ).read_text(encoding="utf-8")
@@ -384,17 +384,13 @@ def test_stable_policy_v4_target_is_distinct_from_deployed_policy_v3() -> None:
         ),
         ("docs/current/OWNER_RUNTIME_OPERATING_MODEL.md", owner_model),
     ):
-        assert "approved post-`0003` Policy v4 target contract" in source, (
-            f"{relative_path} does not identify Policy v4 as a target contract"
-        )
-        assert "currently deployed Policy v3" in source, (
-            f"{relative_path} does not defer deployed identity to the roadmap"
-        )
+        assert "Policy v4" in source
+        assert "currently deployed Policy v3" not in source
         assert "MAIN_CONTROL_ROADMAP.md" in source
 
-    assert "| Dynamic policy | Policy version `3`;" in roadmap
-    assert "Policy version `4`" not in roadmap
-    assert "0003_portfolio_admission_observability" not in roadmap
+    assert "| Dynamic policy | Policy version `4`" in roadmap
+    assert "0003_portfolio_admission_observability" in roadmap
+    assert "new ENTRY submission remains disabled" in roadmap
 
 
 def test_current_deployment_authority_has_no_active_handover_or_schema_deletion() -> None:

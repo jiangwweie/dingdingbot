@@ -66,17 +66,15 @@ same instrument. New ENTRY admission remains globally serialized. Capacity is
 controlled by current Owner budget policy, not by a hard-coded two-position
 architecture.
 
-The currently deployed Policy v3 identity and values are production facts owned
-only by `MAIN_CONTROL_ROADMAP.md`. Stable operating guidance must not describe
-the approved post-`0003` Policy v4 target contract as already deployed.
+Exact deployed Policy identity and values are production facts owned only by
+`MAIN_CONTROL_ROADMAP.md`. Stable operating guidance defines Policy v4
+semantics without becoming authority for whether that Policy is active.
 
-After the `0003_portfolio_admission_observability` release is certified and the
-roadmap is refreshed from direct evidence, Policy v4 targets three concurrent
-Tickets, explicit per-Ticket and gross risk and margin limits, directional-risk
-and Exposure Family limits, a minimum materialization ratio, maximum `10`
-leverage, and `cross` margin. Supported instruments remain configured at fixed
-`5x`; the kernel adopts and revalidates that account fact without mutating
-leverage.
+Policy v4 defines three concurrent Tickets, explicit per-Ticket and gross risk
+and margin limits, directional-risk and Exposure Family limits, a minimum
+materialization ratio, maximum `10` leverage, and `cross` margin. Supported
+instruments remain configured at fixed `5x`; the kernel adopts and revalidates
+that account fact without mutating leverage.
 
 Capacity is demand-based within the persisted policy's Ticket, gross,
 directional, Family, and margin ceilings; three equal positions are not
