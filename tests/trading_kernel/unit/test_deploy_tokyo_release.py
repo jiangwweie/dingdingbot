@@ -798,6 +798,59 @@ def test_regular_release_uses_database_derived_probe_manifest() -> None:
     ]
 
 
+def test_fenced_regular_release_accepts_an_expired_promotion_batch() -> None:
+    """Catches coupling an Entry-fenced code deploy to a short-lived Batch."""
+
+    backend = FakeDeploymentBackend(expired_certification_batch=True)
+
+    result = deploy_tokyo_release(backend, _plan(enable_entry=False))
+
+    assert result.status == "pass"
+    assert result.entry_enabled is False
+    assert ("start_services", (ENTRY_SERVICE,)) not in backend.calls
+    assert backend.entry_fenced is True
+    assert backend.active_services == set(SAFETY_SERVICES)
+
+
+def test_entry_enabling_regular_release_still_requires_a_fresh_batch() -> None:
+    """Catches weakening the fresh Batch gate when deployment enables Entry."""
+
+    backend = FakeDeploymentBackend(expired_certification_batch=True)
+
+    with pytest.raises(DeploymentBlocked, match="StrategyUniverse bootstrap"):
+        deploy_tokyo_release(backend, _plan(enable_entry=True))
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+
+
+def test_fenced_regular_release_requires_compatible_batch_identity() -> None:
+    """Catches accepting an expired Batch whose immutable identity differs."""
+
+    backend = FakeDeploymentBackend(
+        expired_certification_batch=True,
+        certification_gate_failure=(1, "compatible_certification_batch_pass"),
+    )
+
+    with pytest.raises(DeploymentBlocked, match="compatible Certification Batch"):
+        deploy_tokyo_release(backend, _plan(enable_entry=False))
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+
+
+def test_fenced_regular_release_requires_exact_active_universes() -> None:
+    """Catches using compatible Batch history with a drifted current manifest."""
+
+    backend = FakeDeploymentBackend(
+        expired_certification_batch=True,
+        active_universe_count=5,
+    )
+
+    with pytest.raises(DeploymentBlocked, match="Active StrategyUniverse"):
+        deploy_tokyo_release(backend, _plan(enable_entry=False))
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+
+
 @pytest.mark.parametrize(
     ("certification_gate", "expected_message"),
     [
@@ -1158,6 +1211,7 @@ class FakeDeploymentBackend:
         drain_status: str = "flat",
         fail_at: str | None = None,
         entry_gate_ready: bool | None = None,
+        expired_certification_batch: bool = False,
     ) -> None:
         self.configured_leverage = configured_leverage
         self.closure_ticket_id = closure_ticket_id
@@ -1190,6 +1244,7 @@ class FakeDeploymentBackend:
         self.active_universe_count = active_universe_count
         self.warming_universe_count = warming_universe_count
         self.certification_gate_failure = certification_gate_failure
+        self.expired_certification_batch = expired_certification_batch
         self.probe_non_flat_failure_call = probe_non_flat_failure_call
         self.drain_status = drain_status
         self.fail_at = fail_at
@@ -1228,9 +1283,10 @@ class FakeDeploymentBackend:
         self.certification_call_count += 1
         payload: dict[str, object] = {
             "status": "pass",
+            "database_integrity_pass": True,
             "flatness_pass": True,
-            "universe_bootstrap_pass": True,
-            "certification_batch_pass": True,
+            "universe_bootstrap_pass": not self.expired_certification_batch,
+            "certification_batch_pass": not self.expired_certification_batch,
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
                 "schema_revision": TARGET_SCHEMA_REVISION,
@@ -1267,6 +1323,12 @@ class FakeDeploymentBackend:
                 "actual": SEED_IDENTITY,
             },
             "compatible_certification_batch_pass": True,
+            "entry_promotion_counts": {
+                "active_current_universes": 6,
+                "active_instruments": 7,
+                "active_scopes": 42,
+                "warming_scopes": 0,
+            },
         }
         if self.postflight_drift == "policy":
             payload["owner_policy"] = {

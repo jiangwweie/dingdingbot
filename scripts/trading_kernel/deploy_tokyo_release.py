@@ -682,6 +682,7 @@ def _read_release_facts(
             compatible_upgrade=(
                 plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
             ),
+            require_entry_promotion=plan.enable_entry,
         ),
     )
 
@@ -919,13 +920,15 @@ def _require_release_facts(
     *,
     expected_leverage: int,
     compatible_upgrade: bool = False,
+    require_entry_promotion: bool = False,
 ) -> dict[str, str]:
     if certification.get("status") != "pass":
         raise DeploymentBlocked("database flat certification failed")
-    required_gates = (
-        (("flatness_pass", "database flatness gate failed"),)
-        if compatible_upgrade
-        else (
+    required_gates: tuple[tuple[str, str], ...]
+    if compatible_upgrade:
+        required_gates = (("flatness_pass", "database flatness gate failed"),)
+    elif require_entry_promotion:
+        required_gates = (
             (
                 "universe_bootstrap_pass",
                 "StrategyUniverse bootstrap certification failed",
@@ -936,10 +939,38 @@ def _require_release_facts(
             ),
             ("flatness_pass", "database flatness gate failed"),
         )
-    )
+    else:
+        required_gates = (
+            ("database_integrity_pass", "database integrity gate failed"),
+            (
+                "compatible_certification_batch_pass",
+                "compatible Certification Batch identity failed",
+            ),
+            ("flatness_pass", "database flatness gate failed"),
+        )
     for key, message in required_gates:
         if certification.get(key) is not True:
             raise DeploymentBlocked(message)
+    if not compatible_upgrade and not require_entry_promotion:
+        strategy_universe = certification.get("strategy_universe")
+        entry_promotion_counts = certification.get("entry_promotion_counts")
+        if (
+            not isinstance(strategy_universe, Mapping)
+            or strategy_universe.get("identity_status") != "pass"
+            or strategy_universe.get("semantic_digest_status") != "pass"
+            or strategy_universe.get("deployment_stage") != "active"
+            or int(str(strategy_universe.get("active_current_count", -1))) != 6
+            or int(str(strategy_universe.get("warming_count", -1))) != 0
+            or not isinstance(entry_promotion_counts, Mapping)
+            or int(
+                str(entry_promotion_counts.get("active_current_universes", -1))
+            )
+            != 6
+            or int(str(entry_promotion_counts.get("active_instruments", -1))) != 7
+            or int(str(entry_promotion_counts.get("active_scopes", -1))) != 42
+            or int(str(entry_promotion_counts.get("warming_scopes", -1))) != 0
+        ):
+            raise DeploymentBlocked("exact Active StrategyUniverse manifest failed")
     active_counts = certification.get("active_counts")
     if not isinstance(active_counts, Mapping) or any(
         int(str(active_counts.get(key, -1))) != 0
