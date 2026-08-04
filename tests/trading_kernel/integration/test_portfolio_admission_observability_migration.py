@@ -1066,7 +1066,7 @@ async def _prepare_production_shaped_0002(engine: AsyncEngine) -> None:
                 "INSERT INTO brc_runtime_capabilities_current "
                 "(capability_key, enabled, certified_commit, schema_revision, "
                 "certification, updated_at_ms) VALUES "
-                "('exchange_commands', false, "
+                "('exchange_commands', true, "
                 "'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', "
                 "'0002_sor_v3_strategy_group_capacity', "
                 "'{\"stage\":\"observation_only\"}'::jsonb, 1000), "

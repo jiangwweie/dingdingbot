@@ -93,6 +93,76 @@ def test_dep_003_portfolio_admission_upgrade_rejects_enable_entry() -> None:
         _compatible_plan(enable_entry=True)
 
 
+def test_deployment_drain_requires_one_immutable_authorization() -> None:
+    with pytest.raises(ValueError, match="authorization"):
+        _compatible_plan(enable_entry=False, drain_active_tickets=True)
+
+    with pytest.raises(ValueError, match="requires drain"):
+        _compatible_plan(
+            enable_entry=False,
+            drain_authorization_id="deploy-20260804-01",
+        )
+
+
+def test_deployment_drain_rejects_entry_enablement() -> None:
+    with pytest.raises(ValueError, match="keep ENTRY disabled"):
+        _compatible_plan(
+            enable_entry=True,
+            drain_active_tickets=True,
+            drain_authorization_id="deploy-20260804-01",
+        )
+
+
+def test_compatible_upgrade_drains_before_the_unchanged_flat_cutover() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        active_ticket_count=1,
+        drain_status="eligible",
+    )
+
+    result = deploy_tokyo_release(
+        backend,
+        _compatible_plan(
+            enable_entry=False,
+            drain_active_tickets=True,
+            drain_authorization_id="deploy-20260804-01",
+        ),
+    )
+
+    assert result.status == "pass"
+    request_index = backend.calls.index(
+        (
+            "request_deployment_drain",
+            CURRENT_RELEASE,
+            SOURCE_SCHEMA_REVISION,
+            "deploy-20260804-01",
+            TARGET_COMMIT,
+        )
+    )
+    source_certification_index = backend.calls.index(
+        (
+            "certify_compatible_source",
+            TARGET_RELEASE,
+            SOURCE_SCHEMA_REVISION,
+        )
+    )
+    service_stop_index = backend.calls.index(("stop_services", SAFETY_SERVICES))
+    assert request_index < source_certification_index < service_stop_index
+
+
+def test_active_source_without_explicit_drain_remains_blocked() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        active_ticket_count=1,
+    )
+
+    with pytest.raises(DeploymentBlocked, match="active Ticket"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert not any(call[0] == "request_deployment_drain" for call in backend.calls)
+    assert not any(call[0] == "migrate_schema" for call in backend.calls)
+
+
 def test_compatible_upgrade_cannot_reuse_active_position_handover() -> None:
     with pytest.raises(TypeError, match="protected_ticket_ids"):
         DeploymentPlan(
@@ -955,7 +1025,12 @@ def _plan(
     )
 
 
-def _compatible_plan(*, enable_entry: bool) -> DeploymentPlan:
+def _compatible_plan(
+    *,
+    enable_entry: bool,
+    drain_active_tickets: bool = False,
+    drain_authorization_id: str | None = None,
+) -> DeploymentPlan:
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
@@ -964,6 +1039,8 @@ def _compatible_plan(*, enable_entry: bool) -> DeploymentPlan:
         mode=DeploymentMode.COMPATIBLE_UPGRADE,
         expected_configured_leverage=5,
         enable_entry=enable_entry,
+        drain_active_tickets=drain_active_tickets,
+        drain_authorization_id=drain_authorization_id,
     )
 
 
@@ -995,6 +1072,7 @@ class FakeDeploymentBackend:
         target_release_exists: bool = False,
         certification_gate_failure: tuple[int, str] | None = None,
         probe_non_flat_failure_call: int | None = None,
+        drain_status: str = "flat",
         fail_at: str | None = None,
     ) -> None:
         self.configured_leverage = configured_leverage
@@ -1025,6 +1103,7 @@ class FakeDeploymentBackend:
         self.warming_universe_count = warming_universe_count
         self.certification_gate_failure = certification_gate_failure
         self.probe_non_flat_failure_call = probe_non_flat_failure_call
+        self.drain_status = drain_status
         self.fail_at = fail_at
         self.migration_unknown_outcome_error = RuntimeError(
             "simulated migration unknown outcome"
@@ -1219,8 +1298,8 @@ class FakeDeploymentBackend:
             ("certify_compatible_source", release, source_schema_revision)
         )
         gates = {
-            "active_tickets": 0,
-            "non_flat_positions": 0,
+            "active_tickets": self.active_ticket_count,
+            "non_flat_positions": self.active_ticket_count,
             "active_reservations": 0,
             "active_domains": 0,
             "unreviewed_terminal_tickets": 0,
@@ -1254,7 +1333,7 @@ class FakeDeploymentBackend:
             "runtime_profile": {"status": "pass"},
             "capabilities": {
                 "status": "pass",
-                "exchange_commands": False,
+                "exchange_commands": True,
             },
             "account_mode": {
                 "status": "pass",
@@ -1275,6 +1354,50 @@ class FakeDeploymentBackend:
                 "new_entry_submit_enabled": True,
             }
         return payload
+
+    def inspect_deployment_drain(
+        self,
+        release: str,
+        source_schema_revision: str,
+        target_commit: str,
+    ) -> Mapping[str, object]:
+        self.calls.append(
+            (
+                "inspect_deployment_drain",
+                release,
+                source_schema_revision,
+                target_commit,
+            )
+        )
+        status = "flat" if self.active_ticket_count == 0 else self.drain_status
+        return {
+            "status": status,
+            "active_ticket_count": self.active_ticket_count,
+            "blocked_ticket_ids": [],
+        }
+
+    def request_deployment_drain(
+        self,
+        release: str,
+        source_schema_revision: str,
+        authorization_id: str,
+        target_commit: str,
+    ) -> Mapping[str, object]:
+        self.calls.append(
+            (
+                "request_deployment_drain",
+                release,
+                source_schema_revision,
+                authorization_id,
+                target_commit,
+            )
+        )
+        if self.drain_status == "eligible":
+            self.active_ticket_count = 0
+            self.open_order_domain_count = 0
+            self.drain_status = "flat"
+            return {"status": "requested"}
+        return {"status": self.drain_status}
 
     def read_release_marker(self, release: str, marker: str) -> str:
         self.calls.append(("read_release_marker", release, marker))

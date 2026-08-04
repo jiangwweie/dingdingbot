@@ -598,8 +598,28 @@ async def _verify_exact_metadata_shape(
 async def _migration_gate(connection: AsyncConnection) -> dict[str, int]:
     statements = {
         "active_tickets": (
-            "SELECT count(*) FROM brc_trade_tickets "
-            "WHERE terminal_at_ms IS NULL OR status <> 'terminal'"
+            "SELECT count(*) FROM brc_trade_tickets ticket "
+            "JOIN brc_trade_aggregates aggregate "
+            "ON aggregate.ticket_id = ticket.ticket_id WHERE NOT ("
+            "ticket.terminal_at_ms IS NOT NULL "
+            "AND ticket.active_netting_domain_key IS NULL "
+            "AND aggregate.entry_lane_held = false "
+            "AND aggregate.position_qty = 0 AND aggregate.protected_qty = 0 "
+            "AND ((ticket.status = 'terminal' AND aggregate.status = 'terminal' "
+            "AND aggregate.active_stop_exchange_order_id IS NULL "
+            "AND aggregate.pending_replaced_stop_exchange_order_id IS NULL "
+            "AND aggregate.pending_cancel_exchange_order_id IS NULL) OR ("
+            "(ticket.status, aggregate.status) IN ("
+            "('leverage_rejected','leverage_rejected'),"
+            "('entry_rejected','entry_rejected'),"
+            "('entry_reconciled_absent','entry_reconciled_absent')) "
+            "AND aggregate.entry_exchange_order_id IS NULL "
+            "AND aggregate.initial_stop_exchange_order_id IS NULL "
+            "AND aggregate.active_stop_exchange_order_id IS NULL "
+            "AND aggregate.tp1_exchange_order_id IS NULL "
+            "AND aggregate.pending_replaced_stop_exchange_order_id IS NULL "
+            "AND aggregate.pending_cancel_exchange_order_id IS NULL "
+            "AND aggregate.exit_exchange_order_id IS NULL)))"
         ),
         "non_flat_positions": (
             "SELECT count(*) FROM brc_positions_current WHERE quantity <> 0"
@@ -614,7 +634,10 @@ async def _migration_gate(connection: AsyncConnection) -> dict[str, int]:
         ),
         "unreviewed_terminal_tickets": (
             "SELECT count(*) FROM brc_trade_tickets ticket "
+            "JOIN brc_trade_aggregates aggregate "
+            "ON aggregate.ticket_id = ticket.ticket_id "
             "WHERE ticket.terminal_at_ms IS NOT NULL "
+            "AND ticket.status = 'terminal' AND aggregate.status = 'terminal' "
             "AND NOT EXISTS (SELECT 1 FROM brc_trade_reviews review "
             "WHERE review.ticket_id = ticket.ticket_id)"
         ),
@@ -633,12 +656,28 @@ async def _migration_gate(connection: AsyncConnection) -> dict[str, int]:
             "OR lease_until_ms IS NOT NULL OR claim_owner IS NOT NULL"
         ),
         "nonterminal_aggregates": (
-            "SELECT count(*) FROM brc_trade_aggregates "
-            "WHERE status <> 'terminal' OR entry_lane_held = true "
-            "OR position_qty <> 0 OR protected_qty <> 0 "
-            "OR active_stop_exchange_order_id IS NOT NULL "
-            "OR pending_replaced_stop_exchange_order_id IS NOT NULL "
-            "OR pending_cancel_exchange_order_id IS NOT NULL"
+            "SELECT count(*) FROM brc_trade_aggregates aggregate "
+            "JOIN brc_trade_tickets ticket "
+            "ON ticket.ticket_id = aggregate.ticket_id WHERE NOT ("
+            "ticket.terminal_at_ms IS NOT NULL "
+            "AND ticket.active_netting_domain_key IS NULL "
+            "AND aggregate.entry_lane_held = false "
+            "AND aggregate.position_qty = 0 AND aggregate.protected_qty = 0 "
+            "AND ((ticket.status = 'terminal' AND aggregate.status = 'terminal' "
+            "AND aggregate.active_stop_exchange_order_id IS NULL "
+            "AND aggregate.pending_replaced_stop_exchange_order_id IS NULL "
+            "AND aggregate.pending_cancel_exchange_order_id IS NULL) OR ("
+            "(ticket.status, aggregate.status) IN ("
+            "('leverage_rejected','leverage_rejected'),"
+            "('entry_rejected','entry_rejected'),"
+            "('entry_reconciled_absent','entry_reconciled_absent')) "
+            "AND aggregate.entry_exchange_order_id IS NULL "
+            "AND aggregate.initial_stop_exchange_order_id IS NULL "
+            "AND aggregate.active_stop_exchange_order_id IS NULL "
+            "AND aggregate.tp1_exchange_order_id IS NULL "
+            "AND aggregate.pending_replaced_stop_exchange_order_id IS NULL "
+            "AND aggregate.pending_cancel_exchange_order_id IS NULL "
+            "AND aggregate.exit_exchange_order_id IS NULL)))"
         ),
     }
     return {
@@ -853,7 +892,7 @@ async def _certified_0002_capabilities(
         ).mappings()
     }
     expected_enabled = {
-        "exchange_commands": False,
+        "exchange_commands": True,
         "strategy_signal_ingest": True,
     }
     passed = bool(

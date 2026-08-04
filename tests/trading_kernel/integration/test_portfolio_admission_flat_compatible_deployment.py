@@ -107,6 +107,75 @@ async def test_mig_008_manifest_covers_every_0002_table_column_and_value(
     assert target["preservation_manifest"] == manifest
 
 
+@pytest.mark.parametrize(
+    "status",
+    ("leverage_rejected", "entry_rejected", "entry_reconciled_absent"),
+)
+async def test_no_exposure_terminal_rejection_needs_no_fabricated_review(
+    compatible_migration_engine: AsyncEngine,
+    status: str,
+) -> None:
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    await _install_source_runtime_identity(engine)
+    await _make_no_exposure_terminal_rejection(engine, status=status)
+    database_url = _database_url(engine)
+
+    source = await _verify_compatible_source(database_url, SOURCE_REVISION)
+    result = _run_migration(database_url, "upgrade", HEAD_REVISION)
+
+    assert source["status"] == "pass", source
+    assert source["migration_gate"]["active_tickets"] == 0
+    assert source["migration_gate"]["unreviewed_terminal_tickets"] == 0
+    assert source["migration_gate"]["nonterminal_aggregates"] == 0
+    assert result.returncode == 0, result.stderr[-4000:]
+
+
+async def test_exposure_terminal_ticket_without_review_remains_blocked(
+    compatible_migration_engine: AsyncEngine,
+) -> None:
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    await _install_source_runtime_identity(engine)
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "DELETE FROM brc_trade_reviews "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            )
+        )
+
+    database_url = _database_url(engine)
+    source = await _verify_compatible_source(database_url, SOURCE_REVISION)
+    result = _run_migration(database_url, "upgrade", HEAD_REVISION)
+
+    assert source["status"] == "fail"
+    assert source["migration_gate"]["unreviewed_terminal_tickets"] == 1
+    assert result.returncode != 0
+    assert "terminal Ticket Review" in result.stderr
+
+
+async def test_no_exposure_terminal_rejection_with_residue_is_blocked(
+    compatible_migration_engine: AsyncEngine,
+) -> None:
+    engine = compatible_migration_engine
+    await _prepare_production_shaped_0002(engine)
+    await _install_source_runtime_identity(engine)
+    await _make_no_exposure_terminal_rejection(engine, status="entry_rejected")
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_trade_aggregates SET position_qty = 1 "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            )
+        )
+
+    source = await _verify_compatible_source(_database_url(engine), SOURCE_REVISION)
+
+    assert source["status"] == "fail"
+    assert source["migration_gate"]["nonterminal_aggregates"] == 1
+
+
 @pytest.mark.parametrize("source_drift", ("registry", "policy", "profile", "capability"))
 async def test_compatible_source_requires_exact_live_0002_authority(
     compatible_migration_engine: AsyncEngine,
@@ -146,7 +215,7 @@ async def test_compatible_source_requires_exact_live_0002_authority(
             "WHERE runtime_profile_id = 'tiny-live-v1'"
         ),
         "capability": (
-            "UPDATE brc_runtime_capabilities_current SET enabled = true "
+            "UPDATE brc_runtime_capabilities_current SET enabled = false "
             "WHERE capability_key = 'exchange_commands'"
         ),
     }
@@ -310,3 +379,67 @@ async def _install_source_runtime_identity(engine: AsyncEngine) -> None:
                 ),
                 {"key": key, "value": value},
             )
+
+
+async def _make_no_exposure_terminal_rejection(
+    engine: AsyncEngine,
+    *,
+    status: str,
+) -> None:
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_trade_tickets SET status = :status, "
+                "active_netting_domain_key = NULL, terminal_at_ms = 4000 "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            ),
+            {"status": status},
+        )
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_trade_aggregates SET status = :status, "
+                "entry_lane_held = false, position_qty = 0, protected_qty = 0, "
+                "entry_exchange_order_id = NULL, "
+                "initial_stop_exchange_order_id = NULL, "
+                "active_stop_exchange_order_id = NULL, "
+                "tp1_exchange_order_id = NULL, "
+                "pending_replaced_stop_exchange_order_id = NULL, "
+                "pending_cancel_exchange_order_id = NULL, "
+                "exit_exchange_order_id = NULL "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            ),
+            {"status": status},
+        )
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_positions_current SET quantity = 0 "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_budget_reservations SET status = 'released', "
+                "released_at_ms = 4000 "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_exchange_commands SET status = 'rejected', "
+                "completed_at_ms = 3900 "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_runtime_incidents SET status = 'resolved', "
+                "resolved_at_ms = 4000 "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                "DELETE FROM brc_trade_reviews "
+                "WHERE ticket_id = 'ticket-v3-terminal'"
+            )
+        )

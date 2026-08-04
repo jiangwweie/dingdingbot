@@ -21,6 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.trading_kernel.deployment_control import (
+    DeploymentDrainBlocked,
+    run_deployment_drain,
+)
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
@@ -51,6 +55,7 @@ SYSTEMD_UNITS = (
 )
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SEED_IDENTITY = re.compile(r"^sha256:[0-9a-f]{64}$")
+_DRAIN_AUTHORIZATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class DeploymentBlocked(RuntimeError):
@@ -72,6 +77,9 @@ class DeploymentPlan:
     source_schema_revision: str | None = None
     mode: DeploymentMode = DeploymentMode.REGULAR
     closure_ticket_id: str | None = None
+    drain_active_tickets: bool = False
+    drain_authorization_id: str | None = None
+    drain_timeout_seconds: float = 1_800.0
 
     def __post_init__(self) -> None:
         if not _COMMIT.fullmatch(self.target_commit):
@@ -103,6 +111,31 @@ class DeploymentPlan:
             raise ValueError("closure-only Ticket identity must be non-blank")
         if self.closure_ticket_id is not None and self.enable_entry:
             raise ValueError("closure-only handover must keep ENTRY fenced")
+        if self.drain_timeout_seconds <= 0:
+            raise ValueError("Deployment Drain timeout must be positive")
+        if self.drain_active_tickets:
+            if (
+                self.mode is not DeploymentMode.COMPATIBLE_UPGRADE
+                or self.source_schema_revision
+                != COMPATIBLE_SOURCE_SCHEMA_REVISION
+            ):
+                raise ValueError(
+                    "Deployment Drain integration currently requires exact 0002 compatible upgrade"
+                )
+            if self.enable_entry:
+                raise ValueError("Deployment Drain must keep ENTRY disabled")
+            if (
+                self.drain_authorization_id is None
+                or _DRAIN_AUTHORIZATION_ID.fullmatch(
+                    self.drain_authorization_id.strip()
+                )
+                is None
+            ):
+                raise ValueError(
+                    "Deployment Drain requires one canonical authorization"
+                )
+        elif self.drain_authorization_id is not None:
+            raise ValueError("Deployment Drain authorization requires drain")
 
 
 @dataclass(frozen=True)
@@ -211,11 +244,28 @@ class TokyoReleaseBackend(Protocol):
 
     def entry_is_inactive_disabled_and_fenced(self) -> bool: ...
 
+    def inspect_deployment_drain(
+        self,
+        release: str,
+        source_schema_revision: str,
+        target_commit: str,
+    ) -> Mapping[str, object]: ...
+
+    def request_deployment_drain(
+        self,
+        release: str,
+        source_schema_revision: str,
+        authorization_id: str,
+        target_commit: str,
+    ) -> Mapping[str, object]: ...
+
 
 def deploy_tokyo_release(
     backend: TokyoReleaseBackend,
     plan: DeploymentPlan,
 ) -> DeploymentResult:
+    if plan.drain_active_tickets:
+        _run_optional_deployment_drain(backend, plan)
     if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
         return _deploy_compatible_upgrade(backend, plan)
     current_release = backend.read_current_release()
@@ -326,6 +376,39 @@ def deploy_tokyo_release(
         entry_enabled=plan.enable_entry,
         mode=plan.mode,
     )
+
+
+def _run_optional_deployment_drain(
+    backend: TokyoReleaseBackend,
+    plan: DeploymentPlan,
+) -> None:
+    authorization_id = plan.drain_authorization_id
+    if authorization_id is None:
+        raise DeploymentBlocked("Deployment Drain authorization is missing")
+    current_release = backend.read_current_release()
+    source_schema_revision = (
+        plan.source_schema_revision
+        if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
+        else plan.schema_revision
+    )
+    if source_schema_revision is None:
+        raise DeploymentBlocked("Deployment Drain source schema is missing")
+    backend.fence_entry()
+    if not backend.entry_is_inactive_disabled_and_fenced():
+        raise DeploymentBlocked("Deployment Drain requires fenced inactive ENTRY")
+    if backend.services_active(SAFETY_SERVICES) != frozenset(SAFETY_SERVICES):
+        raise DeploymentBlocked("Deployment Drain requires active source safety services")
+    try:
+        run_deployment_drain(
+            backend,
+            release=current_release,
+            source_schema_revision=source_schema_revision,
+            authorization_id=authorization_id,
+            target_commit=plan.target_commit,
+            timeout_seconds=plan.drain_timeout_seconds,
+        )
+    except DeploymentDrainBlocked as exc:
+        raise DeploymentBlocked(str(exc)) from exc
 
 
 def _deploy_compatible_upgrade(
@@ -738,7 +821,7 @@ def _require_compatible_source_facts(
     if (
         not isinstance(capabilities, Mapping)
         or capabilities.get("status") != "pass"
-        or capabilities.get("exchange_commands") is not False
+        or capabilities.get("exchange_commands") is not True
     ):
         raise DeploymentBlocked("exact source capability authority differs")
     account_mode = certification.get("account_mode")
@@ -1394,6 +1477,104 @@ class SshTokyoReleaseBackend:
             != 0
         )
 
+    def inspect_deployment_drain(
+        self,
+        release: str,
+        source_schema_revision: str,
+        target_commit: str,
+    ) -> Mapping[str, object]:
+        source = self._bridge_json(
+            release,
+            "--inspect-only",
+            "--source-schema-revision",
+            source_schema_revision,
+            "--target-commit",
+            target_commit,
+        )
+        probe = self.probe_exchange(release)
+        try:
+            active_ticket_count = int(str(source.get("active_ticket_count", -1)))
+            non_flat_domain_count = int(
+                str(probe.get("non_flat_domain_count", -1))
+            )
+            open_order_domain_count = int(
+                str(probe.get("open_order_domain_count", -1))
+            )
+        except ValueError:
+            return {"status": "blocked", "reason": "drain_fact_shape_invalid"}
+        if (
+            probe.get("venue_id") != "binance-usdm"
+            or probe.get("account_position_mode") != "independent_sides"
+            or probe.get("account_margin_mode") != "cross"
+        ):
+            return {"status": "blocked", "reason": "drain_account_identity_differs"}
+        if active_ticket_count != non_flat_domain_count:
+            return {
+                "status": "blocked",
+                "reason": "internal_exchange_position_contradiction",
+            }
+        if active_ticket_count == 0 and open_order_domain_count != 0:
+            return {"status": "blocked", "reason": "exchange_order_residue"}
+        return source
+
+    def request_deployment_drain(
+        self,
+        release: str,
+        source_schema_revision: str,
+        authorization_id: str,
+        target_commit: str,
+    ) -> Mapping[str, object]:
+        return self._bridge_json(
+            release,
+            "--purpose",
+            "deployment_drain",
+            "--authorization-id",
+            authorization_id,
+            "--source-schema-revision",
+            source_schema_revision,
+            "--target-commit",
+            target_commit,
+        )
+
+    def _bridge_json(
+        self,
+        release: str,
+        *args: str,
+    ) -> Mapping[str, object]:
+        if release != CURRENT_RELEASE:
+            raise ValueError("Deployment Drain bridge requires exact current release")
+        source = (
+            self._repo_root
+            / "scripts/trading_kernel/request_controlled_exit_0002_bridge.py"
+        ).read_text(encoding="utf-8")
+        executable = shlex.join(
+            (f"{release}/.venv/bin/python", "-", *args)
+        )
+        command = (
+            f"set -a; . {shlex.quote(RUNTIME_ENV)}; set +a; "
+            f"cd {shlex.quote(release)}; exec {executable}"
+        )
+        remote_command = shlex.join(
+            ("sudo", "-u", "brc", "/bin/bash", "-lc", command)
+        )
+        completed = subprocess.run(
+            (*self._ssh_base(), "--", remote_command),
+            check=False,
+            capture_output=True,
+            text=True,
+            input=source,
+            timeout=max(self._timeout_seconds, 120),
+        )
+        if completed.returncode not in {0, 2}:
+            raise RuntimeError(
+                "Tokyo Deployment Drain bridge failed: "
+                + completed.stderr.strip()[-2_000:]
+            )
+        payload = json.loads(completed.stdout.strip())
+        if not isinstance(payload, Mapping):
+            raise TypeError("Tokyo Deployment Drain bridge returned invalid JSON")
+        return payload
+
     def _release_json(
         self,
         release: str,
@@ -1550,6 +1731,20 @@ def _parser() -> argparse.ArgumentParser:
         help="Exact zero-exposure pending Ticket allowed across one closure-only handover.",
     )
     parser.add_argument(
+        "--drain-active-tickets",
+        action="store_true",
+        help="Request source-owned Controlled Exit before flat cutover.",
+    )
+    parser.add_argument(
+        "--drain-authorization-id",
+        help="Immutable Owner authorization identity for Deployment Drain.",
+    )
+    parser.add_argument(
+        "--drain-timeout-seconds",
+        type=float,
+        default=1_800.0,
+    )
+    parser.add_argument(
         "--timeout-seconds",
         type=float,
         default=60.0,
@@ -1583,6 +1778,9 @@ def main(argv: list[str] | None = None) -> int:
         source_schema_revision=args.source_schema_revision,
         mode=DeploymentMode(args.mode),
         closure_ticket_id=args.closure_ticket_id,
+        drain_active_tickets=args.drain_active_tickets,
+        drain_authorization_id=args.drain_authorization_id,
+        drain_timeout_seconds=args.drain_timeout_seconds,
     )
     backend = SshTokyoReleaseBackend(
         target=args.target,

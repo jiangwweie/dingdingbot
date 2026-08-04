@@ -1185,8 +1185,28 @@ class SshTokyoSystem:
     async def _current_kernel_counts(self) -> dict[str, int]:
         queries = {
             "nonterminal_tickets": (
-                "SELECT count(*) FROM brc_trade_tickets "
-                "WHERE terminal_at_ms IS NULL"
+                "SELECT count(*) FROM brc_trade_tickets ticket "
+                "JOIN brc_trade_aggregates aggregate "
+                "ON aggregate.ticket_id = ticket.ticket_id WHERE NOT ("
+                "ticket.terminal_at_ms IS NOT NULL "
+                "AND ticket.active_netting_domain_key IS NULL "
+                "AND aggregate.entry_lane_held = false "
+                "AND aggregate.position_qty = 0 AND aggregate.protected_qty = 0 "
+                "AND ((ticket.status = 'terminal' AND aggregate.status = 'terminal' "
+                "AND aggregate.active_stop_exchange_order_id IS NULL "
+                "AND aggregate.pending_replaced_stop_exchange_order_id IS NULL "
+                "AND aggregate.pending_cancel_exchange_order_id IS NULL) OR ("
+                "(ticket.status, aggregate.status) IN ("
+                "('leverage_rejected','leverage_rejected'),"
+                "('entry_rejected','entry_rejected'),"
+                "('entry_reconciled_absent','entry_reconciled_absent')) "
+                "AND aggregate.entry_exchange_order_id IS NULL "
+                "AND aggregate.initial_stop_exchange_order_id IS NULL "
+                "AND aggregate.active_stop_exchange_order_id IS NULL "
+                "AND aggregate.tp1_exchange_order_id IS NULL "
+                "AND aggregate.pending_replaced_stop_exchange_order_id IS NULL "
+                "AND aggregate.pending_cancel_exchange_order_id IS NULL "
+                "AND aggregate.exit_exchange_order_id IS NULL)))"
             ),
             "active_budgets": (
                 "SELECT count(*) FROM brc_budget_reservations "
@@ -1198,7 +1218,11 @@ class SshTokyoSystem:
             ),
             "unreviewed_terminal_tickets": (
                 "SELECT count(*) FROM brc_trade_tickets ticket "
+                "JOIN brc_trade_aggregates aggregate "
+                "ON aggregate.ticket_id = ticket.ticket_id "
                 "WHERE ticket.terminal_at_ms IS NOT NULL "
+                "AND ticket.status = 'terminal' "
+                "AND aggregate.status = 'terminal' "
                 "AND NOT EXISTS (SELECT 1 FROM brc_trade_reviews review "
                 "WHERE review.ticket_id = ticket.ticket_id)"
             ),
