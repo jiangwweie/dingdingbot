@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
@@ -243,6 +244,8 @@ class TokyoReleaseBackend(Protocol):
 
     def bootstrap_strategy_universes(self, release: str) -> None: ...
 
+    def refresh_active_certification_batch(self, release: str) -> None: ...
+
     def unfence_entry(self) -> None: ...
 
     def fence_entry(self) -> None: ...
@@ -275,7 +278,7 @@ def deploy_tokyo_release(
         return _deploy_compatible_upgrade(backend, plan)
     current_release = backend.read_current_release()
     if current_release == plan.target_release:
-        raise DeploymentBlocked("target release is already current")
+        return _resume_regular_deployment(backend, plan)
     backend.install_release(plan.target_commit, plan.target_release)
     _, _, current_identity = _read_release_facts(backend, plan)
     _require_marker(
@@ -344,6 +347,8 @@ def deploy_tokyo_release(
             _require_marker(backend, plan.target_release, marker, expected)
 
         backend.start_services(SAFETY_SERVICES)
+        if plan.closure_ticket_id is None:
+            backend.refresh_active_certification_batch(plan.target_release)
         _require_target_postflight(backend, plan, seed_identity=seed_identity)
         if plan.enable_entry:
             backend.start_services((ENTRY_SERVICE,))
@@ -379,6 +384,55 @@ def deploy_tokyo_release(
         schema_revision=plan.schema_revision,
         configured_leverage=plan.expected_configured_leverage,
         entry_enabled=plan.enable_entry,
+        mode=plan.mode,
+    )
+
+
+def _resume_regular_deployment(
+    backend: TokyoReleaseBackend,
+    plan: DeploymentPlan,
+) -> DeploymentResult:
+    if plan.enable_entry:
+        raise DeploymentBlocked(
+            "current target Entry activation requires official promotion"
+        )
+    if plan.closure_ticket_id is not None:
+        raise DeploymentBlocked("current target closure handover cannot resume")
+    if not backend.entry_is_inactive_disabled_and_fenced():
+        raise DeploymentBlocked(
+            "regular deployment resume requires ENTRY inactive disabled and fenced"
+        )
+    _require_marker(
+        backend,
+        plan.target_release,
+        ".brc-runtime-commit",
+        plan.target_commit,
+    )
+    _require_marker(
+        backend,
+        plan.target_release,
+        ".brc-schema-revision",
+        plan.schema_revision,
+    )
+    seed_identity = backend.read_release_marker(
+        plan.target_release,
+        ".brc-seed-identity",
+    )
+    if not _SEED_IDENTITY.fullmatch(seed_identity):
+        raise DeploymentBlocked("current target Seed marker is invalid")
+    if backend.services_active(ALL_SERVICES) != frozenset(SAFETY_SERVICES):
+        raise DeploymentBlocked(
+            "regular deployment resume requires exact safety workers"
+        )
+    backend.refresh_active_certification_batch(plan.target_release)
+    _require_target_postflight(backend, plan, seed_identity=seed_identity)
+    return DeploymentResult(
+        status="pass",
+        target_commit=plan.target_commit,
+        target_release=plan.target_release,
+        schema_revision=plan.schema_revision,
+        configured_leverage=plan.expected_configured_leverage,
+        entry_enabled=False,
         mode=plan.mode,
     )
 
@@ -1544,6 +1598,30 @@ class SshTokyoReleaseBackend:
             "--runtime-profile-id",
             "tiny-live-v1",
         )
+
+    def refresh_active_certification_batch(self, release: str) -> None:
+        self._release_command(
+            release,
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            "tiny-live-v1",
+            "--refresh-active-certification-batch-only",
+        )
+        deadline = time.monotonic() + self._timeout_seconds
+        while True:
+            certification = self.certify_flat(release)
+            if certification.get("certification_batch_pass") is True:
+                return
+            batch = certification.get("compatible_certification_batch")
+            if isinstance(batch, Mapping) and batch.get("status") == "blocked":
+                raise DeploymentBlocked(
+                    "target Certification Batch is blocked: "
+                    + str(batch.get("blocker_code", "unknown"))
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DeploymentBlocked("target Certification Batch timed out")
+            time.sleep(min(5.0, remaining))
 
     def unfence_entry(self) -> None:
         self._remote(("sudo", "rm", "-f", WRITE_FENCE))

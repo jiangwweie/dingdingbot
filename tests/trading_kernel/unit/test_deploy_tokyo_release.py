@@ -798,6 +798,57 @@ def test_regular_release_uses_database_derived_probe_manifest() -> None:
     ]
 
 
+def test_fenced_regular_release_resumes_target_postflight_without_reinstall() -> None:
+    """Catches abandoning a target release after identity rotation postflight."""
+
+    backend = FakeDeploymentBackend(
+        current_release=TARGET_RELEASE,
+        target_release_exists=True,
+        entry_gate_ready=True,
+    )
+    backend.runtime_commit = TARGET_COMMIT
+
+    result = deploy_tokyo_release(backend, _plan(enable_entry=False))
+
+    assert result.status == "pass"
+    assert result.entry_enabled is False
+    assert not any(call[0] == "install_release" for call in backend.calls)
+    assert not any(call[0] == "deploy_identity" for call in backend.calls)
+    assert not any(call[0] == "activate_release" for call in backend.calls)
+    assert ("refresh_active_certification_batch", TARGET_RELEASE) in backend.calls
+    assert backend.entry_fenced is True
+    assert backend.active_services == set(SAFETY_SERVICES)
+
+
+def test_regular_release_refreshes_target_batch_before_postflight() -> None:
+    """Catches checking a target commit before its release-bound Batch exists."""
+
+    backend = FakeDeploymentBackend(expired_certification_batch=True)
+
+    result = deploy_tokyo_release(backend, _plan(enable_entry=False))
+
+    assert result.status == "pass"
+    identity = backend.calls.index(
+        (
+            "activate_release",
+            TARGET_RELEASE,
+            TARGET_COMMIT,
+            TARGET_SCHEMA_REVISION,
+            SEED_IDENTITY,
+        )
+    )
+    safety = backend.calls.index(("start_services", SAFETY_SERVICES))
+    refresh = backend.calls.index(
+        ("refresh_active_certification_batch", TARGET_RELEASE)
+    )
+    postflight = max(
+        index
+        for index, call in enumerate(backend.calls)
+        if call == ("certify_flat", TARGET_RELEASE)
+    )
+    assert identity < safety < refresh < postflight
+
+
 def test_fenced_regular_release_accepts_an_expired_promotion_batch() -> None:
     """Catches coupling an Entry-fenced code deploy to a short-lived Batch."""
 
@@ -1033,6 +1084,7 @@ def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
         ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
         ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
         ("start_services", SAFETY_SERVICES),
+        ("refresh_active_certification_batch", TARGET_RELEASE),
         ("certify_flat", TARGET_RELEASE),
         ("probe_exchange", TARGET_RELEASE),
         ("start_services", (ENTRY_SERVICE,)),
@@ -1817,6 +1869,10 @@ class FakeDeploymentBackend:
         if self.fail_at == "bootstrap_strategy_universes":
             self.active_services.difference_update(SAFETY_SERVICES)
             raise RuntimeError("simulated bootstrap failure")
+
+    def refresh_active_certification_batch(self, release: str) -> None:
+        self.calls.append(("refresh_active_certification_batch", release))
+        self.expired_certification_batch = False
 
     def fence_entry(self) -> None:
         self.calls.append(("fence_entry",))
