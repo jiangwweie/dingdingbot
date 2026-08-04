@@ -1770,7 +1770,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--timeout-seconds",
         type=float,
-        default=300.0,
+        default=600.0,
     )
     return parser
 

@@ -288,7 +288,7 @@ def test_pre_migration_failure_restores_exact_source_safety_workers() -> None:
 def test_default_ssh_timeout_covers_bounded_preservation_scan() -> None:
     args = deployment_parser().parse_args([])
 
-    assert args.timeout_seconds == 300.0
+    assert args.timeout_seconds == 600.0
 
 
 @pytest.mark.parametrize(
