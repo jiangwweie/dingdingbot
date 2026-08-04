@@ -388,9 +388,10 @@ def test_stable_policy_v4_contract_defers_deployed_identity_to_roadmap() -> None
         assert "currently deployed Policy v3" not in source
         assert "MAIN_CONTROL_ROADMAP.md" in source
 
-    assert "| Dynamic policy | Policy version `4`" in roadmap
+    assert "| Dynamic policy | Policy version `5`" in roadmap
+    assert "approved v4 portfolio" in roadmap
     assert "0003_portfolio_admission_observability" in roadmap
-    assert "new ENTRY submission remains disabled" in roadmap
+    assert "new ENTRY submission is enabled" in roadmap
 
 
 def test_current_deployment_authority_has_no_active_handover_or_schema_deletion() -> None:
