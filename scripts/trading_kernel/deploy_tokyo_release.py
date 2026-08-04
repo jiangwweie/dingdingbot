@@ -433,7 +433,7 @@ def _deploy_compatible_upgrade(
     }:
         raise DeploymentBlocked("compatible source schema revision differs")
 
-    preservation_digest: str
+    preservation_digest: str | None
     recovery_seed_identity: str
     source_identity: dict[str, str] | None = None
     if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
@@ -442,7 +442,8 @@ def _deploy_compatible_upgrade(
             plan,
             exchange_probe_release=current_release,
         )
-        preservation_digest = _require_preservation_digest(source_certification)
+        _require_preservation_digest(source_certification)
+        preservation_digest = None
         _require_marker(
             backend,
             current_release,
@@ -476,6 +477,7 @@ def _deploy_compatible_upgrade(
             raise DeploymentBlocked("current release Seed marker is invalid")
 
     transition_started = False
+    migration_attempted = False
     schema_migrated = database_revision == plan.schema_revision
     target_activated = current_release == plan.target_release
     target_safety_started = False
@@ -496,13 +498,13 @@ def _deploy_compatible_upgrade(
             )
             if final_identity != source_identity:
                 raise DeploymentBlocked("source runtime identity changed during cutover")
-            if _require_preservation_digest(final_source) != preservation_digest:
-                raise DeploymentBlocked("source preservation digest changed during cutover")
+            preservation_digest = _require_preservation_digest(final_source)
             backend.persist_preservation_digest(
                 plan.target_release,
                 preservation_digest,
             )
             try:
+                migration_attempted = True
                 backend.migrate_schema(
                     plan.target_release,
                     COMPATIBLE_SOURCE_SCHEMA_REVISION,
@@ -523,6 +525,9 @@ def _deploy_compatible_upgrade(
                 raise
             else:
                 schema_migrated = True
+
+        if preservation_digest is None:
+            raise DeploymentBlocked("source preservation digest is missing")
 
         if not backend.preservation_verified(
             plan.target_release,
@@ -588,6 +593,18 @@ def _deploy_compatible_upgrade(
         try:
             if transition_started:
                 backend.fence_entry()
+                if not migration_attempted and not schema_migrated:
+                    if backend.read_current_release() != current_release:
+                        raise DeploymentBlocked(
+                            "source recovery release identity differs"
+                        )
+                    _require_marker(
+                        backend,
+                        current_release,
+                        ".brc-schema-revision",
+                        COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                    )
+                    backend.start_services(SAFETY_SERVICES)
                 if schema_migrated:
                     target_activated = (
                         backend.read_current_release() == plan.target_release
@@ -1753,7 +1770,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--timeout-seconds",
         type=float,
-        default=60.0,
+        default=300.0,
     )
     return parser
 

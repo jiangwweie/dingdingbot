@@ -18,6 +18,7 @@ from scripts.trading_kernel.deploy_tokyo_release import (
 from scripts.trading_kernel.deploy_tokyo_release import (
     CURRENT_RELEASE as CURRENT_RELEASE_SYMLINK,
 )
+from scripts.trading_kernel.deploy_tokyo_release import _parser as deployment_parser
 
 TARGET_COMMIT = "a" * 40
 CURRENT_COMMIT = "b" * 40
@@ -251,6 +252,43 @@ def test_mig_007_compatible_upgrade_migrates_only_after_final_flat_recheck() -> 
     assert ("start_services", (ENTRY_SERVICE,)) not in backend.calls
     assert backend.active_services == set(SAFETY_SERVICES)
     assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_compatible_upgrade_freezes_preservation_baseline_only_after_writer_stop() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        source_preservation_changes_before_stop=True,
+    )
+
+    result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert result.status == "pass"
+    service_stop = backend.calls.index(("stop_services", SAFETY_SERVICES))
+    persisted = backend.calls.index(
+        ("persist_preservation_digest", TARGET_RELEASE, PRESERVATION_DIGEST)
+    )
+    assert service_stop < persisted
+
+
+def test_pre_migration_failure_restores_exact_source_safety_workers() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        source_gate_after_stop="active_tickets",
+    )
+
+    with pytest.raises(DeploymentBlocked, match="active Ticket"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert not any(call[0] == "migrate_schema" for call in backend.calls)
+    assert backend.current_release == CURRENT_RELEASE
+    assert backend.active_services == set(SAFETY_SERVICES)
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_default_ssh_timeout_covers_bounded_preservation_scan() -> None:
+    args = deployment_parser().parse_args([])
+
+    assert args.timeout_seconds == 300.0
 
 
 @pytest.mark.parametrize(
@@ -1083,6 +1121,8 @@ class FakeDeploymentBackend:
         source_gate: str | None = None,
         source_authority_drift: str | None = None,
         source_seed_marker: str = SEED_IDENTITY,
+        source_preservation_changes_before_stop: bool = False,
+        source_gate_after_stop: str | None = None,
         preservation_matches: bool = True,
         preservation_verified: bool = False,
         preservation_database_proof_matches: bool = True,
@@ -1115,6 +1155,10 @@ class FakeDeploymentBackend:
         self.source_gate = source_gate
         self.source_authority_drift = source_authority_drift
         self.source_seed_marker = source_seed_marker
+        self.source_preservation_changes_before_stop = (
+            source_preservation_changes_before_stop
+        )
+        self.source_gate_after_stop = source_gate_after_stop
         self.preservation_matches = preservation_matches
         self.preservation_is_verified = preservation_verified
         self.preservation_database_proof_matches = (
@@ -1327,6 +1371,9 @@ class FakeDeploymentBackend:
         self.calls.append(
             ("certify_compatible_source", release, source_schema_revision)
         )
+        source_certification_call_count = sum(
+            call[0] == "certify_compatible_source" for call in self.calls
+        )
         gates = {
             "active_tickets": self.active_ticket_count,
             "non_flat_positions": self.active_ticket_count,
@@ -1340,6 +1387,14 @@ class FakeDeploymentBackend:
         }
         if self.source_gate is not None:
             gates[self.source_gate] = 1
+        if self.source_gate_after_stop is not None and not self.active_services:
+            gates[self.source_gate_after_stop] = 1
+        preservation_digest = PRESERVATION_DIGEST
+        if (
+            self.source_preservation_changes_before_stop
+            and source_certification_call_count == 1
+        ):
+            preservation_digest = "sha256:" + "e" * 64
         payload: dict[str, object] = {
             "status": "pass",
             "alembic_revision": self.source_schema_revision,
@@ -1349,7 +1404,7 @@ class FakeDeploymentBackend:
                 "seed_identity": SEED_IDENTITY,
             },
             "migration_gate": gates,
-            "preservation_manifest": {"digest": PRESERVATION_DIGEST},
+            "preservation_manifest": {"digest": preservation_digest},
             "registry_identity": {
                 "status": "pass",
                 "expected_semantic_hash": SOURCE_REGISTRY_DIGEST,
