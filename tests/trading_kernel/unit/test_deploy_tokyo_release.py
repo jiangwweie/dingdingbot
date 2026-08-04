@@ -15,6 +15,9 @@ from scripts.trading_kernel.deploy_tokyo_release import (
     SshTokyoReleaseBackend,
     deploy_tokyo_release,
 )
+from scripts.trading_kernel.deploy_tokyo_release import (
+    CURRENT_RELEASE as CURRENT_RELEASE_SYMLINK,
+)
 
 TARGET_COMMIT = "a" * 40
 CURRENT_COMMIT = "b" * 40
@@ -133,9 +136,17 @@ def test_compatible_upgrade_drains_before_the_unchanged_flat_cutover() -> None:
     request_index = backend.calls.index(
         (
             "request_deployment_drain",
-            CURRENT_RELEASE,
+            CURRENT_RELEASE_SYMLINK,
             SOURCE_SCHEMA_REVISION,
             "deploy-20260804-01",
+            TARGET_COMMIT,
+        )
+    )
+    inspect_index = backend.calls.index(
+        (
+            "inspect_deployment_drain",
+            CURRENT_RELEASE_SYMLINK,
+            SOURCE_SCHEMA_REVISION,
             TARGET_COMMIT,
         )
     )
@@ -147,7 +158,7 @@ def test_compatible_upgrade_drains_before_the_unchanged_flat_cutover() -> None:
         )
     )
     service_stop_index = backend.calls.index(("stop_services", SAFETY_SERVICES))
-    assert request_index < source_certification_index < service_stop_index
+    assert inspect_index < request_index < source_certification_index < service_stop_index
 
 
 def test_active_source_without_explicit_drain_remains_blocked() -> None:

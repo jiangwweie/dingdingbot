@@ -388,7 +388,6 @@ def _run_optional_deployment_drain(
     authorization_id = plan.drain_authorization_id
     if authorization_id is None:
         raise DeploymentBlocked("Deployment Drain authorization is missing")
-    current_release = backend.read_current_release()
     source_schema_revision = (
         plan.source_schema_revision
         if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
@@ -404,7 +403,7 @@ def _run_optional_deployment_drain(
     try:
         run_deployment_drain(
             backend,
-            release=current_release,
+            release=CURRENT_RELEASE,
             source_schema_revision=source_schema_revision,
             authorization_id=authorization_id,
             target_commit=plan.target_commit,
