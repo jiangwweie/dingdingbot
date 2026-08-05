@@ -58,6 +58,8 @@ PostgreSQL 保存当前运行真相与追加式生命周期事实。交易所只
 
 `src/trading_kernel/interfaces/readonly_api.py` 当前只支持按精确键读取 Monitor 与单 Ticket Owner Projection。它不是页面级 HTTP API，也不提供总览、列表、因果详情或复盘中心读模型。
 
+（来源：`src/trading_kernel/interfaces/readonly_api.py`）
+
 ### 2.3 当前 Review 事实
 
 当前 Trade Review：
@@ -67,6 +69,8 @@ PostgreSQL 保存当前运行真相与追加式生命周期事实。交易所只
 - 保存 `outcome`、`metrics` 与 `decision_impact`；
 - 能保存成交归因、Gross PnL、Fees、Funding、Net PnL、计划与实际风险、Net R 和经济证据完整性；
 - Funding 或外部退出事实缺失时记录显式不可用原因，不按零处理。
+
+（来源：`src/trading_kernel/application/settle_ticket.py`、`src/trading_kernel/domain/review.py`、`src/trading_kernel/interfaces/reconciliation_worker.py`、`migrations/trading_kernel/v4_schema.py`）
 
 ### 2.4 当前 K 线来源
 
@@ -78,9 +82,13 @@ PostgreSQL 保存当前运行真相与追加式生命周期事实。交易所只
 - 不需要交易所 API Key；
 - 当前没有 Owner Console 专用 K 线表或后台采集服务。
 
+（来源：`src/trading_kernel/infrastructure/binance_public_market_source.py`、`src/trading_kernel/infrastructure/production_runtime.py`）
+
 ### 2.5 当前运行资源
 
 Tokyo 主机只有 2C4G。Observation、Entry、Lifecycle 与 Reconciliation 四个持久 Worker 已共享一个 1 CPU、1GB 内存资源切片。Owner Console 必须保持低常驻成本，并与四个交易 Worker 的资源和失败边界隔离。
+
+（来源：Owner 当前服务器说明、`docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`、`deploy/systemd/brc-trading-kernel.slice`）
 
 ## 3. 产品目标
 
@@ -179,11 +187,23 @@ BRC OWNER   总览   信号   交易   复盘          PROD · 正常 · 数据�
 
 - 常规页面最大内容宽度 1160px；
 - 统一 12 列网格；
+- 顶部导航高度 44px；
+- 表格数据行高度 38px，表头高度 30px；
+- 按钮与输入框高度 30–32px；
 - 卡片上下边缘对齐；
 - 间距主要使用 8px、12px、16px；
 - 不使用大圆角、阴影和过量留白；
 - 不使用右侧超长抽屉；
 - 表格详情使用行内横向展开。
+
+组件视觉固定采用已确认的 **B 规范**：
+
+- 扁平内容面与细分隔线；
+- 黄色只用于当前选中、刷新和需要关注的状态；
+- 正常、盈利和确认使用绿色；
+- 异常、阻断和亏损使用红色；
+- 不使用 shadcn、Ant Design 或 Material UI 的默认视觉；
+- 不使用悬浮 SaaS 卡片、头像中心、消息中心或装饰性大图标。
 
 ## 7. 页面设计
 
@@ -296,23 +316,115 @@ TradingView K 线只提供价格背景。Signal、订单与生命周期标记必
 
 ## 8. 前端技术边界
 
-首版建议：
+前端技术栈正式确定为：
 
 ```text
-React + TypeScript + Vite 静态构建
-TradingView Lightweight Charts
+TypeScript strict mode
++ React
++ Vite 静态构建
++ React Router
++ TanStack Query
++ TanStack Table
++ Radix UI Primitives
++ Tailwind CSS + CSS Variables
++ TradingView Lightweight Charts
++ React Hook Form + Zod
++ openapi-typescript + openapi-fetch
 ```
 
-约束：
+项目目录固定为：
 
-- 无 SSR；
-- 生产环境无常驻 Node.js 进程；
-- 静态资源由 HTTPS 反向代理提供；
-- 浏览器只消费类型化 JSON API；
-- 前端不计算 PnL、Net R、退出原因、Incident 状态或复盘分类；
-- 浏览器不持有 PostgreSQL、交易所或系统管理凭证。
+```text
+frontend/owner-console/
+├── src/
+│   ├── app/
+│   ├── pages/
+│   ├── features/
+│   │   ├── overview/
+│   │   ├── signals/
+│   │   ├── trades/
+│   │   ├── review/
+│   │   └── auth/
+│   ├── components/
+│   │   ├── ui/
+│   │   ├── tables/
+│   │   └── charts/
+│   ├── api/
+│   ├── styles/
+│   └── test/
+├── package.json
+├── vite.config.ts
+└── tsconfig.json
+```
+
+### 8.1 TypeScript 与 API 类型
+
+TypeScript 至少启用：
+
+```text
+strict = true
+noUncheckedIndexedAccess = true
+exactOptionalPropertyTypes = true
+```
+
+FastAPI OpenAPI 在构建阶段通过 `openapi-typescript`生成前端类型，`openapi-fetch`负责类型化请求。前端不维护第二套手写 API Schema，不使用 Axios，不允许核心 API 数据使用 `any`。
+
+### 8.2 组件与样式
+
+- Radix 只提供 Dialog、AlertDialog、Tabs、Tooltip、Popover、DropdownMenu 和 ScrollArea 等无样式可访问性 Primitive；
+- 项目在 `components/ui/`维护自己的 B 规范组件；
+- 不采用 shadcn/ui 默认组件外观；
+- Tailwind 只负责布局、间距、响应式和状态组合；
+- 颜色、字体、密度、边框和层级通过 B 规范 CSS Variables 集中管理；
+- 图标使用 Lucide React，并直接导入具体图标；
+- 日期时间使用浏览器 `Intl`，不引入 Moment；
+- 金额、价格和 R 倍数保持字符串/Decimal 语义，前端不以浮点数重算经济结果。
+
+### 8.3 数据与状态
+
+TanStack Query 必须关闭自动行为：
+
+```text
+refetchInterval = false
+refetchOnWindowFocus = false
+refetchOnReconnect = false
+staleTime = Infinity
+retry = false
+```
+
+状态所有权：
+
+```text
+URL 参数        筛选、分页、当前 Ticket
+TanStack Query  API 数据与 Last Known Good
+React 本地状态  行展开、Tab 和弹窗
+```
+
+首版不使用 Redux 或 Zustand。列表最多 100 条，因此不引入虚拟滚动；后续只有在有界页面数量改变时才评估 TanStack Virtual。
+
+### 8.4 图表与构建
+
+- `lightweight-charts`只在单笔详情页动态 import；
+- 不进入总览、信号或交易列表初始 bundle；
+- 所有第三方库直接导入具体模块，避免无界 barrel import；
+- 包管理使用 pnpm + Corepack；
+- Node.js 仅用于本地/CI 构建；
+- 生产环境无 SSR、无常驻 Node.js 进程；
+- Nginx 只提供 Vite `dist/`静态产物。
+
+浏览器只消费类型化 JSON API，不计算 PnL、Net R、退出原因、Incident 状态或复盘分类，也不持有 PostgreSQL、交易所或系统管理凭证。
 
 ## 9. 只读 API 架构
+
+后端技术栈正式确定为：
+
+```text
+FastAPI
++ Pydantic v2
++ SQLAlchemy Core
++ asyncpg
++ Uvicorn 单进程
+```
 
 ```text
 Owner Console
@@ -335,7 +447,45 @@ K 线使用独立网络边界：
 
 数据库读取与 Binance 网络 I/O 不在同一个数据库事务中等待。
 
-### 9.1 页面接口
+代码结构固定为：
+
+```text
+src/trading_kernel/
+├── application/owner_console/
+│   ├── models.py
+│   ├── overview.py
+│   ├── signals.py
+│   ├── trades.py
+│   ├── causality.py
+│   └── programmatic_review.py
+├── infrastructure/
+│   ├── pg_owner_read_repository.py
+│   └── owner_market_data.py
+└── interfaces/owner_console_http/
+    ├── app.py
+    ├── auth.py
+    ├── dependencies.py
+    ├── errors.py
+    └── routes/
+```
+
+FastAPI Route 不直接编写 SQL。`application/owner_console`只接收类型化事实并组装 Read Model；PostgreSQL SQL 只属于 `pg_owner_read_repository.py`；公共 K 线网络调用只属于 `owner_market_data.py`。
+
+### 9.1 数据库身份与连接
+
+Owner API 使用独立 PostgreSQL 只读角色：
+
+```text
+default_transaction_read_only = on
+statement_timeout = 3000ms
+application_name = brc_owner_console
+pool_size = 1
+max_overflow = 1
+```
+
+页面内部事实使用短 `REPEATABLE READ`只读事务。创建只读数据库角色属于部署配置，不新增应用 Schema 或运行数据表。
+
+### 9.2 页面接口
 
 | 页面 | 接口 | 返回内容 |
 |---|---|---|
@@ -347,7 +497,7 @@ K 线使用独立网络边界：
 | 复盘 | `GET /api/owner/v1/review` | 完成交易、执行质量、退出原因、证据状态 |
 | K 线 | `GET /api/owner/v1/market/candles` | 有界展示型 OHLCV |
 
-### 9.2 查询边界
+### 9.3 查询边界
 
 - 列表默认每页 50 条，硬上限 100 条；
 - K 线默认最多 300 根，硬上限 500 根；
@@ -357,7 +507,7 @@ K 线使用独立网络边界：
 - 时间范围、StrategyGroup、Instrument、Side 和状态作为有界筛选；
 - 不提供无边界全历史 API。
 
-### 9.3 Read Model
+### 9.4 Read Model
 
 首版核心类型：
 
@@ -377,7 +527,7 @@ ReviewCenterSummary
 
 页面 Read Model Assembler 使用一个短 PostgreSQL 只读事务读取该页面所需的内部事实，事务结束后再返回序列化结果。K 线等外部网络读取使用独立接口，不得在该数据库事务中等待。
 
-### 9.4 响应信封
+### 9.5 响应信封
 
 ```json
 {
@@ -412,7 +562,7 @@ Console 不执行任何自动刷新：
 | 点击“刷新图表” | 重新请求 K 线 |
 | 浏览器不可见 | 不请求 |
 
-页面持续显示数据时间。数据年龄增加只改变时间文字或局部状态颜色，不触发后台请求，不出现全宽干扰提示。
+页面持续显示数据时间。数据年龄由不产生网络请求的前端时钟更新，只改变时间文字或局部状态颜色，不触发后台请求，不出现全宽干扰提示。
 
 请求失败时保留 Last Known Good。失败不能把一个活动 Ticket 显示成零，也不能把数据不可用解释为无 Signal、无 Incident 或系统正常。
 
@@ -547,6 +697,14 @@ Ticket 已终态，但外部平仓成交事实不可获得；因此不计算 Net
 
 Google Authenticator 是 TOTP 客户端，不使用 Google OAuth。
 
+认证实现固定使用：
+
+```text
+argon2-cffi   密码哈希与验证
+PyOTP         RFC 6238 TOTP
+itsdangerous  Session Cookie 签名
+```
+
 ### 13.2 凭证存储
 
 为避免首版因登录引入 Trading Kernel 数据库 Migration：
@@ -560,17 +718,30 @@ Google Authenticator 是 TOTP 客户端，不使用 Google OAuth。
 
 ### 13.3 Session 安全
 
+- Cookie 只保存已签名的随机 Session ID；
+- 服务端内存保存当前唯一有效 Session ID，不使用 Redis 或数据库 Session；
+- 新登录使旧 Session 失效；
 - `HttpOnly`；
 - `Secure`；
 - `SameSite=Strict`；
 - 登录成功后旋转 Session ID；
 - Session 空闲 30 分钟失效，绝对有效期最长 12 小时；
-- 服务重启或 Session 签名密钥轮换使现有 Session 失效；
+- Read API 重启会清空内存 Session；Session 签名密钥轮换也使现有 Session 失效；
 - TOTP 使用 30 秒时间步，只接受当前时间步及相邻一个时间步；
 - 同一账号或来源 IP 在 15 分钟内最多失败 5 次，达到上限后冷却 15 分钟；
 - 错误提示不暴露用户名是否存在；
 - 所有 API 请求验证 Owner Session；
 - HTTPS 反向代理向 API 传递可信来源信息，API 不信任公网客户端自行提供的转发头。
+
+认证接口固定为：
+
+```text
+POST /api/owner/v1/auth/login
+POST /api/owner/v1/auth/logout
+GET  /api/owner/v1/auth/session
+```
+
+登录一次提交用户名、密码与 TOTP；任一字段错误都返回相同外部错误语义。首版无跨域调用，因此不启用 CORS。
 
 未来控制操作必须支持重新输入 TOTP，并记录不可变 Owner Authorization。
 
@@ -579,9 +750,10 @@ Google Authenticator 是 TOTP 客户端，不使用 Google OAuth。
 首版运行模型：
 
 ```text
-HTTPS 反向代理
-├── 静态前端文件
-└── 单进程 Owner Read API
+现有 Nginx
+├── /          Vite dist 静态文件
+├── /api/      Unix Socket -> Uvicorn
+└── HTTPS      现有证书与域名
 
 Trading Kernel
 ├── Observation
@@ -589,6 +761,23 @@ Trading Kernel
 ├── Lifecycle
 └── Reconciliation
 ```
+
+Uvicorn 不监听公网 TCP 端口，使用：
+
+```text
+/run/brc-owner-console/api.sock
+```
+
+Nginx 负责静态压缩、HTTPS、安全响应头和登录端点的第一层限速。Read API 不信任客户端自行提交的 `X-Forwarded-*`头。
+
+后端依赖使用独立文件与虚拟环境：
+
+```text
+requirements-owner-console.txt
+/opt/brc/current/.venv-owner-console/
+```
+
+`requirements-owner-console.txt`引用基础 `requirements.txt`，并增加 FastAPI、Uvicorn、argon2-cffi、PyOTP 与 itsdangerous。四个 Trading Kernel Worker 继续使用原 `.venv`，不加载 Owner Console Web 依赖。
 
 Owner Read API 与四个交易 Worker 使用独立 systemd unit 和资源边界。初始设计预算：
 
@@ -680,7 +869,10 @@ Owner 重新输入 TOTP
 - Read API 不导入或调用交易所写入边界；
 - 首版除登录与登出外不存在业务 write endpoint；
 - 不存在自动刷新 timer、WebSocket、SSE、Redis 或行情 Worker；
-- 不创建生成式 JSON/Markdown Runtime 文件。
+- 不创建生成式 JSON/Markdown Runtime 文件；
+- FastAPI Route 不包含直接 SQL；
+- Read API 使用独立只读数据库身份；
+- Uvicorn 只监听 Unix Socket，不监听公网端口。
 
 ### 17.2 Read Model 单元测试
 
@@ -705,6 +897,9 @@ Owner 重新输入 TOTP
 
 ### 17.4 前端测试
 
+- Vitest 与 React Testing Library 覆盖组件和交互；
+- MSW 提供类型化 API 场景；
+- Playwright 覆盖登录与核心页面路径；
 - 顶部导航与二级路由；
 - 行内展开；
 - 列表筛选上下文返回；
@@ -713,7 +908,9 @@ Owner 重新输入 TOTP
 - 响应式降级；
 - 无自动网络请求；
 - 复盘页无全局样本不足横幅；
-- 活动 Ticket 无最终复盘文案。
+- 活动 Ticket 无最终复盘文案；
+- TanStack Query 不因定时器、窗口聚焦或网络恢复产生请求；
+- `lightweight-charts`不进入非详情页面初始 bundle。
 
 ### 17.5 认证测试
 
@@ -722,7 +919,8 @@ Owner 重新输入 TOTP
 - Session Cookie 属性正确；
 - Session fixation 防护；
 - 登录限速；
-- 服务重启或 Session 密钥轮换后 Session 失效；
+- 新登录使旧 Session 失效；
+- Read API 重启或 Session 密钥轮换后 Session 失效；
 - 缺失或错误 systemd credential 时 fail closed；
 - 未认证请求不能读取任何 Owner API。
 
@@ -750,11 +948,12 @@ Owner 重新输入 TOTP
 ### 18.2 部署顺序
 
 ```text
-本地测试与静态构建
--> 部署 Read API（仅 loopback / 私网）
+本地/CI 测试与 Vite 静态构建
+-> 构建独立 .venv-owner-console
+-> 部署 Read API systemd unit 与 Unix Socket
 -> 验证只读数据库身份
--> 部署静态资源
--> 配置 HTTPS 与域名
+-> 部署 Vite dist 到 Nginx 静态目录
+-> 配置现有 Nginx HTTPS、SPA fallback 与 /api/ Unix Socket proxy
 -> 安装 Owner encrypted credentials
 -> 验证登录、TOTP 和未认证阻断
 -> 验证资源边界与 Trading Kernel 无影响
@@ -765,12 +964,14 @@ Owner 重新输入 TOTP
 ### 18.3 回退
 
 - 停止并禁用 Owner Read API；
-- 从反向代理移除 Console 路由；
+- 从 Nginx 移除 Console 静态目录和 `/api/` Unix Socket 路由；
 - 保留或删除静态资源均不影响运行权威；
 - 无数据库回滚；
 - 不恢复任何旧 Frontend 或替代执行链。
 
 ## 19. 实施分期
+
+当前设计对应的首个实施计划只覆盖 **Phase 1**。Phase 2 与 Phase 3 仅记录产品演进边界，必须分别重新完成设计、Owner 书面批准与独立实施计划，不能作为 Phase 1 的顺带实现项。
 
 ### Phase 1：只读 Owner Console
 
