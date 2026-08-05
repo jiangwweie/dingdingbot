@@ -134,13 +134,13 @@ def test_every_conclusion_bearing_read_model_requires_evidence() -> None:
 
 
 def test_named_factories_return_complete_frozen_facts_and_named_overrides() -> None:
-    overview = overview_facts(ticket_capacity=4)
+    overview = overview_facts(max_concurrent_tickets=4)
     signal = signal_item_facts(first_blocker="capacity_exhausted", ticket_id=None)
     trade = trade_item_facts(exit_reason="Initial Stop")
     causality = trade_causality_facts(current_stage="exit")
     review = programmatic_review_facts(exit_reason="Controlled Exit")
 
-    assert overview.ticket_capacity == 4
+    assert overview.max_concurrent_tickets == 4
     assert signal.first_blocker == "capacity_exhausted"
     assert trade.exit_reason == "Initial Stop"
     assert causality.current_stage == "exit"
@@ -151,7 +151,7 @@ def test_named_factories_return_complete_frozen_facts_and_named_overrides() -> N
 
 def test_named_factories_reject_wrong_typed_overrides() -> None:
     with pytest.raises(ValidationError):
-        overview_facts(ticket_capacity="three")
+        overview_facts(max_concurrent_tickets="three")
 
 
 def test_named_factories_normalize_mutable_container_overrides() -> None:

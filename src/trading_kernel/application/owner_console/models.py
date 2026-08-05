@@ -161,20 +161,27 @@ class ReviewListQuery(BoundedWindowQuery):
 
 
 class AdmissionAccountSnapshot(FrozenModel):
-    equity: MoneyMetric
+    label: Literal["Latest Admission Snapshot"]
+    is_realtime: Literal[False] = False
+    captured_at_ms: int | None
+    wallet_balance: MoneyMetric
     available_margin: MoneyMetric
-    frozen_at_ms: int
+
+
+class OwnerConclusion(FrozenModel):
+    level: Literal["intervention", "attention", "no_action"]
+    summary: str
+    owner_action: str | None
     evidence: tuple[EvidenceRef, ...]
 
 
 class OwnerOverview(FrozenModel):
     observed_at_ms: int
-    system_status: Literal["needs_intervention", "attention", "no_action"]
-    system_conclusion: str
-    owner_action: str | None
-    latest_admission_snapshot: AdmissionAccountSnapshot | None
-    ticket_capacity: int
-    active_ticket_count: int
+    conclusion: OwnerConclusion
+    account_snapshot: AdmissionAccountSnapshot
+    ticket_capacity: int | None
+    active_ticket_count: int | None
+    active_ticket_ids: tuple[str, ...]
     today_net_pnl: MoneyMetric
     today_net_r: MoneyMetric
     today_signal_count: int
@@ -332,11 +339,26 @@ class ReviewCenterSummary(FrozenModel):
 class OverviewFacts(FrozenModel):
     observed_at_ms: int
     runtime_freshness: Freshness
-    unresolved_incident_count: int
-    contradictory_fact_count: int
-    latest_admission_snapshot: AdmissionAccountSnapshot | None
-    ticket_capacity: int
+    freshness_evidence_identity: str
+    freshness_evidence_at_ms: int
+    max_concurrent_tickets: int | None
+    active_ticket_count: int | None
     active_ticket_ids: tuple[str, ...]
+    latest_capacity_claim_id: str | None
+    latest_wallet_balance_at_claim: Decimal | None
+    latest_available_margin_at_claim: Decimal | None
+    latest_claim_created_at_ms: int | None
+    open_owner_incident_id: str | None
+    open_owner_incident_opened_at_ms: int | None
+    attention_incident_ids: tuple[str, ...]
+    attention_incident_opened_at_ms: tuple[int, ...]
+    monitor_statuses: tuple[str, ...]
+    monitor_keys: tuple[str, ...]
+    monitor_updated_at_ms: tuple[int, ...]
+    contradictory_fact_reasons: tuple[str, ...]
+    contradictory_evidence_identity: str | None
+    evidence_gap_reasons: tuple[str, ...]
+    evidence_gap_identity: str | None
     today_net_pnl: MoneyMetric
     today_net_r: MoneyMetric
     today_signal_count: int

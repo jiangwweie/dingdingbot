@@ -6,7 +6,6 @@ from decimal import Decimal
 from typing import Any, TypeVar, cast
 
 from src.trading_kernel.application.owner_console.models import (
-    AdmissionAccountSnapshot,
     ChartAnnotation,
     EvidenceRef,
     Freshness,
@@ -47,18 +46,29 @@ def overview_facts(**overrides: Any) -> OverviewFacts:
     facts = OverviewFacts(
         observed_at_ms=1_800_000_000_000,
         runtime_freshness=Freshness.FRESH,
-        unresolved_incident_count=0,
-        contradictory_fact_count=0,
-        latest_admission_snapshot=AdmissionAccountSnapshot(
-            equity=MoneyMetric(value=Decimal("100.00"), unit="USDT"),
-            available_margin=MoneyMetric(value=Decimal("70.00"), unit="USDT"),
-            frozen_at_ms=1_799_999_900_000,
-            evidence=(
-                _evidence("admission", "admission:1", 1_799_999_900_000),
-            ),
-        ),
-        ticket_capacity=3,
+        freshness_evidence_identity="account:binance-usdm:test",
+        freshness_evidence_at_ms=1_800_000_000_000,
+        max_concurrent_tickets=3,
+        active_ticket_count=1,
         active_ticket_ids=("ticket:1",),
+        latest_capacity_claim_id="claim:1",
+        latest_wallet_balance_at_claim=Decimal("100.00"),
+        latest_available_margin_at_claim=Decimal("70.00"),
+        latest_claim_created_at_ms=1_799_999_900_000,
+        open_owner_incident_id=None,
+        open_owner_incident_opened_at_ms=None,
+        attention_incident_ids=(),
+        attention_incident_opened_at_ms=(),
+        monitor_statuses=("running", "waiting_for_opportunity"),
+        monitor_keys=("monitor:runtime", "monitor:opportunity"),
+        monitor_updated_at_ms=(
+            1_800_000_000_000,
+            1_800_000_000_000,
+        ),
+        contradictory_fact_reasons=(),
+        contradictory_evidence_identity=None,
+        evidence_gap_reasons=(),
+        evidence_gap_identity=None,
         today_net_pnl=MoneyMetric(value=Decimal("3.5100"), unit="USDT"),
         today_net_r=MoneyMetric(value=Decimal("0.4800"), unit="R"),
         today_signal_count=4,
