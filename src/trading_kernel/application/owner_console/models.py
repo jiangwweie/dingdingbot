@@ -155,9 +155,17 @@ class SignalListQuery(BoundedWindowQuery):
 
 
 class TradeListQuery(BoundedWindowQuery):
-    ticket_status: str | None = None
-    strategy_group_id: str | None = None
-    exchange_instrument_id: str | None = None
+    aggregate_status: str | None = None
+    strategy_group_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=160,
+    )
+    exchange_instrument_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=160,
+    )
     position_side: Literal["long", "short"] | None = None
 
 
@@ -269,8 +277,17 @@ class TradeListItem(FrozenModel):
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
     ticket_status: str
+    aggregate_status: str
+    lifecycle_stage: LifecycleStageKey
     issued_at_ms: int
     terminal_at_ms: int | None
+    review_id: str | None
+    review_revision: int | None
+    economics_completeness: Literal[
+        "complete",
+        "funding_unavailable",
+        "external_exit_unavailable",
+    ] | None
     completed_stage_count: int
     total_stage_count: Literal[8]
     exit_reason: str | None
@@ -281,6 +298,11 @@ class TradeListItem(FrozenModel):
     net_r: MoneyMetric
     attention_items: tuple[str, ...]
     evidence: tuple[EvidenceRef, ...]
+
+
+class TradeListPage(FrozenModel):
+    items: tuple[TradeListItem, ...] = Field(max_length=100)
+    next_cursor: str | None
 
 
 class LifecycleStageView(FrozenModel):
@@ -483,17 +505,26 @@ class TradeItemFacts(FrozenModel):
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
     ticket_status: str
+    aggregate_status: str
     issued_at_ms: int
     terminal_at_ms: int | None
-    completed_stage_count: int
+    aggregate_review_id: str | None
+    review_id: str | None
+    review_ticket_id: str | None
+    review_revision: int | None
+    review_created_at_ms: int | None
+    review_metrics: dict[str, JsonValue] | None
     exit_reason: str | None
-    gross_pnl: MoneyMetric
-    fees: MoneyMetric
-    funding: MoneyMetric
-    net_pnl: MoneyMetric
-    net_r: MoneyMetric
-    incident_count: int
+    open_incident_id: str | None
+    open_incident_opened_at_ms: int | None
+    latest_incident_id: str | None
+    latest_incident_opened_at_ms: int | None
     evidence: tuple[EvidenceRef, ...]
+
+
+class TradePageFacts(FrozenModel):
+    items: tuple[TradeItemFacts, ...] = Field(max_length=101)
+    requested_limit: int = Field(ge=1, le=100)
 
 
 class TradeCausalityFacts(FrozenModel):

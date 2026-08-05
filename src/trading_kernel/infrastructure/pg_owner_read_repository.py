@@ -27,11 +27,17 @@ from src.trading_kernel.application.owner_console.models import (
     SignalItemFacts,
     SignalListQuery,
     SignalPageFacts,
+    TradeItemFacts,
+    TradeListQuery,
+    TradePageFacts,
     decode_cursor,
 )
 from src.trading_kernel.application.owner_console.signals import (
     SignalFactsContradiction,
     SignalNotFound,
+)
+from src.trading_kernel.application.owner_console.trades import (
+    TradeFactsContradiction,
 )
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
@@ -533,6 +539,23 @@ class PostgresOwnerReadRepository:
         )
         return SignalDetailFacts(signal=item, fact_snapshots=snapshots)
 
+    async def read_trade_page_facts(
+        self,
+        query: TradeListQuery,
+    ) -> TradePageFacts:
+        """Read one bounded active/terminal Trade page on this connection."""
+
+        cursor = None if query.cursor is None else decode_cursor(query.cursor)
+        rows = (
+            await self._connection.execute(
+                _trade_list_query(query=query, cursor=cursor)
+            )
+        ).mappings().all()
+        return TradePageFacts(
+            items=tuple(_trade_item_facts_from_row(row) for row in rows),
+            requested_limit=query.limit,
+        )
+
 
 def _signal_list_query(
     *,
@@ -578,6 +601,214 @@ def _signal_list_query(
             signal_events.c.signal_event_id.desc(),
         )
         .limit(query.limit + 1)
+    )
+
+
+def _trade_list_query(
+    *,
+    query: TradeListQuery,
+    cursor: PageCursor | None,
+) -> sa.Select[Any]:
+    conditions: list[sa.ColumnElement[bool]] = [
+        trade_tickets.c.created_at_ms >= query.from_ms,
+        trade_tickets.c.created_at_ms < query.to_ms,
+    ]
+    if query.strategy_group_id is not None:
+        conditions.append(
+            trade_tickets.c.strategy_group_id == query.strategy_group_id
+        )
+    if query.exchange_instrument_id is not None:
+        conditions.append(
+            trade_tickets.c.exchange_instrument_id
+            == query.exchange_instrument_id
+        )
+    if query.position_side is not None:
+        conditions.append(trade_tickets.c.position_side == query.position_side)
+    if query.aggregate_status is not None:
+        conditions.append(
+            trade_aggregates.c.status == query.aggregate_status
+        )
+    if cursor is not None:
+        conditions.append(
+            sa.tuple_(
+                trade_tickets.c.created_at_ms,
+                trade_tickets.c.ticket_id,
+            )
+            < sa.tuple_(
+                sa.literal(cursor.sort_ms),
+                sa.literal(cursor.identity),
+            )
+        )
+
+    open_incident = (
+        sa.select(
+            runtime_incidents.c.incident_id.label("open_incident_id"),
+            runtime_incidents.c.opened_at_ms.label(
+                "open_incident_opened_at_ms"
+            ),
+        )
+        .where(
+            runtime_incidents.c.ticket_id == trade_tickets.c.ticket_id,
+            runtime_incidents.c.status == "open",
+        )
+        .order_by(
+            runtime_incidents.c.opened_at_ms.asc(),
+            runtime_incidents.c.incident_id.asc(),
+        )
+        .limit(1)
+        .lateral("open_trade_incident")
+    )
+    latest_incident = (
+        sa.select(
+            runtime_incidents.c.incident_id.label("latest_incident_id"),
+            runtime_incidents.c.opened_at_ms.label(
+                "latest_incident_opened_at_ms"
+            ),
+        )
+        .where(runtime_incidents.c.ticket_id == trade_tickets.c.ticket_id)
+        .order_by(
+            runtime_incidents.c.opened_at_ms.desc(),
+            runtime_incidents.c.incident_id.desc(),
+        )
+        .limit(1)
+        .lateral("latest_trade_incident")
+    )
+    source = (
+        trade_tickets.join(
+            trade_aggregates,
+            trade_aggregates.c.ticket_id == trade_tickets.c.ticket_id,
+        )
+        .outerjoin(
+            trade_reviews,
+            trade_reviews.c.review_id == trade_aggregates.c.review_id,
+        )
+        .outerjoin(open_incident, sa.true())
+        .outerjoin(latest_incident, sa.true())
+    )
+    return (
+        sa.select(
+            trade_tickets.c.ticket_id,
+            trade_tickets.c.strategy_group_id,
+            trade_tickets.c.event_spec_id,
+            trade_tickets.c.exchange_instrument_id,
+            trade_tickets.c.position_side,
+            trade_tickets.c.status.label("ticket_status"),
+            trade_tickets.c.created_at_ms.label("issued_at_ms"),
+            trade_tickets.c.terminal_at_ms,
+            trade_aggregates.c.ticket_id.label("aggregate_ticket_id"),
+            trade_aggregates.c.status.label("aggregate_status"),
+            trade_aggregates.c.review_id.label("aggregate_review_id"),
+            trade_reviews.c.review_id,
+            trade_reviews.c.ticket_id.label("review_ticket_id"),
+            trade_reviews.c.revision.label("review_revision"),
+            trade_reviews.c.metrics.label("review_metrics"),
+            trade_reviews.c.created_at_ms.label("review_created_at_ms"),
+            open_incident.c.open_incident_id,
+            open_incident.c.open_incident_opened_at_ms,
+            latest_incident.c.latest_incident_id,
+            latest_incident.c.latest_incident_opened_at_ms,
+        )
+        .select_from(source)
+        .where(*conditions)
+        .order_by(
+            trade_tickets.c.created_at_ms.desc(),
+            trade_tickets.c.ticket_id.desc(),
+        )
+        .limit(query.limit + 1)
+    )
+
+
+def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
+    ticket_id = str(row["ticket_id"])
+    if str(row["aggregate_ticket_id"]) != ticket_id:
+        raise TradeFactsContradiction("Ticket and Aggregate identity mismatch")
+
+    review_id = (
+        None if row["review_id"] is None else str(row["review_id"])
+    )
+    review_metrics = row["review_metrics"]
+    if review_metrics is not None and not isinstance(review_metrics, dict):
+        raise TradeFactsContradiction("current Review metrics are not JSON object")
+    exit_reason = None
+    if isinstance(review_metrics, dict):
+        raw_exit_reason = review_metrics.get("exit_reason")
+        if isinstance(raw_exit_reason, str) and raw_exit_reason.strip():
+            exit_reason = raw_exit_reason.strip()
+
+    for identity_name, time_name in (
+        ("open_incident_id", "open_incident_opened_at_ms"),
+        ("latest_incident_id", "latest_incident_opened_at_ms"),
+    ):
+        if (row[identity_name] is None) != (row[time_name] is None):
+            raise TradeFactsContradiction("partial Incident summary row")
+
+    issued_at_ms = int(row["issued_at_ms"])
+    return TradeItemFacts(
+        ticket_id=ticket_id,
+        strategy_group_id=str(row["strategy_group_id"]),
+        event_spec_id=str(row["event_spec_id"]),
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
+        position_side=cast(
+            Literal["long", "short"], str(row["position_side"])
+        ),
+        ticket_status=str(row["ticket_status"]),
+        aggregate_status=str(row["aggregate_status"]),
+        issued_at_ms=issued_at_ms,
+        terminal_at_ms=(
+            None
+            if row["terminal_at_ms"] is None
+            else int(row["terminal_at_ms"])
+        ),
+        aggregate_review_id=(
+            None
+            if row["aggregate_review_id"] is None
+            else str(row["aggregate_review_id"])
+        ),
+        review_id=review_id,
+        review_ticket_id=(
+            None
+            if row["review_ticket_id"] is None
+            else str(row["review_ticket_id"])
+        ),
+        review_revision=(
+            None
+            if row["review_revision"] is None
+            else int(row["review_revision"])
+        ),
+        review_created_at_ms=(
+            None
+            if row["review_created_at_ms"] is None
+            else int(row["review_created_at_ms"])
+        ),
+        review_metrics=review_metrics,
+        exit_reason=exit_reason,
+        open_incident_id=(
+            None
+            if row["open_incident_id"] is None
+            else str(row["open_incident_id"])
+        ),
+        open_incident_opened_at_ms=(
+            None
+            if row["open_incident_opened_at_ms"] is None
+            else int(row["open_incident_opened_at_ms"])
+        ),
+        latest_incident_id=(
+            None
+            if row["latest_incident_id"] is None
+            else str(row["latest_incident_id"])
+        ),
+        latest_incident_opened_at_ms=(
+            None
+            if row["latest_incident_opened_at_ms"] is None
+            else int(row["latest_incident_opened_at_ms"])
+        ),
+        evidence=(
+            EvidenceRef(
+                kind="ticket",
+                identity=ticket_id,
+                occurred_at_ms=issued_at_ms,
+            ),
+        ),
     )
 
 

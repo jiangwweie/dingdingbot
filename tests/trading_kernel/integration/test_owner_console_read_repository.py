@@ -10,7 +10,10 @@ from sqlalchemy import event
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
-from src.trading_kernel.application.owner_console.models import SignalListQuery
+from src.trading_kernel.application.owner_console.models import (
+    SignalListQuery,
+    TradeListQuery,
+)
 from src.trading_kernel.application.owner_console.overview import (
     build_owner_overview,
 )
@@ -20,6 +23,7 @@ from src.trading_kernel.application.owner_console.signals import (
     build_signal_detail,
     build_signal_page,
 )
+from src.trading_kernel.application.owner_console.trades import build_trade_page
 from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     PostgresOwnerReadRepository,
     _review_metrics,
@@ -494,6 +498,184 @@ async def test_signal_detail_rejects_more_than_256_fact_snapshots(
                 await PostgresOwnerReadRepository(
                     connection
                 ).read_signal_detail_facts("signal:z")
+    finally:
+        await engine.dispose()
+
+
+async def test_trade_list_cursor_is_stable_for_active_and_terminal_mix(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_trades(owner_read_dsn)
+    engine = create_owner_read_engine(owner_read_dsn)
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection,
+        _cursor,
+        statement: str,
+        _parameters,
+        _context,
+        _executemany: bool,
+    ) -> None:
+        statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine.sync_engine, "before_cursor_execute", capture_statement)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            transaction = connection.get_transaction()
+            repository = PostgresOwnerReadRepository(connection)
+            first = build_trade_page(
+                await repository.read_trade_page_facts(
+                    TradeListQuery(
+                        from_ms=1_799_999_000_000,
+                        to_ms=1_800_001_000_000,
+                        limit=2,
+                    )
+                )
+            )
+            assert first.next_cursor is not None
+            second = build_trade_page(
+                await repository.read_trade_page_facts(
+                    TradeListQuery(
+                        from_ms=1_799_999_000_000,
+                        to_ms=1_800_001_000_000,
+                        limit=2,
+                        cursor=first.next_cursor,
+                    )
+                )
+            )
+            assert connection.get_transaction() is transaction
+
+        assert [item.ticket_id for item in first.items] == [
+            "ticket:z",
+            "ticket:y",
+        ]
+        assert [item.ticket_id for item in second.items] == [
+            "ticket:x",
+            "ticket:w",
+        ]
+        list_selects = [item for item in statements if item.startswith("select")]
+        assert len(list_selects) == 2
+        assert "brc_trade_tickets" in list_selects[0]
+        assert "brc_trade_aggregates" in list_selects[0]
+        assert "brc_trade_reviews" in list_selects[0]
+        assert "brc_trade_reviews.review_id = brc_trade_aggregates.review_id" in (
+            list_selects[0]
+        )
+        assert "brc_runtime_incidents" in list_selects[0]
+        assert "brc_runtime_incidents.ticket_id = brc_trade_tickets.ticket_id" in (
+            list_selects[0]
+        )
+        assert "brc_runtime_incidents.status =" in list_selects[0]
+        assert list_selects[0].count("limit") >= 3
+        assert "count(" not in list_selects[0]
+        assert "order by brc_trade_tickets.created_at_ms desc" in list_selects[0]
+        assert "brc_trade_tickets.ticket_id desc" in list_selects[0]
+        assert "(brc_trade_tickets.created_at_ms, " in list_selects[1]
+        assert "brc_trade_tickets.ticket_id) <" in list_selects[1]
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", capture_statement)
+        await engine.dispose()
+
+
+async def test_trade_list_applies_window_and_all_exact_filters(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_trades(owner_read_dsn)
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            repository = PostgresOwnerReadRepository(connection)
+            filtered = build_trade_page(
+                await repository.read_trade_page_facts(
+                    TradeListQuery(
+                        from_ms=1_800_000_000_000,
+                        to_ms=1_800_000_000_001,
+                        strategy_group_id="strategy-group:alpha",
+                        exchange_instrument_id="BTCUSDT",
+                        position_side="long",
+                        aggregate_status="position_protected",
+                    )
+                )
+            )
+            terminal = build_trade_page(
+                await repository.read_trade_page_facts(
+                    TradeListQuery(
+                        from_ms=1_799_999_000_000,
+                        to_ms=1_800_001_000_000,
+                        aggregate_status="terminal",
+                    )
+                )
+            )
+            upper_exclusive = build_trade_page(
+                await repository.read_trade_page_facts(
+                    TradeListQuery(
+                        from_ms=1_799_999_000_000,
+                        to_ms=1_800_000_000_000,
+                    )
+                )
+            )
+
+        assert [item.ticket_id for item in filtered.items] == ["ticket:z"]
+        assert [item.ticket_id for item in terminal.items] == [
+            "ticket:y",
+            "ticket:x",
+            "ticket:w",
+            "ticket:v",
+        ]
+        assert [item.ticket_id for item in upper_exclusive.items] == [
+            "ticket:w",
+            "ticket:v",
+        ]
+    finally:
+        await engine.dispose()
+
+
+async def test_trade_list_uses_only_current_review_and_keeps_incident_bound(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_trades(owner_read_dsn)
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            page = build_trade_page(
+                await PostgresOwnerReadRepository(
+                    connection
+                ).read_trade_page_facts(
+                    TradeListQuery(
+                        from_ms=1_799_999_000_000,
+                        to_ms=1_800_001_000_000,
+                    )
+                )
+            )
+
+        rows = {item.ticket_id: item for item in page.items}
+        assert rows["ticket:y"].review_id == "review:y:v2"
+        assert rows["ticket:y"].review_revision == 2
+        assert rows["ticket:y"].net_pnl.value == Decimal("3.5100")
+        assert [
+            ref.identity
+            for ref in rows["ticket:y"].evidence
+            if ref.kind == "review"
+        ] == ["review:y:v2"]
+        assert rows["ticket:z"].lifecycle_stage == "protection"
+        assert rows["ticket:z"].net_pnl.unavailable_reason == "ticket_active"
+        assert rows["ticket:z"].attention_items == (
+            "open_incident:incident:z:older-open",
+        )
+        assert [
+            ref.identity
+            for ref in rows["ticket:z"].evidence
+            if ref.kind == "incident"
+        ] == ["incident:z:older-open", "incident:z:resolved:21"]
+        assert rows["ticket:x"].net_pnl.unavailable_reason == "review_missing"
+        assert rows["ticket:w"].funding.unavailable_reason == (
+            "funding_unavailable"
+        )
+        assert rows["ticket:w"].net_pnl.value is None
+        assert rows["ticket:v"].net_pnl.unavailable_reason == (
+            "incomplete_review_economics"
+        )
     finally:
         await engine.dispose()
 
@@ -1347,6 +1529,294 @@ async def _seed_current_reviews(
                 count,
                 malformed_review_number,
                 missing_metric_key,
+            )
+    finally:
+        await connection.close()
+
+
+async def _seed_owner_console_trades(dsn: str) -> None:
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    digest = "sha256:" + "a" * 64
+    created_at_ms = 1_800_000_000_000
+    tickets = (
+        (
+            "ticket:z",
+            "strategy-group:alpha",
+            "BTCUSDT",
+            "long",
+            "issued",
+            created_at_ms,
+            None,
+            "active:ticket:z",
+        ),
+        (
+            "ticket:y",
+            "strategy-group:alpha",
+            "ETHUSDT",
+            "short",
+            "terminal",
+            created_at_ms,
+            created_at_ms + 30_000,
+            None,
+        ),
+        (
+            "ticket:x",
+            "strategy-group:beta",
+            "BTCUSDT",
+            "short",
+            "terminal",
+            created_at_ms,
+            created_at_ms + 30_000,
+            None,
+        ),
+        (
+            "ticket:w",
+            "strategy-group:beta",
+            "SOLUSDT",
+            "long",
+            "terminal",
+            created_at_ms - 100,
+            created_at_ms + 30_000,
+            None,
+        ),
+        (
+            "ticket:v",
+            "strategy-group:gamma",
+            "BNBUSDT",
+            "long",
+            "terminal",
+            created_at_ms - 200,
+            created_at_ms + 30_000,
+            None,
+        ),
+    )
+    try:
+        async with connection.transaction():
+            await connection.execute(
+                """
+                INSERT INTO brc_strategy_universe_versions (
+                    universe_version_id, strategy_group_id, event_spec_id,
+                    universe_version, semantic_digest, lifecycle_state,
+                    installed_at_ms, activated_at_ms, retired_at_ms,
+                    abandoned_at_ms, abandon_reason_code
+                ) VALUES (
+                    'universe:owner-console-trades', 'strategy-group:test',
+                    'event-spec:test', 1, $1, 'active', $2, $2,
+                    NULL, NULL, NULL
+                )
+                """,
+                digest,
+                created_at_ms,
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_trade_tickets (
+                    ticket_id, exposure_episode_id, signal_event_id,
+                    strategy_group_id, strategy_version_id, event_spec_id,
+                    universe_version_id, universe_semantic_digest,
+                    runtime_profile_id, owner_policy_id, owner_policy_version,
+                    runtime_scope_id, runtime_scope_version, account_id,
+                    venue_id, exchange_instrument_id, position_side,
+                    netting_domain_key, active_netting_domain_key,
+                    exposure_family, active_family_ticket_count_at_claim,
+                    family_ticket_limit, directional_risk_at_stop_at_claim,
+                    directional_stop_risk_limit_fraction,
+                    min_materialization_ratio, minimum_stop_risk_budget,
+                    exit_policy_id, exit_policy_semantic_hash,
+                    entry_reference_price, quantity, notional,
+                    capacity_claim_id, planned_stop_risk_budget,
+                    post_fill_stop_risk_limit, selected_leverage,
+                    leverage_change_required, reserved_margin,
+                    risk_reservation_basis, margin_mode,
+                    cross_margin_stress_model_id, post_stop_stress_multiple,
+                    claim_stress_proof_digest, risk_at_stop,
+                    entry_order_type, entry_limit_price, initial_stop_price,
+                    pre_tp1_reclaim_price, exposure_session_end_ms,
+                    take_profit_prices, take_profit_quantities, fact_digest,
+                    decision_digest, status, created_at_ms, expires_at_ms,
+                    terminal_at_ms
+                ) VALUES (
+                    $1::varchar(160), 'episode:' || $1::varchar(160),
+                    'signal:' || $1::varchar(160), $2::varchar(160),
+                    'strategy-version:test', 'event-spec:test',
+                    'universe:owner-console-trades', $9::text,
+                    'profile:owner-console', 'policy:owner-console', 1,
+                    'runtime-scope:test', 1, 'owner-console-account',
+                    'binance-usdm', $3::varchar(160), $4::varchar(160),
+                    'binance-usdm:owner-console-account:'
+                        || $3::varchar(160) || ':' || $4::varchar(160),
+                    $8::varchar(160), 'opening_range', 0, 3, 0, 0.04, 0.5, 1,
+                    'exit-policy:test', 'sha256:' || repeat('b', 64),
+                    100, 1, 100, 'claim:' || $1::varchar(160),
+                    1, 1.1, 1, false, 100,
+                    'stop_risk', 'cross', 'stress:test', 2,
+                    'sha256:' || repeat('c', 64), 1, 'market', NULL, 99,
+                    NULL, NULL, '[]'::jsonb, '[]'::jsonb,
+                    'sha256:' || repeat('d', 64),
+                    'sha256:' || repeat('e', 64), $5::varchar(160),
+                    $6::bigint, $6::bigint + 60_000, $7::bigint
+                )
+                """,
+                tuple((*ticket, digest) for ticket in tickets),
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_trade_aggregates (
+                    ticket_id, status, version, last_event_sequence,
+                    entry_lane_held, position_qty, average_fill_price,
+                    actual_stop_risk, venue_reported_liquidation_price,
+                    post_fill_risk_status, post_fill_disposition,
+                    post_fill_stress_status, post_fill_stress_proof_digest,
+                    protected_qty, entry_exchange_order_id,
+                    initial_stop_exchange_order_id,
+                    active_stop_exchange_order_id, active_stop_price,
+                    tp1_exchange_order_id, tp1_target_qty, tp1_filled_qty,
+                    break_even_floor_price,
+                    pending_replaced_stop_exchange_order_id,
+                    pending_stop_price, pending_stop_watermark_ms,
+                    runner_stop_watermark_ms, pending_cancel_exchange_order_id,
+                    exit_exchange_order_id, review_id, lifecycle_due_at_ms,
+                    reconciliation_due_at_ms, updated_at_ms
+                ) VALUES (
+                    $1::varchar(160), $2::varchar(160),
+                    1, 1, false, 0, 100, 1, NULL,
+                    'within_limit', 'continue', 'within_limit',
+                    'sha256:' || repeat('f', 64), 0,
+                    'entry:' || $1::varchar(160),
+                    NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, NULL,
+                    NULL, NULL, NULL, 'exit:' || $1::varchar(160),
+                    $3::varchar(160), NULL, NULL, $4::bigint
+                )
+                """,
+                (
+                    ("ticket:z", "position_protected", None, created_at_ms),
+                    ("ticket:y", "terminal", "review:y:v2", created_at_ms),
+                    ("ticket:x", "terminal", None, created_at_ms),
+                    ("ticket:w", "terminal", "review:w:v1", created_at_ms),
+                    ("ticket:v", "terminal", "review:v:v1", created_at_ms),
+                ),
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_trade_reviews (
+                    review_id, ticket_id, revision, supersedes_review_id,
+                    outcome, metrics, decision_impact, created_at_ms
+                ) VALUES (
+                    $1::varchar(160), $2::varchar(160), $3::bigint,
+                    $4::varchar(160), 'terminal_flat', $5::jsonb, '{}',
+                    $6::bigint
+                )
+                """,
+                (
+                    (
+                        "review:y:v1",
+                        "ticket:y",
+                        1,
+                        None,
+                        json.dumps(
+                            {
+                                "economics_completeness": "complete",
+                                "gross_realized_pnl_quote": "1000",
+                                "trading_fees_quote": "1",
+                                "funding_quote": "0",
+                                "net_pnl_quote": "999",
+                                "planned_r_multiple": "99",
+                            }
+                        ),
+                        created_at_ms + 50_000,
+                    ),
+                    (
+                        "review:y:v2",
+                        "ticket:y",
+                        2,
+                        "review:y:v1",
+                        json.dumps(
+                            {
+                                "economics_completeness": "complete",
+                                "gross_realized_pnl_quote": "4.0000",
+                                "trading_fees_quote": "0.4000",
+                                "funding_quote": "-0.0900",
+                                "net_pnl_quote": "3.5100",
+                                "planned_r_multiple": "0.4800",
+                            }
+                        ),
+                        created_at_ms + 40_000,
+                    ),
+                    (
+                        "review:w:v1",
+                        "ticket:w",
+                        1,
+                        None,
+                        json.dumps(
+                            {
+                                "economics_completeness": "funding_unavailable",
+                                "gross_realized_pnl_quote": "4.0000",
+                                "trading_fees_quote": "0.4000",
+                                "funding_quote": None,
+                                "net_pnl_quote": None,
+                                "planned_r_multiple": None,
+                                "funding_unavailable_reason": (
+                                    "overlapping_instrument_exposure"
+                                ),
+                            }
+                        ),
+                        created_at_ms + 40_000,
+                    ),
+                    (
+                        "review:v:v1",
+                        "ticket:v",
+                        1,
+                        None,
+                        json.dumps(
+                            {
+                                "economics_completeness": "complete",
+                                "gross_realized_pnl_quote": "4.0000",
+                                "trading_fees_quote": "0.4000",
+                                "funding_quote": "-0.0900",
+                                "planned_r_multiple": "0.4800",
+                            }
+                        ),
+                        created_at_ms + 40_000,
+                    ),
+                ),
+            )
+            await connection.execute(
+                """
+                INSERT INTO brc_runtime_incidents (
+                    incident_id, ticket_id, incident_kind, status,
+                    first_blocker, entry_block_scope, entry_block_key,
+                    details, opened_at_ms, resolved_at_ms
+                ) VALUES (
+                    'incident:z:older-open', 'ticket:z', 'entry_outcome_unknown',
+                    'open', 'exact recovery required', 'none', NULL, '{}',
+                    $1, NULL
+                )
+                """,
+                created_at_ms - 120_000,
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_runtime_incidents (
+                    incident_id, ticket_id, incident_kind, status,
+                    first_blocker, entry_block_scope, entry_block_key,
+                    details, opened_at_ms, resolved_at_ms
+                ) VALUES (
+                    'incident:z:resolved:' || $1::integer::text, 'ticket:z',
+                    'recovered_incident', 'resolved', 'resolved', 'none', NULL,
+                    '{}', $2::bigint, $2::bigint + 1
+                )
+                """,
+                tuple(
+                    (number, created_at_ms - 30_000 + number)
+                    for number in range(1, 22)
+                ),
             )
     finally:
         await connection.close()

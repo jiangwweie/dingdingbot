@@ -196,8 +196,8 @@ def test_nested_financial_values_serialize_as_exact_strings() -> None:
 
     dumped = trade.model_dump(mode="json")
 
-    assert dumped["net_pnl"]["value"] == "3.5100"
-    assert dumped["net_r"]["value"] == "0.4800"
+    assert dumped["review_metrics"]["net_pnl_quote"] == "3.5100"
+    assert dumped["review_metrics"]["planned_r_multiple"] == "0.4800"
 
 
 def _encode_unvalidated_cursor_document(document: object) -> str:
