@@ -1,3 +1,5 @@
+import base64
+import json
 from decimal import Decimal
 
 import pytest
@@ -64,6 +66,31 @@ def test_cursor_round_trip_is_exact_and_rejects_invalid_input() -> None:
     ):
         with pytest.raises(ValueError, match="^invalid page cursor$"):
             decode_cursor(malformed)
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    (
+        "游标",
+        "A" * 2049,
+        None,
+        {"sort_ms": -1, "identity": "signal:1"},
+        {"sort_ms": 9_223_372_036_854_775_808, "identity": "signal:1"},
+        {"sort_ms": 1, "identity": ""},
+        {"sort_ms": 1, "identity": "x" * 161},
+    ),
+)
+def test_cursor_rejects_external_text_and_postgres_key_bounds(
+    malformed: str | dict[str, object] | None,
+) -> None:
+    encoded = (
+        malformed
+        if isinstance(malformed, str)
+        else _encode_unvalidated_cursor_document(malformed)
+    )
+
+    with pytest.raises(ValueError, match="^invalid page cursor$"):
+        decode_cursor(encoded)
 
 
 def test_freshness_values_are_closed() -> None:
@@ -171,3 +198,8 @@ def test_nested_financial_values_serialize_as_exact_strings() -> None:
 
     assert dumped["net_pnl"]["value"] == "3.5100"
     assert dumped["net_r"]["value"] == "0.4800"
+
+
+def _encode_unvalidated_cursor_document(document: object) -> str:
+    payload = json.dumps(document, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")

@@ -20,6 +20,13 @@ from tests.trading_kernel.unit.owner_console.factories import (
     signal_item_facts,
 )
 
+_REJECTED_SHADOW_BASE = {
+    "decision_status": "rejected",
+    "first_blocker": "gross_stop_risk_capacity_exhausted",
+    "ticket_id": None,
+    "shadow_outcome_id": "shadow:1",
+}
+
 
 def test_rejected_signal_has_first_blocker_and_no_ticket_link() -> None:
     item = build_signal_item(
@@ -32,6 +39,7 @@ def test_rejected_signal_has_first_blocker_and_no_ticket_link() -> None:
             shadow_mfe_r="1.25",
             shadow_mae_r="-0.40",
             shadow_completion_reason="horizon_complete",
+            shadow_observed_through_ms=1_800_000_000_000,
             shadow_completed_at_ms=1_800_000_000_000,
         )
     )
@@ -103,6 +111,7 @@ def test_signal_detail_keeps_persisted_facts_and_shadow_observational() -> None:
                 shadow_mfe_r="1.250000000000000001",
                 shadow_mae_r="-0.400000000000000001",
                 shadow_completion_reason="horizon_complete",
+                shadow_observed_through_ms=1_800_000_000_000,
                 shadow_completed_at_ms=1_800_000_000_000,
             )
         )
@@ -117,6 +126,144 @@ def test_signal_detail_keeps_persisted_facts_and_shadow_observational() -> None:
     assert detail.shadow_summary.mfe_r == Decimal("1.250000000000000001")
     assert "observation" in detail.shadow_summary.interpretation.lower()
     assert "not execution" in detail.shadow_summary.interpretation.lower()
+
+
+@pytest.mark.parametrize(
+    ("status", "status_facts"),
+    (
+        (
+            "pending",
+            {
+                "shadow_mfe_r": None,
+                "shadow_mae_r": None,
+                "shadow_completion_reason": None,
+                "shadow_observed_through_ms": None,
+                "shadow_completed_at_ms": None,
+            },
+        ),
+        (
+            "claimed",
+            {
+                "shadow_mfe_r": None,
+                "shadow_mae_r": None,
+                "shadow_completion_reason": None,
+                "shadow_observed_through_ms": None,
+                "shadow_completed_at_ms": None,
+            },
+        ),
+        (
+            "completed",
+            {
+                "shadow_mfe_r": "1.25",
+                "shadow_mae_r": "-0.40",
+                "shadow_completion_reason": "horizon_complete",
+                "shadow_observed_through_ms": 1_800_000_000_000,
+                "shadow_completed_at_ms": 1_800_000_000_000,
+            },
+        ),
+        (
+            "unavailable",
+            {
+                "shadow_mfe_r": None,
+                "shadow_mae_r": None,
+                "shadow_completion_reason": "market_facts_unavailable",
+                "shadow_observed_through_ms": None,
+                "shadow_completed_at_ms": 1_800_000_000_000,
+            },
+        ),
+    ),
+)
+def test_shadow_status_matrix_accepts_only_complete_persisted_shapes(
+    status: str,
+    status_facts: dict[str, object],
+) -> None:
+    item = build_signal_item(
+        signal_item_facts(
+            **_REJECTED_SHADOW_BASE,
+            shadow_status=status,
+            **status_facts,
+        )
+    )
+
+    assert item.shadow_summary is not None
+    assert item.shadow_summary.status == status
+    assert item.shadow_summary.observed_through_ms == status_facts[
+        "shadow_observed_through_ms"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status", "invalid_facts"),
+    (
+        ("pending", {"shadow_completed_at_ms": 1}),
+        ("pending", {"shadow_completion_reason": "partial"}),
+        ("pending", {"shadow_observed_through_ms": 1}),
+        ("pending", {"shadow_mfe_r": "0.1"}),
+        ("pending", {"shadow_mae_r": "-0.1"}),
+        ("claimed", {"shadow_completed_at_ms": 1}),
+        ("claimed", {"shadow_completion_reason": "partial"}),
+        ("claimed", {"shadow_observed_through_ms": 1}),
+        ("claimed", {"shadow_mfe_r": "0.1"}),
+        ("claimed", {"shadow_mae_r": "-0.1"}),
+        ("completed", {"shadow_completed_at_ms": None}),
+        ("completed", {"shadow_completion_reason": None}),
+        ("completed", {"shadow_observed_through_ms": None}),
+        ("completed", {"shadow_mfe_r": None}),
+        ("completed", {"shadow_mae_r": None}),
+        ("unavailable", {"shadow_completed_at_ms": None}),
+        ("unavailable", {"shadow_completion_reason": None}),
+        ("unavailable", {"shadow_observed_through_ms": 1}),
+        ("unavailable", {"shadow_mfe_r": "0.1"}),
+        ("unavailable", {"shadow_mae_r": "-0.1"}),
+    ),
+)
+def test_shadow_status_matrix_rejects_partial_observational_evidence(
+    status: str,
+    invalid_facts: dict[str, object],
+) -> None:
+    valid_shapes: dict[str, dict[str, object]] = {
+        "pending": {
+            "shadow_mfe_r": None,
+            "shadow_mae_r": None,
+            "shadow_completion_reason": None,
+            "shadow_observed_through_ms": None,
+            "shadow_completed_at_ms": None,
+        },
+        "claimed": {
+            "shadow_mfe_r": None,
+            "shadow_mae_r": None,
+            "shadow_completion_reason": None,
+            "shadow_observed_through_ms": None,
+            "shadow_completed_at_ms": None,
+        },
+        "completed": {
+            "shadow_mfe_r": "1.25",
+            "shadow_mae_r": "-0.40",
+            "shadow_completion_reason": "horizon_complete",
+            "shadow_observed_through_ms": 1,
+            "shadow_completed_at_ms": 1,
+        },
+        "unavailable": {
+            "shadow_mfe_r": None,
+            "shadow_mae_r": None,
+            "shadow_completion_reason": "market_facts_unavailable",
+            "shadow_observed_through_ms": None,
+            "shadow_completed_at_ms": 1,
+        },
+    }
+    valid_facts = valid_shapes[status]
+
+    with pytest.raises(
+        SignalFactsContradiction,
+        match="Shadow Outcome status shape mismatch",
+    ):
+        build_signal_item(
+            signal_item_facts(
+                **_REJECTED_SHADOW_BASE,
+                shadow_status=status,
+                **(valid_facts | invalid_facts),
+            )
+        )
 
 
 def test_signal_detail_rejects_fact_snapshot_identity_mismatch() -> None:

@@ -155,6 +155,7 @@ def _shadow_summary(facts: SignalItemFacts) -> ShadowOutcomeSummary | None:
         facts.shadow_mfe_r,
         facts.shadow_mae_r,
         facts.shadow_completion_reason,
+        facts.shadow_observed_through_ms,
         facts.shadow_completed_at_ms,
     )
     if facts.shadow_outcome_id is None:
@@ -163,19 +164,38 @@ def _shadow_summary(facts: SignalItemFacts) -> ShadowOutcomeSummary | None:
         return None
     if facts.shadow_status is None:
         raise SignalFactsContradiction("Shadow Outcome status is missing")
-    if facts.shadow_status == "completed":
-        if (
-            facts.shadow_mfe_r is None
-            or facts.shadow_mae_r is None
-            or facts.shadow_completion_reason is None
-            or facts.shadow_completed_at_ms is None
-        ):
-            raise SignalFactsContradiction(
-                "completed Shadow Outcome facts are incomplete"
-            )
-    elif facts.shadow_mfe_r is not None or facts.shadow_mae_r is not None:
+    pending_or_claimed_shape = (
+        facts.shadow_completed_at_ms is None
+        and facts.shadow_completion_reason is None
+        and facts.shadow_observed_through_ms is None
+        and facts.shadow_mfe_r is None
+        and facts.shadow_mae_r is None
+    )
+    completed_shape = (
+        facts.shadow_completed_at_ms is not None
+        and facts.shadow_completion_reason is not None
+        and facts.shadow_observed_through_ms is not None
+        and facts.shadow_mfe_r is not None
+        and facts.shadow_mae_r is not None
+    )
+    unavailable_shape = (
+        facts.shadow_completed_at_ms is not None
+        and facts.shadow_completion_reason is not None
+        and facts.shadow_observed_through_ms is None
+        and facts.shadow_mfe_r is None
+        and facts.shadow_mae_r is None
+    )
+    valid_shape = (
+        facts.shadow_status in {"pending", "claimed"}
+        and pending_or_claimed_shape
+    ) or (
+        facts.shadow_status == "completed" and completed_shape
+    ) or (
+        facts.shadow_status == "unavailable" and unavailable_shape
+    )
+    if not valid_shape:
         raise SignalFactsContradiction(
-            "non-completed Shadow Outcome has excursion values"
+            "Shadow Outcome status shape mismatch"
         )
 
     shadow_evidence = EvidenceRef(
@@ -189,6 +209,7 @@ def _shadow_summary(facts: SignalItemFacts) -> ShadowOutcomeSummary | None:
         mfe_r=facts.shadow_mfe_r,
         mae_r=facts.shadow_mae_r,
         completion_reason=facts.shadow_completion_reason,
+        observed_through_ms=facts.shadow_observed_through_ms,
         completed_at_ms=facts.shadow_completed_at_ms,
         evidence=(shadow_evidence,),
     )

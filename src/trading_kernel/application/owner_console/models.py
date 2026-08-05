@@ -79,8 +79,8 @@ LifecycleStageKey = Literal[
 
 
 class PageCursor(FrozenModel):
-    sort_ms: int
-    identity: str
+    sort_ms: int = Field(ge=0, le=9_223_372_036_854_775_807)
+    identity: str = Field(min_length=1, max_length=160)
 
 
 DataT = TypeVar("DataT")
@@ -114,6 +114,8 @@ def decode_cursor(encoded: str) -> PageCursor:
     """Decode and validate a keyset cursor through its frozen model."""
 
     try:
+        if len(encoded) > 2048:
+            raise ValueError("encoded page cursor exceeds 2048 characters")
         raw = encoded.encode("ascii")
         padding = b"=" * (-len(raw) % 4)
         payload = base64.b64decode(raw + padding, altchars=b"-_", validate=True)
@@ -208,6 +210,7 @@ class ShadowOutcomeSummary(FrozenModel):
     mfe_r: Decimal | None
     mae_r: Decimal | None
     completion_reason: str | None
+    observed_through_ms: int | None
     completed_at_ms: int | None
     interpretation: Literal[
         "Observation only; this Shadow Outcome is not execution."
@@ -431,6 +434,7 @@ class SignalItemFacts(FrozenModel):
     shadow_mfe_r: Decimal | None
     shadow_mae_r: Decimal | None
     shadow_completion_reason: str | None
+    shadow_observed_through_ms: int | None
     shadow_completed_at_ms: int | None
     evidence: tuple[EvidenceRef, ...]
 

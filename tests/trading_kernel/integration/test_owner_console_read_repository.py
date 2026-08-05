@@ -421,6 +421,7 @@ async def test_signal_detail_reads_exact_identity_bound_facts_and_decimal_shadow
         assert detail.shadow_summary.mae_r == Decimal(
             "-0.400000000000000001"
         )
+        assert detail.shadow_summary.observed_through_ms == 1_800_000_900_000
         assert [ref.identity for ref in detail.evidence] == [
             "signal:z",
             "admission:z",

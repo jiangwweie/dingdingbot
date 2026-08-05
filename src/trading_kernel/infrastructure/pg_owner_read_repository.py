@@ -643,6 +643,9 @@ def _signal_joined_select() -> sa.Select[Any]:
         shadow_outcomes_current.c.completion_reason.label(
             "shadow_completion_reason"
         ),
+        shadow_outcomes_current.c.observed_through_ms.label(
+            "shadow_observed_through_ms"
+        ),
         shadow_outcomes_current.c.completed_at_ms.label(
             "shadow_completed_at_ms"
         ),
@@ -696,6 +699,9 @@ def _exact_shadow_query(admission_decision_id: str) -> sa.Select[Any]:
             shadow_outcomes_current.c.mae_r.label("shadow_mae_r"),
             shadow_outcomes_current.c.completion_reason.label(
                 "shadow_completion_reason"
+            ),
+            shadow_outcomes_current.c.observed_through_ms.label(
+                "shadow_observed_through_ms"
             ),
             shadow_outcomes_current.c.completed_at_ms.label(
                 "shadow_completed_at_ms"
@@ -758,6 +764,7 @@ def _signal_item_facts(
     shadow_mfe_r = None
     shadow_mae_r = None
     shadow_completion_reason = None
+    shadow_observed_through_ms = None
     shadow_completed_at_ms = None
     if shadow is not None:
         shadow_outcome_id = str(shadow["shadow_outcome_id"])
@@ -774,6 +781,11 @@ def _signal_item_facts(
             None
             if shadow["shadow_completion_reason"] is None
             else str(shadow["shadow_completion_reason"])
+        )
+        shadow_observed_through_ms = (
+            None
+            if shadow["shadow_observed_through_ms"] is None
+            else int(shadow["shadow_observed_through_ms"])
         )
         shadow_completed_at_ms = (
             None
@@ -830,6 +842,7 @@ def _signal_item_facts(
         shadow_mfe_r=shadow_mfe_r,
         shadow_mae_r=shadow_mae_r,
         shadow_completion_reason=shadow_completion_reason,
+        shadow_observed_through_ms=shadow_observed_through_ms,
         shadow_completed_at_ms=shadow_completed_at_ms,
         evidence=tuple(evidence),
     )

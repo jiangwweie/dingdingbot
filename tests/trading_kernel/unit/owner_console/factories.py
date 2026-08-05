@@ -118,6 +118,7 @@ def signal_item_facts(**overrides: Any) -> SignalItemFacts:
         shadow_mfe_r=None,
         shadow_mae_r=None,
         shadow_completion_reason=None,
+        shadow_observed_through_ms=None,
         shadow_completed_at_ms=None,
         evidence=(
             _evidence("signal", "signal:1", 1_799_999_800_000),
