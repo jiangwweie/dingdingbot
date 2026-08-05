@@ -13,12 +13,24 @@ from src.trading_kernel.application.owner_console.models import (
     MoneyMetric,
     OverviewFacts,
     ProgrammaticReviewFacts,
+    SignalDetailFacts,
+    SignalFactSnapshotFacts,
     SignalItemFacts,
     TradeCausalityFacts,
     TradeItemFacts,
 )
 
-FactT = TypeVar("FactT", bound=OverviewFacts | SignalItemFacts | TradeItemFacts | TradeCausalityFacts | ProgrammaticReviewFacts)
+FactT = TypeVar(
+    "FactT",
+    bound=(
+        OverviewFacts
+        | SignalItemFacts
+        | SignalDetailFacts
+        | TradeItemFacts
+        | TradeCausalityFacts
+        | ProgrammaticReviewFacts
+    ),
+)
 
 
 def _copy_with_named_overrides(model: FactT, overrides: dict[str, Any]) -> FactT:
@@ -86,7 +98,7 @@ def overview_facts(**overrides: Any) -> OverviewFacts:
 
 def signal_item_facts(**overrides: Any) -> SignalItemFacts:
     facts = SignalItemFacts(
-        signal_id="signal:1",
+        signal_event_id="signal:1",
         exposure_episode_id="episode:1",
         strategy_group_id="strategy-group:opening-range",
         strategy_version_id="strategy-version:1",
@@ -100,11 +112,45 @@ def signal_item_facts(**overrides: Any) -> SignalItemFacts:
         first_blocker=None,
         binding_constraint="remaining_initial_margin",
         ticket_id="ticket:1",
-        shadow_net_r=None,
-        shadow_unavailable_reason="admitted_signal_has_no_shadow_outcome",
+        decided_at_ms=1_799_999_900_000,
+        shadow_outcome_id=None,
+        shadow_status=None,
+        shadow_mfe_r=None,
+        shadow_mae_r=None,
+        shadow_completion_reason=None,
+        shadow_completed_at_ms=None,
         evidence=(
             _evidence("signal", "signal:1", 1_799_999_800_000),
             _evidence("admission", "admission:1", 1_799_999_900_000),
+        ),
+    )
+    return _copy_with_named_overrides(facts, overrides)
+
+
+def signal_detail_facts(**overrides: Any) -> SignalDetailFacts:
+    facts = SignalDetailFacts(
+        signal=signal_item_facts(),
+        fact_snapshots=(
+            SignalFactSnapshotFacts(
+                signal_event_id="signal:1",
+                fact_definition_id="fact:condition",
+                role="condition",
+                value=True,
+                satisfied=True,
+                observed_at_ms=1_799_999_800_000,
+                valid_until_ms=1_800_000_100_000,
+                projection_version=1,
+            ),
+            SignalFactSnapshotFacts(
+                signal_event_id="signal:1",
+                fact_definition_id="fact:reference",
+                role="protection_reference",
+                value="99.125000000000000001",
+                satisfied=True,
+                observed_at_ms=1_799_999_800_000,
+                valid_until_ms=1_800_000_100_000,
+                projection_version=1,
+            ),
         ),
     )
     return _copy_with_named_overrides(facts, overrides)

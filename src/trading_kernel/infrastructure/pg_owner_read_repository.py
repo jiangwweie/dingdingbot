@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import sqlalchemy as sa
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -20,6 +21,17 @@ from src.trading_kernel.application.owner_console.models import (
     MoneyMetric,
     OverviewEvidenceGap,
     OverviewFacts,
+    PageCursor,
+    SignalDetailFacts,
+    SignalFactSnapshotFacts,
+    SignalItemFacts,
+    SignalListQuery,
+    SignalPageFacts,
+    decode_cursor,
+)
+from src.trading_kernel.application.owner_console.signals import (
+    SignalFactsContradiction,
+    SignalNotFound,
 )
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
@@ -30,7 +42,9 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_incidents,
     runtime_profiles,
     runtime_scopes_current,
+    shadow_outcomes_current,
     signal_events,
+    signal_fact_snapshots,
     trade_aggregates,
     trade_reviews,
     trade_tickets,
@@ -431,6 +445,513 @@ class PostgresOwnerReadRepository:
             execution_incident_count=incident_total,
             evidence=evidence,
         )
+
+    async def read_signal_page_facts(
+        self,
+        query: SignalListQuery,
+    ) -> SignalPageFacts:
+        """Read one bounded limit+1 Signal page on the supplied connection."""
+
+        cursor = None if query.cursor is None else decode_cursor(query.cursor)
+        rows = (
+            await self._connection.execute(
+                _signal_list_query(query=query, cursor=cursor)
+            )
+        ).mappings().all()
+        return SignalPageFacts(
+            items=tuple(_signal_item_facts_from_joined_row(row) for row in rows),
+            requested_limit=query.limit,
+        )
+
+    async def read_signal_detail_facts(
+        self,
+        signal_event_id: str,
+    ) -> SignalDetailFacts:
+        """Read one exact Signal, Decision, bounded facts, and optional Shadow."""
+
+        signal_rows = (
+            await self._connection.execute(
+                _exact_signal_query(signal_event_id)
+            )
+        ).mappings().all()
+        if not signal_rows:
+            raise SignalNotFound(f"Signal not found: {signal_event_id}")
+        if len(signal_rows) != 1:
+            raise SignalFactsContradiction(
+                "exact Signal identity returned multiple rows"
+            )
+        signal = signal_rows[0]
+        if str(signal["signal_event_id"]) != signal_event_id:
+            raise SignalFactsContradiction("exact Signal identity mismatch")
+
+        decision_rows = (
+            await self._connection.execute(
+                _exact_admission_query(signal_event_id)
+            )
+        ).mappings().all()
+        if len(decision_rows) != 1:
+            raise SignalFactsContradiction(
+                "Signal requires exactly one AdmissionDecision"
+            )
+        decision = decision_rows[0]
+
+        fact_rows = (
+            await self._connection.execute(
+                _exact_signal_facts_query(signal_event_id)
+            )
+        ).mappings().all()
+
+        admission_decision_id = str(decision["admission_decision_id"])
+        shadow_rows = (
+            await self._connection.execute(
+                _exact_shadow_query(admission_decision_id)
+            )
+        ).mappings().all()
+        if len(shadow_rows) > 1:
+            raise SignalFactsContradiction(
+                "AdmissionDecision has multiple Shadow Outcomes"
+            )
+        if len(fact_rows) > 256:
+            raise SignalFactsContradiction(
+                "Signal has more than 256 fact snapshots"
+            )
+        shadow = shadow_rows[0] if shadow_rows else None
+        _validate_signal_admission_identity(signal=signal, decision=decision)
+        _validate_shadow_identity(decision=decision, shadow=shadow)
+
+        item = _signal_item_facts_from_detail_rows(
+            signal=signal,
+            decision=decision,
+            shadow=shadow,
+        )
+        snapshots = tuple(
+            _signal_fact_snapshot_from_row(
+                row,
+                expected_signal_event_id=signal_event_id,
+            )
+            for row in fact_rows
+        )
+        return SignalDetailFacts(signal=item, fact_snapshots=snapshots)
+
+
+def _signal_list_query(
+    *,
+    query: SignalListQuery,
+    cursor: PageCursor | None,
+) -> sa.Select[Any]:
+    conditions: list[sa.ColumnElement[bool]] = [
+        signal_events.c.occurred_at_ms >= query.from_ms,
+        signal_events.c.occurred_at_ms < query.to_ms,
+    ]
+    if query.strategy_group_id is not None:
+        conditions.append(
+            signal_events.c.strategy_group_id == query.strategy_group_id
+        )
+    if query.exchange_instrument_id is not None:
+        conditions.append(
+            signal_events.c.exchange_instrument_id
+            == query.exchange_instrument_id
+        )
+    if query.position_side is not None:
+        conditions.append(signal_events.c.position_side == query.position_side)
+    if query.decision_status is not None:
+        conditions.append(
+            admission_decisions.c.decision_status == query.decision_status
+        )
+    if cursor is not None:
+        conditions.append(
+            sa.tuple_(
+                signal_events.c.occurred_at_ms,
+                signal_events.c.signal_event_id,
+            )
+            < sa.tuple_(
+                sa.literal(cursor.sort_ms),
+                sa.literal(cursor.identity),
+            )
+        )
+
+    return (
+        _signal_joined_select()
+        .where(*conditions)
+        .order_by(
+            signal_events.c.occurred_at_ms.desc(),
+            signal_events.c.signal_event_id.desc(),
+        )
+        .limit(query.limit + 1)
+    )
+
+
+def _signal_joined_select() -> sa.Select[Any]:
+    return sa.select(
+        signal_events.c.signal_event_id,
+        signal_events.c.exposure_episode_id,
+        signal_events.c.runtime_scope_id,
+        signal_events.c.runtime_scope_version,
+        signal_events.c.strategy_group_id,
+        signal_events.c.strategy_version_id,
+        signal_events.c.event_spec_id,
+        signal_events.c.universe_version_id,
+        signal_events.c.universe_semantic_digest,
+        signal_events.c.exchange_instrument_id,
+        signal_events.c.position_side,
+        signal_events.c.occurred_at_ms,
+        signal_events.c.expires_at_ms,
+        admission_decisions.c.admission_decision_id,
+        admission_decisions.c.signal_event_id.label("decision_signal_event_id"),
+        admission_decisions.c.exposure_episode_id.label(
+            "decision_exposure_episode_id"
+        ),
+        admission_decisions.c.runtime_scope_id.label(
+            "decision_runtime_scope_id"
+        ),
+        admission_decisions.c.runtime_scope_version.label(
+            "decision_runtime_scope_version"
+        ),
+        admission_decisions.c.strategy_group_id.label(
+            "decision_strategy_group_id"
+        ),
+        admission_decisions.c.strategy_version_id.label(
+            "decision_strategy_version_id"
+        ),
+        admission_decisions.c.event_spec_id.label("decision_event_spec_id"),
+        admission_decisions.c.universe_version_id.label(
+            "decision_universe_version_id"
+        ),
+        admission_decisions.c.universe_semantic_digest.label(
+            "decision_universe_semantic_digest"
+        ),
+        admission_decisions.c.exchange_instrument_id.label(
+            "decision_exchange_instrument_id"
+        ),
+        admission_decisions.c.position_side.label("decision_position_side"),
+        admission_decisions.c.decision_status,
+        admission_decisions.c.first_blocker,
+        admission_decisions.c.binding_constraint,
+        admission_decisions.c.ticket_id,
+        admission_decisions.c.decided_at_ms,
+        shadow_outcomes_current.c.shadow_outcome_id,
+        shadow_outcomes_current.c.admission_decision_id.label(
+            "shadow_admission_decision_id"
+        ),
+        shadow_outcomes_current.c.exchange_instrument_id.label(
+            "shadow_exchange_instrument_id"
+        ),
+        shadow_outcomes_current.c.position_side.label("shadow_position_side"),
+        shadow_outcomes_current.c.status.label("shadow_status"),
+        shadow_outcomes_current.c.mfe_r.label("shadow_mfe_r"),
+        shadow_outcomes_current.c.mae_r.label("shadow_mae_r"),
+        shadow_outcomes_current.c.completion_reason.label(
+            "shadow_completion_reason"
+        ),
+        shadow_outcomes_current.c.completed_at_ms.label(
+            "shadow_completed_at_ms"
+        ),
+    ).select_from(
+        signal_events.join(
+            admission_decisions,
+            admission_decisions.c.signal_event_id
+            == signal_events.c.signal_event_id,
+        ).outerjoin(
+            shadow_outcomes_current,
+            shadow_outcomes_current.c.admission_decision_id
+            == admission_decisions.c.admission_decision_id,
+        )
+    )
+
+
+def _exact_signal_query(signal_event_id: str) -> sa.Select[Any]:
+    return (
+        sa.select(signal_events)
+        .where(signal_events.c.signal_event_id == signal_event_id)
+        .limit(2)
+    )
+
+
+def _exact_admission_query(signal_event_id: str) -> sa.Select[Any]:
+    return (
+        sa.select(admission_decisions)
+        .where(admission_decisions.c.signal_event_id == signal_event_id)
+        .limit(2)
+    )
+
+
+def _exact_signal_facts_query(signal_event_id: str) -> sa.Select[Any]:
+    return (
+        sa.select(signal_fact_snapshots)
+        .where(signal_fact_snapshots.c.signal_event_id == signal_event_id)
+        .order_by(signal_fact_snapshots.c.fact_definition_id)
+        .limit(257)
+    )
+
+
+def _exact_shadow_query(admission_decision_id: str) -> sa.Select[Any]:
+    return (
+        sa.select(
+            shadow_outcomes_current.c.shadow_outcome_id,
+            shadow_outcomes_current.c.admission_decision_id,
+            shadow_outcomes_current.c.exchange_instrument_id,
+            shadow_outcomes_current.c.position_side,
+            shadow_outcomes_current.c.status.label("shadow_status"),
+            shadow_outcomes_current.c.mfe_r.label("shadow_mfe_r"),
+            shadow_outcomes_current.c.mae_r.label("shadow_mae_r"),
+            shadow_outcomes_current.c.completion_reason.label(
+                "shadow_completion_reason"
+            ),
+            shadow_outcomes_current.c.completed_at_ms.label(
+                "shadow_completed_at_ms"
+            ),
+        )
+        .where(
+            shadow_outcomes_current.c.admission_decision_id
+            == admission_decision_id
+        )
+        .limit(2)
+    )
+
+
+def _signal_item_facts_from_joined_row(row: RowMapping) -> SignalItemFacts:
+    _validate_joined_signal_identity(row)
+    return _signal_item_facts(
+        signal=row,
+        decision=row,
+        shadow=row if row["shadow_outcome_id"] is not None else None,
+    )
+
+
+def _signal_item_facts_from_detail_rows(
+    *,
+    signal: RowMapping,
+    decision: RowMapping,
+    shadow: RowMapping | None,
+) -> SignalItemFacts:
+    return _signal_item_facts(
+        signal=signal,
+        decision=decision,
+        shadow=shadow,
+    )
+
+
+def _signal_item_facts(
+    *,
+    signal: RowMapping,
+    decision: RowMapping,
+    shadow: RowMapping | None,
+) -> SignalItemFacts:
+    signal_event_id = str(signal["signal_event_id"])
+    admission_decision_id = str(decision["admission_decision_id"])
+    occurred_at_ms = int(signal["occurred_at_ms"])
+    decided_at_ms = int(decision["decided_at_ms"])
+    evidence = [
+        EvidenceRef(
+            kind="signal",
+            identity=signal_event_id,
+            occurred_at_ms=occurred_at_ms,
+        ),
+        EvidenceRef(
+            kind="admission",
+            identity=admission_decision_id,
+            occurred_at_ms=decided_at_ms,
+        ),
+    ]
+    shadow_outcome_id = None
+    shadow_status = None
+    shadow_mfe_r = None
+    shadow_mae_r = None
+    shadow_completion_reason = None
+    shadow_completed_at_ms = None
+    if shadow is not None:
+        shadow_outcome_id = str(shadow["shadow_outcome_id"])
+        shadow_status = str(shadow["shadow_status"])
+        shadow_mfe_r = _exact_decimal_or_none(
+            shadow["shadow_mfe_r"],
+            field_name="shadow_mfe_r",
+        )
+        shadow_mae_r = _exact_decimal_or_none(
+            shadow["shadow_mae_r"],
+            field_name="shadow_mae_r",
+        )
+        shadow_completion_reason = (
+            None
+            if shadow["shadow_completion_reason"] is None
+            else str(shadow["shadow_completion_reason"])
+        )
+        shadow_completed_at_ms = (
+            None
+            if shadow["shadow_completed_at_ms"] is None
+            else int(shadow["shadow_completed_at_ms"])
+        )
+        evidence.append(
+            EvidenceRef(
+                kind="shadow",
+                identity=shadow_outcome_id,
+                occurred_at_ms=shadow_completed_at_ms or decided_at_ms,
+            )
+        )
+
+    return SignalItemFacts(
+        signal_event_id=signal_event_id,
+        exposure_episode_id=str(signal["exposure_episode_id"]),
+        strategy_group_id=str(signal["strategy_group_id"]),
+        strategy_version_id=str(signal["strategy_version_id"]),
+        event_spec_id=str(signal["event_spec_id"]),
+        exchange_instrument_id=str(signal["exchange_instrument_id"]),
+        position_side=cast(
+            Literal["long", "short"], str(signal["position_side"])
+        ),
+        occurred_at_ms=occurred_at_ms,
+        expires_at_ms=int(signal["expires_at_ms"]),
+        admission_decision_id=admission_decision_id,
+        decision_status=cast(
+            Literal["admitted", "rejected"],
+            str(decision["decision_status"]),
+        ),
+        first_blocker=(
+            None
+            if decision["first_blocker"] is None
+            else str(decision["first_blocker"])
+        ),
+        binding_constraint=(
+            None
+            if decision["binding_constraint"] is None
+            else str(decision["binding_constraint"])
+        ),
+        ticket_id=(
+            None
+            if decision["ticket_id"] is None
+            else str(decision["ticket_id"])
+        ),
+        decided_at_ms=decided_at_ms,
+        shadow_outcome_id=shadow_outcome_id,
+        shadow_status=cast(
+            Literal["pending", "claimed", "completed", "unavailable"]
+            | None,
+            shadow_status,
+        ),
+        shadow_mfe_r=shadow_mfe_r,
+        shadow_mae_r=shadow_mae_r,
+        shadow_completion_reason=shadow_completion_reason,
+        shadow_completed_at_ms=shadow_completed_at_ms,
+        evidence=tuple(evidence),
+    )
+
+
+def _validate_joined_signal_identity(row: RowMapping) -> None:
+    pairs = (
+        ("signal_event_id", "decision_signal_event_id"),
+        ("exposure_episode_id", "decision_exposure_episode_id"),
+        ("runtime_scope_id", "decision_runtime_scope_id"),
+        ("runtime_scope_version", "decision_runtime_scope_version"),
+        ("strategy_group_id", "decision_strategy_group_id"),
+        ("strategy_version_id", "decision_strategy_version_id"),
+        ("event_spec_id", "decision_event_spec_id"),
+        ("universe_version_id", "decision_universe_version_id"),
+        (
+            "universe_semantic_digest",
+            "decision_universe_semantic_digest",
+        ),
+        (
+            "exchange_instrument_id",
+            "decision_exchange_instrument_id",
+        ),
+        ("position_side", "decision_position_side"),
+    )
+    if any(row[left] != row[right] for left, right in pairs):
+        raise SignalFactsContradiction(
+            "signal and admission identity mismatch"
+        )
+    if row["shadow_outcome_id"] is not None:
+        shadow_pairs = (
+            ("admission_decision_id", "shadow_admission_decision_id"),
+            ("exchange_instrument_id", "shadow_exchange_instrument_id"),
+            ("position_side", "shadow_position_side"),
+        )
+        if any(row[left] != row[right] for left, right in shadow_pairs):
+            raise SignalFactsContradiction(
+                "admission and Shadow Outcome identity mismatch"
+            )
+
+
+def _validate_signal_admission_identity(
+    *, signal: RowMapping, decision: RowMapping
+) -> None:
+    names = (
+        "signal_event_id",
+        "exposure_episode_id",
+        "runtime_scope_id",
+        "runtime_scope_version",
+        "strategy_group_id",
+        "strategy_version_id",
+        "event_spec_id",
+        "universe_version_id",
+        "universe_semantic_digest",
+        "exchange_instrument_id",
+        "position_side",
+    )
+    if any(signal[name] != decision[name] for name in names):
+        raise SignalFactsContradiction(
+            "signal and admission identity mismatch"
+        )
+
+
+def _validate_shadow_identity(
+    *, decision: RowMapping, shadow: RowMapping | None
+) -> None:
+    if shadow is None:
+        return
+    if (
+        shadow["admission_decision_id"] != decision["admission_decision_id"]
+        or shadow["exchange_instrument_id"]
+        != decision["exchange_instrument_id"]
+        or shadow["position_side"] != decision["position_side"]
+    ):
+        raise SignalFactsContradiction(
+            "admission and Shadow Outcome identity mismatch"
+        )
+
+
+def _signal_fact_snapshot_from_row(
+    row: RowMapping,
+    *,
+    expected_signal_event_id: str,
+) -> SignalFactSnapshotFacts:
+    signal_event_id = str(row["signal_event_id"])
+    if signal_event_id != expected_signal_event_id:
+        raise SignalFactsContradiction(
+            "fact snapshot signal identity mismatch"
+        )
+    return SignalFactSnapshotFacts(
+        signal_event_id=signal_event_id,
+        fact_definition_id=str(row["fact_definition_id"]),
+        role=cast(
+            Literal[
+                "condition",
+                "protection_reference",
+                "identity_reference",
+                "lifecycle_reference",
+                "disable",
+            ],
+            str(row["role"]),
+        ),
+        value=row["value"],
+        satisfied=bool(row["satisfied"]),
+        observed_at_ms=int(row["observed_at_ms"]),
+        valid_until_ms=int(row["valid_until_ms"]),
+        projection_version=int(row["projection_version"]),
+    )
+
+
+def _exact_decimal_or_none(
+    value: object,
+    *,
+    field_name: str,
+) -> Decimal | None:
+    if value is None:
+        return None
+    if not isinstance(value, Decimal):
+        raise SignalFactsContradiction(
+            f"{field_name} did not decode as Decimal"
+        )
+    return value
 
 
 def _overview_authority_query() -> sa.Select[Any]:

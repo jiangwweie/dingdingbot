@@ -13,8 +13,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     ValidationError,
     field_serializer,
+    field_validator,
     model_validator,
 )
 
@@ -52,6 +54,8 @@ class EvidenceRef(FrozenModel):
         "incident",
         "settlement",
         "review",
+        "shadow",
+        "fact",
     ]
     identity: str
     occurred_at_ms: int
@@ -145,6 +149,7 @@ class SignalListQuery(BoundedWindowQuery):
     decision_status: Literal["admitted", "rejected"] | None = None
     strategy_group_id: str | None = None
     exchange_instrument_id: str | None = None
+    position_side: Literal["long", "short"] | None = None
 
 
 class TradeListQuery(BoundedWindowQuery):
@@ -197,8 +202,32 @@ class OwnerOverview(FrozenModel):
     evidence: tuple[EvidenceRef, ...]
 
 
+class ShadowOutcomeSummary(FrozenModel):
+    shadow_outcome_id: str
+    status: Literal["pending", "claimed", "completed", "unavailable"]
+    mfe_r: Decimal | None
+    mae_r: Decimal | None
+    completion_reason: str | None
+    completed_at_ms: int | None
+    interpretation: Literal[
+        "Observation only; this Shadow Outcome is not execution."
+    ] = "Observation only; this Shadow Outcome is not execution."
+    evidence: tuple[EvidenceRef, ...]
+
+    @field_validator("mfe_r", "mae_r", mode="before")
+    @classmethod
+    def _reject_float_decimal(cls, value: object) -> object:
+        if isinstance(value, float):
+            raise TypeError("shadow decimal values must not be floats")
+        return value
+
+    @field_serializer("mfe_r", "mae_r")
+    def _serialize_decimal(self, value: Decimal | None) -> str | None:
+        return None if value is None else str(value)
+
+
 class SignalListItem(FrozenModel):
-    signal_id: str
+    signal_event_id: str
     exposure_episode_id: str
     strategy_group_id: str
     strategy_version_id: str
@@ -212,16 +241,21 @@ class SignalListItem(FrozenModel):
     first_blocker: str | None
     binding_constraint: str | None
     ticket_id: str | None
-    shadow_summary: str | None
+    shadow_summary: ShadowOutcomeSummary | None
     evidence: tuple[EvidenceRef, ...]
+
+
+class SignalListPage(FrozenModel):
+    items: tuple[SignalListItem, ...] = Field(max_length=100)
+    next_cursor: str | None
 
 
 class SignalAdmissionDetail(FrozenModel):
     signal: SignalListItem
     what_happened: str
     why_no_ticket: str | None
-    shadow_summary: str | None
-    shadow_net_r: MoneyMetric
+    fact_snapshots: tuple[SignalFactSnapshotFacts, ...] = Field(max_length=256)
+    shadow_summary: ShadowOutcomeSummary | None
     evidence: tuple[EvidenceRef, ...]
 
 
@@ -375,7 +409,7 @@ class OverviewFacts(FrozenModel):
 
 
 class SignalItemFacts(FrozenModel):
-    signal_id: str
+    signal_event_id: str
     exposure_episode_id: str
     strategy_group_id: str
     strategy_version_id: str
@@ -389,9 +423,53 @@ class SignalItemFacts(FrozenModel):
     first_blocker: str | None
     binding_constraint: str | None
     ticket_id: str | None
-    shadow_net_r: MoneyMetric | None
-    shadow_unavailable_reason: str | None
+    decided_at_ms: int
+    shadow_outcome_id: str | None
+    shadow_status: Literal[
+        "pending", "claimed", "completed", "unavailable"
+    ] | None
+    shadow_mfe_r: Decimal | None
+    shadow_mae_r: Decimal | None
+    shadow_completion_reason: str | None
+    shadow_completed_at_ms: int | None
     evidence: tuple[EvidenceRef, ...]
+
+    @field_validator("shadow_mfe_r", "shadow_mae_r", mode="before")
+    @classmethod
+    def _reject_float_decimal(cls, value: object) -> object:
+        if isinstance(value, float):
+            raise TypeError("shadow decimal values must not be floats")
+        return value
+
+
+SignalFactRole = Literal[
+    "condition",
+    "protection_reference",
+    "identity_reference",
+    "lifecycle_reference",
+    "disable",
+]
+
+
+class SignalFactSnapshotFacts(FrozenModel):
+    signal_event_id: str
+    fact_definition_id: str
+    role: SignalFactRole
+    value: JsonValue
+    satisfied: bool
+    observed_at_ms: int
+    valid_until_ms: int
+    projection_version: int
+
+
+class SignalPageFacts(FrozenModel):
+    items: tuple[SignalItemFacts, ...] = Field(max_length=101)
+    requested_limit: int = Field(ge=1, le=100)
+
+
+class SignalDetailFacts(FrozenModel):
+    signal: SignalItemFacts
+    fact_snapshots: tuple[SignalFactSnapshotFacts, ...] = Field(max_length=256)
 
 
 class TradeItemFacts(FrozenModel):

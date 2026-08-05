@@ -10,8 +10,15 @@ from sqlalchemy import event
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from src.trading_kernel.application.owner_console.models import SignalListQuery
 from src.trading_kernel.application.owner_console.overview import (
     build_owner_overview,
+)
+from src.trading_kernel.application.owner_console.signals import (
+    SignalFactsContradiction,
+    SignalNotFound,
+    build_signal_detail,
+    build_signal_page,
 )
 from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     PostgresOwnerReadRepository,
@@ -252,6 +259,242 @@ async def test_owner_read_role_cannot_use_public_object_creation_capabilities(
             )
     finally:
         await connection.close()
+
+
+async def test_signal_cursor_is_stable_across_same_timestamp_page_boundary(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_signals(owner_read_dsn)
+    engine = create_owner_read_engine(owner_read_dsn)
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection,
+        _cursor,
+        statement: str,
+        _parameters,
+        _context,
+        _executemany: bool,
+    ) -> None:
+        statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine.sync_engine, "before_cursor_execute", capture_statement)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            transaction = connection.get_transaction()
+            repository = PostgresOwnerReadRepository(connection)
+            first = build_signal_page(
+                await repository.read_signal_page_facts(
+                    SignalListQuery(
+                        from_ms=1_799_999_700_000,
+                        to_ms=1_800_000_100_000,
+                        limit=2,
+                    )
+                )
+            )
+            assert first.next_cursor is not None
+            second = build_signal_page(
+                await repository.read_signal_page_facts(
+                    SignalListQuery(
+                        from_ms=1_799_999_700_000,
+                        to_ms=1_800_000_100_000,
+                        limit=2,
+                        cursor=first.next_cursor,
+                    )
+                )
+            )
+            assert connection.get_transaction() is transaction
+
+        assert [item.signal_event_id for item in first.items] == [
+            "signal:z",
+            "signal:y",
+        ]
+        assert [item.signal_event_id for item in second.items] == [
+            "signal:x",
+            "signal:w",
+        ]
+        assert first.next_cursor is not None
+        assert second.next_cursor is None
+        assert len(statements) == 3  # SET TRANSACTION plus two list SELECTs.
+        list_selects = [item for item in statements if item.startswith("select")]
+        assert len(list_selects) == 2
+        assert "brc_signal_events" in list_selects[0]
+        assert "brc_admission_decisions" in list_selects[0]
+        assert "brc_shadow_outcomes_current" in list_selects[0]
+        assert "occurred_at_ms >=" in list_selects[0]
+        assert "occurred_at_ms <" in list_selects[0]
+        assert "order by brc_signal_events.occurred_at_ms desc" in list_selects[0]
+        assert "brc_signal_events.signal_event_id desc" in list_selects[0]
+        assert "limit" in list_selects[0]
+        assert "(brc_signal_events.occurred_at_ms, " in list_selects[1]
+        assert "brc_signal_events.signal_event_id) <" in list_selects[1]
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", capture_statement)
+        await engine.dispose()
+
+
+async def test_signal_list_applies_exact_window_and_all_optional_filters(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_signals(owner_read_dsn)
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            repository = PostgresOwnerReadRepository(connection)
+            page = build_signal_page(
+                await repository.read_signal_page_facts(
+                    SignalListQuery(
+                        from_ms=1_800_000_000_000,
+                        to_ms=1_800_000_000_001,
+                        strategy_group_id="strategy-group:alpha",
+                        exchange_instrument_id="ETHUSDT",
+                        position_side="short",
+                        decision_status="rejected",
+                    )
+                )
+            )
+            admitted = build_signal_page(
+                await repository.read_signal_page_facts(
+                    SignalListQuery(
+                        from_ms=1_799_999_700_000,
+                        to_ms=1_800_000_100_000,
+                        decision_status="admitted",
+                    )
+                )
+            )
+            upper_exclusive = build_signal_page(
+                await repository.read_signal_page_facts(
+                    SignalListQuery(
+                        from_ms=1_799_999_700_000,
+                        to_ms=1_800_000_000_000,
+                    )
+                )
+            )
+
+        assert [item.signal_event_id for item in page.items] == ["signal:y"]
+        assert admitted.items == ()
+        assert [item.signal_event_id for item in upper_exclusive.items] == [
+            "signal:w"
+        ]
+    finally:
+        await engine.dispose()
+
+
+async def test_signal_detail_reads_exact_identity_bound_facts_and_decimal_shadow(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_signals(owner_read_dsn)
+    engine = create_owner_read_engine(owner_read_dsn)
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection,
+        _cursor,
+        statement: str,
+        _parameters,
+        _context,
+        _executemany: bool,
+    ) -> None:
+        statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine.sync_engine, "before_cursor_execute", capture_statement)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            statements.clear()
+            transaction = connection.get_transaction()
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_signal_detail_facts("signal:z")
+            assert connection.get_transaction() is transaction
+
+        detail = build_signal_detail(facts)
+        assert detail.signal.signal_event_id == "signal:z"
+        assert detail.why_no_ticket == "gross_stop_risk_capacity_exhausted"
+        assert [fact.fact_definition_id for fact in detail.fact_snapshots] == [
+            "fact:condition",
+            "fact:reference",
+        ]
+        assert detail.shadow_summary is not None
+        assert detail.shadow_summary.mfe_r == Decimal(
+            "1.250000000000000001"
+        )
+        assert detail.shadow_summary.mae_r == Decimal(
+            "-0.400000000000000001"
+        )
+        assert [ref.identity for ref in detail.evidence] == [
+            "signal:z",
+            "admission:z",
+            "shadow:z",
+            "signal-fact:signal:z:fact:condition",
+            "signal-fact:signal:z:fact:reference",
+        ]
+        assert len(statements) == 4
+        assert "brc_signal_events.signal_event_id =" in statements[0]
+        assert "brc_admission_decisions.signal_event_id =" in statements[1]
+        assert "brc_signal_fact_snapshots.signal_event_id =" in statements[2]
+        assert "order by brc_signal_fact_snapshots.fact_definition_id" in (
+            statements[2]
+        )
+        assert "limit" in statements[2]
+        assert "brc_shadow_outcomes_current.admission_decision_id =" in (
+            statements[3]
+        )
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", capture_statement)
+        await engine.dispose()
+
+
+async def test_signal_detail_missing_identity_is_explicit(
+    owner_read_dsn: str,
+) -> None:
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            with pytest.raises(SignalNotFound, match="signal:missing"):
+                await PostgresOwnerReadRepository(
+                    connection
+                ).read_signal_detail_facts("signal:missing")
+    finally:
+        await engine.dispose()
+
+
+async def test_signal_detail_rejects_persisted_identity_mismatch(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_signals(
+        owner_read_dsn,
+        admission_strategy_group_override="strategy-group:wrong",
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            with pytest.raises(
+                SignalFactsContradiction,
+                match="signal and admission identity mismatch",
+            ):
+                await PostgresOwnerReadRepository(
+                    connection
+                ).read_signal_detail_facts("signal:z")
+    finally:
+        await engine.dispose()
+
+
+async def test_signal_detail_rejects_more_than_256_fact_snapshots(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_signals(owner_read_dsn, fact_count=257)
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            with pytest.raises(
+                SignalFactsContradiction,
+                match="more than 256 fact snapshots",
+            ):
+                await PostgresOwnerReadRepository(
+                    connection
+                ).read_signal_detail_facts("signal:z")
+    finally:
+        await engine.dispose()
 
 
 async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
@@ -1103,6 +1346,223 @@ async def _seed_current_reviews(
                 count,
                 malformed_review_number,
                 missing_metric_key,
+            )
+    finally:
+        await connection.close()
+
+
+async def _seed_owner_console_signals(
+    dsn: str,
+    *,
+    admission_strategy_group_override: str | None = None,
+    fact_count: int = 2,
+) -> None:
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    digest = "sha256:" + "a" * 64
+    signals = (
+        (
+            "signal:z",
+            "episode:z",
+            "scope:z",
+            "strategy-group:alpha",
+            "strategy-version:alpha",
+            "BTCUSDT",
+            "long",
+            1_800_000_000_000,
+        ),
+        (
+            "signal:y",
+            "episode:y",
+            "scope:y",
+            "strategy-group:alpha",
+            "strategy-version:alpha",
+            "ETHUSDT",
+            "short",
+            1_800_000_000_000,
+        ),
+        (
+            "signal:x",
+            "episode:x",
+            "scope:x",
+            "strategy-group:beta",
+            "strategy-version:beta",
+            "BTCUSDT",
+            "short",
+            1_800_000_000_000,
+        ),
+        (
+            "signal:w",
+            "episode:w",
+            "scope:w",
+            "strategy-group:alpha",
+            "strategy-version:alpha",
+            "BTCUSDT",
+            "long",
+            1_799_999_800_000,
+        ),
+    )
+    try:
+        async with connection.transaction():
+            await connection.execute(
+                """
+                INSERT INTO brc_strategy_universe_versions (
+                    universe_version_id, strategy_group_id, event_spec_id,
+                    universe_version, semantic_digest, lifecycle_state,
+                    installed_at_ms, activated_at_ms, retired_at_ms,
+                    abandoned_at_ms, abandon_reason_code
+                ) VALUES (
+                    'universe:owner-console-signals', 'strategy-group:alpha',
+                    'event-spec:signal', 1, $1, 'active',
+                    1799999700000, 1799999700000, NULL, NULL, NULL
+                )
+                """,
+                digest,
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_signal_events (
+                    signal_event_id, exposure_episode_id, runtime_scope_id,
+                    runtime_scope_version, strategy_group_id,
+                    strategy_version_id, event_spec_id, universe_version_id,
+                    universe_semantic_digest, exchange_instrument_id,
+                    position_side, fact_digest, occurred_at_ms, observed_at_ms,
+                    expires_at_ms
+                ) VALUES (
+                    $1, $2, $3, 1, $4, $5, 'event-spec:signal',
+                    'universe:owner-console-signals', $9, $6, $7,
+                    'sha256:' || repeat('b', 64), $8::bigint,
+                    $8::bigint + 1000, $8::bigint + 60000
+                )
+                """,
+                [(*signal, digest) for signal in signals],
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_admission_decisions (
+                    admission_decision_id, signal_event_id,
+                    exposure_episode_id, strategy_group_id,
+                    strategy_version_id, event_spec_id, universe_version_id,
+                    universe_semantic_digest, runtime_profile_id,
+                    runtime_scope_id, runtime_scope_version, owner_policy_id,
+                    owner_policy_version, venue_id, account_id,
+                    exchange_instrument_id, position_side, exposure_family,
+                    candidate_rank, candidate_count, candidate_set_digest,
+                    candidate_set_summary, portfolio_usage, decision_status,
+                    first_blocker, binding_constraint, capacity_claim_id,
+                    ticket_id, entry_admission_snapshot_digest,
+                    decision_digest, decided_at_ms
+                ) VALUES (
+                    'admission:' || substring($1 from 8), $1, $2, $4, $5,
+                    'event-spec:signal', 'universe:owner-console-signals', $9,
+                    'profile:owner-console', $3, 1, 'policy:owner-console', 1,
+                    'binance-usdm', 'owner-console-account', $6, $7,
+                    'opening_range', 1, 1,
+                    'sha256:' || repeat('c', 64), '{}'::jsonb, '{}'::jsonb,
+                    'rejected', 'gross_stop_risk_capacity_exhausted',
+                    'gross_stop_risk', NULL, NULL, NULL,
+                    'sha256:' || repeat('d', 64), $8::bigint + 2000
+                )
+                """,
+                [
+                    (
+                        signal_event_id,
+                        exposure_episode_id,
+                        runtime_scope_id,
+                        (
+                            admission_strategy_group_override
+                            if signal_event_id == "signal:z"
+                            and admission_strategy_group_override is not None
+                            else strategy_group_id
+                        ),
+                        strategy_version_id,
+                        exchange_instrument_id,
+                        position_side,
+                        occurred_at_ms,
+                        digest,
+                    )
+                    for (
+                        signal_event_id,
+                        exposure_episode_id,
+                        runtime_scope_id,
+                        strategy_group_id,
+                        strategy_version_id,
+                        exchange_instrument_id,
+                        position_side,
+                        occurred_at_ms,
+                    ) in signals
+                ],
+            )
+            fact_rows = (
+                [
+                    (
+                        "signal:z",
+                        "fact:condition",
+                        "condition",
+                        "true",
+                        True,
+                    ),
+                    (
+                        "signal:z",
+                        "fact:reference",
+                        "protection_reference",
+                        '"99.125000000000000001"',
+                        True,
+                    ),
+                ]
+                if fact_count == 2
+                else [
+                    (
+                        "signal:z",
+                        f"fact:{index:03d}",
+                        "condition",
+                        "true",
+                        True,
+                    )
+                    for index in range(fact_count)
+                ]
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_signal_fact_snapshots (
+                    signal_event_id, fact_definition_id, role, value,
+                    satisfied, observed_at_ms, valid_until_ms,
+                    projection_version
+                ) VALUES (
+                    $1, $2, $3, $4::jsonb, $5,
+                    1800000001000, 1800000060000, 1
+                )
+                """,
+                fact_rows,
+            )
+            await connection.execute(
+                """
+                INSERT INTO brc_shadow_outcomes_current (
+                    shadow_outcome_id, admission_decision_id, status,
+                    evaluation_kind, exchange_instrument_id, position_side,
+                    timeframe, entry_reference_price, initial_stop_price,
+                    initial_risk_per_unit, horizon_start_ms, horizon_end_ms,
+                    claim_owner, claim_token, lease_until_ms,
+                    max_favorable_price, max_adverse_price, mfe_r, mae_r,
+                    observed_through_ms, completion_reason, projection_version,
+                    created_at_ms, completed_at_ms
+                ) VALUES (
+                    'shadow:z', 'admission:z', 'completed',
+                    'fixed_horizon_excursion_v1', 'BTCUSDT', 'long', '15m',
+                    100.000000000000000001, 99.000000000000000001,
+                    1.000000000000000000, 1800000000000, 1800000900000,
+                    NULL, NULL, NULL, 101.250000000000000002,
+                    99.599999999999999999, 1.250000000000000001,
+                    -0.400000000000000001, 1800000900000,
+                    'horizon_complete', 1, 1800000002000, 1800000900000
+                )
+                """
             )
     finally:
         await connection.close()
