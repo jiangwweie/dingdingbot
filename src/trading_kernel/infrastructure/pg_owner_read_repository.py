@@ -817,10 +817,13 @@ def _today_reviews_query(
         "planned_r_multiple"
     ].as_string()
     numeric_text = r"^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$"
-    valid_economics = sa.and_(
-        economics_completeness == "complete",
-        net_pnl_quote.op("~")(numeric_text),
-        planned_r_multiple.op("~")(numeric_text),
+    valid_economics = sa.func.coalesce(
+        sa.and_(
+            economics_completeness == "complete",
+            net_pnl_quote.op("~")(numeric_text),
+            planned_r_multiple.op("~")(numeric_text),
+        ),
+        sa.false(),
     )
     review_facts = (
         sa.select(

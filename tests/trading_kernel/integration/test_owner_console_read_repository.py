@@ -571,6 +571,49 @@ async def test_overview_aggregates_all_current_reviews_beyond_one_hundred(
         await engine.dispose()
 
 
+async def test_overview_missing_review_economics_key_is_unavailable(
+    owner_read_dsn: str,
+) -> None:
+    now_ms = 1_800_000_010_000
+    day_start_ms = 1_799_913_600_000
+    malformed_review_id = "review:owner-console:2"
+    await _seed_overview_authority(owner_read_dsn, now_ms=now_ms)
+    await _seed_current_reviews(
+        owner_read_dsn,
+        count=2,
+        created_at_ms=day_start_ms + 1_000,
+        malformed_review_number=2,
+        missing_metric_key="planned_r_multiple",
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_overview_facts(
+                day_start_ms=day_start_ms,
+                now_ms=now_ms,
+            )
+
+        assert facts.today_net_pnl.value is None
+        assert facts.today_net_pnl.unavailable_reason == (
+            "incomplete_review_economics"
+        )
+        assert facts.today_net_r.value is None
+        assert facts.today_net_r.unavailable_reason == (
+            "incomplete_review_economics"
+        )
+        assert facts.evidence_gaps[0].reason == (
+            "incomplete_review_economics"
+        )
+        assert facts.evidence_gaps[0].evidence.identity == malformed_review_id
+        assert facts.evidence_gaps[0].evidence.occurred_at_ms == (
+            day_start_ms + 1_002
+        )
+    finally:
+        await engine.dispose()
+
+
 async def _seed_overview_authority(
     dsn: str,
     *,
@@ -910,6 +953,8 @@ async def _seed_current_reviews(
     *,
     count: int,
     created_at_ms: int,
+    malformed_review_number: int | None = None,
+    missing_metric_key: str | None = None,
 ) -> None:
     database_name = make_url(dsn).database
     assert database_name is not None
@@ -1037,17 +1082,27 @@ async def _seed_current_reviews(
                     'review:owner-console:' || series::text,
                     'ticket:review:' || series::text,
                     1, NULL, 'complete',
-                    jsonb_build_object(
-                        'economics_completeness', 'complete',
-                        'net_pnl_quote', '1.25',
-                        'planned_r_multiple', '0.5'
-                    ),
+                    CASE
+                        WHEN series = $3::integer AND $4::text IS NOT NULL
+                        THEN jsonb_build_object(
+                            'economics_completeness', 'complete',
+                            'net_pnl_quote', '1.25',
+                            'planned_r_multiple', '0.5'
+                        ) - $4::text
+                        ELSE jsonb_build_object(
+                            'economics_completeness', 'complete',
+                            'net_pnl_quote', '1.25',
+                            'planned_r_multiple', '0.5'
+                        )
+                    END,
                     '{}'::jsonb,
                     $1::bigint + series
                 FROM generate_series(1, $2) AS series
                 """,
                 created_at_ms,
                 count,
+                malformed_review_number,
+                missing_metric_key,
             )
     finally:
         await connection.close()
