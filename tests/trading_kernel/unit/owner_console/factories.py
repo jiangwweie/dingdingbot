@@ -27,7 +27,12 @@ def _copy_with_named_overrides(model: FactT, overrides: dict[str, Any]) -> FactT
     if unknown:
         names = ", ".join(sorted(unknown))
         raise TypeError(f"unknown fact override(s): {names}")
-    return cast(FactT, model.model_copy(update=overrides))
+    copied = model.model_copy(update=overrides)
+    merged = {
+        field_name: getattr(copied, field_name)
+        for field_name in type(model).model_fields
+    }
+    return cast(FactT, type(model).model_validate(merged))
 
 
 def _evidence(kind: str, identity: str, occurred_at_ms: int) -> EvidenceRef:

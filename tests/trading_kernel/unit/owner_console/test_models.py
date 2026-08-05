@@ -149,6 +149,21 @@ def test_named_factories_return_complete_frozen_facts_and_named_overrides() -> N
         overview_facts(not_a_field=True)
 
 
+def test_named_factories_reject_wrong_typed_overrides() -> None:
+    with pytest.raises(ValidationError):
+        overview_facts(ticket_capacity="three")
+
+
+def test_named_factories_normalize_mutable_container_overrides() -> None:
+    active_ticket_ids = ["ticket:1"]
+
+    facts = overview_facts(active_ticket_ids=active_ticket_ids)
+    active_ticket_ids.append("ticket:2")
+
+    assert facts.active_ticket_ids == ("ticket:1",)
+    assert isinstance(facts.active_ticket_ids, tuple)
+
+
 def test_nested_financial_values_serialize_as_exact_strings() -> None:
     trade = trade_item_facts()
 
