@@ -29,6 +29,7 @@
 - Existing Observation, Entry, Lifecycle, and Reconciliation services, their slice, and their exchange authority remain unchanged.
 - Production-to-local acceptance data is exported only through a consistent, single-job, data-only PostgreSQL snapshot. Snapshot artifacts stay outside Git with mode `0600`, exclude `alembic_version`, reject credential-like columns, and may be restored only into an explicitly named localhost disposable database.
 - Tokyo deployment is a separate Owner-controlled action. Complete and report Tasks 1–24 first; do not execute any Task 25 command until the Owner gives a fresh explicit confirmation after reviewing local acceptance results. Approval of this plan is not deployment approval.
+- The restored production-fact snapshot must pass representative worst-window Signal, Trade, and Review list probes before local acceptance closes. Each query runs with the real read-only role and `statement_timeout=3s`; `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` actual execution time must remain below 2400 ms and the end-to-end repository read below 3000 ms. Failure blocks Task 24 and deployment; Phase 1 does not add an index migration implicitly.
 
 ## Source Documents
 
@@ -2669,6 +2670,7 @@ git commit -m "deploy(console): isolate owner api behind nginx"
 **Files:**
 - Create: `scripts/owner_console/export_server_dml_snapshot.py`
 - Create: `scripts/owner_console/restore_local_dml_snapshot.py`
+- Create: `scripts/owner_console/probe_local_snapshot.py`
 - Create: `tests/trading_kernel/unit/owner_console/test_dml_snapshot.py`
 - Modify: `.gitignore`
 - Modify: `deploy/owner-console/README.md`
@@ -2746,6 +2748,16 @@ The export is a PostgreSQL consistent snapshot and never stops, locks for write,
 6. creates or refreshes a local `brc_owner_console` role with `default_transaction_read_only=on`, grants only `CONNECT`, schema `USAGE`, and table `SELECT`, and proves `SHOW transaction_read_only` returns `on` for the final acceptance connection;
 7. prints the exact cleanup command for the disposable database and never targets the production database name.
 
+`probe_local_snapshot.py` connects only to the restored localhost disposable database through the final read-only role. It compiles the same SQLAlchemy list statements used by the Owner repository and records no row payload. It probes the first page of:
+
+```text
+Signal: 90-day window, limit 100, no optional filter
+Trade:  90-day window, limit 100, no optional filter
+Review: 90-day window, limit 100, no optional filter
+```
+
+For each path it runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` and one actual repository read under `statement_timeout=3s`. It emits only query name, snapshot SHA-256, row-count metadata, planning time, execution time, end-to-end elapsed time, returned row count, and whether a sequential scan or external sort appeared. It never emits SQL parameter values, row data, identities, DSNs, or credentials. Acceptance requires `actual_total_time_ms < 2400` and repository elapsed time `< 3000` for every path. A sequential scan is recorded for diagnosis but is not by itself a failure on a small snapshot.
+
 The snapshot preserves exact causal identities because Ticket, Signal, Event, Command, Review, and Incident joins depend on them. Safety comes from local-only storage, file permissions, credential-column rejection, Git exclusion, and the disposable-target guard rather than identity rewriting.
 
 - [ ] **Step 4: Verify safety, deterministic help, and a disposable round trip**
@@ -2757,15 +2769,16 @@ Run unit checks on every machine:
 .venv/bin/ruff check scripts/owner_console/export_server_dml_snapshot.py scripts/owner_console/restore_local_dml_snapshot.py tests/trading_kernel/unit/owner_console/test_dml_snapshot.py
 .venv/bin/python scripts/owner_console/export_server_dml_snapshot.py --help
 .venv/bin/python scripts/owner_console/restore_local_dml_snapshot.py --help
+.venv/bin/python scripts/owner_console/probe_local_snapshot.py --help
 git check-ignore .local/owner-console-snapshots/probe.sql.gz
 ```
 
-After explicit readonly SSH access to Tokyo is available, run one export and restore into a fresh `brc_owner_console_test_<12 hex>` database. Verify the checksum, Alembic revision, five parity counts, and read-only role result. The SQL artifact and its metadata remain untracked and are not attached to test output.
+After explicit readonly SSH access to Tokyo is available, run one export and restore into a fresh `brc_owner_console_test_<12 hex>` database. Verify the checksum, Alembic revision, five parity counts, and read-only role result. Run all three snapshot probes and require their EXPLAIN and end-to-end budgets to pass. The SQL artifact, its metadata, and query-plan JSON remain untracked and are not attached to test output.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add .gitignore scripts/owner_console/export_server_dml_snapshot.py scripts/owner_console/restore_local_dml_snapshot.py tests/trading_kernel/unit/owner_console/test_dml_snapshot.py deploy/owner-console/README.md
+git add .gitignore scripts/owner_console/export_server_dml_snapshot.py scripts/owner_console/restore_local_dml_snapshot.py scripts/owner_console/probe_local_snapshot.py tests/trading_kernel/unit/owner_console/test_dml_snapshot.py deploy/owner-console/README.md
 git commit -m "test(console): add production data local snapshot workflow"
 ```
 
@@ -2805,6 +2818,8 @@ The checklist contains these closed gates:
 [ ] Four Trading Kernel workers remain unchanged
 [ ] Production DML snapshot is Git-ignored, checksum-verified, and restored only into a guarded localhost disposable database
 [ ] Owner Console passes the same browser and API paths against the restored production-fact snapshot
+[ ] Restored-snapshot Signal, Trade, and Review worst-window EXPLAIN actual times are each below 2400 ms
+[ ] Restored-snapshot Signal, Trade, and Review end-to-end repository reads are each below the 3000 ms statement budget
 ```
 
 - [ ] **Step 2: Run the complete backend verification**
@@ -2845,6 +2860,14 @@ ps -o pid,rss,%cpu,command -p "$OWNER_CONSOLE_TEST_PID"
 git diff --check
 ```
 
+Run the three production-snapshot list probes and retain only their non-sensitive timing summary in the acceptance checklist:
+
+```bash
+.venv/bin/python scripts/owner_console/probe_local_snapshot.py \
+  --database-name "brc_owner_console_test_<12 hex>" \
+  --snapshot-metadata .local/owner-console-snapshots/<snapshot>.json
+```
+
 Expected:
 
 - health returns 200;
@@ -2852,6 +2875,7 @@ Expected:
 - idle CPU is near zero after startup;
 - no periodic request or file output appears;
 - runtime file-I/O audit and diff check pass.
+- Signal, Trade, and Review EXPLAIN execution times are each below 2400 ms and end-to-end repository reads are each below 3000 ms; otherwise Task 24 remains open and no deployment confirmation is requested.
 
 Record commands and observed values in the acceptance checklist without copying a production commit, Ticket ID, or transient Tokyo state.
 
