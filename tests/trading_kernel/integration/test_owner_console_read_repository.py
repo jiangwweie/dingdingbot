@@ -12,9 +12,13 @@ from src.trading_kernel.infrastructure.pg_owner_read_repository import (
 )
 from tests.trading_kernel.integration.owner_console_support import (
     UnsafeDisposablePostgresTarget,
+    _CandidatePostgresIdentity,
     _connect_verified_disposable_admin,
+    _DockerPostgresContainerIdentity,
     _OwnerReadCleanupActions,
+    _require_expected_docker_postgres_container,
     _require_local_server_identity,
+    _run_attested_admin_ddl,
     _run_owner_read_cleanup,
     owner_read_dsn,
 )
@@ -51,6 +55,55 @@ def test_disposable_admin_rejects_nonlocal_server_identity(
         _require_local_server_identity(
             database_name=database_name,
             server_address=server_address,
+        )
+
+
+async def test_ssh_tunnel_identifier_mismatch_is_rejected_before_ddl() -> None:
+    ddl_calls: list[str] = []
+
+    async def forbidden_ddl() -> None:
+        ddl_calls.append("called")
+
+    with pytest.raises(UnsafeDisposablePostgresTarget):
+        await _run_attested_admin_ddl(
+            admin_dsn=(
+                "postgresql://production_admin@127.0.0.1:5432/postgres"
+            ),
+            candidate=_CandidatePostgresIdentity(
+                database_name="postgres",
+                server_address="172.18.0.99/32",
+                system_identifier="1111111111111111111",
+            ),
+            attested_system_identifier="2222222222222222222",
+            ddl=forbidden_ddl,
+        )
+
+    assert ddl_calls == []
+
+
+def test_docker_attestation_rejects_mismatched_compose_service_label() -> None:
+    identity = _DockerPostgresContainerIdentity(
+        name="/dingdingbot-pg",
+        image="postgres:16-alpine",
+        running=True,
+        labels={
+            "com.docker.compose.service": "production-postgres",
+            "com.docker.compose.project": "final",
+            "com.docker.compose.project.config_files": (
+                "/Users/jiangwei/Documents/final/docker-compose.pg.yml"
+            ),
+            "com.docker.compose.project.working_dir": (
+                "/Users/jiangwei/Documents/final"
+            ),
+            "com.docker.compose.container-number": "1",
+            "com.docker.compose.oneoff": "False",
+        },
+    )
+
+    with pytest.raises(UnsafeDisposablePostgresTarget):
+        _require_expected_docker_postgres_container(
+            identity,
+            container_name="dingdingbot-pg",
         )
 
 

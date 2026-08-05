@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import sys
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from ipaddress import ip_address, ip_interface
 from pathlib import Path
@@ -21,10 +22,42 @@ ADMIN_DSN = os.getenv(
 )
 SAFE_DATABASE = re.compile(r"^brc_owner_console_test_[a-f0-9]{12}$")
 SAFE_ROLE = re.compile(r"^brc_owner_read_test_[a-f0-9]{12}$")
+SAFE_CONTAINER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+SAFE_SYSTEM_IDENTIFIER = re.compile(r"^[0-9]+$")
+SAFE_COMPOSE_CONFIG_HASH = re.compile(r"^[a-f0-9]{64}$")
+POSTGRES_CONTAINER_NAME = os.getenv(
+    "BRC_TEST_POSTGRES_CONTAINER_NAME",
+    "dingdingbot-pg",
+)
+DOCKER_TIMEOUT_SECONDS = 3
+EXPECTED_POSTGRES_IMAGE = "postgres:16-alpine"
+EXPECTED_COMPOSE_FILE = "docker-compose.pg.yml"
+EXPECTED_COMPOSE_LABELS = {
+    "com.docker.compose.service": "postgres",
+    "com.docker.compose.project": "final",
+    "com.docker.compose.container-number": "1",
+    "com.docker.compose.oneoff": "False",
+    "com.docker.compose.depends_on": "",
+}
 
 
 class UnsafeDisposablePostgresTarget(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class _CandidatePostgresIdentity:
+    database_name: str
+    server_address: str | None
+    system_identifier: str
+
+
+@dataclass(frozen=True, slots=True)
+class _DockerPostgresContainerIdentity:
+    name: str
+    image: str
+    running: bool
+    labels: Mapping[str, str]
 
 
 _CleanupAction = Callable[[], Awaitable[None]]
@@ -98,6 +131,223 @@ async def _connect_verified_disposable_admin(
     return admin
 
 
+async def _run_local_container_attested_ddl(
+    *,
+    admin_dsn: str,
+    admin: asyncpg.Connection,
+    container_name: str,
+    ddl: _CleanupAction,
+) -> None:
+    candidate = await _read_candidate_postgres_identity(admin)
+    attested_system_identifier = _attest_local_docker_postgres(container_name)
+    await _run_attested_admin_ddl(
+        admin_dsn=admin_dsn,
+        candidate=candidate,
+        attested_system_identifier=attested_system_identifier,
+        ddl=ddl,
+    )
+
+
+async def _run_attested_admin_ddl(
+    *,
+    admin_dsn: str,
+    candidate: _CandidatePostgresIdentity,
+    attested_system_identifier: str,
+    ddl: _CleanupAction,
+) -> None:
+    _require_local_admin_dsn(admin_dsn)
+    _require_local_server_identity(
+        database_name=candidate.database_name,
+        server_address=candidate.server_address,
+    )
+    if not SAFE_SYSTEM_IDENTIFIER.fullmatch(candidate.system_identifier):
+        raise UnsafeDisposablePostgresTarget(
+            "candidate PostgreSQL system identifier is invalid"
+        )
+    if not SAFE_SYSTEM_IDENTIFIER.fullmatch(attested_system_identifier):
+        raise UnsafeDisposablePostgresTarget(
+            "attested PostgreSQL system identifier is invalid"
+        )
+    if candidate.system_identifier != attested_system_identifier:
+        raise UnsafeDisposablePostgresTarget(
+            "candidate PostgreSQL cluster differs from local Docker cluster"
+        )
+    await ddl()
+
+
+async def _read_candidate_postgres_identity(
+    admin: asyncpg.Connection,
+) -> _CandidatePostgresIdentity:
+    identity = await admin.fetchrow(
+        "SELECT current_database() AS database_name, "
+        "inet_server_addr()::text AS server_address, "
+        "system_identifier::text AS system_identifier "
+        "FROM pg_control_system()"
+    )
+    return _CandidatePostgresIdentity(
+        database_name=identity["database_name"],
+        server_address=identity["server_address"],
+        system_identifier=identity["system_identifier"],
+    )
+
+
+def _attest_local_docker_postgres(container_name: str) -> str:
+    identity = _inspect_docker_postgres_container(container_name)
+    _require_expected_docker_postgres_container(
+        identity,
+        container_name=container_name,
+    )
+    result = _run_docker(
+        [
+            "exec",
+            container_name,
+            "psql",
+            "--username",
+            "dingdingbot",
+            "--dbname",
+            "postgres",
+            "--tuples-only",
+            "--no-align",
+            "--set",
+            "ON_ERROR_STOP=1",
+            "--command",
+            "SELECT system_identifier::text FROM pg_control_system()",
+        ]
+    )
+    system_identifier = result.stdout.strip()
+    if not SAFE_SYSTEM_IDENTIFIER.fullmatch(system_identifier):
+        raise UnsafeDisposablePostgresTarget(
+            "local Docker PostgreSQL system identifier is invalid"
+        )
+    return system_identifier
+
+
+def _inspect_docker_postgres_container(
+    container_name: str,
+) -> _DockerPostgresContainerIdentity:
+    if not SAFE_CONTAINER.fullmatch(container_name):
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container name is invalid"
+        )
+    result = _run_docker(
+        [
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            (
+                "{{json .Name}}\t{{json .Config.Image}}\t"
+                "{{json .State.Running}}\t{{json .Config.Labels}}"
+            ),
+            container_name,
+        ]
+    )
+    try:
+        raw_name, raw_image, raw_running, raw_labels = result.stdout.strip().split(
+            "\t",
+            3,
+        )
+        name = json.loads(raw_name)
+        image = json.loads(raw_image)
+        running = json.loads(raw_running)
+        labels = json.loads(raw_labels)
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container inspect output is invalid"
+        ) from None
+    if not isinstance(name, str) or not isinstance(image, str):
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container identity is invalid"
+        )
+    if not isinstance(running, bool) or not isinstance(labels, dict):
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container state is invalid"
+        )
+    if not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in labels.items()
+    ):
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container labels are invalid"
+        )
+    return _DockerPostgresContainerIdentity(
+        name=name,
+        image=image,
+        running=running,
+        labels=labels,
+    )
+
+
+def _require_expected_docker_postgres_container(
+    identity: _DockerPostgresContainerIdentity,
+    *,
+    container_name: str,
+) -> None:
+    if identity.name != f"/{container_name}":
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container name differs from expected identity"
+        )
+    if identity.image != EXPECTED_POSTGRES_IMAGE or not identity.running:
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container image or state is invalid"
+        )
+    for key, expected in EXPECTED_COMPOSE_LABELS.items():
+        if identity.labels.get(key) != expected:
+            raise UnsafeDisposablePostgresTarget(
+                "local PostgreSQL container Compose labels are invalid"
+            )
+
+    config_hash = identity.labels.get("com.docker.compose.config-hash")
+    if config_hash is None or not SAFE_COMPOSE_CONFIG_HASH.fullmatch(config_hash):
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container Compose config hash is invalid"
+        )
+    config_file_value = identity.labels.get(
+        "com.docker.compose.project.config_files"
+    )
+    working_dir_value = identity.labels.get(
+        "com.docker.compose.project.working_dir"
+    )
+    if config_file_value is None or working_dir_value is None:
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container Compose source labels are missing"
+        )
+    config_file = Path(config_file_value)
+    if (
+        not config_file.is_absolute()
+        or config_file.name != EXPECTED_COMPOSE_FILE
+        or str(config_file.parent) != working_dir_value
+    ):
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container Compose source labels are invalid"
+        )
+    try:
+        source_matches = config_file.read_bytes() == (
+            REPO_ROOT / EXPECTED_COMPOSE_FILE
+        ).read_bytes()
+    except OSError:
+        source_matches = False
+    if not source_matches:
+        raise UnsafeDisposablePostgresTarget(
+            "local PostgreSQL container Compose source differs from repository"
+        )
+
+
+def _run_docker(arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["docker", *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=DOCKER_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise UnsafeDisposablePostgresTarget(
+            "local Docker PostgreSQL attestation failed"
+        ) from None
+
+
 def _require_local_admin_dsn(admin_dsn: str) -> None:
     url = make_url(admin_dsn)
     if url.database != "postgres":
@@ -162,7 +412,12 @@ async def owner_read_dsn() -> AsyncGenerator[str, None]:
     primary_error: BaseException | None = None
     try:
         admin = await _connect_verified_disposable_admin(ADMIN_DSN)
-        await admin.execute(f'CREATE DATABASE "{database_name}"')
+        await _run_local_container_attested_ddl(
+            admin_dsn=ADMIN_DSN,
+            admin=admin,
+            container_name=POSTGRES_CONTAINER_NAME,
+            ddl=lambda: admin.execute(f'CREATE DATABASE "{database_name}"'),
+        )
         database_created = True
         database_url = _database_url(database_name)
         _run_alembic(database_url, "upgrade", "head")
