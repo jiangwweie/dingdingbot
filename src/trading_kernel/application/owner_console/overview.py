@@ -40,7 +40,7 @@ def build_owner_overview(facts: OverviewFacts, now_ms: int) -> OwnerOverview:
     )
     attention_summary = (
         *facts.contradictory_fact_reasons,
-        *facts.evidence_gap_reasons,
+        *(gap.reason for gap in facts.evidence_gaps),
         *(f"open_incident:{identity}" for identity in facts.attention_incident_ids),
     )
 
@@ -125,6 +125,18 @@ def _conclusion(facts: OverviewFacts) -> OwnerConclusion:
             ),
         )
 
+    if facts.needs_intervention_monitor_key is not None:
+        return _owner_conclusion(
+            level="intervention",
+            summary="A current Monitor requires Owner intervention.",
+            owner_action="Follow the intervention recorded by the Monitor.",
+            evidence=_fact_evidence(
+                facts.needs_intervention_monitor_key,
+                facts.needs_intervention_monitor_updated_at_ms
+                or facts.observed_at_ms,
+            ),
+        )
+
     for index, status in enumerate(facts.monitor_statuses):
         if status != "needs_intervention":
             continue
@@ -173,18 +185,22 @@ def _conclusion(facts: OverviewFacts) -> OwnerConclusion:
         )
 
     if (
-        facts.evidence_gap_reasons
+        facts.evidence_gaps
         or facts.runtime_freshness is Freshness.UNAVAILABLE
     ):
+        evidence = (
+            facts.evidence_gaps[0].evidence
+            if facts.evidence_gaps
+            else _fact_evidence(
+                facts.freshness_evidence_identity,
+                facts.freshness_evidence_at_ms,
+            )
+        )
         return _owner_conclusion(
             level="attention",
             summary="Required overview evidence is unavailable.",
             owner_action=None,
-            evidence=_fact_evidence(
-                facts.evidence_gap_identity
-                or facts.freshness_evidence_identity,
-                facts.freshness_evidence_at_ms,
-            ),
+            evidence=evidence,
         )
 
     return _owner_conclusion(

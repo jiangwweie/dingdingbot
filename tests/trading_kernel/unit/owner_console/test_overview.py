@@ -2,7 +2,11 @@ from decimal import Decimal
 
 import pytest
 
-from src.trading_kernel.application.owner_console.models import Freshness
+from src.trading_kernel.application.owner_console.models import (
+    EvidenceRef,
+    Freshness,
+    OverviewEvidenceGap,
+)
 from src.trading_kernel.application.owner_console.overview import (
     build_owner_overview,
 )
@@ -102,15 +106,32 @@ def test_open_owner_incident_wins_over_normal_monitor_rows() -> None:
             {
                 "attention_incident_ids": ("incident:attention",),
                 "attention_incident_opened_at_ms": (1_800_000_009_000,),
-                "evidence_gap_reasons": ("incomplete_review_economics",),
+                "evidence_gaps": (
+                    OverviewEvidenceGap(
+                        reason="incomplete_review_economics",
+                        evidence=EvidenceRef(
+                            kind="review",
+                            identity="review:missing-economics",
+                            occurred_at_ms=1_800_000_008_000,
+                        ),
+                    ),
+                ),
             },
             "attention",
             "incident:attention",
         ),
         (
             {
-                "evidence_gap_reasons": ("incomplete_review_economics",),
-                "evidence_gap_identity": "review:missing-economics",
+                "evidence_gaps": (
+                    OverviewEvidenceGap(
+                        reason="incomplete_review_economics",
+                        evidence=EvidenceRef(
+                            kind="review",
+                            identity="review:missing-economics",
+                            occurred_at_ms=1_800_000_008_000,
+                        ),
+                    ),
+                ),
             },
             "attention",
             "review:missing-economics",
@@ -145,3 +166,41 @@ def test_capacity_uses_current_policy_and_exposure_not_claim_snapshot() -> None:
 
     assert overview.ticket_capacity == 1
     assert overview.active_ticket_count == 2
+
+
+def test_first_evidence_gap_keeps_its_matching_boundary_fact() -> None:
+    facts = overview_facts(
+        evidence_gaps=(
+            OverviewEvidenceGap(
+                reason="active_ticket_limit_reached",
+                evidence=EvidenceRef(
+                    kind="ticket",
+                    identity="ticket:boundary:21",
+                    occurred_at_ms=1_800_000_001_000,
+                ),
+            ),
+            OverviewEvidenceGap(
+                reason="monitor_limit_reached",
+                evidence=EvidenceRef(
+                    kind="event",
+                    identity="monitor:boundary:101",
+                    occurred_at_ms=1_800_000_000_500,
+                ),
+            ),
+        )
+    )
+
+    overview = build_owner_overview(facts, now_ms=1_800_000_010_000)
+
+    assert overview.attention_summary[:2] == (
+        "active_ticket_limit_reached",
+        "monitor_limit_reached",
+    )
+    assert overview.conclusion.level == "attention"
+    assert overview.conclusion.evidence == (
+        EvidenceRef(
+            kind="ticket",
+            identity="ticket:boundary:21",
+            occurred_at_ms=1_800_000_001_000,
+        ),
+    )

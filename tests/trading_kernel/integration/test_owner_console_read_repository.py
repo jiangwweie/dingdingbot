@@ -10,6 +10,9 @@ from sqlalchemy import event
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from src.trading_kernel.application.owner_console.overview import (
+    build_owner_overview,
+)
 from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     PostgresOwnerReadRepository,
     _review_metrics,
@@ -288,7 +291,7 @@ async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
         overview_selects = [
             statement
             for statement in statements
-            if statement.startswith("select")
+            if statement.startswith(("select", "with"))
             and "count(*) from brc_owner_policy_current" not in statement
         ]
         assert len(overview_selects) == 7
@@ -312,7 +315,10 @@ async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
         assert "brc_trade_aggregates.review_id = brc_trade_reviews.review_id" in (
             overview_selects[6]
         )
-        assert "limit" in overview_selects[6]
+        assert "created_at_ms >=" in overview_selects[6]
+        assert "sum(" in overview_selects[6]
+        assert "count(*) over" not in " ".join(overview_selects)
+        assert "count() over" not in " ".join(overview_selects)
 
         assert facts.max_concurrent_tickets == 3
         assert facts.active_ticket_count == 0
@@ -334,7 +340,243 @@ async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
         await engine.dispose()
 
 
-async def _seed_overview_authority(dsn: str, *, now_ms: int) -> None:
+async def test_overview_freshness_uses_stalest_required_projection(
+    owner_read_dsn: str,
+) -> None:
+    now_ms = 1_800_000_010_000
+    exposure_updated_at_ms = now_ms - 120_000
+    await _seed_overview_authority(
+        owner_read_dsn,
+        now_ms=now_ms,
+        exposure_updated_at_ms=exposure_updated_at_ms,
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_overview_facts(
+                day_start_ms=1_799_913_600_000,
+                now_ms=now_ms,
+            )
+
+        assert facts.runtime_freshness.value == "stale"
+        assert facts.freshness_evidence_identity == (
+            "account:binance-usdm:owner-console-account"
+        )
+        assert facts.freshness_evidence_at_ms == exposure_updated_at_ms
+    finally:
+        await engine.dispose()
+
+
+async def test_overview_authority_ignores_disabled_policy_binding(
+    owner_read_dsn: str,
+) -> None:
+    now_ms = 1_800_000_010_000
+    await _seed_overview_authority(owner_read_dsn, now_ms=now_ms)
+    await _seed_additional_owner_policy(
+        owner_read_dsn,
+        now_ms=now_ms,
+        owner_policy_id="policy:disabled",
+        enabled=False,
+        priority_rank=1,
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_overview_facts(
+                day_start_ms=1_799_913_600_000,
+                now_ms=now_ms,
+            )
+
+        assert facts.max_concurrent_tickets == 3
+        assert "multiple_configured_owner_authorities" not in (
+            facts.contradictory_fact_reasons
+        )
+        assert facts.attention_incident_ids == ("incident:auto-retry",)
+    finally:
+        await engine.dispose()
+
+
+async def test_overview_ambiguous_authority_does_not_scope_account_queries(
+    owner_read_dsn: str,
+) -> None:
+    now_ms = 1_800_000_010_000
+    await _seed_overview_authority(owner_read_dsn, now_ms=now_ms)
+    await _seed_additional_owner_policy(
+        owner_read_dsn,
+        now_ms=now_ms,
+        owner_policy_id="policy:also-enabled",
+        enabled=True,
+        priority_rank=101,
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_overview_facts(
+                day_start_ms=1_799_913_600_000,
+                now_ms=now_ms,
+            )
+
+        assert facts.max_concurrent_tickets is None
+        assert facts.active_ticket_count is None
+        assert facts.attention_incident_ids == ()
+        assert facts.contradictory_fact_reasons == (
+            "multiple_configured_owner_authorities",
+        )
+    finally:
+        await engine.dispose()
+
+
+async def test_overview_without_authority_keeps_runtime_global_incident(
+    owner_read_dsn: str,
+) -> None:
+    now_ms = 1_800_000_010_000
+    await _seed_runtime_incident(
+        owner_read_dsn,
+        incident_id="incident:runtime-global",
+        entry_block_scope="runtime",
+        entry_block_key="global",
+        opened_at_ms=now_ms - 5_000,
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_overview_facts(
+                day_start_ms=1_799_913_600_000,
+                now_ms=now_ms,
+            )
+
+        assert facts.open_owner_incident_id == "incident:runtime-global"
+        assert facts.open_owner_incident_opened_at_ms == now_ms - 5_000
+        assert facts.execution_incident_count == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_overview_incident_limit_keeps_older_owner_intervention(
+    owner_read_dsn: str,
+) -> None:
+    now_ms = 1_800_000_010_000
+    await _seed_overview_authority(owner_read_dsn, now_ms=now_ms)
+    await _seed_attention_incidents(
+        owner_read_dsn,
+        count=21,
+        newest_opened_at_ms=now_ms - 1_000,
+    )
+    await _seed_runtime_incident(
+        owner_read_dsn,
+        incident_id="incident:older-intervention",
+        entry_block_scope="runtime",
+        entry_block_key="global",
+        opened_at_ms=now_ms - 120_000,
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_overview_facts(
+                day_start_ms=1_799_913_600_000,
+                now_ms=now_ms,
+            )
+
+        assert facts.open_owner_incident_id == "incident:older-intervention"
+        assert facts.open_owner_incident_opened_at_ms == now_ms - 120_000
+        assert len(facts.attention_incident_ids) == 20
+        assert "open_incident_limit_reached" in tuple(
+            gap.reason for gap in facts.evidence_gaps
+        )
+    finally:
+        await engine.dispose()
+
+
+async def test_overview_monitor_limit_keeps_older_owner_intervention(
+    owner_read_dsn: str,
+) -> None:
+    now_ms = 1_800_000_010_000
+    await _seed_overview_authority(owner_read_dsn, now_ms=now_ms)
+    await _seed_normal_monitors(
+        owner_read_dsn,
+        count=101,
+        newest_updated_at_ms=now_ms - 500,
+    )
+    await _seed_owner_intervention_monitor(
+        owner_read_dsn,
+        monitor_key="monitor:older-intervention",
+        updated_at_ms=now_ms - 120_000,
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_overview_facts(
+                day_start_ms=1_799_913_600_000,
+                now_ms=now_ms,
+            )
+
+        assert facts.needs_intervention_monitor_key == (
+            "monitor:older-intervention"
+        )
+        assert facts.needs_intervention_monitor_updated_at_ms == (
+            now_ms - 120_000
+        )
+        assert len(facts.monitor_keys) == 100
+        assert "monitor_limit_reached" in tuple(
+            gap.reason for gap in facts.evidence_gaps
+        )
+        overview = build_owner_overview(facts, now_ms=now_ms)
+        assert overview.conclusion.level == "intervention"
+        assert overview.conclusion.evidence[0].identity == (
+            "monitor:older-intervention"
+        )
+    finally:
+        await engine.dispose()
+
+
+async def test_overview_aggregates_all_current_reviews_beyond_one_hundred(
+    owner_read_dsn: str,
+) -> None:
+    now_ms = 1_800_000_010_000
+    day_start_ms = 1_799_913_600_000
+    await _seed_overview_authority(owner_read_dsn, now_ms=now_ms)
+    await _seed_current_reviews(
+        owner_read_dsn,
+        count=101,
+        created_at_ms=day_start_ms + 1_000,
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_overview_facts(
+                day_start_ms=day_start_ms,
+                now_ms=now_ms,
+            )
+
+        assert facts.today_net_pnl.value == Decimal("126.25")
+        assert facts.today_net_r.value == Decimal("50.5")
+        assert "current_review_limit_reached" not in tuple(
+            gap.reason for gap in facts.evidence_gaps
+        )
+    finally:
+        await engine.dispose()
+
+
+async def _seed_overview_authority(
+    dsn: str,
+    *,
+    now_ms: int,
+    exposure_updated_at_ms: int | None = None,
+) -> None:
     database_name = make_url(dsn).database
     assert database_name is not None
     admin_dsn = (
@@ -409,7 +651,7 @@ async def _seed_overview_authority(dsn: str, *, now_ms: int) -> None:
                 """,
                 "binance-usdm",
                 "owner-console-account",
-                now_ms - 10_000,
+                exposure_updated_at_ms or now_ms - 10_000,
             )
             await connection.execute(
                 """
@@ -453,6 +695,359 @@ async def _seed_overview_authority(dsn: str, *, now_ms: int) -> None:
                 "automatic retry",
                 "incident:auto-retry",
                 now_ms - 8_000,
+            )
+    finally:
+        await connection.close()
+
+
+async def _seed_additional_owner_policy(
+    dsn: str,
+    *,
+    now_ms: int,
+    owner_policy_id: str,
+    enabled: bool,
+    priority_rank: int,
+) -> None:
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    try:
+        await connection.execute(
+            """
+            INSERT INTO brc_owner_policy_current (
+                owner_policy_id, policy_version, enabled,
+                new_entry_submit_enabled, priority_rank,
+                max_concurrent_tickets,
+                max_strategy_group_concurrent_tickets,
+                family_ticket_limits,
+                max_ticket_stop_risk_fraction,
+                max_gross_stop_risk_fraction,
+                max_ticket_initial_margin_fraction,
+                max_gross_initial_margin_utilization,
+                directional_stop_risk_limit_fraction,
+                min_materialization_ratio, max_leverage,
+                supported_margin_mode, post_stop_stress_multiple,
+                max_post_fill_stop_risk_overrun_fraction,
+                scope, updated_at_ms
+            ) VALUES (
+                $1, 1, $2, true, $3, 3, NULL, '{}'::jsonb,
+                0.02, 0.06, 0.30, 0.90, 0.04, 0.50, 10,
+                'cross', 2.0, 0.10, $4::jsonb, $5
+            )
+            """,
+            owner_policy_id,
+            enabled,
+            priority_rank,
+            json.dumps(
+                {
+                    "runtime_profile_id": "profile:owner-console",
+                    "allowed_event_spec_ids": [],
+                }
+            ),
+            now_ms - 10_000,
+        )
+    finally:
+        await connection.close()
+
+
+async def _seed_runtime_incident(
+    dsn: str,
+    *,
+    incident_id: str,
+    entry_block_scope: str,
+    entry_block_key: str,
+    opened_at_ms: int,
+) -> None:
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    try:
+        await connection.execute(
+            """
+            INSERT INTO brc_runtime_incidents (
+                incident_id, ticket_id, incident_kind, status,
+                first_blocker, entry_block_scope, entry_block_key,
+                details, opened_at_ms, resolved_at_ms
+            ) VALUES (
+                $1, NULL, 'runtime_fence', 'open', 'hard_safety_stop',
+                $2, $3, '{}'::jsonb, $4, NULL
+            )
+            """,
+            incident_id,
+            entry_block_scope,
+            entry_block_key,
+            opened_at_ms,
+        )
+    finally:
+        await connection.close()
+
+
+async def _seed_attention_incidents(
+    dsn: str,
+    *,
+    count: int,
+    newest_opened_at_ms: int,
+) -> None:
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    try:
+        await connection.execute(
+            """
+            INSERT INTO brc_runtime_incidents (
+                incident_id, ticket_id, incident_kind, status,
+                first_blocker, entry_block_scope, entry_block_key,
+                details, opened_at_ms, resolved_at_ms
+            )
+            SELECT
+                'incident:attention:' || series::text,
+                NULL,
+                'post_fill_risk_facts_unavailable',
+                'open',
+                'post_fill_risk_facts_unavailable',
+                'account_capacity',
+                'binance-usdm:owner-console-account',
+                '{}'::jsonb,
+                $1::bigint - (series - 1) * 1000,
+                NULL
+            FROM generate_series(1, $2) AS series
+            """,
+            newest_opened_at_ms,
+            count,
+        )
+    finally:
+        await connection.close()
+
+
+async def _seed_normal_monitors(
+    dsn: str,
+    *,
+    count: int,
+    newest_updated_at_ms: int,
+) -> None:
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    try:
+        await connection.execute(
+            """
+            INSERT INTO brc_monitor_current (
+                monitor_key, owner_status, summary, intervention,
+                ticket_id, incident_id, updated_at_ms, projection_version
+            )
+            SELECT
+                'monitor:normal:' || series::text,
+                'running',
+                'runtime healthy',
+                'no action',
+                NULL,
+                NULL,
+                $1::bigint - (series - 1) * 1000,
+                1
+            FROM generate_series(1, $2) AS series
+            """,
+            newest_updated_at_ms,
+            count,
+        )
+    finally:
+        await connection.close()
+
+
+async def _seed_owner_intervention_monitor(
+    dsn: str,
+    *,
+    monitor_key: str,
+    updated_at_ms: int,
+) -> None:
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    try:
+        await connection.execute(
+            """
+            INSERT INTO brc_monitor_current (
+                monitor_key, owner_status, summary, intervention,
+                ticket_id, incident_id, updated_at_ms, projection_version
+            ) VALUES (
+                $1, 'needs_intervention', 'owner action required',
+                'follow official recovery', NULL, NULL, $2, 1
+            )
+            """,
+            monitor_key,
+            updated_at_ms,
+        )
+    finally:
+        await connection.close()
+
+
+async def _seed_current_reviews(
+    dsn: str,
+    *,
+    count: int,
+    created_at_ms: int,
+) -> None:
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    digest = "sha256:" + "a" * 64
+    try:
+        async with connection.transaction():
+            await connection.execute(
+                """
+                INSERT INTO brc_strategy_universe_versions (
+                    universe_version_id, strategy_group_id, event_spec_id,
+                    universe_version, semantic_digest, lifecycle_state,
+                    installed_at_ms, activated_at_ms, retired_at_ms,
+                    abandoned_at_ms, abandon_reason_code
+                ) VALUES (
+                    'universe:owner-console', 'strategy-group:test',
+                    'event-spec:test', 1, $1, 'active', $2, $2,
+                    NULL, NULL, NULL
+                )
+                """,
+                digest,
+                created_at_ms,
+            )
+            await connection.execute(
+                """
+                INSERT INTO brc_trade_tickets (
+                    ticket_id, exposure_episode_id, signal_event_id,
+                    strategy_group_id, strategy_version_id, event_spec_id,
+                    universe_version_id, universe_semantic_digest,
+                    runtime_profile_id, owner_policy_id, owner_policy_version,
+                    runtime_scope_id, runtime_scope_version, account_id,
+                    venue_id, exchange_instrument_id, position_side,
+                    netting_domain_key, active_netting_domain_key,
+                    exposure_family, active_family_ticket_count_at_claim,
+                    family_ticket_limit, directional_risk_at_stop_at_claim,
+                    directional_stop_risk_limit_fraction,
+                    min_materialization_ratio, minimum_stop_risk_budget,
+                    exit_policy_id, exit_policy_semantic_hash,
+                    entry_reference_price, quantity, notional,
+                    capacity_claim_id, planned_stop_risk_budget,
+                    post_fill_stop_risk_limit, selected_leverage,
+                    leverage_change_required, reserved_margin,
+                    risk_reservation_basis, margin_mode,
+                    cross_margin_stress_model_id, post_stop_stress_multiple,
+                    claim_stress_proof_digest, risk_at_stop,
+                    entry_order_type, entry_limit_price, initial_stop_price,
+                    pre_tp1_reclaim_price, exposure_session_end_ms,
+                    take_profit_prices, take_profit_quantities, fact_digest,
+                    decision_digest, status, created_at_ms, expires_at_ms,
+                    terminal_at_ms
+                )
+                SELECT
+                    'ticket:review:' || series::text,
+                    'episode:review:' || series::text,
+                    'signal:review:' || series::text,
+                    'strategy-group:test', 'strategy-version:test',
+                    'event-spec:test', 'universe:owner-console', $1,
+                    'profile:owner-console', 'policy:owner-console', 1,
+                    'runtime-scope:test', 1, 'owner-console-account',
+                    'binance-usdm', 'BTCUSDT', 'long',
+                    'binance-usdm:owner-console-account:BTCUSDT:long:'
+                        || series::text,
+                    NULL, 'opening_range', 0, 3, 0, 0.04, 0.5, 1,
+                    'exit-policy:test', 'sha256:' || repeat('b', 64),
+                    100, 1, 100, 'claim:test:' || series::text,
+                    1, 1.1, 1, false, 100, 'stop_risk', 'cross',
+                    'stress:test', 2, 'sha256:' || repeat('c', 64),
+                    1, 'market', NULL, 99, NULL, NULL,
+                    '[]'::jsonb, '[]'::jsonb,
+                    'sha256:' || repeat('d', 64),
+                    'sha256:' || repeat('e', 64),
+                    'terminal', $2::bigint, $2::bigint + 60_000,
+                    $2::bigint + 30_000
+                FROM generate_series(1, $3) AS series
+                """,
+                digest,
+                created_at_ms,
+                count,
+            )
+            await connection.execute(
+                """
+                INSERT INTO brc_trade_aggregates (
+                    ticket_id, status, version, last_event_sequence,
+                    entry_lane_held, position_qty, average_fill_price,
+                    actual_stop_risk, venue_reported_liquidation_price,
+                    post_fill_risk_status, post_fill_disposition,
+                    post_fill_stress_status, post_fill_stress_proof_digest,
+                    protected_qty, entry_exchange_order_id,
+                    initial_stop_exchange_order_id,
+                    active_stop_exchange_order_id, active_stop_price,
+                    tp1_exchange_order_id, tp1_target_qty, tp1_filled_qty,
+                    break_even_floor_price,
+                    pending_replaced_stop_exchange_order_id,
+                    pending_stop_price, pending_stop_watermark_ms,
+                    runner_stop_watermark_ms, pending_cancel_exchange_order_id,
+                    exit_exchange_order_id, review_id, lifecycle_due_at_ms,
+                    reconciliation_due_at_ms, updated_at_ms
+                )
+                SELECT
+                    'ticket:review:' || series::text, 'terminal', 1, 1,
+                    false, 0, 100, 1, NULL, 'within_limit', 'continue',
+                    'within_limit', 'sha256:' || repeat('f', 64), 0,
+                    'entry-order:' || series::text, NULL, NULL, NULL,
+                    NULL, 0, 0, NULL, NULL, NULL, NULL, NULL, NULL,
+                    'exit-order:' || series::text,
+                    'review:owner-console:' || series::text,
+                    NULL, NULL, $1::bigint + 30_000
+                FROM generate_series(1, $2) AS series
+                """,
+                created_at_ms,
+                count,
+            )
+            await connection.execute(
+                """
+                INSERT INTO brc_trade_reviews (
+                    review_id, ticket_id, revision, supersedes_review_id,
+                    outcome, metrics, decision_impact, created_at_ms
+                )
+                SELECT
+                    'review:owner-console:' || series::text,
+                    'ticket:review:' || series::text,
+                    1, NULL, 'complete',
+                    jsonb_build_object(
+                        'economics_completeness', 'complete',
+                        'net_pnl_quote', '1.25',
+                        'planned_r_multiple', '0.5'
+                    ),
+                    '{}'::jsonb,
+                    $1::bigint + series
+                FROM generate_series(1, $2) AS series
+                """,
+                created_at_ms,
+                count,
             )
     finally:
         await connection.close()

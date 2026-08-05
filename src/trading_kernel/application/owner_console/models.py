@@ -57,6 +57,11 @@ class EvidenceRef(FrozenModel):
     occurred_at_ms: int
 
 
+class OverviewEvidenceGap(FrozenModel):
+    reason: str
+    evidence: EvidenceRef
+
+
 LifecycleStageKey = Literal[
     "signal",
     "admission",
@@ -187,7 +192,7 @@ class OwnerOverview(FrozenModel):
     today_signal_count: int
     admitted_signal_count: int
     rejected_signal_count: int
-    execution_incident_count: int
+    execution_incident_count: int | None
     attention_summary: tuple[str, ...]
     evidence: tuple[EvidenceRef, ...]
 
@@ -355,16 +360,17 @@ class OverviewFacts(FrozenModel):
     monitor_statuses: tuple[str, ...]
     monitor_keys: tuple[str, ...]
     monitor_updated_at_ms: tuple[int, ...]
+    needs_intervention_monitor_key: str | None
+    needs_intervention_monitor_updated_at_ms: int | None
     contradictory_fact_reasons: tuple[str, ...]
     contradictory_evidence_identity: str | None
-    evidence_gap_reasons: tuple[str, ...]
-    evidence_gap_identity: str | None
+    evidence_gaps: tuple[OverviewEvidenceGap, ...]
     today_net_pnl: MoneyMetric
     today_net_r: MoneyMetric
     today_signal_count: int
     admitted_signal_count: int
     rejected_signal_count: int
-    execution_incident_count: int
+    execution_incident_count: int | None
     evidence: tuple[EvidenceRef, ...]
 
 

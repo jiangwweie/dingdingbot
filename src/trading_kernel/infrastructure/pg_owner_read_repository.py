@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import (
@@ -18,6 +18,7 @@ from src.trading_kernel.application.owner_console.models import (
     EvidenceRef,
     Freshness,
     MoneyMetric,
+    OverviewEvidenceGap,
     OverviewFacts,
 )
 from src.trading_kernel.infrastructure.pg_models import (
@@ -90,7 +91,7 @@ class PostgresOwnerReadRepository:
         authority_rows = (
             await self._connection.execute(_overview_authority_query())
         ).mappings().all()
-        authority = authority_rows[0] if authority_rows else None
+        authority = authority_rows[0] if len(authority_rows) == 1 else None
         venue_id = None if authority is None else str(authority["venue_id"])
         account_id = None if authority is None else str(authority["account_id"])
         runtime_profile_id = (
@@ -105,7 +106,7 @@ class PostgresOwnerReadRepository:
                 )
             )
         ).mappings().one_or_none()
-        incident_rows = (
+        incident_query_rows = (
             await self._connection.execute(
                 _open_incidents_query(
                     venue_id=venue_id,
@@ -113,7 +114,9 @@ class PostgresOwnerReadRepository:
                 )
             )
         ).mappings().all()
-        monitor_rows = (
+        incident_limit_reached = len(incident_query_rows) > 20
+        incident_rows = incident_query_rows[:20]
+        monitor_query_rows = (
             await self._connection.execute(
                 _monitor_rows_query(
                     venue_id=venue_id,
@@ -121,7 +124,9 @@ class PostgresOwnerReadRepository:
                 )
             )
         ).mappings().all()
-        active_ticket_rows = (
+        monitor_limit_reached = len(monitor_query_rows) > 100
+        monitor_rows = monitor_query_rows[:100]
+        active_ticket_query_rows = (
             await self._connection.execute(
                 _active_tickets_query(
                     venue_id=venue_id,
@@ -129,6 +134,8 @@ class PostgresOwnerReadRepository:
                 )
             )
         ).mappings().all()
+        active_ticket_limit_reached = len(active_ticket_query_rows) > 20
+        active_ticket_rows = active_ticket_query_rows[:20]
         count_row = (
             await self._connection.execute(
                 _today_counts_query(
@@ -139,7 +146,7 @@ class PostgresOwnerReadRepository:
                 )
             )
         ).mappings().one()
-        review_rows = (
+        review_row = (
             await self._connection.execute(
                 _today_reviews_query(
                     day_start_ms=day_start_ms,
@@ -147,16 +154,32 @@ class PostgresOwnerReadRepository:
                     account_id=account_id,
                 )
             )
-        ).mappings().all()
+        ).mappings().one()
 
         contradictory_reasons: list[str] = []
-        evidence_gaps: list[str] = []
+        evidence_gaps: list[OverviewEvidenceGap] = []
         if len(authority_rows) > 1:
             contradictory_reasons.append("multiple_configured_owner_authorities")
-        if authority is None:
-            evidence_gaps.append("configured_owner_authority_missing")
-        elif authority["exposure_venue_id"] is None:
-            evidence_gaps.append("account_exposure_current_missing")
+        if not authority_rows:
+            evidence_gaps.append(
+                _evidence_gap(
+                    reason="configured_owner_authority_missing",
+                    kind="event",
+                    identity="owner_policy:configured",
+                    occurred_at_ms=now_ms,
+                )
+            )
+        elif authority is not None and authority["exposure_venue_id"] is None:
+            evidence_gaps.append(
+                _evidence_gap(
+                    reason="account_exposure_current_missing",
+                    kind="event",
+                    identity=(
+                        f"account:{authority['venue_id']}:{authority['account_id']}"
+                    ),
+                    occurred_at_ms=now_ms,
+                )
+            )
 
         max_concurrent_tickets = (
             None
@@ -168,13 +191,10 @@ class PostgresOwnerReadRepository:
             if authority is None or authority["active_ticket_count"] is None
             else int(authority["active_ticket_count"])
         )
-        active_ticket_total = (
-            int(active_ticket_rows[0]["total_count"])
-            if active_ticket_rows
-            else 0
-        )
+        active_ticket_total = len(active_ticket_rows)
         if (
-            active_ticket_count is not None
+            not active_ticket_limit_reached
+            and active_ticket_count is not None
             and active_ticket_total != active_ticket_count
         ):
             contradictory_reasons.append("active_ticket_count_mismatch")
@@ -185,14 +205,37 @@ class PostgresOwnerReadRepository:
         ):
             contradictory_reasons.append("active_ticket_count_exceeds_policy")
 
-        if active_ticket_total > 20:
-            evidence_gaps.append("active_ticket_limit_reached")
-        incident_total = int(incident_rows[0]["total_count"]) if incident_rows else 0
-        if incident_total > 20:
-            evidence_gaps.append("open_incident_limit_reached")
-        monitor_total = int(monitor_rows[0]["total_count"]) if monitor_rows else 0
-        if monitor_total > 100:
-            evidence_gaps.append("monitor_limit_reached")
+        if active_ticket_limit_reached:
+            boundary = active_ticket_query_rows[20]
+            evidence_gaps.append(
+                _evidence_gap(
+                    reason="active_ticket_limit_reached",
+                    kind="ticket",
+                    identity=str(boundary["ticket_id"]),
+                    occurred_at_ms=int(boundary["updated_at_ms"]),
+                )
+            )
+        incident_total = None if incident_limit_reached else len(incident_rows)
+        if incident_limit_reached:
+            boundary = incident_query_rows[20]
+            evidence_gaps.append(
+                _evidence_gap(
+                    reason="open_incident_limit_reached",
+                    kind="incident",
+                    identity=str(boundary["incident_id"]),
+                    occurred_at_ms=int(boundary["opened_at_ms"]),
+                )
+            )
+        if monitor_limit_reached:
+            boundary = monitor_query_rows[100]
+            evidence_gaps.append(
+                _evidence_gap(
+                    reason="monitor_limit_reached",
+                    kind="event",
+                    identity=str(boundary["monitor_key"]),
+                    occurred_at_ms=int(boundary["updated_at_ms"]),
+                )
+            )
 
         claim_id = None if claim is None else str(claim["capacity_claim_id"])
         wallet_balance = (
@@ -209,33 +252,48 @@ class PostgresOwnerReadRepository:
             None if claim is None else int(claim["created_at_ms"])
         )
 
-        blocking_incidents = [
-            row for row in incident_rows if bool(row["needs_intervention"])
-        ]
         attention_incidents = [
             row for row in incident_rows if not bool(row["needs_intervention"])
         ]
-        latest_blocking = blocking_incidents[0] if blocking_incidents else None
+        latest_blocking = incident_query_rows[0] if incident_query_rows else None
+        if (
+            latest_blocking is not None
+            and latest_blocking["top_actionable_incident_id"] is None
+        ):
+            latest_blocking = None
+        intervention_monitor = (
+            monitor_query_rows[0] if monitor_query_rows else None
+        )
+        if (
+            intervention_monitor is not None
+            and intervention_monitor["needs_intervention_monitor_key"] is None
+        ):
+            intervention_monitor = None
 
         today_net_pnl, today_net_r, review_gap, review_evidence = (
-            _review_metrics(review_rows)
+            _review_aggregate_metrics(review_row)
         )
         if review_gap is not None:
-            evidence_gaps.append(review_gap)
-        review_total = int(review_rows[0]["total_count"]) if review_rows else 0
-        if review_total > 100:
-            evidence_gaps.append("current_review_limit_reached")
-
+            review_gap_evidence = (
+                review_evidence[0]
+                if review_evidence
+                else EvidenceRef(
+                    kind="review",
+                    identity="review:current",
+                    occurred_at_ms=now_ms,
+                )
+            )
+            evidence_gaps.append(
+                OverviewEvidenceGap(
+                    reason=review_gap,
+                    evidence=review_gap_evidence,
+                )
+            )
         freshness, freshness_identity, freshness_at_ms = _overview_freshness(
             authority=authority,
             monitor_rows=monitor_rows,
             now_ms=now_ms,
             contradictory=bool(contradictory_reasons),
-        )
-        evidence_gap_identity = (
-            review_evidence[0].identity
-            if review_gap is not None and review_evidence
-            else freshness_identity
         )
         evidence = _unique_evidence(
             (
@@ -248,12 +306,48 @@ class PostgresOwnerReadRepository:
                     for row in incident_rows
                 ),
                 *(
+                    ()
+                    if latest_blocking is None
+                    else (
+                        EvidenceRef(
+                            kind="incident",
+                            identity=str(
+                                latest_blocking["top_actionable_incident_id"]
+                            ),
+                            occurred_at_ms=int(
+                                latest_blocking[
+                                    "top_actionable_incident_opened_at_ms"
+                                ]
+                            ),
+                        ),
+                    )
+                ),
+                *(
                     EvidenceRef(
                         kind="event",
                         identity=str(row["monitor_key"]),
                         occurred_at_ms=int(row["updated_at_ms"]),
                     )
                     for row in monitor_rows
+                ),
+                *(
+                    ()
+                    if intervention_monitor is None
+                    else (
+                        EvidenceRef(
+                            kind="event",
+                            identity=str(
+                                intervention_monitor[
+                                    "needs_intervention_monitor_key"
+                                ]
+                            ),
+                            occurred_at_ms=int(
+                                intervention_monitor[
+                                    "needs_intervention_monitor_updated_at_ms"
+                                ]
+                            ),
+                        ),
+                    )
                 ),
                 *(
                     EvidenceRef(
@@ -284,12 +378,14 @@ class PostgresOwnerReadRepository:
             open_owner_incident_id=(
                 None
                 if latest_blocking is None
-                else str(latest_blocking["incident_id"])
+                else str(latest_blocking["top_actionable_incident_id"])
             ),
             open_owner_incident_opened_at_ms=(
                 None
                 if latest_blocking is None
-                else int(latest_blocking["opened_at_ms"])
+                else int(
+                    latest_blocking["top_actionable_incident_opened_at_ms"]
+                )
             ),
             attention_incident_ids=tuple(
                 str(row["incident_id"]) for row in attention_incidents
@@ -306,12 +402,27 @@ class PostgresOwnerReadRepository:
             monitor_updated_at_ms=tuple(
                 int(row["updated_at_ms"]) for row in monitor_rows
             ),
+            needs_intervention_monitor_key=(
+                None
+                if intervention_monitor is None
+                else str(
+                    intervention_monitor["needs_intervention_monitor_key"]
+                )
+            ),
+            needs_intervention_monitor_updated_at_ms=(
+                None
+                if intervention_monitor is None
+                else int(
+                    intervention_monitor[
+                        "needs_intervention_monitor_updated_at_ms"
+                    ]
+                )
+            ),
             contradictory_fact_reasons=tuple(contradictory_reasons),
             contradictory_evidence_identity=(
                 freshness_identity if contradictory_reasons else None
             ),
-            evidence_gap_reasons=tuple(evidence_gaps),
-            evidence_gap_identity=(evidence_gap_identity if evidence_gaps else None),
+            evidence_gaps=tuple(evidence_gaps),
             today_net_pnl=today_net_pnl,
             today_net_r=today_net_r,
             today_signal_count=int(count_row["signal_count"]),
@@ -332,6 +443,7 @@ def _overview_authority_query() -> sa.Select[Any]:
             owner_policy_current.c.max_concurrent_tickets,
             owner_policy_current.c.updated_at_ms.label("policy_updated_at_ms"),
             runtime_profiles.c.runtime_profile_id,
+            runtime_profiles.c.updated_at_ms.label("profile_updated_at_ms"),
             runtime_profiles.c.venue_id,
             runtime_profiles.c.account_id,
             account_exposure_current.c.venue_id.label("exposure_venue_id"),
@@ -356,6 +468,7 @@ def _overview_authority_query() -> sa.Select[Any]:
             )
         )
         .where(
+            owner_policy_current.c.enabled.is_(True),
             runtime_profiles.c.status == "active",
             runtime_profiles.c.venue_id == _VENUE_ID,
         )
@@ -399,15 +512,41 @@ def _open_incidents_query(
         venue_id=venue_id,
         account_id=account_id,
     )
-    needs_intervention = sa.or_(
-        runtime_incidents.c.entry_block_scope == "runtime",
-        runtime_incidents.c.first_blocker == "hard_safety_stop",
-        sa.exists(
-            sa.select(sa.literal(1)).where(
-                monitor_current.c.incident_id == runtime_incidents.c.incident_id,
-                monitor_current.c.owner_status == "needs_intervention",
+    needs_intervention = _incident_needs_intervention(runtime_incidents)
+    actionable_incident = runtime_incidents.alias("actionable_incident")
+    actionable_ticket = trade_tickets.alias("actionable_incident_ticket")
+    actionable_scope = _incident_scope(
+        incident=actionable_incident,
+        ticket=actionable_ticket,
+        venue_id=venue_id,
+        account_id=account_id,
+    )
+    top_actionable = (
+        sa.select(
+            actionable_incident.c.incident_id.label(
+                "top_actionable_incident_id"
+            ),
+            actionable_incident.c.opened_at_ms.label(
+                "top_actionable_incident_opened_at_ms"
+            ),
+        )
+        .select_from(
+            actionable_incident.outerjoin(
+                actionable_ticket,
+                actionable_ticket.c.ticket_id == actionable_incident.c.ticket_id,
             )
-        ),
+        )
+        .where(
+            actionable_incident.c.status == "open",
+            actionable_scope,
+            _incident_needs_intervention(actionable_incident),
+        )
+        .order_by(
+            actionable_incident.c.opened_at_ms.desc(),
+            actionable_incident.c.incident_id,
+        )
+        .limit(1)
+        .lateral("top_actionable_incident")
     )
     return (
         sa.select(
@@ -415,20 +554,36 @@ def _open_incidents_query(
             runtime_incidents.c.entry_block_scope,
             runtime_incidents.c.opened_at_ms,
             needs_intervention.label("needs_intervention"),
-            sa.func.count().over().label("total_count"),
+            top_actionable.c.top_actionable_incident_id,
+            top_actionable.c.top_actionable_incident_opened_at_ms,
         )
         .select_from(
             runtime_incidents.outerjoin(
                 ticket,
                 ticket.c.ticket_id == runtime_incidents.c.ticket_id,
-            )
+            ).outerjoin(top_actionable, sa.true())
         )
         .where(runtime_incidents.c.status == "open", scope)
         .order_by(
             runtime_incidents.c.opened_at_ms.desc(),
             runtime_incidents.c.incident_id,
         )
-        .limit(20)
+        .limit(21)
+    )
+
+
+def _incident_needs_intervention(
+    incident: sa.FromClause,
+) -> sa.ColumnElement[bool]:
+    return sa.or_(
+        incident.c.entry_block_scope == "runtime",
+        incident.c.first_blocker == "hard_safety_stop",
+        sa.exists(
+            sa.select(sa.literal(1)).where(
+                monitor_current.c.incident_id == incident.c.incident_id,
+                monitor_current.c.owner_status == "needs_intervention",
+            )
+        ),
     )
 
 
@@ -438,32 +593,71 @@ def _monitor_rows_query(
     ticket = trade_tickets.alias("monitor_ticket")
     incident = runtime_incidents.alias("monitor_incident")
     incident_ticket = trade_tickets.alias("monitor_incident_ticket")
-    incident_scope = _incident_scope(
+    scope = _monitor_scope(
+        monitor=monitor_current,
+        ticket=ticket,
         incident=incident,
-        ticket=incident_ticket,
+        incident_ticket=incident_ticket,
         venue_id=venue_id,
         account_id=account_id,
     )
-    ticket_scope = _exact_scope(
-        venue_column=ticket.c.venue_id,
-        account_column=ticket.c.account_id,
+    actionable_monitor = monitor_current.alias("actionable_monitor")
+    actionable_ticket = trade_tickets.alias("actionable_monitor_ticket")
+    actionable_incident = runtime_incidents.alias("actionable_monitor_incident")
+    actionable_incident_ticket = trade_tickets.alias(
+        "actionable_monitor_incident_ticket"
+    )
+    actionable_scope = _monitor_scope(
+        monitor=actionable_monitor,
+        ticket=actionable_ticket,
+        incident=actionable_incident,
+        incident_ticket=actionable_incident_ticket,
         venue_id=venue_id,
         account_id=account_id,
     )
-    scope = sa.or_(
-        sa.and_(
-            monitor_current.c.ticket_id.is_(None),
-            monitor_current.c.incident_id.is_(None),
-        ),
-        sa.and_(monitor_current.c.ticket_id.is_not(None), ticket_scope),
-        sa.and_(monitor_current.c.incident_id.is_not(None), incident_scope),
+    top_intervention = (
+        sa.select(
+            actionable_monitor.c.monitor_key.label(
+                "needs_intervention_monitor_key"
+            ),
+            actionable_monitor.c.updated_at_ms.label(
+                "needs_intervention_monitor_updated_at_ms"
+            ),
+        )
+        .select_from(
+            actionable_monitor.outerjoin(
+                actionable_ticket,
+                actionable_ticket.c.ticket_id == actionable_monitor.c.ticket_id,
+            )
+            .outerjoin(
+                actionable_incident,
+                actionable_incident.c.incident_id
+                == actionable_monitor.c.incident_id,
+            )
+            .outerjoin(
+                actionable_incident_ticket,
+                actionable_incident_ticket.c.ticket_id
+                == actionable_incident.c.ticket_id,
+            )
+        )
+        .where(
+            actionable_scope,
+            actionable_monitor.c.owner_status == "needs_intervention",
+        )
+        .order_by(
+            actionable_monitor.c.updated_at_ms.desc(),
+            actionable_monitor.c.monitor_key,
+        )
+        .limit(1)
+        .lateral("top_intervention_monitor")
     )
     return (
         sa.select(
             monitor_current.c.monitor_key,
             monitor_current.c.owner_status,
             monitor_current.c.updated_at_ms,
-            sa.func.count().over().label("total_count"),
+            top_intervention.c.needs_intervention_monitor_key,
+            top_intervention.c.needs_intervention_monitor_updated_at_ms,
         )
         .select_from(
             monitor_current.outerjoin(
@@ -478,13 +672,42 @@ def _monitor_rows_query(
                 incident_ticket,
                 incident_ticket.c.ticket_id == incident.c.ticket_id,
             )
+            .outerjoin(top_intervention, sa.true())
         )
         .where(scope)
         .order_by(
             monitor_current.c.updated_at_ms.desc(),
             monitor_current.c.monitor_key,
         )
-        .limit(100)
+        .limit(101)
+    )
+
+
+def _monitor_scope(
+    *,
+    monitor: sa.FromClause,
+    ticket: sa.FromClause,
+    incident: sa.FromClause,
+    incident_ticket: sa.FromClause,
+    venue_id: str | None,
+    account_id: str | None,
+) -> sa.ColumnElement[bool]:
+    incident_scope = _incident_scope(
+        incident=incident,
+        ticket=incident_ticket,
+        venue_id=venue_id,
+        account_id=account_id,
+    )
+    ticket_scope = _exact_scope(
+        venue_column=ticket.c.venue_id,
+        account_column=ticket.c.account_id,
+        venue_id=venue_id,
+        account_id=account_id,
+    )
+    return sa.or_(
+        sa.and_(monitor.c.ticket_id.is_(None), monitor.c.incident_id.is_(None)),
+        sa.and_(monitor.c.ticket_id.is_not(None), ticket_scope),
+        sa.and_(monitor.c.incident_id.is_not(None), incident_scope),
     )
 
 
@@ -501,7 +724,6 @@ def _active_tickets_query(
         sa.select(
             trade_tickets.c.ticket_id,
             trade_aggregates.c.updated_at_ms,
-            sa.func.count().over().label("total_count"),
         )
         .select_from(
             trade_tickets.join(
@@ -514,7 +736,7 @@ def _active_tickets_query(
             trade_aggregates.c.updated_at_ms.desc(),
             trade_tickets.c.ticket_id,
         )
-        .limit(20)
+        .limit(21)
     )
 
 
@@ -587,20 +809,26 @@ def _today_reviews_query(
         venue_id=venue_id,
         account_id=account_id,
     )
-    return (
+    economics_completeness = trade_reviews.c.metrics[
+        "economics_completeness"
+    ].as_string()
+    net_pnl_quote = trade_reviews.c.metrics["net_pnl_quote"].as_string()
+    planned_r_multiple = trade_reviews.c.metrics[
+        "planned_r_multiple"
+    ].as_string()
+    numeric_text = r"^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$"
+    valid_economics = sa.and_(
+        economics_completeness == "complete",
+        net_pnl_quote.op("~")(numeric_text),
+        planned_r_multiple.op("~")(numeric_text),
+    )
+    review_facts = (
         sa.select(
             trade_reviews.c.review_id,
-            trade_reviews.c.metrics["economics_completeness"]
-            .as_string()
-            .label("economics_completeness"),
-            trade_reviews.c.metrics["net_pnl_quote"]
-            .as_string()
-            .label("net_pnl_quote"),
-            trade_reviews.c.metrics["planned_r_multiple"]
-            .as_string()
-            .label("planned_r_multiple"),
             trade_reviews.c.created_at_ms,
-            sa.func.count().over().label("total_count"),
+            net_pnl_quote.label("net_pnl_quote"),
+            planned_r_multiple.label("planned_r_multiple"),
+            valid_economics.label("valid_economics"),
         )
         .select_from(
             trade_aggregates.join(
@@ -612,11 +840,132 @@ def _today_reviews_query(
             )
         )
         .where(scope, trade_reviews.c.created_at_ms >= day_start_ms)
+        .cte("current_review_facts")
+    )
+    latest_review_id = (
+        sa.select(review_facts.c.review_id)
         .order_by(
-            trade_reviews.c.created_at_ms.desc(),
-            trade_reviews.c.review_id,
+            review_facts.c.created_at_ms.desc(),
+            review_facts.c.review_id,
         )
-        .limit(100)
+        .limit(1)
+        .scalar_subquery()
+    )
+    latest_review_at_ms = (
+        sa.select(review_facts.c.created_at_ms)
+        .order_by(
+            review_facts.c.created_at_ms.desc(),
+            review_facts.c.review_id,
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
+    invalid_review_id = (
+        sa.select(review_facts.c.review_id)
+        .where(review_facts.c.valid_economics.is_(False))
+        .order_by(
+            review_facts.c.created_at_ms.desc(),
+            review_facts.c.review_id,
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
+    invalid_review_at_ms = (
+        sa.select(review_facts.c.created_at_ms)
+        .where(review_facts.c.valid_economics.is_(False))
+        .order_by(
+            review_facts.c.created_at_ms.desc(),
+            review_facts.c.review_id,
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
+    net_pnl_sum = sa.func.coalesce(
+        sa.func.sum(
+            sa.case(
+                (
+                    review_facts.c.valid_economics.is_(True),
+                    sa.cast(review_facts.c.net_pnl_quote, sa.Numeric()),
+                ),
+                else_=sa.literal(0),
+            )
+        ),
+        0,
+    )
+    net_r_sum = sa.func.coalesce(
+        sa.func.sum(
+            sa.case(
+                (
+                    review_facts.c.valid_economics.is_(True),
+                    sa.cast(review_facts.c.planned_r_multiple, sa.Numeric()),
+                ),
+                else_=sa.literal(0),
+            )
+        ),
+        0,
+    )
+    return sa.select(
+        sa.func.count().label("review_count"),
+        sa.func.count()
+        .filter(review_facts.c.valid_economics.is_(False))
+        .label("incomplete_review_count"),
+        net_pnl_sum.label("net_pnl_sum"),
+        net_r_sum.label("net_r_sum"),
+        latest_review_id.label("latest_review_id"),
+        latest_review_at_ms.label("latest_review_at_ms"),
+        invalid_review_id.label("invalid_review_id"),
+        invalid_review_at_ms.label("invalid_review_at_ms"),
+    ).select_from(review_facts)
+
+
+def _review_aggregate_metrics(
+    row: sa.RowMapping,
+) -> tuple[MoneyMetric, MoneyMetric, str | None, tuple[EvidenceRef, ...]]:
+    invalid_count = int(row["incomplete_review_count"])
+    evidence_id = (
+        row["invalid_review_id"]
+        if invalid_count
+        else row["latest_review_id"]
+    )
+    evidence_at_ms = (
+        row["invalid_review_at_ms"]
+        if invalid_count
+        else row["latest_review_at_ms"]
+    )
+    evidence = (
+        ()
+        if evidence_id is None or evidence_at_ms is None
+        else (
+            EvidenceRef(
+                kind="review",
+                identity=str(evidence_id),
+                occurred_at_ms=int(evidence_at_ms),
+            ),
+        )
+    )
+    if invalid_count:
+        reason = "incomplete_review_economics"
+        return (
+            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
+            MoneyMetric(value=None, unit="R", unavailable_reason=reason),
+            reason,
+            evidence,
+        )
+    net_pnl = row["net_pnl_sum"]
+    net_r = row["net_r_sum"]
+    if not isinstance(net_pnl, Decimal) or not isinstance(net_r, Decimal):
+        reason = "incomplete_review_economics"
+        return (
+            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
+            MoneyMetric(value=None, unit="R", unavailable_reason=reason),
+            reason,
+            evidence,
+        )
+    return (
+        MoneyMetric(value=net_pnl, unit="USDT"),
+        MoneyMetric(value=net_r, unit="R"),
+        None,
+        evidence,
     )
 
 
@@ -639,15 +988,16 @@ def _incident_scope(
     venue_id: str | None,
     account_id: str | None,
 ) -> sa.ColumnElement[bool]:
+    runtime_global = sa.and_(
+        incident.c.entry_block_scope == "runtime",
+        incident.c.entry_block_key == "global",
+    )
     if venue_id is None or account_id is None:
-        return sa.false()
+        return runtime_global
     account_key = f"{venue_id}:{account_id}"
     leverage_prefix = f"{account_key}:%"
     return sa.or_(
-        sa.and_(
-            incident.c.entry_block_scope == "runtime",
-            incident.c.entry_block_key == "global",
-        ),
+        runtime_global,
         sa.and_(
             incident.c.entry_block_scope == "account_capacity",
             incident.c.entry_block_key == account_key,
@@ -725,22 +1075,81 @@ def _overview_freshness(
     contradictory: bool,
 ) -> tuple[Freshness, str, int]:
     if authority is None:
-        return Freshness.UNAVAILABLE, "owner_policy:configured", now_ms
-    identity = f"account:{authority['venue_id']}:{authority['account_id']}"
-    timestamps = [int(authority["policy_updated_at_ms"])]
-    if authority["exposure_updated_at_ms"] is not None:
-        timestamps.append(int(authority["exposure_updated_at_ms"]))
+        freshness = (
+            Freshness.CONTRADICTORY
+            if contradictory
+            else Freshness.UNAVAILABLE
+        )
+        return freshness, "owner_policy:configured", now_ms
+    account_identity = (
+        f"account:{authority['venue_id']}:{authority['account_id']}"
+    )
+    required = [
+        (
+            f"owner_policy:{authority['owner_policy_id']}",
+            int(authority["policy_updated_at_ms"]),
+        ),
+        (
+            f"runtime_profile:{authority['runtime_profile_id']}",
+            int(authority["profile_updated_at_ms"]),
+        ),
+        (
+            account_identity,
+            (
+                None
+                if authority["exposure_updated_at_ms"] is None
+                else int(authority["exposure_updated_at_ms"])
+            ),
+        ),
+    ]
     if monitor_rows:
-        timestamps.append(max(int(row["updated_at_ms"]) for row in monitor_rows))
-    watermark = max(timestamps)
-    if contradictory or watermark > now_ms:
-        return Freshness.CONTRADICTORY, identity, watermark
-    age_ms = now_ms - watermark
+        latest_monitor = max(
+            monitor_rows,
+            key=lambda row: (int(row["updated_at_ms"]), str(row["monitor_key"])),
+        )
+        required.append(
+            (
+                str(latest_monitor["monitor_key"]),
+                int(latest_monitor["updated_at_ms"]),
+            )
+        )
+    else:
+        required.append(("monitor:current", None))
+
+    classified = [
+        (*_classify_freshness(timestamp, now_ms=now_ms), identity)
+        for identity, timestamp in required
+    ]
+    if contradictory:
+        return Freshness.CONTRADICTORY, account_identity, now_ms
+    precedence = {
+        Freshness.FRESH: 0,
+        Freshness.STALE: 1,
+        Freshness.UNAVAILABLE: 2,
+        Freshness.CONTRADICTORY: 3,
+    }
+    freshness, occurred_at_ms, identity = max(
+        classified,
+        key=lambda item: (precedence[item[0]], -item[1]),
+    )
+    return freshness, identity, occurred_at_ms
+
+
+def _classify_freshness(
+    timestamp_ms: int | None,
+    *,
+    now_ms: int,
+) -> tuple[Freshness, int]:
+    if timestamp_ms is None:
+        return Freshness.UNAVAILABLE, now_ms
+    if timestamp_ms > now_ms:
+        return Freshness.CONTRADICTORY, timestamp_ms
+    age_ms = now_ms - timestamp_ms
     if age_ms <= _FRESH_AGE_MS:
-        return Freshness.FRESH, identity, watermark
+        return Freshness.FRESH, timestamp_ms
     if age_ms <= _STALE_MAX_AGE_MS:
-        return Freshness.STALE, identity, watermark
-    return Freshness.UNAVAILABLE, identity, watermark
+        return Freshness.STALE, timestamp_ms
+    return Freshness.UNAVAILABLE, timestamp_ms
 
 
 def _unique_evidence(evidence: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
@@ -753,3 +1162,29 @@ def _unique_evidence(evidence: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ..
         seen.add(key)
         unique.append(item)
     return tuple(unique)
+
+
+def _evidence_gap(
+    *,
+    reason: str,
+    kind: Literal[
+        "signal",
+        "admission",
+        "ticket",
+        "event",
+        "command",
+        "incident",
+        "settlement",
+        "review",
+    ],
+    identity: str,
+    occurred_at_ms: int,
+) -> OverviewEvidenceGap:
+    return OverviewEvidenceGap(
+        reason=reason,
+        evidence=EvidenceRef(
+            kind=kind,
+            identity=identity,
+            occurred_at_ms=occurred_at_ms,
+        ),
+    )
