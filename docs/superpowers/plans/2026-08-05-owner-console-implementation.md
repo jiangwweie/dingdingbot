@@ -28,6 +28,7 @@
 - Owner API budget is one process, `CPUQuota=25%`, `MemoryMax=256M`, `TasksMax=32`, zero background tasks, and at most two PostgreSQL connections.
 - Existing Observation, Entry, Lifecycle, and Reconciliation services, their slice, and their exchange authority remain unchanged.
 - Production-to-local acceptance data is exported only through a consistent, single-job, data-only PostgreSQL snapshot. Snapshot artifacts stay outside Git with mode `0600`, exclude `alembic_version`, reject credential-like columns, and may be restored only into an explicitly named localhost disposable database.
+- Tokyo deployment is a separate Owner-controlled action. Complete and report Tasks 1–24 first; do not execute any Task 25 command until the Owner gives a fresh explicit confirmation after reviewing local acceptance results. Approval of this plan is not deployment approval.
 
 ## Source Documents
 
@@ -2861,7 +2862,7 @@ git add deploy/owner-console/README.md docs/superpowers/specs/2026-08-05-owner-c
 git commit -m "docs(console): record phase one acceptance procedure"
 ```
 
-### Task 25: Deploy and verify the Owner Console on Tokyo
+### Task 25: Deploy and verify the Owner Console on Tokyo — explicit Owner confirmation required
 
 **Files:**
 - Modify: `docs/current/MAIN_CONTROL_ROADMAP.md` only after direct deployment evidence exists and only if Owner Console state belongs in the current runtime snapshot.
@@ -2870,6 +2871,8 @@ git commit -m "docs(console): record phase one acceptance procedure"
 **Interfaces:**
 - Consumes: reviewed commit, built frontend, encrypted credentials, existing Nginx HTTPS server, and the production PostgreSQL database.
 - Produces: authenticated public Owner Console with no effect on trading authority.
+
+**Hard stop:** Do not execute Step 1 or any later deployment step until Task 24 is complete, its local acceptance evidence has been reported to the Owner, and the Owner then gives a fresh explicit deployment confirmation in the active conversation.
 
 - [ ] **Step 1: Perform preflight without production mutation**
 
