@@ -27,6 +27,7 @@
 - Layout maximum width is 1160px; top navigation is 44px; table rows are 38px; table headers are 30px; buttons and inputs are 30–32px.
 - Owner API budget is one process, `CPUQuota=25%`, `MemoryMax=256M`, `TasksMax=32`, zero background tasks, and at most two PostgreSQL connections.
 - Existing Observation, Entry, Lifecycle, and Reconciliation services, their slice, and their exchange authority remain unchanged.
+- Production-to-local acceptance data is exported only through a consistent, single-job, data-only PostgreSQL snapshot. Snapshot artifacts stay outside Git with mode `0600`, exclude `alembic_version`, reject credential-like columns, and may be restored only into an explicitly named localhost disposable database.
 
 ## Source Documents
 
@@ -86,6 +87,8 @@
 | `deploy/owner-console/nginx/*` | Existing HTTPS server include and login rate-limit zone |
 | `deploy/owner-console/postgresql/owner-console-read-role.sql` | Idempotent read-role grants and read-only defaults |
 | `deploy/owner-console/README.md` | Installation, credential rotation, verification, and rollback |
+| `scripts/owner_console/export_server_dml_snapshot.py` | Consistent server-side `pg_dump` data-only export over SSH with local artifact safeguards |
+| `scripts/owner_console/restore_local_dml_snapshot.py` | Localhost-only disposable database bootstrap, truncate, DML restore, and read-role verification |
 | `tests/trading_kernel/architecture/test_owner_console_architecture.py` | Read-only and isolation guardrails |
 | `tests/trading_kernel/integration/test_owner_console_read_repository.py` | PostgreSQL query, transaction, cursor, and consistency verification |
 | `tests/trading_kernel/unit/owner_console/*` | Pure assembler, review, auth, and market-data tests |
@@ -2660,7 +2663,112 @@ git add deploy/owner-console scripts/trading_kernel/deploy_tokyo_release.py test
 git commit -m "deploy(console): isolate owner api behind nginx"
 ```
 
-### Task 23: Run full local acceptance and close documentation
+### Task 23: Add the production-to-local DML snapshot test path
+
+**Files:**
+- Create: `scripts/owner_console/export_server_dml_snapshot.py`
+- Create: `scripts/owner_console/restore_local_dml_snapshot.py`
+- Create: `tests/trading_kernel/unit/owner_console/test_dml_snapshot.py`
+- Modify: `.gitignore`
+- Modify: `deploy/owner-console/README.md`
+
+**Interfaces:**
+- Consumes: an SSH alias for Tokyo, the exact remote PostgreSQL database name, local PostgreSQL admin connection facts, and the current repository migrations.
+- Produces: one compressed data-only SQL artifact plus non-sensitive metadata, and one disposable local database containing the same persisted facts for Owner Console acceptance.
+
+- [ ] **Step 1: Write failing safety and command-construction tests**
+
+```python
+from pathlib import Path
+
+import pytest
+
+from scripts.owner_console.export_server_dml_snapshot import build_remote_dump_command
+from scripts.owner_console.restore_local_dml_snapshot import validate_local_target
+
+
+def test_export_is_single_job_consistent_data_only_dml() -> None:
+    command = build_remote_dump_command(database_name="brc")
+
+    assert "pg_dump" in command
+    assert "--data-only" in command
+    assert "--inserts" in command
+    assert "--rows-per-insert=100" in command
+    assert "--serializable-deferrable" in command
+    assert "--lock-wait-timeout=3000" in command
+    assert "--exclude-table=alembic_version" in command
+    assert "--jobs" not in command
+
+
+def test_restore_rejects_remote_or_unscoped_database() -> None:
+    with pytest.raises(ValueError):
+        validate_local_target(host="tokyo", database_name="brc")
+    with pytest.raises(ValueError):
+        validate_local_target(host="127.0.0.1", database_name="brc")
+
+
+def test_snapshot_directory_is_ignored() -> None:
+    assert ".local/owner-console-snapshots/" in Path(".gitignore").read_text()
+```
+
+- [ ] **Step 2: Run tests and verify the snapshot tooling is absent**
+
+Run:
+
+```bash
+.venv/bin/pytest tests/trading_kernel/unit/owner_console/test_dml_snapshot.py -v
+```
+
+Expected: FAIL because both scripts and the ignore rule do not exist.
+
+- [ ] **Step 3: Implement guarded export and local restore**
+
+`export_server_dml_snapshot.py`:
+
+1. accepts `--ssh-host`, `--remote-database`, and `--output-dir` without accepting a password or full DSN;
+2. validates the database name against `^[a-zA-Z][a-zA-Z0-9_]{0,62}$` before constructing any remote command;
+3. performs a remote `information_schema.columns` preflight and refuses schemas containing column names matching `password`, `secret`, `api_key`, `totp`, `credential`, or `token`;
+4. runs exactly one remote `pg_dump` process with `--data-only --inserts --rows-per-insert=100 --serializable-deferrable --lock-wait-timeout=3000 --no-owner --no-privileges --exclude-table=alembic_version`;
+5. streams the dump through local gzip without writing an uncompressed intermediate file;
+6. writes the final artifact atomically with mode `0600` under `.local/owner-console-snapshots/`;
+7. writes a sidecar JSON containing only UTC capture time, SSH host label, database name, PostgreSQL version, Alembic revision, compressed byte size, and SHA-256; it contains no DSN, row payload, account ID, Ticket ID, Session value, or credential.
+
+The export is a PostgreSQL consistent snapshot and never stops, locks for write, or mutates any Trading Kernel service. Failure to obtain a lock within three seconds aborts the export instead of waiting on production.
+
+`restore_local_dml_snapshot.py`:
+
+1. accepts only host `localhost`, `127.0.0.1`, `::1`, or a local Unix Socket;
+2. accepts only database names matching `^brc_owner_console_test_[a-f0-9]{12}$`;
+3. verifies the sidecar SHA-256 before touching PostgreSQL;
+4. creates a fresh disposable database, runs `scripts/trading_kernel/bootstrap_schema.py` to Alembic head, truncates every public table except `alembic_version` inside the disposable target, then restores the decompressed DML through `psql -v ON_ERROR_STOP=1`;
+5. confirms the local Alembic revision equals the sidecar revision and executes bounded parity counts for `brc_signal_events`, `brc_trade_tickets`, `brc_trade_aggregates`, `brc_trade_reviews`, and open `brc_runtime_incidents`;
+6. creates or refreshes a local `brc_owner_console` role with `default_transaction_read_only=on`, grants only `CONNECT`, schema `USAGE`, and table `SELECT`, and proves `SHOW transaction_read_only` returns `on` for the final acceptance connection;
+7. prints the exact cleanup command for the disposable database and never targets the production database name.
+
+The snapshot preserves exact causal identities because Ticket, Signal, Event, Command, Review, and Incident joins depend on them. Safety comes from local-only storage, file permissions, credential-column rejection, Git exclusion, and the disposable-target guard rather than identity rewriting.
+
+- [ ] **Step 4: Verify safety, deterministic help, and a disposable round trip**
+
+Run unit checks on every machine:
+
+```bash
+.venv/bin/pytest tests/trading_kernel/unit/owner_console/test_dml_snapshot.py -v
+.venv/bin/ruff check scripts/owner_console/export_server_dml_snapshot.py scripts/owner_console/restore_local_dml_snapshot.py tests/trading_kernel/unit/owner_console/test_dml_snapshot.py
+.venv/bin/python scripts/owner_console/export_server_dml_snapshot.py --help
+.venv/bin/python scripts/owner_console/restore_local_dml_snapshot.py --help
+git check-ignore .local/owner-console-snapshots/probe.sql.gz
+```
+
+After explicit readonly SSH access to Tokyo is available, run one export and restore into a fresh `brc_owner_console_test_<12 hex>` database. Verify the checksum, Alembic revision, five parity counts, and read-only role result. The SQL artifact and its metadata remain untracked and are not attached to test output.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .gitignore scripts/owner_console/export_server_dml_snapshot.py scripts/owner_console/restore_local_dml_snapshot.py tests/trading_kernel/unit/owner_console/test_dml_snapshot.py deploy/owner-console/README.md
+git commit -m "test(console): add production data local snapshot workflow"
+```
+
+### Task 24: Run full local acceptance and close documentation
 
 **Files:**
 - Modify: `deploy/owner-console/README.md`
@@ -2694,6 +2802,8 @@ The checklist contains these closed gates:
 [ ] Frontend initial bundle excludes lightweight-charts
 [ ] API idle resource use fits 25% CPU / 256M / 32-task budget
 [ ] Four Trading Kernel workers remain unchanged
+[ ] Production DML snapshot is Git-ignored, checksum-verified, and restored only into a guarded localhost disposable database
+[ ] Owner Console passes the same browser and API paths against the restored production-fact snapshot
 ```
 
 - [ ] **Step 2: Run the complete backend verification**
@@ -2725,7 +2835,7 @@ Expected: PASS and generated API types remain unchanged.
 
 - [ ] **Step 4: Run local process and resource acceptance**
 
-Start the API against the disposable read-only PostgreSQL role and a temporary Unix Socket, then verify:
+Restore the latest checksum-verified production-fact snapshot into a guarded localhost disposable database. Start the API against that database through the disposable read-only PostgreSQL role and a temporary Unix Socket, then verify:
 
 ```bash
 curl --unix-socket /tmp/brc-owner-console-test.sock http://localhost/healthz
@@ -2751,7 +2861,7 @@ git add deploy/owner-console/README.md docs/superpowers/specs/2026-08-05-owner-c
 git commit -m "docs(console): record phase one acceptance procedure"
 ```
 
-### Task 24: Deploy and verify the Owner Console on Tokyo
+### Task 25: Deploy and verify the Owner Console on Tokyo
 
 **Files:**
 - Modify: `docs/current/MAIN_CONTROL_ROADMAP.md` only after direct deployment evidence exists and only if Owner Console state belongs in the current runtime snapshot.
@@ -2842,6 +2952,7 @@ Skip this commit when no tracked documentation changed. Never copy secrets, Sess
 ```bash
 .venv/bin/pytest tests/trading_kernel/architecture -v
 .venv/bin/pytest tests/trading_kernel/unit/owner_console tests/trading_kernel/interfaces/test_owner_console_http.py tests/trading_kernel/integration/test_owner_console_read_repository.py -v
+.venv/bin/pytest tests/trading_kernel/unit/owner_console/test_dml_snapshot.py -v
 .venv/bin/ruff check src/trading_kernel scripts/owner_console tests/trading_kernel
 .venv/bin/mypy src/trading_kernel scripts/owner_console tests/trading_kernel
 pnpm --dir frontend/owner-console generate:api
