@@ -563,11 +563,12 @@ async def test_trade_list_cursor_is_stable_for_active_and_terminal_mix(
             list_selects[0]
         )
         assert "brc_runtime_incidents" in list_selects[0]
+        assert "brc_trade_events" in list_selects[0]
         assert "brc_runtime_incidents.ticket_id = brc_trade_tickets.ticket_id" in (
             list_selects[0]
         )
         assert "brc_runtime_incidents.status =" in list_selects[0]
-        assert list_selects[0].count("limit") >= 3
+        assert list_selects[0].count("limit") >= 4
         assert "count(" not in list_selects[0]
         assert "order by brc_trade_tickets.created_at_ms desc" in list_selects[0]
         assert "brc_trade_tickets.ticket_id desc" in list_selects[0]
@@ -653,11 +654,18 @@ async def test_trade_list_uses_only_current_review_and_keeps_incident_bound(
         assert rows["ticket:y"].review_id == "review:y:v2"
         assert rows["ticket:y"].review_revision == 2
         assert rows["ticket:y"].net_pnl.value == Decimal("3.5100")
+        assert rows["ticket:y"].exit_reason == "strategy_exit"
+        assert rows["ticket:y"].exit_reason_unavailable_reason is None
         assert [
             ref.identity
             for ref in rows["ticket:y"].evidence
             if ref.kind == "review"
         ] == ["review:y:v2"]
+        assert [
+            ref.identity
+            for ref in rows["ticket:y"].evidence
+            if ref.kind == "event"
+        ] == ["event:y:exit-requested"]
         assert rows["ticket:z"].lifecycle_stage == "protection"
         assert rows["ticket:z"].net_pnl.unavailable_reason == "ticket_active"
         assert rows["ticket:z"].attention_items == (
@@ -675,6 +683,10 @@ async def test_trade_list_uses_only_current_review_and_keeps_incident_bound(
         assert rows["ticket:w"].net_pnl.value is None
         assert rows["ticket:v"].net_pnl.unavailable_reason == (
             "incomplete_review_economics"
+        )
+        assert rows["ticket:v"].exit_reason is None
+        assert rows["ticket:v"].exit_reason_unavailable_reason == (
+            "exit_reason_evidence_missing"
         )
     finally:
         await engine.dispose()
@@ -1784,6 +1796,47 @@ async def _seed_owner_console_trades(dsn: str) -> None:
                             }
                         ),
                         created_at_ms + 40_000,
+                    ),
+                ),
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_trade_events (
+                    event_id, ticket_id, sequence, event_type, payload,
+                    occurred_at_ms
+                ) VALUES (
+                    $1::varchar(160), 'ticket:y', $2::bigint,
+                    'ExitRequested', $3::jsonb, $4::bigint
+                )
+                """,
+                (
+                    (
+                        "event:y:exit-requested",
+                        10,
+                        json.dumps(
+                            {
+                                "event_id": "event:y:exit-requested",
+                                "ticket_id": "ticket:y",
+                                "sequence": 10,
+                                "occurred_at_ms": created_at_ms + 20_000,
+                                "reason": "strategy_exit",
+                            }
+                        ),
+                        created_at_ms + 20_000,
+                    ),
+                    (
+                        "event:y:exit-retry",
+                        11,
+                        json.dumps(
+                            {
+                                "event_id": "event:y:exit-retry",
+                                "ticket_id": "ticket:y",
+                                "sequence": 11,
+                                "occurred_at_ms": created_at_ms + 21_000,
+                                "reason": "recover_exit_rejection",
+                            }
+                        ),
+                        created_at_ms + 21_000,
                     ),
                 ),
             )

@@ -82,6 +82,165 @@ def test_unknown_persisted_aggregate_status_is_contradictory() -> None:
         aggregate_stage("future_status_not_in_current_kernel")
 
 
+def test_unknown_persisted_ticket_status_is_contradictory() -> None:
+    with pytest.raises(
+        TradeFactsContradiction,
+        match="unknown Ticket status",
+    ):
+        build_trade_item(
+            trade_item_facts(ticket_status="future_terminal_status")
+        )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    (
+        (
+            {
+                "ticket_status": "issued",
+                "terminal_at_ms": None,
+                "aggregate_status": "terminal",
+                "aggregate_review_id": None,
+                "review_id": None,
+                "review_ticket_id": None,
+                "review_revision": None,
+                "review_created_at_ms": None,
+                "review_metrics": None,
+            },
+            "Ticket and Aggregate status mismatch",
+        ),
+        (
+            {
+                "ticket_status": "terminal",
+                "aggregate_status": "position_protected",
+            },
+            "Ticket and Aggregate status mismatch",
+        ),
+        (
+            {
+                "ticket_status": "entry_rejected",
+                "aggregate_status": "entry_rejected",
+            },
+            "terminal rejection has a Review",
+        ),
+    ),
+)
+def test_cross_state_ticket_aggregate_review_combinations_are_contradictory(
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(TradeFactsContradiction, match=message):
+        build_trade_item(trade_item_facts(**overrides))
+
+
+def test_terminal_ticket_without_joined_review_preserves_review_missing() -> None:
+    item = build_trade_item(
+        trade_item_facts(
+            aggregate_review_id="review:missing",
+            review_id=None,
+            review_ticket_id=None,
+            review_revision=None,
+            review_created_at_ms=None,
+            review_metrics=None,
+        )
+    )
+
+    assert item.review_id == "review:missing"
+    assert item.net_pnl.unavailable_reason == "review_missing"
+
+
+def test_exit_reason_comes_from_exact_append_only_exit_event() -> None:
+    facts = trade_item_facts().model_copy(
+        update={
+            "exit_event_id": "event:exit-requested",
+            "exit_event_type": "ExitRequested",
+            "exit_event_payload": {
+                "event_id": "event:exit-requested",
+                "ticket_id": "ticket:1",
+                "sequence": 10,
+                "occurred_at_ms": 1_799_999_990_000,
+                "reason": "strategy_exit",
+            },
+            "exit_event_occurred_at_ms": 1_799_999_990_000,
+        }
+    )
+
+    item = build_trade_item(facts)
+
+    assert item.exit_reason == "strategy_exit"
+    assert item.exit_reason_unavailable_reason is None
+    assert [ref.identity for ref in item.evidence if ref.kind == "event"] == [
+        "event:exit-requested"
+    ]
+
+
+def test_terminal_trade_without_exit_event_is_explicitly_unavailable() -> None:
+    item = build_trade_item(trade_item_facts())
+
+    assert item.exit_reason is None
+    assert item.exit_reason_unavailable_reason == "exit_reason_evidence_missing"
+
+
+def test_active_trade_without_exit_event_reports_ticket_active() -> None:
+    item = build_trade_item(
+        trade_item_facts(
+            ticket_status="issued",
+            aggregate_status="position_protected",
+            terminal_at_ms=None,
+            aggregate_review_id=None,
+            review_id=None,
+            review_ticket_id=None,
+            review_revision=None,
+            review_created_at_ms=None,
+            review_metrics=None,
+        )
+    )
+
+    assert item.exit_reason is None
+    assert item.exit_reason_unavailable_reason == "ticket_active"
+
+
+def test_terminal_entry_rejection_reports_exit_not_applicable() -> None:
+    item = build_trade_item(
+        trade_item_facts(
+            ticket_status="entry_rejected",
+            aggregate_status="entry_rejected",
+            aggregate_review_id=None,
+            review_id=None,
+            review_ticket_id=None,
+            review_revision=None,
+            review_created_at_ms=None,
+            review_metrics=None,
+        )
+    )
+
+    assert item.exit_reason is None
+    assert item.exit_reason_unavailable_reason == "exit_not_applicable"
+
+
+def test_exit_event_without_nonempty_reason_is_contradictory() -> None:
+    facts = trade_item_facts().model_copy(
+        update={
+            "exit_event_id": "event:exit-requested",
+            "exit_event_type": "ExitRequested",
+            "exit_event_payload": {
+                "event_id": "event:exit-requested",
+                "ticket_id": "ticket:1",
+                "sequence": 10,
+                "occurred_at_ms": 1_799_999_990_000,
+                "reason": " ",
+            },
+            "exit_event_occurred_at_ms": 1_799_999_990_000,
+        }
+    )
+
+    with pytest.raises(
+        TradeFactsContradiction,
+        match="exit Event reason is missing",
+    ):
+        build_trade_item(facts)
+
+
 def test_trade_list_uses_aggregate_current_review_pointer() -> None:
     item = build_trade_item(
         trade_item_facts(

@@ -18,6 +18,7 @@ from src.trading_kernel.application.owner_console.models import (
     encode_cursor,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.ticket import TicketStatus
 
 
 class TradeFactsContradiction(RuntimeError):
@@ -113,6 +114,25 @@ _COMPLETED_BEFORE_STAGE: dict[LifecycleStageKey, int] = {
     "review": 7,
 }
 
+_TERMINAL_TICKET_AGGREGATE = {
+    TicketStatus.LEVERAGE_REJECTED: AggregateStatus.LEVERAGE_REJECTED,
+    TicketStatus.ENTRY_REJECTED: AggregateStatus.ENTRY_REJECTED,
+    TicketStatus.ENTRY_RECONCILED_ABSENT: (
+        AggregateStatus.ENTRY_RECONCILED_ABSENT
+    ),
+    TicketStatus.TERMINAL: AggregateStatus.TERMINAL,
+}
+_TERMINAL_REJECTION_TICKET_STATUSES = frozenset(
+    {
+        TicketStatus.LEVERAGE_REJECTED,
+        TicketStatus.ENTRY_REJECTED,
+        TicketStatus.ENTRY_RECONCILED_ABSENT,
+    }
+)
+_ACTIVE_AGGREGATE_STATUSES = frozenset(AggregateStatus).difference(
+    _TERMINAL_TICKET_AGGREGATE.values()
+)
+
 
 def aggregate_stage(status: str) -> LifecycleStageKey:
     """Map every current Aggregate status to one public lifecycle stage."""
@@ -154,7 +174,7 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
     """Build one Trade row without recomputing Review economics."""
 
     stage = aggregate_stage(facts.aggregate_status)
-    active = _ticket_is_active(facts)
+    active = _validate_lifecycle_shape(facts)
     _validate_review_pointer(facts, active=active)
 
     evidence = list(facts.evidence)
@@ -164,6 +184,21 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
                 kind="review",
                 identity=facts.review_id,
                 occurred_at_ms=facts.review_created_at_ms,
+            )
+        )
+    exit_reason, exit_reason_unavailable_reason = _exit_reason(
+        facts,
+        active=active,
+    )
+    if (
+        facts.exit_event_id is not None
+        and facts.exit_event_occurred_at_ms is not None
+    ):
+        evidence.append(
+            EvidenceRef(
+                kind="event",
+                identity=facts.exit_event_id,
+                occurred_at_ms=facts.exit_event_occurred_at_ms,
             )
         )
     for incident_id, opened_at_ms in (
@@ -188,9 +223,9 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
     else:
         economics, completeness = _review_economics(facts.review_metrics)
 
-    exit_reason = facts.exit_reason
     if completeness == "external_exit_unavailable":
         exit_reason = "External Flat / Exit Fills Unavailable"
+        exit_reason_unavailable_reason = None
 
     attention_items = (
         ()
@@ -219,6 +254,7 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
         completed_stage_count=completed_stage_count,
         total_stage_count=8,
         exit_reason=exit_reason,
+        exit_reason_unavailable_reason=exit_reason_unavailable_reason,
         gross_pnl=economics[0],
         fees=economics[1],
         funding=economics[2],
@@ -229,16 +265,90 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
     )
 
 
-def _ticket_is_active(facts: TradeItemFacts) -> bool:
-    active = facts.ticket_status == "issued" and facts.terminal_at_ms is None
-    terminal = facts.ticket_status != "issued" and facts.terminal_at_ms is not None
-    if not active and not terminal:
-        raise TradeFactsContradiction("Ticket terminal shape mismatch")
-    return active
+def _exit_reason(
+    facts: TradeItemFacts,
+    *,
+    active: bool,
+) -> tuple[str | None, str | None]:
+    event_facts = (
+        facts.exit_event_id,
+        facts.exit_event_type,
+        facts.exit_event_payload,
+        facts.exit_event_occurred_at_ms,
+    )
+    if facts.exit_event_id is None:
+        if any(value is not None for value in event_facts[1:]):
+            raise TradeFactsContradiction("partial exit Event row")
+    else:
+        if any(value is None for value in event_facts[1:]):
+            raise TradeFactsContradiction("partial exit Event row")
+        if facts.exit_event_type != "ExitRequested":
+            raise TradeFactsContradiction("unexpected exit Event type")
+        payload = facts.exit_event_payload
+        if payload is None:
+            raise TradeFactsContradiction("partial exit Event row")
+        if (
+            payload.get("event_id") != facts.exit_event_id
+            or payload.get("ticket_id") != facts.ticket_id
+            or payload.get("occurred_at_ms")
+            != facts.exit_event_occurred_at_ms
+        ):
+            raise TradeFactsContradiction("exit Event identity mismatch")
+        reason = payload.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise TradeFactsContradiction("exit Event reason is missing")
+        return reason.strip(), None
+
+    try:
+        ticket_status = TicketStatus(facts.ticket_status)
+    except ValueError as exc:
+        raise TradeFactsContradiction(
+            f"unknown Ticket status: {facts.ticket_status}"
+        ) from exc
+    if ticket_status in _TERMINAL_REJECTION_TICKET_STATUSES:
+        return None, "exit_not_applicable"
+    if active:
+        return None, "ticket_active"
+    return None, "exit_reason_evidence_missing"
 
 
-def _validate_review_pointer(facts: TradeItemFacts, *, active: bool) -> None:
-    if active and any(
+def _validate_lifecycle_shape(facts: TradeItemFacts) -> bool:
+    try:
+        ticket_status = TicketStatus(facts.ticket_status)
+    except ValueError as exc:
+        raise TradeFactsContradiction(
+            f"unknown Ticket status: {facts.ticket_status}"
+        ) from exc
+    aggregate_status = AggregateStatus(facts.aggregate_status)
+
+    if ticket_status is TicketStatus.ISSUED:
+        if (
+            facts.terminal_at_ms is not None
+            or aggregate_status not in _ACTIVE_AGGREGATE_STATUSES
+        ):
+            raise TradeFactsContradiction(
+                "Ticket and Aggregate status mismatch"
+            )
+        return True
+
+    expected_aggregate = _TERMINAL_TICKET_AGGREGATE.get(ticket_status)
+    if (
+        expected_aggregate is None
+        or aggregate_status is not expected_aggregate
+        or facts.terminal_at_ms is None
+        or facts.terminal_at_ms < facts.issued_at_ms
+    ):
+        raise TradeFactsContradiction("Ticket and Aggregate status mismatch")
+    if (
+        ticket_status in _TERMINAL_REJECTION_TICKET_STATUSES
+        and _has_any_review_fact(facts)
+    ):
+        raise TradeFactsContradiction("terminal rejection has a Review")
+    return False
+
+
+def _has_any_review_fact(facts: TradeItemFacts) -> bool:
+    return any(
         value is not None
         for value in (
             facts.aggregate_review_id,
@@ -248,7 +358,11 @@ def _validate_review_pointer(facts: TradeItemFacts, *, active: bool) -> None:
             facts.review_created_at_ms,
             facts.review_metrics,
         )
-    ):
+    )
+
+
+def _validate_review_pointer(facts: TradeItemFacts, *, active: bool) -> None:
+    if active and _has_any_review_fact(facts):
         raise TradeFactsContradiction("active Ticket has a current Review")
     if facts.review_id is None:
         if any(

@@ -291,6 +291,7 @@ class TradeListItem(FrozenModel):
     completed_stage_count: int
     total_stage_count: Literal[8]
     exit_reason: str | None
+    exit_reason_unavailable_reason: str | None
     gross_pnl: MoneyMetric
     fees: MoneyMetric
     funding: MoneyMetric
@@ -514,7 +515,10 @@ class TradeItemFacts(FrozenModel):
     review_revision: int | None
     review_created_at_ms: int | None
     review_metrics: dict[str, JsonValue] | None
-    exit_reason: str | None
+    exit_event_id: str | None
+    exit_event_type: str | None
+    exit_event_payload: dict[str, JsonValue] | None
+    exit_event_occurred_at_ms: int | None
     open_incident_id: str | None
     open_incident_opened_at_ms: int | None
     latest_incident_id: str | None

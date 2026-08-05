@@ -52,6 +52,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     signal_events,
     signal_fact_snapshots,
     trade_aggregates,
+    trade_events,
     trade_reviews,
     trade_tickets,
 )
@@ -673,6 +674,26 @@ def _trade_list_query(
         .limit(1)
         .lateral("latest_trade_incident")
     )
+    exit_event = (
+        sa.select(
+            trade_events.c.event_id.label("exit_event_id"),
+            trade_events.c.event_type.label("exit_event_type"),
+            trade_events.c.payload.label("exit_event_payload"),
+            trade_events.c.occurred_at_ms.label(
+                "exit_event_occurred_at_ms"
+            ),
+        )
+        .where(
+            trade_events.c.ticket_id == trade_tickets.c.ticket_id,
+            trade_events.c.event_type == "ExitRequested",
+        )
+        .order_by(
+            trade_events.c.sequence.asc(),
+            trade_events.c.event_id.asc(),
+        )
+        .limit(1)
+        .lateral("initial_trade_exit_event")
+    )
     source = (
         trade_tickets.join(
             trade_aggregates,
@@ -684,6 +705,7 @@ def _trade_list_query(
         )
         .outerjoin(open_incident, sa.true())
         .outerjoin(latest_incident, sa.true())
+        .outerjoin(exit_event, sa.true())
     )
     return (
         sa.select(
@@ -707,6 +729,10 @@ def _trade_list_query(
             open_incident.c.open_incident_opened_at_ms,
             latest_incident.c.latest_incident_id,
             latest_incident.c.latest_incident_opened_at_ms,
+            exit_event.c.exit_event_id,
+            exit_event.c.exit_event_type,
+            exit_event.c.exit_event_payload,
+            exit_event.c.exit_event_occurred_at_ms,
         )
         .select_from(source)
         .where(*conditions)
@@ -729,12 +755,6 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
     review_metrics = row["review_metrics"]
     if review_metrics is not None and not isinstance(review_metrics, dict):
         raise TradeFactsContradiction("current Review metrics are not JSON object")
-    exit_reason = None
-    if isinstance(review_metrics, dict):
-        raw_exit_reason = review_metrics.get("exit_reason")
-        if isinstance(raw_exit_reason, str) and raw_exit_reason.strip():
-            exit_reason = raw_exit_reason.strip()
-
     for identity_name, time_name in (
         ("open_incident_id", "open_incident_opened_at_ms"),
         ("latest_incident_id", "latest_incident_opened_at_ms"),
@@ -781,7 +801,22 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
             else int(row["review_created_at_ms"])
         ),
         review_metrics=review_metrics,
-        exit_reason=exit_reason,
+        exit_event_id=(
+            None
+            if row["exit_event_id"] is None
+            else str(row["exit_event_id"])
+        ),
+        exit_event_type=(
+            None
+            if row["exit_event_type"] is None
+            else str(row["exit_event_type"])
+        ),
+        exit_event_payload=row["exit_event_payload"],
+        exit_event_occurred_at_ms=(
+            None
+            if row["exit_event_occurred_at_ms"] is None
+            else int(row["exit_event_occurred_at_ms"])
+        ),
         open_incident_id=(
             None
             if row["open_incident_id"] is None

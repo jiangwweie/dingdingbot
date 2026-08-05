@@ -163,13 +163,24 @@ def test_every_conclusion_bearing_read_model_requires_evidence() -> None:
 def test_named_factories_return_complete_frozen_facts_and_named_overrides() -> None:
     overview = overview_facts(max_concurrent_tickets=4)
     signal = signal_item_facts(first_blocker="capacity_exhausted", ticket_id=None)
-    trade = trade_item_facts(exit_reason="Initial Stop")
+    trade = trade_item_facts(
+        exit_event_id="event:exit-requested",
+        exit_event_type="ExitRequested",
+        exit_event_payload={
+            "event_id": "event:exit-requested",
+            "ticket_id": "ticket:1",
+            "sequence": 10,
+            "occurred_at_ms": 1_799_999_990_000,
+            "reason": "Initial Stop",
+        },
+        exit_event_occurred_at_ms=1_799_999_990_000,
+    )
     causality = trade_causality_facts(current_stage="exit")
     review = programmatic_review_facts(exit_reason="Controlled Exit")
 
     assert overview.max_concurrent_tickets == 4
     assert signal.first_blocker == "capacity_exhausted"
-    assert trade.exit_reason == "Initial Stop"
+    assert trade.exit_event_type == "ExitRequested"
     assert causality.current_stage == "exit"
     assert review.exit_reason == "Controlled Exit"
     with pytest.raises(TypeError, match="unknown fact override"):
