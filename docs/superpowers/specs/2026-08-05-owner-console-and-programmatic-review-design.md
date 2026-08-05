@@ -2,7 +2,7 @@
 
 > 日期：2026-08-05
 >
-> 状态：APPROVED_FOR_SPEC_REVIEW
+> 状态：APPROVED
 >
 > 适用范围：Tokyo Trading Kernel 的单 Owner 只读运营、交易因果查看与程序化复盘表面
 
@@ -89,6 +89,12 @@ PostgreSQL 保存当前运行真相与追加式生命周期事实。交易所只
 Tokyo 主机只有 2C4G。Observation、Entry、Lifecycle 与 Reconciliation 四个持久 Worker 已共享一个 1 CPU、1GB 内存资源切片。Owner Console 必须保持低常驻成本，并与四个交易 Worker 的资源和失败边界隔离。
 
 （来源：Owner 当前服务器说明、`docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`、`deploy/systemd/brc-trading-kernel.slice`）
+
+### 2.6 当前账户资金事实
+
+PostgreSQL 当前没有持续刷新的账户权益或可用保证金投影。`capacity_claims` 只冻结每次准入 Claim 发生时的 `total_wallet_balance_at_claim`、`total_margin_balance_at_claim` 与 `available_margin_at_claim`。首版 Read API 又明确不加载 Binance 私有凭证，因此不能把这些历史快照包装成实时账户余额。
+
+（来源：`src/trading_kernel/infrastructure/pg_models.py`、`src/trading_kernel/application/build_capacity_claim.py`）
 
 ## 3. 产品目标
 
@@ -213,13 +219,15 @@ BRC OWNER   总览   信号   交易   复盘          PROD · 正常 · 数据�
 
 ```text
 系统结论 + Owner Action
--> 账户权益 / 可用保证金 / Ticket 容量
+-> 最近准入账户快照 / Ticket 当前容量
 -> 今日 Net PnL / Net R / Signals
 -> 活动 Ticket
 -> 机会与准入
 -> 执行质量
 -> 自动关注摘要
 ```
+
+“最近准入账户快照”显示最近一笔 CapacityClaim 冻结的账户权益、可用保证金和快照时间，必须明确标记 `Latest Admission Snapshot`，不能标记为实时余额。没有 CapacityClaim 时显示 `Unavailable`。Ticket 容量与占用来自当前 Owner Policy 和 `account_exposure_current`，与账户快照分开显示。
 
 总览只区分：
 
@@ -489,7 +497,7 @@ max_overflow = 1
 
 | 页面 | 接口 | 返回内容 |
 |---|---|---|
-| 总览 | `GET /api/owner/v1/overview` | 系统结论、资金、容量、今日结果、活动 Ticket、关注项 |
+| 总览 | `GET /api/owner/v1/overview` | 系统结论、最近准入账户快照、当前容量、今日结果、活动 Ticket、关注项 |
 | 信号 | `GET /api/owner/v1/signals` | 准入漏斗、Signal、第一阻塞点、Shadow 摘要 |
 | 信号详情 | `GET /api/owner/v1/signals/{signal_id}` | Facts、AdmissionDecision、Shadow Outcome |
 | 交易列表 | `GET /api/owner/v1/tickets` | 活动与终止 Ticket、状态、经济结果、退出原因 |
@@ -1016,6 +1024,7 @@ Owner 重新输入 TOTP
 12. Owner Console 故障不影响 Observation、Entry、Lifecycle 与 Reconciliation；
 13. 不新增 PostgreSQL Migration、后台 Worker、Redis、WebSocket、SSE 或文件权威；
 14. 复盘页不显示全宽样本不足提示，不生成小样本策略排名。
+15. 总览不得把 CapacityClaim 历史账户快照标记为实时账户余额；没有快照时必须显示 `Unavailable`。
 
 ## 21. 已拒绝方案
 
