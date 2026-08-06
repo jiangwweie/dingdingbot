@@ -5,6 +5,7 @@ OWNER_ROOTS = (
     REPO_ROOT / "src/trading_kernel/application/owner_console",
     REPO_ROOT / "src/trading_kernel/interfaces/owner_console_http",
 )
+OWNER_MARKET_DATA = REPO_ROOT / "src/trading_kernel/infrastructure/owner_market_data.py"
 
 FORBIDDEN = (
     "application.controlled_exit",
@@ -22,6 +23,18 @@ def test_owner_console_packages_exist_and_have_no_exchange_write_authority() -> 
             source = path.read_text(encoding="utf-8")
             for marker in FORBIDDEN:
                 assert marker not in source, f"{path}: {marker}"
+
+
+def test_owner_market_data_has_only_credential_free_public_market_authority() -> None:
+    source = OWNER_MARKET_DATA.read_text(encoding="utf-8")
+
+    for marker in (
+        "ProductionRuntimeSettings",
+        "build_binance_usdm_venue_adapter",
+        "TRADING_KERNEL_API_KEY",
+        "TRADING_KERNEL_API_SECRET",
+    ):
+        assert marker not in source, f"{OWNER_MARKET_DATA}: {marker}"
 
 
 def test_kernel_systemd_directory_remains_four_workers_plus_slice() -> None:

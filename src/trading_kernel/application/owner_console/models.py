@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Generic, Literal, TypeVar
 
@@ -181,6 +181,75 @@ class ReviewListQuery(BoundedWindowQuery):
         "incomplete_evidence",
     ] | None = None
     strategy_group_id: str | None = None
+
+
+class CandleQuery(FrozenModel):
+    exchange_instrument_id: str
+    timeframe: Literal["15m", "1h"]
+    limit: int = Field(default=300, ge=1, le=500)
+    closed_at_ms: int = Field(gt=0)
+
+    @field_validator("exchange_instrument_id", mode="before")
+    @classmethod
+    def _require_instrument_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("candle query instrument must be non-blank")
+        return normalized
+
+
+class CandleView(FrozenModel):
+    open_time_ms: int = Field(gt=0)
+    close_time_ms: int = Field(gt=0)
+    open: str
+    high: str
+    low: str
+    close: str
+    volume: str
+
+    @field_validator("open", "high", "low", "close", "volume", mode="before")
+    @classmethod
+    def _require_exact_decimal_text(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise TypeError("candle values must be exact strings")
+        try:
+            decimal_value = Decimal(value)
+        except InvalidOperation as exc:
+            raise ValueError("candle values must be valid decimals") from exc
+        if not decimal_value.is_finite():
+            raise ValueError("candle values must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_candle(self) -> CandleView:
+        if self.close_time_ms <= self.open_time_ms:
+            raise ValueError("candle requires an increasing time window")
+        open_value = Decimal(self.open)
+        high_value = Decimal(self.high)
+        low_value = Decimal(self.low)
+        close_value = Decimal(self.close)
+        volume_value = Decimal(self.volume)
+        if min(open_value, high_value, low_value, close_value) <= 0:
+            raise ValueError("candle OHLC values must be positive")
+        if volume_value < 0:
+            raise ValueError("candle volume must be nonnegative")
+        if high_value < max(open_value, close_value) or low_value > min(
+            open_value,
+            close_value,
+        ):
+            raise ValueError("candle high/low does not contain open and close")
+        return self
+
+
+class CandleSeries(FrozenModel):
+    candles: tuple[CandleView, ...] = Field(max_length=500)
+
+    @model_validator(mode="after")
+    def _validate_chronological_candles(self) -> CandleSeries:
+        open_times = [candle.open_time_ms for candle in self.candles]
+        if open_times != sorted(open_times) or len(open_times) != len(set(open_times)):
+            raise ValueError("candle series must be ordered and unique")
+        return self
 
 
 class AdmissionAccountSnapshot(FrozenModel):
