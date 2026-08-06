@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from src.trading_kernel.application.owner_console.causality import (
+    ContradictoryFacts,
+)
 from src.trading_kernel.application.owner_console.models import (
     EvidenceRef,
     Freshness,
@@ -27,6 +30,15 @@ from src.trading_kernel.application.owner_console.models import (
     SignalItemFacts,
     SignalListQuery,
     SignalPageFacts,
+    TradeCausalityAdmissionFacts,
+    TradeCausalityAggregateFacts,
+    TradeCausalityCommandFacts,
+    TradeCausalityEventFacts,
+    TradeCausalityFacts,
+    TradeCausalityIncidentFacts,
+    TradeCausalityReviewFacts,
+    TradeCausalitySignalFacts,
+    TradeCausalityTicketFacts,
     TradeItemFacts,
     TradeListQuery,
     TradePageFacts,
@@ -43,6 +55,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     admission_decisions,
     capacity_claims,
+    exchange_commands,
     monitor_current,
     owner_policy_current,
     runtime_incidents,
@@ -60,6 +73,9 @@ from src.trading_kernel.infrastructure.pg_models import (
 _VENUE_ID = "binance-usdm"
 _FRESH_AGE_MS = 30_000
 _STALE_MAX_AGE_MS = 300_000
+_CAUSALITY_EVENT_LIMIT = 512
+_CAUSALITY_COMMAND_LIMIT = 128
+_CAUSALITY_INCIDENT_LIMIT = 64
 
 
 def create_owner_read_engine(dsn: str) -> AsyncEngine:
@@ -556,6 +572,486 @@ class PostgresOwnerReadRepository:
             items=tuple(_trade_item_facts_from_row(row) for row in rows),
             requested_limit=query.limit,
         )
+
+    async def read_trade_causality_facts(
+        self,
+        ticket_id: str,
+    ) -> TradeCausalityFacts | None:
+        """Read one exact Ticket causality graph on this connection."""
+
+        ticket_row = (
+            await self._connection.execute(_causality_ticket_query(ticket_id))
+        ).mappings().one_or_none()
+        if ticket_row is None:
+            return None
+        if ticket_row["aggregate_ticket_id"] is None:
+            raise ContradictoryFacts("Ticket exists without Aggregate")
+        signal_row = (
+            await self._connection.execute(
+                _causality_signal_admission_query(
+                    str(ticket_row["signal_event_id"])
+                )
+            )
+        ).mappings().one_or_none()
+        if signal_row is None:
+            raise ContradictoryFacts("Ticket Signal does not exist")
+        if signal_row["admission_decision_id"] is None:
+            raise ContradictoryFacts("Ticket AdmissionDecision does not exist")
+
+        event_rows = (
+            await self._connection.execute(_causality_events_query(ticket_id))
+        ).mappings().all()
+        command_rows = (
+            await self._connection.execute(_causality_commands_query(ticket_id))
+        ).mappings().all()
+        incident_rows = (
+            await self._connection.execute(_causality_incidents_query(ticket_id))
+        ).mappings().all()
+        _require_history_bound(
+            "Trade Events", event_rows, maximum=_CAUSALITY_EVENT_LIMIT
+        )
+        _require_history_bound(
+            "Exchange Commands",
+            command_rows,
+            maximum=_CAUSALITY_COMMAND_LIMIT,
+        )
+        _require_history_bound(
+            "Incidents", incident_rows, maximum=_CAUSALITY_INCIDENT_LIMIT
+        )
+        review_row: RowMapping | None = None
+        aggregate_review_id = ticket_row["aggregate_review_id"]
+        if aggregate_review_id is not None:
+            review_row = (
+                await self._connection.execute(
+                    _causality_review_query(str(aggregate_review_id))
+                )
+            ).mappings().one_or_none()
+
+        events = tuple(_causality_event_facts(row) for row in event_rows)
+        commands = tuple(_causality_command_facts(row) for row in command_rows)
+        incidents = tuple(_causality_incident_facts(row) for row in incident_rows)
+        review = (
+            None if review_row is None else _causality_review_facts(review_row)
+        )
+        return TradeCausalityFacts(
+            trade=_causality_trade_item_facts(
+                ticket_row,
+                events=events,
+                incidents=incidents,
+                review=review,
+            ),
+            ticket=_causality_ticket_facts(ticket_row),
+            aggregate=_causality_aggregate_facts(ticket_row),
+            signal=_causality_signal_facts(signal_row),
+            admission=_causality_admission_facts(signal_row),
+            events=events,
+            commands=commands,
+            incidents=incidents,
+            review=review,
+        )
+
+
+def _causality_ticket_query(ticket_id: str) -> sa.Select[Any]:
+    return (
+        sa.select(
+            trade_tickets.c.ticket_id,
+            trade_tickets.c.exposure_episode_id,
+            trade_tickets.c.signal_event_id,
+            trade_tickets.c.strategy_group_id,
+            trade_tickets.c.strategy_version_id,
+            trade_tickets.c.event_spec_id,
+            trade_tickets.c.universe_version_id,
+            trade_tickets.c.universe_semantic_digest,
+            trade_tickets.c.runtime_profile_id,
+            trade_tickets.c.runtime_scope_id,
+            trade_tickets.c.runtime_scope_version,
+            trade_tickets.c.owner_policy_id,
+            trade_tickets.c.owner_policy_version,
+            trade_tickets.c.capacity_claim_id,
+            trade_tickets.c.venue_id,
+            trade_tickets.c.account_id,
+            trade_tickets.c.exchange_instrument_id,
+            trade_tickets.c.position_side,
+            trade_tickets.c.entry_reference_price,
+            trade_tickets.c.initial_stop_price,
+            trade_tickets.c.status.label("ticket_status"),
+            trade_tickets.c.created_at_ms.label("issued_at_ms"),
+            trade_tickets.c.terminal_at_ms,
+            trade_aggregates.c.ticket_id.label("aggregate_ticket_id"),
+            trade_aggregates.c.status.label("aggregate_status"),
+            trade_aggregates.c.last_event_sequence,
+            trade_aggregates.c.review_id.label("aggregate_review_id"),
+            trade_aggregates.c.updated_at_ms.label("aggregate_updated_at_ms"),
+        )
+        .select_from(
+            trade_tickets.outerjoin(
+                trade_aggregates,
+                trade_aggregates.c.ticket_id == trade_tickets.c.ticket_id,
+            )
+        )
+        .where(trade_tickets.c.ticket_id == ticket_id)
+    )
+
+
+def _causality_signal_admission_query(signal_event_id: str) -> sa.Select[Any]:
+    return (
+        sa.select(
+            signal_events.c.signal_event_id,
+            signal_events.c.exposure_episode_id,
+            signal_events.c.runtime_scope_id,
+            signal_events.c.runtime_scope_version,
+            signal_events.c.strategy_group_id,
+            signal_events.c.strategy_version_id,
+            signal_events.c.event_spec_id,
+            signal_events.c.universe_version_id,
+            signal_events.c.universe_semantic_digest,
+            signal_events.c.exchange_instrument_id,
+            signal_events.c.position_side,
+            signal_events.c.occurred_at_ms,
+            admission_decisions.c.admission_decision_id,
+            admission_decisions.c.signal_event_id.label(
+                "admission_signal_event_id"
+            ),
+            admission_decisions.c.exposure_episode_id.label(
+                "admission_exposure_episode_id"
+            ),
+            admission_decisions.c.strategy_group_id.label(
+                "admission_strategy_group_id"
+            ),
+            admission_decisions.c.strategy_version_id.label(
+                "admission_strategy_version_id"
+            ),
+            admission_decisions.c.event_spec_id.label(
+                "admission_event_spec_id"
+            ),
+            admission_decisions.c.universe_version_id.label(
+                "admission_universe_version_id"
+            ),
+            admission_decisions.c.universe_semantic_digest.label(
+                "admission_universe_semantic_digest"
+            ),
+            admission_decisions.c.runtime_profile_id,
+            admission_decisions.c.runtime_scope_id.label(
+                "admission_runtime_scope_id"
+            ),
+            admission_decisions.c.runtime_scope_version.label(
+                "admission_runtime_scope_version"
+            ),
+            admission_decisions.c.owner_policy_id,
+            admission_decisions.c.owner_policy_version,
+            admission_decisions.c.venue_id,
+            admission_decisions.c.account_id,
+            admission_decisions.c.exchange_instrument_id.label(
+                "admission_exchange_instrument_id"
+            ),
+            admission_decisions.c.position_side.label(
+                "admission_position_side"
+            ),
+            admission_decisions.c.decision_status,
+            admission_decisions.c.capacity_claim_id,
+            admission_decisions.c.ticket_id.label("admission_ticket_id"),
+            admission_decisions.c.decided_at_ms,
+        )
+        .select_from(
+            signal_events.outerjoin(
+                admission_decisions,
+                admission_decisions.c.signal_event_id
+                == signal_events.c.signal_event_id,
+            )
+        )
+        .where(signal_events.c.signal_event_id == signal_event_id)
+    )
+
+
+def _causality_events_query(ticket_id: str) -> sa.Select[Any]:
+    return (
+        sa.select(trade_events)
+        .where(trade_events.c.ticket_id == ticket_id)
+        .order_by(trade_events.c.sequence.asc())
+        .limit(_CAUSALITY_EVENT_LIMIT + 1)
+    )
+
+
+def _causality_commands_query(ticket_id: str) -> sa.Select[Any]:
+    return (
+        sa.select(exchange_commands)
+        .where(exchange_commands.c.ticket_id == ticket_id)
+        .order_by(
+            exchange_commands.c.created_at_ms.asc(),
+            exchange_commands.c.command_id.asc(),
+        )
+        .limit(_CAUSALITY_COMMAND_LIMIT + 1)
+    )
+
+
+def _causality_incidents_query(ticket_id: str) -> sa.Select[Any]:
+    return (
+        sa.select(runtime_incidents)
+        .where(runtime_incidents.c.ticket_id == ticket_id)
+        .order_by(
+            runtime_incidents.c.opened_at_ms.asc(),
+            runtime_incidents.c.incident_id.asc(),
+        )
+        .limit(_CAUSALITY_INCIDENT_LIMIT + 1)
+    )
+
+
+def _causality_review_query(review_id: str) -> sa.Select[Any]:
+    return sa.select(trade_reviews).where(trade_reviews.c.review_id == review_id)
+
+
+def _require_history_bound(
+    label: str,
+    rows: Sequence[RowMapping],
+    *,
+    maximum: int,
+) -> None:
+    if len(rows) > maximum:
+        raise ContradictoryFacts(f"{label} exceed hard maximum {maximum}")
+
+
+def _causality_ticket_facts(row: RowMapping) -> TradeCausalityTicketFacts:
+    return TradeCausalityTicketFacts(
+        ticket_id=str(row["ticket_id"]),
+        exposure_episode_id=str(row["exposure_episode_id"]),
+        signal_event_id=str(row["signal_event_id"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        strategy_version_id=str(row["strategy_version_id"]),
+        event_spec_id=str(row["event_spec_id"]),
+        universe_version_id=str(row["universe_version_id"]),
+        universe_semantic_digest=str(row["universe_semantic_digest"]),
+        runtime_profile_id=str(row["runtime_profile_id"]),
+        runtime_scope_id=str(row["runtime_scope_id"]),
+        runtime_scope_version=int(row["runtime_scope_version"]),
+        owner_policy_id=str(row["owner_policy_id"]),
+        owner_policy_version=int(row["owner_policy_version"]),
+        capacity_claim_id=str(row["capacity_claim_id"]),
+        venue_id=str(row["venue_id"]),
+        account_id=str(row["account_id"]),
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
+        position_side=cast(
+            Literal["long", "short"], str(row["position_side"])
+        ),
+        entry_reference_price=Decimal(str(row["entry_reference_price"])),
+        initial_stop_price=Decimal(str(row["initial_stop_price"])),
+        created_at_ms=int(row["issued_at_ms"]),
+    )
+
+
+def _causality_aggregate_facts(
+    row: RowMapping,
+) -> TradeCausalityAggregateFacts:
+    return TradeCausalityAggregateFacts(
+        ticket_id=str(row["aggregate_ticket_id"]),
+        aggregate_status=str(row["aggregate_status"]),
+        last_event_sequence=int(row["last_event_sequence"]),
+        review_id=(
+            None
+            if row["aggregate_review_id"] is None
+            else str(row["aggregate_review_id"])
+        ),
+        updated_at_ms=int(row["aggregate_updated_at_ms"]),
+    )
+
+
+def _causality_signal_facts(row: RowMapping) -> TradeCausalitySignalFacts:
+    return TradeCausalitySignalFacts(
+        signal_event_id=str(row["signal_event_id"]),
+        exposure_episode_id=str(row["exposure_episode_id"]),
+        runtime_scope_id=str(row["runtime_scope_id"]),
+        runtime_scope_version=int(row["runtime_scope_version"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        strategy_version_id=str(row["strategy_version_id"]),
+        event_spec_id=str(row["event_spec_id"]),
+        universe_version_id=str(row["universe_version_id"]),
+        universe_semantic_digest=str(row["universe_semantic_digest"]),
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
+        position_side=cast(
+            Literal["long", "short"], str(row["position_side"])
+        ),
+        occurred_at_ms=int(row["occurred_at_ms"]),
+    )
+
+
+def _causality_admission_facts(
+    row: RowMapping,
+) -> TradeCausalityAdmissionFacts:
+    return TradeCausalityAdmissionFacts(
+        admission_decision_id=str(row["admission_decision_id"]),
+        signal_event_id=str(row["admission_signal_event_id"]),
+        exposure_episode_id=str(row["admission_exposure_episode_id"]),
+        strategy_group_id=str(row["admission_strategy_group_id"]),
+        strategy_version_id=str(row["admission_strategy_version_id"]),
+        event_spec_id=str(row["admission_event_spec_id"]),
+        universe_version_id=str(row["admission_universe_version_id"]),
+        universe_semantic_digest=str(
+            row["admission_universe_semantic_digest"]
+        ),
+        runtime_profile_id=str(row["runtime_profile_id"]),
+        runtime_scope_id=str(row["admission_runtime_scope_id"]),
+        runtime_scope_version=int(row["admission_runtime_scope_version"]),
+        owner_policy_id=str(row["owner_policy_id"]),
+        owner_policy_version=int(row["owner_policy_version"]),
+        venue_id=str(row["venue_id"]),
+        account_id=str(row["account_id"]),
+        exchange_instrument_id=str(row["admission_exchange_instrument_id"]),
+        position_side=cast(
+            Literal["long", "short"], str(row["admission_position_side"])
+        ),
+        decision_status=cast(
+            Literal["admitted", "rejected"], str(row["decision_status"])
+        ),
+        capacity_claim_id=(
+            None
+            if row["capacity_claim_id"] is None
+            else str(row["capacity_claim_id"])
+        ),
+        ticket_id=(
+            None
+            if row["admission_ticket_id"] is None
+            else str(row["admission_ticket_id"])
+        ),
+        decided_at_ms=int(row["decided_at_ms"]),
+    )
+
+
+def _json_object(value: object, *, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ContradictoryFacts(f"{label} is not a JSON object")
+    return value
+
+
+def _causality_event_facts(row: RowMapping) -> TradeCausalityEventFacts:
+    return TradeCausalityEventFacts(
+        event_id=str(row["event_id"]),
+        ticket_id=str(row["ticket_id"]),
+        sequence=int(row["sequence"]),
+        event_type=str(row["event_type"]),
+        payload=_json_object(row["payload"], label="Event payload"),
+        occurred_at_ms=int(row["occurred_at_ms"]),
+    )
+
+
+def _causality_command_facts(row: RowMapping) -> TradeCausalityCommandFacts:
+    result_payload = row["result_payload"]
+    return TradeCausalityCommandFacts(
+        command_id=str(row["command_id"]),
+        ticket_id=str(row["ticket_id"]),
+        command_kind=str(row["command_kind"]),
+        generation=int(row["generation"]),
+        status=str(row["status"]),
+        request_payload=_json_object(
+            row["request_payload"], label="Command request payload"
+        ),
+        result_payload=(
+            None
+            if result_payload is None
+            else _json_object(result_payload, label="Command result payload")
+        ),
+        created_at_ms=int(row["created_at_ms"]),
+        completed_at_ms=(
+            None
+            if row["completed_at_ms"] is None
+            else int(row["completed_at_ms"])
+        ),
+    )
+
+
+def _causality_incident_facts(row: RowMapping) -> TradeCausalityIncidentFacts:
+    return TradeCausalityIncidentFacts(
+        incident_id=str(row["incident_id"]),
+        ticket_id=str(row["ticket_id"]),
+        incident_kind=str(row["incident_kind"]),
+        status=str(row["status"]),
+        first_blocker=str(row["first_blocker"]),
+        details=_json_object(row["details"], label="Incident details"),
+        opened_at_ms=int(row["opened_at_ms"]),
+        resolved_at_ms=(
+            None
+            if row["resolved_at_ms"] is None
+            else int(row["resolved_at_ms"])
+        ),
+    )
+
+
+def _causality_review_facts(row: RowMapping) -> TradeCausalityReviewFacts:
+    return TradeCausalityReviewFacts(
+        review_id=str(row["review_id"]),
+        ticket_id=str(row["ticket_id"]),
+        revision=int(row["revision"]),
+        metrics=_json_object(row["metrics"], label="current Review metrics"),
+        created_at_ms=int(row["created_at_ms"]),
+    )
+
+
+def _causality_trade_item_facts(
+    ticket_row: RowMapping,
+    *,
+    events: tuple[TradeCausalityEventFacts, ...],
+    incidents: tuple[TradeCausalityIncidentFacts, ...],
+    review: TradeCausalityReviewFacts | None,
+) -> TradeItemFacts:
+    exit_event = next(
+        (event for event in events if event.event_type == "ExitRequested"),
+        None,
+    )
+    open_incident = next(
+        (incident for incident in incidents if incident.status == "open"),
+        None,
+    )
+    latest_incident = incidents[-1] if incidents else None
+    return TradeItemFacts(
+        ticket_id=str(ticket_row["ticket_id"]),
+        strategy_group_id=str(ticket_row["strategy_group_id"]),
+        event_spec_id=str(ticket_row["event_spec_id"]),
+        exchange_instrument_id=str(ticket_row["exchange_instrument_id"]),
+        position_side=cast(
+            Literal["long", "short"], str(ticket_row["position_side"])
+        ),
+        ticket_status=str(ticket_row["ticket_status"]),
+        aggregate_status=str(ticket_row["aggregate_status"]),
+        issued_at_ms=int(ticket_row["issued_at_ms"]),
+        terminal_at_ms=(
+            None
+            if ticket_row["terminal_at_ms"] is None
+            else int(ticket_row["terminal_at_ms"])
+        ),
+        aggregate_review_id=(
+            None
+            if ticket_row["aggregate_review_id"] is None
+            else str(ticket_row["aggregate_review_id"])
+        ),
+        review_id=None if review is None else review.review_id,
+        review_ticket_id=None if review is None else review.ticket_id,
+        review_revision=None if review is None else review.revision,
+        review_created_at_ms=None if review is None else review.created_at_ms,
+        review_metrics=None if review is None else review.metrics,
+        exit_event_id=None if exit_event is None else exit_event.event_id,
+        exit_event_type=None if exit_event is None else exit_event.event_type,
+        exit_event_payload=None if exit_event is None else exit_event.payload,
+        exit_event_occurred_at_ms=(
+            None if exit_event is None else exit_event.occurred_at_ms
+        ),
+        open_incident_id=(
+            None if open_incident is None else open_incident.incident_id
+        ),
+        open_incident_opened_at_ms=(
+            None if open_incident is None else open_incident.opened_at_ms
+        ),
+        latest_incident_id=(
+            None if latest_incident is None else latest_incident.incident_id
+        ),
+        latest_incident_opened_at_ms=(
+            None if latest_incident is None else latest_incident.opened_at_ms
+        ),
+        evidence=(
+            EvidenceRef(
+                kind="ticket",
+                identity=str(ticket_row["ticket_id"]),
+                occurred_at_ms=int(ticket_row["issued_at_ms"]),
+            ),
+        ),
+    )
 
 
 def _signal_list_query(

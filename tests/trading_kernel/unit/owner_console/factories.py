@@ -6,17 +6,22 @@ from decimal import Decimal
 from typing import Any, TypeVar, cast
 
 from src.trading_kernel.application.owner_console.models import (
-    ChartAnnotation,
     EvidenceRef,
     Freshness,
-    LifecycleStageView,
     MoneyMetric,
     OverviewFacts,
     ProgrammaticReviewFacts,
     SignalDetailFacts,
     SignalFactSnapshotFacts,
     SignalItemFacts,
+    TradeCausalityAdmissionFacts,
+    TradeCausalityAggregateFacts,
+    TradeCausalityCommandFacts,
+    TradeCausalityEventFacts,
     TradeCausalityFacts,
+    TradeCausalityReviewFacts,
+    TradeCausalitySignalFacts,
+    TradeCausalityTicketFacts,
     TradeItemFacts,
 )
 
@@ -197,47 +202,253 @@ def trade_item_facts(**overrides: Any) -> TradeItemFacts:
 
 
 def trade_causality_facts(**overrides: Any) -> TradeCausalityFacts:
-    stage_evidence = (_evidence("event", "event:entry", 1_799_999_920_000),)
+    event_types = tuple(
+        overrides.pop(
+            "event_types",
+            (
+                "TicketIssued",
+                "EntryFilled",
+                "InitialStopConfirmed",
+                "TakeProfitFilled",
+                "ProtectionReplacementConfirmed",
+                "ExitRequested",
+                "PositionFlatConfirmed",
+                "BudgetSettled",
+                "ReviewRecorded",
+            ),
+        )
+    )
+    exit_requested_reason = str(
+        overrides.pop("exit_requested_reason", "initial_stop_triggered")
+    )
+    # Accepted only by this test factory to prove it never crosses the facts
+    # boundary into build_trade_causality.
+    overrides.pop("candle_pattern_hint", None)
+    aggregate_status = str(overrides.pop("aggregate_status", "terminal"))
+    ticket_status = str(overrides.pop("ticket_status", "terminal"))
+    terminal_at_ms = overrides.pop("terminal_at_ms", 1_800_000_000_000)
+    review_override = overrides.pop("review", "default")
+    events = tuple(
+        _causality_event(
+            event_type,
+            sequence=sequence,
+            exit_requested_reason=exit_requested_reason,
+        )
+        for sequence, event_type in enumerate(event_types, start=1)
+    )
+    review_metrics = {
+        "economics_completeness": "complete",
+        "gross_realized_pnl_quote": "4.0000",
+        "trading_fees_quote": "0.4000",
+        "funding_quote": "-0.0900",
+        "net_pnl_quote": "3.5100",
+        "planned_r_multiple": "0.4800",
+        "order_attribution": [
+            {
+                "exchange_trade_id": "trade:exit:1",
+                "exchange_order_id": "exchange:exit:1",
+                "command_id": "command:exit:1",
+                "role": "exit",
+                "quantity": "1",
+                "price": "103.00",
+                "fee": {},
+                "realized_pnl_quote": "3.00",
+                "occurred_at_ms": 1_799_999_990_000,
+            }
+        ],
+    }
+    review = (
+        TradeCausalityReviewFacts(
+            review_id="review:1",
+            ticket_id="ticket:1",
+            revision=1,
+            metrics=review_metrics,
+            created_at_ms=1_800_000_000_000,
+        )
+        if review_override == "default"
+        else review_override
+    )
+    trade_review_values = (
+        {
+            "aggregate_review_id": None,
+            "review_id": None,
+            "review_ticket_id": None,
+            "review_revision": None,
+            "review_created_at_ms": None,
+            "review_metrics": None,
+        }
+        if review is None
+        else {
+            "aggregate_review_id": review.review_id,
+            "review_id": review.review_id,
+            "review_ticket_id": review.ticket_id,
+            "review_revision": review.revision,
+            "review_created_at_ms": review.created_at_ms,
+            "review_metrics": review.metrics,
+        }
+    )
+    exit_event = next(
+        (event for event in events if event.event_type == "ExitRequested"),
+        None,
+    )
     facts = TradeCausalityFacts(
-        trade=trade_item_facts(),
-        current_stage="review",
-        stages=(
-            LifecycleStageView(
-                key="entry",
-                label="入场",
-                status="complete",
-                started_at_ms=1_799_999_920_000,
-                completed_at_ms=1_799_999_930_000,
-                duration_ms=10_000,
-                summary="ENTRY 已成交",
-                evidence=stage_evidence,
+        trade=trade_item_facts(
+            ticket_status=ticket_status,
+            aggregate_status=aggregate_status,
+            terminal_at_ms=terminal_at_ms,
+            exit_event_id=(None if exit_event is None else exit_event.event_id),
+            exit_event_type=(None if exit_event is None else exit_event.event_type),
+            exit_event_payload=(None if exit_event is None else exit_event.payload),
+            exit_event_occurred_at_ms=(
+                None if exit_event is None else exit_event.occurred_at_ms
+            ),
+            **trade_review_values,
+        ),
+        ticket=TradeCausalityTicketFacts(
+            ticket_id="ticket:1",
+            exposure_episode_id="episode:1",
+            signal_event_id="signal:1",
+            strategy_group_id="strategy-group:opening-range",
+            strategy_version_id="strategy-version:1",
+            event_spec_id="event:opening-range-breakout",
+            universe_version_id="universe:1",
+            universe_semantic_digest="sha256:" + "a" * 64,
+            runtime_profile_id="profile:1",
+            runtime_scope_id="scope:1",
+            runtime_scope_version=1,
+            owner_policy_id="policy:1",
+            owner_policy_version=1,
+            capacity_claim_id="claim:1",
+            venue_id="binance-usdm",
+            account_id="account:1",
+            exchange_instrument_id="BTCUSDT",
+            position_side="long",
+            entry_reference_price=Decimal("100.00"),
+            initial_stop_price=Decimal("99.00"),
+            created_at_ms=1_799_999_900_000,
+        ),
+        aggregate=TradeCausalityAggregateFacts(
+            ticket_id="ticket:1",
+            aggregate_status=aggregate_status,
+            last_event_sequence=len(events),
+            review_id=None if review is None else review.review_id,
+            updated_at_ms=1_800_000_000_000,
+        ),
+        signal=TradeCausalitySignalFacts(
+            signal_event_id="signal:1",
+            exposure_episode_id="episode:1",
+            runtime_scope_id="scope:1",
+            runtime_scope_version=1,
+            strategy_group_id="strategy-group:opening-range",
+            strategy_version_id="strategy-version:1",
+            event_spec_id="event:opening-range-breakout",
+            universe_version_id="universe:1",
+            universe_semantic_digest="sha256:" + "a" * 64,
+            exchange_instrument_id="BTCUSDT",
+            position_side="long",
+            occurred_at_ms=1_799_999_800_000,
+        ),
+        admission=TradeCausalityAdmissionFacts(
+            admission_decision_id="admission:1",
+            signal_event_id="signal:1",
+            exposure_episode_id="episode:1",
+            strategy_group_id="strategy-group:opening-range",
+            strategy_version_id="strategy-version:1",
+            event_spec_id="event:opening-range-breakout",
+            universe_version_id="universe:1",
+            universe_semantic_digest="sha256:" + "a" * 64,
+            runtime_profile_id="profile:1",
+            runtime_scope_id="scope:1",
+            runtime_scope_version=1,
+            owner_policy_id="policy:1",
+            owner_policy_version=1,
+            venue_id="binance-usdm",
+            account_id="account:1",
+            exchange_instrument_id="BTCUSDT",
+            position_side="long",
+            decision_status="admitted",
+            capacity_claim_id="claim:1",
+            ticket_id="ticket:1",
+            decided_at_ms=1_799_999_900_000,
+        ),
+        events=events,
+        commands=(
+            TradeCausalityCommandFacts(
+                command_id="command:entry:1",
+                ticket_id="ticket:1",
+                command_kind="entry",
+                generation=1,
+                status="accepted",
+                request_payload={"quantity": "1"},
+                result_payload={"exchange_order_id": "exchange:entry:1"},
+                created_at_ms=1_799_999_910_000,
+                completed_at_ms=1_799_999_920_000,
+            ),
+            TradeCausalityCommandFacts(
+                command_id="command:exit:1",
+                ticket_id="ticket:1",
+                command_kind="exit",
+                generation=1,
+                status="accepted",
+                request_payload={"quantity": "1"},
+                result_payload={"exchange_order_id": "exchange:exit:1"},
+                created_at_ms=1_799_999_980_000,
+                completed_at_ms=1_799_999_990_000,
             ),
         ),
-        annotations=(
-            ChartAnnotation(
-                kind="entry",
-                occurred_at_ms=1_799_999_925_000,
-                price=Decimal("100.10"),
-                label="ENTRY",
-                evidence=stage_evidence,
-            ),
-        ),
-        signal_evidence=(
-            _evidence("signal", "signal:1", 1_799_999_800_000),
-        ),
-        order_evidence=(
-            _evidence("command", "command:entry:1", 1_799_999_920_000),
-        ),
-        incident_evidence=(),
-        event_evidence=stage_evidence,
-        settlement_evidence=(
-            _evidence("settlement", "settlement:1", 1_799_999_990_000),
-        ),
-        review_evidence=(
-            _evidence("review", "review:1", 1_800_000_000_000),
-        ),
+        incidents=(),
+        review=review,
     )
     return _copy_with_named_overrides(facts, overrides)
+
+
+def _causality_event(
+    event_type: str,
+    *,
+    sequence: int,
+    exit_requested_reason: str,
+) -> TradeCausalityEventFacts:
+    event_id = f"event:1:{sequence}"
+    occurred_at_ms = 1_799_999_900_000 + sequence * 10_000
+    payload: dict[str, Any] = {
+        "event_id": event_id,
+        "sequence": sequence,
+        "occurred_at_ms": occurred_at_ms,
+    }
+    if event_type == "TicketIssued":
+        payload["ticket"] = {"identity": {"ticket_id": "ticket:1"}}
+    else:
+        payload["ticket_id"] = "ticket:1"
+    if event_type == "EntryFilled":
+        payload.update(filled_qty="1", average_fill_price="100.10")
+    elif event_type == "InitialStopConfirmed":
+        payload.update(exchange_order_id="exchange:stop:1", protected_qty="1")
+    elif event_type == "TakeProfitFilled":
+        payload.update(
+            filled_qty="0.5",
+            average_fill_price="102.00",
+            runner_floor_price="100.20",
+        )
+    elif event_type == "ProtectionReplacementConfirmed":
+        payload.update(
+            exchange_order_id="exchange:stop:2",
+            protected_qty="0.5",
+            stop_price="100.20",
+            replaces_exchange_order_id="exchange:stop:1",
+            source_watermark_ms=occurred_at_ms,
+        )
+    elif event_type == "ExitRequested":
+        payload["reason"] = exit_requested_reason
+    elif event_type == "ReviewRecorded":
+        payload["review_id"] = "review:1"
+    return TradeCausalityEventFacts(
+        event_id=event_id,
+        ticket_id="ticket:1",
+        sequence=sequence,
+        event_type=event_type,
+        payload=payload,
+        occurred_at_ms=occurred_at_ms,
+    )
 
 
 def programmatic_review_facts(**overrides: Any) -> ProgrammaticReviewFacts:

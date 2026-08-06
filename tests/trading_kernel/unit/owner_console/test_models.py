@@ -175,13 +175,18 @@ def test_named_factories_return_complete_frozen_facts_and_named_overrides() -> N
         },
         exit_event_occurred_at_ms=1_799_999_990_000,
     )
-    causality = trade_causality_facts(current_stage="exit")
+    causality = trade_causality_facts(
+        aggregate_status="exit_pending",
+        ticket_status="issued",
+        terminal_at_ms=None,
+        review=None,
+    )
     review = programmatic_review_facts(exit_reason="Controlled Exit")
 
     assert overview.max_concurrent_tickets == 4
     assert signal.first_blocker == "capacity_exhausted"
     assert trade.exit_event_type == "ExitRequested"
-    assert causality.current_stage == "exit"
+    assert causality.aggregate.aggregate_status == "exit_pending"
     assert review.exit_reason == "Controlled Exit"
     with pytest.raises(TypeError, match="unknown fact override"):
         overview_facts(not_a_field=True)

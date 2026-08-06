@@ -1,0 +1,771 @@
+"""Deterministic Ticket causality assembly from bounded PostgreSQL facts."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from decimal import Decimal, InvalidOperation
+from typing import Literal
+
+from src.trading_kernel.application.owner_console.models import (
+    CausalityExitReason,
+    ChartAnnotation,
+    EvidenceRef,
+    LifecycleStageKey,
+    LifecycleStageView,
+    RawExchangeCommandView,
+    RawIncidentView,
+    RawTradeEventView,
+    TradeCausalityDetail,
+    TradeCausalityEventFacts,
+    TradeCausalityFacts,
+)
+from src.trading_kernel.application.owner_console.trades import (
+    TradeFactsContradiction,
+    aggregate_stage,
+    build_trade_item,
+)
+from src.trading_kernel.domain.events import PERSISTED_TRADE_EVENT_MODELS
+
+
+class ContradictoryFacts(TradeFactsContradiction):
+    """Exact Ticket causality identities or bounded histories disagree."""
+
+
+_STAGE_ORDER: tuple[LifecycleStageKey, ...] = (
+    "signal",
+    "admission",
+    "entry",
+    "protection",
+    "tp_runner",
+    "exit",
+    "reconciliation",
+    "review",
+)
+_STAGE_LABELS: dict[LifecycleStageKey, str] = {
+    "signal": "Signal",
+    "admission": "Admission",
+    "entry": "Entry",
+    "protection": "Protection",
+    "tp_runner": "TP / Runner",
+    "exit": "Exit",
+    "reconciliation": "Reconciliation / Settlement",
+    "review": "Review",
+}
+
+_ENTRY_EVENTS = {
+    "TicketIssued",
+    "LeverageConfirmed",
+    "LeverageRejected",
+    "LeverageOutcomeUnknown",
+    "EntryAccepted",
+    "EntryRejected",
+    "EntryOutcomeUnknown",
+    "EntryAbsenceConfirmed",
+    "EntryFilled",
+    "EntryPartiallyFilled",
+    "EntryRemainderCancelConfirmed",
+    "EntryRemainderCancelRejected",
+    "EntryRemainderCancelOutcomeUnknown",
+}
+_PROTECTION_EVENTS = {
+    "InitialStopConfirmed",
+    "PostFillStressAssessed",
+    "InitialStopRejected",
+    "InitialStopOutcomeUnknown",
+    "InitialStopAbsenceConfirmed",
+}
+_TP_RUNNER_EVENTS = {
+    "TakeProfitConfirmed",
+    "TakeProfitRejected",
+    "TakeProfitOutcomeUnknown",
+    "TakeProfitAbsenceConfirmed",
+    "TakeProfitFilled",
+    "RunnerStopRequested",
+    "ProtectionReplacementConfirmed",
+    "ProtectionReplacementRejected",
+    "ProtectionReplacementOutcomeUnknown",
+    "ProtectionReplacementAbsenceConfirmed",
+}
+_EXIT_EVENTS = {
+    "ExitRequested",
+    "ExitAccepted",
+    "ExitRejected",
+    "ExitOutcomeUnknown",
+    "ExitAbsenceConfirmed",
+    "ControlledFlattenAccepted",
+    "ControlledFlattenRejected",
+    "ControlledFlattenOutcomeUnknown",
+    "ControlledFlattenAbsenceConfirmed",
+}
+_RECONCILIATION_EVENTS = {
+    "PositionFlatConfirmed",
+    "ExternalFlatDetected",
+    "OwnedOrphanOrderDetected",
+    "OwnedOrderAbsenceConfirmed",
+    "UnownedOrderDetected",
+    "ProtectionCancelConfirmed",
+    "ProtectionCancelRejected",
+    "ProtectionCancelOutcomeUnknown",
+    "ProtectionCancelAbsenceConfirmed",
+    "OwnedOrphanCancelConfirmed",
+    "CancelOrderRejected",
+    "CancelOrderOutcomeUnknown",
+    "CancelOrderAbsenceConfirmed",
+    "CancelOrderStillOpenConfirmed",
+    "ReconciliationMatched",
+    "BudgetSettled",
+}
+_REVIEW_EVENTS = {"ReviewRecorded", "ReviewRevised"}
+
+EVENT_STAGE: dict[str, LifecycleStageKey] = {
+    **{name: "entry" for name in _ENTRY_EVENTS},
+    **{name: "protection" for name in _PROTECTION_EVENTS},
+    **{name: "tp_runner" for name in _TP_RUNNER_EVENTS},
+    **{name: "exit" for name in _EXIT_EVENTS},
+    **{name: "reconciliation" for name in _RECONCILIATION_EVENTS},
+    **{name: "review" for name in _REVIEW_EVENTS},
+}
+_PERSISTED_EVENT_TYPES = {
+    model.__name__ for model in PERSISTED_TRADE_EVENT_MODELS
+}
+if set(EVENT_STAGE) != _PERSISTED_EVENT_TYPES:
+    missing = sorted(_PERSISTED_EVENT_TYPES.difference(EVENT_STAGE))
+    extra = sorted(set(EVENT_STAGE).difference(_PERSISTED_EVENT_TYPES))
+    raise RuntimeError(
+        f"Trade Event stage mapping mismatch; missing={missing}, extra={extra}"
+    )
+
+_EXIT_REASON_LABELS = {
+    "initial_stop_triggered": "Initial Stop",
+    "take_profit_triggered": "Take Profit",
+    "failed_breakout_reclaimed": "Failed Breakout Reclaimed",
+    "exposure_session_expired": "Session End",
+    "strategy_exit": "Strategy Exit",
+    "recover_exit_rejection": "Exit Recovery",
+}
+
+
+def build_trade_causality(facts: TradeCausalityFacts) -> TradeCausalityDetail:
+    """Build one exact, evidence-linked causality workbench."""
+
+    try:
+        current_stage = aggregate_stage(facts.aggregate.aggregate_status)
+        trade = build_trade_item(facts.trade)
+    except TradeFactsContradiction as exc:
+        raise ContradictoryFacts(str(exc)) from exc
+    _validate_identities(facts)
+    ordered_events = _ordered_events(facts)
+    raw_events = _raw_events(ordered_events, fallback=current_stage)
+    raw_commands = _raw_commands(facts)
+    raw_incidents = _raw_incidents(facts)
+    exit_reason = _exit_reason(ordered_events)
+    annotations = _annotations(facts, ordered_events)
+    stages = _stages(
+        facts,
+        current_stage=current_stage,
+        raw_events=raw_events,
+    )
+    signal_evidence = (
+        EvidenceRef(
+            kind="signal",
+            identity=facts.signal.signal_event_id,
+            occurred_at_ms=facts.signal.occurred_at_ms,
+        ),
+    )
+    order_evidence = tuple(
+        item.evidence[0] for item in raw_commands
+    )
+    incident_evidence = tuple(
+        item.evidence[0] for item in raw_incidents
+    )
+    event_evidence = tuple(item.evidence[0] for item in raw_events)
+    settlement_evidence = tuple(
+        item.evidence[0]
+        for item in raw_events
+        if item.event_type in {"BudgetSettled", "ReconciliationMatched"}
+    )
+    review_evidence = _review_evidence(facts, raw_events)
+    evidence = _deduplicate_evidence(
+        (
+            *trade.evidence,
+            *signal_evidence,
+            EvidenceRef(
+                kind="aggregate",
+                identity=facts.aggregate.ticket_id,
+                occurred_at_ms=facts.aggregate.updated_at_ms,
+            ),
+            EvidenceRef(
+                kind="admission",
+                identity=facts.admission.admission_decision_id,
+                occurred_at_ms=facts.admission.decided_at_ms,
+            ),
+            *order_evidence,
+            *incident_evidence,
+            *event_evidence,
+            *review_evidence,
+        )
+    )
+    current_view = stages[_STAGE_ORDER.index(current_stage)]
+    return TradeCausalityDetail(
+        trade=trade,
+        current_stage=current_stage,
+        current_stage_summary=current_view.summary,
+        stages=stages,
+        annotations=annotations,
+        exit_reason=exit_reason,
+        raw_events=raw_events,
+        raw_commands=raw_commands,
+        raw_incidents=raw_incidents,
+        signal_evidence=signal_evidence,
+        order_evidence=order_evidence,
+        incident_evidence=incident_evidence,
+        event_evidence=event_evidence,
+        settlement_evidence=settlement_evidence,
+        review_evidence=review_evidence,
+        evidence=evidence,
+    )
+
+
+def _validate_identities(facts: TradeCausalityFacts) -> None:
+    ticket = facts.ticket
+    aggregate = facts.aggregate
+    signal = facts.signal
+    admission = facts.admission
+    trade = facts.trade
+    if aggregate.ticket_id != ticket.ticket_id:
+        raise ContradictoryFacts("Ticket and Aggregate identity mismatch")
+    if (
+        trade.ticket_id != ticket.ticket_id
+        or trade.strategy_group_id != ticket.strategy_group_id
+        or trade.event_spec_id != ticket.event_spec_id
+        or trade.exchange_instrument_id != ticket.exchange_instrument_id
+        or trade.position_side != ticket.position_side
+        or trade.aggregate_status != aggregate.aggregate_status
+        or trade.issued_at_ms != ticket.created_at_ms
+        or trade.aggregate_review_id != aggregate.review_id
+    ):
+        raise ContradictoryFacts("Trade and Ticket causality facts disagree")
+    ticket_signal_pairs = (
+        (ticket.signal_event_id, signal.signal_event_id),
+        (ticket.exposure_episode_id, signal.exposure_episode_id),
+        (ticket.strategy_group_id, signal.strategy_group_id),
+        (ticket.strategy_version_id, signal.strategy_version_id),
+        (ticket.event_spec_id, signal.event_spec_id),
+        (ticket.universe_version_id, signal.universe_version_id),
+        (ticket.universe_semantic_digest, signal.universe_semantic_digest),
+        (ticket.runtime_scope_id, signal.runtime_scope_id),
+        (ticket.runtime_scope_version, signal.runtime_scope_version),
+        (ticket.exchange_instrument_id, signal.exchange_instrument_id),
+        (ticket.position_side, signal.position_side),
+    )
+    if any(left != right for left, right in ticket_signal_pairs):
+        raise ContradictoryFacts("Ticket and Signal identity mismatch")
+    ticket_admission_pairs = (
+        (ticket.ticket_id, admission.ticket_id),
+        (ticket.signal_event_id, admission.signal_event_id),
+        (ticket.exposure_episode_id, admission.exposure_episode_id),
+        (ticket.strategy_group_id, admission.strategy_group_id),
+        (ticket.strategy_version_id, admission.strategy_version_id),
+        (ticket.event_spec_id, admission.event_spec_id),
+        (ticket.universe_version_id, admission.universe_version_id),
+        (ticket.universe_semantic_digest, admission.universe_semantic_digest),
+        (ticket.runtime_profile_id, admission.runtime_profile_id),
+        (ticket.runtime_scope_id, admission.runtime_scope_id),
+        (ticket.runtime_scope_version, admission.runtime_scope_version),
+        (ticket.owner_policy_id, admission.owner_policy_id),
+        (ticket.owner_policy_version, admission.owner_policy_version),
+        (ticket.capacity_claim_id, admission.capacity_claim_id),
+        (ticket.venue_id, admission.venue_id),
+        (ticket.account_id, admission.account_id),
+        (ticket.exchange_instrument_id, admission.exchange_instrument_id),
+        (ticket.position_side, admission.position_side),
+    )
+    if (
+        admission.decision_status != "admitted"
+        or any(left != right for left, right in ticket_admission_pairs)
+    ):
+        raise ContradictoryFacts("Ticket and AdmissionDecision identity mismatch")
+    review = facts.review
+    if review is None:
+        if aggregate.review_id is not None and trade.review_id is not None:
+            raise ContradictoryFacts("current Review row is missing")
+        return
+    if (
+        aggregate.review_id != review.review_id
+        or review.ticket_id != ticket.ticket_id
+        or trade.review_id != review.review_id
+        or trade.review_ticket_id != review.ticket_id
+        or trade.review_revision != review.revision
+        or trade.review_created_at_ms != review.created_at_ms
+        or trade.review_metrics != review.metrics
+    ):
+        raise ContradictoryFacts("current Review identity mismatch")
+
+
+def _ordered_events(
+    facts: TradeCausalityFacts,
+) -> tuple[TradeCausalityEventFacts, ...]:
+    ordered = tuple(sorted(facts.events, key=lambda item: item.sequence))
+    sequences = tuple(item.sequence for item in ordered)
+    expected = tuple(range(1, facts.aggregate.last_event_sequence + 1))
+    if sequences != expected:
+        raise ContradictoryFacts("Event sequence disagrees with Aggregate")
+    for event in ordered:
+        if event.ticket_id != facts.ticket.ticket_id:
+            raise ContradictoryFacts("Event Ticket identity mismatch")
+        _validate_event_payload(event, ticket_id=facts.ticket.ticket_id)
+    return ordered
+
+
+def _validate_event_payload(
+    event: TradeCausalityEventFacts,
+    *,
+    ticket_id: str,
+) -> None:
+    payload = event.payload
+    if (
+        payload.get("event_id") != event.event_id
+        or payload.get("sequence") != event.sequence
+        or payload.get("occurred_at_ms") != event.occurred_at_ms
+    ):
+        raise ContradictoryFacts("Event payload identity mismatch")
+    if event.event_type == "TicketIssued":
+        nested_ticket = payload.get("ticket")
+        nested_identity = (
+            nested_ticket.get("identity")
+            if isinstance(nested_ticket, dict)
+            else None
+        )
+        payload_ticket_id = (
+            nested_identity.get("ticket_id")
+            if isinstance(nested_identity, dict)
+            else None
+        )
+    else:
+        payload_ticket_id = payload.get("ticket_id")
+    if payload_ticket_id != ticket_id:
+        raise ContradictoryFacts("Event payload identity mismatch")
+
+
+def _raw_events(
+    events: tuple[TradeCausalityEventFacts, ...],
+    *,
+    fallback: LifecycleStageKey,
+) -> tuple[RawTradeEventView, ...]:
+    rows: list[RawTradeEventView] = []
+    for event in events:
+        mapped_stage = EVENT_STAGE.get(event.event_type)
+        evidence = (
+            EvidenceRef(
+                kind="event",
+                identity=event.event_id,
+                occurred_at_ms=event.occurred_at_ms,
+            ),
+        )
+        rows.append(
+            RawTradeEventView(
+                event_id=event.event_id,
+                ticket_id=event.ticket_id,
+                sequence=event.sequence,
+                event_type=event.event_type,
+                payload=event.payload,
+                occurred_at_ms=event.occurred_at_ms,
+                stage=fallback if mapped_stage is None else mapped_stage,
+                classification=(
+                    "unmapped" if mapped_stage is None else "mapped"
+                ),
+                evidence=evidence,
+            )
+        )
+    return tuple(rows)
+
+
+def _raw_commands(
+    facts: TradeCausalityFacts,
+) -> tuple[RawExchangeCommandView, ...]:
+    ordered = tuple(
+        sorted(facts.commands, key=lambda item: (item.created_at_ms, item.command_id))
+    )
+    if ordered != facts.commands:
+        raise ContradictoryFacts("Exchange Commands are not in exact order")
+    if len({item.command_id for item in ordered}) != len(ordered):
+        raise ContradictoryFacts("duplicate Exchange Command identity")
+    rows: list[RawExchangeCommandView] = []
+    for command in ordered:
+        if command.ticket_id != facts.ticket.ticket_id:
+            raise ContradictoryFacts("Exchange Command Ticket identity mismatch")
+        evidence = (
+            EvidenceRef(
+                kind="command",
+                identity=command.command_id,
+                occurred_at_ms=command.created_at_ms,
+            ),
+        )
+        rows.append(
+            RawExchangeCommandView(
+                command_id=command.command_id,
+                ticket_id=command.ticket_id,
+                command_kind=command.command_kind,
+                generation=command.generation,
+                status=command.status,
+                request_payload=command.request_payload,
+                result_payload=command.result_payload,
+                created_at_ms=command.created_at_ms,
+                completed_at_ms=command.completed_at_ms,
+                evidence=evidence,
+            )
+        )
+    return tuple(rows)
+
+
+def _raw_incidents(
+    facts: TradeCausalityFacts,
+) -> tuple[RawIncidentView, ...]:
+    ordered = tuple(
+        sorted(facts.incidents, key=lambda item: (item.opened_at_ms, item.incident_id))
+    )
+    if ordered != facts.incidents:
+        raise ContradictoryFacts("Incidents are not in exact order")
+    if len({item.incident_id for item in ordered}) != len(ordered):
+        raise ContradictoryFacts("duplicate Incident identity")
+    rows: list[RawIncidentView] = []
+    for incident in ordered:
+        if incident.ticket_id != facts.ticket.ticket_id:
+            raise ContradictoryFacts("Incident Ticket identity mismatch")
+        evidence = (
+            EvidenceRef(
+                kind="incident",
+                identity=incident.incident_id,
+                occurred_at_ms=incident.opened_at_ms,
+            ),
+        )
+        rows.append(
+            RawIncidentView(
+                incident_id=incident.incident_id,
+                ticket_id=incident.ticket_id,
+                incident_kind=incident.incident_kind,
+                status=incident.status,
+                first_blocker=incident.first_blocker,
+                details=incident.details,
+                opened_at_ms=incident.opened_at_ms,
+                resolved_at_ms=incident.resolved_at_ms,
+                evidence=evidence,
+            )
+        )
+    return tuple(rows)
+
+
+def _exit_reason(
+    events: tuple[TradeCausalityEventFacts, ...],
+) -> CausalityExitReason | None:
+    event = next(
+        (item for item in events if item.event_type == "ExitRequested"),
+        None,
+    )
+    if event is None:
+        return None
+    reason = event.payload.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ContradictoryFacts("ExitRequested reason is missing")
+    code = reason.strip()
+    return CausalityExitReason(
+        code=code,
+        label=_EXIT_REASON_LABELS.get(code, _humanize(code)),
+        evidence=(
+            EvidenceRef(
+                kind="event",
+                identity=event.event_id,
+                occurred_at_ms=event.occurred_at_ms,
+            ),
+        ),
+    )
+
+
+def _annotations(
+    facts: TradeCausalityFacts,
+    events: tuple[TradeCausalityEventFacts, ...],
+) -> tuple[ChartAnnotation, ...]:
+    ticket_evidence = EvidenceRef(
+        kind="ticket",
+        identity=facts.ticket.ticket_id,
+        occurred_at_ms=facts.ticket.created_at_ms,
+    )
+    signal_evidence = EvidenceRef(
+        kind="signal",
+        identity=facts.signal.signal_event_id,
+        occurred_at_ms=facts.signal.occurred_at_ms,
+    )
+    annotations = [
+        ChartAnnotation(
+            kind="signal",
+            occurred_at_ms=facts.signal.occurred_at_ms,
+            price=facts.ticket.entry_reference_price,
+            label="Signal Reference",
+            evidence=(signal_evidence, ticket_evidence),
+        ),
+        ChartAnnotation(
+            kind="stop",
+            occurred_at_ms=facts.signal.occurred_at_ms,
+            price=facts.ticket.initial_stop_price,
+            label="Frozen Initial Stop Plan",
+            evidence=(signal_evidence, ticket_evidence),
+        ),
+    ]
+    for event in events:
+        event_evidence = EvidenceRef(
+            kind="event",
+            identity=event.event_id,
+            occurred_at_ms=event.occurred_at_ms,
+        )
+        if event.event_type == "EntryFilled":
+            annotations.append(
+                ChartAnnotation(
+                    kind="entry",
+                    occurred_at_ms=event.occurred_at_ms,
+                    price=_decimal_string(
+                        event.payload.get("average_fill_price"),
+                        context="EntryFilled.average_fill_price",
+                    ),
+                    label="ENTRY Fill",
+                    evidence=(event_evidence,),
+                )
+            )
+        elif event.event_type == "InitialStopConfirmed":
+            annotations.append(
+                ChartAnnotation(
+                    kind="stop",
+                    occurred_at_ms=event.occurred_at_ms,
+                    price=facts.ticket.initial_stop_price,
+                    label="Initial Stop Confirmed",
+                    evidence=(event_evidence, ticket_evidence),
+                )
+            )
+        elif event.event_type == "TakeProfitFilled":
+            annotations.append(
+                ChartAnnotation(
+                    kind="take_profit",
+                    occurred_at_ms=event.occurred_at_ms,
+                    price=_decimal_string(
+                        event.payload.get("average_fill_price"),
+                        context="TakeProfitFilled.average_fill_price",
+                    ),
+                    label="Take Profit Fill",
+                    evidence=(event_evidence,),
+                )
+            )
+        elif event.event_type == "ProtectionReplacementConfirmed":
+            annotations.append(
+                ChartAnnotation(
+                    kind="stop",
+                    occurred_at_ms=event.occurred_at_ms,
+                    price=_decimal_string(
+                        event.payload.get("stop_price"),
+                        context="ProtectionReplacementConfirmed.stop_price",
+                    ),
+                    label="Protection Replacement",
+                    evidence=(event_evidence,),
+                )
+            )
+    annotations.extend(_review_exit_annotations(facts))
+    return tuple(
+        sorted(
+            annotations,
+            key=lambda item: (item.occurred_at_ms, _annotation_order(item.kind)),
+        )
+    )
+
+
+def _review_exit_annotations(
+    facts: TradeCausalityFacts,
+) -> tuple[ChartAnnotation, ...]:
+    review = facts.review
+    if review is None:
+        return ()
+    raw_attribution = review.metrics.get("order_attribution")
+    if raw_attribution is None:
+        return ()
+    if not isinstance(raw_attribution, list):
+        raise ContradictoryFacts("current Review order attribution is malformed")
+    command_ids = {command.command_id for command in facts.commands}
+    evidence = EvidenceRef(
+        kind="review",
+        identity=review.review_id,
+        occurred_at_ms=review.created_at_ms,
+    )
+    annotations: list[ChartAnnotation] = []
+    for raw_row in raw_attribution:
+        if not isinstance(raw_row, dict):
+            raise ContradictoryFacts("current Review order attribution is malformed")
+        role = raw_row.get("role")
+        if role not in {"entry", "exit"}:
+            raise ContradictoryFacts("current Review order attribution role is invalid")
+        if role != "exit":
+            continue
+        command_id = raw_row.get("command_id")
+        if not isinstance(command_id, str) or command_id not in command_ids:
+            raise ContradictoryFacts("current Review order attribution identity mismatch")
+        occurred_at_ms = raw_row.get("occurred_at_ms")
+        if (
+            isinstance(occurred_at_ms, bool)
+            or not isinstance(occurred_at_ms, int)
+            or occurred_at_ms <= 0
+        ):
+            raise ContradictoryFacts("current Review exit fill time is invalid")
+        annotations.append(
+            ChartAnnotation(
+                kind="exit",
+                occurred_at_ms=occurred_at_ms,
+                price=_decimal_string(
+                    raw_row.get("price"),
+                    context="current Review exit fill price",
+                ),
+                label="Exit Fill",
+                evidence=(evidence,),
+            )
+        )
+    return tuple(annotations)
+
+
+def _stages(
+    facts: TradeCausalityFacts,
+    *,
+    current_stage: LifecycleStageKey,
+    raw_events: tuple[RawTradeEventView, ...],
+) -> tuple[LifecycleStageView, ...]:
+    stage_evidence: dict[LifecycleStageKey, list[EvidenceRef]] = {
+        stage: [
+            EvidenceRef(
+                kind="aggregate",
+                identity=facts.aggregate.ticket_id,
+                occurred_at_ms=facts.aggregate.updated_at_ms,
+            )
+        ]
+        for stage in _STAGE_ORDER
+    }
+    stage_evidence["signal"].append(
+        EvidenceRef(
+            kind="signal",
+            identity=facts.signal.signal_event_id,
+            occurred_at_ms=facts.signal.occurred_at_ms,
+        )
+    )
+    stage_evidence["admission"].append(
+        EvidenceRef(
+            kind="admission",
+            identity=facts.admission.admission_decision_id,
+            occurred_at_ms=facts.admission.decided_at_ms,
+        )
+    )
+    for event in raw_events:
+        stage_evidence[event.stage].append(event.evidence[0])
+    if facts.review is not None:
+        stage_evidence["review"].append(
+            EvidenceRef(
+                kind="review",
+                identity=facts.review.review_id,
+                occurred_at_ms=facts.review.created_at_ms,
+            )
+        )
+    current_index = _STAGE_ORDER.index(current_stage)
+    terminal = facts.aggregate.aggregate_status == "terminal"
+    stages: list[LifecycleStageView] = []
+    for index, key in enumerate(_STAGE_ORDER):
+        evidence = _deduplicate_evidence(stage_evidence[key])
+        times = [
+            item.occurred_at_ms
+            for item in evidence
+            if item.kind != "aggregate"
+        ]
+        if terminal or index < current_index:
+            status: Literal["pending", "current", "complete", "unavailable"] = (
+                "complete" if evidence else "unavailable"
+            )
+        elif index == current_index:
+            status = "current" if evidence else "unavailable"
+        else:
+            status = "pending"
+        started_at_ms = min(times) if times else None
+        completed_at_ms = (
+            max(times) if status == "complete" and times else None
+        )
+        stages.append(
+            LifecycleStageView(
+                key=key,
+                label=_STAGE_LABELS[key],
+                status=status,
+                started_at_ms=started_at_ms,
+                completed_at_ms=completed_at_ms,
+                duration_ms=(
+                    None
+                    if started_at_ms is None or completed_at_ms is None
+                    else completed_at_ms - started_at_ms
+                ),
+                summary=_stage_summary(key, status),
+                evidence=evidence,
+            )
+        )
+    return tuple(stages)
+
+
+def _review_evidence(
+    facts: TradeCausalityFacts,
+    raw_events: tuple[RawTradeEventView, ...],
+) -> tuple[EvidenceRef, ...]:
+    evidence = [
+        event.evidence[0]
+        for event in raw_events
+        if event.event_type in _REVIEW_EVENTS
+    ]
+    if facts.review is not None:
+        evidence.append(
+            EvidenceRef(
+                kind="review",
+                identity=facts.review.review_id,
+                occurred_at_ms=facts.review.created_at_ms,
+            )
+        )
+    return _deduplicate_evidence(evidence)
+
+
+def _decimal_string(value: object, *, context: str) -> Decimal:
+    if not isinstance(value, str) or not value.strip():
+        raise ContradictoryFacts(f"{context} is not an exact Decimal string")
+    try:
+        decimal = Decimal(value)
+    except (InvalidOperation, ValueError) as exc:
+        raise ContradictoryFacts(
+            f"{context} is not an exact Decimal string"
+        ) from exc
+    if not decimal.is_finite() or decimal <= 0:
+        raise ContradictoryFacts(f"{context} must be finite and positive")
+    return decimal
+
+
+def _annotation_order(kind: str) -> int:
+    return {
+        "signal": 0,
+        "stop": 1,
+        "entry": 2,
+        "take_profit": 3,
+        "exit": 4,
+    }[kind]
+
+
+def _stage_summary(
+    key: LifecycleStageKey,
+    status: Literal["pending", "current", "complete", "unavailable"],
+) -> str:
+    return f"{_STAGE_LABELS[key]}: {status}"
+
+
+def _humanize(value: str) -> str:
+    return " ".join(part.capitalize() for part in value.split("_") if part)
+
+
+def _deduplicate_evidence(
+    evidence: Iterable[EvidenceRef],
+) -> tuple[EvidenceRef, ...]:
+    unique: dict[tuple[str, str, int], EvidenceRef] = {}
+    for item in evidence:
+        unique[(item.kind, item.identity, item.occurred_at_ms)] = item
+    return tuple(unique.values())

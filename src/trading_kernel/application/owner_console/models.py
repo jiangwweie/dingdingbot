@@ -49,6 +49,7 @@ class EvidenceRef(FrozenModel):
         "signal",
         "admission",
         "ticket",
+        "aggregate",
         "event",
         "command",
         "incident",
@@ -324,9 +325,66 @@ class ChartAnnotation(FrozenModel):
     label: str
     evidence: tuple[EvidenceRef, ...]
 
+    @field_validator("price", mode="before")
+    @classmethod
+    def _reject_float_price(cls, value: object) -> object:
+        if isinstance(value, float):
+            raise TypeError("chart annotation price must not be a float")
+        return value
+
+    @field_validator("price")
+    @classmethod
+    def _require_finite_price(cls, value: Decimal) -> Decimal:
+        if not value.is_finite():
+            raise ValueError("chart annotation price must be finite")
+        return value
+
     @field_serializer("price")
     def _serialize_price(self, value: Decimal) -> str:
         return str(value)
+
+
+class CausalityExitReason(FrozenModel):
+    code: str
+    label: str
+    evidence: tuple[EvidenceRef, ...]
+
+
+class RawTradeEventView(FrozenModel):
+    event_id: str
+    ticket_id: str
+    sequence: int
+    event_type: str
+    payload: dict[str, JsonValue]
+    occurred_at_ms: int
+    stage: LifecycleStageKey
+    classification: Literal["mapped", "unmapped"]
+    evidence: tuple[EvidenceRef, ...]
+
+
+class RawExchangeCommandView(FrozenModel):
+    command_id: str
+    ticket_id: str
+    command_kind: str
+    generation: int
+    status: str
+    request_payload: dict[str, JsonValue]
+    result_payload: dict[str, JsonValue] | None
+    created_at_ms: int
+    completed_at_ms: int | None
+    evidence: tuple[EvidenceRef, ...]
+
+
+class RawIncidentView(FrozenModel):
+    incident_id: str
+    ticket_id: str
+    incident_kind: str
+    status: str
+    first_blocker: str
+    details: dict[str, JsonValue]
+    opened_at_ms: int
+    resolved_at_ms: int | None
+    evidence: tuple[EvidenceRef, ...]
 
 
 class TradeCausalityDetail(FrozenModel):
@@ -335,6 +393,10 @@ class TradeCausalityDetail(FrozenModel):
     current_stage_summary: str
     stages: tuple[LifecycleStageView, ...]
     annotations: tuple[ChartAnnotation, ...]
+    exit_reason: CausalityExitReason | None
+    raw_events: tuple[RawTradeEventView, ...] = Field(max_length=512)
+    raw_commands: tuple[RawExchangeCommandView, ...] = Field(max_length=128)
+    raw_incidents: tuple[RawIncidentView, ...] = Field(max_length=64)
     signal_evidence: tuple[EvidenceRef, ...]
     order_evidence: tuple[EvidenceRef, ...]
     incident_evidence: tuple[EvidenceRef, ...]
@@ -531,17 +593,141 @@ class TradePageFacts(FrozenModel):
     requested_limit: int = Field(ge=1, le=100)
 
 
+class TradeCausalityTicketFacts(FrozenModel):
+    ticket_id: str
+    exposure_episode_id: str
+    signal_event_id: str
+    strategy_group_id: str
+    strategy_version_id: str
+    event_spec_id: str
+    universe_version_id: str
+    universe_semantic_digest: str
+    runtime_profile_id: str
+    runtime_scope_id: str
+    runtime_scope_version: int
+    owner_policy_id: str
+    owner_policy_version: int
+    capacity_claim_id: str
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
+    entry_reference_price: Decimal
+    initial_stop_price: Decimal
+    created_at_ms: int
+
+    @field_validator("entry_reference_price", "initial_stop_price", mode="before")
+    @classmethod
+    def _reject_float_decimal(cls, value: object) -> object:
+        if isinstance(value, float):
+            raise TypeError("Ticket causality decimals must not be floats")
+        return value
+
+    @field_validator("entry_reference_price", "initial_stop_price")
+    @classmethod
+    def _require_finite_decimal(cls, value: Decimal) -> Decimal:
+        if not value.is_finite() or value <= 0:
+            raise ValueError("Ticket causality decimals must be finite and positive")
+        return value
+
+
+class TradeCausalityAggregateFacts(FrozenModel):
+    ticket_id: str
+    aggregate_status: str
+    last_event_sequence: int = Field(gt=0)
+    review_id: str | None
+    updated_at_ms: int
+
+
+class TradeCausalitySignalFacts(FrozenModel):
+    signal_event_id: str
+    exposure_episode_id: str
+    runtime_scope_id: str
+    runtime_scope_version: int
+    strategy_group_id: str
+    strategy_version_id: str
+    event_spec_id: str
+    universe_version_id: str
+    universe_semantic_digest: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
+    occurred_at_ms: int
+
+
+class TradeCausalityAdmissionFacts(FrozenModel):
+    admission_decision_id: str
+    signal_event_id: str
+    exposure_episode_id: str
+    strategy_group_id: str
+    strategy_version_id: str
+    event_spec_id: str
+    universe_version_id: str
+    universe_semantic_digest: str
+    runtime_profile_id: str
+    runtime_scope_id: str
+    runtime_scope_version: int
+    owner_policy_id: str
+    owner_policy_version: int
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
+    decision_status: Literal["admitted", "rejected"]
+    capacity_claim_id: str | None
+    ticket_id: str | None
+    decided_at_ms: int
+
+
+class TradeCausalityEventFacts(FrozenModel):
+    event_id: str
+    ticket_id: str
+    sequence: int = Field(gt=0)
+    event_type: str
+    payload: dict[str, JsonValue]
+    occurred_at_ms: int
+
+
+class TradeCausalityCommandFacts(FrozenModel):
+    command_id: str
+    ticket_id: str
+    command_kind: str
+    generation: int = Field(gt=0)
+    status: str
+    request_payload: dict[str, JsonValue]
+    result_payload: dict[str, JsonValue] | None
+    created_at_ms: int
+    completed_at_ms: int | None
+
+
+class TradeCausalityIncidentFacts(FrozenModel):
+    incident_id: str
+    ticket_id: str
+    incident_kind: str
+    status: str
+    first_blocker: str
+    details: dict[str, JsonValue]
+    opened_at_ms: int
+    resolved_at_ms: int | None
+
+
+class TradeCausalityReviewFacts(FrozenModel):
+    review_id: str
+    ticket_id: str
+    revision: int = Field(gt=0)
+    metrics: dict[str, JsonValue]
+    created_at_ms: int
+
+
 class TradeCausalityFacts(FrozenModel):
     trade: TradeItemFacts
-    current_stage: LifecycleStageKey
-    stages: tuple[LifecycleStageView, ...]
-    annotations: tuple[ChartAnnotation, ...]
-    signal_evidence: tuple[EvidenceRef, ...]
-    order_evidence: tuple[EvidenceRef, ...]
-    incident_evidence: tuple[EvidenceRef, ...]
-    event_evidence: tuple[EvidenceRef, ...]
-    settlement_evidence: tuple[EvidenceRef, ...]
-    review_evidence: tuple[EvidenceRef, ...]
+    ticket: TradeCausalityTicketFacts
+    aggregate: TradeCausalityAggregateFacts
+    signal: TradeCausalitySignalFacts
+    admission: TradeCausalityAdmissionFacts
+    events: tuple[TradeCausalityEventFacts, ...] = Field(max_length=512)
+    commands: tuple[TradeCausalityCommandFacts, ...] = Field(max_length=128)
+    incidents: tuple[TradeCausalityIncidentFacts, ...] = Field(max_length=64)
+    review: TradeCausalityReviewFacts | None
 
 
 class ProgrammaticReviewFacts(FrozenModel):

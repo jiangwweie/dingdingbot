@@ -10,6 +10,10 @@ from sqlalchemy import event
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from src.trading_kernel.application.owner_console.causality import (
+    ContradictoryFacts,
+    build_trade_causality,
+)
 from src.trading_kernel.application.owner_console.models import (
     SignalListQuery,
     TradeListQuery,
@@ -263,6 +267,144 @@ async def test_owner_read_role_cannot_use_public_object_creation_capabilities(
             )
     finally:
         await connection.close()
+
+
+async def test_causality_nonexistent_ticket_returns_none_with_one_exact_read(
+    owner_read_dsn: str,
+) -> None:
+    engine = create_owner_read_engine(owner_read_dsn)
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection,
+        _cursor,
+        statement: str,
+        _parameters,
+        _context,
+        _executemany: bool,
+    ) -> None:
+        statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine.sync_engine, "before_cursor_execute", capture_statement)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            statements.clear()
+            transaction = connection.get_transaction()
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_trade_causality_facts("ticket:missing")
+            assert connection.get_transaction() is transaction
+
+        assert facts is None
+        selects = [item for item in statements if item.startswith("select")]
+        assert len(selects) == 1
+        assert "brc_trade_tickets.ticket_id =" in selects[0]
+        assert "brc_trade_aggregates" in selects[0]
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", capture_statement)
+        await engine.dispose()
+
+
+async def test_causality_reads_exact_bounded_histories_and_current_review(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_causality(owner_read_dsn)
+    engine = create_owner_read_engine(owner_read_dsn)
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection,
+        _cursor,
+        statement: str,
+        _parameters,
+        _context,
+        _executemany: bool,
+    ) -> None:
+        statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine.sync_engine, "before_cursor_execute", capture_statement)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            statements.clear()
+            transaction = connection.get_transaction()
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_trade_causality_facts("ticket:causality")
+            assert connection.get_transaction() is transaction
+
+        assert facts is not None
+        detail = build_trade_causality(facts)
+        assert detail.exit_reason is not None
+        assert detail.exit_reason.label == "Initial Stop"
+        assert detail.annotations[-1].model_dump(mode="json") == {
+            "kind": "exit",
+            "occurred_at_ms": 1_800_000_090_000,
+            "price": "103.00",
+            "label": "Exit Fill",
+            "evidence": [
+                {
+                    "kind": "review",
+                    "identity": "review:causality:v2",
+                    "occurred_at_ms": 1_800_000_100_000,
+                }
+            ],
+        }
+        assert detail.raw_events[-1].event_type == "FutureLifecycleEvent"
+        assert detail.raw_events[-1].classification == "unmapped"
+        assert detail.raw_events[-1].stage == "review"
+        assert [item.sequence for item in detail.raw_events] == list(range(1, 11))
+        assert [item.command_id for item in detail.raw_commands] == [
+            "command:entry:1",
+            "command:exit:1",
+        ]
+        assert [item.incident_id for item in detail.raw_incidents] == [
+            "incident:causality:1"
+        ]
+
+        selects = [item for item in statements if item.startswith("select")]
+        assert len(selects) == 6
+        assert "brc_trade_tickets.ticket_id =" in selects[0]
+        assert "brc_signal_events.signal_event_id =" in selects[1]
+        assert "brc_admission_decisions" in selects[1]
+        assert "brc_trade_events.ticket_id =" in selects[2]
+        assert "order by brc_trade_events.sequence asc" in selects[2]
+        assert "limit" in selects[2]
+        assert "brc_exchange_commands.ticket_id =" in selects[3]
+        assert "brc_exchange_commands.created_at_ms asc" in selects[3]
+        assert "brc_exchange_commands.command_id asc" in selects[3]
+        assert "limit" in selects[3]
+        assert "brc_runtime_incidents.ticket_id =" in selects[4]
+        assert "brc_runtime_incidents.opened_at_ms asc" in selects[4]
+        assert "limit" in selects[4]
+        assert "brc_trade_reviews.review_id =" in selects[5]
+        assert "brc_candles" not in " ".join(selects)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", capture_statement)
+        await engine.dispose()
+
+
+async def test_causality_identity_mismatch_fails_closed(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_causality(
+        owner_read_dsn,
+        admission_strategy_group_id="strategy-group:contradictory",
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_trade_causality_facts("ticket:causality")
+
+        assert facts is not None
+        with pytest.raises(
+            ContradictoryFacts,
+            match="Ticket and AdmissionDecision identity mismatch",
+        ):
+            build_trade_causality(facts)
+    finally:
+        await engine.dispose()
 
 
 async def test_signal_cursor_is_stable_across_same_timestamp_page_boundary(
@@ -2087,6 +2229,481 @@ async def _seed_owner_console_signals(
                     'horizon_complete', 1, 1800000002000, 1800000900000
                 )
                 """
+            )
+    finally:
+        await connection.close()
+
+
+async def _seed_owner_console_causality(
+    dsn: str,
+    *,
+    admission_strategy_group_id: str = "strategy-group:alpha",
+) -> None:
+    await _seed_owner_console_signals(dsn)
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    digest = "sha256:" + "a" * 64
+    try:
+        async with connection.transaction():
+            await connection.execute(
+                "DELETE FROM brc_shadow_outcomes_current "
+                "WHERE admission_decision_id = 'admission:z'"
+            )
+            await connection.execute(
+                "DELETE FROM brc_admission_decisions "
+                "WHERE admission_decision_id = 'admission:z'"
+            )
+            await connection.execute(
+                """
+                INSERT INTO brc_trade_tickets (
+                    ticket_id, exposure_episode_id, signal_event_id,
+                    strategy_group_id, strategy_version_id, event_spec_id,
+                    universe_version_id, universe_semantic_digest,
+                    runtime_profile_id, owner_policy_id, owner_policy_version,
+                    runtime_scope_id, runtime_scope_version, account_id,
+                    venue_id, exchange_instrument_id, position_side,
+                    netting_domain_key, active_netting_domain_key,
+                    exposure_family, active_family_ticket_count_at_claim,
+                    family_ticket_limit, directional_risk_at_stop_at_claim,
+                    directional_stop_risk_limit_fraction,
+                    min_materialization_ratio, minimum_stop_risk_budget,
+                    exit_policy_id, exit_policy_semantic_hash,
+                    entry_reference_price, quantity, notional,
+                    capacity_claim_id, planned_stop_risk_budget,
+                    post_fill_stop_risk_limit, selected_leverage,
+                    leverage_change_required, reserved_margin,
+                    risk_reservation_basis, margin_mode,
+                    cross_margin_stress_model_id, post_stop_stress_multiple,
+                    claim_stress_proof_digest, risk_at_stop,
+                    entry_order_type, entry_limit_price, initial_stop_price,
+                    pre_tp1_reclaim_price, exposure_session_end_ms,
+                    take_profit_prices, take_profit_quantities, fact_digest,
+                    decision_digest, status, created_at_ms, expires_at_ms,
+                    terminal_at_ms
+                ) VALUES (
+                    'ticket:causality', 'episode:z', 'signal:z',
+                    'strategy-group:alpha', 'strategy-version:alpha',
+                    'event-spec:signal', 'universe:owner-console-signals', $1,
+                    'profile:owner-console', 'policy:owner-console', 1,
+                    'scope:z', 1, 'owner-console-account', 'binance-usdm',
+                    'BTCUSDT', 'long',
+                    'binance-usdm:owner-console-account:BTCUSDT:long', NULL,
+                    'opening_range', 0, 2, 0, 0.04, 0.5, 1,
+                    'exit-policy:test', 'sha256:' || repeat('b', 64),
+                    100.00, 1, 100, 'claim:causality', 1, 1.1, 1, false,
+                    100, 'stop_risk', 'cross', 'stress:test', 2,
+                    'sha256:' || repeat('c', 64), 1, 'market', NULL, 99.00,
+                    NULL, NULL, '["102.00"]'::jsonb, '["0.5"]'::jsonb,
+                    'sha256:' || repeat('d', 64),
+                    'sha256:' || repeat('e', 64), 'terminal',
+                    1800000003000, 1800000060000, 1800000095000
+                )
+                """,
+                digest,
+            )
+            await connection.execute(
+                """
+                INSERT INTO brc_capacity_claims (
+                    capacity_claim_id, ticket_id, signal_event_id,
+                    exposure_episode_id, strategy_group_id,
+                    strategy_version_id, event_spec_id, universe_version_id,
+                    universe_semantic_digest, runtime_profile_id,
+                    owner_policy_id, owner_policy_version, runtime_scope_id,
+                    runtime_scope_version, account_id, venue_id,
+                    exchange_instrument_id, position_side, netting_domain_key,
+                    fact_digest, exit_policy_id, exit_policy_semantic_hash,
+                    entry_admission_snapshot_digest,
+                    account_entry_health_digest,
+                    instrument_entry_health_digest,
+                    instrument_rules_projection_version,
+                    account_capacity_domain_key, leverage_domain_key,
+                    total_wallet_balance_at_claim,
+                    total_margin_balance_at_claim,
+                    total_initial_margin_at_claim,
+                    total_maintenance_margin_at_claim,
+                    available_margin_at_claim, mark_price_at_claim,
+                    position_mode_at_claim, margin_mode_at_claim,
+                    active_ticket_count_at_claim, remaining_slots_at_claim,
+                    active_strategy_group_ticket_count_at_claim,
+                    max_strategy_group_concurrent_tickets,
+                    remaining_strategy_group_slots_at_claim,
+                    exposure_family, active_family_ticket_count_at_claim,
+                    family_ticket_limit, gross_risk_at_stop_at_claim,
+                    directional_risk_at_stop_at_claim,
+                    current_reserved_margin_at_claim,
+                    max_ticket_stop_risk_fraction,
+                    max_gross_stop_risk_fraction,
+                    directional_stop_risk_limit_fraction,
+                    max_ticket_initial_margin_fraction,
+                    max_gross_initial_margin_utilization,
+                    min_materialization_ratio, minimum_stop_risk_budget,
+                    planned_stop_risk_budget,
+                    max_post_fill_stop_risk_overrun_fraction,
+                    post_fill_stop_risk_limit, post_stop_stress_multiple,
+                    ticket_margin_budget, required_leverage,
+                    selected_leverage, configured_leverage_at_claim,
+                    leverage_change_required, exchange_max_leverage,
+                    reserved_margin, cross_margin_stress_evidence,
+                    entry_reference_price, quantity, notional, risk_at_stop,
+                    entry_order_type, entry_limit_price, initial_stop_price,
+                    pre_tp1_reclaim_price, exposure_session_end_ms,
+                    take_profit_prices, take_profit_quantities,
+                    decision_digest, created_at_ms, expires_at_ms
+                ) VALUES (
+                    'claim:causality', 'ticket:causality', 'signal:z',
+                    'episode:z', 'strategy-group:alpha',
+                    'strategy-version:alpha', 'event-spec:signal',
+                    'universe:owner-console-signals', $1,
+                    'profile:owner-console', 'policy:owner-console', 1,
+                    'scope:z', 1, 'owner-console-account', 'binance-usdm',
+                    'BTCUSDT', 'long',
+                    'binance-usdm:owner-console-account:BTCUSDT:long',
+                    'sha256:' || repeat('f', 64), 'exit-policy:test',
+                    'sha256:' || repeat('b', 64),
+                    'sha256:' || repeat('1', 64),
+                    'sha256:' || repeat('2', 64),
+                    'sha256:' || repeat('3', 64), 1,
+                    'binance-usdm:owner-console-account',
+                    'binance-usdm:owner-console-account:BTCUSDT',
+                    1000, 1000, 0, 0, 900, 100, 'independent_sides', 'cross',
+                    0, 3, NULL, NULL, NULL, 'opening_range', 0, 2, 0, 0, 0,
+                    0.02, 0.06, 0.04, 0.30, 0.90, 0.50, 1, 1, 0.10, 1.1,
+                    2, 100, 1, 1, 1, false, 10, 100, '{}'::jsonb,
+                    100.00, 1, 100, 1, 'market', NULL, 99.00, NULL, NULL,
+                    '["102.00"]'::jsonb, '["0.5"]'::jsonb,
+                    'sha256:' || repeat('4', 64),
+                    1800000002000, 1800000060000
+                )
+                """,
+                digest,
+            )
+            await connection.execute(
+                """
+                INSERT INTO brc_admission_decisions (
+                    admission_decision_id, signal_event_id,
+                    exposure_episode_id, strategy_group_id,
+                    strategy_version_id, event_spec_id, universe_version_id,
+                    universe_semantic_digest, runtime_profile_id,
+                    runtime_scope_id, runtime_scope_version, owner_policy_id,
+                    owner_policy_version, venue_id, account_id,
+                    exchange_instrument_id, position_side, exposure_family,
+                    candidate_rank, candidate_count, candidate_set_digest,
+                    candidate_set_summary, portfolio_usage, decision_status,
+                    first_blocker, binding_constraint, capacity_claim_id,
+                    ticket_id, entry_admission_snapshot_digest,
+                    decision_digest, decided_at_ms
+                ) VALUES (
+                    'admission:z', 'signal:z', 'episode:z', $2,
+                    'strategy-version:alpha', 'event-spec:signal',
+                    'universe:owner-console-signals', $1,
+                    'profile:owner-console', 'scope:z', 1,
+                    'policy:owner-console', 1, 'binance-usdm',
+                    'owner-console-account', 'BTCUSDT', 'long',
+                    'opening_range', 1, 1, 'sha256:' || repeat('5', 64),
+                    '{}'::jsonb, '{}'::jsonb, 'admitted', NULL,
+                    'remaining_initial_margin', 'claim:causality',
+                    'ticket:causality', 'sha256:' || repeat('1', 64),
+                    'sha256:' || repeat('6', 64), 1800000002000
+                )
+                """,
+                digest,
+                admission_strategy_group_id,
+            )
+            await connection.execute(
+                """
+                INSERT INTO brc_trade_aggregates (
+                    ticket_id, status, version, last_event_sequence,
+                    entry_lane_held, position_qty, average_fill_price,
+                    actual_stop_risk, venue_reported_liquidation_price,
+                    post_fill_risk_status, post_fill_disposition,
+                    post_fill_stress_status, post_fill_stress_proof_digest,
+                    protected_qty, entry_exchange_order_id,
+                    initial_stop_exchange_order_id,
+                    active_stop_exchange_order_id, active_stop_price,
+                    tp1_exchange_order_id, tp1_target_qty, tp1_filled_qty,
+                    break_even_floor_price,
+                    pending_replaced_stop_exchange_order_id,
+                    pending_stop_price, pending_stop_watermark_ms,
+                    runner_stop_watermark_ms, pending_cancel_exchange_order_id,
+                    exit_exchange_order_id, review_id, lifecycle_due_at_ms,
+                    reconciliation_due_at_ms, updated_at_ms
+                ) VALUES (
+                    'ticket:causality', 'terminal', 10, 10, false, 0,
+                    100.10, 1.10, NULL, 'within_limit', 'continue',
+                    'within_limit', 'sha256:' || repeat('7', 64), 0,
+                    'exchange:entry:1', 'exchange:stop:1', 'exchange:stop:2',
+                    100.20, 'exchange:tp:1', 0.5, 0.5, 100.20,
+                    'exchange:stop:1', NULL, NULL, 1800000040000, NULL,
+                    'exchange:exit:1', 'review:causality:v2', NULL, NULL,
+                    1800000100000
+                )
+                """
+            )
+            event_rows = (
+                (
+                    "event:causality:1",
+                    1,
+                    "TicketIssued",
+                    {
+                        "event_id": "event:causality:1",
+                        "sequence": 1,
+                        "occurred_at_ms": 1_800_000_003_000,
+                        "ticket": {
+                            "identity": {"ticket_id": "ticket:causality"}
+                        },
+                    },
+                    1_800_000_003_000,
+                ),
+                (
+                    "event:causality:2",
+                    2,
+                    "EntryFilled",
+                    {
+                        "event_id": "event:causality:2",
+                        "ticket_id": "ticket:causality",
+                        "sequence": 2,
+                        "occurred_at_ms": 1_800_000_010_000,
+                        "filled_qty": "1",
+                        "average_fill_price": "100.10",
+                    },
+                    1_800_000_010_000,
+                ),
+                (
+                    "event:causality:3",
+                    3,
+                    "InitialStopConfirmed",
+                    {
+                        "event_id": "event:causality:3",
+                        "ticket_id": "ticket:causality",
+                        "sequence": 3,
+                        "occurred_at_ms": 1_800_000_020_000,
+                        "exchange_order_id": "exchange:stop:1",
+                        "protected_qty": "1",
+                    },
+                    1_800_000_020_000,
+                ),
+                (
+                    "event:causality:4",
+                    4,
+                    "TakeProfitFilled",
+                    {
+                        "event_id": "event:causality:4",
+                        "ticket_id": "ticket:causality",
+                        "sequence": 4,
+                        "occurred_at_ms": 1_800_000_030_000,
+                        "filled_qty": "0.5",
+                        "average_fill_price": "102.00",
+                        "runner_floor_price": "100.20",
+                    },
+                    1_800_000_030_000,
+                ),
+                (
+                    "event:causality:5",
+                    5,
+                    "ProtectionReplacementConfirmed",
+                    {
+                        "event_id": "event:causality:5",
+                        "ticket_id": "ticket:causality",
+                        "sequence": 5,
+                        "occurred_at_ms": 1_800_000_040_000,
+                        "exchange_order_id": "exchange:stop:2",
+                        "protected_qty": "0.5",
+                        "stop_price": "100.20",
+                        "replaces_exchange_order_id": "exchange:stop:1",
+                        "source_watermark_ms": 1_800_000_040_000,
+                    },
+                    1_800_000_040_000,
+                ),
+                (
+                    "event:causality:6",
+                    6,
+                    "ExitRequested",
+                    {
+                        "event_id": "event:causality:6",
+                        "ticket_id": "ticket:causality",
+                        "sequence": 6,
+                        "occurred_at_ms": 1_800_000_050_000,
+                        "reason": "initial_stop_triggered",
+                    },
+                    1_800_000_050_000,
+                ),
+                (
+                    "event:causality:7",
+                    7,
+                    "PositionFlatConfirmed",
+                    {
+                        "event_id": "event:causality:7",
+                        "ticket_id": "ticket:causality",
+                        "sequence": 7,
+                        "occurred_at_ms": 1_800_000_060_000,
+                    },
+                    1_800_000_060_000,
+                ),
+                (
+                    "event:causality:8",
+                    8,
+                    "BudgetSettled",
+                    {
+                        "event_id": "event:causality:8",
+                        "ticket_id": "ticket:causality",
+                        "sequence": 8,
+                        "occurred_at_ms": 1_800_000_070_000,
+                    },
+                    1_800_000_070_000,
+                ),
+                (
+                    "event:causality:9",
+                    9,
+                    "ReviewRecorded",
+                    {
+                        "event_id": "event:causality:9",
+                        "ticket_id": "ticket:causality",
+                        "sequence": 9,
+                        "occurred_at_ms": 1_800_000_100_000,
+                        "review_id": "review:causality:v2",
+                    },
+                    1_800_000_100_000,
+                ),
+                (
+                    "event:causality:10",
+                    10,
+                    "FutureLifecycleEvent",
+                    {
+                        "event_id": "event:causality:10",
+                        "ticket_id": "ticket:causality",
+                        "sequence": 10,
+                        "occurred_at_ms": 1_800_000_101_000,
+                    },
+                    1_800_000_101_000,
+                ),
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_trade_events (
+                    event_id, ticket_id, sequence, event_type, payload,
+                    occurred_at_ms
+                ) VALUES ($1, 'ticket:causality', $2, $3, $4::jsonb, $5)
+                """,
+                [
+                    (event_id, sequence, event_type, json.dumps(payload), at_ms)
+                    for event_id, sequence, event_type, payload, at_ms in event_rows
+                ],
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_exchange_commands (
+                    command_id, ticket_id, command_kind, generation,
+                    idempotency_key, venue_client_order_id, status, quantity,
+                    request_payload, result_payload, claim_owner,
+                    lease_until_ms, created_at_ms, deadline_at_ms,
+                    completed_at_ms
+                ) VALUES (
+                    $1, 'ticket:causality', $2, 1, $3, $4, 'accepted', 1,
+                    $5::jsonb, $6::jsonb, NULL, NULL, $7::bigint,
+                    $7::bigint + 30000, $8::bigint
+                )
+                """,
+                (
+                    (
+                        "command:entry:1",
+                        "entry",
+                        "idempotency:entry:1",
+                        "client:entry:1",
+                        json.dumps({"quantity": "1"}),
+                        json.dumps({"exchange_order_id": "exchange:entry:1"}),
+                        1_800_000_005_000,
+                        1_800_000_010_000,
+                    ),
+                    (
+                        "command:exit:1",
+                        "exit",
+                        "idempotency:exit:1",
+                        "client:exit:1",
+                        json.dumps({"quantity": "1"}),
+                        json.dumps({"exchange_order_id": "exchange:exit:1"}),
+                        1_800_000_045_000,
+                        1_800_000_050_000,
+                    ),
+                ),
+            )
+            await connection.execute(
+                """
+                INSERT INTO brc_runtime_incidents (
+                    incident_id, ticket_id, incident_kind, status,
+                    first_blocker, entry_block_scope, entry_block_key,
+                    details, opened_at_ms, resolved_at_ms
+                ) VALUES (
+                    'incident:causality:1', 'ticket:causality',
+                    'exit_outcome_unknown', 'resolved', 'venue_timeout',
+                    'none', NULL, '{"resolution":"reconciled"}'::jsonb,
+                    1800000055000, 1800000065000
+                )
+                """
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_trade_reviews (
+                    review_id, ticket_id, revision, supersedes_review_id,
+                    outcome, metrics, decision_impact, created_at_ms
+                ) VALUES (
+                    $1, 'ticket:causality', $2, $3, 'terminal_flat',
+                    $4::jsonb, '{}'::jsonb, $5
+                )
+                """,
+                (
+                    (
+                        "review:causality:v1",
+                        1,
+                        None,
+                        json.dumps(
+                            {
+                                "economics_completeness": "complete",
+                                "gross_realized_pnl_quote": "999",
+                                "trading_fees_quote": "0",
+                                "funding_quote": "0",
+                                "net_pnl_quote": "999",
+                                "planned_r_multiple": "999",
+                                "order_attribution": [],
+                            }
+                        ),
+                        1_800_000_110_000,
+                    ),
+                    (
+                        "review:causality:v2",
+                        2,
+                        "review:causality:v1",
+                        json.dumps(
+                            {
+                                "economics_completeness": "complete",
+                                "gross_realized_pnl_quote": "3.00",
+                                "trading_fees_quote": "0.10",
+                                "funding_quote": "0.00",
+                                "net_pnl_quote": "2.90",
+                                "planned_r_multiple": "2.90",
+                                "order_attribution": [
+                                    {
+                                        "exchange_trade_id": "trade:exit:1",
+                                        "exchange_order_id": "exchange:exit:1",
+                                        "command_id": "command:exit:1",
+                                        "role": "exit",
+                                        "quantity": "1",
+                                        "price": "103.00",
+                                        "fee": {},
+                                        "realized_pnl_quote": "3.00",
+                                        "occurred_at_ms": 1_800_000_090_000,
+                                    }
+                                ],
+                            }
+                        ),
+                        1_800_000_100_000,
+                    ),
+                ),
             )
     finally:
         await connection.close()
