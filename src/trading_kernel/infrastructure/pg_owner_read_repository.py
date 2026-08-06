@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import (
 
 from src.trading_kernel.application.owner_console.causality import (
     ContradictoryFacts,
+    EVENT_STAGE,
 )
 from src.trading_kernel.application.owner_console.models import (
     EvidenceRef,
@@ -25,6 +26,10 @@ from src.trading_kernel.application.owner_console.models import (
     OverviewEvidenceGap,
     OverviewFacts,
     PageCursor,
+    ProgrammaticReviewFacts,
+    ReviewCenterFacts,
+    ReviewCenterItemFacts,
+    ReviewListQuery,
     SignalDetailFacts,
     SignalFactSnapshotFacts,
     SignalItemFacts,
@@ -49,6 +54,8 @@ from src.trading_kernel.application.owner_console.signals import (
 )
 from src.trading_kernel.application.owner_console.trades import (
     TradeFactsContradiction,
+    aggregate_stage,
+    build_trade_item,
 )
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
@@ -76,6 +83,15 @@ _STALE_MAX_AGE_MS = 300_000
 _CAUSALITY_EVENT_LIMIT = 512
 _CAUSALITY_COMMAND_LIMIT = 128
 _CAUSALITY_INCIDENT_LIMIT = 64
+_REVIEW_CENTER_INCIDENT_LIMIT = 64
+_REVIEW_CENTER_STAGE_EVENTS = {
+    stage: tuple(
+        event_type
+        for event_type, event_stage in EVENT_STAGE.items()
+        if event_stage == stage
+    )
+    for stage in ("entry", "protection", "exit", "reconciliation")
+}
 
 
 def create_owner_read_engine(dsn: str) -> AsyncEngine:
@@ -650,6 +666,48 @@ class PostgresOwnerReadRepository:
             review=review,
         )
 
+    async def read_review_center_facts(
+        self,
+        query: ReviewListQuery,
+    ) -> ReviewCenterFacts:
+        """Read one terminal-only limit+1 Review Center page."""
+
+        cursor = None if query.cursor is None else decode_cursor(query.cursor)
+        ticket_rows = (
+            await self._connection.execute(
+                _review_center_ticket_query(query=query, cursor=cursor)
+            )
+        ).mappings().all()
+        page_ticket_ids = tuple(
+            str(row["ticket_id"]) for row in ticket_rows[: query.limit]
+        )
+        incident_rows = (
+            ()
+            if not page_ticket_ids
+            else (
+                await self._connection.execute(
+                    _review_center_incidents_query(page_ticket_ids)
+                )
+            ).mappings().all()
+        )
+        incidents_by_ticket = _review_center_incidents_by_ticket(
+            incident_rows
+        )
+        items = tuple(
+            _review_center_item_facts(
+                row,
+                incidents=incidents_by_ticket.get(str(row["ticket_id"]), ()),
+            )
+            for row in ticket_rows
+        )
+        return ReviewCenterFacts(
+            from_ms=query.from_ms,
+            to_ms=query.to_ms,
+            items=items,
+            requested_limit=query.limit,
+            requested_strategy_group_id=query.strategy_group_id,
+        )
+
 
 def _causality_ticket_query(ticket_id: str) -> sa.Select[Any]:
     return (
@@ -1192,6 +1250,250 @@ def _trade_list_query(
     )
 
 
+def _review_center_ticket_query(
+    *,
+    query: ReviewListQuery,
+    cursor: PageCursor | None,
+) -> sa.Select[Any]:
+    terminal_at_ms = trade_tickets.c.terminal_at_ms
+    conditions: list[sa.ColumnElement[bool]] = [
+        trade_aggregates.c.status == "terminal",
+        trade_tickets.c.status == "terminal",
+        terminal_at_ms.is_not(None),
+        terminal_at_ms >= query.from_ms,
+        terminal_at_ms < query.to_ms,
+    ]
+    if query.strategy_group_id is not None:
+        conditions.append(
+            trade_tickets.c.strategy_group_id == query.strategy_group_id
+        )
+    open_incident_exists = sa.exists(
+        sa.select(sa.literal(1)).where(
+            runtime_incidents.c.ticket_id == trade_tickets.c.ticket_id,
+            runtime_incidents.c.status == "open",
+        )
+    )
+    completeness = trade_reviews.c.metrics[
+        "economics_completeness"
+    ].as_string()
+    numeric_text = r"^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$"
+    economic_keys = (
+        "gross_realized_pnl_quote",
+        "trading_fees_quote",
+        "funding_quote",
+        "net_pnl_quote",
+        "planned_r_multiple",
+    )
+    complete_economics = sa.func.coalesce(
+        sa.and_(
+            completeness == "complete",
+            *(
+                sa.and_(
+                    sa.func.jsonb_typeof(trade_reviews.c.metrics[key])
+                    == "string",
+                    trade_reviews.c.metrics[key]
+                    .as_string()
+                    .op("~")(numeric_text),
+                )
+                for key in economic_keys
+            ),
+        ),
+        sa.false(),
+    )
+    if query.review_status in {"in_progress", "waiting_for_settlement"}:
+        conditions.append(sa.false())
+    elif query.review_status == "waiting_for_review":
+        conditions.append(trade_reviews.c.review_id.is_(None))
+    elif query.review_status == "complete":
+        conditions.extend(
+            (
+                trade_reviews.c.review_id.is_not(None),
+                complete_economics,
+                ~open_incident_exists,
+            )
+        )
+    elif query.review_status == "incomplete_evidence":
+        conditions.extend(
+            (
+                trade_reviews.c.review_id.is_not(None),
+                sa.or_(
+                    ~complete_economics,
+                    open_incident_exists,
+                ),
+            )
+        )
+    if cursor is not None:
+        conditions.append(
+            sa.tuple_(terminal_at_ms, trade_tickets.c.ticket_id)
+            < sa.tuple_(
+                sa.literal(cursor.sort_ms),
+                sa.literal(cursor.identity),
+            )
+        )
+
+    exit_event = (
+        sa.select(
+            trade_events.c.event_id.label("exit_event_id"),
+            trade_events.c.event_type.label("exit_event_type"),
+            trade_events.c.payload.label("exit_event_payload"),
+            trade_events.c.occurred_at_ms.label(
+                "exit_event_occurred_at_ms"
+            ),
+        )
+        .where(
+            trade_events.c.ticket_id == trade_tickets.c.ticket_id,
+            trade_events.c.event_type == "ExitRequested",
+        )
+        .order_by(
+            trade_events.c.sequence.asc(),
+            trade_events.c.event_id.asc(),
+        )
+        .limit(1)
+        .lateral("review_center_exit_event")
+    )
+    entry_event = _review_center_stage_event(
+        stage="entry",
+        alias="review_center_entry_event",
+    )
+    protection_event = _review_center_stage_event(
+        stage="protection",
+        alias="review_center_protection_event",
+    )
+    settlement_event = (
+        sa.select(
+            trade_events.c.event_id.label("settlement_event_id"),
+            trade_events.c.occurred_at_ms.label("settlement_event_at_ms"),
+        )
+        .where(
+            trade_events.c.ticket_id == trade_tickets.c.ticket_id,
+            trade_events.c.event_type == "BudgetSettled",
+        )
+        .order_by(trade_events.c.sequence.asc(), trade_events.c.event_id.asc())
+        .limit(1)
+        .lateral("review_center_settlement_event")
+    )
+    source = (
+        trade_tickets.join(
+            trade_aggregates,
+            trade_aggregates.c.ticket_id == trade_tickets.c.ticket_id,
+        )
+        .outerjoin(
+            trade_reviews,
+            trade_reviews.c.review_id == trade_aggregates.c.review_id,
+        )
+        .outerjoin(entry_event, sa.true())
+        .outerjoin(protection_event, sa.true())
+        .outerjoin(exit_event, sa.true())
+        .outerjoin(settlement_event, sa.true())
+    )
+    return (
+        sa.select(
+            trade_tickets.c.ticket_id,
+            trade_tickets.c.strategy_group_id,
+            trade_tickets.c.event_spec_id,
+            trade_tickets.c.exchange_instrument_id,
+            trade_tickets.c.position_side,
+            trade_tickets.c.status.label("ticket_status"),
+            trade_tickets.c.created_at_ms.label("issued_at_ms"),
+            terminal_at_ms,
+            trade_tickets.c.risk_at_stop.label("frozen_initial_stop_risk"),
+            trade_aggregates.c.actual_stop_risk,
+            trade_aggregates.c.ticket_id.label("aggregate_ticket_id"),
+            trade_aggregates.c.status.label("aggregate_status"),
+            trade_aggregates.c.review_id.label("aggregate_review_id"),
+            trade_aggregates.c.updated_at_ms.label(
+                "aggregate_updated_at_ms"
+            ),
+            trade_reviews.c.review_id,
+            trade_reviews.c.ticket_id.label("review_ticket_id"),
+            trade_reviews.c.revision.label("review_revision"),
+            trade_reviews.c.metrics.label("review_metrics"),
+            trade_reviews.c.created_at_ms.label("review_created_at_ms"),
+            sa.null().label("open_incident_id"),
+            sa.null().label("open_incident_opened_at_ms"),
+            sa.null().label("latest_incident_id"),
+            sa.null().label("latest_incident_opened_at_ms"),
+            entry_event.c.stage_event_id.label("entry_stage_event_id"),
+            entry_event.c.stage_event_at_ms.label("entry_stage_event_at_ms"),
+            protection_event.c.stage_event_id.label(
+                "protection_stage_event_id"
+            ),
+            protection_event.c.stage_event_at_ms.label(
+                "protection_stage_event_at_ms"
+            ),
+            exit_event.c.exit_event_id,
+            exit_event.c.exit_event_type,
+            exit_event.c.exit_event_payload,
+            exit_event.c.exit_event_occurred_at_ms,
+            settlement_event.c.settlement_event_id,
+            settlement_event.c.settlement_event_at_ms,
+        )
+        .select_from(source)
+        .where(*conditions)
+        .order_by(
+            terminal_at_ms.desc(),
+            trade_tickets.c.ticket_id.desc(),
+        )
+        .limit(query.limit + 1)
+    )
+
+
+def _review_center_stage_event(
+    *,
+    stage: Literal["entry", "protection"],
+    alias: str,
+) -> sa.FromClause:
+    return (
+        sa.select(
+            trade_events.c.event_id.label("stage_event_id"),
+            trade_events.c.occurred_at_ms.label("stage_event_at_ms"),
+        )
+        .where(
+            trade_events.c.ticket_id == trade_tickets.c.ticket_id,
+            trade_events.c.event_type.in_(_REVIEW_CENTER_STAGE_EVENTS[stage]),
+        )
+        .order_by(trade_events.c.sequence.asc(), trade_events.c.event_id.asc())
+        .limit(1)
+        .lateral(alias)
+    )
+
+
+def _review_center_incidents_query(
+    ticket_ids: tuple[str, ...],
+) -> sa.Select[Any]:
+    incident_rank = sa.func.row_number().over(
+        partition_by=runtime_incidents.c.ticket_id,
+        order_by=(
+            runtime_incidents.c.opened_at_ms.asc(),
+            runtime_incidents.c.incident_id.asc(),
+        ),
+    )
+    ranked = (
+        sa.select(
+            runtime_incidents.c.incident_id,
+            runtime_incidents.c.ticket_id,
+            runtime_incidents.c.incident_kind,
+            runtime_incidents.c.status,
+            runtime_incidents.c.opened_at_ms,
+            runtime_incidents.c.resolved_at_ms,
+            incident_rank.label("incident_rank"),
+        )
+        .where(runtime_incidents.c.ticket_id.in_(ticket_ids))
+        .cte("bounded_review_center_incidents")
+    )
+    return (
+        sa.select(ranked)
+        .where(
+            ranked.c.incident_rank <= _REVIEW_CENTER_INCIDENT_LIMIT + 1
+        )
+        .order_by(
+            ranked.c.ticket_id,
+            ranked.c.opened_at_ms,
+            ranked.c.incident_id,
+        )
+    )
+
+
 def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
     ticket_id = str(row["ticket_id"])
     if str(row["aggregate_ticket_id"]) != ticket_id:
@@ -1293,6 +1595,161 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
             ),
         ),
     )
+
+
+def _review_center_incidents_by_ticket(
+    rows: Sequence[RowMapping],
+) -> dict[str, tuple[RowMapping, ...]]:
+    grouped: dict[str, list[RowMapping]] = {}
+    for row in rows:
+        ticket_id = str(row["ticket_id"])
+        grouped.setdefault(ticket_id, []).append(row)
+    for ticket_id, incidents in grouped.items():
+        if len(incidents) > _REVIEW_CENTER_INCIDENT_LIMIT:
+            raise TradeFactsContradiction(
+                f"Ticket {ticket_id} has more than "
+                f"{_REVIEW_CENTER_INCIDENT_LIMIT} Incidents"
+            )
+    return {
+        ticket_id: tuple(incidents)
+        for ticket_id, incidents in grouped.items()
+    }
+
+
+def _review_center_item_facts(
+    row: RowMapping,
+    *,
+    incidents: tuple[RowMapping, ...],
+) -> ReviewCenterItemFacts:
+    trade_facts = _trade_item_facts_from_row(row)
+    trade = build_trade_item(trade_facts)
+    ticket_id = trade.ticket_id
+    incident_ids: list[str] = []
+    recovered_incident_ids: list[str] = []
+    evidence = [
+        *trade.evidence,
+        EvidenceRef(
+            kind="aggregate",
+            identity=ticket_id,
+            occurred_at_ms=int(row["aggregate_updated_at_ms"]),
+        ),
+    ]
+    for identity_name, time_name in (
+        ("entry_stage_event_id", "entry_stage_event_at_ms"),
+        ("protection_stage_event_id", "protection_stage_event_at_ms"),
+        ("exit_event_id", "exit_event_occurred_at_ms"),
+        ("settlement_event_id", "settlement_event_at_ms"),
+    ):
+        identity = row[identity_name]
+        occurred_at_ms = row[time_name]
+        if (identity is None) != (occurred_at_ms is None):
+            raise TradeFactsContradiction("partial Review stage Event row")
+        if identity is not None:
+            evidence.append(
+                EvidenceRef(
+                    kind="event",
+                    identity=str(identity),
+                    occurred_at_ms=int(occurred_at_ms),
+                )
+            )
+    for incident in incidents:
+        if str(incident["ticket_id"]) != ticket_id:
+            raise TradeFactsContradiction(
+                "Review Center Incident Ticket identity mismatch"
+            )
+        incident_id = str(incident["incident_id"])
+        status = str(incident["status"])
+        resolved_at_ms = incident["resolved_at_ms"]
+        if status == "open":
+            if resolved_at_ms is not None:
+                raise TradeFactsContradiction(
+                    "open Incident has resolved timestamp"
+                )
+        elif status == "resolved":
+            if resolved_at_ms is None:
+                raise TradeFactsContradiction(
+                    "resolved Incident lacks resolved timestamp"
+                )
+            recovered_incident_ids.append(incident_id)
+        else:
+            raise TradeFactsContradiction(
+                f"unknown Incident status: {status}"
+            )
+        incident_ids.append(incident_id)
+        evidence.append(
+            EvidenceRef(
+                kind="incident",
+                identity=incident_id,
+                occurred_at_ms=int(incident["opened_at_ms"]),
+            )
+        )
+
+    current_review_id = (
+        None if row["review_id"] is None else str(row["review_id"])
+    )
+    unavailable_runner = MoneyMetric(
+        value=None,
+        unit="USDT",
+        unavailable_reason="runner_contribution_unavailable",
+    )
+    review_facts = ProgrammaticReviewFacts(
+        ticket_id=ticket_id,
+        ticket_status=trade.ticket_status,
+        aggregate_status=trade.aggregate_status,
+        lifecycle_stage=aggregate_stage(trade.aggregate_status),
+        settlement_completed=row["settlement_event_id"] is not None,
+        current_review_id=current_review_id,
+        entry_complete=row["entry_stage_event_id"] is not None,
+        protection_complete=row["protection_stage_event_id"] is not None,
+        exit_complete=row["exit_event_id"] is not None,
+        reconciliation_complete=row["settlement_event_id"] is not None,
+        review_complete=current_review_id is not None,
+        incident_ids=tuple(incident_ids),
+        recovered_incident_ids=tuple(recovered_incident_ids),
+        economics_completeness=(
+            trade.economics_completeness or "incomplete_evidence"
+        ),
+        gross_pnl=trade.gross_pnl,
+        fees=trade.fees,
+        funding=trade.funding,
+        net_pnl=trade.net_pnl,
+        net_r=trade.net_r,
+        frozen_initial_stop_risk=_review_center_risk_metric(
+            row["frozen_initial_stop_risk"],
+            unavailable_reason="frozen_initial_stop_risk_unavailable",
+        ),
+        actual_stop_risk=_review_center_risk_metric(
+            row["actual_stop_risk"],
+            unavailable_reason="actual_stop_risk_unavailable",
+        ),
+        exit_reason=trade.exit_reason,
+        runner_net_contribution=unavailable_runner,
+        evidence=tuple(evidence),
+    )
+    terminal_at_ms = row["terminal_at_ms"]
+    if terminal_at_ms is None:
+        raise TradeFactsContradiction(
+            "Review Center terminal Ticket lacks terminal timestamp"
+        )
+    return ReviewCenterItemFacts(
+        strategy_group_id=trade.strategy_group_id,
+        terminal_at_ms=int(terminal_at_ms),
+        review=review_facts,
+    )
+
+
+def _review_center_risk_metric(
+    value: object,
+    *,
+    unavailable_reason: str,
+) -> MoneyMetric:
+    if not isinstance(value, Decimal) or not value.is_finite():
+        return MoneyMetric(
+            value=None,
+            unit="USDT",
+            unavailable_reason=unavailable_reason,
+        )
+    return MoneyMetric(value=value, unit="USDT")
 
 
 def _signal_joined_select() -> sa.Select[Any]:

@@ -414,32 +414,51 @@ class TradeCausalityDetail(FrozenModel):
     evidence: tuple[EvidenceRef, ...]
 
 
-class ProgrammaticTradeReview(FrozenModel):
-    ticket_id: str
-    review_status: Literal[
-        "in_progress",
-        "waiting_for_settlement",
-        "waiting_for_review",
-        "complete",
-        "incomplete_evidence",
+ExecutionClassification = Literal[
+    "complete",
+    "recovered_incident",
+    "evidence_incomplete",
+    "in_progress",
+    "waiting_review",
+]
+
+
+class ReviewSentence(FrozenModel):
+    template_id: Literal[
+        "execution_complete",
+        "execution_recovered",
+        "economics_complete",
+        "economics_incomplete",
+        "review_waiting",
+        "ticket_in_progress",
     ]
-    execution_chain_classification: Literal[
-        "complete",
-        "recovered_incident",
-        "incomplete_evidence",
-        "in_progress",
-    ]
-    execution_chain_conclusion: str
-    economic_conclusion: str | None
-    exit_reason: str | None
-    exit_conclusion: str | None
+    text: str
+    evidence: tuple[EvidenceRef, ...] = Field(min_length=1)
+
+
+class ReviewEconomicSummary(FrozenModel):
     gross_pnl: MoneyMetric
     fees: MoneyMetric
     funding: MoneyMetric
     net_pnl: MoneyMetric
     net_r: MoneyMetric
+
+
+class ProgrammaticTradeReview(FrozenModel):
+    ticket_id: str
+    review_status: Literal[
+        "in_progress",
+        "waiting_review",
+        "complete",
+        "incomplete_evidence",
+    ]
+    execution_classification: ExecutionClassification
+    economic_summary: ReviewEconomicSummary
+    exit_reason: str | None
     attention_items: tuple[str, ...]
-    evidence: tuple[EvidenceRef, ...]
+    sentences: tuple[ReviewSentence, ...] = Field(min_length=1)
+    final_conclusion: str | None
+    evidence: tuple[EvidenceRef, ...] = Field(min_length=1)
 
 
 class ReviewBreakdownItem(FrozenModel):
@@ -450,7 +469,7 @@ class ReviewBreakdownItem(FrozenModel):
 
 class StrategyGroupSampleState(FrozenModel):
     strategy_group_id: str
-    completed_ticket_count: int
+    sample_count: int
     evidence_state: Literal["observe_only", "no_evidence"]
     evidence: tuple[EvidenceRef, ...]
 
@@ -458,7 +477,8 @@ class StrategyGroupSampleState(FrozenModel):
 class ReviewCenterSummary(FrozenModel):
     from_ms: int
     to_ms: int
-    completed_ticket_count: int
+    sample_count: int
+    next_cursor: str | None
     net_pnl: MoneyMetric
     net_r: MoneyMetric
     fees: MoneyMetric
@@ -703,6 +723,8 @@ class TradeCausalityFacts(FrozenModel):
 class ProgrammaticReviewFacts(FrozenModel):
     ticket_id: str
     ticket_status: str
+    aggregate_status: str = "terminal"
+    lifecycle_stage: LifecycleStageKey = "review"
     settlement_completed: bool
     current_review_id: str | None
     entry_complete: bool
@@ -716,6 +738,7 @@ class ProgrammaticReviewFacts(FrozenModel):
         "complete",
         "funding_unavailable",
         "external_exit_unavailable",
+        "incomplete_evidence",
     ]
     gross_pnl: MoneyMetric
     fees: MoneyMetric
@@ -727,3 +750,17 @@ class ProgrammaticReviewFacts(FrozenModel):
     exit_reason: str | None
     runner_net_contribution: MoneyMetric
     evidence: tuple[EvidenceRef, ...]
+
+
+class ReviewCenterItemFacts(FrozenModel):
+    strategy_group_id: str
+    terminal_at_ms: int
+    review: ProgrammaticReviewFacts
+
+
+class ReviewCenterFacts(FrozenModel):
+    from_ms: int
+    to_ms: int
+    items: tuple[ReviewCenterItemFacts, ...] = Field(max_length=101)
+    requested_limit: int = Field(ge=1, le=100)
+    requested_strategy_group_id: str | None

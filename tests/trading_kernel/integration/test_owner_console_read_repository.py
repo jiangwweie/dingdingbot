@@ -15,11 +15,16 @@ from src.trading_kernel.application.owner_console.causality import (
     build_trade_causality,
 )
 from src.trading_kernel.application.owner_console.models import (
+    ReviewListQuery,
     SignalListQuery,
     TradeListQuery,
 )
 from src.trading_kernel.application.owner_console.overview import (
     build_owner_overview,
+)
+from src.trading_kernel.application.owner_console.programmatic_review import (
+    build_programmatic_review,
+    build_review_center,
 )
 from src.trading_kernel.application.owner_console.signals import (
     SignalFactsContradiction,
@@ -895,6 +900,156 @@ async def test_trade_list_uses_only_current_review_and_keeps_incident_bound(
         assert rows["ticket:v"].exit_reason_unavailable_reason == (
             "exit_reason_evidence_missing"
         )
+    finally:
+        await engine.dispose()
+
+
+async def test_review_center_is_terminal_current_review_and_cursor_bounded(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_trades(owner_read_dsn)
+    engine = create_owner_read_engine(owner_read_dsn)
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection,
+        _cursor,
+        statement: str,
+        _parameters,
+        _context,
+        _executemany: bool,
+    ) -> None:
+        statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine.sync_engine, "before_cursor_execute", capture_statement)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            transaction = connection.get_transaction()
+            repository = PostgresOwnerReadRepository(connection)
+            first_facts = await repository.read_review_center_facts(
+                ReviewListQuery(
+                    from_ms=1_800_000_000_000,
+                    to_ms=1_800_001_000_000,
+                    limit=2,
+                )
+            )
+            first = build_review_center(first_facts)
+            assert first.next_cursor is not None
+            second_facts = await repository.read_review_center_facts(
+                ReviewListQuery(
+                    from_ms=1_800_000_000_000,
+                    to_ms=1_800_001_000_000,
+                    limit=2,
+                    cursor=first.next_cursor,
+                )
+            )
+            second = build_review_center(second_facts)
+            assert connection.get_transaction() is transaction
+
+        first_reviews = {
+            item.review.ticket_id: build_programmatic_review(item.review)
+            for item in first_facts.items[:2]
+        }
+        assert first_facts.items[0].review.current_review_id == "review:y:v2"
+        assert first_reviews["ticket:y"].economic_summary.net_pnl.value == (
+            Decimal("3.5100")
+        )
+        assert first_reviews["ticket:y"].execution_classification == (
+            "recovered_incident"
+        )
+        assert first_reviews["ticket:x"].execution_classification == (
+            "waiting_review"
+        )
+        assert first.sample_count == 2
+        assert first.net_pnl.value is None
+        assert first.incomplete_review_count == 1
+        assert first.strategy_group_samples[0].strategy_group_id == (
+            "strategy-group:alpha"
+        )
+        assert second.sample_count == 2
+        assert second.incomplete_review_count == 2
+        second_reviews = {
+            item.review.ticket_id: build_programmatic_review(item.review)
+            for item in second_facts.items[:2]
+        }
+        assert second_reviews["ticket:w"].execution_classification == (
+            "evidence_incomplete"
+        )
+        assert second_facts.items[0].review.incident_ids == (
+            "incident:w:open",
+        )
+        selects = [
+            statement
+            for statement in statements
+            if statement.startswith(("select", "with"))
+        ]
+        assert len(selects) == 4
+        ticket_selects = [statement for statement in selects if "brc_trade_tickets" in statement]
+        assert len(ticket_selects) == 2
+        assert "brc_trade_aggregates.status =" in ticket_selects[0]
+        assert "brc_trade_tickets.terminal_at_ms >=" in ticket_selects[0]
+        assert "brc_trade_tickets.terminal_at_ms <" in ticket_selects[0]
+        assert "brc_trade_reviews.review_id = brc_trade_aggregates.review_id" in (
+            ticket_selects[0]
+        )
+        assert "order by brc_trade_tickets.terminal_at_ms desc" in ticket_selects[0]
+        assert "brc_trade_tickets.ticket_id desc" in ticket_selects[0]
+        assert ticket_selects[0].count("limit") >= 2
+        assert "(brc_trade_tickets.terminal_at_ms, " in ticket_selects[1]
+        assert "brc_trade_tickets.ticket_id) <" in ticket_selects[1]
+        incident_selects = [
+            statement
+            for statement in selects
+            if "brc_runtime_incidents" in statement
+        ]
+        assert len(incident_selects) == 2
+        assert "row_number() over (partition by" in incident_selects[0]
+        assert "<= " in incident_selects[0]
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", capture_statement)
+        await engine.dispose()
+
+
+async def test_review_center_status_filters_use_built_review_semantics(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_trades(owner_read_dsn)
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            repository = PostgresOwnerReadRepository(connection)
+            complete = await repository.read_review_center_facts(
+                ReviewListQuery(
+                    from_ms=1_800_000_000_000,
+                    to_ms=1_800_001_000_000,
+                    review_status="complete",
+                )
+            )
+            incomplete = await repository.read_review_center_facts(
+                ReviewListQuery(
+                    from_ms=1_800_000_000_000,
+                    to_ms=1_800_001_000_000,
+                    review_status="incomplete_evidence",
+                )
+            )
+            waiting = await repository.read_review_center_facts(
+                ReviewListQuery(
+                    from_ms=1_800_000_000_000,
+                    to_ms=1_800_001_000_000,
+                    review_status="waiting_for_review",
+                )
+            )
+
+        assert [item.review.ticket_id for item in complete.items] == [
+            "ticket:y"
+        ]
+        assert [item.review.ticket_id for item in incomplete.items] == [
+            "ticket:w",
+            "ticket:v",
+        ]
+        assert [item.review.ticket_id for item in waiting.items] == [
+            "ticket:x"
+        ]
     finally:
         await engine.dispose()
 
@@ -2047,6 +2202,40 @@ async def _seed_owner_console_trades(dsn: str) -> None:
                     ),
                 ),
             )
+            await connection.executemany(
+                """
+                INSERT INTO brc_trade_events (
+                    event_id, ticket_id, sequence, event_type, payload,
+                    occurred_at_ms
+                ) VALUES (
+                    $1::varchar(160), 'ticket:y', $2::bigint,
+                    $3::varchar(160), $4::jsonb, $5::bigint
+                )
+                """,
+                (
+                    (
+                        "event:y:ticket-issued",
+                        2,
+                        "TicketIssued",
+                        json.dumps({"ticket_id": "ticket:y"}),
+                        created_at_ms + 2_000,
+                    ),
+                    (
+                        "event:y:initial-stop-confirmed",
+                        3,
+                        "InitialStopConfirmed",
+                        json.dumps({"ticket_id": "ticket:y"}),
+                        created_at_ms + 3_000,
+                    ),
+                    (
+                        "event:y:budget-settled",
+                        12,
+                        "BudgetSettled",
+                        json.dumps({"ticket_id": "ticket:y"}),
+                        created_at_ms + 29_000,
+                    ),
+                ),
+            )
             await connection.execute(
                 """
                 INSERT INTO brc_runtime_incidents (
@@ -2076,6 +2265,39 @@ async def _seed_owner_console_trades(dsn: str) -> None:
                 tuple(
                     (number, created_at_ms - 30_000 + number)
                     for number in range(1, 22)
+                ),
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_runtime_incidents (
+                    incident_id, ticket_id, incident_kind, status,
+                    first_blocker, entry_block_scope, entry_block_key,
+                    details, opened_at_ms, resolved_at_ms
+                ) VALUES (
+                    $1::varchar(160), $2::varchar(160), $3::varchar(160),
+                    $4::varchar(160), $5::text, 'none', NULL, '{}',
+                    $6::bigint, $7::bigint
+                )
+                """,
+                (
+                    (
+                        "incident:y:resolved",
+                        "ticket:y",
+                        "exit_outcome_unknown",
+                        "resolved",
+                        "automatic recovery complete",
+                        created_at_ms + 25_000,
+                        created_at_ms + 26_000,
+                    ),
+                    (
+                        "incident:w:open",
+                        "ticket:w",
+                        "funding_attribution_unavailable",
+                        "open",
+                        "exact evidence unavailable",
+                        created_at_ms + 25_000,
+                        None,
+                    ),
                 ),
             )
     finally:
