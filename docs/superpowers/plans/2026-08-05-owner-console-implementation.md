@@ -25,11 +25,31 @@
 - Owner username, Argon2id password hash, TOTP seed, Session signing key, and database DSN come from exact systemd encrypted credentials. The application package does not read repository configuration files.
 - UI uses the confirmed B specification: `#0B0E11` background, `#181A20` content, `#2B3139` dividers, `#EAECEF` primary text, `#848E9C` secondary text, `#F0B90B` emphasis, `#0ECB81` success, and `#F6465D` danger.
 - Layout maximum width is 1160px; top navigation is 44px; table rows are 38px; table headers are 30px; buttons and inputs are 30–32px.
+- Frontend visual acceptance uses real-browser renders at `1280x800`, `1440x900`, and `1920x1080`. Unit tests, type checks, and DOM assertions do not by themselves close the visual gate.
+- Visual acceptance uses deterministic mock facts only. Screenshots and browser traces stay under Git-ignored `.local/owner-console-visual/`; production Ticket identities or production data never enter screenshot fixtures or tracked artifacts.
+- Task 16 must present the first real Overview browser preview and receive explicit Owner visual approval before Task 17 begins. Task 24 must present the complete local product preview and receive separate Owner visual acceptance before any Task 25 deployment confirmation is requested.
 - Owner API budget is one process, `CPUQuota=25%`, `MemoryMax=256M`, `TasksMax=32`, zero background tasks, and at most two PostgreSQL connections.
 - Existing Observation, Entry, Lifecycle, and Reconciliation services, their slice, and their exchange authority remain unchanged.
 - Production-to-local acceptance data is exported only through a consistent, single-job, data-only PostgreSQL snapshot. Snapshot artifacts stay outside Git with mode `0600`, exclude `alembic_version`, reject credential-like columns, and may be restored only into an explicitly named localhost disposable database.
 - Tokyo deployment is a separate Owner-controlled action. Complete and report Tasks 1–24 first; do not execute any Task 25 command until the Owner gives a fresh explicit confirmation after reviewing local acceptance results. Approval of this plan is not deployment approval.
 - The restored production-fact snapshot must pass representative worst-window Signal, Trade, and Review list probes before local acceptance closes. Each query runs with the real read-only role and `statement_timeout=3s`; `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` actual execution time must remain below 2400 ms and the end-to-end repository read below 3000 ms. Failure blocks Task 24 and deployment; Phase 1 does not add an index migration implicitly.
+
+## Visual Acceptance Contract
+
+Every frontend implementation task from Task 14 through Task 21 must render its changed route in a real browser before review. The controller inspects the actual pixels, not only the DOM or component source, and records the inspected viewport and result in that task's report.
+
+The visual gate checks:
+
+1. content remains centered and no wider than 1160px at `1440x900` and `1920x1080`;
+2. there is no page-wide horizontal overflow at any required viewport;
+3. panel edges, table columns, headers, and adjacent sections align on the same grid;
+4. the page has no oversized dead space, stretched empty cards, decorative SaaS shadows, icon tiles, avatars, gradients, or marketing-dashboard styling;
+5. typography, numeric alignment, row density, color hierarchy, and interactive states match UI system B;
+6. the Overview first screen exposes the Owner conclusion, intervention, data age, and primary operating facts without scrolling;
+7. the Ticket workbench right column remains viewport-bounded and internally scrollable;
+8. loading, empty, stale, unavailable, error, expanded-row, and long-content states remain readable and do not break alignment.
+
+Deterministic screenshots are written to `.local/owner-console-visual/task-<N>/`. A reviewer must reject the task for visible alignment, density, overflow, hierarchy, or style defects even when all automated tests pass. Screenshot capture is evidence collection, not automatic proof that the UI is attractive.
 
 ## Source Documents
 
@@ -1781,7 +1801,11 @@ pnpm --dir frontend/owner-console build
 
 Expected: PASS and `frontend/owner-console/dist/index.html` exists.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Render and inspect the UI-system browser baseline**
+
+Serve the production build locally and inspect it in a real browser at `1280x800`, `1440x900`, and `1920x1080`. Capture deterministic screenshots under `.local/owner-console-visual/task-14/`. Verify exact B colors, 44px navigation, 1160px centered content, flat borders, dense 30–32px controls, tabular numbers, and absence of shadows, gradients, oversized cards, or page-wide overflow. Record the inspected viewport results in the Task 14 report.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add .gitignore frontend/owner-console
@@ -2004,7 +2028,11 @@ pnpm --dir frontend/owner-console typecheck
 
 Expected: PASS; no test observes a second request without a click.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Present the first real Overview visual gate**
+
+Render healthy, intervention, stale, unavailable, and failed-manual-refresh states with deterministic facts in a real browser at all three required viewports. Capture `.local/owner-console-visual/task-16/` screenshots and inspect first-screen information priority, aligned panel edges, vertical rhythm, card height, empty space, typography, long values, and status colors. Present the `1440x900` and `1920x1080` previews to the Owner. **Do not begin Task 17 until the Owner explicitly approves this visual baseline.**
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/owner-console/src/app/AppShell.tsx frontend/owner-console/src/components/ui frontend/owner-console/src/features/overview frontend/owner-console/src/pages/OverviewRoute.tsx frontend/owner-console/src/app/router.tsx
@@ -2095,7 +2123,11 @@ pnpm --dir frontend/owner-console typecheck
 
 Expected: PASS with a valid table structure and no dialog/drawer.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Inspect Signal browser density and expansion states**
+
+Capture the list, rejected inline expansion, admitted Ticket link, empty, stale, unavailable, and long-blocker states at the required viewports under `.local/owner-console-visual/task-17/`. Reject page-wide drawers, clipped columns, uneven header/row alignment, oversized funnel cards, excessive lower-card whitespace, or table containers wider than the page.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/owner-console/src/components/tables frontend/owner-console/src/features/signals frontend/owner-console/src/pages/SignalsRoute.tsx frontend/owner-console/src/app/router.tsx
@@ -2178,7 +2210,11 @@ pnpm --dir frontend/owner-console typecheck
 
 Expected: PASS with multiple Tickets leading to independent detail URLs.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Inspect multi-Ticket list browser states**
+
+Capture active/terminal mixed rows, expanded summary, unavailable economics, attention, empty, and long-instrument states at the required viewports under `.local/owner-console-visual/task-18/`. Verify the summary strip and table share one grid, rows remain dense, numeric columns align, and the page does not become visually sparse at `1920x1080`.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/owner-console/src/features/trades frontend/owner-console/src/pages/TradesRoute.tsx frontend/owner-console/src/app/router.tsx
@@ -2282,7 +2318,11 @@ rg -n "lightweight-charts" frontend/owner-console/dist/.vite/manifest.json
 
 Expected: PASS; `lightweight-charts` appears only in a lazy chunk that is not an entry or shared initial dependency.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Inspect the Ticket workbench in a real browser**
+
+Capture the eight-stage lifecycle before chart load, expanded chart, selected-stage facts, candle failure, Incident, long evidence, and narrow stacked layout under `.local/owner-console-visual/task-19/`. Verify the desktop `3/12 + 6/12 + 3/12` grid, center-chart dominance, viewport-bounded right column, internal facts scrolling, aligned bottom evidence sections, and absence of an overlong right drawer.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/owner-console/src/components/charts frontend/owner-console/src/features/trades frontend/owner-console/src/pages/TradeCausalityRoute.tsx frontend/owner-console/src/app/router.tsx
@@ -2367,7 +2407,11 @@ rg -n "样本不足 · 当前仅支持观察性结论" frontend/owner-console/sr
 
 Expected: tests PASS and `rg` returns no matches.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Inspect Review browser evidence states**
+
+Capture complete, funding-unavailable, external-exit-unavailable, Observe Only, No Evidence, expanded-row, empty, and long-sentence states under `.local/owner-console-visual/task-20/`. Verify there is no global insufficient-sample banner, no misleading zero, no ranking-card visual hierarchy, and no excessive whitespace below short tables.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/owner-console/src/features/review frontend/owner-console/src/pages/ReviewRoute.tsx frontend/owner-console/src/app/router.tsx
@@ -2458,6 +2502,10 @@ Playwright intercepts `/api/owner/v1/**` with exact JSON matching the generated 
 8. no request on time, focus, reconnect, or browser invisibility;
 9. 1024px and 1440px layouts have no page-wide horizontal overflow;
 10. tables may scroll within their own container below 1024px.
+11. deterministic screenshots exist for every primary page and exact Ticket detail at `1280x800`, `1440x900`, and `1920x1080`;
+12. visual fixtures cover loading, empty, stale, unavailable, error, expanded, long-content, active-Ticket, and terminal-Ticket states.
+
+Screenshot output goes only to `.local/owner-console-visual/task-21/`. The task reviewer must inspect the images and report visible alignment, density, hierarchy, overflow, and style findings separately from functional Playwright results.
 
 - [ ] **Step 4: Run all frontend verification**
 
@@ -2814,6 +2862,10 @@ The checklist contains these closed gates:
 [ ] CapacityClaim account values are labeled Latest Admission Snapshot
 [ ] No Strategy control or exchange write route exists
 [ ] Frontend initial bundle excludes lightweight-charts
+[ ] Real-browser screenshots cover all primary routes and exact Ticket detail at 1280x800, 1440x900, and 1920x1080
+[ ] Overview first-screen hierarchy and UI system B received explicit Owner visual approval before Task 17
+[ ] Final local product preview received separate Owner visual acceptance
+[ ] No page-wide overflow, oversized dead space, stretched empty card, SaaS shadow, decorative icon tile, or viewport-height right drawer remains
 [ ] API idle resource use fits 25% CPU / 256M / 32-task budget
 [ ] Four Trading Kernel workers remain unchanged
 [ ] Production DML snapshot is Git-ignored, checksum-verified, and restored only into a guarded localhost disposable database
@@ -2849,7 +2901,13 @@ pnpm --dir frontend/owner-console e2e
 
 Expected: PASS and generated API types remain unchanged.
 
-- [ ] **Step 4: Run local process and resource acceptance**
+- [ ] **Step 4: Run final local visual acceptance**
+
+Serve the production build against deterministic browser fixtures and inspect every primary route plus exact Ticket detail at the three required viewports. Include healthy, intervention, active, terminal, empty, stale, unavailable, failed-refresh, expanded, long-content, and candle-failure states. Store screenshots under `.local/owner-console-visual/task-24/`; record only the non-sensitive viewport/result matrix in the acceptance checklist.
+
+Present the complete local browser preview to the Owner. **Task 24 remains open until the Owner explicitly accepts the final visual result.** Visual acceptance does not authorize Task 25 deployment.
+
+- [ ] **Step 5: Run local process and resource acceptance**
 
 Restore the latest checksum-verified production-fact snapshot into a guarded localhost disposable database. Start the API against that database through the disposable read-only PostgreSQL role and a temporary Unix Socket, then verify:
 
@@ -2879,7 +2937,7 @@ Expected:
 
 Record commands and observed values in the acceptance checklist without copying a production commit, Ticket ID, or transient Tokyo state.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add deploy/owner-console/README.md docs/superpowers/specs/2026-08-05-owner-console-and-programmatic-review-design.md docs/superpowers/specs/2026-08-05-owner-console-acceptance-checklist.md
