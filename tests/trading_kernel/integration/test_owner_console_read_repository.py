@@ -28,6 +28,13 @@ from src.trading_kernel.application.owner_console.signals import (
     build_signal_page,
 )
 from src.trading_kernel.application.owner_console.trades import build_trade_page
+from src.trading_kernel.domain.events import TicketIssued
+from src.trading_kernel.domain.identities import (
+    NettingDomain,
+    RuntimeIdentity,
+    TicketIdentity,
+)
+from src.trading_kernel.domain.ticket import TicketStatus, TradeTicket
 from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     PostgresOwnerReadRepository,
     _review_metrics,
@@ -346,7 +353,12 @@ async def test_causality_reads_exact_bounded_histories_and_current_review(
                     "kind": "review",
                     "identity": "review:causality:v2",
                     "occurred_at_ms": 1_800_000_100_000,
-                }
+                },
+                {
+                    "kind": "command",
+                    "identity": "command:exit:1",
+                    "occurred_at_ms": 1_800_000_045_000,
+                },
             ],
         }
         assert detail.raw_events[-1].event_type == "FutureLifecycleEvent"
@@ -403,6 +415,59 @@ async def test_causality_identity_mismatch_fails_closed(
             match="Ticket and AdmissionDecision identity mismatch",
         ):
             build_trade_causality(facts)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("fact_field", "seed_kwargs", "maximum"),
+    (
+        ("events", {"event_count": 512}, 512),
+        ("commands", {"command_count": 128}, 128),
+        ("incidents", {"incident_count": 64}, 64),
+    ),
+)
+async def test_causality_history_exact_cap_succeeds(
+    owner_read_dsn: str,
+    fact_field: str,
+    seed_kwargs: dict[str, int],
+    maximum: int,
+) -> None:
+    await _seed_owner_console_causality(owner_read_dsn, **seed_kwargs)
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_trade_causality_facts("ticket:causality")
+
+        assert facts is not None
+        assert len(getattr(facts, fact_field)) == maximum
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("seed_kwargs", "message"),
+    (
+        ({"event_count": 513}, "Trade Events exceed hard maximum 512"),
+        ({"command_count": 129}, "Exchange Commands exceed hard maximum 128"),
+        ({"incident_count": 65}, "Incidents exceed hard maximum 64"),
+    ),
+)
+async def test_causality_history_cap_plus_one_fails_closed(
+    owner_read_dsn: str,
+    seed_kwargs: dict[str, int],
+    message: str,
+) -> None:
+    await _seed_owner_console_causality(owner_read_dsn, **seed_kwargs)
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            with pytest.raises(ContradictoryFacts, match=message):
+                await PostgresOwnerReadRepository(
+                    connection
+                ).read_trade_causality_facts("ticket:causality")
     finally:
         await engine.dispose()
 
@@ -2234,11 +2299,76 @@ async def _seed_owner_console_signals(
         await connection.close()
 
 
+def _owner_console_causality_ticket() -> TradeTicket:
+    return TradeTicket(
+        identity=TicketIdentity(
+            ticket_id="ticket:causality",
+            exposure_episode_id="episode:z",
+            signal_event_id="signal:z",
+            runtime=RuntimeIdentity(
+                runtime_profile_id="profile:owner-console",
+                strategy_group_id="strategy-group:alpha",
+                strategy_version_id="strategy-version:alpha",
+                event_spec_id="event-spec:signal",
+            ),
+            netting_domain=NettingDomain(
+                venue_id="binance-usdm",
+                account_id="owner-console-account",
+                exchange_instrument_id="BTCUSDT",
+                position_side="long",
+            ),
+        ),
+        owner_policy_id="policy:owner-console",
+        owner_policy_version=1,
+        runtime_scope_id="scope:z",
+        runtime_scope_version=1,
+        universe_version_id="universe:owner-console-signals",
+        universe_semantic_digest="sha256:" + "a" * 64,
+        fact_digest="sha256:" + "d" * 64,
+        exposure_family="opening_range",
+        active_family_ticket_count_at_claim=0,
+        family_ticket_limit=2,
+        directional_risk_at_stop_at_claim=Decimal(0),
+        directional_stop_risk_limit_fraction=Decimal("0.04"),
+        min_materialization_ratio=Decimal("0.5"),
+        minimum_stop_risk_budget=Decimal(1),
+        exit_policy_id="exit-policy:test",
+        exit_policy_semantic_hash="sha256:" + "b" * 64,
+        capacity_claim_id="claim:causality",
+        created_at_ms=1_800_000_003_000,
+        expires_at_ms=1_800_000_060_000,
+        entry_reference_price=Decimal("100.00"),
+        quantity=Decimal(1),
+        notional=Decimal(100),
+        planned_stop_risk_budget=Decimal(1),
+        post_fill_stop_risk_limit=Decimal("1.1"),
+        selected_leverage=1,
+        leverage_change_required=False,
+        reserved_margin=Decimal(100),
+        risk_reservation_basis="stop_risk",
+        margin_mode="cross",
+        cross_margin_stress_model_id="cross-margin-stop-stress-v1",
+        post_stop_stress_multiple=Decimal(2),
+        claim_stress_proof_digest="sha256:" + "c" * 64,
+        risk_at_stop=Decimal(1),
+        entry_order_type="market",
+        initial_stop_price=Decimal("99.00"),
+        take_profit_prices=(Decimal("102.00"),),
+        take_profit_quantities=(Decimal("0.5"),),
+        status=TicketStatus.TERMINAL,
+    )
+
+
 async def _seed_owner_console_causality(
     dsn: str,
     *,
     admission_strategy_group_id: str = "strategy-group:alpha",
+    event_count: int = 10,
+    command_count: int = 2,
+    incident_count: int = 1,
 ) -> None:
+    if event_count < 10 or command_count < 2 or incident_count < 1:
+        raise ValueError("causality seed counts cannot remove baseline facts")
     await _seed_owner_console_signals(dsn)
     database_name = make_url(dsn).database
     assert database_name is not None
@@ -2249,6 +2379,7 @@ async def _seed_owner_console_causality(
     )
     connection = await asyncpg.connect(admin_dsn)
     digest = "sha256:" + "a" * 64
+    ticket = _owner_console_causality_ticket()
     try:
         async with connection.transaction():
             await connection.execute(
@@ -2297,7 +2428,8 @@ async def _seed_owner_console_causality(
                     'opening_range', 0, 2, 0, 0.04, 0.5, 1,
                     'exit-policy:test', 'sha256:' || repeat('b', 64),
                     100.00, 1, 100, 'claim:causality', 1, 1.1, 1, false,
-                    100, 'stop_risk', 'cross', 'stress:test', 2,
+                    100, 'stop_risk', 'cross',
+                    'cross-margin-stop-stress-v1', 2,
                     'sha256:' || repeat('c', 64), 1, 'market', NULL, 99.00,
                     NULL, NULL, '["102.00"]'::jsonb, '["0.5"]'::jsonb,
                     'sha256:' || repeat('d', 64),
@@ -2434,7 +2566,7 @@ async def _seed_owner_console_causality(
                     exit_exchange_order_id, review_id, lifecycle_due_at_ms,
                     reconciliation_due_at_ms, updated_at_ms
                 ) VALUES (
-                    'ticket:causality', 'terminal', 10, 10, false, 0,
+                    'ticket:causality', 'terminal', $1, $1, false, 0,
                     100.10, 1.10, NULL, 'within_limit', 'continue',
                     'within_limit', 'sha256:' || repeat('7', 64), 0,
                     'exchange:entry:1', 'exchange:stop:1', 'exchange:stop:2',
@@ -2443,21 +2575,23 @@ async def _seed_owner_console_causality(
                     'exchange:exit:1', 'review:causality:v2', NULL, NULL,
                     1800000100000
                 )
-                """
+                """,
+                event_count,
+            )
+            issued_ticket = ticket.model_copy(
+                update={"status": TicketStatus.ISSUED}
             )
             event_rows = (
                 (
                     "event:causality:1",
                     1,
                     "TicketIssued",
-                    {
-                        "event_id": "event:causality:1",
-                        "sequence": 1,
-                        "occurred_at_ms": 1_800_000_003_000,
-                        "ticket": {
-                            "identity": {"ticket_id": "ticket:causality"}
-                        },
-                    },
+                    TicketIssued(
+                        event_id="event:causality:1",
+                        sequence=1,
+                        occurred_at_ms=1_800_000_003_000,
+                        ticket=issued_ticket,
+                    ).model_dump(mode="json"),
                     1_800_000_003_000,
                 ),
                 (
@@ -2595,6 +2729,29 @@ async def _seed_owner_console_causality(
                     for event_id, sequence, event_type, payload, at_ms in event_rows
                 ],
             )
+            if event_count > 10:
+                await connection.execute(
+                    """
+                    INSERT INTO brc_trade_events (
+                        event_id, ticket_id, sequence, event_type, payload,
+                        occurred_at_ms
+                    )
+                    SELECT
+                        'event:causality:cap:' || sequence,
+                        'ticket:causality',
+                        sequence,
+                        'FutureLifecycleEvent',
+                        jsonb_build_object(
+                            'event_id', 'event:causality:cap:' || sequence,
+                            'ticket_id', 'ticket:causality',
+                            'sequence', sequence,
+                            'occurred_at_ms', 1800000200000 + sequence
+                        ),
+                        1800000200000 + sequence
+                    FROM generate_series(11, $1) AS sequence
+                    """,
+                    event_count,
+                )
             await connection.executemany(
                 """
                 INSERT INTO brc_exchange_commands (
@@ -2632,6 +2789,39 @@ async def _seed_owner_console_causality(
                     ),
                 ),
             )
+            if command_count > 2:
+                await connection.execute(
+                    """
+                    INSERT INTO brc_exchange_commands (
+                        command_id, ticket_id, command_kind, generation,
+                        idempotency_key, venue_client_order_id, status,
+                        quantity, request_payload, result_payload,
+                        claim_owner, lease_until_ms, created_at_ms,
+                        deadline_at_ms, completed_at_ms
+                    )
+                    SELECT
+                        'command:causality:cap:' || generation,
+                        'ticket:causality',
+                        'cancel_order',
+                        generation,
+                        'idempotency:causality:cap:' || generation,
+                        'client:causality:cap:' || generation,
+                        'accepted',
+                        1,
+                        '{"quantity":"1"}'::jsonb,
+                        jsonb_build_object(
+                            'exchange_order_id',
+                            'exchange:causality:cap:' || generation
+                        ),
+                        NULL,
+                        NULL,
+                        1800000200000 + generation,
+                        1800000230000 + generation,
+                        1800000205000 + generation
+                    FROM generate_series(1, $1) AS generation
+                    """,
+                    command_count - 2,
+                )
             await connection.execute(
                 """
                 INSERT INTO brc_runtime_incidents (
@@ -2646,6 +2836,29 @@ async def _seed_owner_console_causality(
                 )
                 """
             )
+            if incident_count > 1:
+                await connection.execute(
+                    """
+                    INSERT INTO brc_runtime_incidents (
+                        incident_id, ticket_id, incident_kind, status,
+                        first_blocker, entry_block_scope, entry_block_key,
+                        details, opened_at_ms, resolved_at_ms
+                    )
+                    SELECT
+                        'incident:causality:cap:' || incident_number,
+                        'ticket:causality',
+                        'bounded_history_fixture',
+                        'resolved',
+                        'fixture',
+                        'none',
+                        NULL,
+                        '{}'::jsonb,
+                        1800000200000 + incident_number,
+                        1800000205000 + incident_number
+                    FROM generate_series(1, $1) AS incident_number
+                    """,
+                    incident_count - 1,
+                )
             await connection.executemany(
                 """
                 INSERT INTO brc_trade_reviews (

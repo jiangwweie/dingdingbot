@@ -75,6 +75,49 @@ def test_unknown_persisted_event_remains_visible_at_aggregate_fallback() -> None
     ]
 
 
+def test_terminal_ticket_does_not_complete_stages_without_business_evidence() -> None:
+    detail = build_trade_causality(
+        trade_causality_facts(
+            event_types=("TicketIssued",),
+            review=None,
+        )
+    )
+
+    assert [stage.status for stage in detail.stages] == [
+        "complete",
+        "complete",
+        "complete",
+        "unavailable",
+        "unavailable",
+        "unavailable",
+        "unavailable",
+        "unavailable",
+    ]
+    assert all(detail.stages[index].evidence for index in range(3))
+
+
+def test_terminal_entry_rejection_marks_later_business_stages_skipped() -> None:
+    detail = build_trade_causality(
+        trade_causality_facts(
+            event_types=("TicketIssued", "EntryRejected"),
+            aggregate_status="entry_rejected",
+            ticket_status="entry_rejected",
+            review=None,
+        )
+    )
+
+    assert [stage.status for stage in detail.stages] == [
+        "complete",
+        "complete",
+        "complete",
+        "skipped",
+        "skipped",
+        "skipped",
+        "skipped",
+        "skipped",
+    ]
+
+
 def test_chart_annotations_use_only_exact_authoritative_prices() -> None:
     detail = build_trade_causality(trade_causality_facts())
 
@@ -89,7 +132,51 @@ def test_chart_annotations_use_only_exact_authoritative_prices() -> None:
         ("exit", "103.00"),
     ]
     assert all(item.evidence for item in detail.annotations)
-    assert detail.annotations[-1].evidence[0].kind == "review"
+    assert [ref.kind for ref in detail.annotations[-1].evidence] == [
+        "review",
+        "command",
+    ]
+
+
+@pytest.mark.parametrize(
+    "command_kind",
+    ("entry", "set_leverage", "cancel_order"),
+)
+def test_review_exit_attribution_rejects_non_exit_command_kind(
+    command_kind: str,
+) -> None:
+    facts = trade_causality_facts()
+    commands = (
+        facts.commands[0],
+        facts.commands[1].model_copy(update={"command_kind": command_kind}),
+    )
+
+    with pytest.raises(ContradictoryFacts, match="Review exit Command"):
+        build_trade_causality(facts.model_copy(update={"commands": commands}))
+
+
+@pytest.mark.parametrize(
+    "status",
+    (
+        "prepared",
+        "claimed",
+        "superseded",
+        "rejected",
+        "outcome_unknown",
+        "reconciled_absent",
+    ),
+)
+def test_review_exit_attribution_rejects_nonaccepted_command_status(
+    status: str,
+) -> None:
+    facts = trade_causality_facts()
+    commands = (
+        facts.commands[0],
+        facts.commands[1].model_copy(update={"status": status}),
+    )
+
+    with pytest.raises(ContradictoryFacts, match="Review exit Command"):
+        build_trade_causality(facts.model_copy(update={"commands": commands}))
 
 
 def test_causality_rejects_event_payload_identity_disagreement() -> None:
@@ -109,6 +196,30 @@ def test_causality_rejects_event_payload_identity_disagreement() -> None:
     )
 
     with pytest.raises(ContradictoryFacts, match="Event payload identity"):
+        build_trade_causality(facts.model_copy(update={"events": events}))
+
+
+def test_ticket_issued_requires_complete_frozen_ticket_snapshot_match() -> None:
+    facts = trade_causality_facts()
+    issued = facts.events[0]
+    ticket_payload = issued.payload["ticket"]
+    assert isinstance(ticket_payload, dict)
+    events = (
+        issued.model_copy(
+            update={
+                "payload": {
+                    **issued.payload,
+                    "ticket": {
+                        **ticket_payload,
+                        "owner_policy_id": "policy:contradictory",
+                    },
+                }
+            }
+        ),
+        *facts.events[1:],
+    )
+
+    with pytest.raises(ContradictoryFacts, match="TicketIssued snapshot"):
         build_trade_causality(facts.model_copy(update={"events": events}))
 
 

@@ -21,9 +21,15 @@ from src.trading_kernel.application.owner_console.models import (
     TradeCausalityFacts,
     TradeCausalityReviewFacts,
     TradeCausalitySignalFacts,
-    TradeCausalityTicketFacts,
     TradeItemFacts,
 )
+from src.trading_kernel.domain.events import TicketIssued
+from src.trading_kernel.domain.identities import (
+    NettingDomain,
+    RuntimeIdentity,
+    TicketIdentity,
+)
+from src.trading_kernel.domain.ticket import TicketStatus, TradeTicket
 
 FactT = TypeVar(
     "FactT",
@@ -228,11 +234,15 @@ def trade_causality_facts(**overrides: Any) -> TradeCausalityFacts:
     ticket_status = str(overrides.pop("ticket_status", "terminal"))
     terminal_at_ms = overrides.pop("terminal_at_ms", 1_800_000_000_000)
     review_override = overrides.pop("review", "default")
+    ticket = _causality_trade_ticket().model_copy(
+        update={"status": TicketStatus(ticket_status)}
+    )
     events = tuple(
         _causality_event(
             event_type,
             sequence=sequence,
             exit_requested_reason=exit_requested_reason,
+            ticket=ticket,
         )
         for sequence, event_type in enumerate(event_types, start=1)
     )
@@ -304,29 +314,7 @@ def trade_causality_facts(**overrides: Any) -> TradeCausalityFacts:
             ),
             **trade_review_values,
         ),
-        ticket=TradeCausalityTicketFacts(
-            ticket_id="ticket:1",
-            exposure_episode_id="episode:1",
-            signal_event_id="signal:1",
-            strategy_group_id="strategy-group:opening-range",
-            strategy_version_id="strategy-version:1",
-            event_spec_id="event:opening-range-breakout",
-            universe_version_id="universe:1",
-            universe_semantic_digest="sha256:" + "a" * 64,
-            runtime_profile_id="profile:1",
-            runtime_scope_id="scope:1",
-            runtime_scope_version=1,
-            owner_policy_id="policy:1",
-            owner_policy_version=1,
-            capacity_claim_id="claim:1",
-            venue_id="binance-usdm",
-            account_id="account:1",
-            exchange_instrument_id="BTCUSDT",
-            position_side="long",
-            entry_reference_price=Decimal("100.00"),
-            initial_stop_price=Decimal("99.00"),
-            created_at_ms=1_799_999_900_000,
-        ),
+        ticket=ticket,
         aggregate=TradeCausalityAggregateFacts(
             ticket_id="ticket:1",
             aggregate_status=aggregate_status,
@@ -407,6 +395,7 @@ def _causality_event(
     *,
     sequence: int,
     exit_requested_reason: str,
+    ticket: TradeTicket,
 ) -> TradeCausalityEventFacts:
     event_id = f"event:1:{sequence}"
     occurred_at_ms = 1_799_999_900_000 + sequence * 10_000
@@ -416,7 +405,12 @@ def _causality_event(
         "occurred_at_ms": occurred_at_ms,
     }
     if event_type == "TicketIssued":
-        payload["ticket"] = {"identity": {"ticket_id": "ticket:1"}}
+        payload = TicketIssued(
+            event_id=event_id,
+            sequence=sequence,
+            occurred_at_ms=occurred_at_ms,
+            ticket=ticket,
+        ).model_dump(mode="json")
     else:
         payload["ticket_id"] = "ticket:1"
     if event_type == "EntryFilled":
@@ -448,6 +442,70 @@ def _causality_event(
         event_type=event_type,
         payload=payload,
         occurred_at_ms=occurred_at_ms,
+    )
+
+
+def _causality_trade_ticket() -> TradeTicket:
+    runtime = RuntimeIdentity(
+        runtime_profile_id="profile:1",
+        strategy_group_id="strategy-group:opening-range",
+        strategy_version_id="strategy-version:1",
+        event_spec_id="event:opening-range-breakout",
+    )
+    netting_domain = NettingDomain(
+        venue_id="binance-usdm",
+        account_id="account:1",
+        exchange_instrument_id="BTCUSDT",
+        position_side="long",
+    )
+    return TradeTicket(
+        identity=TicketIdentity(
+            ticket_id="ticket:1",
+            exposure_episode_id="episode:1",
+            signal_event_id="signal:1",
+            runtime=runtime,
+            netting_domain=netting_domain,
+        ),
+        owner_policy_id="policy:1",
+        owner_policy_version=1,
+        runtime_scope_id="scope:1",
+        runtime_scope_version=1,
+        universe_version_id="universe:1",
+        universe_semantic_digest="sha256:" + "a" * 64,
+        fact_digest="sha256:" + "b" * 64,
+        exposure_family="opening_range",
+        active_family_ticket_count_at_claim=0,
+        family_ticket_limit=2,
+        directional_risk_at_stop_at_claim=Decimal(0),
+        directional_stop_risk_limit_fraction=Decimal("0.04"),
+        min_materialization_ratio=Decimal("0.50"),
+        minimum_stop_risk_budget=Decimal(1),
+        exit_policy_id="exit-policy:1",
+        exit_policy_semantic_hash="sha256:" + "c" * 64,
+        capacity_claim_id="claim:1",
+        created_at_ms=1_799_999_900_000,
+        expires_at_ms=1_800_000_100_000,
+        entry_reference_price=Decimal("100.00"),
+        quantity=Decimal(1),
+        notional=Decimal(100),
+        planned_stop_risk_budget=Decimal(1),
+        post_fill_stop_risk_limit=Decimal("1.1"),
+        selected_leverage=1,
+        leverage_change_required=False,
+        reserved_margin=Decimal(100),
+        risk_reservation_basis="stop_risk",
+        margin_mode="cross",
+        cross_margin_stress_model_id="cross-margin-stop-stress-v1",
+        post_stop_stress_multiple=Decimal(2),
+        claim_stress_proof_digest="sha256:" + "d" * 64,
+        risk_at_stop=Decimal(1),
+        entry_order_type="market",
+        entry_limit_price=None,
+        initial_stop_price=Decimal("99.00"),
+        pre_tp1_reclaim_price=None,
+        exposure_session_end_ms=None,
+        take_profit_prices=(Decimal("102.00"),),
+        take_profit_quantities=(Decimal("0.5"),),
     )
 
 

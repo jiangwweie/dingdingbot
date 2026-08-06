@@ -6,6 +6,8 @@ from collections.abc import Iterable
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
+from pydantic import ValidationError
+
 from src.trading_kernel.application.owner_console.models import (
     CausalityExitReason,
     ChartAnnotation,
@@ -24,7 +26,15 @@ from src.trading_kernel.application.owner_console.trades import (
     aggregate_stage,
     build_trade_item,
 )
-from src.trading_kernel.domain.events import PERSISTED_TRADE_EVENT_MODELS
+from src.trading_kernel.domain.commands import (
+    ExchangeCommandKind,
+    ExchangeCommandStatus,
+)
+from src.trading_kernel.domain.events import (
+    PERSISTED_TRADE_EVENT_MODELS,
+    TicketIssued,
+)
+from src.trading_kernel.domain.ticket import TicketStatus, TradeTicket
 
 
 class ContradictoryFacts(TradeFactsContradiction):
@@ -143,6 +153,22 @@ _EXIT_REASON_LABELS = {
     "strategy_exit": "Strategy Exit",
     "recover_exit_rejection": "Exit Recovery",
 }
+_TERMINAL_REJECTION_STATUSES = {
+    TicketStatus.LEVERAGE_REJECTED.value,
+    TicketStatus.ENTRY_REJECTED.value,
+    TicketStatus.ENTRY_RECONCILED_ABSENT.value,
+}
+_EXIT_ATTRIBUTION_COMMAND_KINDS = {
+    ExchangeCommandKind.INITIAL_STOP.value,
+    ExchangeCommandKind.TAKE_PROFIT.value,
+    ExchangeCommandKind.EXIT.value,
+    ExchangeCommandKind.REPLACE_PROTECTION.value,
+    ExchangeCommandKind.CONTROLLED_FLATTEN.value,
+}
+_ACCEPTED_ATTRIBUTION_COMMAND_STATUSES = {
+    ExchangeCommandStatus.ACCEPTED.value,
+    ExchangeCommandStatus.RECONCILED_ACCEPTED.value,
+}
 
 
 def build_trade_causality(facts: TradeCausalityFacts) -> TradeCausalityDetail:
@@ -228,57 +254,60 @@ def build_trade_causality(facts: TradeCausalityFacts) -> TradeCausalityDetail:
 
 def _validate_identities(facts: TradeCausalityFacts) -> None:
     ticket = facts.ticket
+    identity = ticket.identity
+    runtime = identity.runtime
+    domain = identity.netting_domain
     aggregate = facts.aggregate
     signal = facts.signal
     admission = facts.admission
     trade = facts.trade
-    if aggregate.ticket_id != ticket.ticket_id:
+    if aggregate.ticket_id != identity.ticket_id:
         raise ContradictoryFacts("Ticket and Aggregate identity mismatch")
     if (
-        trade.ticket_id != ticket.ticket_id
-        or trade.strategy_group_id != ticket.strategy_group_id
-        or trade.event_spec_id != ticket.event_spec_id
-        or trade.exchange_instrument_id != ticket.exchange_instrument_id
-        or trade.position_side != ticket.position_side
+        trade.ticket_id != identity.ticket_id
+        or trade.strategy_group_id != runtime.strategy_group_id
+        or trade.event_spec_id != runtime.event_spec_id
+        or trade.exchange_instrument_id != domain.exchange_instrument_id
+        or trade.position_side != domain.position_side
         or trade.aggregate_status != aggregate.aggregate_status
         or trade.issued_at_ms != ticket.created_at_ms
         or trade.aggregate_review_id != aggregate.review_id
     ):
         raise ContradictoryFacts("Trade and Ticket causality facts disagree")
     ticket_signal_pairs = (
-        (ticket.signal_event_id, signal.signal_event_id),
-        (ticket.exposure_episode_id, signal.exposure_episode_id),
-        (ticket.strategy_group_id, signal.strategy_group_id),
-        (ticket.strategy_version_id, signal.strategy_version_id),
-        (ticket.event_spec_id, signal.event_spec_id),
+        (identity.signal_event_id, signal.signal_event_id),
+        (identity.exposure_episode_id, signal.exposure_episode_id),
+        (runtime.strategy_group_id, signal.strategy_group_id),
+        (runtime.strategy_version_id, signal.strategy_version_id),
+        (runtime.event_spec_id, signal.event_spec_id),
         (ticket.universe_version_id, signal.universe_version_id),
         (ticket.universe_semantic_digest, signal.universe_semantic_digest),
         (ticket.runtime_scope_id, signal.runtime_scope_id),
         (ticket.runtime_scope_version, signal.runtime_scope_version),
-        (ticket.exchange_instrument_id, signal.exchange_instrument_id),
-        (ticket.position_side, signal.position_side),
+        (domain.exchange_instrument_id, signal.exchange_instrument_id),
+        (domain.position_side, signal.position_side),
     )
     if any(left != right for left, right in ticket_signal_pairs):
         raise ContradictoryFacts("Ticket and Signal identity mismatch")
     ticket_admission_pairs = (
-        (ticket.ticket_id, admission.ticket_id),
-        (ticket.signal_event_id, admission.signal_event_id),
-        (ticket.exposure_episode_id, admission.exposure_episode_id),
-        (ticket.strategy_group_id, admission.strategy_group_id),
-        (ticket.strategy_version_id, admission.strategy_version_id),
-        (ticket.event_spec_id, admission.event_spec_id),
+        (identity.ticket_id, admission.ticket_id),
+        (identity.signal_event_id, admission.signal_event_id),
+        (identity.exposure_episode_id, admission.exposure_episode_id),
+        (runtime.strategy_group_id, admission.strategy_group_id),
+        (runtime.strategy_version_id, admission.strategy_version_id),
+        (runtime.event_spec_id, admission.event_spec_id),
         (ticket.universe_version_id, admission.universe_version_id),
         (ticket.universe_semantic_digest, admission.universe_semantic_digest),
-        (ticket.runtime_profile_id, admission.runtime_profile_id),
+        (runtime.runtime_profile_id, admission.runtime_profile_id),
         (ticket.runtime_scope_id, admission.runtime_scope_id),
         (ticket.runtime_scope_version, admission.runtime_scope_version),
         (ticket.owner_policy_id, admission.owner_policy_id),
         (ticket.owner_policy_version, admission.owner_policy_version),
         (ticket.capacity_claim_id, admission.capacity_claim_id),
-        (ticket.venue_id, admission.venue_id),
-        (ticket.account_id, admission.account_id),
-        (ticket.exchange_instrument_id, admission.exchange_instrument_id),
-        (ticket.position_side, admission.position_side),
+        (domain.venue_id, admission.venue_id),
+        (domain.account_id, admission.account_id),
+        (domain.exchange_instrument_id, admission.exchange_instrument_id),
+        (domain.position_side, admission.position_side),
     )
     if (
         admission.decision_status != "admitted"
@@ -292,7 +321,7 @@ def _validate_identities(facts: TradeCausalityFacts) -> None:
         return
     if (
         aggregate.review_id != review.review_id
-        or review.ticket_id != ticket.ticket_id
+        or review.ticket_id != identity.ticket_id
         or trade.review_id != review.review_id
         or trade.review_ticket_id != review.ticket_id
         or trade.review_revision != review.revision
@@ -311,16 +340,16 @@ def _ordered_events(
     if sequences != expected:
         raise ContradictoryFacts("Event sequence disagrees with Aggregate")
     for event in ordered:
-        if event.ticket_id != facts.ticket.ticket_id:
+        if event.ticket_id != facts.ticket.identity.ticket_id:
             raise ContradictoryFacts("Event Ticket identity mismatch")
-        _validate_event_payload(event, ticket_id=facts.ticket.ticket_id)
+        _validate_event_payload(event, ticket=facts.ticket)
     return ordered
 
 
 def _validate_event_payload(
     event: TradeCausalityEventFacts,
     *,
-    ticket_id: str,
+    ticket: TradeTicket,
 ) -> None:
     payload = event.payload
     if (
@@ -330,20 +359,19 @@ def _validate_event_payload(
     ):
         raise ContradictoryFacts("Event payload identity mismatch")
     if event.event_type == "TicketIssued":
-        nested_ticket = payload.get("ticket")
-        nested_identity = (
-            nested_ticket.get("identity")
-            if isinstance(nested_ticket, dict)
-            else None
-        )
-        payload_ticket_id = (
-            nested_identity.get("ticket_id")
-            if isinstance(nested_identity, dict)
-            else None
-        )
-    else:
-        payload_ticket_id = payload.get("ticket_id")
-    if payload_ticket_id != ticket_id:
+        try:
+            issued = TicketIssued.model_validate(payload)
+        except ValidationError as exc:
+            raise ContradictoryFacts("TicketIssued snapshot is invalid") from exc
+        if issued.ticket.model_dump(mode="python", exclude={"status"}) != (
+            ticket.model_dump(mode="python", exclude={"status"})
+        ):
+            raise ContradictoryFacts("TicketIssued snapshot disagrees with Ticket")
+        if issued.ticket.identity.ticket_id != ticket.identity.ticket_id:
+            raise ContradictoryFacts("Event payload identity mismatch")
+        return
+    payload_ticket_id = payload.get("ticket_id")
+    if payload_ticket_id != ticket.identity.ticket_id:
         raise ContradictoryFacts("Event payload identity mismatch")
 
 
@@ -392,7 +420,7 @@ def _raw_commands(
         raise ContradictoryFacts("duplicate Exchange Command identity")
     rows: list[RawExchangeCommandView] = []
     for command in ordered:
-        if command.ticket_id != facts.ticket.ticket_id:
+        if command.ticket_id != facts.ticket.identity.ticket_id:
             raise ContradictoryFacts("Exchange Command Ticket identity mismatch")
         evidence = (
             EvidenceRef(
@@ -430,7 +458,7 @@ def _raw_incidents(
         raise ContradictoryFacts("duplicate Incident identity")
     rows: list[RawIncidentView] = []
     for incident in ordered:
-        if incident.ticket_id != facts.ticket.ticket_id:
+        if incident.ticket_id != facts.ticket.identity.ticket_id:
             raise ContradictoryFacts("Incident Ticket identity mismatch")
         evidence = (
             EvidenceRef(
@@ -487,7 +515,7 @@ def _annotations(
 ) -> tuple[ChartAnnotation, ...]:
     ticket_evidence = EvidenceRef(
         kind="ticket",
-        identity=facts.ticket.ticket_id,
+        identity=facts.ticket.identity.ticket_id,
         occurred_at_ms=facts.ticket.created_at_ms,
     )
     signal_evidence = EvidenceRef(
@@ -586,8 +614,8 @@ def _review_exit_annotations(
         return ()
     if not isinstance(raw_attribution, list):
         raise ContradictoryFacts("current Review order attribution is malformed")
-    command_ids = {command.command_id for command in facts.commands}
-    evidence = EvidenceRef(
+    commands = {command.command_id: command for command in facts.commands}
+    review_evidence = EvidenceRef(
         kind="review",
         identity=review.review_id,
         occurred_at_ms=review.created_at_ms,
@@ -602,8 +630,16 @@ def _review_exit_annotations(
         if role != "exit":
             continue
         command_id = raw_row.get("command_id")
-        if not isinstance(command_id, str) or command_id not in command_ids:
+        if not isinstance(command_id, str) or command_id not in commands:
             raise ContradictoryFacts("current Review order attribution identity mismatch")
+        command = commands[command_id]
+        if (
+            command.command_kind not in _EXIT_ATTRIBUTION_COMMAND_KINDS
+            or command.status not in _ACCEPTED_ATTRIBUTION_COMMAND_STATUSES
+        ):
+            raise ContradictoryFacts(
+                "current Review exit Command is not attributable"
+            )
         occurred_at_ms = raw_row.get("occurred_at_ms")
         if (
             isinstance(occurred_at_ms, bool)
@@ -620,7 +656,14 @@ def _review_exit_annotations(
                     context="current Review exit fill price",
                 ),
                 label="Exit Fill",
-                evidence=(evidence,),
+                evidence=(
+                    review_evidence,
+                    EvidenceRef(
+                        kind="command",
+                        identity=command.command_id,
+                        occurred_at_ms=command.created_at_ms,
+                    ),
+                ),
             )
         )
     return tuple(annotations)
@@ -633,14 +676,7 @@ def _stages(
     raw_events: tuple[RawTradeEventView, ...],
 ) -> tuple[LifecycleStageView, ...]:
     stage_evidence: dict[LifecycleStageKey, list[EvidenceRef]] = {
-        stage: [
-            EvidenceRef(
-                kind="aggregate",
-                identity=facts.aggregate.ticket_id,
-                occurred_at_ms=facts.aggregate.updated_at_ms,
-            )
-        ]
-        for stage in _STAGE_ORDER
+        stage: [] for stage in _STAGE_ORDER
     }
     stage_evidence["signal"].append(
         EvidenceRef(
@@ -657,7 +693,8 @@ def _stages(
         )
     )
     for event in raw_events:
-        stage_evidence[event.stage].append(event.evidence[0])
+        if event.classification == "mapped":
+            stage_evidence[event.stage].append(event.evidence[0])
     if facts.review is not None:
         stage_evidence["review"].append(
             EvidenceRef(
@@ -668,20 +705,42 @@ def _stages(
         )
     current_index = _STAGE_ORDER.index(current_stage)
     terminal = facts.aggregate.aggregate_status == "terminal"
+    terminal_rejection = facts.trade.ticket_status in _TERMINAL_REJECTION_STATUSES
+    aggregate_evidence = EvidenceRef(
+        kind="aggregate",
+        identity=facts.aggregate.ticket_id,
+        occurred_at_ms=facts.aggregate.updated_at_ms,
+    )
     stages: list[LifecycleStageView] = []
     for index, key in enumerate(_STAGE_ORDER):
-        evidence = _deduplicate_evidence(stage_evidence[key])
+        business_evidence = _deduplicate_evidence(stage_evidence[key])
+        display_evidence = list(business_evidence)
+        if key == current_stage:
+            display_evidence.append(aggregate_evidence)
+            display_evidence.extend(
+                event.evidence[0]
+                for event in raw_events
+                if event.stage == key and event.classification == "unmapped"
+            )
+        evidence = _deduplicate_evidence(display_evidence)
         times = [
             item.occurred_at_ms
-            for item in evidence
-            if item.kind != "aggregate"
+            for item in business_evidence
         ]
-        if terminal or index < current_index:
-            status: Literal["pending", "current", "complete", "unavailable"] = (
-                "complete" if evidence else "unavailable"
-            )
+        if terminal:
+            status: Literal[
+                "pending",
+                "current",
+                "complete",
+                "unavailable",
+                "skipped",
+            ] = "complete" if business_evidence else "unavailable"
+        elif terminal_rejection and index > current_index:
+            status = "skipped"
+        elif terminal_rejection or index < current_index:
+            status = "complete" if business_evidence else "unavailable"
         elif index == current_index:
-            status = "current" if evidence else "unavailable"
+            status = "current" if business_evidence else "unavailable"
         else:
             status = "pending"
         started_at_ms = min(times) if times else None
@@ -753,7 +812,13 @@ def _annotation_order(kind: str) -> int:
 
 def _stage_summary(
     key: LifecycleStageKey,
-    status: Literal["pending", "current", "complete", "unavailable"],
+    status: Literal[
+        "pending",
+        "current",
+        "complete",
+        "unavailable",
+        "skipped",
+    ],
 ) -> str:
     return f"{_STAGE_LABELS[key]}: {status}"
 

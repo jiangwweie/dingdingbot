@@ -38,7 +38,6 @@ from src.trading_kernel.application.owner_console.models import (
     TradeCausalityIncidentFacts,
     TradeCausalityReviewFacts,
     TradeCausalitySignalFacts,
-    TradeCausalityTicketFacts,
     TradeItemFacts,
     TradeListQuery,
     TradePageFacts,
@@ -69,6 +68,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     trade_reviews,
     trade_tickets,
 )
+from src.trading_kernel.infrastructure.pg_repositories import _ticket_from_row
 
 _VENUE_ID = "binance-usdm"
 _FRESH_AGE_MS = 30_000
@@ -640,7 +640,7 @@ class PostgresOwnerReadRepository:
                 incidents=incidents,
                 review=review,
             ),
-            ticket=_causality_ticket_facts(ticket_row),
+            ticket=_ticket_from_row(ticket_row),
             aggregate=_causality_aggregate_facts(ticket_row),
             signal=_causality_signal_facts(signal_row),
             admission=_causality_admission_facts(signal_row),
@@ -654,29 +654,9 @@ class PostgresOwnerReadRepository:
 def _causality_ticket_query(ticket_id: str) -> sa.Select[Any]:
     return (
         sa.select(
-            trade_tickets.c.ticket_id,
-            trade_tickets.c.exposure_episode_id,
-            trade_tickets.c.signal_event_id,
-            trade_tickets.c.strategy_group_id,
-            trade_tickets.c.strategy_version_id,
-            trade_tickets.c.event_spec_id,
-            trade_tickets.c.universe_version_id,
-            trade_tickets.c.universe_semantic_digest,
-            trade_tickets.c.runtime_profile_id,
-            trade_tickets.c.runtime_scope_id,
-            trade_tickets.c.runtime_scope_version,
-            trade_tickets.c.owner_policy_id,
-            trade_tickets.c.owner_policy_version,
-            trade_tickets.c.capacity_claim_id,
-            trade_tickets.c.venue_id,
-            trade_tickets.c.account_id,
-            trade_tickets.c.exchange_instrument_id,
-            trade_tickets.c.position_side,
-            trade_tickets.c.entry_reference_price,
-            trade_tickets.c.initial_stop_price,
+            trade_tickets,
             trade_tickets.c.status.label("ticket_status"),
             trade_tickets.c.created_at_ms.label("issued_at_ms"),
-            trade_tickets.c.terminal_at_ms,
             trade_aggregates.c.ticket_id.label("aggregate_ticket_id"),
             trade_aggregates.c.status.label("aggregate_status"),
             trade_aggregates.c.last_event_sequence,
@@ -808,34 +788,6 @@ def _require_history_bound(
 ) -> None:
     if len(rows) > maximum:
         raise ContradictoryFacts(f"{label} exceed hard maximum {maximum}")
-
-
-def _causality_ticket_facts(row: RowMapping) -> TradeCausalityTicketFacts:
-    return TradeCausalityTicketFacts(
-        ticket_id=str(row["ticket_id"]),
-        exposure_episode_id=str(row["exposure_episode_id"]),
-        signal_event_id=str(row["signal_event_id"]),
-        strategy_group_id=str(row["strategy_group_id"]),
-        strategy_version_id=str(row["strategy_version_id"]),
-        event_spec_id=str(row["event_spec_id"]),
-        universe_version_id=str(row["universe_version_id"]),
-        universe_semantic_digest=str(row["universe_semantic_digest"]),
-        runtime_profile_id=str(row["runtime_profile_id"]),
-        runtime_scope_id=str(row["runtime_scope_id"]),
-        runtime_scope_version=int(row["runtime_scope_version"]),
-        owner_policy_id=str(row["owner_policy_id"]),
-        owner_policy_version=int(row["owner_policy_version"]),
-        capacity_claim_id=str(row["capacity_claim_id"]),
-        venue_id=str(row["venue_id"]),
-        account_id=str(row["account_id"]),
-        exchange_instrument_id=str(row["exchange_instrument_id"]),
-        position_side=cast(
-            Literal["long", "short"], str(row["position_side"])
-        ),
-        entry_reference_price=Decimal(str(row["entry_reference_price"])),
-        initial_stop_price=Decimal(str(row["initial_stop_price"])),
-        created_at_ms=int(row["issued_at_ms"]),
-    )
 
 
 def _causality_aggregate_facts(

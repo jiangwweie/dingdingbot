@@ -20,6 +20,8 @@ from pydantic import (
     model_validator,
 )
 
+from src.trading_kernel.domain.ticket import TradeTicket
+
 
 class FrozenModel(BaseModel):
     """Base contract for immutable read models and their input facts."""
@@ -310,7 +312,13 @@ class TradeListPage(FrozenModel):
 class LifecycleStageView(FrozenModel):
     key: LifecycleStageKey
     label: str
-    status: Literal["pending", "current", "complete", "unavailable"]
+    status: Literal[
+        "pending",
+        "current",
+        "complete",
+        "unavailable",
+        "skipped",
+    ]
     started_at_ms: int | None
     completed_at_ms: int | None
     duration_ms: int | None
@@ -593,44 +601,6 @@ class TradePageFacts(FrozenModel):
     requested_limit: int = Field(ge=1, le=100)
 
 
-class TradeCausalityTicketFacts(FrozenModel):
-    ticket_id: str
-    exposure_episode_id: str
-    signal_event_id: str
-    strategy_group_id: str
-    strategy_version_id: str
-    event_spec_id: str
-    universe_version_id: str
-    universe_semantic_digest: str
-    runtime_profile_id: str
-    runtime_scope_id: str
-    runtime_scope_version: int
-    owner_policy_id: str
-    owner_policy_version: int
-    capacity_claim_id: str
-    venue_id: str
-    account_id: str
-    exchange_instrument_id: str
-    position_side: Literal["long", "short"]
-    entry_reference_price: Decimal
-    initial_stop_price: Decimal
-    created_at_ms: int
-
-    @field_validator("entry_reference_price", "initial_stop_price", mode="before")
-    @classmethod
-    def _reject_float_decimal(cls, value: object) -> object:
-        if isinstance(value, float):
-            raise TypeError("Ticket causality decimals must not be floats")
-        return value
-
-    @field_validator("entry_reference_price", "initial_stop_price")
-    @classmethod
-    def _require_finite_decimal(cls, value: Decimal) -> Decimal:
-        if not value.is_finite() or value <= 0:
-            raise ValueError("Ticket causality decimals must be finite and positive")
-        return value
-
-
 class TradeCausalityAggregateFacts(FrozenModel):
     ticket_id: str
     aggregate_status: str
@@ -720,7 +690,7 @@ class TradeCausalityReviewFacts(FrozenModel):
 
 class TradeCausalityFacts(FrozenModel):
     trade: TradeItemFacts
-    ticket: TradeCausalityTicketFacts
+    ticket: TradeTicket
     aggregate: TradeCausalityAggregateFacts
     signal: TradeCausalitySignalFacts
     admission: TradeCausalityAdmissionFacts
