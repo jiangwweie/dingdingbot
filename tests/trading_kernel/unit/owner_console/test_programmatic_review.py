@@ -7,6 +7,7 @@ import pytest
 from src.trading_kernel.application.owner_console.models import (
     EvidenceRef,
     MoneyMetric,
+    ProgrammaticReviewFacts,
     ReviewCenterFacts,
     ReviewCenterItemFacts,
 )
@@ -33,16 +34,84 @@ def _metric(
     )
 
 
-def _incident_evidence(identity: str, occurred_at_ms: int) -> EvidenceRef:
+def _ref(kind: str, identity: str, occurred_at_ms: int) -> EvidenceRef:
     return EvidenceRef(
-        kind="incident",
+        kind=kind,  # type: ignore[arg-type]
         identity=identity,
         occurred_at_ms=occurred_at_ms,
     )
 
 
-def test_complete_review_uses_fixed_templates_and_exact_evidence() -> None:
-    review = build_programmatic_review(programmatic_review_facts())
+_TICKET = _ref("ticket", "ticket:1", 1_799_999_900_000)
+_AGGREGATE = _ref("aggregate", "ticket:1", 1_800_000_000_000)
+_ENTRY = _ref("event", "event:entry-filled", 1_799_999_920_000)
+_PROTECTION = _ref(
+    "event",
+    "event:initial-stop-confirmed",
+    1_799_999_930_000,
+)
+_EXIT = _ref("event", "event:exit-requested", 1_799_999_970_000)
+_FLAT = _ref("event", "event:position-flat-confirmed", 1_799_999_980_000)
+_RECONCILIATION = _ref(
+    "event",
+    "event:reconciliation-matched",
+    1_799_999_985_000,
+)
+_SETTLEMENT = _ref("settlement", "event:budget-settled", 1_799_999_990_000)
+_REVIEW = _ref("review", "review:1", 1_800_000_000_000)
+_LIFECYCLE_REFS = (
+    _ENTRY,
+    _PROTECTION,
+    _EXIT,
+    _FLAT,
+    _RECONCILIATION,
+    _SETTLEMENT,
+)
+
+
+def _facts(**overrides: object) -> ProgrammaticReviewFacts:
+    base = programmatic_review_facts()
+    values = base.model_dump(mode="python")
+    ticket_id = str(overrides.get("ticket_id", base.ticket_id))
+    ticket = _ref("ticket", ticket_id, _TICKET.occurred_at_ms)
+    aggregate = _ref("aggregate", ticket_id, _AGGREGATE.occurred_at_ms)
+    values.update(
+        {
+            "ticket_evidence": ticket,
+            "aggregate_evidence": aggregate,
+            "entry_fill_evidence": _ENTRY,
+            "protection_confirmed_evidence": _PROTECTION,
+            "exit_trigger_evidence": _EXIT,
+            "flat_evidence": _FLAT,
+            "reconciliation_matched_evidence": _RECONCILIATION,
+            "settlement_evidence": _SETTLEMENT,
+            "current_review_evidence": _REVIEW,
+            "incident_evidence": (),
+            "evidence": (
+                ticket,
+                aggregate,
+                *_LIFECYCLE_REFS,
+                _REVIEW,
+            ),
+        }
+    )
+    values.update(overrides)
+    return ProgrammaticReviewFacts.model_validate(values)
+
+
+def _unavailable_economics(reason: str) -> dict[str, object]:
+    return {
+        "economics_completeness": "incomplete_evidence",
+        "gross_pnl": _metric(None, reason=reason),
+        "fees": _metric(None, reason=reason),
+        "funding": _metric(None, reason=reason),
+        "net_pnl": _metric(None, reason=reason),
+        "net_r": _metric(None, unit="R", reason=reason),
+    }
+
+
+def test_complete_review_uses_only_exact_claim_evidence() -> None:
+    review = build_programmatic_review(_facts())
 
     assert review.execution_classification == "complete"
     assert review.economic_summary.net_pnl.value == Decimal("3.5100")
@@ -58,53 +127,89 @@ def test_complete_review_uses_fixed_templates_and_exact_evidence() -> None:
         "Net PnL 为 3.5100 U，Net R 为 0.4800R；"
         "订单、费用、Funding 与 Review 证据完整。"
     )
-    assert all(sentence.evidence for sentence in review.sentences)
-    assert review.final_conclusion is not None
+    assert review.sentences[0].evidence == _LIFECYCLE_REFS
+    assert review.sentences[1].evidence == (_REVIEW,)
 
 
-def test_resolved_incident_is_recovered_and_links_exact_incident() -> None:
-    incident_id = "incident:ticket:1:entry-outcome"
-    facts = programmatic_review_facts(
-        incident_ids=(incident_id,),
-        recovered_incident_ids=(incident_id,),
-        evidence=(
-            *programmatic_review_facts().evidence,
-            _incident_evidence(incident_id, 1_799_999_950_000),
-        ),
+@pytest.mark.parametrize(
+    ("missing_field", "missing_identity"),
+    (
+        ("entry_fill_evidence", "event:entry-filled"),
+        ("protection_confirmed_evidence", "event:initial-stop-confirmed"),
+        ("exit_trigger_evidence", "event:exit-requested"),
+        ("flat_evidence", "event:position-flat-confirmed"),
+        ("reconciliation_matched_evidence", "event:reconciliation-matched"),
+        ("settlement_evidence", "event:budget-settled"),
+    ),
+)
+def test_missing_positive_lifecycle_proof_is_evidence_incomplete(
+    missing_field: str,
+    missing_identity: str,
+) -> None:
+    facts = _facts(
+        **{
+            missing_field: None,
+            "evidence": tuple(
+                ref
+                for ref in (_TICKET, _AGGREGATE, *_LIFECYCLE_REFS, _REVIEW)
+                if ref.identity != missing_identity
+            ),
+        }
     )
 
     review = build_programmatic_review(facts)
 
-    assert review.execution_classification == "recovered_incident"
-    assert review.sentences[0].template_id == "execution_recovered"
-    assert [
-        ref.identity
-        for ref in review.sentences[0].evidence
-        if ref.kind == "incident"
-    ] == [incident_id]
+    assert review.execution_classification == "evidence_incomplete"
+    assert review.sentences[0].template_id == "economics_incomplete"
 
 
-def test_open_incident_keeps_terminal_review_evidence_incomplete() -> None:
-    incident_id = "incident:ticket:1:open"
+def test_resolved_incident_uses_exact_lifecycle_and_incident_evidence() -> None:
+    incident_id = "incident:ticket:1:entry-outcome"
+    incident = _ref("incident", incident_id, 1_799_999_950_000)
     review = build_programmatic_review(
-        programmatic_review_facts(
+        _facts(
+            incident_ids=(incident_id,),
+            recovered_incident_ids=(incident_id,),
+            incident_evidence=(incident,),
+            evidence=(
+                _TICKET,
+                _AGGREGATE,
+                *_LIFECYCLE_REFS,
+                incident,
+                _REVIEW,
+            ),
+        )
+    )
+
+    assert review.execution_classification == "recovered_incident"
+    assert review.sentences[0].evidence == (*_LIFECYCLE_REFS, incident)
+
+
+def test_open_incident_incomplete_sentence_uses_only_open_incident() -> None:
+    incident_id = "incident:ticket:1:open"
+    incident = _ref("incident", incident_id, 1_799_999_950_000)
+    review = build_programmatic_review(
+        _facts(
             incident_ids=(incident_id,),
             recovered_incident_ids=(),
+            incident_evidence=(incident,),
             evidence=(
-                *programmatic_review_facts().evidence,
-                _incident_evidence(incident_id, 1_799_999_950_000),
+                _TICKET,
+                _AGGREGATE,
+                *_LIFECYCLE_REFS,
+                incident,
+                _REVIEW,
             ),
         )
     )
 
     assert review.execution_classification == "evidence_incomplete"
-    assert review.final_conclusion is not None
-    assert "Incident" in review.final_conclusion
+    assert review.sentences[0].evidence == (incident,)
 
 
 def test_funding_unavailable_does_not_become_zero_or_net_r() -> None:
     review = build_programmatic_review(
-        programmatic_review_facts(
+        _facts(
             economics_completeness="funding_unavailable",
             funding=_metric(None, reason="funding_unavailable"),
             net_pnl=_metric(None, reason="funding_unavailable"),
@@ -116,14 +221,51 @@ def test_funding_unavailable_does_not_become_zero_or_net_r() -> None:
     assert review.economic_summary.funding.value is None
     assert review.economic_summary.net_pnl.value is None
     assert review.economic_summary.net_r.value is None
-    assert review.sentences[-1].template_id == "economics_incomplete"
+    assert review.sentences[-1].evidence == (_REVIEW,)
     assert "0" not in review.sentences[-1].text
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {
+            "economics_completeness": "funding_unavailable",
+            "funding": _metric(None, reason="funding_unavailable"),
+            "net_pnl": _metric("3.51"),
+            "net_r": _metric(None, unit="R", reason="funding_unavailable"),
+        },
+        {
+            "economics_completeness": "external_exit_unavailable",
+            "gross_pnl": _metric("4.00"),
+            "fees": _metric(None, reason="external_exit_unavailable"),
+            "funding": _metric(None, reason="external_exit_unavailable"),
+            "net_pnl": _metric(None, reason="external_exit_unavailable"),
+            "net_r": _metric(
+                None,
+                unit="R",
+                reason="external_exit_unavailable",
+            ),
+        },
+        {
+            **_unavailable_economics("incomplete_review_economics"),
+            "net_r": _metric("0.48", unit="R"),
+        },
+    ),
+)
+def test_unavailable_economic_shapes_reject_dependent_numeric_values(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(
+        ProgrammaticReviewContradiction,
+        match="economics shape",
+    ):
+        build_programmatic_review(_facts(**overrides))
 
 
 def test_external_exit_unavailable_never_builds_final_economics() -> None:
     unavailable = _metric(None, reason="external_exit_unavailable")
     review = build_programmatic_review(
-        programmatic_review_facts(
+        _facts(
             economics_completeness="external_exit_unavailable",
             gross_pnl=unavailable,
             fees=unavailable,
@@ -140,41 +282,100 @@ def test_external_exit_unavailable_never_builds_final_economics() -> None:
 
     assert review.execution_classification == "evidence_incomplete"
     assert review.economic_summary.net_pnl.value is None
-    assert "外部平仓成交事实不可获得" in review.sentences[-1].text
+    assert review.sentences[-1].evidence == (_REVIEW,)
 
 
-def test_active_ticket_has_progress_summary_not_final_review() -> None:
-    ticket_evidence = (programmatic_review_facts().evidence[0],)
+@pytest.mark.parametrize(
+    "contradictory_overrides",
+    (
+        {"ticket_status": "terminal"},
+        {"current_review_id": "review:1", "current_review_evidence": _REVIEW},
+        {"settlement_completed": True, "settlement_evidence": _SETTLEMENT},
+        {},
+    ),
+)
+def test_active_ticket_rejects_terminal_only_shapes(
+    contradictory_overrides: dict[str, object],
+) -> None:
+    active = {
+        "ticket_status": "issued",
+        "aggregate_status": "position_protected",
+        "lifecycle_stage": "protection",
+        "settlement_completed": False,
+        "current_review_id": None,
+        "entry_complete": True,
+        "protection_complete": True,
+        "exit_complete": False,
+        "reconciliation_complete": False,
+        "review_complete": False,
+        "entry_fill_evidence": _ENTRY,
+        "protection_confirmed_evidence": _PROTECTION,
+        "exit_trigger_evidence": None,
+        "flat_evidence": None,
+        "reconciliation_matched_evidence": None,
+        "settlement_evidence": None,
+        "current_review_evidence": None,
+        "evidence": (_TICKET, _AGGREGATE, _ENTRY, _PROTECTION),
+        **_unavailable_economics("ticket_active"),
+    }
+    active.update(contradictory_overrides)
+    if not contradictory_overrides:
+        active.update(
+            {
+                "economics_completeness": "complete",
+                "gross_pnl": _metric("4"),
+                "fees": _metric("0.4"),
+                "funding": _metric("-0.09"),
+                "net_pnl": _metric("3.51"),
+                "net_r": _metric("0.48", unit="R"),
+            }
+        )
+
+    with pytest.raises(ProgrammaticReviewContradiction, match="active Ticket"):
+        build_programmatic_review(_facts(**active))
+
+
+def test_active_ticket_has_progress_summary_with_aggregate_evidence_only() -> None:
     review = build_programmatic_review(
-        programmatic_review_facts(
+        _facts(
             ticket_status="issued",
             aggregate_status="position_protected",
             lifecycle_stage="protection",
             settlement_completed=False,
             current_review_id=None,
+            entry_complete=True,
+            protection_complete=True,
+            exit_complete=False,
+            reconciliation_complete=False,
             review_complete=False,
-            evidence=ticket_evidence,
+            exit_trigger_evidence=None,
+            flat_evidence=None,
+            reconciliation_matched_evidence=None,
+            settlement_evidence=None,
+            current_review_evidence=None,
+            evidence=(_TICKET, _AGGREGATE, _ENTRY, _PROTECTION),
+            **_unavailable_economics("ticket_active"),
         )
     )
 
     assert review.execution_classification == "in_progress"
-    assert review.sentences[0].template_id == "ticket_in_progress"
+    assert review.sentences[0].evidence == (_TICKET, _AGGREGATE)
     assert review.final_conclusion is None
 
 
-def test_terminal_ticket_without_current_review_waits_for_review() -> None:
-    ticket_evidence = (programmatic_review_facts().evidence[0],)
+def test_terminal_ticket_without_aggregate_review_pointer_waits() -> None:
     review = build_programmatic_review(
-        programmatic_review_facts(
+        _facts(
             current_review_id=None,
             review_complete=False,
-            evidence=ticket_evidence,
+            current_review_evidence=None,
+            evidence=(_TICKET, _AGGREGATE, *_LIFECYCLE_REFS),
+            **_unavailable_economics("review_missing"),
         )
     )
 
     assert review.execution_classification == "waiting_review"
-    assert review.sentences[0].template_id == "review_waiting"
-    assert review.final_conclusion == "Ticket 已终态，当前仍在等待 Review。"
+    assert review.sentences[0].evidence == (_TICKET, _AGGREGATE)
 
 
 def test_current_review_requires_the_exact_review_evidence_identity() -> None:
@@ -183,47 +384,22 @@ def test_current_review_requires_the_exact_review_evidence_identity() -> None:
         match="current Review evidence identity mismatch",
     ):
         build_programmatic_review(
-            programmatic_review_facts(
+            _facts(
                 current_review_id="review:current",
-                evidence=(
-                    programmatic_review_facts().evidence[0],
-                    EvidenceRef(
-                        kind="review",
-                        identity="review:stale",
-                        occurred_at_ms=1_800_000_000_000,
-                    ),
+                current_review_evidence=_ref(
+                    "review",
+                    "review:stale",
+                    1_800_000_000_000,
                 ),
             )
         )
 
 
 def test_missing_exit_reason_keeps_execution_evidence_incomplete() -> None:
-    review = build_programmatic_review(
-        programmatic_review_facts(exit_reason=None)
-    )
+    review = build_programmatic_review(_facts(exit_reason=None))
 
     assert review.execution_classification == "evidence_incomplete"
     assert "退出原因证据不完整" in review.final_conclusion
-
-
-def test_malformed_review_economics_has_its_own_incomplete_state() -> None:
-    review = build_programmatic_review(
-        programmatic_review_facts(
-            economics_completeness="incomplete_evidence",
-            gross_pnl=_metric(None, reason="incomplete_review_economics"),
-            fees=_metric(None, reason="incomplete_review_economics"),
-            funding=_metric(None, reason="incomplete_review_economics"),
-            net_pnl=_metric(None, reason="incomplete_review_economics"),
-            net_r=_metric(
-                None,
-                unit="R",
-                reason="incomplete_review_economics",
-            ),
-        )
-    )
-
-    assert review.execution_classification == "evidence_incomplete"
-    assert "关键执行或经济证据不完整" in review.final_conclusion
 
 
 def test_review_center_is_bounded_observe_only_and_never_ranks() -> None:
@@ -234,17 +410,17 @@ def test_review_center_is_bounded_observe_only_and_never_ranks() -> None:
             ReviewCenterItemFacts(
                 strategy_group_id="strategy-group:alpha",
                 terminal_at_ms=1_800_000_000_000,
-                review=programmatic_review_facts(ticket_id="ticket:z"),
+                review=_facts(ticket_id="ticket:z"),
             ),
             ReviewCenterItemFacts(
                 strategy_group_id="strategy-group:alpha",
                 terminal_at_ms=1_799_999_999_000,
-                review=programmatic_review_facts(ticket_id="ticket:y"),
+                review=_facts(ticket_id="ticket:y"),
             ),
             ReviewCenterItemFacts(
                 strategy_group_id="strategy-group:beta",
                 terminal_at_ms=1_799_999_998_000,
-                review=programmatic_review_facts(ticket_id="ticket:x"),
+                review=_facts(ticket_id="ticket:x"),
             ),
         ),
         requested_limit=2,
@@ -272,12 +448,12 @@ def test_incomplete_center_economics_never_contributes_as_zero() -> None:
             ReviewCenterItemFacts(
                 strategy_group_id="strategy-group:alpha",
                 terminal_at_ms=1_800_000_000_000,
-                review=programmatic_review_facts(),
+                review=_facts(),
             ),
             ReviewCenterItemFacts(
                 strategy_group_id="strategy-group:beta",
                 terminal_at_ms=1_799_999_999_000,
-                review=programmatic_review_facts(
+                review=_facts(
                     economics_completeness="funding_unavailable",
                     funding=_metric(None, reason="funding_unavailable"),
                     net_pnl=_metric(None, reason="funding_unavailable"),
@@ -299,3 +475,22 @@ def test_incomplete_center_economics_never_contributes_as_zero() -> None:
     assert center.net_r.value is None
     assert center.funding.value is None
     assert center.incomplete_review_count == 1
+
+
+def test_empty_review_center_is_no_evidence_not_computed_zero() -> None:
+    center = build_review_center(
+        ReviewCenterFacts(
+            from_ms=1_799_999_000_000,
+            to_ms=1_800_001_000_000,
+            items=(),
+            requested_limit=50,
+            requested_strategy_group_id="strategy-group:alpha",
+        )
+    )
+
+    assert center.net_pnl.value is None
+    assert center.net_pnl.unavailable_reason == "no_review_evidence"
+    assert center.net_r.value is None
+    assert center.fees.value is None
+    assert center.funding.value is None
+    assert center.strategy_group_samples[0].evidence_state == "no_evidence"

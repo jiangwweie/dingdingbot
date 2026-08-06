@@ -749,6 +749,16 @@ class ProgrammaticReviewFacts(FrozenModel):
     actual_stop_risk: MoneyMetric
     exit_reason: str | None
     runner_net_contribution: MoneyMetric
+    ticket_evidence: EvidenceRef | None = None
+    aggregate_evidence: EvidenceRef | None = None
+    entry_fill_evidence: EvidenceRef | None = None
+    protection_confirmed_evidence: EvidenceRef | None = None
+    exit_trigger_evidence: EvidenceRef | None = None
+    flat_evidence: EvidenceRef | None = None
+    reconciliation_matched_evidence: EvidenceRef | None = None
+    settlement_evidence: EvidenceRef | None = None
+    current_review_evidence: EvidenceRef | None = None
+    incident_evidence: tuple[EvidenceRef, ...] = ()
     evidence: tuple[EvidenceRef, ...]
 
 

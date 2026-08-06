@@ -23,6 +23,7 @@ from src.trading_kernel.application.owner_console.overview import (
     build_owner_overview,
 )
 from src.trading_kernel.application.owner_console.programmatic_review import (
+    ProgrammaticReviewContradiction,
     build_programmatic_review,
     build_review_center,
 )
@@ -32,7 +33,10 @@ from src.trading_kernel.application.owner_console.signals import (
     build_signal_detail,
     build_signal_page,
 )
-from src.trading_kernel.application.owner_console.trades import build_trade_page
+from src.trading_kernel.application.owner_console.trades import (
+    TradeFactsContradiction,
+    build_trade_page,
+)
 from src.trading_kernel.domain.events import TicketIssued
 from src.trading_kernel.domain.identities import (
     NettingDomain,
@@ -61,6 +65,8 @@ from tests.trading_kernel.integration.owner_console_support import (
 )
 
 __all__ = ["owner_read_dsn"]
+
+_REVIEW_FILTER_HARD_CAP = 512
 
 
 def test_overview_review_metrics_never_accept_decoded_json_floats() -> None:
@@ -957,6 +963,23 @@ async def test_review_center_is_terminal_current_review_and_cursor_bounded(
         assert first_reviews["ticket:y"].execution_classification == (
             "recovered_incident"
         )
+        assert [
+            ref.identity
+            for ref in first_reviews["ticket:y"].sentences[0].evidence
+        ] == [
+            "event:y:entry-filled",
+            "event:y:initial-stop-confirmed",
+            "event:y:exit-requested",
+            "event:y:position-flat-confirmed",
+            "event:y:reconciliation-matched",
+            "event:y:budget-settled",
+            "incident:y:resolved",
+        ]
+        assert first_facts.items[0].review.current_review_evidence is not None
+        assert (
+            first_facts.items[0].review.current_review_evidence.identity
+            == "review:y:v2"
+        )
         assert first_reviews["ticket:x"].execution_classification == (
             "waiting_review"
         )
@@ -1050,6 +1073,166 @@ async def test_review_center_status_filters_use_built_review_semantics(
         assert [item.review.ticket_id for item in waiting.items] == [
             "ticket:x"
         ]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    (
+        "EntryFilled",
+        "InitialStopConfirmed",
+        "ExitRequested",
+        "PositionFlatConfirmed",
+        "ReconciliationMatched",
+        "BudgetSettled",
+    ),
+)
+async def test_review_center_status_filter_uses_each_exact_positive_proof(
+    owner_read_dsn: str,
+    event_type: str,
+) -> None:
+    await _seed_owner_console_trades(owner_read_dsn)
+    await _execute_owner_console_admin(
+        owner_read_dsn,
+        """
+        DELETE FROM brc_trade_events
+        WHERE ticket_id = 'ticket:y' AND event_type = $1
+        """,
+        event_type,
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            repository = PostgresOwnerReadRepository(connection)
+            complete = await repository.read_review_center_facts(
+                ReviewListQuery(
+                    from_ms=1_800_000_000_000,
+                    to_ms=1_800_001_000_000,
+                    review_status="complete",
+                )
+            )
+            incomplete = await repository.read_review_center_facts(
+                ReviewListQuery(
+                    from_ms=1_800_000_000_000,
+                    to_ms=1_800_001_000_000,
+                    review_status="incomplete_evidence",
+                )
+            )
+
+        assert "ticket:y" not in {
+            item.review.ticket_id for item in complete.items
+        }
+        incomplete_y = next(
+            item.review
+            for item in incomplete.items
+            if item.review.ticket_id == "ticket:y"
+        )
+        assert (
+            build_programmatic_review(incomplete_y).execution_classification
+            == "evidence_incomplete"
+        )
+    finally:
+        await engine.dispose()
+
+
+async def test_review_center_rejects_dangling_aggregate_review_pointer(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_trades(owner_read_dsn)
+    await _execute_owner_console_admin(
+        owner_read_dsn,
+        """
+        UPDATE brc_trade_aggregates
+        SET review_id = 'review:missing'
+        WHERE ticket_id = 'ticket:y'
+        """,
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            repository = PostgresOwnerReadRepository(connection)
+            with pytest.raises(
+                TradeFactsContradiction,
+                match="Aggregate current Review pointer",
+            ):
+                await repository.read_review_center_facts(
+                    ReviewListQuery(
+                        from_ms=1_800_000_000_000,
+                        to_ms=1_800_001_000_000,
+                    )
+                )
+    finally:
+        await engine.dispose()
+
+
+async def test_sparse_review_filter_paginates_exact_matches_within_cap(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_trades(
+        owner_read_dsn,
+        sparse_candidate_count=12,
+        sparse_complete_ordinals=(2, 7, 11),
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        cursor = None
+        ticket_ids: list[str] = []
+        async with owner_read_transaction(engine) as connection:
+            repository = PostgresOwnerReadRepository(connection)
+            for _page in range(3):
+                facts = await repository.read_review_center_facts(
+                    ReviewListQuery(
+                        from_ms=1_800_000_000_000,
+                        to_ms=1_800_001_000_000,
+                        limit=1,
+                        cursor=cursor,
+                        review_status="complete",
+                        strategy_group_id="strategy-group:sparse",
+                    )
+                )
+                center = build_review_center(facts)
+                ticket_ids.extend(
+                    item.review.ticket_id for item in facts.items[:1]
+                )
+                cursor = center.next_cursor
+
+        assert ticket_ids == [
+            "ticket:sparse:0002",
+            "ticket:sparse:0007",
+            "ticket:sparse:0011",
+        ]
+        assert len(ticket_ids) == len(set(ticket_ids))
+        assert cursor is None
+    finally:
+        await engine.dispose()
+
+
+async def test_sparse_review_filter_fails_closed_beyond_candidate_cap(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_trades(
+        owner_read_dsn,
+        sparse_candidate_count=_REVIEW_FILTER_HARD_CAP + 1,
+        sparse_complete_ordinals=(_REVIEW_FILTER_HARD_CAP,),
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            repository = PostgresOwnerReadRepository(connection)
+            with pytest.raises(
+                ProgrammaticReviewContradiction,
+                match="candidate bound",
+            ):
+                await repository.read_review_center_facts(
+                    ReviewListQuery(
+                        from_ms=1_800_000_000_000,
+                        to_ms=1_800_001_000_000,
+                        limit=1,
+                        review_status="complete",
+                        strategy_group_id="strategy-group:sparse",
+                    )
+                )
     finally:
         await engine.dispose()
 
@@ -1908,7 +2091,31 @@ async def _seed_current_reviews(
         await connection.close()
 
 
-async def _seed_owner_console_trades(dsn: str) -> None:
+async def _execute_owner_console_admin(
+    dsn: str,
+    statement: str,
+    *args: object,
+) -> None:
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    try:
+        await connection.execute(statement, *args)
+    finally:
+        await connection.close()
+
+
+async def _seed_owner_console_trades(
+    dsn: str,
+    *,
+    sparse_candidate_count: int = 0,
+    sparse_complete_ordinals: tuple[int, ...] = (),
+) -> None:
     database_name = make_url(dsn).database
     assert database_name is not None
     admin_dsn = (
@@ -1969,6 +2176,27 @@ async def _seed_owner_console_trades(dsn: str) -> None:
             created_at_ms - 200,
             created_at_ms + 30_000,
             None,
+        ),
+    )
+    sparse_complete = set(sparse_complete_ordinals)
+    sparse_ticket_ids = tuple(
+        f"ticket:sparse:{ordinal:04d}"
+        for ordinal in range(sparse_candidate_count)
+    )
+    tickets = (
+        *tickets,
+        *(
+            (
+                ticket_id,
+                "strategy-group:sparse",
+                f"SPARSE{ordinal:04d}USDT",
+                "long",
+                "terminal",
+                created_at_ms - 1_000 - ordinal,
+                created_at_ms + 20_000 - ordinal,
+                None,
+            )
+            for ordinal, ticket_id in enumerate(sparse_ticket_ids)
         ),
     )
     try:
@@ -2075,6 +2303,15 @@ async def _seed_owner_console_trades(dsn: str) -> None:
                     ("ticket:x", "terminal", None, created_at_ms),
                     ("ticket:w", "terminal", "review:w:v1", created_at_ms),
                     ("ticket:v", "terminal", "review:v:v1", created_at_ms),
+                    *(
+                        (
+                            ticket_id,
+                            "terminal",
+                            f"review:sparse:{ordinal:04d}",
+                            created_at_ms + 20_000 - ordinal,
+                        )
+                        for ordinal, ticket_id in enumerate(sparse_ticket_ids)
+                    ),
                 ),
             )
             await connection.executemany(
@@ -2159,6 +2396,40 @@ async def _seed_owner_console_trades(dsn: str) -> None:
                         ),
                         created_at_ms + 40_000,
                     ),
+                    *(
+                        (
+                            f"review:sparse:{ordinal:04d}",
+                            ticket_id,
+                            1,
+                            None,
+                            json.dumps(
+                                {
+                                    "economics_completeness": "complete",
+                                    "gross_realized_pnl_quote": "4.0000",
+                                    "trading_fees_quote": "0.4000",
+                                    "funding_quote": "-0.0900",
+                                    "net_pnl_quote": "3.5100",
+                                    "planned_r_multiple": "0.4800",
+                                }
+                                if ordinal in sparse_complete
+                                else {
+                                    "economics_completeness": (
+                                        "funding_unavailable"
+                                    ),
+                                    "gross_realized_pnl_quote": "4.0000",
+                                    "trading_fees_quote": "0.4000",
+                                    "funding_quote": None,
+                                    "net_pnl_quote": None,
+                                    "planned_r_multiple": None,
+                                    "funding_unavailable_reason": (
+                                        "overlapping_instrument_exposure"
+                                    ),
+                                }
+                            ),
+                            created_at_ms + 40_000 - ordinal,
+                        )
+                        for ordinal, ticket_id in enumerate(sparse_ticket_ids)
+                    ),
                 ),
             )
             await connection.executemany(
@@ -2214,26 +2485,109 @@ async def _seed_owner_console_trades(dsn: str) -> None:
                 """,
                 (
                     (
-                        "event:y:ticket-issued",
+                        "event:y:entry-rejected",
+                        1,
+                        "EntryRejected",
+                        json.dumps({"ticket_id": "ticket:y"}),
+                        created_at_ms + 1_000,
+                    ),
+                    (
+                        "event:y:entry-filled",
                         2,
-                        "TicketIssued",
+                        "EntryFilled",
                         json.dumps({"ticket_id": "ticket:y"}),
                         created_at_ms + 2_000,
                     ),
                     (
-                        "event:y:initial-stop-confirmed",
+                        "event:y:initial-stop-rejected",
                         3,
-                        "InitialStopConfirmed",
+                        "InitialStopRejected",
                         json.dumps({"ticket_id": "ticket:y"}),
                         created_at_ms + 3_000,
                     ),
                     (
-                        "event:y:budget-settled",
+                        "event:y:initial-stop-confirmed",
+                        4,
+                        "InitialStopConfirmed",
+                        json.dumps({"ticket_id": "ticket:y"}),
+                        created_at_ms + 4_000,
+                    ),
+                    (
+                        "event:y:position-flat-confirmed",
                         12,
+                        "PositionFlatConfirmed",
+                        json.dumps({"ticket_id": "ticket:y"}),
+                        created_at_ms + 27_000,
+                    ),
+                    (
+                        "event:y:reconciliation-matched",
+                        13,
+                        "ReconciliationMatched",
+                        json.dumps({"ticket_id": "ticket:y"}),
+                        created_at_ms + 28_000,
+                    ),
+                    (
+                        "event:y:budget-settled",
+                        14,
                         "BudgetSettled",
                         json.dumps({"ticket_id": "ticket:y"}),
                         created_at_ms + 29_000,
                     ),
+                ),
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_trade_events (
+                    event_id, ticket_id, sequence, event_type, payload,
+                    occurred_at_ms
+                ) VALUES (
+                    'event:' || $1::varchar(160) || ':' || lower($3::text),
+                    $1::varchar(160), $2::bigint, $3::varchar(160),
+                    $4::jsonb, $5::bigint
+                )
+                """,
+                tuple(
+                    (
+                        ticket_id,
+                        sequence,
+                        event_type,
+                        json.dumps(
+                            {
+                                "event_id": (
+                                    f"event:{ticket_id}:{event_type.lower()}"
+                                ),
+                                "ticket_id": ticket_id,
+                                "sequence": sequence,
+                                "occurred_at_ms": (
+                                    created_at_ms + occurred_offset
+                                ),
+                                **(
+                                    {"reason": "strategy_exit"}
+                                    if event_type == "ExitRequested"
+                                    else {}
+                                ),
+                            }
+                        ),
+                        created_at_ms + occurred_offset,
+                    )
+                    for ticket_id in (
+                        "ticket:x",
+                        "ticket:w",
+                        "ticket:v",
+                        *sparse_ticket_ids,
+                    )
+                    for sequence, event_type, occurred_offset in (
+                        (1, "EntryFilled", 1_000),
+                        (2, "InitialStopConfirmed", 2_000),
+                        (3, "ExitRequested", 20_000),
+                        (4, "PositionFlatConfirmed", 27_000),
+                        (5, "ReconciliationMatched", 28_000),
+                        (6, "BudgetSettled", 29_000),
+                    )
+                    if not (
+                        ticket_id == "ticket:v"
+                        and event_type == "ExitRequested"
+                    )
                 ),
             )
             await connection.execute(

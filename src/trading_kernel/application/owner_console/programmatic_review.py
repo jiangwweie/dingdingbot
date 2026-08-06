@@ -70,8 +70,12 @@ def build_programmatic_review(
         raise ProgrammaticReviewContradiction(
             "programmatic Review requires evidence"
         )
+    _validate_active_shape(facts)
     _validate_incident_evidence(facts)
     _validate_review_evidence(facts)
+    _validate_exact_evidence(facts, evidence=evidence)
+    _validate_lifecycle_conclusions(facts)
+    _validate_economics_shape(facts)
     economic_summary = ReviewEconomicSummary(
         gross_pnl=facts.gross_pnl,
         fees=facts.fees,
@@ -83,7 +87,7 @@ def build_programmatic_review(
     if facts.aggregate_status != "terminal":
         sentence = _sentence(
             "ticket_in_progress",
-            evidence=_evidence_of_kinds(evidence, "ticket", "aggregate"),
+            evidence=_ticket_aggregate_evidence(facts),
             stage=_STAGE_LABELS[facts.lifecycle_stage],
         )
         return ProgrammaticTradeReview(
@@ -101,7 +105,7 @@ def build_programmatic_review(
     if facts.current_review_id is None:
         sentence = _sentence(
             "review_waiting",
-            evidence=_evidence_of_kinds(evidence, "ticket", "aggregate"),
+            evidence=_ticket_aggregate_evidence(facts),
         )
         return ProgrammaticTradeReview(
             ticket_id=facts.ticket_id,
@@ -119,7 +123,6 @@ def build_programmatic_review(
     sentences = _terminal_sentences(
         facts,
         classification=classification,
-        evidence=evidence,
     )
     review_status: Literal["complete", "incomplete_evidence"] = (
         "complete"
@@ -136,6 +139,32 @@ def build_programmatic_review(
         sentences=sentences,
         final_conclusion="\n".join(sentence.text for sentence in sentences),
         evidence=evidence,
+    )
+
+
+def matches_review_status(
+    review: ProgrammaticTradeReview,
+    requested_status: str | None,
+) -> bool:
+    """Apply the sole Review Center status mapping after classification."""
+
+    if requested_status is None:
+        return True
+    if requested_status == "in_progress":
+        return review.execution_classification == "in_progress"
+    if requested_status == "waiting_for_settlement":
+        return False
+    if requested_status == "waiting_for_review":
+        return review.execution_classification == "waiting_review"
+    if requested_status == "complete":
+        return review.execution_classification in {
+            "complete",
+            "recovered_incident",
+        }
+    if requested_status == "incomplete_evidence":
+        return review.execution_classification == "evidence_incomplete"
+    raise ProgrammaticReviewContradiction(
+        f"unknown Review status filter: {requested_status}"
     )
 
 
@@ -199,13 +228,14 @@ def _terminal_classification(
     facts: ProgrammaticReviewFacts,
 ) -> ExecutionClassification:
     chain_complete = all(
-        (
-            facts.entry_complete,
-            facts.protection_complete,
-            facts.exit_complete,
-            facts.reconciliation_complete,
-            facts.settlement_completed,
-            facts.review_complete,
+        ref is not None
+        for ref in (
+            facts.entry_fill_evidence,
+            facts.protection_confirmed_evidence,
+            facts.exit_trigger_evidence,
+            facts.flat_evidence,
+            facts.reconciliation_matched_evidence,
+            facts.settlement_evidence,
         )
     )
     incidents = set(facts.incident_ids)
@@ -215,7 +245,8 @@ def _terminal_classification(
         not chain_complete
         or not incidents_recovered
         or facts.exit_reason is None
-        or not _economics_complete(facts)
+        or facts.current_review_evidence is None
+        or facts.economics_completeness != "complete"
     ):
         return "evidence_incomplete"
     if incidents:
@@ -227,40 +258,31 @@ def _terminal_sentences(
     facts: ProgrammaticReviewFacts,
     *,
     classification: ExecutionClassification,
-    evidence: tuple[EvidenceRef, ...],
 ) -> tuple[ReviewSentence, ...]:
-    review_evidence = _evidence_of_kinds(
-        evidence,
-        "ticket",
-        "event",
-        "command",
-        "settlement",
-        "review",
-    )
+    lifecycle_evidence = _lifecycle_evidence(facts)
     if classification == "complete":
         execution = _sentence(
             "execution_complete",
-            evidence=review_evidence,
+            evidence=lifecycle_evidence,
             entry_summary="ENTRY 后初始保护已确认",
             exit_summary=_exit_summary(facts.exit_reason),
         )
         economics = _sentence(
             "economics_complete",
-            evidence=_evidence_of_kinds(evidence, "review", "settlement"),
+            evidence=_current_review_evidence(facts),
             net_pnl=_required_value(facts.net_pnl, "Net PnL"),
             net_r=_required_value(facts.net_r, "Net R"),
         )
         return execution, economics
     if classification == "recovered_incident":
-        incident_evidence = _incident_evidence(evidence, facts.incident_ids)
         execution = _sentence(
             "execution_recovered",
-            evidence=incident_evidence,
+            evidence=(*lifecycle_evidence, *facts.incident_evidence),
             incident_summary="、".join(facts.incident_ids),
         )
         economics = _sentence(
             "economics_complete",
-            evidence=_evidence_of_kinds(evidence, "review", "settlement"),
+            evidence=_current_review_evidence(facts),
             net_pnl=_required_value(facts.net_pnl, "Net PnL"),
             net_r=_required_value(facts.net_r, "Net R"),
         )
@@ -268,22 +290,9 @@ def _terminal_sentences(
     return (
         _sentence(
             "economics_incomplete",
-            evidence=evidence,
+            evidence=_incomplete_evidence(facts),
             reason=_incomplete_reason(facts),
         ),
-    )
-
-
-def _economics_complete(facts: ProgrammaticReviewFacts) -> bool:
-    return facts.economics_completeness == "complete" and all(
-        metric.value is not None and metric.unavailable_reason is None
-        for metric in (
-            facts.gross_pnl,
-            facts.fees,
-            facts.funding,
-            facts.net_pnl,
-            facts.net_r,
-        )
     )
 
 
@@ -325,12 +334,12 @@ def _center_economics(
     reviews: tuple[tuple[ReviewCenterItemFacts, ProgrammaticTradeReview], ...],
 ) -> tuple[MoneyMetric, MoneyMetric, MoneyMetric, MoneyMetric]:
     if not reviews:
-        zero_quote = MoneyMetric(value=Decimal(0), unit="USDT")
+        reason = "no_review_evidence"
         return (
-            zero_quote,
-            MoneyMetric(value=Decimal(0), unit="R"),
-            zero_quote,
-            zero_quote,
+            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
+            MoneyMetric(value=None, unit="R", unavailable_reason=reason),
+            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
+            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
         )
     summaries = tuple(review.economic_summary for _item, review in reviews)
     if any(
@@ -504,24 +513,225 @@ def _required_value(metric: MoneyMetric, label: str) -> Decimal:
     return metric.value
 
 
-def _evidence_of_kinds(
-    evidence: tuple[EvidenceRef, ...],
-    *kinds: str,
-) -> tuple[EvidenceRef, ...]:
-    selected = tuple(ref for ref in evidence if ref.kind in kinds)
-    return selected or evidence
+def _validate_active_shape(facts: ProgrammaticReviewFacts) -> None:
+    if facts.aggregate_status == "terminal":
+        if facts.ticket_status != "terminal":
+            raise ProgrammaticReviewContradiction(
+                "terminal Aggregate requires terminal Ticket"
+            )
+        return
+    if (
+        facts.ticket_status == "terminal"
+        or facts.settlement_completed
+        or facts.settlement_evidence is not None
+        or facts.current_review_id is not None
+        or facts.current_review_evidence is not None
+        or facts.review_complete
+        or facts.economics_completeness == "complete"
+    ):
+        raise ProgrammaticReviewContradiction(
+            "active Ticket contains terminal-only facts"
+        )
 
 
-def _incident_evidence(
+def _validate_exact_evidence(
+    facts: ProgrammaticReviewFacts,
+    *,
     evidence: tuple[EvidenceRef, ...],
-    incident_ids: tuple[str, ...],
+) -> None:
+    required_core = (
+        (facts.ticket_evidence, "ticket", facts.ticket_id, "Ticket"),
+        (facts.aggregate_evidence, "aggregate", facts.ticket_id, "Aggregate"),
+    )
+    for ref, kind, identity, label in required_core:
+        if ref is None or ref.kind != kind or ref.identity != identity:
+            raise ProgrammaticReviewContradiction(
+                f"{label} evidence identity mismatch"
+            )
+
+    typed_refs = (
+        (facts.entry_fill_evidence, "event", "ENTRY fill"),
+        (facts.protection_confirmed_evidence, "event", "protection"),
+        (facts.exit_trigger_evidence, "event", "exit trigger"),
+        (facts.flat_evidence, "event", "flat"),
+        (
+            facts.reconciliation_matched_evidence,
+            "event",
+            "reconciliation",
+        ),
+        (facts.settlement_evidence, "settlement", "settlement"),
+        (facts.current_review_evidence, "review", "current Review"),
+    )
+    for ref, kind, label in typed_refs:
+        if ref is not None and ref.kind != kind:
+            raise ProgrammaticReviewContradiction(
+                f"{label} evidence kind mismatch"
+            )
+    for ref in facts.incident_evidence:
+        if ref.kind != "incident":
+            raise ProgrammaticReviewContradiction(
+                "Incident evidence kind mismatch"
+            )
+
+    evidence_keys = {
+        (ref.kind, ref.identity, ref.occurred_at_ms) for ref in evidence
+    }
+    explicit_refs = (
+        facts.ticket_evidence,
+        facts.aggregate_evidence,
+        facts.entry_fill_evidence,
+        facts.protection_confirmed_evidence,
+        facts.exit_trigger_evidence,
+        facts.flat_evidence,
+        facts.reconciliation_matched_evidence,
+        facts.settlement_evidence,
+        facts.current_review_evidence,
+        *facts.incident_evidence,
+    )
+    if any(
+        ref is not None
+        and (ref.kind, ref.identity, ref.occurred_at_ms) not in evidence_keys
+        for ref in explicit_refs
+    ):
+        raise ProgrammaticReviewContradiction(
+            "exact claim evidence is absent from Review evidence"
+        )
+
+
+def _validate_lifecycle_conclusions(facts: ProgrammaticReviewFacts) -> None:
+    contradictions = (
+        (not facts.entry_complete and facts.entry_fill_evidence is not None),
+        (
+            not facts.protection_complete
+            and facts.protection_confirmed_evidence is not None
+        ),
+        (
+            not facts.exit_complete
+            and facts.exit_trigger_evidence is not None
+            and facts.flat_evidence is not None
+        ),
+        (
+            not facts.reconciliation_complete
+            and facts.reconciliation_matched_evidence is not None
+        ),
+        (
+            not facts.settlement_completed
+            and facts.settlement_evidence is not None
+        ),
+        (
+            not facts.review_complete
+            and facts.current_review_evidence is not None
+        ),
+    )
+    if any(contradictions):
+        raise ProgrammaticReviewContradiction(
+            "lifecycle conclusion contradicts exact evidence"
+        )
+
+
+def _validate_economics_shape(facts: ProgrammaticReviewFacts) -> None:
+    metrics = (
+        facts.gross_pnl,
+        facts.fees,
+        facts.funding,
+        facts.net_pnl,
+        facts.net_r,
+    )
+    completeness = facts.economics_completeness
+    if completeness == "complete":
+        valid = all(
+            metric.value is not None
+            and metric.value.is_finite()
+            and metric.unavailable_reason is None
+            for metric in metrics
+        )
+    elif completeness == "funding_unavailable":
+        valid = all(
+            metric.value is not None
+            and metric.value.is_finite()
+            and metric.unavailable_reason is None
+            for metric in metrics[:2]
+        ) and all(
+            metric.value is None
+            and metric.unavailable_reason == "funding_unavailable"
+            for metric in metrics[2:]
+        )
+    elif completeness == "external_exit_unavailable":
+        valid = all(
+            metric.value is None
+            and metric.unavailable_reason == "external_exit_unavailable"
+            for metric in metrics
+        )
+    else:
+        allowed_reasons = {
+            "incomplete_review_economics",
+            "review_missing",
+            "ticket_active",
+        }
+        valid = all(
+            metric.value is None
+            and metric.unavailable_reason in allowed_reasons
+            for metric in metrics
+        ) and len({metric.unavailable_reason for metric in metrics}) == 1
+    if not valid:
+        raise ProgrammaticReviewContradiction(
+            f"invalid {completeness} economics shape"
+        )
+
+
+def _lifecycle_evidence(
+    facts: ProgrammaticReviewFacts,
 ) -> tuple[EvidenceRef, ...]:
-    identities = set(incident_ids)
     return tuple(
         ref
-        for ref in evidence
-        if ref.kind == "incident" and ref.identity in identities
+        for ref in (
+            facts.entry_fill_evidence,
+            facts.protection_confirmed_evidence,
+            facts.exit_trigger_evidence,
+            facts.flat_evidence,
+            facts.reconciliation_matched_evidence,
+            facts.settlement_evidence,
+        )
+        if ref is not None
     )
+
+
+def _ticket_aggregate_evidence(
+    facts: ProgrammaticReviewFacts,
+) -> tuple[EvidenceRef, ...]:
+    return tuple(
+        ref
+        for ref in (facts.ticket_evidence, facts.aggregate_evidence)
+        if ref is not None
+    )
+
+
+def _current_review_evidence(
+    facts: ProgrammaticReviewFacts,
+) -> tuple[EvidenceRef, ...]:
+    if facts.current_review_evidence is None:
+        return ()
+    return (facts.current_review_evidence,)
+
+
+def _incomplete_evidence(
+    facts: ProgrammaticReviewFacts,
+) -> tuple[EvidenceRef, ...]:
+    open_incident_ids = set(facts.incident_ids) - set(
+        facts.recovered_incident_ids
+    )
+    if open_incident_ids:
+        return tuple(
+            ref
+            for ref in facts.incident_evidence
+            if ref.identity in open_incident_ids
+        )
+    if facts.economics_completeness != "complete":
+        return _current_review_evidence(facts)
+    if facts.exit_reason is None and facts.exit_trigger_evidence is not None:
+        return (facts.exit_trigger_evidence,)
+    lifecycle = _lifecycle_evidence(facts)
+    return lifecycle or _ticket_aggregate_evidence(facts)
 
 
 def _validate_incident_evidence(facts: ProgrammaticReviewFacts) -> None:
@@ -531,26 +741,25 @@ def _validate_incident_evidence(facts: ProgrammaticReviewFacts) -> None:
         raise ProgrammaticReviewContradiction(
             "recovered Incident identity is not attached to Ticket"
         )
-    evidence_ids = {
-        ref.identity for ref in facts.evidence if ref.kind == "incident"
-    }
-    if not incident_ids.issubset(evidence_ids):
+    explicit_ids = {ref.identity for ref in facts.incident_evidence}
+    if incident_ids != explicit_ids:
         raise ProgrammaticReviewContradiction(
             "Incident classification lacks exact Incident evidence"
         )
 
 
 def _validate_review_evidence(facts: ProgrammaticReviewFacts) -> None:
-    review_ids = {
-        ref.identity for ref in facts.evidence if ref.kind == "review"
-    }
     if facts.current_review_id is None:
-        if review_ids or facts.review_complete:
+        if facts.current_review_evidence is not None or facts.review_complete:
             raise ProgrammaticReviewContradiction(
                 "current Review evidence identity mismatch"
             )
         return
-    if review_ids != {facts.current_review_id}:
+    if (
+        facts.current_review_evidence is None
+        or facts.current_review_evidence.identity != facts.current_review_id
+        or not facts.review_complete
+    ):
         raise ProgrammaticReviewContradiction(
             "current Review evidence identity mismatch"
         )
