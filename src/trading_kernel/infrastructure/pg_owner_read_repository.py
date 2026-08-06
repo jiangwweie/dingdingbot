@@ -1323,7 +1323,7 @@ def _review_center_ticket_query(
         .lateral("review_center_exit_event")
     )
     entry_event = _review_center_exact_event(
-        event_types=("EntryFilled", "EntryPartiallyFilled"),
+        event_types=("EntryFilled",),
         alias="review_center_entry_event",
         identity_label="entry_fill_event_id",
         occurred_at_label="entry_fill_event_at_ms",

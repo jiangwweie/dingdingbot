@@ -45,6 +45,11 @@ def _ref(kind: str, identity: str, occurred_at_ms: int) -> EvidenceRef:
 _TICKET = _ref("ticket", "ticket:1", 1_799_999_900_000)
 _AGGREGATE = _ref("aggregate", "ticket:1", 1_800_000_000_000)
 _ENTRY = _ref("event", "event:entry-filled", 1_799_999_920_000)
+_PARTIAL_ENTRY = _ref(
+    "event",
+    "event:entry-partially-filled",
+    1_799_999_920_000,
+)
 _PROTECTION = _ref(
     "event",
     "event:initial-stop-confirmed",
@@ -161,6 +166,46 @@ def test_missing_positive_lifecycle_proof_is_evidence_incomplete(
 
     assert review.execution_classification == "evidence_incomplete"
     assert review.sentences[0].template_id == "economics_incomplete"
+
+
+def test_partial_fill_without_incident_cannot_replace_entry_filled_proof() -> None:
+    review = build_programmatic_review(
+        _facts(
+            entry_fill_evidence=None,
+            evidence=(
+                _TICKET,
+                _AGGREGATE,
+                _PARTIAL_ENTRY,
+                *_LIFECYCLE_REFS[1:],
+                _REVIEW,
+            ),
+        )
+    )
+
+    assert review.execution_classification == "evidence_incomplete"
+
+
+def test_resolved_partial_fill_incident_remains_entry_evidence_incomplete() -> None:
+    incident_id = "incident:ticket:1:unsupported-partial-entry-fill"
+    incident = _ref("incident", incident_id, 1_799_999_925_000)
+    review = build_programmatic_review(
+        _facts(
+            entry_fill_evidence=None,
+            incident_ids=(incident_id,),
+            recovered_incident_ids=(incident_id,),
+            incident_evidence=(incident,),
+            evidence=(
+                _TICKET,
+                _AGGREGATE,
+                _PARTIAL_ENTRY,
+                *_LIFECYCLE_REFS[1:],
+                incident,
+                _REVIEW,
+            ),
+        )
+    )
+
+    assert review.execution_classification == "evidence_incomplete"
 
 
 def test_resolved_incident_uses_exact_lifecycle_and_incident_evidence() -> None:

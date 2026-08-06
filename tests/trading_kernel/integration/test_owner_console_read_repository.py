@@ -1136,6 +1136,78 @@ async def test_review_center_status_filter_uses_each_exact_positive_proof(
         await engine.dispose()
 
 
+@pytest.mark.parametrize(
+    "resolved_partial_fill_incident",
+    (False, True),
+    ids=("without_incident", "with_resolved_incident"),
+)
+async def test_partial_fill_never_satisfies_normal_entry_proof_filter(
+    owner_read_dsn: str,
+    resolved_partial_fill_incident: bool,
+) -> None:
+    await _seed_owner_console_trades(owner_read_dsn)
+    await _execute_owner_console_admin(
+        owner_read_dsn,
+        """
+        UPDATE brc_trade_events
+        SET event_type = 'EntryPartiallyFilled'
+        WHERE event_id = 'event:y:entry-filled'
+        """,
+    )
+    if resolved_partial_fill_incident:
+        await _execute_owner_console_admin(
+            owner_read_dsn,
+            """
+            UPDATE brc_runtime_incidents
+            SET incident_kind = 'unsupported_partial_entry_fill'
+            WHERE incident_id = 'incident:y:resolved'
+            """,
+        )
+    else:
+        await _execute_owner_console_admin(
+            owner_read_dsn,
+            """
+            DELETE FROM brc_runtime_incidents
+            WHERE incident_id = 'incident:y:resolved'
+            """,
+        )
+
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            repository = PostgresOwnerReadRepository(connection)
+            complete = await repository.read_review_center_facts(
+                ReviewListQuery(
+                    from_ms=1_800_000_000_000,
+                    to_ms=1_800_001_000_000,
+                    review_status="complete",
+                )
+            )
+            incomplete = await repository.read_review_center_facts(
+                ReviewListQuery(
+                    from_ms=1_800_000_000_000,
+                    to_ms=1_800_001_000_000,
+                    review_status="incomplete_evidence",
+                )
+            )
+
+        assert "ticket:y" not in {
+            item.review.ticket_id for item in complete.items
+        }
+        partial = next(
+            item.review
+            for item in incomplete.items
+            if item.review.ticket_id == "ticket:y"
+        )
+        assert partial.entry_fill_evidence is None
+        assert (
+            build_programmatic_review(partial).execution_classification
+            == "evidence_incomplete"
+        )
+    finally:
+        await engine.dispose()
+
+
 async def test_review_center_rejects_dangling_aggregate_review_pointer(
     owner_read_dsn: str,
 ) -> None:
