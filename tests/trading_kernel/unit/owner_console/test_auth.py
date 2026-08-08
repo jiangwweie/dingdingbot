@@ -282,3 +282,60 @@ async def test_failures_at_window_boundary_do_not_accumulate() -> None:
                 source_ip=source_ip,
                 now_ms=now_ms,
             )
+
+
+async def test_unique_expired_failure_keys_are_purged_globally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = OwnerAuthService(auth_settings())
+
+    async def reject_password(*args: object, **kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", reject_password)
+    for attempt in range(32):
+        with pytest.raises(InvalidCredentials):
+            await login(
+                service,
+                username=f"attacker-{attempt}",
+                source_ip="192.0.2.10",
+                now_ms=BASE_MS,
+            )
+
+    with pytest.raises(InvalidCredentials):
+        await login(
+            service,
+            username="fresh-attacker",
+            source_ip="192.0.2.10",
+            now_ms=BASE_MS + FAILURE_WINDOW_MS,
+        )
+
+    assert len(service._failures) == 1
+
+
+async def test_failure_key_cache_rejects_new_keys_at_fixed_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = OwnerAuthService(auth_settings())
+
+    async def reject_password(*args: object, **kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", reject_password)
+    for attempt in range(4096):
+        with pytest.raises(InvalidCredentials):
+            await login(
+                service,
+                username=f"attacker-{attempt}",
+                source_ip="192.0.2.11",
+                now_ms=BASE_MS,
+            )
+
+    with pytest.raises(LoginThrottled):
+        await login(
+            service,
+            username="over-cap",
+            source_ip="192.0.2.11",
+            now_ms=BASE_MS,
+        )
+    assert len(service._failures) == 4096

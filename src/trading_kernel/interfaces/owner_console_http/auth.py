@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import heapq
 import secrets
 import unicodedata
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ _SERIALIZER_SALT = "brc-owner-console-session-v1"
 _FAILURE_LIMIT = 5
 _FAILURE_WINDOW_MS = 15 * 60_000
 _COOLDOWN_MS = 15 * 60_000
+_MAX_FAILURE_KEYS = 4096
 _MAX_USERNAME_LENGTH = 256
 _MAX_PASSWORD_HASH_LENGTH = 1024
 _MAX_TOTP_SEED_LENGTH = 256
@@ -131,6 +133,7 @@ class SessionRecord:
 @dataclass(frozen=True, slots=True)
 class _FailureRecord:
     failure_times_ms: tuple[int, ...]
+    expires_at_ms: int
     cooldown_until_ms: int | None = None
 
 
@@ -156,6 +159,7 @@ class OwnerAuthService:
         self._lock = asyncio.Lock()
         self._session: SessionRecord | None = None
         self._failures: dict[tuple[str, str], _FailureRecord] = {}
+        self._failure_expiries: list[tuple[int, tuple[str, str]]] = []
 
     async def login(
         self,
@@ -171,6 +175,12 @@ class OwnerAuthService:
         _require_nonnegative_time(now_ms)
         throttle_key = (_normalize_throttle_username(username), source_ip)
         async with self._lock:
+            self._purge_expired_failures_locked(now_ms=now_ms)
+            if (
+                throttle_key not in self._failures
+                and len(self._failures) >= _MAX_FAILURE_KEYS
+            ):
+                raise LoginThrottled
             if self._is_throttled_locked(throttle_key, now_ms=now_ms):
                 raise LoginThrottled
 
@@ -188,6 +198,11 @@ class OwnerAuthService:
 
         async with self._lock:
             if not credentials_valid:
+                if (
+                    throttle_key not in self._failures
+                    and len(self._failures) >= _MAX_FAILURE_KEYS
+                ):
+                    raise LoginThrottled
                 self._record_failure_locked(throttle_key, now_ms=now_ms)
                 raise InvalidCredentials
 
@@ -292,7 +307,10 @@ class OwnerAuthService:
         )
         if current_failures:
             if current_failures != record.failure_times_ms:
-                self._failures[key] = _FailureRecord(current_failures)
+                self._failures[key] = _FailureRecord(
+                    failure_times_ms=current_failures,
+                    expires_at_ms=record.expires_at_ms,
+                )
         else:
             self._failures.pop(key, None)
         return False
@@ -310,10 +328,21 @@ class OwnerAuthService:
         cooldown_until_ms = (
             now_ms + _COOLDOWN_MS if len(new_times) >= _FAILURE_LIMIT else None
         )
-        self._failures[key] = _FailureRecord(
+        expires_at_ms = cooldown_until_ms or now_ms + _FAILURE_WINDOW_MS
+        record = _FailureRecord(
             failure_times_ms=new_times,
+            expires_at_ms=expires_at_ms,
             cooldown_until_ms=cooldown_until_ms,
         )
+        self._failures[key] = record
+        heapq.heappush(self._failure_expiries, (record.expires_at_ms, key))
+
+    def _purge_expired_failures_locked(self, *, now_ms: int) -> None:
+        while self._failure_expiries and self._failure_expiries[0][0] <= now_ms:
+            expires_at_ms, key = heapq.heappop(self._failure_expiries)
+            record = self._failures.get(key)
+            if record is not None and record.expires_at_ms == expires_at_ms:
+                self._failures.pop(key, None)
 
 
 def _verify_password(password_hash: str, password: str) -> bool:
