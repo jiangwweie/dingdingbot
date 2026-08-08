@@ -313,7 +313,7 @@ async def test_unique_expired_failure_keys_are_purged_globally(
     assert len(service._failures) == 1
 
 
-async def test_failure_key_cache_rejects_new_keys_at_fixed_cap(
+async def test_full_failure_cache_preserves_new_identity_authentication_state_machine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = OwnerAuthService(auth_settings())
@@ -331,11 +331,35 @@ async def test_failure_key_cache_rejects_new_keys_at_fixed_cap(
                 now_ms=BASE_MS,
             )
 
+    async def accept_password(*args: object, **kwargs: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", accept_password)
+    session = await login(
+        service,
+        username="owner",
+        source_ip="192.0.2.12",
+        now_ms=BASE_MS + 1,
+    )
+    assert await service.validate_cookie(session.cookie, now_ms=BASE_MS + 2)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", reject_password)
+    for attempt in range(5):
+        with pytest.raises(InvalidCredentials):
+            await login(
+                service,
+                username="over-cap",
+                source_ip="192.0.2.11",
+                now_ms=BASE_MS + 3 + attempt,
+            )
+
     with pytest.raises(LoginThrottled):
         await login(
             service,
             username="over-cap",
             source_ip="192.0.2.11",
-            now_ms=BASE_MS,
+            now_ms=BASE_MS + 8,
         )
     assert len(service._failures) == 4096
+    assert ("attacker-0", "192.0.2.11") not in service._failures
+    assert ("over-cap", "192.0.2.11") in service._failures
