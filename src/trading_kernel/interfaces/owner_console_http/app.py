@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any
 
+import ccxt.async_support as ccxt_async
 import sqlalchemy as sa
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -15,13 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.trading_kernel.application.owner_console.causality import ContradictoryFacts
 from src.trading_kernel.application.owner_console.signals import SignalNotFound
+from src.trading_kernel.infrastructure.binance_public_market_source import (
+    CcxtBinancePublicMarketSource,
+)
 from src.trading_kernel.infrastructure.owner_market_data import OwnerMarketData
 from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     create_owner_read_engine,
     owner_read_transaction,
-)
-from src.trading_kernel.infrastructure.production_runtime import (
-    build_binance_usdm_market_source,
 )
 from src.trading_kernel.interfaces.owner_console_http.auth import (
     InvalidCredentials,
@@ -58,27 +59,38 @@ def create_owner_console_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        read_engine = (
-            engine
-            if engine is not None
-            else create_owner_read_engine(settings.database_dsn)
-        )
-        public_market_data = (
-            market_data
-            if market_data is not None
-            else OwnerMarketData(build_binance_usdm_market_source())
-        )
-        app.state.owner_console_settings = settings
-        app.state.owner_console_engine = read_engine
-        app.state.owner_market_data = public_market_data
-        app.state.owner_auth_service = OwnerAuthService(settings.auth)
-        app.state.owner_clock_ms = clock_ms if clock_ms is not None else current_time_ms
+        read_engine: AsyncEngine | None = None
+        public_market_data: OwnerMarketData | None = None
+        primary_error: BaseException | None = None
         try:
-            await _verify_startup_read_transaction(cast(AsyncEngine, read_engine))
+            read_engine = (
+                engine
+                if engine is not None
+                else create_owner_read_engine(settings.database_dsn)
+            )
+            public_market_data = (
+                market_data
+                if market_data is not None
+                else _build_owner_market_data(settings)
+            )
+            app.state.owner_console_settings = settings
+            app.state.owner_console_engine = read_engine
+            app.state.owner_market_data = public_market_data
+            app.state.owner_auth_service = OwnerAuthService(settings.auth)
+            app.state.owner_clock_ms = (
+                clock_ms if clock_ms is not None else current_time_ms
+            )
+            await _verify_startup_read_transaction(read_engine)
             yield
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
-            await read_engine.dispose()
-            await public_market_data.close()
+            await _cleanup_lifespan_resources(
+                engine=read_engine,
+                market_data=public_market_data,
+                primary_error=primary_error,
+            )
 
     app = FastAPI(lifespan=lifespan)
     app.include_router(auth_router)
@@ -116,6 +128,61 @@ async def _verify_startup_read_transaction(engine: AsyncEngine) -> None:
         or statement_timeout != "3s"
     ):
         raise RuntimeError("Owner Console read transaction verification failed")
+
+
+def _build_owner_market_data(settings: OwnerConsoleSettings) -> OwnerMarketData:
+    timeout_ms = max(1, int(settings.market_timeout_seconds * 1_000))
+    exchange = ccxt_async.binanceusdm(
+        {
+            "enableRateLimit": True,
+            "timeout": timeout_ms,
+            "options": {
+                "defaultType": "future",
+                "adjustForTimeDifference": True,
+            },
+        }
+    )
+    return OwnerMarketData(
+        CcxtBinancePublicMarketSource(
+            exchange=exchange,
+            timeout_seconds=settings.market_timeout_seconds,
+        )
+    )
+
+
+async def _cleanup_lifespan_resources(
+    *,
+    engine: AsyncEngine | None,
+    market_data: OwnerMarketData | None,
+    primary_error: BaseException | None,
+) -> None:
+    failures: list[tuple[str, BaseException]] = []
+    for name, cleanup in (
+        ("engine dispose", None if engine is None else engine.dispose),
+        ("public market close", None if market_data is None else market_data.close),
+    ):
+        if cleanup is None:
+            continue
+        try:
+            await cleanup()
+        except BaseException as cleanup_error:  # noqa: BLE001 - cleanup must be complete
+            failures.append((name, cleanup_error))
+
+    if not failures:
+        return
+    if primary_error is not None:
+        for name, cleanup_failure in failures:
+            primary_error.add_note(
+                f"Owner Console cleanup {name} failed: {cleanup_failure!r}"
+            )
+        return
+    first_name, first_error = failures[0]
+    first_error.add_note(f"Owner Console cleanup first failed step: {first_name}")
+    for name, cleanup_failure in failures[1:]:
+        first_error.add_note(
+            f"Owner Console cleanup {name} also failed: {cleanup_failure!r}"
+        )
+    raise first_error
 
 
 def _register_error_handlers(app: FastAPI) -> None:
