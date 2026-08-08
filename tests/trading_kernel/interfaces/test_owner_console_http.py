@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import cast
+from importlib import import_module
+from typing import Any, cast
 
 import pyotp
 import pytest
@@ -12,6 +13,24 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.types import Message, Scope
 
+from src.trading_kernel.application.owner_console.models import (
+    CandleQuery,
+    CandleSeries,
+    CandleView,
+    EvidenceRef,
+    Freshness,
+    OverviewEvidenceGap,
+    OverviewFacts,
+    ReviewCenterFacts,
+    ReviewListQuery,
+    SignalDetailFacts,
+    SignalListQuery,
+    SignalPageFacts,
+    TradeCausalityFacts,
+    TradeListQuery,
+    TradePageFacts,
+)
+from src.trading_kernel.infrastructure import pg_owner_read_repository
 from src.trading_kernel.infrastructure.owner_market_data import OwnerMarketData
 from src.trading_kernel.interfaces.owner_console_http import app as app_module
 from src.trading_kernel.interfaces.owner_console_http.app import (
@@ -19,6 +38,13 @@ from src.trading_kernel.interfaces.owner_console_http.app import (
     create_owner_console_app,
 )
 from src.trading_kernel.interfaces.owner_console_http.auth import OwnerAuthSettings
+
+_FACTORIES = import_module("tests.trading_kernel.unit.owner_console.factories")
+overview_facts = cast(Any, _FACTORIES.overview_facts)
+signal_detail_facts = cast(Any, _FACTORIES.signal_detail_facts)
+signal_item_facts = cast(Any, _FACTORIES.signal_item_facts)
+trade_causality_facts = cast(Any, _FACTORIES.trade_causality_facts)
+trade_item_facts = cast(Any, _FACTORIES.trade_item_facts)
 
 PASSWORD = "correct horse"
 TOTP_SEED = "JBSWY3DPEHPK3PXP"
@@ -82,6 +108,7 @@ class _ReadOnlyEngine:
         dispose_error: BaseException | None = None,
     ) -> None:
         self.dispose_calls = 0
+        self.transaction_count = 0
         self._dispose_error = dispose_error
         self._values = {
             "SHOW transaction_read_only": "on",
@@ -90,6 +117,7 @@ class _ReadOnlyEngine:
         }
 
     def connect(self) -> _ConnectionContext:
+        self.transaction_count += 1
         return _ConnectionContext(self._values)
 
     async def dispose(self) -> None:
@@ -101,6 +129,8 @@ class _ReadOnlyEngine:
 class _PublicMarketData:
     def __init__(self, *, close_error: BaseException | None = None) -> None:
         self.close_calls = 0
+        self.requests: list[CandleQuery] = []
+        self.read_error: Exception | None = None
         self._close_error = close_error
 
     async def close(self) -> None:
@@ -108,9 +138,111 @@ class _PublicMarketData:
         if self._close_error is not None:
             raise self._close_error
 
+    async def read_candles(self, request: CandleQuery) -> CandleSeries:
+        self.requests.append(request)
+        if self.read_error is not None:
+            raise self.read_error
+        return CandleSeries(
+            candles=(
+                CandleView(
+                    open_time_ms=request.closed_at_ms - 900_000,
+                    close_time_ms=request.closed_at_ms,
+                    open="100.00",
+                    high="102.00",
+                    low="99.00",
+                    close="101.00",
+                    volume="12.50",
+                ),
+            )
+        )
+
+
+class _RepositorySpy:
+    def __init__(self) -> None:
+        self.overview_requests: list[tuple[int, int]] = []
+        self.signal_queries: list[SignalListQuery] = []
+        self.signal_detail_ids: list[str] = []
+        self.trade_queries: list[TradeListQuery] = []
+        self.causality_ids: list[str] = []
+        self.review_queries: list[ReviewListQuery] = []
+        self.overview_facts_override: OverviewFacts | None = None
+
+    async def read_overview_facts(
+        self,
+        day_start_ms: int,
+        now_ms: int,
+    ) -> OverviewFacts:
+        self.overview_requests.append((day_start_ms, now_ms))
+        if self.overview_facts_override is not None:
+            return self.overview_facts_override
+        return overview_facts(observed_at_ms=now_ms)
+
+    async def read_signal_page_facts(
+        self,
+        query: SignalListQuery,
+    ) -> SignalPageFacts:
+        self.signal_queries.append(query)
+        return SignalPageFacts(
+            items=(signal_item_facts(),),
+            requested_limit=query.limit,
+        )
+
+    async def read_signal_detail_facts(
+        self,
+        signal_event_id: str,
+    ) -> SignalDetailFacts:
+        self.signal_detail_ids.append(signal_event_id)
+        return signal_detail_facts()
+
+    async def read_trade_page_facts(
+        self,
+        query: TradeListQuery,
+    ) -> TradePageFacts:
+        self.trade_queries.append(query)
+        return TradePageFacts(
+            items=(trade_item_facts(),),
+            requested_limit=query.limit,
+        )
+
+    async def read_trade_causality_facts(
+        self,
+        ticket_id: str,
+    ) -> TradeCausalityFacts | None:
+        self.causality_ids.append(ticket_id)
+        return None if ticket_id == "ticket:missing" else trade_causality_facts()
+
+    async def read_review_center_facts(
+        self,
+        query: ReviewListQuery,
+    ) -> ReviewCenterFacts:
+        self.review_queries.append(query)
+        return ReviewCenterFacts(
+            from_ms=query.from_ms,
+            to_ms=query.to_ms,
+            items=(),
+            requested_limit=query.limit,
+            requested_strategy_group_id=query.strategy_group_id,
+        )
+
+
+@pytest.fixture
+def repository_spy(monkeypatch: pytest.MonkeyPatch) -> _RepositorySpy:
+    spy = _RepositorySpy()
+    monkeypatch.setattr(
+        pg_owner_read_repository,
+        "PostgresOwnerReadRepository",
+        lambda _connection: spy,
+    )
+    return spy
+
 
 @pytest_asyncio.fixture
-async def owner_console_app() -> AsyncIterator[FastAPI]:
+async def owner_console_app(
+    repository_spy: _RepositorySpy,
+    market_data_spy: _PublicMarketData,
+) -> AsyncIterator[FastAPI]:
+    del repository_spy
+    engine = _ReadOnlyEngine()
     app = create_owner_console_app(
         OwnerConsoleSettings(
             database_dsn="postgresql+asyncpg://unused",
@@ -122,12 +254,301 @@ async def owner_console_app() -> AsyncIterator[FastAPI]:
                 session_signing_key="test-signing-key-with-enough-random-looking-material",
             ),
         ),
-        engine=cast(AsyncEngine, _ReadOnlyEngine()),
-        market_data=cast(OwnerMarketData, _PublicMarketData()),
+        engine=cast(AsyncEngine, engine),
+        market_data=cast(OwnerMarketData, market_data_spy),
         clock_ms=lambda: BASE_MS,
     )
     async with app.router.lifespan_context(app):
+        engine.transaction_count = 0
         yield app
+
+
+@pytest.fixture
+def market_data_spy() -> _PublicMarketData:
+    return _PublicMarketData()
+
+
+@pytest_asyncio.fixture
+async def owner_console_client(
+    owner_console_app: FastAPI,
+) -> AsyncIterator[AsyncClient]:
+    async with AsyncClient(
+        transport=ASGITransport(app=owner_console_app),
+        base_url="https://owner.example.test",
+    ) as client:
+        response = await client.post(
+            "/api/owner/v1/auth/login",
+            json={
+                "username": "owner",
+                "password": PASSWORD,
+                "totp_code": pyotp.TOTP(TOTP_SEED).at(BASE_MS // 1_000),
+            },
+        )
+        assert response.status_code == 204
+        yield client
+
+
+async def test_overview_uses_one_read_transaction_and_envelope(
+    owner_console_client: AsyncClient,
+    owner_console_app: FastAPI,
+) -> None:
+    response = await owner_console_client.get("/api/owner/v1/overview")
+
+    assert response.status_code == 200
+    assert response.json()["freshness"] in {"fresh", "stale"}
+    assert (
+        response.json()["data"]["account_snapshot"]["label"]
+        == "Latest Admission Snapshot"
+    )
+    assert (
+        response.json()["data"]["account_snapshot"]["wallet_balance"]["value"]
+        == "100.00"
+    )
+    assert response.json()["snapshot_id"].startswith("snap:")
+    assert response.json()["generated_at"] == "2027-01-15T08:00:00.000Z"
+    assert response.json()["source_watermark"] == "2027-01-15T08:00:00.000Z"
+    engine = cast(_ReadOnlyEngine, owner_console_app.state.owner_console_engine)
+    assert engine.transaction_count == 1
+
+
+async def test_overview_missing_rows_do_not_claim_generated_source_watermark(
+    owner_console_client: AsyncClient,
+    repository_spy: _RepositorySpy,
+) -> None:
+    repository_spy.overview_facts_override = overview_facts(
+        runtime_freshness=Freshness.UNAVAILABLE,
+        freshness_evidence_identity="owner_policy:configured",
+        freshness_evidence_at_ms=BASE_MS,
+        max_concurrent_tickets=None,
+        active_ticket_count=None,
+        active_ticket_ids=(),
+        latest_capacity_claim_id=None,
+        latest_wallet_balance_at_claim=None,
+        latest_available_margin_at_claim=None,
+        latest_claim_created_at_ms=None,
+        monitor_statuses=(),
+        monitor_keys=(),
+        monitor_updated_at_ms=(),
+        today_signal_count=0,
+        admitted_signal_count=0,
+        rejected_signal_count=0,
+        execution_incident_count=None,
+        evidence_gaps=(
+            OverviewEvidenceGap(
+                reason="configured_owner_authority_missing",
+                evidence=EvidenceRef(
+                    kind="event",
+                    identity="owner_policy:configured",
+                    occurred_at_ms=BASE_MS,
+                ),
+            ),
+        ),
+        evidence=(),
+    )
+
+    response = await owner_console_client.get("/api/owner/v1/overview")
+
+    assert response.status_code == 200
+    assert response.json()["freshness"] == "unavailable"
+    assert response.json()["source_watermark"] is None
+
+
+async def test_candles_do_not_open_database_transaction(
+    owner_console_client: AsyncClient,
+    owner_console_app: FastAPI,
+) -> None:
+    response = await owner_console_client.get(
+        "/api/owner/v1/market/candles",
+        params={
+            "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
+            "timeframe": "15m",
+            "limit": 300,
+            "closed_at_ms": BASE_MS,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["source_watermark"] == "2027-01-15T08:00:00.000Z"
+    engine = cast(_ReadOnlyEngine, owner_console_app.state.owner_console_engine)
+    assert engine.transaction_count == 0
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/api/owner/v1/signals",
+        "/api/owner/v1/tickets",
+        "/api/owner/v1/review",
+    ),
+)
+async def test_list_limit_above_hard_cap_returns_422(
+    owner_console_client: AsyncClient,
+    path: str,
+) -> None:
+    response = await owner_console_client.get(
+        path,
+        params={"limit": 101},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/api/owner/v1/signals",
+        "/api/owner/v1/signals/signal:1",
+        "/api/owner/v1/tickets",
+        "/api/owner/v1/tickets/ticket:1/causality",
+        "/api/owner/v1/review",
+    ),
+)
+async def test_each_postgres_data_route_uses_one_read_transaction(
+    owner_console_client: AsyncClient,
+    owner_console_app: FastAPI,
+    path: str,
+) -> None:
+    response = await owner_console_client.get(path)
+
+    assert response.status_code == 200
+    engine = cast(_ReadOnlyEngine, owner_console_app.state.owner_console_engine)
+    assert engine.transaction_count == 1
+
+
+async def test_list_routes_use_clock_derived_default_windows(
+    owner_console_client: AsyncClient,
+    repository_spy: _RepositorySpy,
+) -> None:
+    responses = (
+        await owner_console_client.get("/api/owner/v1/signals"),
+        await owner_console_client.get("/api/owner/v1/tickets"),
+        await owner_console_client.get("/api/owner/v1/review"),
+    )
+
+    assert [response.status_code for response in responses] == [200, 200, 200]
+    assert repository_spy.signal_queries == [
+        SignalListQuery(from_ms=BASE_MS - 7 * 86_400_000, to_ms=BASE_MS)
+    ]
+    assert repository_spy.trade_queries == [
+        TradeListQuery(from_ms=BASE_MS - 30 * 86_400_000, to_ms=BASE_MS)
+    ]
+    assert repository_spy.review_queries == [
+        ReviewListQuery(from_ms=BASE_MS - 30 * 86_400_000, to_ms=BASE_MS)
+    ]
+
+
+async def test_shifted_window_is_bounded_to_ninety_days(
+    owner_console_client: AsyncClient,
+    owner_console_app: FastAPI,
+) -> None:
+    accepted = await owner_console_client.get(
+        "/api/owner/v1/tickets",
+        params={"from_ms": BASE_MS - 90 * 86_400_000, "to_ms": BASE_MS},
+    )
+    rejected = await owner_console_client.get(
+        "/api/owner/v1/tickets",
+        params={"from_ms": BASE_MS - 90 * 86_400_000 - 1, "to_ms": BASE_MS},
+    )
+
+    assert accepted.status_code == 200
+    assert rejected.status_code == 422
+    engine = cast(_ReadOnlyEngine, owner_console_app.state.owner_console_engine)
+    assert engine.transaction_count == 1
+
+
+async def test_candle_limit_defaults_to_300_and_caps_at_500(
+    owner_console_client: AsyncClient,
+    market_data_spy: _PublicMarketData,
+) -> None:
+    defaulted = await owner_console_client.get(
+        "/api/owner/v1/market/candles",
+        params={
+            "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
+            "timeframe": "15m",
+            "closed_at_ms": BASE_MS,
+        },
+    )
+    capped = await owner_console_client.get(
+        "/api/owner/v1/market/candles",
+        params={
+            "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
+            "timeframe": "15m",
+            "limit": 501,
+            "closed_at_ms": BASE_MS,
+        },
+    )
+
+    assert defaulted.status_code == 200
+    assert market_data_spy.requests[0].limit == 300
+    assert capped.status_code == 422
+    assert len(market_data_spy.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (TimeoutError("market timeout"), ValueError("malformed response")),
+)
+async def test_market_failures_use_stable_502_shape(
+    owner_console_client: AsyncClient,
+    market_data_spy: _PublicMarketData,
+    failure: Exception,
+) -> None:
+    market_data_spy.read_error = failure
+
+    response = await owner_console_client.get(
+        "/api/owner/v1/market/candles",
+        params={
+            "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
+            "timeframe": "15m",
+            "closed_at_ms": BASE_MS,
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "error": {
+            "code": "market_data_unavailable",
+            "message": "Public market data is unavailable",
+        }
+    }
+
+
+async def test_missing_ticket_causality_uses_stable_404_shape(
+    owner_console_client: AsyncClient,
+) -> None:
+    response = await owner_console_client.get(
+        "/api/owner/v1/tickets/ticket:missing/causality"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": {"code": "not_found", "message": "Resource not found"}
+    }
+
+
+async def test_openapi_contains_only_health_auth_and_read_routes(
+    owner_console_app: FastAPI,
+) -> None:
+    paths = set(owner_console_app.openapi()["paths"])
+
+    assert paths == {
+        "/healthz",
+        "/api/owner/v1/auth/login",
+        "/api/owner/v1/auth/logout",
+        "/api/owner/v1/auth/session",
+        "/api/owner/v1/overview",
+        "/api/owner/v1/signals",
+        "/api/owner/v1/signals/{signal_event_id}",
+        "/api/owner/v1/tickets",
+        "/api/owner/v1/tickets/{ticket_id}/causality",
+        "/api/owner/v1/review",
+        "/api/owner/v1/market/candles",
+    }
+    assert not any(
+        method in path_item
+        for path_item in owner_console_app.openapi()["paths"].values()
+        for method in ("put", "patch", "delete")
+    )
 
 
 async def test_login_sets_strict_secure_http_only_cookie(

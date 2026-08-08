@@ -13,6 +13,10 @@ class PublicMarketFailure(Exception):
     """Raised when bounded credential-free market data cannot be read."""
 
 
+class OwnerResourceNotFound(LookupError):
+    """Raised when an exact Owner read identity does not exist."""
+
+
 def error_response(
     *,
     status_code: int,

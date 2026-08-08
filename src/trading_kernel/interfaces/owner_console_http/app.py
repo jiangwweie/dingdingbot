@@ -15,7 +15,16 @@ from sqlalchemy.exc import TimeoutError as SqlAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.trading_kernel.application.owner_console.causality import ContradictoryFacts
-from src.trading_kernel.application.owner_console.signals import SignalNotFound
+from src.trading_kernel.application.owner_console.programmatic_review import (
+    ProgrammaticReviewContradiction,
+)
+from src.trading_kernel.application.owner_console.signals import (
+    SignalFactsContradiction,
+    SignalNotFound,
+)
+from src.trading_kernel.application.owner_console.trades import (
+    TradeFactsContradiction,
+)
 from src.trading_kernel.infrastructure.binance_public_market_source import (
     CcxtBinancePublicMarketSource,
 )
@@ -35,6 +44,7 @@ from src.trading_kernel.interfaces.owner_console_http.dependencies import (
     require_authenticated,
 )
 from src.trading_kernel.interfaces.owner_console_http.errors import (
+    OwnerResourceNotFound,
     PublicMarketFailure,
     UnauthorizedError,
     error_response,
@@ -42,6 +52,21 @@ from src.trading_kernel.interfaces.owner_console_http.errors import (
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.auth import (
     router as auth_router,
+)
+from src.trading_kernel.interfaces.owner_console_http.routes.market import (
+    router as market_router,
+)
+from src.trading_kernel.interfaces.owner_console_http.routes.overview import (
+    router as overview_router,
+)
+from src.trading_kernel.interfaces.owner_console_http.routes.review import (
+    router as review_router,
+)
+from src.trading_kernel.interfaces.owner_console_http.routes.signals import (
+    router as signals_router,
+)
+from src.trading_kernel.interfaces.owner_console_http.routes.tickets import (
+    router as tickets_router,
 )
 
 _API_PREFIX = "/api/owner/v1"
@@ -94,6 +119,11 @@ def create_owner_console_app(
 
     app = FastAPI(lifespan=lifespan)
     app.include_router(auth_router)
+    app.include_router(overview_router)
+    app.include_router(signals_router)
+    app.include_router(tickets_router)
+    app.include_router(review_router)
+    app.include_router(market_router)
     _register_error_handlers(app)
 
     @app.middleware("http")
@@ -108,7 +138,7 @@ def create_owner_console_app(
                 return unauthorized_response()
         return await call_next(request)
 
-    @app.get("/healthz", include_in_schema=False)
+    @app.get("/healthz")
     async def healthz(request: Request) -> Response:
         if not _is_unix_socket_request(request):
             return Response(status_code=404)
@@ -190,7 +220,20 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(InvalidCredentials, _handle_invalid_credentials)
     app.add_exception_handler(LoginThrottled, _handle_login_throttled)
     app.add_exception_handler(SignalNotFound, _handle_not_found)
+    app.add_exception_handler(OwnerResourceNotFound, _handle_not_found)
     app.add_exception_handler(ContradictoryFacts, _handle_contradictory_facts)
+    app.add_exception_handler(
+        SignalFactsContradiction,
+        _handle_contradictory_facts,
+    )
+    app.add_exception_handler(
+        TradeFactsContradiction,
+        _handle_contradictory_facts,
+    )
+    app.add_exception_handler(
+        ProgrammaticReviewContradiction,
+        _handle_contradictory_facts,
+    )
     app.add_exception_handler(asyncio.TimeoutError, _handle_query_timeout)
     app.add_exception_handler(SqlAlchemyTimeoutError, _handle_query_timeout)
     app.add_exception_handler(PublicMarketFailure, _handle_market_failure)

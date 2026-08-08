@@ -8,8 +8,10 @@ from typing import Literal, cast
 
 from fastapi import Request
 from pydantic import Field
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.trading_kernel.application.owner_console.models import FrozenModel
+from src.trading_kernel.infrastructure.owner_market_data import OwnerMarketData
 from src.trading_kernel.interfaces.owner_console_http.auth import (
     OwnerAuthService,
     OwnerAuthSettings,
@@ -47,13 +49,31 @@ def get_auth_service(request: Request) -> OwnerAuthService:
     return cast(OwnerAuthService, request.app.state.owner_auth_service)
 
 
+def get_read_engine(request: Request) -> AsyncEngine:
+    """Read the sole lifespan-owned PostgreSQL read engine."""
+
+    return cast(AsyncEngine, request.app.state.owner_console_engine)
+
+
+def get_market_data(request: Request) -> OwnerMarketData:
+    """Read the sole lifespan-owned credential-free market adapter."""
+
+    return cast(OwnerMarketData, request.app.state.owner_market_data)
+
+
+def get_clock_ms(request: Request) -> int:
+    """Read the injected clock once for one HTTP page snapshot."""
+
+    return cast(Callable[[], int], request.app.state.owner_clock_ms)()
+
+
 async def require_authenticated(request: Request) -> None:
     """Require the sole signed Session cookie and expose no validation detail."""
 
     settings = get_settings(request)
     authenticated = await get_auth_service(request).validate_cookie(
         request.cookies.get(settings.cookie_name),
-        now_ms=_clock_ms(request),
+        now_ms=get_clock_ms(request),
     )
     if not authenticated:
         raise UnauthorizedError
@@ -65,7 +85,3 @@ def trusted_source_ip(request: Request) -> str:
     if request.client is None:
         return "unix-socket"
     return request.client.host
-
-
-def _clock_ms(request: Request) -> int:
-    return cast(Callable[[], int], request.app.state.owner_clock_ms)()
