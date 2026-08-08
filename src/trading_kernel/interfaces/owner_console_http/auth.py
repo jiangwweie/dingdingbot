@@ -21,7 +21,6 @@ _SERIALIZER_SALT = "brc-owner-console-session-v1"
 _FAILURE_LIMIT = 5
 _FAILURE_WINDOW_MS = 15 * 60_000
 _COOLDOWN_MS = 15 * 60_000
-_MAX_FAILURE_KEYS = 4096
 _MAX_USERNAME_LENGTH = 256
 _MAX_PASSWORD_HASH_LENGTH = 1024
 _MAX_TOTP_SEED_LENGTH = 256
@@ -193,11 +192,6 @@ class OwnerAuthService:
 
         async with self._lock:
             if not credentials_valid:
-                if (
-                    throttle_key not in self._failures
-                    and len(self._failures) >= _MAX_FAILURE_KEYS
-                ):
-                    self._evict_earliest_failure_locked()
                 self._record_failure_locked(throttle_key, now_ms=now_ms)
                 raise InvalidCredentials
 
@@ -338,22 +332,6 @@ class OwnerAuthService:
             record = self._failures.get(key)
             if record is not None and record.expires_at_ms == expires_at_ms:
                 self._failures.pop(key, None)
-
-    def _evict_earliest_failure_locked(self) -> None:
-        while self._failure_expiries:
-            expires_at_ms, key = heapq.heappop(self._failure_expiries)
-            record = self._failures.get(key)
-            if record is not None and record.expires_at_ms == expires_at_ms:
-                self._failures.pop(key, None)
-                return
-
-        if self._failures:
-            key = min(
-                self._failures,
-                key=lambda item: (self._failures[item].expires_at_ms, item),
-            )
-            self._failures.pop(key, None)
-
 
 def _verify_password(password_hash: str, password: str) -> bool:
     try:

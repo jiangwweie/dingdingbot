@@ -293,7 +293,7 @@ async def test_unique_expired_failure_keys_are_purged_globally(
         return False
 
     monkeypatch.setattr(anyio.to_thread, "run_sync", reject_password)
-    for attempt in range(32):
+    for attempt in range(1024):
         with pytest.raises(InvalidCredentials):
             await login(
                 service,
@@ -313,53 +313,50 @@ async def test_unique_expired_failure_keys_are_purged_globally(
     assert len(service._failures) == 1
 
 
-async def test_full_failure_cache_preserves_new_identity_authentication_state_machine(
+@pytest.mark.parametrize("initial_failures", (4, 5))
+async def test_live_failure_state_survives_unique_identity_churn(
     monkeypatch: pytest.MonkeyPatch,
+    initial_failures: int,
 ) -> None:
     service = OwnerAuthService(auth_settings())
+    target_username = f"target-{initial_failures}"
+    source_ip = "192.0.2.11"
 
     async def reject_password(*args: object, **kwargs: Any) -> bool:
         return False
 
     monkeypatch.setattr(anyio.to_thread, "run_sync", reject_password)
+    for attempt in range(initial_failures):
+        with pytest.raises(InvalidCredentials):
+            await login(
+                service,
+                username=target_username,
+                source_ip=source_ip,
+                now_ms=BASE_MS + attempt,
+            )
+
     for attempt in range(4096):
         with pytest.raises(InvalidCredentials):
             await login(
                 service,
-                username=f"attacker-{attempt}",
-                source_ip="192.0.2.11",
-                now_ms=BASE_MS,
+                username=f"churn-{attempt}",
+                source_ip=source_ip,
+                now_ms=BASE_MS + 10,
             )
 
-    async def accept_password(*args: object, **kwargs: Any) -> bool:
-        return True
-
-    monkeypatch.setattr(anyio.to_thread, "run_sync", accept_password)
-    session = await login(
-        service,
-        username="owner",
-        source_ip="192.0.2.12",
-        now_ms=BASE_MS + 1,
-    )
-    assert await service.validate_cookie(session.cookie, now_ms=BASE_MS + 2)
-
-    monkeypatch.setattr(anyio.to_thread, "run_sync", reject_password)
-    for attempt in range(5):
+    if initial_failures == 4:
         with pytest.raises(InvalidCredentials):
             await login(
                 service,
-                username="over-cap",
-                source_ip="192.0.2.11",
-                now_ms=BASE_MS + 3 + attempt,
+                username=target_username,
+                source_ip=source_ip,
+                now_ms=BASE_MS + 20,
             )
 
     with pytest.raises(LoginThrottled):
         await login(
             service,
-            username="over-cap",
-            source_ip="192.0.2.11",
-            now_ms=BASE_MS + 8,
+            username=target_username,
+            source_ip=source_ip,
+            now_ms=BASE_MS + 21,
         )
-    assert len(service._failures) == 4096
-    assert ("attacker-0", "192.0.2.11") not in service._failures
-    assert ("over-cap", "192.0.2.11") in service._failures
