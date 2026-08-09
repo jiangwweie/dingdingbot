@@ -47,6 +47,8 @@ def test_owner_console_nginx_include_is_same_origin_and_manual_cache_safe() -> N
     assert "proxy_cache off" in source
     assert 'Cache-Control "no-store"' in source
     assert "expires 1y" in source
+    assert "/opt/brc/owner-console/current/dist" in source
+    assert "/opt/brc/current/frontend/owner-console/dist" not in source
 
 
 def test_owner_console_postgresql_role_is_read_only_and_select_only() -> None:

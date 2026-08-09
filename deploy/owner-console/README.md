@@ -53,6 +53,29 @@ pnpm --dir frontend/owner-console build
 The four Kernel workers continue to use `.venv`. Nginx serves only the built
 `frontend/owner-console/dist` directory, so Node.js is not a runtime process.
 
+Install each verified static build under an Nginx-readable independent release
+root instead of serving through `/opt/brc/current`. Kernel releases are owned
+by `brc:brc` and intentionally are not traversable by the `www-data` Nginx
+worker.
+
+```bash
+sudo install -d -o root -g www-data -m 0750 /opt/brc/owner-console
+sudo install -d -o root -g www-data -m 0750 /opt/brc/owner-console/releases
+sudo install -d -o root -g www-data -m 0750 \
+  /opt/brc/owner-console/releases/<commit>/dist
+sudo cp -a frontend/owner-console/dist/. \
+  /opt/brc/owner-console/releases/<commit>/dist/
+sudo chown -R root:www-data /opt/brc/owner-console/releases/<commit>
+sudo find /opt/brc/owner-console/releases/<commit> -type d -exec chmod 0750 {} +
+sudo find /opt/brc/owner-console/releases/<commit> -type f -exec chmod 0640 {} +
+sudo ln -sfn /opt/brc/owner-console/releases/<commit> \
+  /opt/brc/owner-console/current
+```
+
+The Nginx include reads only
+`/opt/brc/owner-console/current/dist`. Switching this symlink does not stop or
+restart the Owner API or any Trading Kernel worker.
+
 ## systemd Credentials
 
 Create `/etc/brc/owner-console-credentials` as root with mode `0700` and store
