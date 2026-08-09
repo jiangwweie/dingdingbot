@@ -25,6 +25,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     budget_reservations,
     entry_lane_current,
     exchange_commands,
+    owner_authorizations,
     owner_policy_current,
     owner_policy_events,
     positions_current,
@@ -32,6 +33,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_incidents,
     runtime_profiles,
     schema_metadata,
+    strategy_entry_control_events,
+    strategy_entry_controls_current,
     trade_aggregates,
     trade_reviews,
     trade_tickets,
@@ -50,6 +53,7 @@ GLOBAL_ENTRY_LANE_ID = "global-entry"
 VENUE_ID = "binance-usdm"
 POSITION_MODE = "independent_sides"
 COMPATIBLE_SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
+OWNER_CONTROL_SOURCE_SCHEMA_REVISION = "0003_portfolio_admission_observability"
 _RUNTIME_FENCE_INCIDENT_ID = "incident:runtime-fence"
 _RUNTIME_FENCE_INCIDENT_KIND = "runtime_identity_mismatch"
 _PRESERVATION_METADATA_KEYS = frozenset(
@@ -253,6 +257,12 @@ async def seed_runtime_authority(
 
     registry = await seed_strategy_registry(uow, seeded_at_ms=request.seeded_at_ms)
     connection = uow._require_connection()
+    control_inserted_count = 0
+    if request.schema_revision == "0004_owner_control_plane":
+        control_inserted_count = await _seed_strategy_entry_controls(
+            connection,
+            seeded_at_ms=request.seeded_at_ms,
+        )
     allowed_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
     seed_identity = _seed_identity(
         account_id=request.account_id,
@@ -414,7 +424,7 @@ async def seed_runtime_authority(
         registry_semantic_hash=registry.registry_semantic_hash,
         runtime_seed_semantic_hash=seed_identity,
         registry_inserted_count=registry.total_inserted_count,
-        runtime_inserted_count=inserted,
+        runtime_inserted_count=inserted + control_inserted_count,
     )
 
 
@@ -448,9 +458,13 @@ async def deploy_compatible_upgrade_identity(
             request,
             allow_compatible_runtime_fence=True,
         )
-    if metadata_rows.get("schema_revision") != COMPATIBLE_SOURCE_SCHEMA_REVISION:
+    source_schema_revision = metadata_rows.get("schema_revision")
+    if source_schema_revision not in {
+        COMPATIBLE_SOURCE_SCHEMA_REVISION,
+        OWNER_CONTROL_SOURCE_SCHEMA_REVISION,
+    }:
         raise RuntimeAuthorityTransitionRefused(
-            "compatible identity requires the exact 0002 source authority"
+            "compatible identity requires an approved flat source authority"
         )
 
     await _require_flat_compatible_upgrade_activity(
@@ -459,16 +473,34 @@ async def deploy_compatible_upgrade_identity(
     )
     current_policy = dict(await _lock_policy(connection))
     target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
+    current_policy_version = int(str(current_policy["policy_version"]))
+    expected_policy_version = (
+        4
+        if source_schema_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION
+        else current_policy_version
+    )
+    source_entry_enabled = bool(current_policy["new_entry_submit_enabled"])
+    expected_source_entry_enabled = (
+        False
+        if source_schema_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION
+        else source_entry_enabled
+    )
     if not _policy_matches(
         current_policy,
-        version=4,
-        new_entry_submit_enabled=False,
+        version=expected_policy_version,
+        new_entry_submit_enabled=expected_source_entry_enabled,
         allowed_event_spec_ids=target_event_spec_ids,
-    ) or current_policy["max_strategy_group_concurrent_tickets"] is not None:
+    ) or (
+        source_schema_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION
+        and current_policy["max_strategy_group_concurrent_tickets"] is not None
+    ):
         raise RuntimeAuthorityTransitionRefused(
-            "compatible identity requires exact migrated Policy v4"
+            "compatible identity requires exact paused source Policy"
         )
-    if bool(current_policy["new_entry_submit_enabled"]):
+    if (
+        source_schema_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION
+        and source_entry_enabled
+    ):
         raise RuntimeAuthorityTransitionRefused(
             "compatible identity cannot re-enable new ENTRY"
         )
@@ -478,6 +510,19 @@ async def deploy_compatible_upgrade_identity(
         )
 
     registry = await seed_strategy_registry(uow, seeded_at_ms=request.seeded_at_ms)
+    if source_schema_revision == OWNER_CONTROL_SOURCE_SCHEMA_REVISION:
+        await _seed_strategy_entry_controls(
+            connection,
+            seeded_at_ms=request.seeded_at_ms,
+        )
+        if source_entry_enabled:
+            current_policy = await _pause_entry_for_owner_control_upgrade(
+                connection,
+                current_policy=current_policy,
+                occurred_at_ms=request.seeded_at_ms,
+                runtime_commit=request.runtime_commit,
+            )
+            expected_policy_version = int(str(current_policy["policy_version"]))
     seed_identity = _seed_identity(
         account_id=request.account_id,
         schema_revision=request.schema_revision,
@@ -486,7 +531,7 @@ async def deploy_compatible_upgrade_identity(
     )
     if not _policy_matches(
         current_policy,
-        version=4,
+        version=expected_policy_version,
         new_entry_submit_enabled=False,
         allowed_event_spec_ids=target_event_spec_ids,
     ):
@@ -1588,6 +1633,160 @@ async def _insert_exact(connection: AsyncConnection, row: _ExactRow) -> int:
             + ":".join(str(row.values[column]) for column in identity_columns)
         )
     return 0
+
+
+async def _seed_strategy_entry_controls(
+    connection: AsyncConnection,
+    *,
+    seeded_at_ms: int,
+) -> int:
+    """Install one explicit enabled control row for every registered StrategyGroup."""
+
+    strategy_group_ids = tuple(
+        sorted({item.strategy_group_id for item in registered_strategy_contracts()})
+    )
+    inserted = 0
+    for strategy_group_id in strategy_group_ids:
+        authorization_id = f"owner-authorization:seed:{strategy_group_id}"
+        event_id = f"strategy-control-event:seed:{strategy_group_id}"
+        inserted += await _insert_exact(
+            connection,
+            _ExactRow(
+                owner_authorizations,
+                "authorization_id",
+                {
+                    "authorization_id": authorization_id,
+                    "purpose": "strategy_resume",
+                    "owner_identity": "system-seed",
+                    "authentication_strength": "session",
+                    "request_digest": "sha256:" + "0" * 64,
+                    "target_scope": {"seed": True},
+                    "idempotency_key": f"owner-request:seed:{strategy_group_id}",
+                    "authorized_at_ms": seeded_at_ms,
+                },
+                (
+                    "purpose",
+                    "owner_identity",
+                    "authentication_strength",
+                    "request_digest",
+                    "target_scope",
+                    "idempotency_key",
+                ),
+            ),
+        )
+        inserted += await _insert_exact(
+            connection,
+            _ExactRow(
+                strategy_entry_control_events,
+                "strategy_entry_control_event_id",
+                {
+                    "strategy_entry_control_event_id": event_id,
+                    "strategy_group_id": strategy_group_id,
+                    "control_version": 1,
+                    "operation": "resume",
+                    "target_state": "enabled",
+                    "authorization_id": authorization_id,
+                    "reason": "seed_enabled",
+                    "payload": {},
+                    "created_at_ms": seeded_at_ms,
+                },
+                (
+                    "strategy_group_id",
+                    "control_version",
+                    "operation",
+                    "target_state",
+                    "authorization_id",
+                    "reason",
+                    "payload",
+                ),
+            ),
+        )
+        inserted += await _insert_exact(
+            connection,
+            _ExactRow(
+                strategy_entry_controls_current,
+                "strategy_group_id",
+                {
+                    "strategy_group_id": strategy_group_id,
+                    "entry_state": "enabled",
+                    "control_version": 1,
+                    "last_event_id": event_id,
+                    "reason": "seed_enabled",
+                    "updated_at_ms": seeded_at_ms,
+                },
+                (
+                    "entry_state",
+                    "control_version",
+                    "last_event_id",
+                    "reason",
+                ),
+            ),
+        )
+    await _assert_exact_identity_set(
+        connection,
+        strategy_entry_controls_current,
+        "strategy_group_id",
+        set(strategy_group_ids),
+    )
+    return inserted
+
+
+async def _pause_entry_for_owner_control_upgrade(
+    connection: AsyncConnection,
+    *,
+    current_policy: Mapping[str, object],
+    occurred_at_ms: int,
+    runtime_commit: str,
+) -> dict[str, object]:
+    """Atomically retain a flat upgrade with new ENTRY paused and audited."""
+
+    current_version = int(str(current_policy["policy_version"]))
+    target_version = current_version + 1
+    event_id = f"owner-policy-event:owner-control-upgrade:{target_version}"
+    await _insert_exact(
+        connection,
+        _ExactRow(
+            owner_policy_events,
+            "owner_policy_event_id",
+            {
+                "owner_policy_event_id": event_id,
+                "owner_policy_id": OWNER_POLICY_ID,
+                "policy_version": target_version,
+                "operation": "owner_control_upgrade_pause_entry",
+                "payload": {
+                    "runtime_commit": runtime_commit,
+                    "new_entry_submit_enabled": False,
+                },
+                "created_at_ms": occurred_at_ms,
+            },
+            (
+                "owner_policy_id",
+                "policy_version",
+                "operation",
+                "payload",
+            ),
+        ),
+    )
+    updated = await connection.execute(
+        sa.update(owner_policy_current)
+        .where(
+            owner_policy_current.c.owner_policy_id == OWNER_POLICY_ID,
+            owner_policy_current.c.policy_version == current_version,
+            owner_policy_current.c.new_entry_submit_enabled.is_(True),
+        )
+        .values(
+            policy_version=target_version,
+            new_entry_submit_enabled=False,
+            updated_at_ms=occurred_at_ms,
+        )
+        .returning(owner_policy_current)
+    )
+    row = updated.mappings().one_or_none()
+    if row is None:
+        raise RuntimeAuthorityTransitionRefused(
+            "owner-control upgrade lost the ENTRY pause transition"
+        )
+    return dict(row)
 
 
 async def _assert_exact_identity_set(

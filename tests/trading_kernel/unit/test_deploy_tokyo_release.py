@@ -26,8 +26,8 @@ CURRENT_COMMIT = "b" * 40
 CURRENT_RELEASE = "/opt/brc/releases/brc-trading-kernel-bbbbbbbbbbbb"
 TARGET_RELEASE = "/opt/brc/releases/brc-trading-kernel-aaaaaaaaaaaa"
 RECOVERY_RELEASE = "/opt/brc/releases/brc-trading-kernel-cccccccccccc"
-SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
-TARGET_SCHEMA_REVISION = "0003_portfolio_admission_observability"
+SOURCE_SCHEMA_REVISION = "0003_portfolio_admission_observability"
+TARGET_SCHEMA_REVISION = "0004_owner_control_plane"
 SEED_IDENTITY = "sha256:" + "c" * 64
 PRESERVATION_DIGEST = "sha256:" + "d" * 64
 REGISTRY_DIGEST = "sha256:" + "f" * 64
@@ -84,7 +84,7 @@ def test_regular_plan_rejects_a_schema_change() -> None:
         )
 
 
-def test_dep_002_compatible_upgrade_accepts_only_exact_0002_to_0003() -> None:
+def test_dep_002_compatible_upgrade_accepts_only_exact_0003_to_0004() -> None:
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
@@ -98,7 +98,7 @@ def test_dep_002_compatible_upgrade_accepts_only_exact_0002_to_0003() -> None:
     assert plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
     assert plan.source_schema_revision == SOURCE_SCHEMA_REVISION
 
-    with pytest.raises(ValueError, match="exact 0002 source"):
+    with pytest.raises(ValueError, match="exact 0003 source"):
         DeploymentPlan(
             target_commit=TARGET_COMMIT,
             target_release=TARGET_RELEASE,
@@ -658,7 +658,7 @@ def test_mig_009_wrong_source_blocks_before_service_mutation() -> None:
     ("source_authority_drift", "source_seed_marker", "expected_message"),
     [
         ("registry", SEED_IDENTITY, "source Registry"),
-        ("policy", SEED_IDENTITY, "source Policy v3"),
+        ("policy", SEED_IDENTITY, "source Owner Policy"),
         (None, "sha256:" + "0" * 64, "source Seed marker"),
     ],
 )
@@ -714,7 +714,7 @@ def test_dep_004_missing_target_safety_worker_fails_with_entry_fenced() -> None:
 @pytest.mark.parametrize(
     ("postflight_drift", "expected_message"),
     [
-        ("policy", "Policy v4"),
+        ("policy", "Owner Policy"),
         ("registry", "Registry identity"),
         ("universe", "Universe identity"),
         ("universe_digest", "Universe identity"),
@@ -1561,7 +1561,7 @@ class FakeDeploymentBackend:
             },
             "owner_policy": {
                 "status": "pass",
-                "policy_version": 3,
+                "policy_version": 5,
                 "new_entry_submit_enabled": True,
             },
             "runtime_profile": {"status": "pass"},
@@ -1584,7 +1584,7 @@ class FakeDeploymentBackend:
         elif self.source_authority_drift == "policy":
             payload["owner_policy"] = {
                 "status": "fail",
-                "policy_version": 3,
+                "policy_version": 5,
                 "new_entry_submit_enabled": False,
             }
         return payload

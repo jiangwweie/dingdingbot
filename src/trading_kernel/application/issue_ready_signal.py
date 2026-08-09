@@ -17,6 +17,7 @@ from src.trading_kernel.application.issue_ticket import (
     IssueTicketStatus,
     issue_ticket,
 )
+from src.trading_kernel.application.owner_control import strategy_entry_is_enabled
 from src.trading_kernel.application.ports import KernelUnitOfWork
 from src.trading_kernel.application.project_shadow_outcome import (
     pending_shadow_spec_for_rejection,
@@ -166,6 +167,12 @@ async def issue_ready_signal(
         )
     profile = await uow.signals.get_runtime_profile(scope.runtime_profile_id)
     policy = await uow.entry_admission.get_owner_policy(scope.owner_policy_id)
+    owner_controls = getattr(uow, "owner_controls", None)
+    strategy_control = (
+        None
+        if owner_controls is None
+        else await owner_controls.get_strategy_control(signal.strategy_group_id)
+    )
     rules = (
         None
         if profile is None
@@ -185,6 +192,7 @@ async def issue_ready_signal(
         or policy is None
         or not policy.enabled
         or not policy.new_entry_submit_enabled
+        or not strategy_entry_is_enabled(strategy_control)
         or event_spec is None
         or event_spec.status != "active"
     ):

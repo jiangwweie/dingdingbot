@@ -18,6 +18,7 @@ from src.trading_kernel.application.issue_ready_signal import (
     issue_ready_signal,
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus
+from src.trading_kernel.application.owner_control import strategy_entry_is_enabled
 from src.trading_kernel.application.ports import (
     KernelUnitOfWork,
     UnitOfWorkFactory,
@@ -136,6 +137,25 @@ async def run_entry_worker_once(
         ):
             return EntryWorkerResult(status=EntryWorkerStatus.NO_CANDIDATE)
         signal = selected.candidate.signal
+        owner_controls = getattr(uow, "owner_controls", None)
+        strategy_control = (
+            None
+            if owner_controls is None
+            else await owner_controls.get_strategy_control(signal.strategy_group_id)
+        )
+        if not strategy_entry_is_enabled(strategy_control):
+            await uow.signals.save_readiness(
+                runtime_scope_id=signal.runtime_scope_id,
+                readiness_state="blocked",
+                first_blocker=f"strategy_paused:{signal.strategy_group_id}",
+                signal_event_id=signal.signal_event_id,
+                fact_summary={"reason": "owner_strategy_entry_control"},
+                updated_at_ms=request.now_ms,
+            )
+            return EntryWorkerResult(
+                status=EntryWorkerStatus.ISSUE_REFUSED,
+                issue_status=IssueTicketStatus.STRATEGY_PAUSED,
+            )
         scope = await uow.signals.get_runtime_scope(signal.runtime_scope_id)
         profile = (
             None

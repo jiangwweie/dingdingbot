@@ -46,9 +46,12 @@ from src.trading_kernel.infrastructure.pg_models import (
     entry_lane_current,
     event_specs,
     instruments,
+    owner_authorizations,
     owner_policy_current,
     runtime_incidents,
     runtime_scopes_current,
+    strategy_entry_control_events,
+    strategy_entry_controls_current,
     strategy_groups,
     strategy_universe_current,
     strategy_universe_members,
@@ -1450,6 +1453,53 @@ async def _seed_ticket_registry(connection, ticket) -> None:
                 "status": "active",
                 "updated_at_ms": ticket.created_at_ms,
             },
+        )
+    )
+    authorization_id = f"owner-authorization:test-seed:{runtime.strategy_group_id}"
+    event_id = f"strategy-control-event:test-seed:{runtime.strategy_group_id}"
+    await connection.execute(
+        pg_insert(owner_authorizations)
+        .values(
+            authorization_id=authorization_id,
+            purpose="strategy_resume",
+            owner_identity="test-seed",
+            authentication_strength="session",
+            request_digest="sha256:" + "0" * 64,
+            target_scope={"seed": True},
+            idempotency_key=f"owner-request:test-seed:{runtime.strategy_group_id}",
+            authorized_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_nothing(index_elements=[owner_authorizations.c.authorization_id])
+    )
+    await connection.execute(
+        pg_insert(strategy_entry_control_events)
+        .values(
+            strategy_entry_control_event_id=event_id,
+            strategy_group_id=runtime.strategy_group_id,
+            control_version=1,
+            operation="resume",
+            target_state="enabled",
+            authorization_id=authorization_id,
+            reason="test_seed_enabled",
+            payload={},
+            created_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[strategy_entry_control_events.c.strategy_entry_control_event_id]
+        )
+    )
+    await connection.execute(
+        pg_insert(strategy_entry_controls_current)
+        .values(
+            strategy_group_id=runtime.strategy_group_id,
+            entry_state="enabled",
+            control_version=1,
+            last_event_id=event_id,
+            reason="test_seed_enabled",
+            updated_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[strategy_entry_controls_current.c.strategy_group_id]
         )
     )
     await connection.execute(

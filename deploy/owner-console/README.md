@@ -2,7 +2,8 @@
 
 ## Boundary
 
-The Owner Console is a read-only, same-origin HTTPS surface. It has its own
+The Owner Console is a same-origin HTTPS surface with read-only analysis and a
+bounded Owner control plane. It has its own
 PostgreSQL login, Python virtual environment, systemd service, resource slice,
 Unix Socket, and Nginx locations. It does not load exchange credentials and it
 does not change the four Trading Kernel worker units.
@@ -52,27 +53,24 @@ pnpm --dir frontend/owner-console build
 The four Kernel workers continue to use `.venv`. Nginx serves only the built
 `frontend/owner-console/dist` directory, so Node.js is not a runtime process.
 
-## Encrypted Credentials
+## systemd Credentials
 
-Create `/etc/credstore.encrypted` as root and encrypt exactly these six values:
+Create `/etc/brc/owner-console-credentials` as root with mode `0700` and store
+exactly these seven root-owned mode-`0600` values. Tokyo uses systemd 249, so
+the unit consumes them with `LoadCredential=` and never places them in an
+environment file or process arguments.
 
-| Credential name | Encrypted file |
+| Credential name | Source file |
 | --- | --- |
-| `owner_username` | `brc-owner-console-owner-username` |
-| `owner_password_hash` | `brc-owner-console-owner-password-hash` |
-| `owner_totp_seed` | `brc-owner-console-owner-totp-seed` |
-| `session_signing_key` | `brc-owner-console-session-signing-key` |
-| `database_dsn` | `brc-owner-console-database-dsn` |
-| `account_id` | `brc-owner-console-account-id` |
+| `owner_username` | `owner_username` |
+| `owner_password_hash` | `owner_password_hash` |
+| `owner_totp_seed` | `owner_totp_seed` |
+| `session_signing_key` | `session_signing_key` |
+| `database_dsn` | `database_dsn` |
+| `control_database_dsn` | `control_database_dsn` |
+| `account_id` | `account_id` |
 
-Use `systemd-ask-password` so the plaintext value is not stored in the command
-line or shell history. Example for one credential:
-
-```bash
-systemd-ask-password "Owner Console database DSN" | sudo systemd-creds encrypt --name=database_dsn - /etc/credstore.encrypted/brc-owner-console-database-dsn
-```
-
-Repeat with the exact credential name and destination above. The password hash
+The password hash
 must be Argon2id, the TOTP seed must be valid Base32, and the Session signing
 key must be independently generated random material. Never place any of these
 values in the repository, an environment file, process arguments, or logs.

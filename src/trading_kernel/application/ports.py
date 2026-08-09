@@ -66,6 +66,11 @@ from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertification,
 )
 from src.trading_kernel.domain.order_attribution import TicketOrderReference
+from src.trading_kernel.domain.owner_control import (
+    OwnerAuthorization,
+    OwnerControlOperation,
+    StrategyEntryControl,
+)
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.shadow_outcome import (
@@ -788,6 +793,87 @@ class MonitorRepository(Protocol):
     ) -> MonitorStateRecord: ...
 
 
+class OwnerControlRepository(Protocol):
+    async def get_strategy_control(
+        self,
+        strategy_group_id: str,
+        *,
+        for_update: bool = False,
+    ) -> StrategyEntryControl | None: ...
+
+    async def list_strategy_controls(self) -> tuple[StrategyEntryControl, ...]: ...
+
+    async def add_authorization(self, authorization: OwnerAuthorization) -> None: ...
+
+    async def get_authorization_by_idempotency_key(
+        self,
+        idempotency_key: str,
+    ) -> OwnerAuthorization | None: ...
+
+    async def save_strategy_control(
+        self,
+        *,
+        current: StrategyEntryControl,
+        authorization_id: str,
+        operation: Literal["pause", "resume"],
+        payload: dict[str, JsonValue],
+    ) -> None: ...
+
+    async def set_global_entry_enabled(
+        self,
+        *,
+        owner_policy_id: str,
+        expected_version: int,
+        enabled: bool,
+        authorization_id: str,
+        reason: str,
+        updated_at_ms: int,
+    ) -> OwnerPolicySnapshot: ...
+
+    async def get_global_entry_resume_blocker(
+        self,
+        *,
+        runtime_profile_id: str,
+    ) -> str | None: ...
+
+    async def add_operation(self, operation: OwnerControlOperation) -> None: ...
+
+    async def get_operation(
+        self,
+        authorization_id: str,
+        *,
+        for_update: bool = False,
+    ) -> OwnerControlOperation | None: ...
+
+    async def get_actionable_operation(
+        self,
+        *,
+        now_ms: int,
+        for_update: bool = False,
+    ) -> OwnerControlOperation | None: ...
+
+    async def get_progressable_operation(
+        self,
+        *,
+        for_update: bool = False,
+    ) -> OwnerControlOperation | None: ...
+
+    async def get_latest_operation(self) -> OwnerControlOperation | None: ...
+
+    async def save_operation(
+        self,
+        operation: OwnerControlOperation,
+        *,
+        event_payload: dict[str, JsonValue],
+    ) -> None: ...
+
+    async def list_recent_events(
+        self,
+        *,
+        limit: int,
+    ) -> tuple[dict[str, JsonValue], ...]: ...
+
+
 class EntryAdmissionRepository(Protocol):
     async def lock_global_lane(self) -> EntryLaneSnapshot: ...
 
@@ -1388,6 +1474,7 @@ class KernelUnitOfWork(Protocol):
     positions: PositionRepository
     reviews: ReviewRepository
     monitors: MonitorRepository
+    owner_controls: OwnerControlRepository
     entry_admission: EntryAdmissionRepository
     admission_decisions: AdmissionDecisionRepository
     shadow_outcomes: ShadowOutcomeRepository

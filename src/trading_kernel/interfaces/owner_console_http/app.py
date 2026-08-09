@@ -25,10 +25,17 @@ from src.trading_kernel.application.owner_console.signals import (
 from src.trading_kernel.application.owner_console.trades import (
     TradeFactsContradiction,
 )
+from src.trading_kernel.application.owner_control import (
+    OwnerControlBlocked,
+    OwnerControlConflict,
+)
 from src.trading_kernel.infrastructure.binance_public_market_source import (
     CcxtBinancePublicMarketSource,
 )
 from src.trading_kernel.infrastructure.owner_market_data import OwnerMarketData
+from src.trading_kernel.infrastructure.pg_owner_control import (
+    create_owner_control_engine,
+)
 from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     create_owner_read_engine,
     owner_read_transaction,
@@ -40,6 +47,7 @@ from src.trading_kernel.interfaces.owner_console_http.auth import (
 )
 from src.trading_kernel.interfaces.owner_console_http.dependencies import (
     OwnerConsoleSettings,
+    OwnerControlUnavailable,
     current_time_ms,
     require_authenticated,
 )
@@ -52,6 +60,9 @@ from src.trading_kernel.interfaces.owner_console_http.errors import (
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.auth import (
     router as auth_router,
+)
+from src.trading_kernel.interfaces.owner_console_http.routes.controls import (
+    router as controls_router,
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.market import (
     router as market_router,
@@ -77,6 +88,7 @@ def create_owner_console_app(
     settings: OwnerConsoleSettings,
     *,
     engine: AsyncEngine | None = None,
+    control_engine: AsyncEngine | None = None,
     market_data: OwnerMarketData | None = None,
     clock_ms: Callable[[], int] | None = None,
 ) -> FastAPI:
@@ -85,6 +97,7 @@ def create_owner_console_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         read_engine: AsyncEngine | None = None
+        write_engine: AsyncEngine | None = None
         public_market_data: OwnerMarketData | None = None
         primary_error: BaseException | None = None
         try:
@@ -98,9 +111,19 @@ def create_owner_console_app(
                 if market_data is not None
                 else _build_owner_market_data(settings)
             )
+            write_engine = (
+                control_engine
+                if control_engine is not None
+                else (
+                    None
+                    if settings.control_database_dsn is None
+                    else create_owner_control_engine(settings.control_database_dsn)
+                )
+            )
             app.state.owner_console_settings = settings
             app.state.owner_console_engine = read_engine
             app.state.owner_market_data = public_market_data
+            app.state.owner_control_engine = write_engine
             app.state.owner_auth_service = OwnerAuthService(settings.auth)
             app.state.owner_clock_ms = (
                 clock_ms if clock_ms is not None else current_time_ms
@@ -113,12 +136,14 @@ def create_owner_console_app(
         finally:
             await _cleanup_lifespan_resources(
                 engine=read_engine,
+                control_engine=write_engine,
                 market_data=public_market_data,
                 primary_error=primary_error,
             )
 
     app = FastAPI(lifespan=lifespan)
     app.include_router(auth_router)
+    app.include_router(controls_router)
     app.include_router(overview_router)
     app.include_router(signals_router)
     app.include_router(tickets_router)
@@ -183,12 +208,17 @@ def _build_owner_market_data(settings: OwnerConsoleSettings) -> OwnerMarketData:
 async def _cleanup_lifespan_resources(
     *,
     engine: AsyncEngine | None,
+    control_engine: AsyncEngine | None,
     market_data: OwnerMarketData | None,
     primary_error: BaseException | None,
 ) -> None:
     failures: list[tuple[str, BaseException]] = []
     for name, cleanup in (
         ("engine dispose", None if engine is None else engine.dispose),
+        (
+            "control engine dispose",
+            None if control_engine is None else control_engine.dispose,
+        ),
         ("public market close", None if market_data is None else market_data.close),
     ):
         if cleanup is None:
@@ -237,6 +267,25 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(asyncio.TimeoutError, _handle_query_timeout)
     app.add_exception_handler(SqlAlchemyTimeoutError, _handle_query_timeout)
     app.add_exception_handler(PublicMarketFailure, _handle_market_failure)
+    app.add_exception_handler(OwnerControlConflict, _handle_control_conflict)
+    app.add_exception_handler(OwnerControlBlocked, _handle_control_blocked)
+    app.add_exception_handler(OwnerControlUnavailable, _handle_control_unavailable)
+
+
+async def _handle_control_conflict(_: Request, error: Exception) -> JSONResponse:
+    return error_response(status_code=409, code="control_conflict", message=str(error))
+
+
+async def _handle_control_blocked(_: Request, error: Exception) -> JSONResponse:
+    return error_response(status_code=422, code="control_blocked", message=str(error))
+
+
+async def _handle_control_unavailable(_: Request, __: Exception) -> JSONResponse:
+    return error_response(
+        status_code=503,
+        code="control_unavailable",
+        message="Owner control is temporarily unavailable",
+    )
 
 
 async def _handle_unauthorized(_: Request, __: Exception) -> JSONResponse:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded stdin bridge from the release control plane to exact 0002 code."""
+"""Bounded stdin bridge from the release control plane to exact source code."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 CURRENT_RELEASE = "/opt/brc/current"
-SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
+SOURCE_SCHEMA_REVISION = "0003_portfolio_admission_observability"
 RUNTIME_PROFILE_ID = "tiny-live-v1"
 VENUE_ID = "binance-usdm"
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -42,7 +42,7 @@ _TERMINAL = frozenset(
     }
 )
 _UNRESOLVED_COMMAND_STATUSES = frozenset(
-    {"prepared", "claimed", "outcome_unknown"}
+    {"prepared", "claimed", "dispatch_started", "outcome_unknown"}
 )
 
 

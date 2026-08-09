@@ -34,7 +34,7 @@ from src.trading_kernel.infrastructure.runtime_identity import (
 )
 
 SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
-COMPATIBLE_SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
+COMPATIBLE_SOURCE_SCHEMA_REVISION = "0003_portfolio_admission_observability"
 EXPECTED_CONFIGURED_LEVERAGE = 5
 RELEASE_ROOT = "/opt/brc/releases"
 CURRENT_RELEASE = "/opt/brc/current"
@@ -119,7 +119,7 @@ class DeploymentPlan:
                 raise ValueError("regular deployment cannot change schema revision")
         elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
             if self.source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
-                raise ValueError("compatible upgrade requires the exact 0002 source")
+                raise ValueError("compatible upgrade requires the exact 0003 source")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("compatible upgrade requires the current schema head")
             if self.closure_ticket_id is not None:
@@ -143,7 +143,7 @@ class DeploymentPlan:
                 != COMPATIBLE_SOURCE_SCHEMA_REVISION
             ):
                 raise ValueError(
-                    "Deployment Drain integration currently requires exact 0002 compatible upgrade"
+                    "Deployment Drain integration currently requires exact 0003 compatible upgrade"
                 )
             if self.enable_entry:
                 raise ValueError("Deployment Drain must keep ENTRY disabled")
@@ -811,10 +811,10 @@ def _require_portfolio_admission_postflight(
     owner_policy = certification.get("owner_policy")
     if (
         not isinstance(owner_policy, Mapping)
-        or int(str(owner_policy.get("policy_version", -1))) != 4
+        or int(str(owner_policy.get("policy_version", -1))) < 4
         or owner_policy.get("new_entry_submit_enabled") is not False
     ):
-        raise DeploymentBlocked("exact Policy v4 with ENTRY disabled is missing")
+        raise DeploymentBlocked("current paused Owner Policy is missing")
     registry_identity = certification.get("registry_identity")
     if (
         not isinstance(registry_identity, Mapping)
@@ -912,10 +912,9 @@ def _require_compatible_source_facts(
     if (
         not isinstance(owner_policy, Mapping)
         or owner_policy.get("status") != "pass"
-        or int(str(owner_policy.get("policy_version", -1))) != 3
-        or owner_policy.get("new_entry_submit_enabled") is not True
+        or int(str(owner_policy.get("policy_version", -1))) < 4
     ):
-        raise DeploymentBlocked("exact source Policy v3 identity differs")
+        raise DeploymentBlocked("exact source Owner Policy identity differs")
     runtime_profile = certification.get("runtime_profile")
     if (
         not isinstance(runtime_profile, Mapping)
@@ -1466,18 +1465,16 @@ class SshTokyoReleaseBackend:
             COMPATIBLE_SOURCE_SCHEMA_REVISION,
             "--expected-preservation-digest",
             digest,
-            "--record-preservation-proof",
         )
-        proof = payload.get("preservation_proof")
-        if not isinstance(proof, Mapping):
-            raise DeploymentBlocked("database-bound preservation proof is missing")
-        proof_digest = str(proof.get("proof_digest", ""))
-        if not _SEED_IDENTITY.fullmatch(proof_digest):
-            raise DeploymentBlocked("database-bound preservation proof is invalid")
+        _require_preservation_verification(
+            payload,
+            target_schema_revision=SCHEMA_REVISION,
+            expected_digest=digest,
+        )
         self._write_release_marker(
             release,
             ".brc-0002-preservation-verified",
-            proof_digest,
+            digest,
         )
 
     def preservation_verified(self, release: str, digest: str) -> bool:
@@ -1491,9 +1488,9 @@ class SshTokyoReleaseBackend:
         )
         if result.returncode != 0:
             return False
-        proof_digest = result.stdout
-        if not _SEED_IDENTITY.fullmatch(proof_digest):
-            raise DeploymentBlocked("database-bound preservation proof marker is invalid")
+        verified_digest = result.stdout
+        if verified_digest != digest:
+            raise DeploymentBlocked("preservation verification marker differs")
         payload = self._release_json(
             release,
             "scripts/trading_kernel/verify_schema.py",
@@ -1501,34 +1498,31 @@ class SshTokyoReleaseBackend:
             COMPATIBLE_SOURCE_SCHEMA_REVISION,
             "--expected-preservation-digest",
             digest,
-            "--verify-preservation-proof",
-            "--expected-preservation-proof-digest",
-            proof_digest,
             check=False,
         )
-        proof = payload.get("preservation_proof")
-        if (
-            payload.get("status") != "pass"
-            or not isinstance(proof, Mapping)
-            or proof.get("proof_digest") != proof_digest
-        ):
-            raise DeploymentBlocked("database-bound preservation proof differs")
+        _require_preservation_verification(
+            payload,
+            target_schema_revision=SCHEMA_REVISION,
+            expected_digest=digest,
+        )
         return True
 
     def recover_preservation_proof(self, release: str) -> Mapping[str, object]:
+        digest = self.read_preservation_digest(release)
         payload = self._release_json(
             release,
             "scripts/trading_kernel/verify_schema.py",
-            "--verify-stored-preservation-proof",
+            "--preserve-source-revision",
+            COMPATIBLE_SOURCE_SCHEMA_REVISION,
+            "--expected-preservation-digest",
+            digest,
             check=False,
         )
-        digest = _require_historical_preservation_proof(
+        _require_preservation_verification(
             payload,
             target_schema_revision=SCHEMA_REVISION,
+            expected_digest=digest,
         )
-        proof = payload["preservation_proof"]
-        assert isinstance(proof, Mapping)
-        proof_digest = str(proof["proof_digest"])
         self._write_release_marker(
             release,
             ".brc-0002-preservation-digest",
@@ -1537,9 +1531,18 @@ class SshTokyoReleaseBackend:
         self._write_release_marker(
             release,
             ".brc-0002-preservation-verified",
-            proof_digest,
+            digest,
         )
-        return payload
+        return {
+            "status": "pass",
+            "alembic_revision": SCHEMA_REVISION,
+            "preservation_proof": {
+                "source_revision": COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                "target_revision": SCHEMA_REVISION,
+                "preservation_digest": digest,
+                "proof_digest": digest,
+            },
+        }
 
     def deploy_compatible_identity(
         self,

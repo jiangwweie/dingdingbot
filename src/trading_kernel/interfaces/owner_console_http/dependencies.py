@@ -19,16 +19,25 @@ from src.trading_kernel.interfaces.owner_console_http.auth import (
 from src.trading_kernel.interfaces.owner_console_http.errors import UnauthorizedError
 
 
+class OwnerControlUnavailable(RuntimeError):
+    """The independent Owner Control database boundary is unavailable."""
+
+
 class OwnerConsoleSettings(FrozenModel):
     """Explicit Owner Console runtime inputs with no repository configuration read."""
 
     database_dsn: str = Field(min_length=1, repr=False)
+    control_database_dsn: str | None = Field(default=None, repr=False)
     auth: OwnerAuthSettings
     venue_id: Literal["binance-usdm"] = "binance-usdm"
     account_id: str = Field(min_length=1)
     position_mode: Literal["independent_sides"] = "independent_sides"
     market_timeout_seconds: float = Field(default=5.0, gt=0)
     cookie_name: Literal["brc_owner_session"] = "brc_owner_session"
+    public_origin: str = "https://jiaoyingpan.cloud"
+    public_host: str = "jiaoyingpan.cloud"
+    owner_policy_id: str = "policy-main"
+    runtime_profile_id: str = "tiny-live-v1"
 
 
 def current_time_ms() -> int:
@@ -53,6 +62,13 @@ def get_read_engine(request: Request) -> AsyncEngine:
     """Read the sole lifespan-owned PostgreSQL read engine."""
 
     return cast(AsyncEngine, request.app.state.owner_console_engine)
+
+
+def get_control_engine(request: Request) -> AsyncEngine:
+    engine = getattr(request.app.state, "owner_control_engine", None)
+    if engine is None:
+        raise OwnerControlUnavailable("Owner Control database is unavailable")
+    return cast(AsyncEngine, engine)
 
 
 def get_market_data(request: Request) -> OwnerMarketData:

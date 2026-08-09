@@ -64,6 +64,159 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/control-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Control Events */
+        get: operations["read_control_events_api_owner_v1_control_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/control-operations/{authorization_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Control Operation */
+        get: operations["read_control_operation_api_owner_v1_control_operations__authorization_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Controls */
+        get: operations["read_controls_api_owner_v1_controls_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/entry/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Global Entry */
+        post: operations["pause_global_entry_api_owner_v1_controls_entry_pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/entry/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Global Entry */
+        post: operations["resume_global_entry_api_owner_v1_controls_entry_resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/exposure/flatten-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Flatten Submit */
+        post: operations["flatten_submit_api_owner_v1_controls_exposure_flatten_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/exposure/flatten-all/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Flatten Preview */
+        post: operations["flatten_preview_api_owner_v1_controls_exposure_flatten_all_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/strategies/{strategy_group_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Strategy */
+        post: operations["pause_strategy_api_owner_v1_controls_strategies__strategy_group_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/strategies/{strategy_group_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Strategy */
+        post: operations["resume_strategy_api_owner_v1_controls_strategies__strategy_group_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/market/candles": {
         parameters: {
             query?: never;
@@ -367,6 +520,55 @@ export interface components {
             /** Price */
             price: string;
         };
+        /** ControlEventView */
+        ControlEventView: {
+            /** Authorization Id */
+            authorization_id: string;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Event Id */
+            event_id: string;
+            /** First Blocker */
+            first_blocker?: string | null;
+            /** State */
+            state: string;
+            /** Version */
+            version: number;
+        };
+        /** ControlEventsResponse */
+        ControlEventsResponse: {
+            /** Items */
+            items: components["schemas"]["ControlEventView"][];
+        };
+        /**
+         * ControlOperationState
+         * @enum {string}
+         */
+        ControlOperationState: "validating" | "pending" | "claimed" | "exits_requested" | "exit_in_progress" | "reconciliation_pending" | "settlement_pending" | "review_pending" | "completed" | "blocked" | "needs_intervention";
+        /** ControlWriteBody */
+        ControlWriteBody: {
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Totp Code */
+            totp_code?: string | null;
+        };
+        /** ControlsResponse */
+        ControlsResponse: {
+            current_operation: components["schemas"]["OwnerControlOperation"] | null;
+            /** Events */
+            events: components["schemas"]["ControlEventView"][];
+            /** Generated At Ms */
+            generated_at_ms: number;
+            global_entry: components["schemas"]["GlobalEntryView"];
+            /** Strategies */
+            strategies: components["schemas"]["StrategyControlView"][];
+        };
+        /** EmptyControlBody */
+        EmptyControlBody: Record<string, never>;
         /** EvidenceRef */
         EvidenceRef: {
             /** Identity */
@@ -379,11 +581,88 @@ export interface components {
             /** Occurred At Ms */
             occurred_at_ms: number;
         };
+        /** FlattenBody */
+        FlattenBody: {
+            /**
+             * Confirmation Text
+             * @constant
+             */
+            confirmation_text: "确认平仓全部持仓";
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Snapshot Digest */
+            snapshot_digest: string;
+            /** Totp Code */
+            totp_code?: string | null;
+        };
+        /** FlattenPreview */
+        FlattenPreview: {
+            /** Account Id */
+            account_id: string;
+            /** First Blocker */
+            first_blocker?: string | null;
+            /** Global Entry Enabled */
+            global_entry_enabled: boolean;
+            /** Owner Policy Version */
+            owner_policy_version: number;
+            /** Runtime Profile Id */
+            runtime_profile_id: string;
+            /** Snapshot Digest */
+            snapshot_digest: string;
+            /** Ticket Ids */
+            ticket_ids: string[];
+            /** Ticket States */
+            ticket_states: {
+                [key: string]: string;
+            };
+            /** Venue Id */
+            venue_id: string;
+        };
         /**
          * Freshness
          * @enum {string}
          */
         Freshness: "fresh" | "stale" | "unavailable" | "contradictory";
+        /** GlobalEntryView */
+        GlobalEntryView: {
+            /** Active Ticket Count */
+            active_ticket_count: number;
+            /**
+             * Configured State
+             * @enum {string}
+             */
+            configured_state: "enabled" | "paused";
+            /**
+             * Effective State
+             * @enum {string}
+             */
+            effective_state: "enabled" | "paused";
+            /** First Blocker */
+            first_blocker?: string | null;
+            /** Policy Version */
+            policy_version: number;
+        };
+        /** GlobalMutationResponse */
+        GlobalMutationResponse: {
+            /**
+             * Configured State
+             * @enum {string}
+             */
+            configured_state: "enabled" | "paused";
+            /**
+             * Effective State
+             * @enum {string}
+             */
+            effective_state: "enabled" | "paused";
+            /** Updated At Ms */
+            updated_at_ms: number;
+            /** Version */
+            version: number;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -427,6 +706,15 @@ export interface components {
             /** Value */
             value: string | null;
         };
+        /** NotFoundResponse */
+        NotFoundResponse: {
+            /**
+             * Status
+             * @default not_found
+             * @constant
+             */
+            status: "not_found";
+        };
         /** OwnerConclusion */
         OwnerConclusion: {
             /** Evidence */
@@ -440,6 +728,43 @@ export interface components {
             owner_action: string | null;
             /** Summary */
             summary: string;
+        };
+        /** OwnerControlOperation */
+        OwnerControlOperation: {
+            /** Account Id */
+            account_id: string;
+            /** Authorization Id */
+            authorization_id: string;
+            /** Claimed By */
+            claimed_by?: string | null;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** First Blocker */
+            first_blocker?: string | null;
+            /** Lease Until Ms */
+            lease_until_ms?: number | null;
+            /**
+             * Operation Kind
+             * @default flatten_all
+             * @constant
+             */
+            operation_kind: "flatten_all";
+            /** Runtime Profile Id */
+            runtime_profile_id: string;
+            /** Snapshot Digest */
+            snapshot_digest: string;
+            state: components["schemas"]["ControlOperationState"];
+            /**
+             * Target Ticket Ids
+             * @default []
+             */
+            target_ticket_ids: string[];
+            /** Updated At Ms */
+            updated_at_ms: number;
+            /** Venue Id */
+            venue_id: string;
+            /** Version */
+            version: number;
         };
         /** OwnerOverview */
         OwnerOverview: {
@@ -757,6 +1082,45 @@ export interface components {
             /** Next Cursor */
             next_cursor: string | null;
         };
+        /** StrategyControlView */
+        StrategyControlView: {
+            configured_state: components["schemas"]["StrategyEntryState"];
+            /** Control Version */
+            control_version: number;
+            /**
+             * Effective State
+             * @enum {string}
+             */
+            effective_state: "enabled" | "paused" | "paused_by_global";
+            entry_state: components["schemas"]["StrategyEntryState"];
+            /** Last Event Id */
+            last_event_id: string;
+            /** Reason */
+            reason: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Updated At Ms */
+            updated_at_ms: number;
+        };
+        /** StrategyEntryControl */
+        StrategyEntryControl: {
+            /** Control Version */
+            control_version: number;
+            entry_state: components["schemas"]["StrategyEntryState"];
+            /** Last Event Id */
+            last_event_id: string;
+            /** Reason */
+            reason: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Updated At Ms */
+            updated_at_ms: number;
+        };
+        /**
+         * StrategyEntryState
+         * @enum {string}
+         */
+        StrategyEntryState: "enabled" | "paused";
         /** StrategyGroupSampleState */
         StrategyGroupSampleState: {
             /** Evidence */
@@ -967,6 +1331,290 @@ export interface operations {
                     "application/json": {
                         [key: string]: boolean;
                     };
+                };
+            };
+        };
+    };
+    read_control_events_api_owner_v1_control_events_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_control_operation_api_owner_v1_control_operations__authorization_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                authorization_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerControlOperation"] | components["schemas"]["NotFoundResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_controls_api_owner_v1_controls_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlsResponse"];
+                };
+            };
+        };
+    };
+    pause_global_entry_api_owner_v1_controls_entry_pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_global_entry_api_owner_v1_controls_entry_resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    flatten_submit_api_owner_v1_controls_exposure_flatten_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlattenBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerControlOperation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    flatten_preview_api_owner_v1_controls_exposure_flatten_all_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmptyControlBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlattenPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_strategy_api_owner_v1_controls_strategies__strategy_group_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyEntryControl"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_strategy_api_owner_v1_controls_strategies__strategy_group_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyEntryControl"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

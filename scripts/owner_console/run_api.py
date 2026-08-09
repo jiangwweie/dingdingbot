@@ -31,6 +31,7 @@ _CREDENTIAL_NAMES = frozenset(
         "owner_totp_seed",
         "session_signing_key",
         "database_dsn",
+        "control_database_dsn",
         "account_id",
     }
 )
@@ -50,6 +51,7 @@ def load_settings(environ: Mapping[str, str]) -> OwnerConsoleSettings:
     credentials = _read_credentials(Path(credentials_directory))
     return OwnerConsoleSettings(
         database_dsn=credentials["database_dsn"],
+        control_database_dsn=credentials["control_database_dsn"],
         account_id=credentials["account_id"],
         market_timeout_seconds=_market_timeout_seconds(environ),
         auth=OwnerAuthSettings(

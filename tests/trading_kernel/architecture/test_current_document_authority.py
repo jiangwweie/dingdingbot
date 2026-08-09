@@ -318,7 +318,8 @@ def test_current_schema_authority_is_the_exact_flat_forward_revision_chain() -> 
     expected_chain = (
         "0001_trading_kernel_baseline_v4 "
         "-> 0002_sor_v3_strategy_group_capacity "
-        "-> 0003_portfolio_admission_observability"
+        "-> 0003_portfolio_admission_observability "
+        "-> 0004_owner_control_plane"
     )
 
     for relative_path in SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS:
@@ -343,6 +344,7 @@ def test_current_documents_converge_on_portfolio_admission_authority() -> None:
         ),
         "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md": (
             "0003_portfolio_admission_observability",
+            "0004_owner_control_plane",
             "AdmissionDecision",
             "Shadow Outcome",
         ),
@@ -353,6 +355,7 @@ def test_current_documents_converge_on_portfolio_admission_authority() -> None:
         ),
         "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md": (
             "0003_portfolio_admission_observability",
+            "0004_owner_control_plane",
             "fix-forward",
         ),
         "docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md": (

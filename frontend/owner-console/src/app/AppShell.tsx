@@ -9,6 +9,7 @@ const navigationItems = [
   { label: "信号", to: "/signals" },
   { label: "交易", to: "/trades" },
   { label: "复盘", to: "/review" },
+  { label: "控制", to: "/controls" },
 ] as const;
 
 interface AppShellProps {

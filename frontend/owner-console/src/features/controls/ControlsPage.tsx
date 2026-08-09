@@ -1,0 +1,238 @@
+import * as AlertDialog from "@radix-ui/react-alert-dialog";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { AppShell } from "../../app/AppShell";
+import { ownerQueryClient } from "../../app/queryClient";
+import { Button } from "../../components/ui/Button";
+import { DataAge } from "../../components/ui/DataAge";
+import { ManualRefreshButton } from "../../components/ui/ManualRefreshButton";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { Panel } from "../../components/ui/Panel";
+import { StatusTag } from "../../components/ui/StatusTag";
+import { UnavailablePanel } from "../../components/ui/UnavailablePanel";
+import {
+  getControls,
+  getFlattenPreview,
+  setGlobalEntry,
+  setStrategyControl,
+  submitFlatten,
+  type ControlWriteBody,
+  type FlattenPreview,
+} from "./api";
+import { controlsQueryKey } from "./api";
+
+type PendingAction =
+  | { kind: "global"; action: "pause" | "resume"; version: number }
+  | { kind: "strategy"; action: "pause" | "resume"; strategyGroupId: string; version: number };
+
+function requestId(prefix: string): string {
+  return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)}`;
+}
+
+function formatTime(value: number | null | undefined): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
+
+export function ControlsPage() {
+  const controls = useQuery({ queryKey: controlsQueryKey, queryFn: getControls });
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+  const [flattenPreview, setFlattenPreview] = useState<FlattenPreview | null>(null);
+  const [confirmationText, setConfirmationText] = useState("");
+
+  const refresh = async () => {
+    await ownerQueryClient.invalidateQueries({ queryKey: controlsQueryKey });
+  };
+
+  const controlMutation = useMutation({
+    mutationFn: async (action: PendingAction) => {
+      const body: ControlWriteBody = {
+        expected_version: action.version,
+        reason: "owner_manual_control",
+        idempotency_key: requestId("owner-request"),
+        totp_code: action.action === "resume" ? totpCode : null,
+      };
+      if (action.kind === "global") {
+        await setGlobalEntry(action.action, body);
+      } else {
+        await setStrategyControl(action.strategyGroupId, action.action, body);
+      }
+    },
+    onSuccess: async () => {
+      setPendingAction(null);
+      setTotpCode("");
+      await refresh();
+    },
+  });
+
+  const previewMutation = useMutation({
+    mutationFn: getFlattenPreview,
+    onSuccess: setFlattenPreview,
+  });
+
+  const flattenMutation = useMutation({
+    mutationFn: async (preview: FlattenPreview) => submitFlatten({
+      expected_version: preview.owner_policy_version,
+      reason: "owner_flatten_all",
+      idempotency_key: requestId("owner-request-flatten"),
+      totp_code: totpCode,
+      snapshot_digest: preview.snapshot_digest,
+      confirmation_text: "确认平仓全部持仓",
+    }),
+    onSuccess: async () => {
+      setFlattenPreview(null);
+      setTotpCode("");
+      setConfirmationText("");
+      await refresh();
+    },
+  });
+
+  const data = controls.data;
+  const pausedCount = useMemo(
+    () => data?.strategies.filter((item) => item.configured_state === "paused").length ?? 0,
+    [data],
+  );
+
+  const pageHeader = (
+    <PageHeader
+      title="控制"
+      description="暂停新准入、恢复权限与受控退出全部当前 Ticket"
+      actions={<ManualRefreshButton isRefreshing={controls.isFetching} onRefresh={() => void controls.refetch()} />}
+    />
+  );
+
+  if (!data) {
+    return (
+      <AppShell dataTime={<DataAge generatedAt={null} />} statusLabel={controls.isError ? "不可用" : "加载中"} statusTone="neutral">
+        {pageHeader}
+        <UnavailablePanel title="控制状态不可用" detail="不会把不可用解释为运行中，也不会发起任何控制操作。" />
+      </AppShell>
+    );
+  }
+
+  const globalPaused = data.global_entry.configured_state === "paused";
+  const operation = data.current_operation;
+  const actionNeedsTotp = pendingAction?.action === "resume";
+
+  return (
+    <AppShell
+      dataTime={<DataAge generatedAt={new Date(data.generated_at_ms).toISOString()} />}
+      statusLabel={globalPaused ? "ENTRY 已暂停" : "运行中"}
+      statusTone={globalPaused ? "attention" : "success"}
+    >
+      {pageHeader}
+
+      <section className="control-summary-strip">
+        <div><span>全局 ENTRY</span><strong>{globalPaused ? "已暂停" : "运行中"}</strong></div>
+        <div><span>暂停策略</span><strong className="tabular-number">{pausedCount}</strong></div>
+        <div><span>活动 Ticket</span><strong className="tabular-number">{data.global_entry.active_ticket_count}</strong></div>
+        <div><span>当前 Operation</span><strong>{operation?.state ?? "无"}</strong></div>
+      </section>
+
+      <Panel title="全局 ENTRY 控制">
+        <div className="control-row control-row--global">
+          <div className="control-row__identity">
+            <strong>全部策略新开仓</strong>
+            <span>Policy v{data.global_entry.policy_version} · 已有 Ticket 生命周期不受影响</span>
+          </div>
+          <StatusTag tone={globalPaused ? "attention" : "success"}>{globalPaused ? "已暂停" : "运行中"}</StatusTag>
+          <div className="control-row__facts">
+            <span>Effective</span><strong>{data.global_entry.effective_state}</strong>
+          </div>
+          <Button onClick={() => setPendingAction({ kind: "global", action: globalPaused ? "resume" : "pause", version: data.global_entry.policy_version })}>
+            {globalPaused ? "恢复新开仓" : "暂停新开仓"}
+          </Button>
+        </div>
+      </Panel>
+
+      <Panel title="StrategyGroup 控制">
+        <div className="strategy-control-table" role="table">
+          <div className="strategy-control-table__head" role="row">
+            <span>StrategyGroup</span><span>配置状态</span><span>有效状态</span><span>最近变更</span><span>操作</span>
+          </div>
+          {data.strategies.map((strategy) => {
+            const paused = strategy.configured_state === "paused";
+            return (
+              <div className="strategy-control-table__row" role="row" key={strategy.strategy_group_id}>
+                <div><strong>{strategy.strategy_group_id}</strong><small>{strategy.reason}</small></div>
+                <StatusTag tone={paused ? "attention" : "success"}>{paused ? "已暂停" : "已启用"}</StatusTag>
+                <span className="tabular-number">{strategy.effective_state}</span>
+                <span className="tabular-number">v{strategy.control_version} · {formatTime(strategy.updated_at_ms)}</span>
+                <Button onClick={() => setPendingAction({ kind: "strategy", action: paused ? "resume" : "pause", strategyGroupId: strategy.strategy_group_id, version: strategy.control_version })}>
+                  {paused ? "恢复" : "暂停"}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
+
+      <Panel title="当前控制操作">
+        {operation ? (
+          <div className="operation-line">
+            <StatusTag tone={operation.state === "completed" ? "success" : operation.state === "blocked" || operation.state === "needs_intervention" ? "danger" : "attention"}>{operation.state}</StatusTag>
+            <span className="tabular-number">{operation.authorization_id}</span>
+            <span>{operation.target_ticket_ids.length} 个目标 Ticket</span>
+            <span>{operation.first_blocker ?? "无 blocker"}</span>
+          </div>
+        ) : <div className="compact-empty">当前没有控制操作</div>}
+      </Panel>
+
+      <section className="danger-zone">
+        <div>
+          <span className="danger-zone__eyebrow">危险操作</span>
+          <h2>受控平仓全部仓位</h2>
+          <p>先暂停全局 ENTRY，再由 Lifecycle 请求退出服务器冻结的全部活动 Ticket。页面不能选择数量、方向或订单类型。</p>
+        </div>
+        <Button className="owner-button--danger" disabled={previewMutation.isPending} onClick={() => previewMutation.mutate()}>
+          {previewMutation.isPending ? "读取权威事实" : "受控平仓全部仓位"}
+        </Button>
+      </section>
+
+      <Panel title="最近控制记录">
+        {data.events.length ? data.events.map((event) => (
+          <div className="control-event-row" key={event.event_id}>
+            <span>{event.state}</span><span className="tabular-number">{event.authorization_id}</span><span>{event.first_blocker ?? "—"}</span><span className="tabular-number">{formatTime(event.created_at_ms)}</span>
+          </div>
+        )) : <div className="compact-empty">暂无控制记录</div>}
+      </Panel>
+
+      <AlertDialog.Root open={pendingAction !== null} onOpenChange={(open) => { if (!open) { setPendingAction(null); setTotpCode(""); } }}>
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay className="control-dialog__overlay" />
+          <AlertDialog.Content className="control-dialog">
+            <AlertDialog.Title>{pendingAction?.action === "pause" ? "确认暂停" : "确认恢复"}</AlertDialog.Title>
+            <AlertDialog.Description>
+              {pendingAction?.action === "pause" ? "暂停只阻断新的 ENTRY，Observation 和已有 Ticket 不受影响。" : "恢复后新的有效信号可重新创建 Ticket 和 ENTRY。"}
+            </AlertDialog.Description>
+            {actionNeedsTotp ? <label className="control-field">Google Authenticator 验证码<input inputMode="numeric" value={totpCode} onChange={(event) => setTotpCode(event.target.value)} /></label> : null}
+            {controlMutation.isError ? <p className="control-dialog__error">操作失败，当前状态未作成功假设。</p> : null}
+            <div className="control-dialog__actions"><AlertDialog.Cancel asChild><Button>取消</Button></AlertDialog.Cancel><AlertDialog.Action asChild><Button disabled={!pendingAction || (actionNeedsTotp && totpCode.length < 6) || controlMutation.isPending} onClick={(event) => { event.preventDefault(); if (pendingAction) controlMutation.mutate(pendingAction); }}>确认</Button></AlertDialog.Action></div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
+
+      <AlertDialog.Root open={flattenPreview !== null} onOpenChange={(open) => { if (!open) { setFlattenPreview(null); setConfirmationText(""); setTotpCode(""); } }}>
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay className="control-dialog__overlay" />
+          <AlertDialog.Content className="control-dialog control-dialog--danger">
+            <AlertDialog.Title>确认受控平仓全部仓位</AlertDialog.Title>
+            <AlertDialog.Description>服务器已冻结当前范围；提交后全局 ENTRY 将保持暂停。</AlertDialog.Description>
+            <div className="flatten-ticket-list">{flattenPreview?.ticket_ids.length ? flattenPreview.ticket_ids.map((ticketId) => <span className="tabular-number" key={ticketId}>{ticketId} · {flattenPreview.ticket_states[ticketId]}</span>) : <span>当前已经全平，将执行空仓幂等确认。</span>}</div>
+            <label className="control-field">Google Authenticator 验证码<input inputMode="numeric" value={totpCode} onChange={(event) => setTotpCode(event.target.value)} /></label>
+            <label className="control-field">输入“确认平仓全部持仓”<input value={confirmationText} onChange={(event) => setConfirmationText(event.target.value)} /></label>
+            {flattenMutation.isError ? <p className="control-dialog__error">平仓请求未成功提交；全局 ENTRY 可能已被安全暂停，请手动刷新确认。</p> : null}
+            <div className="control-dialog__actions"><AlertDialog.Cancel asChild><Button>取消</Button></AlertDialog.Cancel><AlertDialog.Action asChild><Button className="owner-button--danger" disabled={!flattenPreview || totpCode.length < 6 || confirmationText !== "确认平仓全部持仓" || flattenMutation.isPending} onClick={(event) => { event.preventDefault(); if (flattenPreview) flattenMutation.mutate(flattenPreview); }}>确认平仓全部持仓</Button></AlertDialog.Action></div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
+    </AppShell>
+  );
+}

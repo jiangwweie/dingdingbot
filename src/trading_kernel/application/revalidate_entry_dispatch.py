@@ -55,6 +55,7 @@ class EntryDispatchPreflightStatus(StrEnum):
     DEADLINE_EXPIRED = "deadline_expired"
     POLICY_DRIFT = "policy_drift"
     NEW_ENTRY_DISABLED = "new_entry_disabled"
+    STRATEGY_PAUSED = "strategy_paused"
     SCOPE_DRIFT = "scope_drift"
     RUNTIME_FENCED = "runtime_fenced"
     STALE_SNAPSHOT = "stale_snapshot"
@@ -95,6 +96,7 @@ class EntryDispatchPreflightRequest(BaseModel):
     active_family_ticket_count: int
     active_directional_risk_at_stop: Decimal
     now_ms: int
+    strategy_entry_enabled: bool = True
 
     @field_validator("runtime_commit", "schema_revision", mode="before")
     @classmethod
@@ -165,6 +167,8 @@ def revalidate_entry_dispatch(
     assert request.owner_policy is not None
     if not request.owner_policy.new_entry_submit_enabled:
         return _refused(EntryDispatchPreflightStatus.NEW_ENTRY_DISABLED)
+    if not request.strategy_entry_enabled:
+        return _refused(EntryDispatchPreflightStatus.STRATEGY_PAUSED)
     if (
         request.active_family_ticket_count
         > ticket.family_ticket_limit

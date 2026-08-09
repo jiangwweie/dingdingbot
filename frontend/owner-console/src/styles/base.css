@@ -646,6 +646,213 @@
   opacity: 0.55;
 }
 
+.control-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--color-divider);
+  background: var(--color-surface);
+}
+
+.control-summary-strip > div {
+  display: grid;
+  gap: 3px;
+  min-height: 54px;
+  align-content: center;
+  padding-inline: var(--space-2);
+  border-left: 1px solid var(--color-divider);
+}
+
+.control-summary-strip > div:first-child {
+  border-left: 0;
+}
+
+.control-summary-strip span,
+.control-row__identity span,
+.control-row__facts span,
+.strategy-control-table__row small {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.control-summary-strip strong {
+  font-size: 14px;
+}
+
+.control-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 100px 150px auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.control-row__identity,
+.control-row__facts,
+.strategy-control-table__row > div {
+  display: grid;
+  gap: 3px;
+}
+
+.strategy-control-table {
+  margin: calc(var(--space-2) * -1);
+}
+
+.strategy-control-table__head,
+.strategy-control-table__row {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.25fr) 120px 150px minmax(170px, 1fr) 72px;
+  gap: var(--space-2);
+  align-items: center;
+  padding-inline: var(--space-2);
+}
+
+.strategy-control-table__head {
+  min-height: 30px;
+  background: var(--color-surface-secondary);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.strategy-control-table__row {
+  min-height: 48px;
+  border-top: 1px solid var(--color-divider);
+}
+
+.operation-line,
+.control-event-row {
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) minmax(120px, auto) minmax(140px, auto);
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.control-event-row {
+  min-height: 36px;
+  border-top: 1px solid var(--color-divider);
+  color: var(--color-text-secondary);
+}
+
+.control-event-row:first-child {
+  border-top: 0;
+}
+
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-block: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid rgb(246 70 93 / 55%);
+  background: rgb(246 70 93 / 4%);
+}
+
+.danger-zone h2,
+.danger-zone p {
+  margin: 0;
+}
+
+.danger-zone h2 {
+  margin-block: 4px;
+  font-size: 15px;
+}
+
+.danger-zone p {
+  max-width: 720px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.danger-zone__eyebrow {
+  color: var(--color-danger);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.owner-button--danger {
+  border-color: rgb(246 70 93 / 70%);
+  background: var(--color-danger);
+  color: white;
+}
+
+.control-dialog__overlay {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  background: rgb(0 0 0 / 72%);
+}
+
+.control-dialog {
+  position: fixed;
+  z-index: 31;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: min(calc(100% - 32px), 520px);
+  max-height: calc(100vh - 48px);
+  gap: var(--space-2);
+  padding: var(--space-3);
+  overflow: auto;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--color-divider);
+  background: var(--color-surface);
+}
+
+.control-dialog--danger {
+  border-color: rgb(246 70 93 / 65%);
+}
+
+.control-dialog h2,
+.control-dialog p {
+  margin: 0;
+}
+
+.control-dialog p {
+  color: var(--color-text-secondary);
+}
+
+.control-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.control-dialog__error {
+  color: var(--color-danger) !important;
+}
+
+.control-field {
+  display: grid;
+  gap: 4px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.control-field input {
+  height: var(--height-control);
+  padding-inline: var(--space-1);
+  border: 1px solid var(--color-divider);
+  outline: none;
+  background: var(--color-background);
+  color: var(--color-text-primary);
+}
+
+.control-field input:focus-visible {
+  border-color: var(--color-emphasis);
+}
+
+.flatten-ticket-list {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-divider);
+  background: var(--color-background);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
 @media (max-width: 720px) {
   .runtime-summary__time,
   .primitive-row .optional-detail {
@@ -691,5 +898,41 @@
     flex-direction: column;
     justify-content: center;
     padding-block: 6px;
+  }
+
+  .control-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .control-summary-strip > div:nth-child(3) {
+    border-left: 0;
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .control-summary-strip > div:nth-child(4) {
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .control-row,
+  .strategy-control-table__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .strategy-control-table__head {
+    display: none;
+  }
+
+  .strategy-control-table__row {
+    padding-block: var(--space-2);
+  }
+
+  .operation-line,
+  .control-event-row {
+    grid-template-columns: 1fr;
+  }
+
+  .danger-zone {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

@@ -19,6 +19,7 @@ from src.trading_kernel.application.ports import (
     ExchangeCommandRepository,
     IncidentRepository,
     MonitorRepository,
+    OwnerControlRepository,
     PositionRepository,
     ReviewRepository,
     RuntimeIncidentRecord,
@@ -83,6 +84,7 @@ from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresExchangeCommandRepository,
     PostgresIncidentRepository,
     PostgresMonitorRepository,
+    PostgresOwnerControlRepository,
     PostgresPositionRepository,
     PostgresReviewRepository,
     PostgresShadowOutcomeRepository,
@@ -110,6 +112,7 @@ class PostgresKernelUnitOfWork:
     capacity_claims: CapacityClaimRepository
     incidents: IncidentRepository
     monitors: MonitorRepository
+    owner_controls: OwnerControlRepository
     positions: PositionRepository
     reviews: ReviewRepository
     entry_admission: EntryAdmissionRepository
@@ -137,6 +140,7 @@ class PostgresKernelUnitOfWork:
         self.capacity_claims = PostgresCapacityClaimRepository(self._connection)
         self.incidents = PostgresIncidentRepository(self._connection)
         self.monitors = PostgresMonitorRepository(self._connection)
+        self.owner_controls = PostgresOwnerControlRepository(self._connection)
         self.positions = PostgresPositionRepository(self._connection)
         self.reviews = PostgresReviewRepository(self._connection)
         self.entry_admission = PostgresEntryAdmissionRepository(self._connection)

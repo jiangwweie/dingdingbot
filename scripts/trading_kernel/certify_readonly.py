@@ -1265,8 +1265,9 @@ async def _certify(
         == runtime_identity.get("seed_identity")
         and compatible_batch["owner_policy_id"] == OWNER_POLICY_ID
         and owner_policy_row is not None
-        and int(str(compatible_batch["owner_policy_version"])) == 4
-        and int(owner_policy_row["policy_version"]) == 4
+        and int(str(compatible_batch["owner_policy_version"]))
+        == int(owner_policy_row["policy_version"])
+        and int(owner_policy_row["policy_version"]) >= 4
         and owner_policy_row["new_entry_submit_enabled"] is False
         and compatible_batch["manifest_digest"] == expected_manifest_digest
         and compatible_batch["live_manifest_digest"] == expected_manifest_digest
@@ -1373,7 +1374,7 @@ async def _certify(
         and certification_batch_pass
         and flatness_pass
         and owner_policy_row is not None
-        and int(owner_policy_row["policy_version"]) == 4
+        and int(owner_policy_row["policy_version"]) >= 4
         and owner_policy_row["new_entry_submit_enabled"] is False
         and registry_identity["status"] == "pass"
         and seed_identity["status"] == "pass"

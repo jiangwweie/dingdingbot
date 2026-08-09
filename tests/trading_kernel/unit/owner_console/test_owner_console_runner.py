@@ -18,6 +18,7 @@ _CREDENTIAL_VALUES = {
     "owner_totp_seed": "JBSWY3DPEHPK3PXP",
     "session_signing_key": "s" * 64,
     "database_dsn": "postgresql+asyncpg://owner:secret@127.0.0.1/brc",
+    "control_database_dsn": "postgresql+asyncpg://owner_control:secret@127.0.0.1/brc",
     "account_id": "subaccount-test",
 }
 
@@ -179,6 +180,7 @@ def _write_credentials(directory: Path) -> None:
 def _settings_fixture() -> runner.OwnerConsoleSettings:
     return runner.OwnerConsoleSettings(
         database_dsn=_CREDENTIAL_VALUES["database_dsn"],
+        control_database_dsn=_CREDENTIAL_VALUES["control_database_dsn"],
         account_id=_CREDENTIAL_VALUES["account_id"],
         auth=runner.OwnerAuthSettings(
             username=_CREDENTIAL_VALUES["owner_username"],

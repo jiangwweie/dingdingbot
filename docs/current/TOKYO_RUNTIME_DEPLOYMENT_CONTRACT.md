@@ -90,6 +90,13 @@ call only the exact source release `request_exit()` use case. Once `0003` is
 current, the release contains the native Controlled Exit CLI. Neither form is
 an old-schema worker or an active-position handover.
 
+The `0003 -> 0004` Owner-control upgrade follows the same stopped, flat source
+rule. The source Entry worker is fenced before Drain, Lifecycle and
+Reconciliation finish every exact Ticket, and the target identity transition
+atomically leaves global new ENTRY paused while seeding explicit StrategyGroup
+control authority. The Owner API is started on a Unix Socket before Nginx
+publishes only `/api/owner/v1/` and `/trading/`.
+
 ## Flat Compatible Upgrade
 
 The only schema-changing release path is an exact, forward-only, stopped
@@ -99,6 +106,7 @@ upgrade:
 0001_trading_kernel_baseline_v4
 -> 0002_sor_v3_strategy_group_capacity
 -> 0003_portfolio_admission_observability
+-> 0004_owner_control_plane
 ```
 
 It preserves terminal PostgreSQL lineage from the exact `0002` source; it does

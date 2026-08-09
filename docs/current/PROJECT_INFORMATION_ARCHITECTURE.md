@@ -64,12 +64,16 @@ is one unbranched forward Alembic chain:
 0001_trading_kernel_baseline_v4
 -> 0002_sor_v3_strategy_group_capacity
 -> 0003_portfolio_admission_observability
+-> 0004_owner_control_plane
 ```
 
 `0001` is a frozen historical schema snapshot. `0002 -> 0003` is a stopped,
 flat, forward-only preservation-gated upgrade; it retains certified terminal
 lineage while adding Episode, AdmissionDecision, Shadow Outcome, Policy v4,
-and Exposure Family authority. No runtime reads an old schema, performs dual
+and Exposure Family authority. `0003 -> 0004` is another stopped, flat,
+forward-only upgrade that adds explicit StrategyGroup ENTRY controls, Owner
+authorizations, and durable flatten-all Operation projections without changing
+Ticket or exchange-command semantics. No runtime reads an old schema, performs dual
 writes, falls back, downgrades, or hands active exposure between schemas. The
 deployed schema identity remains a volatile fact owned only by
 `MAIN_CONTROL_ROADMAP.md`.

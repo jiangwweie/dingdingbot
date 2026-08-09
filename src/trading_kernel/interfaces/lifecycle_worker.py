@@ -18,6 +18,7 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
     LifecycleMaintenanceStatus,
     maintain_ticket_lifecycle,
 )
+from src.trading_kernel.application.owner_control import consume_pending_flatten_once
 from src.trading_kernel.application.ports import UnitOfWorkFactory, VenuePort
 from src.trading_kernel.application.runtime_facts import (
     LifecycleFactsRequest,
@@ -104,6 +105,21 @@ async def run_lifecycle_worker_once(
         return LifecycleWorkerResult(
             status=LifecycleWorkerStatus.RUNTIME_FENCED,
             detail="runtime_identity_mismatch",
+        )
+
+    control_operation = await consume_pending_flatten_once(
+        uow_factory,
+        worker_id=request.worker_id,
+        now_ms=request.now_ms,
+        lease_until_ms=request.lease_until_ms,
+    )
+    if (
+        control_operation is not None
+        and control_operation.state.value in {"blocked", "needs_intervention"}
+    ):
+        return LifecycleWorkerResult(
+            status=LifecycleWorkerStatus.NO_CHANGE,
+            detail=f"owner_control:{control_operation.state.value}",
         )
 
     dispatched = await _dispatch_lifecycle(

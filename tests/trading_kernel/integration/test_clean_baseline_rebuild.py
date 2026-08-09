@@ -50,8 +50,20 @@ async def test_empty_postgres_upgrades_from_frozen_v4_baseline_to_head() -> None
                         "SELECT version_num FROM alembic_version"
                     )
                 )
+                strategy_group_count = await connection.scalar(
+                    __import__("sqlalchemy").text(
+                        "SELECT count(*) FROM brc_strategy_groups"
+                    )
+                )
+                strategy_control_count = await connection.scalar(
+                    __import__("sqlalchemy").text(
+                        "SELECT count(*) FROM brc_strategy_entry_controls_current "
+                        "WHERE entry_state = 'enabled' AND control_version = 1"
+                    )
+                )
             assert table_names == EXPECTED_TABLES | {"alembic_version"}
             assert revision == HEAD_REVISION
+            assert strategy_control_count == strategy_group_count == 0
         finally:
             await engine.dispose()
 

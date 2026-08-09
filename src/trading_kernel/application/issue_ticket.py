@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from src.trading_kernel.application.owner_control import strategy_entry_is_enabled
 from src.trading_kernel.application.ports import (
     BudgetReservationRecord,
     KernelUnitOfWork,
@@ -38,6 +39,7 @@ class IssueTicketStatus(StrEnum):
     DUPLICATE_SIGNAL = "duplicate_signal"
     POLICY_MISSING_OR_STALE = "policy_missing_or_stale"
     POLICY_DISABLED = "policy_disabled"
+    STRATEGY_PAUSED = "strategy_paused"
     BUDGET_EXHAUSTED = "budget_exhausted"
     EXPOSURE_FAMILY_CAPACITY_EXHAUSTED = "exposure_family_capacity_exhausted"
     PROTECTION_UNAVAILABLE = "protection_unavailable"
@@ -111,6 +113,16 @@ async def issue_ticket(
             status=IssueTicketStatus.POLICY_DISABLED,
             ticket_id=None,
         )
+    owner_controls = getattr(uow, "owner_controls", None)
+    if owner_controls is not None:
+        strategy_control = await owner_controls.get_strategy_control(
+            ticket.identity.runtime.strategy_group_id
+        )
+        if not strategy_entry_is_enabled(strategy_control):
+            return IssueTicketResult(
+                status=IssueTicketStatus.STRATEGY_PAUSED,
+                ticket_id=None,
+            )
     if (
         policy.family_ticket_limits.for_family(ticket.exposure_family)
         != claim.family_ticket_limit

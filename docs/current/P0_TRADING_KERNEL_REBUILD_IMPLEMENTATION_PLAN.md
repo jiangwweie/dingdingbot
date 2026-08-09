@@ -56,7 +56,8 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| PostgreSQL revision chain | Complete | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability`; one head, forward-only preservation, and no downgrade or runtime fallback |
+| PostgreSQL revision chain | Complete | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability -> 0004_owner_control_plane`; one head, forward-only preservation, and no downgrade or runtime fallback |
+| Owner control plane | Complete | Explicit StrategyGroup pause/resume, global new-ENTRY pause/resume, durable flatten-all authorization and progress projection, authenticated Owner API, and `/trading/` console |
 | Six Strategy Events | Complete | CPM/MPG/MI/BRF2 v3 and SOR v4 Registry contracts |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, rising-edge or session Exposure Episode identity, deterministic Live/Replay parity |
 | Arbitration and CapacityClaim | Complete | Deterministic priority, Policy v4 Family/directional/materialization limits, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
@@ -79,7 +80,7 @@ readonly facts.
 
 | Boundary | Required local evidence | Rejected outcome |
 | --- | --- | --- |
-| Revision integrity | Disposable PostgreSQL upgrades from empty base to the single head and from production-shaped `0002` to `0003`; exact source-column preservation digest matches | A branch, downgrade, schema fallback, old-table reader, dual write, active handover, or changed historical value is accepted |
+| Revision integrity | Disposable PostgreSQL upgrades from empty base to the single head, historical production-shaped `0002` to `0003`, and flat `0003` to `0004`; exact source authority remains preserved | A branch, downgrade, schema fallback, old-table reader, dual write, active handover, or changed historical value is accepted |
 | Batch bootstrap | The six Registry Events receive the approved fixed initial member set in one bounded run; no operator configures members one Event at a time | A second Warming Universe is required for every Event or member |
 | Warming and readiness | Warming performs readonly market/account certification, produces zero StrategySignal, preserves observation time separately from certification time, and activates only after every member passes | Warming can submit an order, stale evidence activates, or a failed member becomes eligible |
 | Concurrency and recovery | One global Warming slot is enforced; the official `abandon_strategy_universe.py` CLI permanently abandons one exact Warming Universe with an audited reason so the slot is released | A failed Warming state blocks all later deployment work, is changed by direct SQL, or can be silently reused |

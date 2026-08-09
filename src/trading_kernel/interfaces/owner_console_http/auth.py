@@ -157,6 +157,7 @@ class OwnerAuthService:
         )
         self._lock = asyncio.Lock()
         self._session: SessionRecord | None = None
+        self._last_step_up_code: str | None = None
         self._failures: dict[tuple[str, str], _FailureRecord] = {}
         self._failure_expiries: list[tuple[int, tuple[str, str]]] = []
 
@@ -249,6 +250,20 @@ class OwnerAuthService:
         """Return only whether the supplied cookie owns the active Session."""
 
         return await self.validate_cookie(cookie, now_ms=now_ms)
+
+    async def verify_step_up(self, code: str, *, now_ms: int) -> None:
+        """Verify one non-replayable TOTP step-up for a high-risk action."""
+
+        _require_nonnegative_time(now_ms)
+        async with self._lock:
+            if self._last_step_up_code is not None and secrets.compare_digest(
+                self._last_step_up_code,
+                code,
+            ):
+                raise InvalidCredentials
+            if not self._verify_totp(code, now_ms=now_ms):
+                raise InvalidCredentials
+            self._last_step_up_code = code
 
     def _verify_totp(self, code: str, *, now_ms: int) -> bool:
         try:

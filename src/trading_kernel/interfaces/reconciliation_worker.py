@@ -17,6 +17,7 @@ from src.trading_kernel.application.certify_universe_instrument import (
     InstrumentCertificationSource,
     certify_universe_instrument,
 )
+from src.trading_kernel.application.owner_control import advance_flatten_operation_once
 from src.trading_kernel.application.ports import (
     MonitorOwnerStatus,
     MonitorStateRecord,
@@ -229,6 +230,10 @@ async def run_reconciliation_worker_once(
         review_economics_source=review_economics_source,
         fee_discount_capability_source=fee_discount_capability_source,
         instrument_certification_source=instrument_certification_source,
+    )
+    await advance_flatten_operation_once(
+        uow_factory,
+        now_ms=request.now_ms,
     )
     if safety is None:
         return housekeeping

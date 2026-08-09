@@ -7,7 +7,7 @@ from typing import Literal, cast
 from uuid import uuid4
 
 import sqlalchemy as sa
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -19,6 +19,7 @@ from src.trading_kernel.application.ports import (
     BudgetReservationRecord,
     EntryLaneSnapshot,
     MonitorStateRecord,
+    OwnerControlRepository,
     OwnerPolicySnapshot,
     RuntimeIncidentRecord,
     TradeReviewRecord,
@@ -69,6 +70,13 @@ from src.trading_kernel.domain.order_attribution import (
     OrderRole,
     TicketOrderReference,
 )
+from src.trading_kernel.domain.owner_control import (
+    ControlOperationState,
+    OwnerAuthorization,
+    OwnerControlOperation,
+    StrategyEntryControl,
+    StrategyEntryState,
+)
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
@@ -90,10 +98,19 @@ from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
     monitor_current,
     monitor_events,
+    owner_authorizations,
+    owner_control_operation_events,
+    owner_control_operations_current,
     owner_policy_current,
+    owner_policy_events,
     positions_current,
+    runtime_capabilities_current,
     runtime_incidents,
+    runtime_profiles,
+    schema_metadata,
     shadow_outcomes_current,
+    strategy_entry_control_events,
+    strategy_entry_controls_current,
     trade_aggregates,
     trade_events,
     trade_reviews,
@@ -105,6 +122,82 @@ _EVENT_MODELS = {
     for event_type in PERSISTED_TRADE_EVENT_MODELS
 }
 _COMMAND_PAYLOAD_ADAPTER: TypeAdapter[CommandPayload] = TypeAdapter(CommandPayload)
+
+
+def _strategy_control_from_row(row: RowMapping) -> StrategyEntryControl:
+    return StrategyEntryControl(
+        strategy_group_id=str(row["strategy_group_id"]),
+        entry_state=StrategyEntryState(str(row["entry_state"])),
+        control_version=int(row["control_version"]),
+        last_event_id=str(row["last_event_id"]),
+        reason=str(row["reason"]),
+        updated_at_ms=int(row["updated_at_ms"]),
+    )
+
+
+def _operation_from_row(row: RowMapping) -> OwnerControlOperation:
+    return OwnerControlOperation(
+        authorization_id=str(row["authorization_id"]),
+        operation_kind="flatten_all",
+        state=ControlOperationState(str(row["state"])),
+        version=int(row["version"]),
+        runtime_profile_id=str(row["runtime_profile_id"]),
+        venue_id=str(row["venue_id"]),
+        account_id=str(row["account_id"]),
+        target_ticket_ids=tuple(str(item) for item in row["target_ticket_ids"]),
+        snapshot_digest=str(row["snapshot_digest"]),
+        first_blocker=(
+            None if row["first_blocker"] is None else str(row["first_blocker"])
+        ),
+        claimed_by=None if row["claimed_by"] is None else str(row["claimed_by"]),
+        lease_until_ms=(
+            None if row["lease_until_ms"] is None else int(row["lease_until_ms"])
+        ),
+        created_at_ms=int(row["created_at_ms"]),
+        updated_at_ms=int(row["updated_at_ms"]),
+    )
+
+
+def _operation_values(operation: OwnerControlOperation) -> dict[str, object]:
+    values = operation.model_dump(mode="json")
+    values["state"] = operation.state.value
+    values["target_ticket_ids"] = list(operation.target_ticket_ids)
+    return values
+
+
+def _owner_policy_from_row(row: RowMapping | dict[str, object]) -> OwnerPolicySnapshot:
+    supported_margin_mode = str(row["supported_margin_mode"])
+    if supported_margin_mode != "cross":
+        raise RuntimeError("Owner policy has unsupported margin mode")
+    return OwnerPolicySnapshot(
+        owner_policy_id=str(row["owner_policy_id"]),
+        policy_version=int(str(row["policy_version"])),
+        enabled=bool(row["enabled"]),
+        new_entry_submit_enabled=bool(row["new_entry_submit_enabled"]),
+        priority_rank=int(str(row["priority_rank"])),
+        max_concurrent_tickets=int(str(row["max_concurrent_tickets"])),
+        family_ticket_limits=FamilyTicketLimits.model_validate(
+            row["family_ticket_limits"]
+        ),
+        max_ticket_stop_risk_fraction=Decimal(str(row["max_ticket_stop_risk_fraction"])),
+        max_gross_stop_risk_fraction=Decimal(str(row["max_gross_stop_risk_fraction"])),
+        max_ticket_initial_margin_fraction=Decimal(
+            str(row["max_ticket_initial_margin_fraction"])
+        ),
+        max_gross_initial_margin_utilization=Decimal(
+            str(row["max_gross_initial_margin_utilization"])
+        ),
+        directional_stop_risk_limit_fraction=Decimal(
+            str(row["directional_stop_risk_limit_fraction"])
+        ),
+        min_materialization_ratio=Decimal(str(row["min_materialization_ratio"])),
+        max_leverage=int(str(row["max_leverage"])),
+        supported_margin_mode=cast(Literal["cross"], supported_margin_mode),
+        post_stop_stress_multiple=Decimal(str(row["post_stop_stress_multiple"])),
+        max_post_fill_stop_risk_overrun_fraction=Decimal(
+            str(row["max_post_fill_stop_risk_overrun_fraction"])
+        ),
+    )
 
 
 class HistoricalTerminalTicket(BaseModel):
@@ -1661,6 +1754,368 @@ class PostgresMonitorRepository:
             )
         )
         return persisted
+
+
+class PostgresOwnerControlRepository(OwnerControlRepository):
+    """Exact bounded PostgreSQL authority for Owner control transitions."""
+
+    def __init__(self, connection: AsyncConnection) -> None:
+        self._connection = connection
+
+    async def get_strategy_control(
+        self,
+        strategy_group_id: str,
+        *,
+        for_update: bool = False,
+    ) -> StrategyEntryControl | None:
+        statement = sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id == strategy_group_id
+        )
+        if for_update:
+            statement = statement.with_for_update(of=strategy_entry_controls_current)
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        return None if row is None else _strategy_control_from_row(row)
+
+    async def list_strategy_controls(self) -> tuple[StrategyEntryControl, ...]:
+        rows = (
+            await self._connection.execute(
+                sa.select(strategy_entry_controls_current).order_by(
+                    strategy_entry_controls_current.c.strategy_group_id
+                )
+            )
+        ).mappings()
+        return tuple(_strategy_control_from_row(row) for row in rows)
+
+    async def add_authorization(self, authorization: OwnerAuthorization) -> None:
+        await self._connection.execute(
+            sa.insert(owner_authorizations).values(
+                **authorization.model_dump(mode="json")
+            )
+        )
+
+    async def get_authorization_by_idempotency_key(
+        self,
+        idempotency_key: str,
+    ) -> OwnerAuthorization | None:
+        row = (
+            await self._connection.execute(
+                sa.select(owner_authorizations).where(
+                    owner_authorizations.c.idempotency_key == idempotency_key
+                )
+            )
+        ).mappings().one_or_none()
+        return None if row is None else OwnerAuthorization.model_validate(row)
+
+    async def save_strategy_control(
+        self,
+        *,
+        current: StrategyEntryControl,
+        authorization_id: str,
+        operation: Literal["pause", "resume"],
+        payload: dict[str, JsonValue],
+    ) -> None:
+        await self._connection.execute(
+            sa.insert(strategy_entry_control_events).values(
+                strategy_entry_control_event_id=current.last_event_id,
+                strategy_group_id=current.strategy_group_id,
+                control_version=current.control_version,
+                operation=operation,
+                target_state=current.entry_state.value,
+                authorization_id=authorization_id,
+                reason=current.reason,
+                payload=payload,
+                created_at_ms=current.updated_at_ms,
+            )
+        )
+        result = await self._connection.execute(
+            sa.update(strategy_entry_controls_current)
+            .where(
+                strategy_entry_controls_current.c.strategy_group_id
+                == current.strategy_group_id,
+                strategy_entry_controls_current.c.control_version
+                == current.control_version - 1,
+            )
+            .values(
+                entry_state=current.entry_state.value,
+                control_version=current.control_version,
+                last_event_id=current.last_event_id,
+                reason=current.reason,
+                updated_at_ms=current.updated_at_ms,
+            )
+        )
+        if result.rowcount != 1:
+            raise AggregateVersionConflict("Strategy control version changed")
+
+    async def set_global_entry_enabled(
+        self,
+        *,
+        owner_policy_id: str,
+        expected_version: int,
+        enabled: bool,
+        authorization_id: str,
+        reason: str,
+        updated_at_ms: int,
+    ) -> OwnerPolicySnapshot:
+        row = (
+            await self._connection.execute(
+                sa.select(owner_policy_current)
+                .where(owner_policy_current.c.owner_policy_id == owner_policy_id)
+                .with_for_update(of=owner_policy_current)
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            raise RuntimeError("Owner policy is missing")
+        if int(row["policy_version"]) != expected_version:
+            raise AggregateVersionConflict("Owner policy version changed")
+        if bool(row["new_entry_submit_enabled"]) == enabled:
+            return _owner_policy_from_row(row)
+        next_version = expected_version + 1
+        await self._connection.execute(
+            sa.insert(owner_policy_events).values(
+                owner_policy_event_id=f"owner-policy-event:{uuid4().hex}",
+                owner_policy_id=owner_policy_id,
+                policy_version=next_version,
+                operation=(
+                    "owner_control_entry_resume"
+                    if enabled
+                    else "owner_control_entry_pause"
+                ),
+                payload={
+                    "authorization_id": authorization_id,
+                    "reason": reason,
+                    "new_entry_submit_enabled": enabled,
+                },
+                created_at_ms=updated_at_ms,
+            )
+        )
+        await self._connection.execute(
+            sa.update(owner_policy_current)
+            .where(owner_policy_current.c.owner_policy_id == owner_policy_id)
+            .values(
+                policy_version=next_version,
+                new_entry_submit_enabled=enabled,
+                updated_at_ms=updated_at_ms,
+            )
+        )
+        updated = dict(row)
+        updated.update(
+            policy_version=next_version,
+            new_entry_submit_enabled=enabled,
+            updated_at_ms=updated_at_ms,
+        )
+        return _owner_policy_from_row(updated)
+
+    async def get_global_entry_resume_blocker(
+        self,
+        *,
+        runtime_profile_id: str,
+    ) -> str | None:
+        profile = (
+            await self._connection.execute(
+                sa.select(runtime_profiles).where(
+                    runtime_profiles.c.runtime_profile_id == runtime_profile_id
+                )
+            )
+        ).mappings().one_or_none()
+        if (
+            profile is None
+            or profile["status"] != "active"
+            or profile["position_mode"] != "independent_sides"
+        ):
+            return "runtime_profile_not_ready"
+        metadata_rows = {
+            str(row["metadata_key"]): str(row["metadata_value"])
+            for row in (
+                await self._connection.execute(
+                    sa.select(schema_metadata).where(
+                        schema_metadata.c.metadata_key.in_(
+                            ("runtime_commit", "schema_revision")
+                        )
+                    )
+                )
+            ).mappings()
+        }
+        capability = (
+            await self._connection.execute(
+                sa.select(runtime_capabilities_current).where(
+                    runtime_capabilities_current.c.capability_key
+                    == "exchange_commands"
+                )
+            )
+        ).mappings().one_or_none()
+        if (
+            capability is None
+            or not bool(capability["enabled"])
+            or capability["certified_commit"] != metadata_rows.get("runtime_commit")
+            or capability["schema_revision"] != metadata_rows.get("schema_revision")
+        ):
+            return "runtime_identity_not_ready"
+        open_incident_count = await self._connection.scalar(
+            sa.select(sa.func.count()).select_from(runtime_incidents).where(
+                runtime_incidents.c.status == "open"
+            )
+        )
+        if int(open_incident_count or 0) != 0:
+            return "runtime_incident_open"
+        unresolved_command_count = await self._connection.scalar(
+            sa.select(sa.func.count()).select_from(exchange_commands).where(
+                exchange_commands.c.status.in_(
+                    ("prepared", "claimed", "dispatch_started", "outcome_unknown")
+                )
+            )
+        )
+        if int(unresolved_command_count or 0) != 0:
+            return "exchange_command_unresolved"
+        return None
+
+    async def add_operation(self, operation: OwnerControlOperation) -> None:
+        await self._connection.execute(
+            sa.insert(owner_control_operations_current).values(
+                **_operation_values(operation)
+            )
+        )
+        await self._append_operation_event(operation, event_payload={})
+
+    async def get_operation(
+        self,
+        authorization_id: str,
+        *,
+        for_update: bool = False,
+    ) -> OwnerControlOperation | None:
+        statement = sa.select(owner_control_operations_current).where(
+            owner_control_operations_current.c.authorization_id == authorization_id
+        )
+        if for_update:
+            statement = statement.with_for_update(of=owner_control_operations_current)
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        return None if row is None else _operation_from_row(row)
+
+    async def get_actionable_operation(
+        self,
+        *,
+        now_ms: int,
+        for_update: bool = False,
+    ) -> OwnerControlOperation | None:
+        statement = (
+            sa.select(owner_control_operations_current)
+            .where(
+                owner_control_operations_current.c.state
+                == ControlOperationState.PENDING.value,
+                sa.or_(
+                    owner_control_operations_current.c.lease_until_ms.is_(None),
+                    owner_control_operations_current.c.lease_until_ms <= now_ms,
+                ),
+            )
+            .order_by(owner_control_operations_current.c.created_at_ms)
+            .limit(1)
+        )
+        if for_update:
+            statement = statement.with_for_update(
+                of=owner_control_operations_current,
+                skip_locked=True,
+            )
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        return None if row is None else _operation_from_row(row)
+
+    async def get_progressable_operation(
+        self,
+        *,
+        for_update: bool = False,
+    ) -> OwnerControlOperation | None:
+        statement = (
+            sa.select(owner_control_operations_current)
+            .where(
+                owner_control_operations_current.c.state.in_(
+                    (
+                        ControlOperationState.EXITS_REQUESTED.value,
+                        ControlOperationState.EXIT_IN_PROGRESS.value,
+                        ControlOperationState.RECONCILIATION_PENDING.value,
+                        ControlOperationState.SETTLEMENT_PENDING.value,
+                        ControlOperationState.REVIEW_PENDING.value,
+                    )
+                )
+            )
+            .order_by(owner_control_operations_current.c.created_at_ms)
+            .limit(1)
+        )
+        if for_update:
+            statement = statement.with_for_update(
+                of=owner_control_operations_current,
+                skip_locked=True,
+            )
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        return None if row is None else _operation_from_row(row)
+
+    async def get_latest_operation(self) -> OwnerControlOperation | None:
+        row = (
+            await self._connection.execute(
+                sa.select(owner_control_operations_current)
+                .order_by(owner_control_operations_current.c.created_at_ms.desc())
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        return None if row is None else _operation_from_row(row)
+
+    async def save_operation(
+        self,
+        operation: OwnerControlOperation,
+        *,
+        event_payload: dict[str, JsonValue],
+    ) -> None:
+        result = await self._connection.execute(
+            sa.update(owner_control_operations_current)
+            .where(
+                owner_control_operations_current.c.authorization_id
+                == operation.authorization_id,
+                owner_control_operations_current.c.version == operation.version - 1,
+            )
+            .values(**_operation_values(operation))
+        )
+        if result.rowcount != 1:
+            raise AggregateVersionConflict("Control operation version changed")
+        await self._append_operation_event(operation, event_payload=event_payload)
+
+    async def list_recent_events(
+        self,
+        *,
+        limit: int,
+    ) -> tuple[dict[str, JsonValue], ...]:
+        rows = (
+            await self._connection.execute(
+                sa.select(owner_control_operation_events)
+                .order_by(owner_control_operation_events.c.created_at_ms.desc())
+                .limit(max(1, min(limit, 100)))
+            )
+        ).mappings()
+        return tuple(
+            {
+                "event_id": str(row["control_operation_event_id"]),
+                "authorization_id": str(row["authorization_id"]),
+                "version": int(row["operation_version"]),
+                "state": str(row["state"]),
+                "first_blocker": row["first_blocker"],
+                "created_at_ms": int(row["created_at_ms"]),
+            }
+            for row in rows
+        )
+
+    async def _append_operation_event(
+        self,
+        operation: OwnerControlOperation,
+        *,
+        event_payload: dict[str, JsonValue],
+    ) -> None:
+        await self._connection.execute(
+            sa.insert(owner_control_operation_events).values(
+                control_operation_event_id=f"control-operation-event:{uuid4().hex}",
+                authorization_id=operation.authorization_id,
+                operation_version=operation.version,
+                state=operation.state.value,
+                first_blocker=operation.first_blocker,
+                payload=event_payload,
+                created_at_ms=operation.updated_at_ms,
+            )
+        )
 
 
 class PostgresEntryAdmissionRepository:

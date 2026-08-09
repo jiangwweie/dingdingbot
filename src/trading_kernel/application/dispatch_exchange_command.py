@@ -8,6 +8,7 @@ from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.application.owner_control import strategy_entry_is_enabled
 from src.trading_kernel.application.ports import (
     UnitOfWorkFactory,
     VenueCommandRequest,
@@ -417,6 +418,14 @@ async def _preflight_new_entry_mutation(
         strategy_group = await uow.signals.get_strategy_group(
             aggregate.ticket.identity.runtime.strategy_group_id
         )
+        owner_controls = getattr(uow, "owner_controls", None)
+        strategy_control = (
+            None
+            if owner_controls is None
+            else await owner_controls.get_strategy_control(
+                aggregate.ticket.identity.runtime.strategy_group_id
+            )
+        )
         strategy_version = await uow.signals.get_strategy_version(
             aggregate.ticket.identity.runtime.strategy_version_id
         )
@@ -469,6 +478,7 @@ async def _preflight_new_entry_mutation(
             active_family_ticket_count=active_family_ticket_count,
             active_directional_risk_at_stop=active_directional_risk_at_stop,
             now_ms=request.now_ms,
+            strategy_entry_enabled=strategy_entry_is_enabled(strategy_control),
         )
     )
     return decision.status

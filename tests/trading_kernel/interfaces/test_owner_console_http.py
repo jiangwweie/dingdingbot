@@ -543,7 +543,7 @@ async def test_missing_ticket_causality_uses_stable_404_shape(
     }
 
 
-async def test_openapi_contains_only_health_auth_and_read_routes(
+async def test_openapi_contains_health_read_and_approved_owner_control_routes(
     owner_console_app: FastAPI,
 ) -> None:
     paths = set(owner_console_app.openapi()["paths"])
@@ -560,6 +560,15 @@ async def test_openapi_contains_only_health_auth_and_read_routes(
         "/api/owner/v1/tickets/{ticket_id}/causality",
         "/api/owner/v1/review",
         "/api/owner/v1/market/candles",
+        "/api/owner/v1/controls",
+        "/api/owner/v1/controls/strategies/{strategy_group_id}/pause",
+        "/api/owner/v1/controls/strategies/{strategy_group_id}/resume",
+        "/api/owner/v1/controls/entry/pause",
+        "/api/owner/v1/controls/entry/resume",
+        "/api/owner/v1/controls/exposure/flatten-all/preview",
+        "/api/owner/v1/controls/exposure/flatten-all",
+        "/api/owner/v1/control-operations/{authorization_id}",
+        "/api/owner/v1/control-events",
     }
     assert not any(
         method in path_item

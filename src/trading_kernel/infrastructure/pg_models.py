@@ -1598,3 +1598,99 @@ schema_metadata = sa.Table(
     sa.Column("metadata_value", LONG_TEXT, nullable=False),
     _time("updated_at_ms"),
 )
+
+strategy_entry_control_events = sa.Table(
+    "brc_strategy_entry_control_events",
+    metadata,
+    _id("strategy_entry_control_event_id", primary_key=True),
+    _id("strategy_group_id"),
+    sa.Column("control_version", sa.BigInteger, nullable=False),
+    sa.Column("operation", SHORT_TEXT, nullable=False),
+    sa.Column("target_state", SHORT_TEXT, nullable=False),
+    _id("authorization_id"),
+    sa.Column("reason", LONG_TEXT, nullable=False),
+    _json("payload"),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("strategy_group_id", "control_version"),
+    sa.CheckConstraint("control_version > 0", name="ver_pos"),
+    sa.CheckConstraint("operation IN ('pause', 'resume')", name="op_valid"),
+    sa.CheckConstraint("target_state IN ('paused', 'enabled')", name="state_valid"),
+)
+
+strategy_entry_controls_current = sa.Table(
+    "brc_strategy_entry_controls_current",
+    metadata,
+    _id("strategy_group_id", primary_key=True),
+    sa.Column("entry_state", SHORT_TEXT, nullable=False),
+    sa.Column("control_version", sa.BigInteger, nullable=False),
+    _id("last_event_id"),
+    sa.Column("reason", LONG_TEXT, nullable=False),
+    _time("updated_at_ms"),
+    sa.CheckConstraint("entry_state IN ('paused', 'enabled')", name="state_valid"),
+    sa.CheckConstraint("control_version > 0", name="ver_pos"),
+)
+
+owner_authorizations = sa.Table(
+    "brc_owner_authorizations",
+    metadata,
+    _id("authorization_id", primary_key=True),
+    sa.Column("purpose", SHORT_TEXT, nullable=False),
+    sa.Column("owner_identity", SHORT_TEXT, nullable=False),
+    sa.Column("authentication_strength", SHORT_TEXT, nullable=False),
+    sa.Column("request_digest", LONG_TEXT, nullable=False),
+    _json("target_scope"),
+    _id("idempotency_key"),
+    _time("authorized_at_ms"),
+    sa.UniqueConstraint("idempotency_key"),
+    sa.CheckConstraint(
+        "purpose IN ('strategy_pause', 'strategy_resume', 'entry_pause', "
+        "'entry_resume', 'owner_flatten_all')",
+        name="purpose_valid",
+    ),
+    sa.CheckConstraint(
+        "authentication_strength IN ('session', 'totp_step_up')",
+        name="auth_valid",
+    ),
+    sa.CheckConstraint("request_digest ~ '^sha256:[0-9a-f]{64}$'", name="digest_valid"),
+)
+
+owner_control_operation_events = sa.Table(
+    "brc_owner_control_operation_events",
+    metadata,
+    _id("control_operation_event_id", primary_key=True),
+    _id("authorization_id"),
+    sa.Column("operation_version", sa.BigInteger, nullable=False),
+    sa.Column("state", SHORT_TEXT, nullable=False),
+    sa.Column("first_blocker", LONG_TEXT, nullable=True),
+    _json("payload"),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("authorization_id", "operation_version"),
+    sa.CheckConstraint("operation_version > 0", name="ver_pos"),
+)
+
+owner_control_operations_current = sa.Table(
+    "brc_owner_control_operations_current",
+    metadata,
+    _id("authorization_id", primary_key=True),
+    sa.Column("operation_kind", SHORT_TEXT, nullable=False),
+    sa.Column("state", SHORT_TEXT, nullable=False),
+    sa.Column("version", sa.BigInteger, nullable=False),
+    _id("runtime_profile_id"),
+    sa.Column("venue_id", SHORT_TEXT, nullable=False),
+    _id("account_id"),
+    _json("target_ticket_ids"),
+    sa.Column("snapshot_digest", LONG_TEXT, nullable=False),
+    sa.Column("first_blocker", LONG_TEXT, nullable=True),
+    _id("claimed_by", nullable=True),
+    _time("lease_until_ms", nullable=True),
+    _time("created_at_ms"),
+    _time("updated_at_ms"),
+    sa.CheckConstraint("operation_kind = 'flatten_all'", name="kind_valid"),
+    sa.CheckConstraint("version > 0", name="ver_pos"),
+    sa.CheckConstraint("snapshot_digest ~ '^sha256:[0-9a-f]{64}$'", name="digest_valid"),
+)
+sa.Index(
+    "ix_brc_owner_control_operations_actionable",
+    owner_control_operations_current.c.state,
+    owner_control_operations_current.c.updated_at_ms,
+)

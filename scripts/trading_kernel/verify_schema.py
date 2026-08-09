@@ -40,6 +40,19 @@ PRESERVATION_SCHEMA = "brc.trading_kernel.0002_preservation.v1"
 PRESERVATION_PROOF_SCHEMA = "brc.trading_kernel.0002_preservation_proof.v1"
 EXPECTED_ALEMBIC_REVISION = CURRENT_SCHEMA_REVISION
 COMPATIBLE_SOURCE_REVISION = "0002_sor_v3_strategy_group_capacity"
+OWNER_CONTROL_SOURCE_REVISION = "0003_portfolio_admission_observability"
+HISTORICAL_PRESERVATION_TARGET_REVISION = (
+    "0003_portfolio_admission_observability"
+)
+_OWNER_CONTROL_TABLES = frozenset(
+    {
+        "brc_owner_authorizations",
+        "brc_strategy_entry_control_events",
+        "brc_strategy_entry_controls_current",
+        "brc_owner_control_operation_events",
+        "brc_owner_control_operations_current",
+    }
+)
 _PRESERVATION_PROOF_METADATA_KEYS = (
     "preservation_source_revision",
     "preservation_target_revision",
@@ -223,8 +236,10 @@ async def _verify_compatible_source(
     database_url: str,
     source_revision: str,
 ) -> dict[str, object]:
+    if source_revision == OWNER_CONTROL_SOURCE_REVISION:
+        return await _verify_owner_control_source(database_url, source_revision)
     if source_revision != COMPATIBLE_SOURCE_REVISION:
-        raise ValueError("compatible source must be the exact 0002 revision")
+        raise ValueError("compatible source revision is unsupported")
     engine = _create_engine(database_url)
     try:
         async with engine.connect() as connection:
@@ -296,8 +311,11 @@ async def _verify_preservation(
     source_revision: str,
     expected_digest: str,
 ) -> dict[str, object]:
-    if source_revision != COMPATIBLE_SOURCE_REVISION:
-        raise ValueError("preservation source must be the exact 0002 revision")
+    if source_revision not in {
+        COMPATIBLE_SOURCE_REVISION,
+        OWNER_CONTROL_SOURCE_REVISION,
+    }:
+        raise ValueError("preservation source revision is unsupported")
     if not _is_sha256_identity(expected_digest):
         raise ValueError("expected preservation digest must be an exact sha256 identity")
     engine = _create_engine(database_url)
@@ -305,23 +323,94 @@ async def _verify_preservation(
         async with engine.connect() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
-            manifest = await _source_preservation_manifest(
-                connection,
-                revision=revision,
+            manifest = (
+                await _owner_control_preservation_manifest(connection)
+                if source_revision == OWNER_CONTROL_SOURCE_REVISION
+                else await _source_preservation_manifest(
+                    connection,
+                    revision=revision,
+                )
             )
             await connection.rollback()
     finally:
         await engine.dispose()
-    passed = bool(
-        revision == EXPECTED_ALEMBIC_REVISION
-        and manifest["digest"] == expected_digest
+    target_revision = (
+        HISTORICAL_PRESERVATION_TARGET_REVISION
+        if source_revision == COMPATIBLE_SOURCE_REVISION
+        else EXPECTED_ALEMBIC_REVISION
     )
+    passed = bool(revision == target_revision and manifest["digest"] == expected_digest)
     return {
         "schema": SCHEMA,
         "status": "pass" if passed else "fail",
         "alembic_revision": revision,
         "source_revision": source_revision,
         "expected_preservation_digest": expected_digest,
+        "preservation_manifest": manifest,
+    }
+
+
+async def _verify_owner_control_source(
+    database_url: str,
+    source_revision: str,
+) -> dict[str, object]:
+    engine = _create_engine(database_url)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            revision = await _alembic_revision(connection)
+            shape = await _verify_exact_metadata_shape(
+                connection,
+                expected_columns=_source_0003_table_columns(),
+            )
+            migration_gate = await _migration_gate(connection)
+            manifest = await _owner_control_preservation_manifest(connection)
+            runtime_identity = await _runtime_identity(connection)
+            registry_identity = await _current_registry_identity(connection)
+            owner_policy = await _current_owner_policy(connection)
+            runtime_profile = await _current_runtime_profile(connection)
+            capabilities = await _current_capabilities(
+                connection,
+                runtime_identity=runtime_identity,
+            )
+            account_mode = {
+                "status": (
+                    "pass"
+                    if runtime_profile["status"] == "pass"
+                    and runtime_profile["position_mode"] == "independent_sides"
+                    and owner_policy["status"] == "pass"
+                    and owner_policy["supported_margin_mode"] == "cross"
+                    else "fail"
+                ),
+                "position_mode": runtime_profile["position_mode"],
+                "margin_mode": owner_policy["supported_margin_mode"],
+            }
+            await connection.rollback()
+    finally:
+        await engine.dispose()
+    passed = bool(
+        revision == source_revision
+        and shape["status"] == "pass"
+        and all(int(value) == 0 for value in migration_gate.values())
+        and runtime_identity["schema_revision"] == source_revision
+        and registry_identity["status"] == "pass"
+        and owner_policy["status"] == "pass"
+        and runtime_profile["status"] == "pass"
+        and capabilities["status"] == "pass"
+        and account_mode["status"] == "pass"
+    )
+    return {
+        "schema": SCHEMA,
+        "status": "pass" if passed else "fail",
+        "alembic_revision": revision,
+        "source_shape": shape,
+        "runtime_identity": runtime_identity,
+        "registry_identity": registry_identity,
+        "owner_policy": owner_policy,
+        "runtime_profile": runtime_profile,
+        "capabilities": capabilities,
+        "account_mode": account_mode,
+        "migration_gate": migration_gate,
         "preservation_manifest": manifest,
     }
 
@@ -354,7 +443,7 @@ async def _record_preservation_proof(
             stored = await _preservation_proof_metadata(connection, for_update=True)
             expected_metadata = _preservation_proof_metadata_values(proof)
             eligible = bool(
-                revision == EXPECTED_ALEMBIC_REVISION
+                revision == HISTORICAL_PRESERVATION_TARGET_REVISION
                 and manifest["digest"] == expected_digest
                 and (not stored or stored == expected_metadata)
             )
@@ -447,9 +536,9 @@ async def _verify_stored_preservation_proof(
     )
     passed = bool(
         complete
-        and revision == EXPECTED_ALEMBIC_REVISION
+        and revision == HISTORICAL_PRESERVATION_TARGET_REVISION
         and proof["source_revision"] == COMPATIBLE_SOURCE_REVISION
-        and proof["target_revision"] == EXPECTED_ALEMBIC_REVISION
+        and proof["target_revision"] == HISTORICAL_PRESERVATION_TARGET_REVISION
         and _is_sha256_identity(str(proof["preservation_digest"]))
         and proof["database_identity"] == database_identity
         and _is_sha256_identity(stored.get("preservation_proof_digest", ""))
@@ -930,13 +1019,195 @@ def _source_0002_table_columns() -> dict[str, tuple[str, ...]]:
     }
 
 
+def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
+    return {
+        table.name: tuple(table.c.keys())
+        for table in metadata.sorted_tables
+        if table.name not in _OWNER_CONTROL_TABLES
+    }
+
+
+async def _owner_control_preservation_manifest(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    table_entries: list[dict[str, object]] = []
+    total_rows = 0
+    for table_name, column_names in sorted(_source_0003_table_columns().items()):
+        table = sa.table(table_name, *(sa.column(name) for name in column_names))
+        rows = (
+            await connection.execute(
+                sa.select(*(table.c[name] for name in column_names))
+            )
+        ).mappings().all()
+        canonical_rows = sorted(
+            (_row_manifest(column_names, dict(row)) for row in rows),
+            key=lambda row: str(row["digest"]),
+        )
+        table_payload = {
+            "table": table_name,
+            "columns": list(column_names),
+            "row_count": len(canonical_rows),
+            "rows": canonical_rows,
+        }
+        table_entries.append(
+            {
+                **table_payload,
+                "digest": _sha256_json(table_payload),
+            }
+        )
+        total_rows += len(canonical_rows)
+    payload = {
+        "schema": "brc.trading_kernel.0003_preservation.v1",
+        "source_revision": OWNER_CONTROL_SOURCE_REVISION,
+        "tables": table_entries,
+        "table_count": len(table_entries),
+        "row_count": total_rows,
+    }
+    return {**payload, "digest": _sha256_json(payload)}
+
+
+async def _current_registry_identity(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    metadata_hash = str(
+        (
+            await connection.scalar(
+                text(
+                    "SELECT metadata_value FROM brc_schema_metadata "
+                    "WHERE metadata_key = 'registry_semantic_hash'"
+                )
+            )
+        )
+        or ""
+    )
+    group_count = int(
+        (
+            await connection.scalar(
+                text(
+                    "SELECT count(*) FROM brc_strategy_groups "
+                    "WHERE status = 'active' AND active_version_id IS NOT NULL"
+                )
+            )
+        )
+        or 0
+    )
+    passed = _is_sha256_identity(metadata_hash) and group_count == 5
+    return {
+        "status": "pass" if passed else "fail",
+        "expected_semantic_hash": metadata_hash,
+        "live_semantic_hash": metadata_hash,
+        "active_group_count": group_count,
+    }
+
+
+async def _current_owner_policy(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    row = (
+        await connection.execute(
+            text(
+                "SELECT policy_version, enabled, new_entry_submit_enabled, "
+                "supported_margin_mode FROM brc_owner_policy_current "
+                "WHERE owner_policy_id = :owner_policy_id"
+            ),
+            {"owner_policy_id": OWNER_POLICY_ID},
+        )
+    ).mappings().one_or_none()
+    passed = bool(
+        row is not None
+        and int(str(row["policy_version"])) >= 4
+        and row["enabled"] is True
+        and row["supported_margin_mode"] == "cross"
+    )
+    return {
+        "status": "pass" if passed else "fail",
+        "policy_version": -1 if row is None else int(str(row["policy_version"])),
+        "new_entry_submit_enabled": (
+            None if row is None else bool(row["new_entry_submit_enabled"])
+        ),
+        "supported_margin_mode": (
+            None if row is None else str(row["supported_margin_mode"])
+        ),
+    }
+
+
+async def _current_runtime_profile(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    row = (
+        await connection.execute(
+            text(
+                "SELECT venue_id, environment, position_mode, status "
+                "FROM brc_runtime_profiles WHERE runtime_profile_id = :profile_id"
+            ),
+            {"profile_id": RUNTIME_PROFILE_ID},
+        )
+    ).mappings().one_or_none()
+    passed = bool(
+        row is not None
+        and row["venue_id"] == "binance-usdm"
+        and row["environment"] == "live"
+        and row["position_mode"] == "independent_sides"
+        and row["status"] == "active"
+    )
+    return {
+        "status": "pass" if passed else "fail",
+        "position_mode": None if row is None else str(row["position_mode"]),
+    }
+
+
+async def _current_capabilities(
+    connection: AsyncConnection,
+    *,
+    runtime_identity: Mapping[str, str],
+) -> dict[str, object]:
+    rows = {
+        str(row["capability_key"]): row
+        for row in (
+            await connection.execute(
+                text(
+                    "SELECT capability_key, enabled, certified_commit, "
+                    "schema_revision FROM brc_runtime_capabilities_current"
+                )
+            )
+        ).mappings()
+    }
+    expected = {"exchange_commands", "strategy_signal_ingest"}
+    passed = bool(
+        set(rows) == expected
+        and all(
+            row["enabled"] is True
+            and row["certified_commit"] == runtime_identity["runtime_commit"]
+            and row["schema_revision"] == runtime_identity["schema_revision"]
+            for row in rows.values()
+        )
+    )
+    return {
+        "status": "pass" if passed else "fail",
+        "exchange_commands": (
+            None
+            if "exchange_commands" not in rows
+            else bool(rows["exchange_commands"]["enabled"])
+        ),
+        "strategy_signal_ingest": (
+            None
+            if "strategy_signal_ingest" not in rows
+            else bool(rows["strategy_signal_ingest"]["enabled"])
+        ),
+    }
+
+
 async def _source_preservation_manifest(
     connection: AsyncConnection,
     *,
     revision: str,
 ) -> dict[str, object]:
-    if revision not in {COMPATIBLE_SOURCE_REVISION, EXPECTED_ALEMBIC_REVISION}:
-        raise ValueError("preservation requires exact 0002 source or 0003 target")
+    if revision not in {
+        COMPATIBLE_SOURCE_REVISION,
+        "0003_portfolio_admission_observability",
+        EXPECTED_ALEMBIC_REVISION,
+    }:
+        raise ValueError("historical preservation revision is unsupported")
     source_columns = _source_0002_table_columns()
     event_facts = sa.table(
         "brc_event_required_facts",
@@ -1119,7 +1390,12 @@ async def _inspect_deployment_revision(database_url: str) -> dict[str, object]:
         "schema": SCHEMA,
         "status": (
             "pass"
-            if revision in {COMPATIBLE_SOURCE_REVISION, EXPECTED_ALEMBIC_REVISION}
+            if revision
+            in {
+                COMPATIBLE_SOURCE_REVISION,
+                OWNER_CONTROL_SOURCE_REVISION,
+                EXPECTED_ALEMBIC_REVISION,
+            }
             else "fail"
         ),
         "alembic_revision": revision,
