@@ -28,6 +28,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0001_trading_kernel_baseline_v4.py",
         "0002_sor_v3_strategy_group_capacity.py",
         "0003_portfolio_admission_observability.py",
+        "0004_owner_control_plane.py",
     )
 
     revisions: dict[str, str | None] = {}
@@ -48,10 +49,12 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0003_portfolio_admission_observability": (
             "0002_sor_v3_strategy_group_capacity"
         ),
+        "0004_owner_control_plane": "0003_portfolio_admission_observability",
     }
     assert set(revisions.values()) - {None} == {
         "0001_trading_kernel_baseline_v4",
         "0002_sor_v3_strategy_group_capacity",
+        "0003_portfolio_admission_observability",
     }
 
     baseline_source = migration_paths[0].read_text(encoding="utf-8")
@@ -100,7 +103,7 @@ def test_reconciliation_certification_is_a_bounded_safety_worker_concern() -> No
     assert request.certification_max_wait_ms == 120_000
     assert request.certification_valid_for_ms == 600_000
     assert request.certification_eligible_check_interval_ms == 300_000
-    assert request.schema_revision == "0003_portfolio_admission_observability"
+    assert request.schema_revision == CURRENT_SCHEMA_REVISION
     assert "housekeeping_status" in ReconciliationWorkerResult.model_fields
     assert (
         "instrument_certification_source"

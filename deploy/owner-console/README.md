@@ -36,8 +36,8 @@ SELECT current_user;
 ```
 
 Expected values are `on`, `3s`, and `brc_owner_console`. Build the
-`postgresql+asyncpg://` DSN with a URL-encoded password, then enter that DSN
-only through the encrypted-credential prompt described below.
+`postgresql+asyncpg://` DSN with a URL-encoded password, then install that DSN
+only in the root-owned mode-`0600` systemd credential source described below.
 
 ## Independent Python Environment And Frontend
 

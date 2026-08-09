@@ -16,8 +16,19 @@ def test_owner_console_service_is_unix_socket_only_and_resource_bounded() -> Non
     assert "--uds /run/brc-owner-console/api.sock" in service
     assert "EnvironmentFile=" not in service
     assert "TRADING_KERNEL_API_KEY" not in service
-    assert "LoadCredentialEncrypted=database_dsn:" in service
-    assert "LoadCredentialEncrypted=account_id:" in service
+    assert (
+        "LoadCredential=database_dsn:"
+        "/etc/brc/owner-console-credentials/database_dsn"
+    ) in service
+    assert (
+        "LoadCredential=control_database_dsn:"
+        "/etc/brc/owner-console-credentials/control_database_dsn"
+    ) in service
+    assert (
+        "LoadCredential=account_id:"
+        "/etc/brc/owner-console-credentials/account_id"
+    ) in service
+    assert "LoadCredentialEncrypted=" not in service
     assert "CPUQuota=25%" in resource_slice
     assert "MemoryMax=256M" in resource_slice
     assert "TasksMax=32" in resource_slice
@@ -26,13 +37,16 @@ def test_owner_console_service_is_unix_socket_only_and_resource_bounded() -> Non
 def test_owner_console_nginx_include_is_same_origin_and_manual_cache_safe() -> None:
     source = _read("deploy/owner-console/nginx/owner-console.locations.conf")
 
-    assert "try_files $uri $uri/ /index.html" in source
+    assert "location ^~ /trading/" in source
+    assert "try_files /__brc_owner_console_missing__ /trading/index.html" in source
+    assert "location ^~ /api/owner/v1/" in source
+    assert "location /api/" not in source
     assert "proxy_pass http://unix:/run/brc-owner-console/api.sock" in source
     assert "location = /api/owner/v1/auth/login" in source
     assert "limit_req zone=brc_owner_login burst=5 nodelay" in source
-    assert "proxy_no_cache 1" in source
+    assert "proxy_cache off" in source
     assert 'Cache-Control "no-store"' in source
-    assert "autoindex off" in source
+    assert "expires 1y" in source
 
 
 def test_owner_console_postgresql_role_is_read_only_and_select_only() -> None:
