@@ -454,16 +454,22 @@ def test_review_center_is_bounded_observe_only_and_never_ranks() -> None:
         items=(
             ReviewCenterItemFacts(
                 strategy_group_id="strategy-group:alpha",
+                exchange_instrument_id="BTCUSDT",
+                position_side="long",
                 terminal_at_ms=1_800_000_000_000,
                 review=_facts(ticket_id="ticket:z"),
             ),
             ReviewCenterItemFacts(
                 strategy_group_id="strategy-group:alpha",
+                exchange_instrument_id="ETHUSDT",
+                position_side="short",
                 terminal_at_ms=1_799_999_999_000,
                 review=_facts(ticket_id="ticket:y"),
             ),
             ReviewCenterItemFacts(
                 strategy_group_id="strategy-group:beta",
+                exchange_instrument_id="BNBUSDT",
+                position_side="long",
                 terminal_at_ms=1_799_999_998_000,
                 review=_facts(ticket_id="ticket:x"),
             ),
@@ -476,6 +482,11 @@ def test_review_center_is_bounded_observe_only_and_never_ranks() -> None:
 
     assert center.sample_count == 2
     assert center.next_cursor is not None
+    assert [item.ticket_id for item in center.items] == ["ticket:z", "ticket:y"]
+    assert center.items[0].exchange_instrument_id == "BTCUSDT"
+    assert center.items[0].position_side == "long"
+    assert center.items[0].strategy_group_id == "strategy-group:alpha"
+    assert center.items[0].review.sentences[0].text.startswith("执行链完整")
     assert center.net_pnl.value == Decimal("7.0200")
     assert center.strategy_group_samples[0].sample_count == 2
     assert center.strategy_group_samples[0].evidence_state == "observe_only"
@@ -492,11 +503,15 @@ def test_incomplete_center_economics_never_contributes_as_zero() -> None:
         items=(
             ReviewCenterItemFacts(
                 strategy_group_id="strategy-group:alpha",
+                exchange_instrument_id="BTCUSDT",
+                position_side="long",
                 terminal_at_ms=1_800_000_000_000,
                 review=_facts(),
             ),
             ReviewCenterItemFacts(
                 strategy_group_id="strategy-group:beta",
+                exchange_instrument_id="ETHUSDT",
+                position_side="short",
                 terminal_at_ms=1_799_999_999_000,
                 review=_facts(
                     economics_completeness="funding_unavailable",

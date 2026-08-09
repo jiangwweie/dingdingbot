@@ -1,11 +1,18 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { AuthBoundary } from "../features/auth/AuthBoundary";
 import { LoginRoute } from "../pages/LoginRoute";
 import { OverviewRoute } from "../pages/OverviewRoute";
 import { SignalsRoute } from "../pages/SignalsRoute";
-import { TradeCausalityRoute } from "../pages/TradeCausalityRoute";
 import { TradesRoute } from "../pages/TradesRoute";
 import { App } from "./App";
+
+const TradeCausalityRoute = lazy(() => import("../pages/TradeCausalityRoute").then((module) => ({ default: module.TradeCausalityRoute })));
+const ReviewRoute = lazy(() => import("../pages/ReviewRoute").then((module) => ({ default: module.ReviewRoute })));
+
+function RouteFallback() {
+  return <main className="auth-status">正在加载页面…</main>;
+}
 
 export const router = createBrowserRouter([
   {
@@ -33,7 +40,11 @@ export const router = createBrowserRouter([
       },
       {
         path: "/trades/:ticketId",
-        element: <TradeCausalityRoute />,
+        element: <Suspense fallback={<RouteFallback />}><TradeCausalityRoute /></Suspense>,
+      },
+      {
+        path: "/review",
+        element: <Suspense fallback={<RouteFallback />}><ReviewRoute /></Suspense>,
       },
       {
         path: "*",

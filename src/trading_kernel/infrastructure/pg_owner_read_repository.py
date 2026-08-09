@@ -1814,6 +1814,8 @@ def _review_center_item_facts(
         )
     return ReviewCenterItemFacts(
         strategy_group_id=trade.strategy_group_id,
+        exchange_instrument_id=trade.exchange_instrument_id,
+        position_side=trade.position_side,
         terminal_at_ms=int(terminal_at_ms),
         review=review_facts,
     )

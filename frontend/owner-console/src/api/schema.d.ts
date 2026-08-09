@@ -468,6 +468,32 @@ export interface components {
             /** Today Signal Count */
             today_signal_count: number;
         };
+        /** ProgrammaticTradeReview */
+        ProgrammaticTradeReview: {
+            /** Attention Items */
+            attention_items: string[];
+            economic_summary: components["schemas"]["ReviewEconomicSummary"];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /**
+             * Execution Classification
+             * @enum {string}
+             */
+            execution_classification: "complete" | "recovered_incident" | "evidence_incomplete" | "in_progress" | "waiting_review";
+            /** Exit Reason */
+            exit_reason: string | null;
+            /** Final Conclusion */
+            final_conclusion: string | null;
+            /**
+             * Review Status
+             * @enum {string}
+             */
+            review_status: "in_progress" | "waiting_review" | "complete" | "incomplete_evidence";
+            /** Sentences */
+            sentences: components["schemas"]["ReviewSentence"][];
+            /** Ticket Id */
+            ticket_id: string;
+        };
         /** RawExchangeCommandView */
         RawExchangeCommandView: {
             /** Command Id */
@@ -556,6 +582,23 @@ export interface components {
             /** Ticket Count */
             ticket_count: number;
         };
+        /** ReviewCenterItem */
+        ReviewCenterItem: {
+            /** Exchange Instrument Id */
+            exchange_instrument_id: string;
+            /**
+             * Position Side
+             * @enum {string}
+             */
+            position_side: "long" | "short";
+            review: components["schemas"]["ProgrammaticTradeReview"];
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Terminal At Ms */
+            terminal_at_ms: number;
+            /** Ticket Id */
+            ticket_id: string;
+        };
         /** ReviewCenterSummary */
         ReviewCenterSummary: {
             /** Complete Review Count */
@@ -572,6 +615,8 @@ export interface components {
             funding: components["schemas"]["MoneyMetric"];
             /** Incomplete Review Count */
             incomplete_review_count: number;
+            /** Items */
+            items: components["schemas"]["ReviewCenterItem"][];
             net_pnl: components["schemas"]["MoneyMetric"];
             net_r: components["schemas"]["MoneyMetric"];
             /** Next Cursor */
@@ -582,6 +627,26 @@ export interface components {
             strategy_group_samples: components["schemas"]["StrategyGroupSampleState"][];
             /** To Ms */
             to_ms: number;
+        };
+        /** ReviewEconomicSummary */
+        ReviewEconomicSummary: {
+            fees: components["schemas"]["MoneyMetric"];
+            funding: components["schemas"]["MoneyMetric"];
+            gross_pnl: components["schemas"]["MoneyMetric"];
+            net_pnl: components["schemas"]["MoneyMetric"];
+            net_r: components["schemas"]["MoneyMetric"];
+        };
+        /** ReviewSentence */
+        ReviewSentence: {
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /**
+             * Template Id
+             * @enum {string}
+             */
+            template_id: "execution_complete" | "execution_recovered" | "economics_complete" | "economics_incomplete" | "review_waiting" | "ticket_in_progress";
+            /** Text */
+            text: string;
         };
         /** ShadowOutcomeSummary */
         ShadowOutcomeSummary: {

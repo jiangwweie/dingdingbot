@@ -16,6 +16,7 @@ from src.trading_kernel.application.owner_console.models import (
     ProgrammaticTradeReview,
     ReviewBreakdownItem,
     ReviewCenterFacts,
+    ReviewCenterItem,
     ReviewCenterItemFacts,
     ReviewCenterSummary,
     ReviewEconomicSummary,
@@ -208,6 +209,17 @@ def build_review_center(facts: ReviewCenterFacts) -> ReviewCenterSummary:
         to_ms=facts.to_ms,
         sample_count=len(reviews),
         next_cursor=next_cursor,
+        items=tuple(
+            ReviewCenterItem(
+                ticket_id=review.ticket_id,
+                strategy_group_id=item.strategy_group_id,
+                exchange_instrument_id=item.exchange_instrument_id,
+                position_side=item.position_side,
+                terminal_at_ms=item.terminal_at_ms,
+                review=review,
+            )
+            for item, review in reviews
+        ),
         net_pnl=net_pnl,
         net_r=net_r,
         fees=fees,

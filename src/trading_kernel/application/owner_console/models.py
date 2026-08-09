@@ -543,11 +543,21 @@ class StrategyGroupSampleState(FrozenModel):
     evidence: tuple[EvidenceRef, ...]
 
 
+class ReviewCenterItem(FrozenModel):
+    ticket_id: str
+    strategy_group_id: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
+    terminal_at_ms: int
+    review: ProgrammaticTradeReview
+
+
 class ReviewCenterSummary(FrozenModel):
     from_ms: int
     to_ms: int
     sample_count: int
     next_cursor: str | None
+    items: tuple[ReviewCenterItem, ...]
     net_pnl: MoneyMetric
     net_r: MoneyMetric
     fees: MoneyMetric
@@ -833,6 +843,8 @@ class ProgrammaticReviewFacts(FrozenModel):
 
 class ReviewCenterItemFacts(FrozenModel):
     strategy_group_id: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
     terminal_at_ms: int
     review: ProgrammaticReviewFacts
 
