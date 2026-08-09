@@ -2,6 +2,7 @@ import { createBrowserRouter } from "react-router-dom";
 import { AuthBoundary } from "../features/auth/AuthBoundary";
 import { LoginRoute } from "../pages/LoginRoute";
 import { OverviewRoute } from "../pages/OverviewRoute";
+import { SignalsRoute } from "../pages/SignalsRoute";
 import { App } from "./App";
 
 export const router = createBrowserRouter([
@@ -19,6 +20,10 @@ export const router = createBrowserRouter([
       {
         path: "/overview",
         element: <OverviewRoute />,
+      },
+      {
+        path: "/signals",
+        element: <SignalsRoute />,
       },
       {
         path: "*",
