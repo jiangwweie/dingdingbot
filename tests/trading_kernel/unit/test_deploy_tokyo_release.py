@@ -418,8 +418,8 @@ def test_migration_unknown_outcome_confirmed_0003_enters_target_fix_forward() ->
     assert backend.entry_is_inactive_disabled_and_fenced()
 
 
-def test_target_schema_fix_forward_recovers_database_bound_proof_markers() -> None:
-    """Catches requiring a lost release-local marker after 0003 already committed."""
+def test_target_schema_fix_forward_reuses_persisted_preservation_digest() -> None:
+    """Catches rebuilding a source manifest after the target schema committed."""
 
     backend = FakeDeploymentBackend(
         source_schema_revision=TARGET_SCHEMA_REVISION,
@@ -430,9 +430,8 @@ def test_target_schema_fix_forward_recovers_database_bound_proof_markers() -> No
     result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
 
     assert result.status == "pass"
-    assert ("recover_preservation_proof", TARGET_RELEASE) in backend.calls
-    assert not any(call[0] == "read_preservation_digest" for call in backend.calls)
-    assert not any(call[0] == "verify_preservation" for call in backend.calls)
+    assert ("read_preservation_digest", TARGET_RELEASE) in backend.calls
+    assert not any(call[0] == "recover_preservation_proof" for call in backend.calls)
 
 
 def test_migration_unknown_outcome_remains_primary_when_target_recovery_activation_fails(
@@ -769,6 +768,8 @@ def test_compatible_upgrade_resumes_target_fix_forward_idempotently() -> None:
     assert result.status == "pass"
     assert not any(call[0] == "install_release" for call in backend.calls)
     assert not any(call[0] == "migrate_schema" for call in backend.calls)
+    assert not any(call[0] == "recover_preservation_proof" for call in backend.calls)
+    assert not any(call[0] == "verify_preservation" for call in backend.calls)
     assert backend.active_services == set(SAFETY_SERVICES)
     assert backend.entry_is_inactive_disabled_and_fenced()
 
@@ -1783,21 +1784,6 @@ class FakeDeploymentBackend:
             self.preservation_is_verified
             and self.preservation_database_proof_matches
         )
-
-    def recover_preservation_proof(self, release: str) -> Mapping[str, object]:
-        self.calls.append(("recover_preservation_proof", release))
-        self.preservation_is_verified = True
-        return {
-            "status": "pass",
-            "alembic_revision": TARGET_SCHEMA_REVISION,
-            "preservation_proof": {
-                "source_revision": SOURCE_SCHEMA_REVISION,
-                "target_revision": TARGET_SCHEMA_REVISION,
-                "preservation_digest": PRESERVATION_DIGEST,
-                "database_identity": "postgresql:123:456",
-                "proof_digest": "sha256:" + "9" * 64,
-            },
-        }
 
     def deploy_compatible_identity(
         self,

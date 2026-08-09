@@ -234,8 +234,6 @@ class TokyoReleaseBackend(Protocol):
 
     def preservation_verified(self, release: str, digest: str) -> bool: ...
 
-    def recover_preservation_proof(self, release: str) -> Mapping[str, object]: ...
-
     def deploy_compatible_identity(
         self,
         release: str,
@@ -599,13 +597,11 @@ def _deploy_compatible_upgrade(
             else:
                 schema_migrated = True
         else:
-            preservation_proof = backend.recover_preservation_proof(
+            preservation_digest = backend.read_preservation_digest(
                 plan.target_release
             )
-            preservation_digest = _require_historical_preservation_proof(
-                preservation_proof,
-                target_schema_revision=plan.schema_revision,
-            )
+            if not _SEED_IDENTITY.fullmatch(preservation_digest):
+                raise DeploymentBlocked("source preservation digest is invalid")
 
         if preservation_digest is None:
             raise DeploymentBlocked("source preservation digest is missing")
@@ -965,25 +961,27 @@ def _require_preservation_verification(
         raise DeploymentBlocked("history preservation digest differs")
 
 
-def _require_historical_preservation_proof(
+def _require_database_lineage_verification(
     payload: Mapping[str, object],
     *,
     target_schema_revision: str,
-) -> str:
+) -> None:
     proof = payload.get("preservation_proof")
-    if payload.get("status") != "pass" or not isinstance(proof, Mapping):
-        raise DeploymentBlocked("database-bound preservation proof differs")
-    digest = str(proof.get("preservation_digest", ""))
-    proof_digest = str(proof.get("proof_digest", ""))
     if (
-        proof.get("source_revision") != COMPATIBLE_SOURCE_SCHEMA_REVISION
-        or proof.get("target_revision") != target_schema_revision
+        payload.get("status") != "pass"
         or payload.get("alembic_revision") != target_schema_revision
-        or not _SEED_IDENTITY.fullmatch(digest)
-        or not _SEED_IDENTITY.fullmatch(proof_digest)
+        or not isinstance(proof, Mapping)
+        or proof.get("source_revision")
+        != "0002_sor_v3_strategy_group_capacity"
+        or proof.get("target_revision")
+        != "0003_portfolio_admission_observability"
+        or not _SEED_IDENTITY.fullmatch(
+            str(proof.get("preservation_digest", ""))
+        )
+        or not _SEED_IDENTITY.fullmatch(str(proof.get("proof_digest", "")))
+        or not str(proof.get("database_identity", "")).startswith("postgresql:")
     ):
         raise DeploymentBlocked("database-bound preservation proof differs")
-    return digest
 
 
 def _require_release_facts(
@@ -1494,55 +1492,14 @@ class SshTokyoReleaseBackend:
         payload = self._release_json(
             release,
             "scripts/trading_kernel/verify_schema.py",
-            "--preserve-source-revision",
-            COMPATIBLE_SOURCE_SCHEMA_REVISION,
-            "--expected-preservation-digest",
-            digest,
+            "--verify-stored-preservation-proof",
             check=False,
         )
-        _require_preservation_verification(
+        _require_database_lineage_verification(
             payload,
             target_schema_revision=SCHEMA_REVISION,
-            expected_digest=digest,
         )
         return True
-
-    def recover_preservation_proof(self, release: str) -> Mapping[str, object]:
-        digest = self.read_preservation_digest(release)
-        payload = self._release_json(
-            release,
-            "scripts/trading_kernel/verify_schema.py",
-            "--preserve-source-revision",
-            COMPATIBLE_SOURCE_SCHEMA_REVISION,
-            "--expected-preservation-digest",
-            digest,
-            check=False,
-        )
-        _require_preservation_verification(
-            payload,
-            target_schema_revision=SCHEMA_REVISION,
-            expected_digest=digest,
-        )
-        self._write_release_marker(
-            release,
-            ".brc-0002-preservation-digest",
-            digest,
-        )
-        self._write_release_marker(
-            release,
-            ".brc-0002-preservation-verified",
-            digest,
-        )
-        return {
-            "status": "pass",
-            "alembic_revision": SCHEMA_REVISION,
-            "preservation_proof": {
-                "source_revision": COMPATIBLE_SOURCE_SCHEMA_REVISION,
-                "target_revision": SCHEMA_REVISION,
-                "preservation_digest": digest,
-                "proof_digest": digest,
-            },
-        }
 
     def deploy_compatible_identity(
         self,

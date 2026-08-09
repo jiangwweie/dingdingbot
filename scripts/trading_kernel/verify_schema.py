@@ -536,7 +536,8 @@ async def _verify_stored_preservation_proof(
     )
     passed = bool(
         complete
-        and revision == HISTORICAL_PRESERVATION_TARGET_REVISION
+        and revision
+        in {HISTORICAL_PRESERVATION_TARGET_REVISION, EXPECTED_ALEMBIC_REVISION}
         and proof["source_revision"] == COMPATIBLE_SOURCE_REVISION
         and proof["target_revision"] == HISTORICAL_PRESERVATION_TARGET_REVISION
         and _is_sha256_identity(str(proof["preservation_digest"]))
