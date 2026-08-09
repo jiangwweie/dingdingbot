@@ -14,6 +14,11 @@ export async function login(credentials: LoginCredentials): Promise<void> {
   }
 }
 
+export async function logout(): Promise<void> {
+  const { error, response } = await apiClient.POST("/api/owner/v1/auth/logout");
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+}
+
 export interface AuthSession {
   authenticated: true;
 }

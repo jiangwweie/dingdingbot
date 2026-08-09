@@ -1,6 +1,8 @@
-import type { ReactNode } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { type ReactNode, useState } from "react";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { StatusTag, type StatusTone } from "../components/ui/StatusTag";
+import { logout } from "../features/auth/api";
+import { ownerQueryClient } from "./queryClient";
 
 const navigationItems = [
   { label: "总览", to: "/overview" },
@@ -17,6 +19,18 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, dataTime, statusLabel, statusTone }: AppShellProps) {
+  const navigate = useNavigate();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      ownerQueryClient.clear();
+      navigate("/login", { replace: true });
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
   return (
     <>
       <header className="top-navigation">
@@ -41,6 +55,7 @@ export function AppShell({ children, dataTime, statusLabel, statusTone }: AppShe
               ·
             </span>
             <span className="runtime-summary__time tabular-number">{dataTime}</span>
+            <button className="runtime-summary__logout" disabled={isLoggingOut} type="button" onClick={() => void handleLogout()}>{isLoggingOut ? "退出中" : "退出"}</button>
           </div>
         </div>
       </header>
