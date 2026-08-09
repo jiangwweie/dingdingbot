@@ -1,0 +1,33 @@
+[Unit]
+Description=BRC Owner Console read-only API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=brc
+Group=brc
+WorkingDirectory=/opt/brc/current
+RuntimeDirectory=brc-owner-console
+RuntimeDirectoryMode=0750
+UMask=0077
+Slice=brc-owner-console.slice
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+LoadCredentialEncrypted=owner_username:/etc/credstore.encrypted/brc-owner-console-owner-username
+LoadCredentialEncrypted=owner_password_hash:/etc/credstore.encrypted/brc-owner-console-owner-password-hash
+LoadCredentialEncrypted=owner_totp_seed:/etc/credstore.encrypted/brc-owner-console-owner-totp-seed
+LoadCredentialEncrypted=session_signing_key:/etc/credstore.encrypted/brc-owner-console-session-signing-key
+LoadCredentialEncrypted=database_dsn:/etc/credstore.encrypted/brc-owner-console-database-dsn
+LoadCredentialEncrypted=account_id:/etc/credstore.encrypted/brc-owner-console-account-id
+ExecStart=/opt/brc/current/.venv-owner-console/bin/python scripts/owner_console/run_api.py --uds /run/brc-owner-console/api.sock
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

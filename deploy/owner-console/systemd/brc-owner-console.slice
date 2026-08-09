@@ -1,0 +1,9 @@
+[Unit]
+Description=BRC Owner Console resource boundary
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+CPUQuota=25%
+MemoryMax=256M
+TasksMax=32

@@ -62,6 +62,25 @@ _SEED_IDENTITY = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DRAIN_AUTHORIZATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
+def preserved_owner_console_artifacts(
+    *,
+    current_release: str,
+    target_release: str,
+) -> tuple[tuple[str, str], ...]:
+    """Return the exact untracked Owner Console artifacts kept across releases."""
+
+    return (
+        (
+            f"{current_release}/.venv-owner-console",
+            f"{target_release}/.venv-owner-console",
+        ),
+        (
+            f"{current_release}/frontend/owner-console/dist",
+            f"{target_release}/frontend/owner-console/dist",
+        ),
+    )
+
+
 class DeploymentBlocked(RuntimeError):
     """Preflight or postflight facts do not satisfy the release contract."""
 
@@ -1361,6 +1380,20 @@ class SshTokyoReleaseBackend:
                 f"{release}/.venv",
             )
         )
+        for source, target in preserved_owner_console_artifacts(
+            current_release=CURRENT_RELEASE,
+            target_release=release,
+        ):
+            source_status = self._remote(
+                ("sudo", "test", "-e", source),
+                check=False,
+            )
+            if source_status.returncode == 0:
+                self._remote(("sudo", "cp", "-a", source, target))
+            elif source_status.returncode != 1:
+                raise RuntimeError(
+                    f"Owner Console artifact preflight failed: {source}"
+                )
         self._remote(("sudo", "chown", "-R", "brc:brc", release))
 
     def deploy_identity(
