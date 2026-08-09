@@ -16,6 +16,7 @@ export type DenseTableColumnDef<TData extends RowData> = ColumnDef<
 
 interface DenseTableProps<TData extends RowData> {
   ariaLabel: string;
+  columnWidths?: readonly string[];
   columns: DenseTableColumnDef<TData>[];
   data: TData[];
   expandedRowId?: string | null;
@@ -25,6 +26,7 @@ interface DenseTableProps<TData extends RowData> {
 
 export function DenseTable<TData extends RowData>({
   ariaLabel,
+  columnWidths,
   columns,
   data,
   expandedRowId = null,
@@ -41,6 +43,11 @@ export function DenseTable<TData extends RowData>({
   return (
     <div className="w-full overflow-x-auto border border-[var(--color-divider)] bg-[var(--color-surface)]">
       <table className="w-full min-w-[960px] table-fixed border-collapse text-left" aria-label={ariaLabel}>
+        {columnWidths ? (
+          <colgroup>
+            {columnWidths.map((width, index) => <col key={`${index}:${width}`} style={{ width }} />)}
+          </colgroup>
+        ) : null}
         <thead className="h-[30px] border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] text-[11px] font-medium text-[var(--color-text-secondary)]">
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id}>

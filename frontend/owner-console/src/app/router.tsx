@@ -3,6 +3,7 @@ import { AuthBoundary } from "../features/auth/AuthBoundary";
 import { LoginRoute } from "../pages/LoginRoute";
 import { OverviewRoute } from "../pages/OverviewRoute";
 import { SignalsRoute } from "../pages/SignalsRoute";
+import { TradesRoute } from "../pages/TradesRoute";
 import { App } from "./App";
 
 export const router = createBrowserRouter([
@@ -24,6 +25,10 @@ export const router = createBrowserRouter([
       {
         path: "/signals",
         element: <SignalsRoute />,
+      },
+      {
+        path: "/trades",
+        element: <TradesRoute />,
       },
       {
         path: "*",
