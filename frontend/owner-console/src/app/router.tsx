@@ -1,6 +1,7 @@
 import { createBrowserRouter } from "react-router-dom";
 import { AuthBoundary } from "../features/auth/AuthBoundary";
 import { LoginRoute } from "../pages/LoginRoute";
+import { OverviewRoute } from "../pages/OverviewRoute";
 import { App } from "./App";
 
 export const router = createBrowserRouter([
@@ -11,6 +12,14 @@ export const router = createBrowserRouter([
   {
     element: <AuthBoundary />,
     children: [
+      {
+        path: "/",
+        element: <App />,
+      },
+      {
+        path: "/overview",
+        element: <OverviewRoute />,
+      },
       {
         path: "*",
         element: <App />,
