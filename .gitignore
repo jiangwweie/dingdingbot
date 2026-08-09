@@ -51,6 +51,7 @@ config/user.yml
 .env.local
 .env.local.*
 .local
+.local/owner-console-snapshots/
 docker/.env.docker
 
 # Node

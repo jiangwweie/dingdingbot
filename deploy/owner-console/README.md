@@ -123,6 +123,63 @@ If neither artifact exists, a Kernel-only release continues normally. This
 preservation rule does not add the Owner Console unit to the four-worker
 deployment membership and does not start or reload Owner Console services.
 
+## Production DML Snapshot For Local Acceptance
+
+The snapshot path is read-only on Tokyo and destructive only inside a guarded
+localhost database named `brc_owner_console_test_<12 lowercase hex>`. It does
+not stop PostgreSQL or any Trading Kernel worker.
+
+Export the exact production database through the configured SSH alias:
+
+```bash
+.venv/bin/python scripts/owner_console/export_server_dml_snapshot.py \
+  --ssh-host tokyo \
+  --remote-database brc_trading_kernel
+```
+
+The exporter performs a credential-column preflight, one single-process
+serializable data-only `pg_dump` restricted to the authoritative `public`
+Schema, local gzip streaming, SHA-256 generation, and before/after parity
+counts. The internal `claim_token` column is an allowed
+runtime lease identity rather than an authentication credential; password,
+secret, API key, TOTP, and credential columns remain hard stops.
+
+Restore the emitted `.sql.gz` and `.json` pair into a fresh disposable local
+database:
+
+```bash
+.venv/bin/python scripts/owner_console/restore_local_dml_snapshot.py \
+  --snapshot .local/owner-console-snapshots/<snapshot>.sql.gz \
+  --metadata .local/owner-console-snapshots/<snapshot>.json \
+  --database-name brc_owner_console_test_<12-lowercase-hex>
+```
+
+The restore verifies SHA-256 before PostgreSQL access, migrates a fresh local
+database to the exact current head, restores DML through `psql` in one
+transaction, compares five parity counts, and writes a mode-0600 local read-role
+DSN beside the snapshot. By default `psql` runs inside the attested local
+`dingdingbot-pg` container; `--postgres-container` may select another explicitly
+scoped local container. During the trusted DML transaction only, PostgreSQL
+trigger execution is disabled through `session_replication_role=replica` to
+avoid replaying runtime triggers before their referenced rows are loaded; it is
+restored to `origin` before commit. The command prints the exact `dropdb`
+cleanup command.
+
+Run the three bounded list probes through that read-only role:
+
+```bash
+.venv/bin/python scripts/owner_console/probe_local_snapshot.py \
+  --database-name brc_owner_console_test_<12-lowercase-hex> \
+  --snapshot-metadata .local/owner-console-snapshots/<snapshot>.json
+```
+
+The probe prints no rows, SQL parameters, DSN, account identity, Ticket
+identity, or credentials. It records only snapshot checksum, aggregate source
+count, planning time, execution time, end-to-end repository time, returned row
+count, sequential-scan presence, external-sort presence, and pass/fail. Signal,
+Trade, and Review each require EXPLAIN execution below 2400 ms and repository
+elapsed time below 3000 ms.
+
 ## Rollback
 
 Stop and disable `brc-owner-console-api.service`, remove the Nginx include, and
