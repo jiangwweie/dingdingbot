@@ -56,6 +56,9 @@ docker/.env.docker
 # Node
 node_modules/
 dist/
+frontend/owner-console/dist/
+frontend/owner-console/.openapi/
+frontend/owner-console/*.tsbuildinfo
 *.pyc
 
 # Local isolated implementation worktrees
