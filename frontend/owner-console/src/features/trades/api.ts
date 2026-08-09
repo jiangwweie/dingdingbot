@@ -4,6 +4,8 @@ import type { components } from "../../api/schema";
 import type { TradeSearchParams } from "./searchParams";
 
 export type TradeListEnvelope = components["schemas"]["ApiEnvelope_TradeListPage_"];
+export type TradeCausalityEnvelope = components["schemas"]["ApiEnvelope_TradeCausalityDetail_"];
+export type CandleEnvelope = components["schemas"]["ApiEnvelope_CandleSeries_"];
 
 export const tradesQueryKey = (filters: TradeSearchParams) => ["owner", "trades", filters] as const;
 
@@ -31,6 +33,34 @@ export async function getTrades(filters: TradeSearchParams): Promise<TradeListEn
 
   if (!response.ok) throw apiErrorFromResponse(response, error);
   if (!data) throw new ApiError(502, "invalid_response", "Trade list response is missing");
+  return data;
+}
+
+export const tradeCausalityQueryKey = (ticketId: string) => ["owner", "trades", "causality", ticketId] as const;
+export const candlesQueryKey = (ticketId: string, closedAtMs: number) => ["owner", "trades", "candles", ticketId, "15m", closedAtMs, 300] as const;
+
+export async function getTradeCausality(ticketId: string): Promise<TradeCausalityEnvelope> {
+  const { data, error, response } = await apiClient.GET("/api/owner/v1/tickets/{ticket_id}/causality", {
+    params: { path: { ticket_id: ticketId } },
+  });
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, "invalid_response", "Trade causality response is missing");
+  return data;
+}
+
+export async function getCandles(input: { exchangeInstrumentId: string; closedAtMs: number }): Promise<CandleEnvelope> {
+  const { data, error, response } = await apiClient.GET("/api/owner/v1/market/candles", {
+    params: {
+      query: {
+        exchange_instrument_id: input.exchangeInstrumentId,
+        timeframe: "15m",
+        closed_at_ms: input.closedAtMs,
+        limit: 300,
+      },
+    },
+  });
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, "invalid_response", "Candle response is missing");
   return data;
 }
 

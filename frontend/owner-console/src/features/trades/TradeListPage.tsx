@@ -151,7 +151,7 @@ export function TradeListPage() {
             <button className="grid h-5 w-5 flex-none place-items-center bg-transparent p-0 text-[var(--color-text-secondary)]" type="button" aria-expanded={isExpanded} aria-label={`${isExpanded ? "收起" : "展开"} ${trade.exchange_instrument_id} ${trade.position_side.toUpperCase()} 概要`} onClick={() => setExpandedTicketId(isExpanded ? null : trade.ticket_id)}>
               <ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`} strokeWidth={1.8} />
             </button>
-            <Link className="min-w-0 truncate text-[var(--color-emphasis)] hover:underline" to={`/trades/${encodeURIComponent(trade.ticket_id)}?${returnParams.toString()}`}>{trade.exchange_instrument_id} {trade.position_side.toUpperCase()}</Link>
+            <Link className="min-w-0 truncate text-[var(--color-emphasis)] hover:underline" state={{ returnPath: currentListPath, ticketIds: items.map((item) => item.ticket_id) }} to={`/trades/${encodeURIComponent(trade.ticket_id)}?${returnParams.toString()}`}>{trade.exchange_instrument_id} {trade.position_side.toUpperCase()}</Link>
           </div>
         );
       },
