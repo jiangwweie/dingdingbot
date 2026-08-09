@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import InvalidOperation
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Request
@@ -46,7 +47,13 @@ async def candles(
     )
     try:
         data = await get_market_data(request).read_candles(query)
-    except Exception as exc:
+    except (
+        TimeoutError,
+        TypeError,
+        ValueError,
+        InvalidOperation,
+        OverflowError,
+    ) as exc:
         raise PublicMarketFailure from exc
     return envelope(
         data,

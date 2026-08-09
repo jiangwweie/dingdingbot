@@ -513,6 +513,23 @@ async def test_market_failures_use_stable_502_shape(
     }
 
 
+async def test_unexpected_market_dependency_failure_remains_visible(
+    owner_console_client: AsyncClient,
+    market_data_spy: _PublicMarketData,
+) -> None:
+    market_data_spy.read_error = RuntimeError("unexpected adapter regression")
+
+    with pytest.raises(RuntimeError, match="unexpected adapter regression"):
+        await owner_console_client.get(
+            "/api/owner/v1/market/candles",
+            params={
+                "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
+                "timeframe": "15m",
+                "closed_at_ms": BASE_MS,
+            },
+        )
+
+
 async def test_missing_ticket_causality_uses_stable_404_shape(
     owner_console_client: AsyncClient,
 ) -> None:
