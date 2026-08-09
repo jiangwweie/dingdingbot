@@ -483,6 +483,8 @@ async def advance_flatten_operation_once(
         for ticket_id in operation.target_ticket_ids:
             aggregate = await uow.aggregates.get(ticket_id)
             if aggregate is None:
+                if operation.state is ControlOperationState.NEEDS_INTERVENTION:
+                    return operation
                 return await _save_operation_progress(
                     uow,
                     operation,
@@ -492,6 +494,8 @@ async def advance_flatten_operation_once(
                 )
             incident = await uow.incidents.get_open_for_ticket(ticket_id)
             if incident is not None:
+                if operation.state is ControlOperationState.NEEDS_INTERVENTION:
+                    return operation
                 return await _save_operation_progress(
                     uow,
                     operation,
@@ -533,7 +537,10 @@ async def advance_flatten_operation_once(
                 AggregateStatus.TERMINAL,
             }:
                 target = ControlOperationState.REVIEW_PENDING
-        elif operation.state is ControlOperationState.REVIEW_PENDING:
+        elif operation.state in {
+            ControlOperationState.REVIEW_PENDING,
+            ControlOperationState.NEEDS_INTERVENTION,
+        }:
             ready = statuses == {AggregateStatus.TERMINAL} or not statuses
             for ticket_id in operation.target_ticket_ids:
                 budget = await uow.budgets.get_for_ticket(ticket_id)

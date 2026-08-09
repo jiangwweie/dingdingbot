@@ -175,6 +175,9 @@ _ALLOWED_OPERATION_TRANSITIONS = {
         ControlOperationState.COMPLETED,
         ControlOperationState.NEEDS_INTERVENTION,
     },
+    ControlOperationState.NEEDS_INTERVENTION: {
+        ControlOperationState.COMPLETED,
+    },
 }
 
 

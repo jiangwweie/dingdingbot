@@ -2032,6 +2032,7 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
                         ControlOperationState.RECONCILIATION_PENDING.value,
                         ControlOperationState.SETTLEMENT_PENDING.value,
                         ControlOperationState.REVIEW_PENDING.value,
+                        ControlOperationState.NEEDS_INTERVENTION.value,
                     )
                 )
             )
