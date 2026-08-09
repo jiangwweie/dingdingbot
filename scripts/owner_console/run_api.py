@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import math
 import os
 import stat
@@ -160,10 +161,30 @@ def _market_timeout_seconds(environ: Mapping[str, str]) -> float:
     return timeout_seconds
 
 
+def _unix_socket_path(value: str) -> str:
+    path = Path(value)
+    if not path.is_absolute() or not path.name:
+        raise argparse.ArgumentTypeError(
+            "Unix Socket path must be an absolute file path"
+        )
+    return str(path)
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--uds",
+        type=_unix_socket_path,
+        default=_DEFAULT_UNIX_SOCKET,
+    )
+    return parser
+
+
 def main() -> None:
     """Load systemd credentials and start the fixed Unix Socket server."""
 
-    run(load_settings(os.environ))
+    args = _parser().parse_args()
+    run(load_settings(os.environ), uds=args.uds)
 
 
 if __name__ == "__main__":

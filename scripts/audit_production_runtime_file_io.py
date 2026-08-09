@@ -47,6 +47,9 @@ PRODUCTION_CADENCE_SCRIPT_NAMES = {
 }
 BOUNDED_ONE_SHOT_DEPLOY_SCRIPT_NAMES = {
     "atomic_switch_release_pointer.py",
+    "export_server_dml_snapshot.py",
+    "probe_local_snapshot.py",
+    "restore_local_dml_snapshot.py",
     "set_production_writer_fence.py",
     "tokyo_runtime_deploy_remote_state_machine.py",
 }

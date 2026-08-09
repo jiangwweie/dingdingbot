@@ -143,6 +143,32 @@ def test_runner_requires_unix_socket_and_one_worker(
     assert "port" not in captured
 
 
+def test_runner_main_honors_explicit_unix_socket_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    settings = _settings_fixture()
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        ["run_api.py", "--uds", "/tmp/owner.sock"],
+    )
+    monkeypatch.setattr(runner, "load_settings", lambda environ: settings)
+
+    def capture_run(
+        supplied_settings: runner.OwnerConsoleSettings,
+        *,
+        uds: str,
+    ) -> None:
+        captured.update(settings=supplied_settings, uds=uds)
+
+    monkeypatch.setattr(runner, "run", capture_run)
+
+    runner.main()
+
+    assert captured == {"settings": settings, "uds": "/tmp/owner.sock"}
+
+
 def _write_credentials(directory: Path) -> None:
     for name, value in _CREDENTIAL_VALUES.items():
         credential = directory / name

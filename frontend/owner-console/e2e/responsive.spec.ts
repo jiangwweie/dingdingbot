@@ -3,7 +3,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { installApiRoutes } from "./apiRoutes";
 
-const visualDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../../.local/owner-console-visual/task-21");
+const visualDir = process.env.OWNER_CONSOLE_VISUAL_DIR
+  ? resolve(process.env.OWNER_CONSOLE_VISUAL_DIR)
+  : resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      "../../../.local/owner-console-visual/task-21",
+    );
 
 test("primary pages and exact Ticket detail remain aligned at approved viewports", async ({ page }) => {
   await installApiRoutes(page, { authenticated: true });
@@ -22,6 +27,20 @@ test("primary pages and exact Ticket detail remain aligned at approved viewports
       await expect(page.getByText(identity, { exact: true }).first()).toBeVisible();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
       expect(overflow).toBe(false);
+      if (name === "review") {
+        const overflowingMetrics = await page.evaluate(() =>
+          Array.from(document.querySelectorAll('table[aria-label="完成 Ticket 复盘列表"] td .tabular-number'))
+            .filter((metric) => {
+              const cell = metric.closest("td");
+              if (!cell) return false;
+              const metricRect = metric.getBoundingClientRect();
+              const cellRect = cell.getBoundingClientRect();
+              return metricRect.left < cellRect.left || metricRect.right > cellRect.right;
+            })
+            .map((metric) => metric.textContent?.trim()),
+        );
+        expect(overflowingMetrics).toEqual([]);
+      }
       await page.screenshot({ path: resolve(visualDir, `${viewport.width}-${name}.png`), fullPage: false });
     }
   }

@@ -70,3 +70,26 @@ def test_shadow_projection_runtime_has_no_file_authority() -> None:
         if "blocking_cleanup_required" in item.risk_flags
     ]
     assert blocking == []
+
+
+def test_owner_console_snapshot_tools_are_bounded_one_shot_ops() -> None:
+    for name in (
+        "export_server_dml_snapshot.py",
+        "restore_local_dml_snapshot.py",
+        "probe_local_snapshot.py",
+    ):
+        occurrences = audit.audit_python_file(
+            rel_path=f"scripts/owner_console/{name}",
+            text='''
+from pathlib import Path
+
+def cleanup(path: Path) -> None:
+    path.unlink(missing_ok=True)
+''',
+        )
+
+        assert {item.runtime_surface for item in occurrences} == {"one_shot_ops"}
+        assert all(
+            "blocking_cleanup_required" not in item.risk_flags
+            for item in occurrences
+        )

@@ -44,7 +44,10 @@ function metricText(metric: MoneyMetric, sign = false): string {
 }
 
 function MetricValue({ metric, sign = false }: { metric: MoneyMetric; sign?: boolean }) {
-  if (metric.value !== null) return <span className="tabular-number whitespace-nowrap">{metricText(metric, sign)}</span>;
+  if (metric.value !== null) {
+    const text = metricText(metric, sign);
+    return <span className="block min-w-0 truncate tabular-number" title={text}>{text}</span>;
+  }
   return <span className="grid min-w-0"><span>—</span><small className="truncate text-[9px] text-[var(--color-text-secondary)]" title={metric.unavailable_reason ?? "unavailable"}>{metric.unavailable_reason ?? "unavailable"}</small></span>;
 }
 
@@ -166,7 +169,7 @@ export function ReviewPage() {
       <div className="mt-2 grid gap-2 lg:grid-cols-3">
         <section className="border border-[var(--color-divider)] bg-[var(--color-surface)]"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">StrategyGroup Evidence</h2><div className="grid">{data.strategy_group_samples.map((item) => <div className="grid min-h-[42px] grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-[var(--color-divider)] px-2 last:border-b-0" key={item.strategy_group_id}><strong className="truncate text-[12px]">{item.strategy_group_id}</strong><span className="tabular-number text-[11px] text-[var(--color-text-secondary)]">{item.sample_count}</span><StatusTag tone={item.evidence_state === "observe_only" ? "attention" : "neutral"}>{item.evidence_state === "observe_only" ? "Observe Only" : "No Evidence"}</StatusTag></div>)}</div></section>
         <section className="border border-[var(--color-divider)] bg-[var(--color-surface)]"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">Execution Classification</h2><div className="grid">{data.execution_quality_breakdown.map((item) => <div className="flex min-h-[42px] items-center justify-between gap-2 border-b border-[var(--color-divider)] px-2 last:border-b-0" key={item.label}><span className="truncate text-[12px]">{item.label}</span><strong className="tabular-number text-[12px]">{item.ticket_count}</strong></div>)}</div></section>
-        <section className="border border-[var(--color-divider)] bg-[var(--color-surface)]"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">Exit Reason</h2><div className="grid">{data.exit_reason_breakdown.map((item) => <div className="flex min-h-[42px] items-center justify-between gap-2 border-b border-[var(--color-divider)] px-2 last:border-b-0" key={item.label}><span className="truncate text-[12px]" title={item.label}>{item.label}</span><strong className="tabular-number text-[12px]">{item.ticket_count}</strong></div>)}</div></section>
+        <section className="border border-[var(--color-divider)] bg-[var(--color-surface)]"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">Exit Reason</h2><div className="grid">{data.exit_reason_breakdown.map((item) => <div className="flex min-w-0 min-h-[42px] items-center justify-between gap-2 border-b border-[var(--color-divider)] px-2 last:border-b-0" key={item.label}><span className="min-w-0 truncate text-[12px]" title={item.label}>{item.label}</span><strong className="tabular-number text-[12px]">{item.ticket_count}</strong></div>)}</div></section>
       </div>
     </AppShell>
   );
