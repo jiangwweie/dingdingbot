@@ -36,7 +36,10 @@ Console 通过公网 HTTPS 域名访问，身份模型固定为一个 Owner 账�
 -> Owner Session
 ```
 
-未来可以在独立的 **Owner Control Plane** 中增加暂停/恢复 StrategyGroup、StrategyUniverse 版本管理和受控退出，但这些能力不属于首版实现。任何受控退出都必须进入 Kernel 现有的 durable EXIT Command 链，不能成为前端直连交易所的旁路。
+StrategyGroup 暂停/恢复、全局 ENTRY 暂停/恢复和受控一键平仓由独立的
+**Owner Control Plane** 设计拥有，不属于 Phase 1。StrategyUniverse 版本管理
+仍是另一项未来范围。任何受控退出都必须进入 Kernel 现有的 durable EXIT
+Command 链，不能成为前端直连交易所的旁路。
 
 ## 2. 已知客观事实
 
@@ -800,9 +803,17 @@ Owner Read API 与四个交易 Worker 使用独立 systemd unit 和资源边界�
 
 这些是实施阶段必须验证的预算，不是当前实测结果。若 API 超出预算，首选减少依赖、查询和常驻对象，不扩大交易 Worker 的共享资源切片。
 
-## 15. 未来 Owner Control Plane
+## 15. 后续 Owner Control Plane
 
-该章节只冻结边界，不授权首版实现。
+Phase 1 仍保持只读。Owner 已于 2026-08-09 单独批准 StrategyGroup
+暂停/恢复、全局 ENTRY 暂停/恢复和受控一键平仓的完整设计范围。后续能力的
+唯一详细设计为：
+
+```text
+docs/superpowers/specs/2026-08-09-owner-control-plane-design.md
+```
+
+本章节只保留与 Phase 1 的稳定边界，不再作为后续控制能力的详细权威。
 
 ### 15.1 StrategyGroup 暂停与恢复
 
@@ -979,7 +990,9 @@ Owner 重新输入 TOTP
 
 ## 19. 实施分期
 
-当前设计对应的首个实施计划只覆盖 **Phase 1**。Phase 2 与 Phase 3 仅记录产品演进边界，必须分别重新完成设计、Owner 书面批准与独立实施计划，不能作为 Phase 1 的顺带实现项。
+当前设计对应的首个实施计划只覆盖 **Phase 1**。后续 Owner Control Plane
+已形成独立设计，不能作为 Phase 1 的顺带实现项；其后端三个能力完成内部
+验证后，才公开部署包含控制页面的前端。
 
 ### Phase 1：只读 Owner Console
 
@@ -991,20 +1004,19 @@ Owner 重新输入 TOTP
 - 规则型逐 Ticket 复盘；
 - 测试与 2C4G 资源验证。
 
-### Phase 2：Owner 运营控制
+### Owner Control Plane
 
 - StrategyGroup 暂停与恢复；
-- StrategyUniverse 新版本草稿、认证、Warming 与激活；
-- 不包含受控退出。
-
-### Phase 3：受控退出
-
+- 全局 ENTRY 暂停与恢复；
 - 新 Owner Authorization purpose；
-- TOTP 重新认证；
-- 完整 Active Ticket 集分类；
-- Kernel `request_exit()` 边界；
-- EXIT、Reconciliation、Settlement 与 Review 全链测试；
-- 独立 Owner 批准与生产安全评审。
+- TOTP step-up；
+- 受控一键平仓全部当前活动 Ticket；
+- Kernel `request_exit()`、Lifecycle、Reconciliation、Settlement 与 Review；
+- 独立 Controls 页面与 Nginx 路径代理；
+- 详细边界由 `2026-08-09-owner-control-plane-design.md` 唯一拥有。
+
+StrategyUniverse 新版本草稿、认证、Warming 与激活仍是独立的未来产品范围，
+不包含在本次 Owner Control Plane 中。
 
 ## 20. 验收标准
 
