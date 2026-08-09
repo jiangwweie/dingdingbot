@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -6,6 +7,7 @@ OWNER_ROOTS = (
     REPO_ROOT / "src/trading_kernel/interfaces/owner_console_http",
 )
 OWNER_MARKET_DATA = REPO_ROOT / "src/trading_kernel/infrastructure/owner_market_data.py"
+OWNER_CONSOLE_RUNNER = REPO_ROOT / "scripts/owner_console/run_api.py"
 
 FORBIDDEN = (
     "application.controlled_exit",
@@ -35,6 +37,35 @@ def test_owner_market_data_has_only_credential_free_public_market_authority() ->
         "TRADING_KERNEL_API_SECRET",
     ):
         assert marker not in source, f"{OWNER_MARKET_DATA}: {marker}"
+
+
+def test_owner_console_runner_accepts_only_its_declared_environment_authority() -> None:
+    source = OWNER_CONSOLE_RUNNER.read_text(encoding="utf-8")
+    environment_names = {
+        call.args[0].value
+        for call in ast.walk(ast.parse(source))
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and call.func.attr == "get"
+        and call.args
+        and isinstance(call.args[0], ast.Constant)
+        and isinstance(call.args[0].value, str)
+        and call.args[0].value.isupper()
+    }
+
+    assert environment_names == {
+        "CREDENTIALS_DIRECTORY",
+        "OWNER_CONSOLE_MARKET_TIMEOUT_SECONDS",
+    }
+    for marker in (
+        "TRADING_KERNEL_API_KEY",
+        "TRADING_KERNEL_API_SECRET",
+        "BINANCE_API_KEY",
+        "BINANCE_API_SECRET",
+        "dotenv",
+        "config.json",
+    ):
+        assert marker not in source, f"{OWNER_CONSOLE_RUNNER}: {marker}"
 
 
 def test_kernel_systemd_directory_remains_four_workers_plus_slice() -> None:
