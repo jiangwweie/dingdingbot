@@ -58,7 +58,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                 IngestSignalRequest(
                     signal=signal,
                     runtime_commit="commit-test",
-                    schema_revision="0003_portfolio_admission_observability",
+                    schema_revision="0004_owner_control_plane",
                     now_ms=1_010,
                 ),
             )
@@ -86,7 +86,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                         update={"signal_event_id": "signal:old-universe-after-switch"}
                     ),
                     runtime_commit="commit-test",
-                    schema_revision="0003_portfolio_admission_observability",
+                    schema_revision="0004_owner_control_plane",
                     now_ms=1_011,
                 ),
             )
@@ -246,7 +246,7 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             certification, updated_at_ms
         ) VALUES (
             'strategy_signal_ingest', true, 'commit-test',
-            '0003_portfolio_admission_observability', '{}'::jsonb, 1000
+            '0004_owner_control_plane', '{}'::jsonb, 1000
         )
         """
     await conn.execute(

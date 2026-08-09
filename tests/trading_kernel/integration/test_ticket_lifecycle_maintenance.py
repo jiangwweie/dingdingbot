@@ -576,7 +576,7 @@ async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_portfolio_admission_observability",
+            schema_revision="0004_owner_control_plane",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

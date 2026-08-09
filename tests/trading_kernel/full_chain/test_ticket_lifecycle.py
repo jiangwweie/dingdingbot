@@ -1142,7 +1142,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0003_portfolio_admission_observability",
+                schema_revision="0004_owner_control_plane",
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -1151,7 +1151,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 set_={
                     "enabled": True,
                     "certified_commit": "kernel-test-head",
-                    "schema_revision": "0003_portfolio_admission_observability",
+                    "schema_revision": "0004_owner_control_plane",
                     "certification": {},
                     "updated_at_ms": 1_000,
                 },
@@ -1181,7 +1181,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_portfolio_admission_observability",
+            schema_revision="0004_owner_control_plane",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

@@ -72,7 +72,7 @@ async def projection_engine() -> AsyncGenerator[AsyncEngine, None]:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-projection-test",
                     runtime_commit="task-9-test",
-                    schema_revision="0003_portfolio_admission_observability",
+                    schema_revision="0004_owner_control_plane",
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
             )

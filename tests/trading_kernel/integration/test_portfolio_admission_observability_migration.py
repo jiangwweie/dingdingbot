@@ -467,15 +467,15 @@ CERTIFIED_0002_SOURCE_EVENTS = (
 )
 
 
-def test_runtime_identity_points_to_portfolio_admission_head() -> None:
-    assert CURRENT_SCHEMA_REVISION == HEAD_REVISION
+def test_runtime_identity_points_to_current_schema_head() -> None:
+    assert CURRENT_SCHEMA_REVISION == "0004_owner_control_plane"
 
 
-def test_alembic_has_one_exact_portfolio_admission_head() -> None:
+def test_alembic_has_one_exact_current_head() -> None:
     config = Config("migrations/trading_kernel/alembic.ini")
     heads = ScriptDirectory.from_config(config).get_heads()
 
-    assert heads == [HEAD_REVISION]
+    assert heads == [CURRENT_SCHEMA_REVISION]
 
 
 @pytest.mark.asyncio
@@ -609,7 +609,7 @@ async def test_0003_downgrade_to_0002_is_forbidden(
     async with engine.connect() as connection:
         assert await connection.scalar(
             sa.text("SELECT version_num FROM alembic_version")
-        ) == HEAD_REVISION
+        ) == CURRENT_SCHEMA_REVISION
 
 
 @pytest.mark.asyncio

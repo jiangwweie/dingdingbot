@@ -459,7 +459,7 @@ async def _dispatch(
             timeout_seconds=1,
             runtime_commit="kernel-test-head" if entry else None,
             schema_revision=(
-                "0003_portfolio_admission_observability" if entry else None
+                "0004_owner_control_plane" if entry else None
             ),
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
@@ -562,7 +562,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0003_portfolio_admission_observability",
+                schema_revision="0004_owner_control_plane",
                 certification={},
                 updated_at_ms=1_000,
             )

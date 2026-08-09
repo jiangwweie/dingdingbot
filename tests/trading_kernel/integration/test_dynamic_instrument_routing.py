@@ -373,7 +373,7 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_portfolio_admission_observability",
+            schema_revision="0004_owner_control_plane",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

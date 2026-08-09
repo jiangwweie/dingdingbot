@@ -799,7 +799,7 @@ async def _make_unknown_entry(engine):
             lease_until_ms=1_200,
             timeout_seconds=0.01,
             runtime_commit="kernel-test-head",
-            schema_revision="0003_portfolio_admission_observability",
+            schema_revision="0004_owner_control_plane",
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -1080,7 +1080,7 @@ async def _dispatch(
             timeout_seconds=timeout_seconds,
             runtime_commit="kernel-test-head" if entry else None,
             schema_revision=(
-                "0003_portfolio_admission_observability" if entry else None
+                "0004_owner_control_plane" if entry else None
             ),
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),

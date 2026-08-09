@@ -50,11 +50,14 @@ from src.trading_kernel.infrastructure.pg_models import (
     instrument_certification_current,
     instrument_rules_current,
     instruments,
+    owner_authorizations,
     owner_policy_current,
     runtime_capabilities_current,
     runtime_profiles,
     runtime_scopes_current,
     signal_fact_snapshots,
+    strategy_entry_control_events,
+    strategy_entry_controls_current,
     strategy_universe_current,
     strategy_universe_members,
     strategy_universe_versions,
@@ -1025,6 +1028,43 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
 
     async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(owner_authorizations).values(
+                authorization_id="owner-authorization:seed:SOR-001",
+                purpose="strategy_resume",
+                owner_identity="system-seed",
+                authentication_strength="session",
+                request_digest="sha256:" + "0" * 64,
+                target_scope={"seed": True},
+                idempotency_key="owner-request:seed:SOR-001",
+                authorized_at_ms=1_000,
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_entry_control_events).values(
+                strategy_entry_control_event_id=(
+                    "strategy-control-event:seed:SOR-001"
+                ),
+                strategy_group_id="SOR-001",
+                control_version=1,
+                operation="resume",
+                target_state="enabled",
+                authorization_id="owner-authorization:seed:SOR-001",
+                reason="seed_enabled",
+                payload={},
+                created_at_ms=1_000,
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_entry_controls_current).values(
+                strategy_group_id="SOR-001",
+                entry_state="enabled",
+                control_version=1,
+                last_event_id="strategy-control-event:seed:SOR-001",
+                reason="seed_enabled",
+                updated_at_ms=1_000,
+            )
+        )
         await connection.execute(
             sa.insert(instruments).values(
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",

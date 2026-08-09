@@ -1455,18 +1455,18 @@ async def _seed_ticket_registry(connection, ticket) -> None:
             },
         )
     )
-    authorization_id = f"owner-authorization:test-seed:{runtime.strategy_group_id}"
-    event_id = f"strategy-control-event:test-seed:{runtime.strategy_group_id}"
+    authorization_id = f"owner-authorization:seed:{runtime.strategy_group_id}"
+    event_id = f"strategy-control-event:seed:{runtime.strategy_group_id}"
     await connection.execute(
         pg_insert(owner_authorizations)
         .values(
             authorization_id=authorization_id,
             purpose="strategy_resume",
-            owner_identity="test-seed",
+            owner_identity="system-seed",
             authentication_strength="session",
             request_digest="sha256:" + "0" * 64,
             target_scope={"seed": True},
-            idempotency_key=f"owner-request:test-seed:{runtime.strategy_group_id}",
+            idempotency_key=f"owner-request:seed:{runtime.strategy_group_id}",
             authorized_at_ms=ticket.created_at_ms,
         )
         .on_conflict_do_nothing(index_elements=[owner_authorizations.c.authorization_id])
@@ -1480,7 +1480,7 @@ async def _seed_ticket_registry(connection, ticket) -> None:
             operation="resume",
             target_state="enabled",
             authorization_id=authorization_id,
-            reason="test_seed_enabled",
+            reason="seed_enabled",
             payload={},
             created_at_ms=ticket.created_at_ms,
         )
@@ -1495,7 +1495,7 @@ async def _seed_ticket_registry(connection, ticket) -> None:
             entry_state="enabled",
             control_version=1,
             last_event_id=event_id,
-            reason="test_seed_enabled",
+            reason="seed_enabled",
             updated_at_ms=ticket.created_at_ms,
         )
         .on_conflict_do_nothing(
