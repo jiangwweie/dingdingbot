@@ -68,6 +68,31 @@ def test_runner_rejects_credential_authority_boundary_violations(
         runner.load_settings({"CREDENTIALS_DIRECTORY": str(tmp_path)})
 
 
+def test_runner_rechecks_opened_credential_permissions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_credentials(tmp_path)
+    original_open = runner.os.open
+
+    def open_then_make_group_readable(
+        path: str | Path,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        descriptor = original_open(path, flags, mode, dir_fd=dir_fd)
+        if path == "account_id":
+            (tmp_path / "account_id").chmod(0o640)
+        return descriptor
+
+    monkeypatch.setattr(runner.os, "open", open_then_make_group_readable)
+
+    with pytest.raises(ValueError):
+        runner.load_settings({"CREDENTIALS_DIRECTORY": str(tmp_path)})
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     ((None, 5.0), ("0.5", 0.5), ("60", 60.0)),

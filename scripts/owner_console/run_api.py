@@ -126,6 +126,10 @@ def _read_credential(directory_fd: int, name: str) -> str:
             or not stat.S_ISREG(after_open.st_mode)
         ):
             raise ValueError("credential changed while being read")
+        if after_open.st_mode & (stat.S_IRGRP | stat.S_IROTH):
+            raise ValueError("credential must not be group or world readable")
+        if after_open.st_size > _MAX_CREDENTIAL_BYTES:
+            raise ValueError("credential exceeds the permitted size")
         try:
             data = os.read(credential_fd, _MAX_CREDENTIAL_BYTES + 1)
             value = data.decode("utf-8")
