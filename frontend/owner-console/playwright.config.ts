@@ -14,7 +14,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
   webServer: {
-    command: "pnpm exec vite --host 127.0.0.1 --port 4180",
+    command: "pnpm exec vite --host 127.0.0.1 --port 4180 --base /",
     url: "http://127.0.0.1:4180/login",
     reuseExistingServer: true,
     timeout: 30_000,

@@ -8,6 +8,7 @@ const navigationItems = [
   { label: "总览", to: "/overview" },
   { label: "信号", to: "/signals" },
   { label: "交易", to: "/trades" },
+  { label: "策略", to: "/strategies" },
   { label: "复盘", to: "/review" },
   { label: "控制", to: "/controls" },
 ] as const;

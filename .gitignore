@@ -58,6 +58,7 @@ docker/.env.docker
 node_modules/
 dist/
 frontend/owner-console/dist/
+frontend/owner-console/test-results/
 frontend/owner-console/.openapi/
 frontend/owner-console/*.tsbuildinfo
 *.pyc

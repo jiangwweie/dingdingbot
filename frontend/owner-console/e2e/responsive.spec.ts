@@ -18,6 +18,7 @@ test("primary pages and exact Ticket detail remain aligned at approved viewports
     ["trades", "/trades", "交易"],
     ["ticket", "/trades/ticket%3Aactive%3A1", "生命周期 · 8 阶段"],
     ["review", "/review", "复盘"],
+    ["strategies", "/strategies", "策略"],
   ] as const;
 
   for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {

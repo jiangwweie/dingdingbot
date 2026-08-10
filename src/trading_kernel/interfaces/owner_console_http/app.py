@@ -22,6 +22,9 @@ from src.trading_kernel.application.owner_console.signals import (
     SignalFactsContradiction,
     SignalNotFound,
 )
+from src.trading_kernel.application.owner_console.strategies import (
+    StrategyFactsContradiction,
+)
 from src.trading_kernel.application.owner_console.trades import (
     TradeFactsContradiction,
 )
@@ -75,6 +78,9 @@ from src.trading_kernel.interfaces.owner_console_http.routes.review import (
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.signals import (
     router as signals_router,
+)
+from src.trading_kernel.interfaces.owner_console_http.routes.strategies import (
+    router as strategies_router,
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.tickets import (
     router as tickets_router,
@@ -147,6 +153,7 @@ def create_owner_console_app(
     app.include_router(overview_router)
     app.include_router(signals_router)
     app.include_router(tickets_router)
+    app.include_router(strategies_router)
     app.include_router(review_router)
     app.include_router(market_router)
     _register_error_handlers(app)
@@ -177,11 +184,7 @@ async def _verify_startup_read_transaction(engine: AsyncEngine) -> None:
         read_only = await connection.scalar(sa.text("SHOW transaction_read_only"))
         isolation = await connection.scalar(sa.text("SHOW transaction_isolation"))
         statement_timeout = await connection.scalar(sa.text("SHOW statement_timeout"))
-    if (
-        read_only != "on"
-        or isolation != "repeatable read"
-        or statement_timeout != "3s"
-    ):
+    if read_only != "on" or isolation != "repeatable read" or statement_timeout != "3s":
         raise RuntimeError("Owner Console read transaction verification failed")
 
 
@@ -261,6 +264,10 @@ def _register_error_handlers(app: FastAPI) -> None:
         _handle_contradictory_facts,
     )
     app.add_exception_handler(
+        StrategyFactsContradiction,
+        _handle_contradictory_facts,
+    )
+    app.add_exception_handler(
         ProgrammaticReviewContradiction,
         _handle_contradictory_facts,
     )
@@ -305,7 +312,9 @@ async def _handle_login_throttled(_: Request, __: Exception) -> JSONResponse:
 
 
 async def _handle_not_found(_: Request, __: Exception) -> JSONResponse:
-    return error_response(status_code=404, code="not_found", message="Resource not found")
+    return error_response(
+        status_code=404, code="not_found", message="Resource not found"
+    )
 
 
 async def _handle_contradictory_facts(_: Request, __: Exception) -> JSONResponse:

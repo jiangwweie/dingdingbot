@@ -24,6 +24,7 @@ deployment remains a separate Owner gate.
 - [x] Every deterministic sentence has evidence references.
 - [x] CapacityClaim account values are labeled Latest Admission Snapshot.
 - [x] No Strategy control or exchange write route exists.
+- [x] Strategy workbench keeps immutable StrategyVersion statistics and natural/controlled outcomes separate.
 - [x] Frontend initial bundle excludes `lightweight-charts`.
 
 ## Visual Gates
@@ -32,6 +33,7 @@ deployment remains a separate Owner gate.
 - [x] Overview first-screen hierarchy and UI System B received explicit Owner visual approval before Task 17.
 - [ ] Final local product preview received separate Owner visual acceptance.
 - [x] No page-wide overflow, oversized dead space, stretched empty card, SaaS shadow, decorative icon tile, or viewport-height right drawer remains.
+- [x] Strategy workbench and its Ticket modal render at 1440x900; Ticket detail return restores the source filter and modal context.
 
 ## Runtime And Deployment Gates
 
@@ -72,12 +74,12 @@ and was intentionally not added to this personal-system acceptance scope.
 | Verification | Result |
 | --- | --- |
 | Generated OpenAPI client | Passed; no unexpected tracked output |
-| Vitest | 9 files, 23 tests passed |
+| Vitest | 12 files, 32 tests passed |
 | TypeScript | Passed |
 | Production build | Passed |
-| Playwright | 6 tests passed |
-| Initial bundle | 481.09 kB; gzip 146.75 kB |
-| Lazy chart bundle | 170.50 kB; gzip 55.38 kB |
+| Playwright | 7 tests passed |
+| Initial bundle | 550.81 kB; gzip 169.12 kB |
+| Lazy chart bundle | 170.56 kB; gzip 55.42 kB |
 
 Fifteen final screenshots exist under
 `.local/owner-console-visual/task-24/`: Overview, Signals, Trades, exact Ticket,
@@ -90,6 +92,18 @@ The in-app Browser separately validated and displayed the 1280px restored-data
 Overview, Signal, Trade, exact Ticket, and Review surfaces. Playwright remains
 the complete three-viewport screenshot matrix; Browser supplied live page
 identity, DOM, console health, interaction, and restored-data layout evidence.
+
+### Strategy Workbench Extension
+
+The approved StrategyVersion extension was verified with the same typed API
+generation, 32-test Vitest suite, seven-path Playwright suite and production
+build. Its two deterministic screenshots are Git-ignored under
+`.local/owner-console-visual/strategy-workbench/` and cover the `1440x900`
+strategy table and TP1 Ticket modal. The E2E route opens the modal, enters a
+Ticket causality detail, and verifies browser-back restoration of the original
+strategy filter and modal state. Focused Owner Console backend checks passed
+for the new two read endpoints; no schema migration, control route or exchange
+write boundary was added.
 
 ### Restored Production Facts
 

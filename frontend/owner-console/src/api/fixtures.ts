@@ -197,4 +197,75 @@ export const reviewFixture = {
   data: { from_ms: baseTime - 30 * 86_400_000, to_ms: baseTime, sample_count: 1, next_cursor: null, items: [completeReviewItem], net_pnl: terminalTrade.net_pnl, net_r: money("-1.114162711864406779661016949", "R"), fees: terminalTrade.fees, funding: terminalTrade.funding, exit_reason_breakdown: [{ label: "deployment_drain:deploy-20260804-8627ae9c:8627ae9ca5430fd9f8b9a76935f685cd36960ccc", ticket_count: 1, evidence: terminalTrade.evidence }], execution_quality_breakdown: [{ label: "complete", ticket_count: 1, evidence: terminalTrade.evidence }], complete_review_count: 1, incomplete_review_count: 0, strategy_group_samples: [{ strategy_group_id: terminalTrade.strategy_group_id, sample_count: 1, evidence_state: "observe_only", evidence: terminalTrade.evidence }], evidence: terminalTrade.evidence },
 } satisfies components["schemas"]["ApiEnvelope_ReviewCenterSummary_"];
 
-export const ownerApiFixtures = { overviewFixture, signalListFixture, signalDetailFixture, tradeListFixture, tradeCausalityFixture, candleFixture, reviewFixture } as const;
+const strategyVersionFixture = {
+  strategy_group_id: "BRF2-001",
+  strategy_group_display_name: "BRF2",
+  strategy_version_id: "strategy-version:brf2:v3",
+  version: 3,
+  strategy_version_status: "active",
+  is_current: true,
+  ticket_count: 4,
+  natural_terminal_count: 3,
+  confirmed_natural_review_count: 2,
+  pending_natural_review_count: 1,
+  controlled_exit_count: 1,
+  tp1_reached_count: 1,
+  tp1_not_reached_count: 2,
+  win_count: 1,
+  loss_count: 1,
+  net_pnl: money("8.12"),
+  net_r: money("0.81", "R"),
+  evidence: [evidence("fact", "strategy-version:brf2:v3")],
+} satisfies components["schemas"]["StrategyVersionSummary"];
+
+const strategyTicketRowFixture = {
+  ticket_id: "ticket:strategy:brf2:tp1",
+  strategy_group_id: "BRF2-001",
+  event_spec_id: "event:brf2:v3",
+  exchange_instrument_id: "BTCUSDT",
+  position_side: "short",
+  ticket_status: "terminal",
+  aggregate_status: "terminal",
+  lifecycle_stage: "review",
+  issued_at_ms: baseTime - 4_800_000,
+  terminal_at_ms: baseTime - 3_600_000,
+  review_id: "review:strategy:brf2:tp1",
+  review_revision: 1,
+  economics_completeness: "complete",
+  completed_stage_count: 8,
+  total_stage_count: 8,
+  exit_reason: "runner_exit",
+  exit_reason_unavailable_reason: null,
+  gross_pnl: money("9.36"),
+  fees: money("0.82"),
+  funding: money("-0.42"),
+  net_pnl: money("8.12"),
+  net_r: money("0.81", "R"),
+  attention_items: [],
+  evaluation_path: "tp1_reached",
+  evidence: [evidence("ticket", "ticket:strategy:brf2:tp1"), evidence("review", "review:strategy:brf2:tp1")],
+} satisfies components["schemas"]["StrategyTicketListItem"];
+
+export const strategyFixture = {
+  snapshot_id: "snapshot:strategies:e2e",
+  generated_at: generatedAt,
+  source_watermark: generatedAt,
+  freshness: "fresh",
+  data: {
+    from_ms: baseTime - 30 * 86_400_000,
+    to_ms: baseTime,
+    view: "current",
+    items: [strategyVersionFixture],
+    evidence: strategyVersionFixture.evidence,
+  },
+} satisfies components["schemas"]["ApiEnvelope_StrategySummaryPage_"];
+
+export const strategyTicketFixture = {
+  snapshot_id: "snapshot:strategy-tickets:e2e",
+  generated_at: generatedAt,
+  source_watermark: generatedAt,
+  freshness: "fresh",
+  data: { items: [strategyTicketRowFixture], next_cursor: null },
+} satisfies components["schemas"]["ApiEnvelope_StrategyTicketListPage_"];
+
+export const ownerApiFixtures = { overviewFixture, signalListFixture, signalDetailFixture, tradeListFixture, tradeCausalityFixture, candleFixture, reviewFixture, strategyFixture, strategyTicketFixture } as const;

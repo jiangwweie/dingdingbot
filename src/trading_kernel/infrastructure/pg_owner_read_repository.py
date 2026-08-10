@@ -34,6 +34,12 @@ from src.trading_kernel.application.owner_console.models import (
     SignalItemFacts,
     SignalListQuery,
     SignalPageFacts,
+    StrategyPageFacts,
+    StrategySummaryQuery,
+    StrategyTicketFacts,
+    StrategyTicketPageFacts,
+    StrategyTicketQuery,
+    StrategyVersionFacts,
     TradeCausalityAdmissionFacts,
     TradeCausalityAggregateFacts,
     TradeCausalityCommandFacts,
@@ -74,6 +80,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     shadow_outcomes_current,
     signal_events,
     signal_fact_snapshots,
+    strategy_groups,
+    strategy_versions,
     trade_aggregates,
     trade_events,
     trade_reviews,
@@ -89,6 +97,8 @@ _CAUSALITY_COMMAND_LIMIT = 128
 _CAUSALITY_INCIDENT_LIMIT = 64
 _REVIEW_CENTER_INCIDENT_LIMIT = 64
 _REVIEW_CENTER_FILTER_CANDIDATE_LIMIT = 512
+_STRATEGY_SUMMARY_VERSION_LIMIT = 100
+_STRATEGY_SUMMARY_TICKET_LIMIT = 5_000
 
 
 def create_owner_read_engine(dsn: str) -> AsyncEngine:
@@ -112,9 +122,7 @@ async def owner_read_transaction(
     engine: AsyncEngine,
 ) -> AsyncIterator[AsyncConnection]:
     async with engine.connect() as raw:
-        connection = await raw.execution_options(
-            isolation_level="REPEATABLE READ"
-        )
+        connection = await raw.execution_options(isolation_level="REPEATABLE READ")
         transaction = await connection.begin()
         try:
             await connection.execute(sa.text("SET TRANSACTION READ ONLY"))
@@ -139,8 +147,10 @@ class PostgresOwnerReadRepository:
         """Read one bounded overview snapshot on the caller's transaction."""
 
         authority_rows = (
-            await self._connection.execute(_overview_authority_query())
-        ).mappings().all()
+            (await self._connection.execute(_overview_authority_query()))
+            .mappings()
+            .all()
+        )
         authority = authority_rows[0] if len(authority_rows) == 1 else None
         venue_id = None if authority is None else str(authority["venue_id"])
         account_id = None if authority is None else str(authority["account_id"])
@@ -149,62 +159,86 @@ class PostgresOwnerReadRepository:
         )
 
         claim = (
-            await self._connection.execute(
-                _latest_capacity_claim_query(
-                    venue_id=venue_id,
-                    account_id=account_id,
+            (
+                await self._connection.execute(
+                    _latest_capacity_claim_query(
+                        venue_id=venue_id,
+                        account_id=account_id,
+                    )
                 )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         incident_query_rows = (
-            await self._connection.execute(
-                _open_incidents_query(
-                    venue_id=venue_id,
-                    account_id=account_id,
+            (
+                await self._connection.execute(
+                    _open_incidents_query(
+                        venue_id=venue_id,
+                        account_id=account_id,
+                    )
                 )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         incident_limit_reached = len(incident_query_rows) > 20
         incident_rows = incident_query_rows[:20]
         monitor_query_rows = (
-            await self._connection.execute(
-                _monitor_rows_query(
-                    venue_id=venue_id,
-                    account_id=account_id,
+            (
+                await self._connection.execute(
+                    _monitor_rows_query(
+                        venue_id=venue_id,
+                        account_id=account_id,
+                    )
                 )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         monitor_limit_reached = len(monitor_query_rows) > 100
         monitor_rows = monitor_query_rows[:100]
         active_ticket_query_rows = (
-            await self._connection.execute(
-                _active_tickets_query(
-                    venue_id=venue_id,
-                    account_id=account_id,
+            (
+                await self._connection.execute(
+                    _active_tickets_query(
+                        venue_id=venue_id,
+                        account_id=account_id,
+                    )
                 )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         active_ticket_limit_reached = len(active_ticket_query_rows) > 20
         active_ticket_rows = active_ticket_query_rows[:20]
         count_row = (
-            await self._connection.execute(
-                _today_counts_query(
-                    day_start_ms=day_start_ms,
-                    runtime_profile_id=runtime_profile_id,
-                    venue_id=venue_id,
-                    account_id=account_id,
+            (
+                await self._connection.execute(
+                    _today_counts_query(
+                        day_start_ms=day_start_ms,
+                        runtime_profile_id=runtime_profile_id,
+                        venue_id=venue_id,
+                        account_id=account_id,
+                    )
                 )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
         review_row = (
-            await self._connection.execute(
-                _today_reviews_query(
-                    day_start_ms=day_start_ms,
-                    venue_id=venue_id,
-                    account_id=account_id,
+            (
+                await self._connection.execute(
+                    _today_reviews_query(
+                        day_start_ms=day_start_ms,
+                        venue_id=venue_id,
+                        account_id=account_id,
+                    )
                 )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
 
         contradictory_reasons: list[str] = []
         evidence_gaps: list[OverviewEvidenceGap] = []
@@ -232,9 +266,7 @@ class PostgresOwnerReadRepository:
             )
 
         max_concurrent_tickets = (
-            None
-            if authority is None
-            else int(authority["max_concurrent_tickets"])
+            None if authority is None else int(authority["max_concurrent_tickets"])
         )
         active_ticket_count = (
             None
@@ -294,13 +326,9 @@ class PostgresOwnerReadRepository:
             else Decimal(str(claim["total_wallet_balance_at_claim"]))
         )
         available_margin = (
-            None
-            if claim is None
-            else Decimal(str(claim["available_margin_at_claim"]))
+            None if claim is None else Decimal(str(claim["available_margin_at_claim"]))
         )
-        claim_created_at_ms = (
-            None if claim is None else int(claim["created_at_ms"])
-        )
+        claim_created_at_ms = None if claim is None else int(claim["created_at_ms"])
 
         attention_incidents = [
             row for row in incident_rows if not bool(row["needs_intervention"])
@@ -311,9 +339,7 @@ class PostgresOwnerReadRepository:
             and latest_blocking["top_actionable_incident_id"] is None
         ):
             latest_blocking = None
-        intervention_monitor = (
-            monitor_query_rows[0] if monitor_query_rows else None
-        )
+        intervention_monitor = monitor_query_rows[0] if monitor_query_rows else None
         if (
             intervention_monitor is not None
             and intervention_monitor["needs_intervention_monitor_key"] is None
@@ -361,13 +387,9 @@ class PostgresOwnerReadRepository:
                     else (
                         EvidenceRef(
                             kind="incident",
-                            identity=str(
-                                latest_blocking["top_actionable_incident_id"]
-                            ),
+                            identity=str(latest_blocking["top_actionable_incident_id"]),
                             occurred_at_ms=int(
-                                latest_blocking[
-                                    "top_actionable_incident_opened_at_ms"
-                                ]
+                                latest_blocking["top_actionable_incident_opened_at_ms"]
                             ),
                         ),
                     )
@@ -387,9 +409,7 @@ class PostgresOwnerReadRepository:
                         EvidenceRef(
                             kind="event",
                             identity=str(
-                                intervention_monitor[
-                                    "needs_intervention_monitor_key"
-                                ]
+                                intervention_monitor["needs_intervention_monitor_key"]
                             ),
                             occurred_at_ms=int(
                                 intervention_monitor[
@@ -433,9 +453,7 @@ class PostgresOwnerReadRepository:
             open_owner_incident_opened_at_ms=(
                 None
                 if latest_blocking is None
-                else int(
-                    latest_blocking["top_actionable_incident_opened_at_ms"]
-                )
+                else int(latest_blocking["top_actionable_incident_opened_at_ms"])
             ),
             attention_incident_ids=tuple(
                 str(row["incident_id"]) for row in attention_incidents
@@ -443,29 +461,21 @@ class PostgresOwnerReadRepository:
             attention_incident_opened_at_ms=tuple(
                 int(row["opened_at_ms"]) for row in attention_incidents
             ),
-            monitor_statuses=tuple(
-                str(row["owner_status"]) for row in monitor_rows
-            ),
-            monitor_keys=tuple(
-                str(row["monitor_key"]) for row in monitor_rows
-            ),
+            monitor_statuses=tuple(str(row["owner_status"]) for row in monitor_rows),
+            monitor_keys=tuple(str(row["monitor_key"]) for row in monitor_rows),
             monitor_updated_at_ms=tuple(
                 int(row["updated_at_ms"]) for row in monitor_rows
             ),
             needs_intervention_monitor_key=(
                 None
                 if intervention_monitor is None
-                else str(
-                    intervention_monitor["needs_intervention_monitor_key"]
-                )
+                else str(intervention_monitor["needs_intervention_monitor_key"])
             ),
             needs_intervention_monitor_updated_at_ms=(
                 None
                 if intervention_monitor is None
                 else int(
-                    intervention_monitor[
-                        "needs_intervention_monitor_updated_at_ms"
-                    ]
+                    intervention_monitor["needs_intervention_monitor_updated_at_ms"]
                 )
             ),
             contradictory_fact_reasons=tuple(contradictory_reasons),
@@ -490,10 +500,14 @@ class PostgresOwnerReadRepository:
 
         cursor = None if query.cursor is None else decode_cursor(query.cursor)
         rows = (
-            await self._connection.execute(
-                _signal_list_query(query=query, cursor=cursor)
+            (
+                await self._connection.execute(
+                    _signal_list_query(query=query, cursor=cursor)
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return SignalPageFacts(
             items=tuple(_signal_item_facts_from_joined_row(row) for row in rows),
             requested_limit=query.limit,
@@ -506,10 +520,10 @@ class PostgresOwnerReadRepository:
         """Read one exact Signal, Decision, bounded facts, and optional Shadow."""
 
         signal_rows = (
-            await self._connection.execute(
-                _exact_signal_query(signal_event_id)
-            )
-        ).mappings().all()
+            (await self._connection.execute(_exact_signal_query(signal_event_id)))
+            .mappings()
+            .all()
+        )
         if not signal_rows:
             raise SignalNotFound(f"Signal not found: {signal_event_id}")
         if len(signal_rows) != 1:
@@ -521,10 +535,10 @@ class PostgresOwnerReadRepository:
             raise SignalFactsContradiction("exact Signal identity mismatch")
 
         decision_rows = (
-            await self._connection.execute(
-                _exact_admission_query(signal_event_id)
-            )
-        ).mappings().all()
+            (await self._connection.execute(_exact_admission_query(signal_event_id)))
+            .mappings()
+            .all()
+        )
         if len(decision_rows) != 1:
             raise SignalFactsContradiction(
                 "Signal requires exactly one AdmissionDecision"
@@ -532,25 +546,23 @@ class PostgresOwnerReadRepository:
         decision = decision_rows[0]
 
         fact_rows = (
-            await self._connection.execute(
-                _exact_signal_facts_query(signal_event_id)
-            )
-        ).mappings().all()
+            (await self._connection.execute(_exact_signal_facts_query(signal_event_id)))
+            .mappings()
+            .all()
+        )
 
         admission_decision_id = str(decision["admission_decision_id"])
         shadow_rows = (
-            await self._connection.execute(
-                _exact_shadow_query(admission_decision_id)
-            )
-        ).mappings().all()
+            (await self._connection.execute(_exact_shadow_query(admission_decision_id)))
+            .mappings()
+            .all()
+        )
         if len(shadow_rows) > 1:
             raise SignalFactsContradiction(
                 "AdmissionDecision has multiple Shadow Outcomes"
             )
         if len(fact_rows) > 256:
-            raise SignalFactsContradiction(
-                "Signal has more than 256 fact snapshots"
-            )
+            raise SignalFactsContradiction("Signal has more than 256 fact snapshots")
         shadow = shadow_rows[0] if shadow_rows else None
         _validate_signal_admission_identity(signal=signal, decision=decision)
         _validate_shadow_identity(decision=decision, shadow=shadow)
@@ -577,10 +589,14 @@ class PostgresOwnerReadRepository:
 
         cursor = None if query.cursor is None else decode_cursor(query.cursor)
         rows = (
-            await self._connection.execute(
-                _trade_list_query(query=query, cursor=cursor)
+            (
+                await self._connection.execute(
+                    _trade_list_query(query=query, cursor=cursor)
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return TradePageFacts(
             items=tuple(_trade_item_facts_from_row(row) for row in rows),
             requested_limit=query.limit,
@@ -593,33 +609,45 @@ class PostgresOwnerReadRepository:
         """Read one exact Ticket causality graph on this connection."""
 
         ticket_row = (
-            await self._connection.execute(_causality_ticket_query(ticket_id))
-        ).mappings().one_or_none()
+            (await self._connection.execute(_causality_ticket_query(ticket_id)))
+            .mappings()
+            .one_or_none()
+        )
         if ticket_row is None:
             return None
         if ticket_row["aggregate_ticket_id"] is None:
             raise ContradictoryFacts("Ticket exists without Aggregate")
         signal_row = (
-            await self._connection.execute(
-                _causality_signal_admission_query(
-                    str(ticket_row["signal_event_id"])
+            (
+                await self._connection.execute(
+                    _causality_signal_admission_query(
+                        str(ticket_row["signal_event_id"])
+                    )
                 )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if signal_row is None:
             raise ContradictoryFacts("Ticket Signal does not exist")
         if signal_row["admission_decision_id"] is None:
             raise ContradictoryFacts("Ticket AdmissionDecision does not exist")
 
         event_rows = (
-            await self._connection.execute(_causality_events_query(ticket_id))
-        ).mappings().all()
+            (await self._connection.execute(_causality_events_query(ticket_id)))
+            .mappings()
+            .all()
+        )
         command_rows = (
-            await self._connection.execute(_causality_commands_query(ticket_id))
-        ).mappings().all()
+            (await self._connection.execute(_causality_commands_query(ticket_id)))
+            .mappings()
+            .all()
+        )
         incident_rows = (
-            await self._connection.execute(_causality_incidents_query(ticket_id))
-        ).mappings().all()
+            (await self._connection.execute(_causality_incidents_query(ticket_id)))
+            .mappings()
+            .all()
+        )
         _require_history_bound(
             "Trade Events", event_rows, maximum=_CAUSALITY_EVENT_LIMIT
         )
@@ -635,17 +663,19 @@ class PostgresOwnerReadRepository:
         aggregate_review_id = ticket_row["aggregate_review_id"]
         if aggregate_review_id is not None:
             review_row = (
-                await self._connection.execute(
-                    _causality_review_query(str(aggregate_review_id))
+                (
+                    await self._connection.execute(
+                        _causality_review_query(str(aggregate_review_id))
+                    )
                 )
-            ).mappings().one_or_none()
+                .mappings()
+                .one_or_none()
+            )
 
         events = tuple(_causality_event_facts(row) for row in event_rows)
         commands = tuple(_causality_command_facts(row) for row in command_rows)
         incidents = tuple(_causality_incident_facts(row) for row in incident_rows)
-        review = (
-            None if review_row is None else _causality_review_facts(review_row)
-        )
+        review = None if review_row is None else _causality_review_facts(review_row)
         return TradeCausalityFacts(
             trade=_causality_trade_item_facts(
                 ticket_row,
@@ -663,6 +693,98 @@ class PostgresOwnerReadRepository:
             review=review,
         )
 
+    async def read_strategy_page_facts(
+        self,
+        query: StrategySummaryQuery,
+    ) -> StrategyPageFacts:
+        """Read bounded version-isolated strategy evidence on this snapshot."""
+
+        version_rows = (
+            (await self._connection.execute(_strategy_versions_query(query)))
+            .mappings()
+            .all()
+        )
+        if len(version_rows) > _STRATEGY_SUMMARY_VERSION_LIMIT:
+            raise TradeFactsContradiction(
+                "StrategyVersion page exceeded hard maximum 100"
+            )
+        version_ids = tuple(str(row["strategy_version_id"]) for row in version_rows)
+        ticket_rows: Sequence[RowMapping] = ()
+        if version_ids:
+            ticket_rows = (
+                (
+                    await self._connection.execute(
+                        _strategy_summary_ticket_query(
+                            query=query,
+                            strategy_version_ids=version_ids,
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        if len(ticket_rows) > _STRATEGY_SUMMARY_TICKET_LIMIT:
+            raise TradeFactsContradiction(
+                "StrategyVersion summary exceeds hard maximum 5000 Tickets"
+            )
+        tickets_by_version: dict[str, list[StrategyTicketFacts]] = {
+            strategy_version_id: [] for strategy_version_id in version_ids
+        }
+        for row in ticket_rows:
+            strategy_version_id = str(row["strategy_version_id"])
+            if strategy_version_id not in tickets_by_version:
+                raise TradeFactsContradiction(
+                    "StrategyVersion Ticket is outside selected version authority"
+                )
+            tickets_by_version[strategy_version_id].append(
+                _strategy_ticket_facts_from_row(row)
+            )
+        return StrategyPageFacts(
+            from_ms=query.from_ms,
+            to_ms=query.to_ms,
+            view=query.view,
+            versions=tuple(
+                StrategyVersionFacts(
+                    strategy_group_id=str(row["strategy_group_id"]),
+                    strategy_group_display_name=str(row["display_name"]),
+                    strategy_version_id=str(row["strategy_version_id"]),
+                    version=int(row["version"]),
+                    strategy_version_status=str(row["strategy_version_status"]),
+                    is_current=bool(row["is_current"]),
+                    tickets=tuple(tickets_by_version[str(row["strategy_version_id"])]),
+                    evidence=(
+                        EvidenceRef(
+                            kind="fact",
+                            identity=str(row["strategy_version_id"]),
+                            occurred_at_ms=int(row["version_created_at_ms"]),
+                        ),
+                    ),
+                )
+                for row in version_rows
+            ),
+        )
+
+    async def read_strategy_ticket_page_facts(
+        self,
+        query: StrategyTicketQuery,
+    ) -> StrategyTicketPageFacts:
+        """Read one version/path-bounded Ticket modal page on this snapshot."""
+
+        cursor = None if query.cursor is None else decode_cursor(query.cursor)
+        rows = (
+            (
+                await self._connection.execute(
+                    _strategy_ticket_query(query=query, cursor=cursor)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return StrategyTicketPageFacts(
+            items=tuple(_trade_item_facts_from_row(row) for row in rows),
+            requested_limit=query.limit,
+        )
+
     async def read_review_center_facts(
         self,
         query: ReviewListQuery,
@@ -671,10 +793,14 @@ class PostgresOwnerReadRepository:
 
         cursor = None if query.cursor is None else decode_cursor(query.cursor)
         ticket_rows = (
-            await self._connection.execute(
-                _review_center_ticket_query(query=query, cursor=cursor)
+            (
+                await self._connection.execute(
+                    _review_center_ticket_query(query=query, cursor=cursor)
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         filter_overflow = (
             query.review_status is not None
             and len(ticket_rows) > _REVIEW_CENTER_FILTER_CANDIDATE_LIMIT
@@ -699,11 +825,11 @@ class PostgresOwnerReadRepository:
                 await self._connection.execute(
                     _review_center_incidents_query(page_ticket_ids)
                 )
-            ).mappings().all()
+            )
+            .mappings()
+            .all()
         )
-        incidents_by_ticket = _review_center_incidents_by_ticket(
-            incident_rows
-        )
+        incidents_by_ticket = _review_center_incidents_by_ticket(incident_rows)
         candidate_items = tuple(
             _review_center_item_facts(
                 row,
@@ -773,9 +899,7 @@ def _causality_signal_admission_query(signal_event_id: str) -> sa.Select[Any]:
             signal_events.c.position_side,
             signal_events.c.occurred_at_ms,
             admission_decisions.c.admission_decision_id,
-            admission_decisions.c.signal_event_id.label(
-                "admission_signal_event_id"
-            ),
+            admission_decisions.c.signal_event_id.label("admission_signal_event_id"),
             admission_decisions.c.exposure_episode_id.label(
                 "admission_exposure_episode_id"
             ),
@@ -785,9 +909,7 @@ def _causality_signal_admission_query(signal_event_id: str) -> sa.Select[Any]:
             admission_decisions.c.strategy_version_id.label(
                 "admission_strategy_version_id"
             ),
-            admission_decisions.c.event_spec_id.label(
-                "admission_event_spec_id"
-            ),
+            admission_decisions.c.event_spec_id.label("admission_event_spec_id"),
             admission_decisions.c.universe_version_id.label(
                 "admission_universe_version_id"
             ),
@@ -795,9 +917,7 @@ def _causality_signal_admission_query(signal_event_id: str) -> sa.Select[Any]:
                 "admission_universe_semantic_digest"
             ),
             admission_decisions.c.runtime_profile_id,
-            admission_decisions.c.runtime_scope_id.label(
-                "admission_runtime_scope_id"
-            ),
+            admission_decisions.c.runtime_scope_id.label("admission_runtime_scope_id"),
             admission_decisions.c.runtime_scope_version.label(
                 "admission_runtime_scope_version"
             ),
@@ -808,9 +928,7 @@ def _causality_signal_admission_query(signal_event_id: str) -> sa.Select[Any]:
             admission_decisions.c.exchange_instrument_id.label(
                 "admission_exchange_instrument_id"
             ),
-            admission_decisions.c.position_side.label(
-                "admission_position_side"
-            ),
+            admission_decisions.c.position_side.label("admission_position_side"),
             admission_decisions.c.decision_status,
             admission_decisions.c.capacity_claim_id,
             admission_decisions.c.ticket_id.label("admission_ticket_id"),
@@ -902,9 +1020,7 @@ def _causality_signal_facts(row: RowMapping) -> TradeCausalitySignalFacts:
         universe_version_id=str(row["universe_version_id"]),
         universe_semantic_digest=str(row["universe_semantic_digest"]),
         exchange_instrument_id=str(row["exchange_instrument_id"]),
-        position_side=cast(
-            Literal["long", "short"], str(row["position_side"])
-        ),
+        position_side=cast(Literal["long", "short"], str(row["position_side"])),
         occurred_at_ms=int(row["occurred_at_ms"]),
     )
 
@@ -920,9 +1036,7 @@ def _causality_admission_facts(
         strategy_version_id=str(row["admission_strategy_version_id"]),
         event_spec_id=str(row["admission_event_spec_id"]),
         universe_version_id=str(row["admission_universe_version_id"]),
-        universe_semantic_digest=str(
-            row["admission_universe_semantic_digest"]
-        ),
+        universe_semantic_digest=str(row["admission_universe_semantic_digest"]),
         runtime_profile_id=str(row["runtime_profile_id"]),
         runtime_scope_id=str(row["admission_runtime_scope_id"]),
         runtime_scope_version=int(row["admission_runtime_scope_version"]),
@@ -938,9 +1052,7 @@ def _causality_admission_facts(
             Literal["admitted", "rejected"], str(row["decision_status"])
         ),
         capacity_claim_id=(
-            None
-            if row["capacity_claim_id"] is None
-            else str(row["capacity_claim_id"])
+            None if row["capacity_claim_id"] is None else str(row["capacity_claim_id"])
         ),
         ticket_id=(
             None
@@ -986,9 +1098,7 @@ def _causality_command_facts(row: RowMapping) -> TradeCausalityCommandFacts:
         ),
         created_at_ms=int(row["created_at_ms"]),
         completed_at_ms=(
-            None
-            if row["completed_at_ms"] is None
-            else int(row["completed_at_ms"])
+            None if row["completed_at_ms"] is None else int(row["completed_at_ms"])
         ),
     )
 
@@ -1003,9 +1113,7 @@ def _causality_incident_facts(row: RowMapping) -> TradeCausalityIncidentFacts:
         details=_json_object(row["details"], label="Incident details"),
         opened_at_ms=int(row["opened_at_ms"]),
         resolved_at_ms=(
-            None
-            if row["resolved_at_ms"] is None
-            else int(row["resolved_at_ms"])
+            None if row["resolved_at_ms"] is None else int(row["resolved_at_ms"])
         ),
     )
 
@@ -1041,9 +1149,7 @@ def _causality_trade_item_facts(
         strategy_group_id=str(ticket_row["strategy_group_id"]),
         event_spec_id=str(ticket_row["event_spec_id"]),
         exchange_instrument_id=str(ticket_row["exchange_instrument_id"]),
-        position_side=cast(
-            Literal["long", "short"], str(ticket_row["position_side"])
-        ),
+        position_side=cast(Literal["long", "short"], str(ticket_row["position_side"])),
         ticket_status=str(ticket_row["ticket_status"]),
         aggregate_status=str(ticket_row["aggregate_status"]),
         issued_at_ms=int(ticket_row["issued_at_ms"]),
@@ -1068,9 +1174,7 @@ def _causality_trade_item_facts(
         exit_event_occurred_at_ms=(
             None if exit_event is None else exit_event.occurred_at_ms
         ),
-        open_incident_id=(
-            None if open_incident is None else open_incident.incident_id
-        ),
+        open_incident_id=(None if open_incident is None else open_incident.incident_id),
         open_incident_opened_at_ms=(
             None if open_incident is None else open_incident.opened_at_ms
         ),
@@ -1100,13 +1204,10 @@ def _signal_list_query(
         signal_events.c.occurred_at_ms < query.to_ms,
     ]
     if query.strategy_group_id is not None:
-        conditions.append(
-            signal_events.c.strategy_group_id == query.strategy_group_id
-        )
+        conditions.append(signal_events.c.strategy_group_id == query.strategy_group_id)
     if query.exchange_instrument_id is not None:
         conditions.append(
-            signal_events.c.exchange_instrument_id
-            == query.exchange_instrument_id
+            signal_events.c.exchange_instrument_id == query.exchange_instrument_id
         )
     if query.position_side is not None:
         conditions.append(signal_events.c.position_side == query.position_side)
@@ -1147,20 +1248,15 @@ def _trade_list_query(
         trade_tickets.c.created_at_ms < query.to_ms,
     ]
     if query.strategy_group_id is not None:
-        conditions.append(
-            trade_tickets.c.strategy_group_id == query.strategy_group_id
-        )
+        conditions.append(trade_tickets.c.strategy_group_id == query.strategy_group_id)
     if query.exchange_instrument_id is not None:
         conditions.append(
-            trade_tickets.c.exchange_instrument_id
-            == query.exchange_instrument_id
+            trade_tickets.c.exchange_instrument_id == query.exchange_instrument_id
         )
     if query.position_side is not None:
         conditions.append(trade_tickets.c.position_side == query.position_side)
     if query.aggregate_status is not None:
-        conditions.append(
-            trade_aggregates.c.status == query.aggregate_status
-        )
+        conditions.append(trade_aggregates.c.status == query.aggregate_status)
     if cursor is not None:
         conditions.append(
             sa.tuple_(
@@ -1173,12 +1269,113 @@ def _trade_list_query(
             )
         )
 
+    return _ticket_facts_select(
+        conditions=conditions,
+        limit=query.limit + 1,
+    )
+
+
+def _strategy_versions_query(query: StrategySummaryQuery) -> sa.Select[Any]:
+    """Select authoritative StrategyVersions, including zero-ticket versions."""
+
+    conditions: list[sa.ColumnElement[bool]] = []
+    if query.view == "current":
+        conditions.append(
+            strategy_groups.c.active_version_id
+            == strategy_versions.c.strategy_version_id
+        )
+    return (
+        sa.select(
+            strategy_groups.c.strategy_group_id,
+            strategy_groups.c.display_name,
+            strategy_groups.c.active_version_id,
+            strategy_versions.c.strategy_version_id,
+            strategy_versions.c.version,
+            strategy_versions.c.status.label("strategy_version_status"),
+            strategy_versions.c.created_at_ms.label("version_created_at_ms"),
+            (
+                strategy_groups.c.active_version_id
+                == strategy_versions.c.strategy_version_id
+            ).label("is_current"),
+        )
+        .select_from(
+            strategy_groups.join(
+                strategy_versions,
+                strategy_versions.c.strategy_group_id
+                == strategy_groups.c.strategy_group_id,
+            )
+        )
+        .where(*conditions)
+        .order_by(
+            strategy_groups.c.display_name.asc(),
+            strategy_versions.c.version.desc(),
+            strategy_versions.c.strategy_version_id.asc(),
+        )
+        .limit(_STRATEGY_SUMMARY_VERSION_LIMIT + 1)
+    )
+
+
+def _strategy_summary_ticket_query(
+    *,
+    query: StrategySummaryQuery,
+    strategy_version_ids: tuple[str, ...],
+) -> sa.Select[Any]:
+    return _ticket_facts_select(
+        conditions=(
+            trade_tickets.c.created_at_ms >= query.from_ms,
+            trade_tickets.c.created_at_ms < query.to_ms,
+            trade_tickets.c.strategy_version_id.in_(strategy_version_ids),
+        ),
+        limit=_STRATEGY_SUMMARY_TICKET_LIMIT + 1,
+    )
+
+
+def _strategy_ticket_query(
+    *,
+    query: StrategyTicketQuery,
+    cursor: PageCursor | None,
+) -> sa.Select[Any]:
+    conditions: list[sa.ColumnElement[bool]] = [
+        trade_tickets.c.created_at_ms >= query.from_ms,
+        trade_tickets.c.created_at_ms < query.to_ms,
+        trade_tickets.c.strategy_version_id == query.strategy_version_id,
+    ]
+    controlled_exit = _controlled_exit_exists()
+    tp1_reached = _take_profit_filled_exists()
+    natural_terminal = _natural_terminal_ticket_condition()
+    if query.scope == "natural":
+        conditions.append(~controlled_exit)
+    if query.exit_path == "controlled_exit":
+        conditions.append(controlled_exit)
+    elif query.exit_path == "tp1_reached":
+        conditions.extend((natural_terminal, ~controlled_exit, tp1_reached))
+    elif query.exit_path == "tp1_not_reached":
+        conditions.extend((natural_terminal, ~controlled_exit, ~tp1_reached))
+    if cursor is not None:
+        conditions.append(
+            sa.tuple_(
+                trade_tickets.c.created_at_ms,
+                trade_tickets.c.ticket_id,
+            )
+            < sa.tuple_(
+                sa.literal(cursor.sort_ms),
+                sa.literal(cursor.identity),
+            )
+        )
+    return _ticket_facts_select(conditions=conditions, limit=query.limit + 1)
+
+
+def _ticket_facts_select(
+    *,
+    conditions: Sequence[sa.ColumnElement[bool]],
+    limit: int,
+) -> sa.Select[Any]:
+    """Select one shared bounded Ticket row shape for every Owner read list."""
+
     open_incident = (
         sa.select(
             runtime_incidents.c.incident_id.label("open_incident_id"),
-            runtime_incidents.c.opened_at_ms.label(
-                "open_incident_opened_at_ms"
-            ),
+            runtime_incidents.c.opened_at_ms.label("open_incident_opened_at_ms"),
         )
         .where(
             runtime_incidents.c.ticket_id == trade_tickets.c.ticket_id,
@@ -1194,9 +1391,7 @@ def _trade_list_query(
     latest_incident = (
         sa.select(
             runtime_incidents.c.incident_id.label("latest_incident_id"),
-            runtime_incidents.c.opened_at_ms.label(
-                "latest_incident_opened_at_ms"
-            ),
+            runtime_incidents.c.opened_at_ms.label("latest_incident_opened_at_ms"),
         )
         .where(runtime_incidents.c.ticket_id == trade_tickets.c.ticket_id)
         .order_by(
@@ -1211,9 +1406,7 @@ def _trade_list_query(
             trade_events.c.event_id.label("exit_event_id"),
             trade_events.c.event_type.label("exit_event_type"),
             trade_events.c.payload.label("exit_event_payload"),
-            trade_events.c.occurred_at_ms.label(
-                "exit_event_occurred_at_ms"
-            ),
+            trade_events.c.occurred_at_ms.label("exit_event_occurred_at_ms"),
         )
         .where(
             trade_events.c.ticket_id == trade_tickets.c.ticket_id,
@@ -1225,6 +1418,22 @@ def _trade_list_query(
         )
         .limit(1)
         .lateral("initial_trade_exit_event")
+    )
+    tp1_event = (
+        sa.select(
+            trade_events.c.event_id.label("tp1_event_id"),
+            trade_events.c.occurred_at_ms.label("tp1_event_occurred_at_ms"),
+        )
+        .where(
+            trade_events.c.ticket_id == trade_tickets.c.ticket_id,
+            trade_events.c.event_type == "TakeProfitFilled",
+        )
+        .order_by(
+            trade_events.c.sequence.asc(),
+            trade_events.c.event_id.asc(),
+        )
+        .limit(1)
+        .lateral("first_trade_take_profit_event")
     )
     source = (
         trade_tickets.join(
@@ -1238,11 +1447,13 @@ def _trade_list_query(
         .outerjoin(open_incident, sa.true())
         .outerjoin(latest_incident, sa.true())
         .outerjoin(exit_event, sa.true())
+        .outerjoin(tp1_event, sa.true())
     )
     return (
         sa.select(
             trade_tickets.c.ticket_id,
             trade_tickets.c.strategy_group_id,
+            trade_tickets.c.strategy_version_id,
             trade_tickets.c.event_spec_id,
             trade_tickets.c.exchange_instrument_id,
             trade_tickets.c.position_side,
@@ -1265,6 +1476,8 @@ def _trade_list_query(
             exit_event.c.exit_event_type,
             exit_event.c.exit_event_payload,
             exit_event.c.exit_event_occurred_at_ms,
+            tp1_event.c.tp1_event_id,
+            tp1_event.c.tp1_event_occurred_at_ms,
         )
         .select_from(source)
         .where(*conditions)
@@ -1272,7 +1485,38 @@ def _trade_list_query(
             trade_tickets.c.created_at_ms.desc(),
             trade_tickets.c.ticket_id.desc(),
         )
-        .limit(query.limit + 1)
+        .limit(limit)
+    )
+
+
+def _controlled_exit_exists() -> sa.ColumnElement[bool]:
+    reason = trade_events.c.payload["reason"].as_string()
+    return sa.exists(
+        sa.select(sa.literal(1)).where(
+            trade_events.c.ticket_id == trade_tickets.c.ticket_id,
+            trade_events.c.event_type == "ExitRequested",
+            sa.or_(
+                reason.like("owner_flatten_all:%"),
+                reason.like("deployment_drain:%"),
+            ),
+        )
+    )
+
+
+def _take_profit_filled_exists() -> sa.ColumnElement[bool]:
+    return sa.exists(
+        sa.select(sa.literal(1)).where(
+            trade_events.c.ticket_id == trade_tickets.c.ticket_id,
+            trade_events.c.event_type == "TakeProfitFilled",
+        )
+    )
+
+
+def _natural_terminal_ticket_condition() -> sa.ColumnElement[bool]:
+    return sa.and_(
+        trade_tickets.c.status == "terminal",
+        trade_aggregates.c.status == "terminal",
+        trade_tickets.c.terminal_at_ms.is_not(None),
     )
 
 
@@ -1290,9 +1534,7 @@ def _review_center_ticket_query(
         terminal_at_ms < query.to_ms,
     ]
     if query.strategy_group_id is not None:
-        conditions.append(
-            trade_tickets.c.strategy_group_id == query.strategy_group_id
-        )
+        conditions.append(trade_tickets.c.strategy_group_id == query.strategy_group_id)
     if cursor is not None:
         conditions.append(
             sa.tuple_(terminal_at_ms, trade_tickets.c.ticket_id)
@@ -1307,9 +1549,7 @@ def _review_center_ticket_query(
             trade_events.c.event_id.label("exit_event_id"),
             trade_events.c.event_type.label("exit_event_type"),
             trade_events.c.payload.label("exit_event_payload"),
-            trade_events.c.occurred_at_ms.label(
-                "exit_event_occurred_at_ms"
-            ),
+            trade_events.c.occurred_at_ms.label("exit_event_occurred_at_ms"),
         )
         .where(
             trade_events.c.ticket_id == trade_tickets.c.ticket_id,
@@ -1390,9 +1630,7 @@ def _review_center_ticket_query(
             trade_aggregates.c.ticket_id.label("aggregate_ticket_id"),
             trade_aggregates.c.status.label("aggregate_status"),
             trade_aggregates.c.review_id.label("aggregate_review_id"),
-            trade_aggregates.c.updated_at_ms.label(
-                "aggregate_updated_at_ms"
-            ),
+            trade_aggregates.c.updated_at_ms.label("aggregate_updated_at_ms"),
             trade_reviews.c.review_id,
             trade_reviews.c.ticket_id.label("review_ticket_id"),
             trade_reviews.c.revision.label("review_revision"),
@@ -1478,9 +1716,7 @@ def _review_center_incidents_query(
     )
     return (
         sa.select(ranked)
-        .where(
-            ranked.c.incident_rank <= _REVIEW_CENTER_INCIDENT_LIMIT + 1
-        )
+        .where(ranked.c.incident_rank <= _REVIEW_CENTER_INCIDENT_LIMIT + 1)
         .order_by(
             ranked.c.ticket_id,
             ranked.c.opened_at_ms,
@@ -1494,9 +1730,7 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
     if str(row["aggregate_ticket_id"]) != ticket_id:
         raise TradeFactsContradiction("Ticket and Aggregate identity mismatch")
 
-    review_id = (
-        None if row["review_id"] is None else str(row["review_id"])
-    )
+    review_id = None if row["review_id"] is None else str(row["review_id"])
     review_metrics = row["review_metrics"]
     if review_metrics is not None and not isinstance(review_metrics, dict):
         raise TradeFactsContradiction("current Review metrics are not JSON object")
@@ -1506,23 +1740,38 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
     ):
         if (row[identity_name] is None) != (row[time_name] is None):
             raise TradeFactsContradiction("partial Incident summary row")
+    tp1_event_id = row.get("tp1_event_id")
+    tp1_event_occurred_at_ms = row.get("tp1_event_occurred_at_ms")
+    if (tp1_event_id is None) != (tp1_event_occurred_at_ms is None):
+        raise TradeFactsContradiction("partial TakeProfitFilled Event row")
 
     issued_at_ms = int(row["issued_at_ms"])
+    evidence = [
+        EvidenceRef(
+            kind="ticket",
+            identity=ticket_id,
+            occurred_at_ms=issued_at_ms,
+        )
+    ]
+    if tp1_event_id is not None:
+        evidence.append(
+            EvidenceRef(
+                kind="event",
+                identity=str(tp1_event_id),
+                occurred_at_ms=int(tp1_event_occurred_at_ms),
+            )
+        )
     return TradeItemFacts(
         ticket_id=ticket_id,
         strategy_group_id=str(row["strategy_group_id"]),
         event_spec_id=str(row["event_spec_id"]),
         exchange_instrument_id=str(row["exchange_instrument_id"]),
-        position_side=cast(
-            Literal["long", "short"], str(row["position_side"])
-        ),
+        position_side=cast(Literal["long", "short"], str(row["position_side"])),
         ticket_status=str(row["ticket_status"]),
         aggregate_status=str(row["aggregate_status"]),
         issued_at_ms=issued_at_ms,
         terminal_at_ms=(
-            None
-            if row["terminal_at_ms"] is None
-            else int(row["terminal_at_ms"])
+            None if row["terminal_at_ms"] is None else int(row["terminal_at_ms"])
         ),
         aggregate_review_id=(
             None
@@ -1531,14 +1780,10 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
         ),
         review_id=review_id,
         review_ticket_id=(
-            None
-            if row["review_ticket_id"] is None
-            else str(row["review_ticket_id"])
+            None if row["review_ticket_id"] is None else str(row["review_ticket_id"])
         ),
         review_revision=(
-            None
-            if row["review_revision"] is None
-            else int(row["review_revision"])
+            None if row["review_revision"] is None else int(row["review_revision"])
         ),
         review_created_at_ms=(
             None
@@ -1547,14 +1792,10 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
         ),
         review_metrics=review_metrics,
         exit_event_id=(
-            None
-            if row["exit_event_id"] is None
-            else str(row["exit_event_id"])
+            None if row["exit_event_id"] is None else str(row["exit_event_id"])
         ),
         exit_event_type=(
-            None
-            if row["exit_event_type"] is None
-            else str(row["exit_event_type"])
+            None if row["exit_event_type"] is None else str(row["exit_event_type"])
         ),
         exit_event_payload=row["exit_event_payload"],
         exit_event_occurred_at_ms=(
@@ -1563,9 +1804,7 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
             else int(row["exit_event_occurred_at_ms"])
         ),
         open_incident_id=(
-            None
-            if row["open_incident_id"] is None
-            else str(row["open_incident_id"])
+            None if row["open_incident_id"] is None else str(row["open_incident_id"])
         ),
         open_incident_opened_at_ms=(
             None
@@ -1582,13 +1821,41 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
             if row["latest_incident_opened_at_ms"] is None
             else int(row["latest_incident_opened_at_ms"])
         ),
-        evidence=(
-            EvidenceRef(
-                kind="ticket",
-                identity=ticket_id,
-                occurred_at_ms=issued_at_ms,
-            ),
+        tp1_reached=tp1_event_id is not None,
+        evidence=tuple(evidence),
+    )
+
+
+def _strategy_ticket_facts_from_row(row: RowMapping) -> StrategyTicketFacts:
+    """Reuse the canonical Trade builder before exposing evaluation facts."""
+
+    trade = build_trade_item(_trade_item_facts_from_row(row))
+    return StrategyTicketFacts(
+        ticket_id=trade.ticket_id,
+        issued_at_ms=trade.issued_at_ms,
+        terminal_at_ms=trade.terminal_at_ms,
+        ticket_status=trade.ticket_status,
+        aggregate_status=trade.aggregate_status,
+        review_id=trade.review_id,
+        review_created_at_ms=(
+            None
+            if trade.review_id is None
+            else next(
+                (
+                    evidence.occurred_at_ms
+                    for evidence in trade.evidence
+                    if evidence.kind == "review"
+                    and evidence.identity == trade.review_id
+                ),
+                None,
+            )
         ),
+        economics_completeness=(trade.economics_completeness or "incomplete_evidence"),
+        net_pnl=trade.net_pnl,
+        net_r=trade.net_r,
+        exit_reason=trade.exit_reason,
+        tp1_reached=bool(row.get("tp1_event_id")),
+        evidence=trade.evidence,
     )
 
 
@@ -1605,10 +1872,7 @@ def _review_center_incidents_by_ticket(
                 f"Ticket {ticket_id} has more than "
                 f"{_REVIEW_CENTER_INCIDENT_LIMIT} Incidents"
             )
-    return {
-        ticket_id: tuple(incidents)
-        for ticket_id, incidents in grouped.items()
-    }
+    return {ticket_id: tuple(incidents) for ticket_id, incidents in grouped.items()}
 
 
 def _review_center_item_facts(
@@ -1617,17 +1881,11 @@ def _review_center_item_facts(
     incidents: tuple[RowMapping, ...],
 ) -> ReviewCenterItemFacts:
     aggregate_review_id = (
-        None
-        if row["aggregate_review_id"] is None
-        else str(row["aggregate_review_id"])
+        None if row["aggregate_review_id"] is None else str(row["aggregate_review_id"])
     )
-    joined_review_id = (
-        None if row["review_id"] is None else str(row["review_id"])
-    )
+    joined_review_id = None if row["review_id"] is None else str(row["review_id"])
     if aggregate_review_id is not None and joined_review_id is None:
-        raise TradeFactsContradiction(
-            "Aggregate current Review pointer is dangling"
-        )
+        raise TradeFactsContradiction("Aggregate current Review pointer is dangling")
     if aggregate_review_id != joined_review_id:
         raise TradeFactsContradiction(
             "Aggregate current Review pointer identity mismatch"
@@ -1714,9 +1972,7 @@ def _review_center_item_facts(
         resolved_at_ms = incident["resolved_at_ms"]
         if status == "open":
             if resolved_at_ms is not None:
-                raise TradeFactsContradiction(
-                    "open Incident has resolved timestamp"
-                )
+                raise TradeFactsContradiction("open Incident has resolved timestamp")
         elif status == "resolved":
             if resolved_at_ms is None:
                 raise TradeFactsContradiction(
@@ -1724,9 +1980,7 @@ def _review_center_item_facts(
                 )
             recovered_incident_ids.append(incident_id)
         else:
-            raise TradeFactsContradiction(
-                f"unknown Incident status: {status}"
-            )
+            raise TradeFactsContradiction(f"unknown Incident status: {status}")
         incident_ids.append(incident_id)
         incident_ref = EvidenceRef(
             kind="incident",
@@ -1773,9 +2027,7 @@ def _review_center_item_facts(
         review_complete=current_review_evidence is not None,
         incident_ids=tuple(incident_ids),
         recovered_incident_ids=tuple(recovered_incident_ids),
-        economics_completeness=(
-            trade.economics_completeness or "incomplete_evidence"
-        ),
+        economics_completeness=(trade.economics_completeness or "incomplete_evidence"),
         gross_pnl=trade.gross_pnl,
         fees=trade.fees,
         funding=trade.funding,
@@ -1794,9 +2046,7 @@ def _review_center_item_facts(
         ticket_evidence=ticket_evidence,
         aggregate_evidence=aggregate_evidence,
         entry_fill_evidence=exact_event_refs["entry_fill_evidence"],
-        protection_confirmed_evidence=exact_event_refs[
-            "protection_confirmed_evidence"
-        ],
+        protection_confirmed_evidence=exact_event_refs["protection_confirmed_evidence"],
         exit_trigger_evidence=exact_event_refs["exit_trigger_evidence"],
         flat_evidence=exact_event_refs["flat_evidence"],
         reconciliation_matched_evidence=exact_event_refs[
@@ -1852,25 +2102,15 @@ def _signal_joined_select() -> sa.Select[Any]:
         signal_events.c.expires_at_ms,
         admission_decisions.c.admission_decision_id,
         admission_decisions.c.signal_event_id.label("decision_signal_event_id"),
-        admission_decisions.c.exposure_episode_id.label(
-            "decision_exposure_episode_id"
-        ),
-        admission_decisions.c.runtime_scope_id.label(
-            "decision_runtime_scope_id"
-        ),
+        admission_decisions.c.exposure_episode_id.label("decision_exposure_episode_id"),
+        admission_decisions.c.runtime_scope_id.label("decision_runtime_scope_id"),
         admission_decisions.c.runtime_scope_version.label(
             "decision_runtime_scope_version"
         ),
-        admission_decisions.c.strategy_group_id.label(
-            "decision_strategy_group_id"
-        ),
-        admission_decisions.c.strategy_version_id.label(
-            "decision_strategy_version_id"
-        ),
+        admission_decisions.c.strategy_group_id.label("decision_strategy_group_id"),
+        admission_decisions.c.strategy_version_id.label("decision_strategy_version_id"),
         admission_decisions.c.event_spec_id.label("decision_event_spec_id"),
-        admission_decisions.c.universe_version_id.label(
-            "decision_universe_version_id"
-        ),
+        admission_decisions.c.universe_version_id.label("decision_universe_version_id"),
         admission_decisions.c.universe_semantic_digest.label(
             "decision_universe_semantic_digest"
         ),
@@ -1894,20 +2134,15 @@ def _signal_joined_select() -> sa.Select[Any]:
         shadow_outcomes_current.c.status.label("shadow_status"),
         shadow_outcomes_current.c.mfe_r.label("shadow_mfe_r"),
         shadow_outcomes_current.c.mae_r.label("shadow_mae_r"),
-        shadow_outcomes_current.c.completion_reason.label(
-            "shadow_completion_reason"
-        ),
+        shadow_outcomes_current.c.completion_reason.label("shadow_completion_reason"),
         shadow_outcomes_current.c.observed_through_ms.label(
             "shadow_observed_through_ms"
         ),
-        shadow_outcomes_current.c.completed_at_ms.label(
-            "shadow_completed_at_ms"
-        ),
+        shadow_outcomes_current.c.completed_at_ms.label("shadow_completed_at_ms"),
     ).select_from(
         signal_events.join(
             admission_decisions,
-            admission_decisions.c.signal_event_id
-            == signal_events.c.signal_event_id,
+            admission_decisions.c.signal_event_id == signal_events.c.signal_event_id,
         ).outerjoin(
             shadow_outcomes_current,
             shadow_outcomes_current.c.admission_decision_id
@@ -1957,14 +2192,9 @@ def _exact_shadow_query(admission_decision_id: str) -> sa.Select[Any]:
             shadow_outcomes_current.c.observed_through_ms.label(
                 "shadow_observed_through_ms"
             ),
-            shadow_outcomes_current.c.completed_at_ms.label(
-                "shadow_completed_at_ms"
-            ),
+            shadow_outcomes_current.c.completed_at_ms.label("shadow_completed_at_ms"),
         )
-        .where(
-            shadow_outcomes_current.c.admission_decision_id
-            == admission_decision_id
-        )
+        .where(shadow_outcomes_current.c.admission_decision_id == admission_decision_id)
         .limit(2)
     )
 
@@ -2061,9 +2291,7 @@ def _signal_item_facts(
         strategy_version_id=str(signal["strategy_version_id"]),
         event_spec_id=str(signal["event_spec_id"]),
         exchange_instrument_id=str(signal["exchange_instrument_id"]),
-        position_side=cast(
-            Literal["long", "short"], str(signal["position_side"])
-        ),
+        position_side=cast(Literal["long", "short"], str(signal["position_side"])),
         occurred_at_ms=occurred_at_ms,
         expires_at_ms=int(signal["expires_at_ms"]),
         admission_decision_id=admission_decision_id,
@@ -2082,15 +2310,12 @@ def _signal_item_facts(
             else str(decision["binding_constraint"])
         ),
         ticket_id=(
-            None
-            if decision["ticket_id"] is None
-            else str(decision["ticket_id"])
+            None if decision["ticket_id"] is None else str(decision["ticket_id"])
         ),
         decided_at_ms=decided_at_ms,
         shadow_outcome_id=shadow_outcome_id,
         shadow_status=cast(
-            Literal["pending", "claimed", "completed", "unavailable"]
-            | None,
+            Literal["pending", "claimed", "completed", "unavailable"] | None,
             shadow_status,
         ),
         shadow_mfe_r=shadow_mfe_r,
@@ -2123,9 +2348,7 @@ def _validate_joined_signal_identity(row: RowMapping) -> None:
         ("position_side", "decision_position_side"),
     )
     if any(row[left] != row[right] for left, right in pairs):
-        raise SignalFactsContradiction(
-            "signal and admission identity mismatch"
-        )
+        raise SignalFactsContradiction("signal and admission identity mismatch")
     if row["shadow_outcome_id"] is not None:
         shadow_pairs = (
             ("admission_decision_id", "shadow_admission_decision_id"),
@@ -2155,9 +2378,7 @@ def _validate_signal_admission_identity(
         "position_side",
     )
     if any(signal[name] != decision[name] for name in names):
-        raise SignalFactsContradiction(
-            "signal and admission identity mismatch"
-        )
+        raise SignalFactsContradiction("signal and admission identity mismatch")
 
 
 def _validate_shadow_identity(
@@ -2167,13 +2388,10 @@ def _validate_shadow_identity(
         return
     if (
         shadow["admission_decision_id"] != decision["admission_decision_id"]
-        or shadow["exchange_instrument_id"]
-        != decision["exchange_instrument_id"]
+        or shadow["exchange_instrument_id"] != decision["exchange_instrument_id"]
         or shadow["position_side"] != decision["position_side"]
     ):
-        raise SignalFactsContradiction(
-            "admission and Shadow Outcome identity mismatch"
-        )
+        raise SignalFactsContradiction("admission and Shadow Outcome identity mismatch")
 
 
 def _signal_fact_snapshot_from_row(
@@ -2183,9 +2401,7 @@ def _signal_fact_snapshot_from_row(
 ) -> SignalFactSnapshotFacts:
     signal_event_id = str(row["signal_event_id"])
     if signal_event_id != expected_signal_event_id:
-        raise SignalFactsContradiction(
-            "fact snapshot signal identity mismatch"
-        )
+        raise SignalFactsContradiction("fact snapshot signal identity mismatch")
     return SignalFactSnapshotFacts(
         signal_event_id=signal_event_id,
         fact_definition_id=str(row["fact_definition_id"]),
@@ -2215,16 +2431,12 @@ def _exact_decimal_or_none(
     if value is None:
         return None
     if not isinstance(value, Decimal):
-        raise SignalFactsContradiction(
-            f"{field_name} did not decode as Decimal"
-        )
+        raise SignalFactsContradiction(f"{field_name} did not decode as Decimal")
     return value
 
 
 def _overview_authority_query() -> sa.Select[Any]:
-    runtime_profile_id = owner_policy_current.c.scope[
-        "runtime_profile_id"
-    ].as_string()
+    runtime_profile_id = owner_policy_current.c.scope["runtime_profile_id"].as_string()
     return (
         sa.select(
             owner_policy_current.c.owner_policy_id,
@@ -2237,9 +2449,7 @@ def _overview_authority_query() -> sa.Select[Any]:
             account_exposure_current.c.venue_id.label("exposure_venue_id"),
             account_exposure_current.c.account_id.label("exposure_account_id"),
             account_exposure_current.c.active_ticket_count,
-            account_exposure_current.c.updated_at_ms.label(
-                "exposure_updated_at_ms"
-            ),
+            account_exposure_current.c.updated_at_ms.label("exposure_updated_at_ms"),
         )
         .select_from(
             owner_policy_current.join(
@@ -2248,8 +2458,7 @@ def _overview_authority_query() -> sa.Select[Any]:
             ).outerjoin(
                 account_exposure_current,
                 sa.and_(
-                    account_exposure_current.c.venue_id
-                    == runtime_profiles.c.venue_id,
+                    account_exposure_current.c.venue_id == runtime_profiles.c.venue_id,
                     account_exposure_current.c.account_id
                     == runtime_profiles.c.account_id,
                 ),
@@ -2311,9 +2520,7 @@ def _open_incidents_query(
     )
     top_actionable = (
         sa.select(
-            actionable_incident.c.incident_id.label(
-                "top_actionable_incident_id"
-            ),
+            actionable_incident.c.incident_id.label("top_actionable_incident_id"),
             actionable_incident.c.opened_at_ms.label(
                 "top_actionable_incident_opened_at_ms"
             ),
@@ -2405,9 +2612,7 @@ def _monitor_rows_query(
     )
     top_intervention = (
         sa.select(
-            actionable_monitor.c.monitor_key.label(
-                "needs_intervention_monitor_key"
-            ),
+            actionable_monitor.c.monitor_key.label("needs_intervention_monitor_key"),
             actionable_monitor.c.updated_at_ms.label(
                 "needs_intervention_monitor_updated_at_ms"
             ),
@@ -2419,8 +2624,7 @@ def _monitor_rows_query(
             )
             .outerjoin(
                 actionable_incident,
-                actionable_incident.c.incident_id
-                == actionable_monitor.c.incident_id,
+                actionable_incident.c.incident_id == actionable_monitor.c.incident_id,
             )
             .outerjoin(
                 actionable_incident_ticket,
@@ -2609,9 +2813,7 @@ def _today_reviews_query(
         "economics_completeness"
     ].as_string()
     net_pnl_quote = trade_reviews.c.metrics["net_pnl_quote"].as_string()
-    planned_r_multiple = trade_reviews.c.metrics[
-        "planned_r_multiple"
-    ].as_string()
+    planned_r_multiple = trade_reviews.c.metrics["planned_r_multiple"].as_string()
     numeric_text = r"^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$"
     valid_economics = sa.func.coalesce(
         sa.and_(
@@ -2721,15 +2923,9 @@ def _review_aggregate_metrics(
     row: sa.RowMapping,
 ) -> tuple[MoneyMetric, MoneyMetric, str | None, tuple[EvidenceRef, ...]]:
     invalid_count = int(row["incomplete_review_count"])
-    evidence_id = (
-        row["invalid_review_id"]
-        if invalid_count
-        else row["latest_review_id"]
-    )
+    evidence_id = row["invalid_review_id"] if invalid_count else row["latest_review_id"]
     evidence_at_ms = (
-        row["invalid_review_at_ms"]
-        if invalid_count
-        else row["latest_review_at_ms"]
+        row["invalid_review_at_ms"] if invalid_count else row["latest_review_at_ms"]
     )
     evidence = (
         ()
@@ -2874,15 +3070,9 @@ def _overview_freshness(
     contradictory: bool,
 ) -> tuple[Freshness, str, int]:
     if authority is None:
-        freshness = (
-            Freshness.CONTRADICTORY
-            if contradictory
-            else Freshness.UNAVAILABLE
-        )
+        freshness = Freshness.CONTRADICTORY if contradictory else Freshness.UNAVAILABLE
         return freshness, "owner_policy:configured", now_ms
-    account_identity = (
-        f"account:{authority['venue_id']}:{authority['account_id']}"
-    )
+    account_identity = f"account:{authority['venue_id']}:{authority['account_id']}"
     required = [
         (
             account_identity,

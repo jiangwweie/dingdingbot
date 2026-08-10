@@ -1054,3 +1054,56 @@ StrategyUniverse 新版本草稿、认证、Warming 与激活仍是独立的未�
 - 前端根据 K 线推断退出原因；
 - 首版策略控制和受控退出；
 - 前端或 Control API 直接创建交易所订单。
+
+## 22. StrategyVersion 策略评估工作台扩展
+
+### 22.1 目的与边界
+
+在既有 Owner Console 中新增“策略”一级页面，用于把**版本隔离的实盘
+Ticket 事实**压缩为可回链的评估表面。它解决的是“当前版本实际经历了多少
+自然生命周期、TP1 路径与已确认收益是什么”，不产生策略评分、排名、恢复
+建议或参数修改建议。
+
+页面与 API 继续完全只读：不改变 StrategyGroup、Owner Policy、
+StrategyUniverse、Ticket 或交易所订单；不增加投影表、刷新 Worker、自动刷新、
+WebSocket 或 SSE。
+
+### 22.2 统计主键与口径
+
+统计主键固定为 `StrategyVersion`，不把同一 StrategyGroup 的历史版本合并。
+默认窗口为 30 天，最大 90 天；一次页面最多读取 100 个版本与 5,000 个
+Ticket，超界时 API fail-closed。
+
+| 数据口径 | 规则 | 用途 |
+| --- | --- | --- |
+| 当前版本 | `brc_strategy_groups.active_version_id` 精确指向的版本 | 日常运行判断 |
+| 全部历史版本 | 保留每个不可变版本的独立行 | 回看版本演进，不混合收益 |
+| 自然终态 | Ticket 与 Aggregate 都终态，且没有受控退出原因 | 收益、R、胜负与 TP1 路径 |
+| 受控退出 | `ExitRequested.reason` 以 `owner_flatten_all:` 或 `deployment_drain:` 开头 | 单独展示，不计入自然表现 |
+| 已确认自然 Review | 当前 Aggregate 精确指向 Review，且经济完整性为 `complete` | 可计入自然 Net PnL、Net R 与胜负 |
+| 待确认自然 Review | 自然终态但没有完整当前 Review | 计入覆盖，不计入收益与胜负 |
+
+若一个版本没有已确认自然 Review，收益与 R 显示不可用而非 `0`。
+
+### 22.3 页面与路由
+
+主表展示版本、样本覆盖、已确认/待确认 Review、自然 Net PnL、自然 Net R、
+TP1 已达/未达路径与受控退出。路径按钮打开居中 Ticket 弹窗，不在主页面
+向下堆叠明细；Ticket 行进入原有因果详情与可全屏的只读 K 线复盘。
+
+```text
+/strategies?view=current&from_ms=…&to_ms=…
+-> 路径弹窗：strategy_version_id + ticket_modal=1 + scope + exit_path
+-> /trades/:ticket_id?origin=strategy + 原策略筛选与弹窗上下文
+-> 浏览器返回 / “返回策略”：恢复原策略 URL 与弹窗
+```
+
+对外只增加以下两个有界 Owner Read API：
+
+```text
+GET /api/owner/v1/strategies
+GET /api/owner/v1/strategies/{strategy_version_id}/tickets
+```
+
+第二个接口使用 `limit + 1` keyset cursor；`tp1_reached` 和
+`tp1_not_reached` 限定为自然终态 Ticket，避免把活动 Ticket 伪装成收益路径。

@@ -317,6 +317,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/strategies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Strategy Versions
+         * @description Return bounded evaluation summaries keyed by immutable StrategyVersion.
+         */
+        get: operations["strategy_versions_api_owner_v1_strategies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/strategies/{strategy_version_id}/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Strategy Version Tickets
+         * @description Return the path-bounded Ticket modal opened from one StrategyVersion.
+         */
+        get: operations["strategy_version_tickets_api_owner_v1_strategies__strategy_version_id__tickets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/tickets": {
         parameters: {
             query?: never;
@@ -443,6 +483,28 @@ export interface components {
         /** ApiEnvelope[SignalListPage] */
         ApiEnvelope_SignalListPage_: {
             data: components["schemas"]["SignalListPage"];
+            freshness: components["schemas"]["Freshness"];
+            /** Generated At */
+            generated_at: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Source Watermark */
+            source_watermark: string | null;
+        };
+        /** ApiEnvelope[StrategySummaryPage] */
+        ApiEnvelope_StrategySummaryPage_: {
+            data: components["schemas"]["StrategySummaryPage"];
+            freshness: components["schemas"]["Freshness"];
+            /** Generated At */
+            generated_at: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Source Watermark */
+            source_watermark: string | null;
+        };
+        /** ApiEnvelope[StrategyTicketListPage] */
+        ApiEnvelope_StrategyTicketListPage_: {
+            data: components["schemas"]["StrategyTicketListPage"];
             freshness: components["schemas"]["Freshness"];
             /** Generated At */
             generated_at: string;
@@ -1137,6 +1199,126 @@ export interface components {
             /** Strategy Group Id */
             strategy_group_id: string;
         };
+        /** StrategySummaryPage */
+        StrategySummaryPage: {
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /** From Ms */
+            from_ms: number;
+            /** Items */
+            items: components["schemas"]["StrategyVersionSummary"][];
+            /** To Ms */
+            to_ms: number;
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "current" | "all";
+        };
+        /** StrategyTicketListItem */
+        StrategyTicketListItem: {
+            /** Aggregate Status */
+            aggregate_status: string;
+            /** Attention Items */
+            attention_items: string[];
+            /** Completed Stage Count */
+            completed_stage_count: number;
+            /** Economics Completeness */
+            economics_completeness: ("complete" | "funding_unavailable" | "external_exit_unavailable") | null;
+            /**
+             * Evaluation Path
+             * @enum {string}
+             */
+            evaluation_path: "tp1_reached" | "tp1_not_reached" | "controlled_exit" | "not_terminal";
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /** Exchange Instrument Id */
+            exchange_instrument_id: string;
+            /** Exit Reason */
+            exit_reason: string | null;
+            /** Exit Reason Unavailable Reason */
+            exit_reason_unavailable_reason: string | null;
+            fees: components["schemas"]["MoneyMetric"];
+            funding: components["schemas"]["MoneyMetric"];
+            gross_pnl: components["schemas"]["MoneyMetric"];
+            /** Issued At Ms */
+            issued_at_ms: number;
+            /**
+             * Lifecycle Stage
+             * @enum {string}
+             */
+            lifecycle_stage: "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
+            net_pnl: components["schemas"]["MoneyMetric"];
+            net_r: components["schemas"]["MoneyMetric"];
+            /**
+             * Position Side
+             * @enum {string}
+             */
+            position_side: "long" | "short";
+            /** Review Id */
+            review_id: string | null;
+            /** Review Revision */
+            review_revision: number | null;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Terminal At Ms */
+            terminal_at_ms: number | null;
+            /** Ticket Id */
+            ticket_id: string;
+            /** Ticket Status */
+            ticket_status: string;
+            /**
+             * Total Stage Count
+             * @constant
+             */
+            total_stage_count: 8;
+        };
+        /** StrategyTicketListPage */
+        StrategyTicketListPage: {
+            /** Items */
+            items: components["schemas"]["StrategyTicketListItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** StrategyVersionSummary */
+        StrategyVersionSummary: {
+            /** Confirmed Natural Review Count */
+            confirmed_natural_review_count: number;
+            /** Controlled Exit Count */
+            controlled_exit_count: number;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /** Is Current */
+            is_current: boolean;
+            /** Loss Count */
+            loss_count: number;
+            /** Natural Terminal Count */
+            natural_terminal_count: number;
+            net_pnl: components["schemas"]["MoneyMetric"];
+            net_r: components["schemas"]["MoneyMetric"];
+            /** Pending Natural Review Count */
+            pending_natural_review_count: number;
+            /** Strategy Group Display Name */
+            strategy_group_display_name: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Strategy Version Id */
+            strategy_version_id: string;
+            /** Strategy Version Status */
+            strategy_version_status: string;
+            /** Ticket Count */
+            ticket_count: number;
+            /** Tp1 Not Reached Count */
+            tp1_not_reached_count: number;
+            /** Tp1 Reached Count */
+            tp1_reached_count: number;
+            /** Version */
+            version: number;
+            /** Win Count */
+            win_count: number;
+        };
         /** TradeCausalityDetail */
         TradeCausalityDetail: {
             /** Annotations */
@@ -1767,6 +1949,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiEnvelope_SignalAdmissionDetail_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    strategy_versions_api_owner_v1_strategies_get: {
+        parameters: {
+            query?: {
+                from_ms?: number | null;
+                to_ms?: number | null;
+                view?: "current" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiEnvelope_StrategySummaryPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    strategy_version_tickets_api_owner_v1_strategies__strategy_version_id__tickets_get: {
+        parameters: {
+            query?: {
+                from_ms?: number | null;
+                to_ms?: number | null;
+                limit?: number;
+                cursor?: string | null;
+                scope?: "natural" | "all";
+                exit_path?: ("tp1_reached" | "tp1_not_reached" | "controlled_exit") | null;
+            };
+            header?: never;
+            path: {
+                strategy_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiEnvelope_StrategyTicketListPage_"];
                 };
             };
             /** @description Validation Error */

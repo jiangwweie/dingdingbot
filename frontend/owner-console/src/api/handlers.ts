@@ -12,6 +12,8 @@ export const ownerApiHandlers = [
   http.get("/api/owner/v1/tickets/:ticketId/causality", () => HttpResponse.json(ownerApiFixtures.tradeCausalityFixture)),
   http.get("/api/owner/v1/market/candles", () => HttpResponse.json(ownerApiFixtures.candleFixture)),
   http.get("/api/owner/v1/review", () => HttpResponse.json(ownerApiFixtures.reviewFixture)),
+  http.get("/api/owner/v1/strategies", () => HttpResponse.json(ownerApiFixtures.strategyFixture)),
+  http.get("/api/owner/v1/strategies/:strategyVersionId/tickets", () => HttpResponse.json(ownerApiFixtures.strategyTicketFixture)),
   http.get("/api/owner/v1/controls", () => HttpResponse.json({
     generated_at_ms: 1800000000000,
     global_entry: { configured_state: "enabled", effective_state: "enabled", policy_version: 5, active_ticket_count: 2, first_blocker: null },

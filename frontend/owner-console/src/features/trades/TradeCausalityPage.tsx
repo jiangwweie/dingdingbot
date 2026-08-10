@@ -35,8 +35,17 @@ function freshnessPresentation(freshness: Freshness) {
   return { label: "数据正常", tone: "success" as const };
 }
 
-function safeReturnPath(value: string | null, stateValue?: string): string {
-  const candidate = stateValue ?? value ?? "/trades";
+function safeReturnPath(searchParams: URLSearchParams, stateValue?: string): string {
+  if (searchParams.get("origin") === "strategy") {
+    const allowed = ["view", "from_ms", "to_ms", "strategy_version_id", "ticket_modal", "exit_path", "scope"] as const;
+    const strategyParams = new URLSearchParams();
+    for (const key of allowed) {
+      const value = searchParams.get(key);
+      if (value !== null) strategyParams.set(key, value);
+    }
+    return `/strategies${strategyParams.size > 0 ? `?${strategyParams.toString()}` : ""}`;
+  }
+  const candidate = stateValue ?? searchParams.get("return") ?? "/trades";
   return candidate === "/trades" || candidate.startsWith("/trades?") ? candidate : "/trades";
 }
 
@@ -105,7 +114,8 @@ export function TradeCausalityPage() {
   }, [envelope, selectedStageKey]);
 
   const shellStatus = envelope ? freshnessPresentation(envelope.freshness) : { label: detail.isError ? "不可用" : "加载中", tone: "neutral" as StatusTone };
-  const returnPath = safeReturnPath(searchParams.get("return"), routeState.returnPath);
+  const returnPath = safeReturnPath(searchParams, routeState.returnPath);
+  const returnLabel = searchParams.get("origin") === "strategy" ? "返回策略" : "返回交易列表";
   const ticketIds = routeState.ticketIds ?? [];
   const ticketIndex = ticketIds.indexOf(ticketId);
   const previousTicketId = ticketIndex > 0 ? ticketIds[ticketIndex - 1] : null;
@@ -119,20 +129,20 @@ export function TradeCausalityPage() {
   };
 
   if (!envelope) {
-    return <AppShell dataTime={<DataAge generatedAt={null} />} statusLabel={shellStatus.label} statusTone={shellStatus.tone}><div className="mb-2"><Link className="text-[12px] text-[var(--color-emphasis)] hover:underline" to={returnPath}>返回交易列表</Link></div><UnavailablePanel title={detail.isError ? "Ticket 因果不可用" : "正在读取 Ticket 因果"} detail={detail.isError ? "保留精确 Ticket 路由，不把缺失事实解释为无交易。" : ticketId} /></AppShell>;
+    return <AppShell dataTime={<DataAge generatedAt={null} />} statusLabel={shellStatus.label} statusTone={shellStatus.tone}><div className="mb-2"><Link className="text-[12px] text-[var(--color-emphasis)] hover:underline" to={returnPath}>{returnLabel}</Link></div><UnavailablePanel title={detail.isError ? "Ticket 因果不可用" : "正在读取 Ticket 因果"} detail={detail.isError ? "保留精确 Ticket 路由，不把缺失事实解释为无交易。" : ticketId} /></AppShell>;
   }
 
   const data = envelope.data;
   const selectedStage = data.stages.find((stage) => stage.key === selectedStageKey) ?? data.stages.find((stage) => stage.key === data.current_stage) ?? data.stages[0];
   const status = freshnessPresentation(envelope.freshness);
   if (!selectedStage) {
-    return <AppShell dataTime={<DataAge generatedAt={envelope.generated_at} />} statusLabel="事实矛盾" statusTone="danger"><div className="mb-2"><Link className="text-[12px] text-[var(--color-emphasis)] hover:underline" to={returnPath}>返回交易列表</Link></div><UnavailablePanel title="生命周期不可用" detail="精确 Ticket 因果响应没有任何生命周期阶段。" /></AppShell>;
+    return <AppShell dataTime={<DataAge generatedAt={envelope.generated_at} />} statusLabel="事实矛盾" statusTone="danger"><div className="mb-2"><Link className="text-[12px] text-[var(--color-emphasis)] hover:underline" to={returnPath}>{returnLabel}</Link></div><UnavailablePanel title="生命周期不可用" detail="精确 Ticket 因果响应没有任何生命周期阶段。" /></AppShell>;
   }
 
   return (
     <AppShell dataTime={<DataAge generatedAt={envelope.generated_at} />} statusLabel={status.label} statusTone={status.tone}>
       <div className="mb-2 flex min-h-9 items-center justify-between gap-3">
-        <nav className="min-w-0 truncate text-[12px] text-[var(--color-text-secondary)]" aria-label="面包屑"><Link className="text-[var(--color-emphasis)] hover:underline" to={returnPath}>交易</Link><span> / {data.trade.exchange_instrument_id} {data.trade.position_side.toUpperCase()} / </span><strong className="text-[var(--color-text-primary)]">{data.trade.ticket_id}</strong></nav>
+        <nav className="min-w-0 truncate text-[12px] text-[var(--color-text-secondary)]" aria-label="面包屑"><Link className="text-[var(--color-emphasis)] hover:underline" to={returnPath}>{searchParams.get("origin") === "strategy" ? "策略" : "交易"}</Link><span> / {data.trade.exchange_instrument_id} {data.trade.position_side.toUpperCase()} / </span><strong className="text-[var(--color-text-primary)]">{data.trade.ticket_id}</strong></nav>
         <div className="flex flex-none items-center gap-2"><Link className={`owner-button grid h-8 place-items-center no-underline ${previousTicketId ? "" : "pointer-events-none opacity-40"}`} state={routeState} to={previousTicketId ? detailHref(previousTicketId) : "#"} aria-disabled={!previousTicketId}>上一笔</Link><Link className={`owner-button grid h-8 place-items-center no-underline ${nextTicketId ? "" : "pointer-events-none opacity-40"}`} state={routeState} to={nextTicketId ? detailHref(nextTicketId) : "#"} aria-disabled={!nextTicketId}>下一笔</Link><ManualRefreshButton isRefreshing={detail.isFetching || candles.isFetching} onRefresh={refreshPage} /></div>
       </div>
 

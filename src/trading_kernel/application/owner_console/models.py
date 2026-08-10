@@ -173,14 +173,44 @@ class TradeListQuery(BoundedWindowQuery):
 
 
 class ReviewListQuery(BoundedWindowQuery):
-    review_status: Literal[
-        "in_progress",
-        "waiting_for_settlement",
-        "waiting_for_review",
-        "complete",
-        "incomplete_evidence",
-    ] | None = None
+    review_status: (
+        Literal[
+            "in_progress",
+            "waiting_for_settlement",
+            "waiting_for_review",
+            "complete",
+            "incomplete_evidence",
+        ]
+        | None
+    ) = None
     strategy_group_id: str | None = None
+
+
+class StrategySummaryQuery(BoundedWindowQuery):
+    """Bounded version-isolated strategy evaluation query."""
+
+    view: Literal["current", "all"] = "current"
+
+
+class StrategyTicketQuery(BoundedWindowQuery):
+    """Bounded Ticket query opened from one StrategyVersion evidence path."""
+
+    strategy_version_id: str = Field(min_length=1, max_length=160)
+    scope: Literal["natural", "all"] = "natural"
+    exit_path: (
+        Literal[
+            "tp1_reached",
+            "tp1_not_reached",
+            "controlled_exit",
+        ]
+        | None
+    ) = None
+
+    @model_validator(mode="after")
+    def _validate_scope_and_path(self) -> StrategyTicketQuery:
+        if self.scope == "natural" and self.exit_path == "controlled_exit":
+            raise ValueError("controlled exit path requires all scope")
+        return self
 
 
 class CandleQuery(FrozenModel):
@@ -355,11 +385,14 @@ class TradeListItem(FrozenModel):
     terminal_at_ms: int | None
     review_id: str | None
     review_revision: int | None
-    economics_completeness: Literal[
-        "complete",
-        "funding_unavailable",
-        "external_exit_unavailable",
-    ] | None
+    economics_completeness: (
+        Literal[
+            "complete",
+            "funding_unavailable",
+            "external_exit_unavailable",
+        ]
+        | None
+    )
     completed_stage_count: int
     total_stage_count: Literal[8]
     exit_reason: str | None
@@ -570,6 +603,95 @@ class ReviewCenterSummary(FrozenModel):
     evidence: tuple[EvidenceRef, ...]
 
 
+class StrategyTicketFacts(FrozenModel):
+    """One exact Ticket outcome used only for a StrategyVersion summary."""
+
+    ticket_id: str
+    issued_at_ms: int
+    terminal_at_ms: int | None
+    ticket_status: str
+    aggregate_status: str
+    review_id: str | None
+    review_created_at_ms: int | None
+    economics_completeness: (
+        Literal[
+            "complete",
+            "funding_unavailable",
+            "external_exit_unavailable",
+            "incomplete_evidence",
+        ]
+        | None
+    )
+    net_pnl: MoneyMetric
+    net_r: MoneyMetric
+    exit_reason: str | None
+    tp1_reached: bool
+    evidence: tuple[EvidenceRef, ...]
+
+
+class StrategyVersionFacts(FrozenModel):
+    """Persisted strategy identity plus bounded Ticket facts for one version."""
+
+    strategy_group_id: str
+    strategy_group_display_name: str
+    strategy_version_id: str
+    version: int = Field(gt=0)
+    strategy_version_status: str
+    is_current: bool
+    tickets: tuple[StrategyTicketFacts, ...] = Field(max_length=5_000)
+    evidence: tuple[EvidenceRef, ...]
+
+
+class StrategyPageFacts(FrozenModel):
+    from_ms: int
+    to_ms: int
+    view: Literal["current", "all"]
+    versions: tuple[StrategyVersionFacts, ...] = Field(max_length=100)
+
+
+class StrategyVersionSummary(FrozenModel):
+    strategy_group_id: str
+    strategy_group_display_name: str
+    strategy_version_id: str
+    version: int = Field(gt=0)
+    strategy_version_status: str
+    is_current: bool
+    ticket_count: int = Field(ge=0)
+    natural_terminal_count: int = Field(ge=0)
+    confirmed_natural_review_count: int = Field(ge=0)
+    pending_natural_review_count: int = Field(ge=0)
+    controlled_exit_count: int = Field(ge=0)
+    tp1_reached_count: int = Field(ge=0)
+    tp1_not_reached_count: int = Field(ge=0)
+    win_count: int = Field(ge=0)
+    loss_count: int = Field(ge=0)
+    net_pnl: MoneyMetric
+    net_r: MoneyMetric
+    evidence: tuple[EvidenceRef, ...]
+
+
+class StrategySummaryPage(FrozenModel):
+    from_ms: int
+    to_ms: int
+    view: Literal["current", "all"]
+    items: tuple[StrategyVersionSummary, ...] = Field(max_length=100)
+    evidence: tuple[EvidenceRef, ...]
+
+
+class StrategyTicketListItem(TradeListItem):
+    evaluation_path: Literal[
+        "tp1_reached",
+        "tp1_not_reached",
+        "controlled_exit",
+        "not_terminal",
+    ]
+
+
+class StrategyTicketListPage(FrozenModel):
+    items: tuple[StrategyTicketListItem, ...] = Field(max_length=100)
+    next_cursor: str | None
+
+
 class OverviewFacts(FrozenModel):
     observed_at_ms: int
     runtime_freshness: Freshness
@@ -620,9 +742,7 @@ class SignalItemFacts(FrozenModel):
     ticket_id: str | None
     decided_at_ms: int
     shadow_outcome_id: str | None
-    shadow_status: Literal[
-        "pending", "claimed", "completed", "unavailable"
-    ] | None
+    shadow_status: Literal["pending", "claimed", "completed", "unavailable"] | None
     shadow_mfe_r: Decimal | None
     shadow_mae_r: Decimal | None
     shadow_completion_reason: str | None
@@ -692,10 +812,16 @@ class TradeItemFacts(FrozenModel):
     open_incident_opened_at_ms: int | None
     latest_incident_id: str | None
     latest_incident_opened_at_ms: int | None
+    tp1_reached: bool = False
     evidence: tuple[EvidenceRef, ...]
 
 
 class TradePageFacts(FrozenModel):
+    items: tuple[TradeItemFacts, ...] = Field(max_length=101)
+    requested_limit: int = Field(ge=1, le=100)
+
+
+class StrategyTicketPageFacts(FrozenModel):
     items: tuple[TradeItemFacts, ...] = Field(max_length=101)
     requested_limit: int = Field(ge=1, le=100)
 

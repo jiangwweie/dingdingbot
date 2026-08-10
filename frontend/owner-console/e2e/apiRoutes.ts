@@ -8,6 +8,8 @@ export interface ApiRequestCounts {
   logout: number;
   overview: number;
   review: number;
+  strategies: number;
+  strategyTickets: number;
   session: number;
   signals: number;
   signalDetail: number;
@@ -27,7 +29,7 @@ function json(route: Route, body: unknown, status = 200) {
 
 export async function installApiRoutes(page: Page, options: ApiRouteOptions = {}): Promise<ApiRequestCounts> {
   let authenticated = options.authenticated ?? false;
-  const counts: ApiRequestCounts = { candles: 0, causality: 0, login: 0, logout: 0, overview: 0, review: 0, session: 0, signals: 0, signalDetail: 0, trades: 0 };
+  const counts: ApiRequestCounts = { candles: 0, causality: 0, login: 0, logout: 0, overview: 0, review: 0, session: 0, signals: 0, signalDetail: 0, strategies: 0, strategyTickets: 0, trades: 0 };
 
   await page.route("**/api/owner/v1/**", async (route) => {
     const request = route.request();
@@ -106,6 +108,16 @@ export async function installApiRoutes(page: Page, options: ApiRouteOptions = {}
     if (path === "/api/owner/v1/review") {
       counts.review += 1;
       await json(route, ownerApiFixtures.reviewFixture);
+      return;
+    }
+    if (path === "/api/owner/v1/strategies") {
+      counts.strategies += 1;
+      await json(route, ownerApiFixtures.strategyFixture);
+      return;
+    }
+    if (path.startsWith("/api/owner/v1/strategies/") && path.endsWith("/tickets")) {
+      counts.strategyTickets += 1;
+      await json(route, ownerApiFixtures.strategyTicketFixture);
       return;
     }
     await json(route, { error: { code: "not_found", message: "Fixture route not found" } }, 404);

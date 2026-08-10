@@ -26,6 +26,10 @@ from src.trading_kernel.application.owner_console.models import (
     SignalDetailFacts,
     SignalListQuery,
     SignalPageFacts,
+    StrategyPageFacts,
+    StrategySummaryQuery,
+    StrategyTicketPageFacts,
+    StrategyTicketQuery,
     TradeCausalityFacts,
     TradeListQuery,
     TradePageFacts,
@@ -165,6 +169,8 @@ class _RepositorySpy:
         self.trade_queries: list[TradeListQuery] = []
         self.causality_ids: list[str] = []
         self.review_queries: list[ReviewListQuery] = []
+        self.strategy_queries: list[StrategySummaryQuery] = []
+        self.strategy_ticket_queries: list[StrategyTicketQuery] = []
         self.overview_facts_override: OverviewFacts | None = None
 
     async def read_overview_facts(
@@ -223,6 +229,25 @@ class _RepositorySpy:
             requested_limit=query.limit,
             requested_strategy_group_id=query.strategy_group_id,
         )
+
+    async def read_strategy_page_facts(
+        self,
+        query: StrategySummaryQuery,
+    ) -> StrategyPageFacts:
+        self.strategy_queries.append(query)
+        return StrategyPageFacts(
+            from_ms=query.from_ms,
+            to_ms=query.to_ms,
+            view=query.view,
+            versions=(),
+        )
+
+    async def read_strategy_ticket_page_facts(
+        self,
+        query: StrategyTicketQuery,
+    ) -> StrategyTicketPageFacts:
+        self.strategy_ticket_queries.append(query)
+        return StrategyTicketPageFacts(items=(), requested_limit=query.limit)
 
 
 @pytest.fixture
@@ -379,6 +404,7 @@ async def test_candles_do_not_open_database_transaction(
         "/api/owner/v1/signals",
         "/api/owner/v1/tickets",
         "/api/owner/v1/review",
+        "/api/owner/v1/strategies/strategy-version:1/tickets",
     ),
 )
 async def test_list_limit_above_hard_cap_returns_422(
@@ -401,6 +427,8 @@ async def test_list_limit_above_hard_cap_returns_422(
         "/api/owner/v1/tickets",
         "/api/owner/v1/tickets/ticket:1/causality",
         "/api/owner/v1/review",
+        "/api/owner/v1/strategies",
+        "/api/owner/v1/strategies/strategy-version:1/tickets",
     ),
 )
 async def test_each_postgres_data_route_uses_one_read_transaction(
@@ -423,9 +451,10 @@ async def test_list_routes_use_clock_derived_default_windows(
         await owner_console_client.get("/api/owner/v1/signals"),
         await owner_console_client.get("/api/owner/v1/tickets"),
         await owner_console_client.get("/api/owner/v1/review"),
+        await owner_console_client.get("/api/owner/v1/strategies"),
     )
 
-    assert [response.status_code for response in responses] == [200, 200, 200]
+    assert [response.status_code for response in responses] == [200, 200, 200, 200]
     assert repository_spy.signal_queries == [
         SignalListQuery(from_ms=BASE_MS - 7 * 86_400_000, to_ms=BASE_MS)
     ]
@@ -434,6 +463,9 @@ async def test_list_routes_use_clock_derived_default_windows(
     ]
     assert repository_spy.review_queries == [
         ReviewListQuery(from_ms=BASE_MS - 30 * 86_400_000, to_ms=BASE_MS)
+    ]
+    assert repository_spy.strategy_queries == [
+        StrategySummaryQuery(from_ms=BASE_MS - 30 * 86_400_000, to_ms=BASE_MS)
     ]
 
 
@@ -559,6 +591,8 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "/api/owner/v1/tickets",
         "/api/owner/v1/tickets/{ticket_id}/causality",
         "/api/owner/v1/review",
+        "/api/owner/v1/strategies",
+        "/api/owner/v1/strategies/{strategy_version_id}/tickets",
         "/api/owner/v1/market/candles",
         "/api/owner/v1/controls",
         "/api/owner/v1/controls/strategies/{strategy_group_id}/pause",

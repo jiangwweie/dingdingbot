@@ -21,9 +21,9 @@ test("login, navigate, inspect causality, and logout", async ({ page }) => {
   await page.getByRole("button", { name: /展开 SOR-LONG/ }).first().click();
   await expect(page.getByText("gross_stop_risk_capacity_exhausted").first()).toBeVisible();
 
-  await page.getByRole("link", { name: "交易" }).click();
+  await page.getByRole("link", { name: "交易", exact: true }).click();
   await expect(page.getByRole("heading", { name: "交易" })).toBeVisible();
-  await page.getByLabel("StrategyGroup").fill("SOR-LONG");
+  await page.getByLabel("策略组").fill("SOR-LONG");
   await page.getByRole("link", { name: "BNBUSDT LONG" }).click();
   await expect(page).toHaveURL(/\/trades\/ticket%3Aactive%3A1/);
   await expect(page.getByTestId("lifecycle-stage")).toHaveCount(8);
@@ -42,7 +42,7 @@ test("login, navigate, inspect causality, and logout", async ({ page }) => {
   await expect(page.getByText("样本不足 · 当前仅支持观察性结论")).toHaveCount(0);
 
   await page.getByRole("button", { name: "退出" }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login(?:\?reason=session_expired)?$/);
   expect(counts.login).toBe(2);
   expect(counts.logout).toBe(1);
 });
@@ -50,5 +50,5 @@ test("login, navigate, inspect causality, and logout", async ({ page }) => {
 test("expired session redirects protected routes to login", async ({ page }) => {
   await installApiRoutes(page, { authenticated: true, expireSession: true });
   await page.goto("/overview");
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login(?:\?reason=session_expired)?$/);
 });
