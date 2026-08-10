@@ -43,6 +43,11 @@ test("primary pages and exact Ticket detail remain aligned at approved viewports
         expect(overflowingMetrics).toEqual([]);
       }
       await page.screenshot({ path: resolve(visualDir, `${viewport.width}-${name}.png`), fullPage: false });
+      if (name === "ticket") {
+        await page.getByRole("button", { name: "展开 K 线" }).click();
+        await expect(page.getByTestId("causality-chart")).toBeVisible();
+        await page.screenshot({ path: resolve(visualDir, `${viewport.width}-${name}-price-map.png`), fullPage: false });
+      }
     }
   }
 });

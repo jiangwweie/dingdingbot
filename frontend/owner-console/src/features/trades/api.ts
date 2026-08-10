@@ -6,6 +6,7 @@ import type { TradeSearchParams } from "./searchParams";
 export type TradeListEnvelope = components["schemas"]["ApiEnvelope_TradeListPage_"];
 export type TradeCausalityEnvelope = components["schemas"]["ApiEnvelope_TradeCausalityDetail_"];
 export type CandleEnvelope = components["schemas"]["ApiEnvelope_CandleSeries_"];
+export type CandleTimeframe = "15m" | "1h";
 
 export const tradesQueryKey = (filters: TradeSearchParams) => ["owner", "trades", filters] as const;
 
@@ -37,7 +38,7 @@ export async function getTrades(filters: TradeSearchParams): Promise<TradeListEn
 }
 
 export const tradeCausalityQueryKey = (ticketId: string) => ["owner", "trades", "causality", ticketId] as const;
-export const candlesQueryKey = (ticketId: string, closedAtMs: number) => ["owner", "trades", "candles", ticketId, "15m", closedAtMs, 300] as const;
+export const candlesQueryKey = (ticketId: string, timeframe: CandleTimeframe, closedAtMs: number, limit: number) => ["owner", "trades", "candles", ticketId, timeframe, closedAtMs, limit] as const;
 
 export async function getTradeCausality(ticketId: string): Promise<TradeCausalityEnvelope> {
   const { data, error, response } = await apiClient.GET("/api/owner/v1/tickets/{ticket_id}/causality", {
@@ -48,14 +49,14 @@ export async function getTradeCausality(ticketId: string): Promise<TradeCausalit
   return data;
 }
 
-export async function getCandles(input: { exchangeInstrumentId: string; closedAtMs: number }): Promise<CandleEnvelope> {
+export async function getCandles(input: { exchangeInstrumentId: string; timeframe: CandleTimeframe; closedAtMs: number; limit: number }): Promise<CandleEnvelope> {
   const { data, error, response } = await apiClient.GET("/api/owner/v1/market/candles", {
     params: {
       query: {
         exchange_instrument_id: input.exchangeInstrumentId,
-        timeframe: "15m",
+        timeframe: input.timeframe,
         closed_at_ms: input.closedAtMs,
-        limit: 300,
+        limit: input.limit,
       },
     },
   });
@@ -63,4 +64,3 @@ export async function getCandles(input: { exchangeInstrumentId: string; closedAt
   if (!data) throw new ApiError(502, "invalid_response", "Candle response is missing");
   return data;
 }
-

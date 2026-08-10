@@ -20,6 +20,7 @@ from src.trading_kernel.application.owner_console.models import (
     TradeCausalityDetail,
     TradeCausalityEventFacts,
     TradeCausalityFacts,
+    TradePricePlanView,
 )
 from src.trading_kernel.application.owner_console.trades import (
     TradeFactsContradiction,
@@ -33,6 +34,10 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.events import (
     PERSISTED_TRADE_EVENT_MODELS,
     TicketIssued,
+)
+from src.trading_kernel.domain.strategy_registry import (
+    registered_strategy_contracts,
+    strategy_contract_for,
 )
 from src.trading_kernel.domain.ticket import TicketStatus, TradeTicket
 
@@ -234,6 +239,7 @@ def build_trade_causality(facts: TradeCausalityFacts) -> TradeCausalityDetail:
     current_view = stages[_STAGE_ORDER.index(current_stage)]
     return TradeCausalityDetail(
         trade=trade,
+        price_plan=_price_plan(facts, ordered_events),
         current_stage=current_stage,
         current_stage_summary=current_view.summary,
         stages=stages,
@@ -250,6 +256,114 @@ def build_trade_causality(facts: TradeCausalityFacts) -> TradeCausalityDetail:
         review_evidence=review_evidence,
         evidence=evidence,
     )
+
+
+def _price_plan(
+    facts: TradeCausalityFacts,
+    events: tuple[TradeCausalityEventFacts, ...],
+) -> TradePricePlanView:
+    """Project one frozen plan without asking the browser to infer trade facts."""
+
+    entry_price = facts.aggregate.average_fill_price
+    entry_events = [event for event in events if event.event_type == "EntryFilled"]
+    if len(entry_events) > 1:
+        raise ContradictoryFacts("Ticket has multiple EntryFilled events")
+    if entry_events:
+        event_price = _decimal_string(
+            entry_events[0].payload.get("average_fill_price"),
+            context="EntryFilled.average_fill_price",
+        )
+        if entry_price is not None and entry_price != event_price:
+            raise ContradictoryFacts("Aggregate and EntryFilled price disagree")
+        entry_price = event_price
+
+    basis = entry_price or facts.ticket.entry_reference_price
+    tp1_price = (
+        facts.ticket.take_profit_prices[0]
+        if facts.ticket.take_profit_prices
+        else None
+    )
+    tp1_target_quantity = (
+        facts.ticket.take_profit_quantities[0]
+        if facts.ticket.take_profit_quantities
+        else None
+    )
+    return TradePricePlanView(
+        strategy_timeframe=_strategy_timeframe(facts),
+        entry_reference_price=facts.ticket.entry_reference_price,
+        entry_limit_price=facts.ticket.entry_limit_price,
+        actual_entry_price=entry_price,
+        initial_stop_price=facts.ticket.initial_stop_price,
+        active_stop_price=facts.aggregate.active_stop_price,
+        tp1_price=tp1_price,
+        ticket_quantity=facts.ticket.quantity,
+        tp1_target_quantity=tp1_target_quantity,
+        tp1_filled_quantity=facts.aggregate.tp1_filled_qty,
+        initial_stop_distance_percent=_signed_distance_percent(
+            basis,
+            facts.ticket.initial_stop_price,
+            side=facts.ticket.identity.netting_domain.position_side,
+            target="stop",
+        ),
+        tp1_distance_percent=(
+            None
+            if tp1_price is None
+            else _signed_distance_percent(
+                basis,
+                tp1_price,
+                side=facts.ticket.identity.netting_domain.position_side,
+                target="take_profit",
+            )
+        ),
+        tp1_reward_r=(
+            None
+            if tp1_price is None
+            else _reward_r(basis, facts.ticket.initial_stop_price, tp1_price)
+        ),
+    )
+
+
+def _strategy_timeframe(
+    facts: TradeCausalityFacts,
+) -> Literal["15m", "1h"] | None:
+    """Resolve exact Event semantics, then a single-timeframe StrategyGroup history."""
+
+    try:
+        return strategy_contract_for(
+            facts.ticket.identity.runtime.event_spec_id
+        ).timeframe
+    except ValueError:
+        candidates = {
+            contract.timeframe
+            for contract in registered_strategy_contracts()
+            if contract.strategy_group_id
+            == facts.ticket.identity.runtime.strategy_group_id
+        }
+        return next(iter(candidates)) if len(candidates) == 1 else None
+
+
+def _signed_distance_percent(
+    basis: Decimal,
+    price: Decimal,
+    *,
+    side: Literal["long", "short"],
+    target: Literal["stop", "take_profit"],
+) -> Decimal | None:
+    if basis <= 0:
+        return None
+    difference = price - basis if side == "long" else basis - price
+    if target == "stop":
+        difference = -abs(difference)
+    else:
+        difference = abs(difference)
+    return difference / basis * Decimal(100)
+
+
+def _reward_r(entry: Decimal, stop: Decimal, target: Decimal) -> Decimal | None:
+    risk_distance = abs(entry - stop)
+    if risk_distance == 0:
+        return None
+    return abs(target - entry) / risk_distance
 
 
 def _validate_identities(facts: TradeCausalityFacts) -> None:

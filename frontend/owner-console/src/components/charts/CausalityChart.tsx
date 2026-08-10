@@ -3,18 +3,26 @@ import {
   ColorType,
   createChart,
   createSeriesMarkers,
+  LineStyle,
 } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 import type { components } from "../../api/schema";
-import { toCandlestickData, toSeriesMarkers } from "./chartAdapter";
+import { toCandlestickData, toChartNumber, toSeriesMarkers } from "./chartAdapter";
 
 interface CausalityChartProps {
   annotations: components["schemas"]["ChartAnnotation"][];
   candles: components["schemas"]["CandleView"][];
+  priceLevels: ChartPriceLevel[];
   fullscreen?: boolean;
 }
 
-export default function CausalityChart({ annotations, candles, fullscreen = false }: CausalityChartProps) {
+export interface ChartPriceLevel {
+  color: string;
+  label: string;
+  price: string;
+}
+
+export default function CausalityChart({ annotations, candles, priceLevels, fullscreen = false }: CausalityChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -44,9 +52,19 @@ export default function CausalityChart({ annotations, candles, fullscreen = fals
     });
     series.setData(toCandlestickData(candles));
     createSeriesMarkers(series, toSeriesMarkers(annotations));
+    for (const level of priceLevels) {
+      series.createPriceLine({
+        price: toChartNumber(level.price),
+        color: level.color,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: level.label,
+      });
+    }
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [annotations, candles]);
+  }, [annotations, candles, priceLevels]);
 
   return <div className={fullscreen ? "h-[calc(100vh-156px)] min-h-[520px] w-full" : "h-[420px] min-h-[320px] w-full"} data-testid="causality-chart" ref={containerRef} />;
 }

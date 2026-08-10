@@ -11,17 +11,20 @@ import { StatusTag, type StatusTone } from "../../components/ui/StatusTag";
 import { UnavailablePanel } from "../../components/ui/UnavailablePanel";
 import type { components } from "../../api/schema";
 import {
+  type CandleTimeframe,
   candlesQueryKey,
   getCandles,
   getTradeCausality,
   tradeCausalityQueryKey,
 } from "./api";
+import type { ChartPriceLevel } from "../../components/charts/CausalityChart";
 
 const CausalityChart = lazy(() => import("../../components/charts/CausalityChart"));
 
 type Freshness = components["schemas"]["Freshness"];
 type Stage = components["schemas"]["LifecycleStageView"];
 type Evidence = components["schemas"]["EvidenceRef"];
+type PricePlan = components["schemas"]["TradePricePlanView"];
 
 interface TradeRouteState {
   returnPath?: string;
@@ -61,6 +64,82 @@ function formatDuration(value: number | null): string {
   return `${(value / 3_600_000).toFixed(1)}h`;
 }
 
+function formatPrice(value: string | null): string {
+  if (value === null) return "—";
+  const [integerPart = "0", decimalPart] = value.split(".");
+  const sign = integerPart.startsWith("-") ? "-" : "";
+  const digits = sign ? integerPart.slice(1) : integerPart;
+  const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return decimalPart === undefined ? `${sign}${grouped}` : `${sign}${grouped}.${decimalPart}`;
+}
+
+function formatRatio(value: string | null, suffix: string): string {
+  if (value === null) return "—";
+  const negative = value.startsWith("-");
+  const unsigned = negative ? value.slice(1) : value;
+  const [integerPart, decimalPart = ""] = unsigned.split(".");
+  const decimal = decimalPart.padEnd(2, "0").slice(0, 2);
+  return `${negative ? "-" : "+"}${integerPart}.${decimal}${suffix}`;
+}
+
+function decimalIsZero(value: string): boolean {
+  return /^-?0(?:\.0+)?$/.test(value);
+}
+
+function chartTimeframeLabel(value: CandleTimeframe): string {
+  return value === "1h" ? "1h 策略复盘" : "15m 执行细节";
+}
+
+function chartWindow(input: { data: components["schemas"]["TradeCausalityDetail"]; generatedAt: string; timeframe: CandleTimeframe }): { closedAtMs: number; limit: number } {
+  const barMs = input.timeframe === "1h" ? 3_600_000 : 900_000;
+  const signalAtMs = input.data.annotations.find((item) => item.kind === "signal")?.occurred_at_ms ?? input.data.trade.issued_at_ms;
+  const generatedAtMs = Date.parse(input.generatedAt);
+  const observedAtMs = Number.isFinite(generatedAtMs) ? generatedAtMs : signalAtMs;
+  const closedAtMs = input.data.trade.terminal_at_ms === null
+    ? Math.max(observedAtMs, signalAtMs + 12 * barMs)
+    : input.data.trade.terminal_at_ms + 12 * barMs;
+  const firstAtMs = signalAtMs - 12 * barMs;
+  return {
+    closedAtMs,
+    limit: Math.min(500, Math.max(48, Math.ceil((closedAtMs - firstAtMs) / barMs) + 1)),
+  };
+}
+
+function chartPriceLevels(plan: PricePlan): ChartPriceLevel[] {
+  const actualEntry = plan.actual_entry_price !== null;
+  const entryPrice = plan.actual_entry_price ?? plan.entry_reference_price;
+  const levels: ChartPriceLevel[] = [
+    { price: entryPrice, color: "#F0B90B", label: `${actualEntry ? "ENTRY" : "ENTRY PLAN"} · ${formatPrice(entryPrice)}` },
+    { price: plan.initial_stop_price, color: "#F6465D", label: `STOP · ${formatPrice(plan.initial_stop_price)}` },
+  ];
+  if (plan.tp1_price !== null) levels.push({ price: plan.tp1_price, color: "#0ECB81", label: `TP1 · ${formatPrice(plan.tp1_price)}` });
+  if (plan.active_stop_price !== null && plan.active_stop_price !== plan.initial_stop_price) {
+    levels.push({ price: plan.active_stop_price, color: "#5B8FF9", label: `ACTIVE STOP · ${formatPrice(plan.active_stop_price)}` });
+  }
+  return levels;
+}
+
+function PricePlanCard({ plan }: { plan: PricePlan }) {
+  const actualEntry = plan.actual_entry_price !== null;
+  const entryPrice = plan.actual_entry_price ?? plan.entry_reference_price;
+  const tp1Quantity = plan.tp1_target_quantity === null ? "—" : `${formatPrice(plan.tp1_filled_quantity)} / ${formatPrice(plan.tp1_target_quantity)}`;
+  return (
+    <section className="mb-2 border border-[var(--color-divider)] bg-[var(--color-surface)]" aria-label="交易计划与执行">
+      <div className="flex min-h-[30px] items-center justify-between gap-3 border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2">
+        <h2 className="m-0 text-[11px] font-medium text-[var(--color-text-secondary)]">交易计划与执行</h2>
+        <span className="tabular-number text-[10px] text-[var(--color-text-secondary)]">{plan.strategy_timeframe === null ? "策略周期不可得" : chartTimeframeLabel(plan.strategy_timeframe)}</span>
+      </div>
+      <div className="grid sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid min-h-[64px] content-center gap-1 border-b border-[var(--color-divider)] px-2 sm:border-r xl:border-b-0"><span className="text-[10px] text-[var(--color-text-secondary)]">{actualEntry ? "实际 Entry" : "计划 Entry"}</span><strong className="tabular-number text-[14px] text-[var(--color-emphasis)]">{formatPrice(entryPrice)}</strong><small className="tabular-number text-[10px] text-[var(--color-text-secondary)]">{actualEntry ? `计划参考 ${formatPrice(plan.entry_reference_price)}` : "尚未实际成交"}</small></div>
+        <div className="grid min-h-[64px] content-center gap-1 border-b border-[var(--color-divider)] px-2 xl:border-b-0 xl:border-r"><span className="text-[10px] text-[var(--color-text-secondary)]">Initial Stop</span><strong className="tabular-number text-[14px] text-[var(--color-danger)]">{formatPrice(plan.initial_stop_price)}</strong><small className="tabular-number text-[10px] text-[var(--color-text-secondary)]">{formatRatio(plan.initial_stop_distance_percent, "%")} · 1R</small></div>
+        <div className="grid min-h-[64px] content-center gap-1 border-b border-[var(--color-divider)] px-2 sm:border-r xl:border-b-0"><span className="text-[10px] text-[var(--color-text-secondary)]">TP1</span><strong className="tabular-number text-[14px] text-[var(--color-success)]">{formatPrice(plan.tp1_price)}</strong><small className="tabular-number text-[10px] text-[var(--color-text-secondary)]">{formatRatio(plan.tp1_distance_percent, "%")} · {formatRatio(plan.tp1_reward_r, "R")}</small></div>
+        <div className="grid min-h-[64px] content-center gap-1 border-b border-[var(--color-divider)] px-2 xl:border-b-0 xl:border-r"><span className="text-[10px] text-[var(--color-text-secondary)]">当前保护价</span><strong className="tabular-number text-[14px]">{formatPrice(plan.active_stop_price)}</strong><small className="text-[10px] text-[var(--color-text-secondary)]">冻结止损与后续替换均在图中保留</small></div>
+        <div className="grid min-h-[64px] content-center gap-1 px-2"><span className="text-[10px] text-[var(--color-text-secondary)]">TP1 已成交 / 目标</span><strong className="tabular-number text-[14px]">{tp1Quantity}</strong><small className="text-[10px] text-[var(--color-text-secondary)]">{decimalIsZero(plan.tp1_filled_quantity) ? "尚未成交" : "已发生部分止盈"}</small></div>
+      </div>
+    </section>
+  );
+}
+
 function stageTone(stage: Stage): StatusTone {
   if (stage.status === "current") return "attention";
   if (stage.status === "complete") return "success";
@@ -95,19 +174,27 @@ export function TradeCausalityPage() {
   const routeState = (location.state ?? {}) as TradeRouteState;
   const detail = useQuery({ queryKey: tradeCausalityQueryKey(ticketId), queryFn: () => getTradeCausality(ticketId), enabled: ticketId.length > 0 });
   const [selectedStageKey, setSelectedStageKey] = useState<Stage["key"] | null>(null);
+  const [selectedTimeframe, setSelectedTimeframe] = useState<CandleTimeframe | null>(null);
   const [chartExpanded, setChartExpanded] = useState(false);
   const [chartFullscreen, setChartFullscreen] = useState(false);
   useEffect(() => {
     setSelectedStageKey(null);
+    setSelectedTimeframe(null);
     setChartExpanded(false);
     setChartFullscreen(false);
   }, [ticketId]);
   const envelope = detail.data;
-  const closedAtMs = envelope ? envelope.data.trade.terminal_at_ms ?? Date.parse(envelope.generated_at) : 0;
+  useEffect(() => {
+    if (envelope) setSelectedTimeframe(envelope.data.price_plan.strategy_timeframe);
+  }, [envelope]);
+  const requestedChart = useMemo(() => {
+    if (!envelope || selectedTimeframe === null) return null;
+    return chartWindow({ data: envelope.data, generatedAt: envelope.generated_at, timeframe: selectedTimeframe });
+  }, [envelope, selectedTimeframe]);
   const candles = useQuery({
-    queryKey: candlesQueryKey(ticketId, closedAtMs),
-    queryFn: () => getCandles({ exchangeInstrumentId: envelope!.data.trade.exchange_instrument_id, closedAtMs }),
-    enabled: chartExpanded && Boolean(envelope) && closedAtMs > 0,
+    queryKey: requestedChart === null || selectedTimeframe === null ? ["owner", "trades", "candles", "disabled"] : candlesQueryKey(ticketId, selectedTimeframe, requestedChart.closedAtMs, requestedChart.limit),
+    queryFn: () => getCandles({ exchangeInstrumentId: envelope!.data.trade.exchange_instrument_id, timeframe: selectedTimeframe!, closedAtMs: requestedChart!.closedAtMs, limit: requestedChart!.limit }),
+    enabled: chartExpanded && Boolean(envelope) && requestedChart !== null && selectedTimeframe !== null,
   });
   useEffect(() => {
     if (envelope && selectedStageKey === null) setSelectedStageKey(envelope.data.current_stage);
@@ -125,7 +212,7 @@ export function TradeCausalityPage() {
 
   const refreshPage = () => {
     void detail.refetch();
-    if (chartExpanded) void candles.refetch();
+    if (chartExpanded && requestedChart !== null) void candles.refetch();
   };
 
   if (!envelope) {
@@ -134,6 +221,7 @@ export function TradeCausalityPage() {
 
   const data = envelope.data;
   const selectedStage = data.stages.find((stage) => stage.key === selectedStageKey) ?? data.stages.find((stage) => stage.key === data.current_stage) ?? data.stages[0];
+  const priceLevels = chartPriceLevels(data.price_plan);
   const status = freshnessPresentation(envelope.freshness);
   if (!selectedStage) {
     return <AppShell dataTime={<DataAge generatedAt={envelope.generated_at} />} statusLabel="事实矛盾" statusTone="danger"><div className="mb-2"><Link className="text-[12px] text-[var(--color-emphasis)] hover:underline" to={returnPath}>{returnLabel}</Link></div><UnavailablePanel title="生命周期不可用" detail="精确 Ticket 因果响应没有任何生命周期阶段。" /></AppShell>;
@@ -146,6 +234,8 @@ export function TradeCausalityPage() {
         <div className="flex flex-none items-center gap-2"><Link className={`owner-button grid h-8 place-items-center no-underline ${previousTicketId ? "" : "pointer-events-none opacity-40"}`} state={routeState} to={previousTicketId ? detailHref(previousTicketId) : "#"} aria-disabled={!previousTicketId}>上一笔</Link><Link className={`owner-button grid h-8 place-items-center no-underline ${nextTicketId ? "" : "pointer-events-none opacity-40"}`} state={routeState} to={nextTicketId ? detailHref(nextTicketId) : "#"} aria-disabled={!nextTicketId}>下一笔</Link><ManualRefreshButton isRefreshing={detail.isFetching || candles.isFetching} onRefresh={refreshPage} /></div>
       </div>
 
+      <PricePlanCard plan={data.price_plan} />
+
       <section className="mb-2 grid border border-[var(--color-divider)] bg-[var(--color-surface)] lg:grid-cols-12">
         <div className="border-b border-[var(--color-divider)] lg:col-span-3 lg:border-b-0 lg:border-r">
           <div className="flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">生命周期 · 8 阶段</div>
@@ -153,8 +243,8 @@ export function TradeCausalityPage() {
         </div>
 
         <div className="min-h-[456px] border-b border-[var(--color-divider)] lg:col-span-6 lg:border-b-0 lg:border-r">
-          <div className="flex min-h-[30px] items-center justify-between border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2"><span className="text-[11px] font-medium text-[var(--color-text-secondary)]">价格背景 · 15m · 手动加载</span>{chartExpanded ? <div className="flex items-center gap-3"><button className="inline-flex items-center gap-1 bg-transparent p-0 text-[11px] text-[var(--color-emphasis)] hover:underline" disabled={!candles.data} type="button" aria-label="全屏复盘 K 线" onClick={() => setChartFullscreen(true)}><Maximize2 aria-hidden="true" className="h-3 w-3" />全屏复盘</button><button className="bg-transparent p-0 text-[11px] text-[var(--color-emphasis)] hover:underline" type="button" onClick={() => { setChartExpanded(false); setChartFullscreen(false); }}>收起 K 线</button></div> : null}</div>
-          {!chartExpanded ? <div className="grid min-h-[425px] place-content-center gap-3 text-center"><p className="m-0 text-[12px] text-[var(--color-text-secondary)]">生命周期事实已加载，公共 K 线尚未请求</p><button className="owner-button mx-auto h-8" type="button" onClick={() => setChartExpanded(true)}>展开 K 线</button></div> : candles.isError ? <div className="grid min-h-[425px] place-content-center gap-2 text-center"><strong>公共行情不可用</strong><span className="text-[12px] text-[var(--color-text-secondary)]">生命周期、订单与 Review 事实仍可阅读</span></div> : !candles.data ? <div className="grid min-h-[425px] place-content-center text-[12px] text-[var(--color-text-secondary)]">正在读取公共行情</div> : <Suspense fallback={<div className="grid min-h-[425px] place-content-center text-[12px] text-[var(--color-text-secondary)]">正在加载图表组件</div>}><CausalityChart annotations={data.annotations} candles={candles.data.data.candles} /></Suspense>}
+          <div className="flex min-h-[30px] flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2"><div className="flex items-center gap-2"><span className="text-[11px] font-medium text-[var(--color-text-secondary)]">价格决策图 · {selectedTimeframe === null ? "选择周期" : chartTimeframeLabel(selectedTimeframe)}{requestedChart === null ? "" : ` · ${requestedChart.limit} 根`}</span><div className="flex items-center gap-1"><button aria-pressed={selectedTimeframe === "1h"} className={`h-6 border px-1.5 text-[10px] ${selectedTimeframe === "1h" ? "border-[var(--color-emphasis)] text-[var(--color-emphasis)]" : "border-[var(--color-divider)] text-[var(--color-text-secondary)]"}`} type="button" onClick={() => setSelectedTimeframe("1h")}>1h</button><button aria-pressed={selectedTimeframe === "15m"} className={`h-6 border px-1.5 text-[10px] ${selectedTimeframe === "15m" ? "border-[var(--color-emphasis)] text-[var(--color-emphasis)]" : "border-[var(--color-divider)] text-[var(--color-text-secondary)]"}`} type="button" onClick={() => setSelectedTimeframe("15m")}>15m</button></div></div>{chartExpanded ? <div className="flex items-center gap-3"><button className="inline-flex items-center gap-1 bg-transparent p-0 text-[11px] text-[var(--color-emphasis)] hover:underline" disabled={!candles.data} type="button" aria-label="全屏复盘 K 线" onClick={() => setChartFullscreen(true)}><Maximize2 aria-hidden="true" className="h-3 w-3" />全屏复盘</button><button className="bg-transparent p-0 text-[11px] text-[var(--color-emphasis)] hover:underline" type="button" onClick={() => { setChartExpanded(false); setChartFullscreen(false); }}>收起 K 线</button></div> : null}</div>
+          {!chartExpanded ? <div className="grid min-h-[425px] place-content-center gap-3 text-center"><p className="m-0 text-[12px] text-[var(--color-text-secondary)]">默认聚焦 Signal 至当前 / 最终退出，不再加载 300 根固定背景</p><button className="owner-button mx-auto h-8" disabled={selectedTimeframe === null} type="button" onClick={() => setChartExpanded(true)}>展开 K 线</button></div> : selectedTimeframe === null ? <div className="grid min-h-[425px] place-content-center text-[12px] text-[var(--color-text-secondary)]">请先选择 1h 或 15m 周期</div> : candles.isError ? <div className="grid min-h-[425px] place-content-center gap-2 text-center"><strong>公共行情不可用</strong><span className="text-[12px] text-[var(--color-text-secondary)]">冻结计划、生命周期与审计事实仍可阅读</span></div> : !candles.data ? <div className="grid min-h-[425px] place-content-center text-[12px] text-[var(--color-text-secondary)]">正在读取公共行情</div> : <Suspense fallback={<div className="grid min-h-[425px] place-content-center text-[12px] text-[var(--color-text-secondary)]">正在加载图表组件</div>}><CausalityChart annotations={data.annotations} candles={candles.data.data.candles} priceLevels={priceLevels} /></Suspense>}
         </div>
 
         <aside className="max-h-[520px] overflow-y-auto p-3 lg:col-span-3" aria-label="当前阶段事实"><StageFacts stage={selectedStage} /></aside>
@@ -165,10 +255,10 @@ export function TradeCausalityPage() {
           <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
           <Dialog.Content className="fixed inset-4 z-50 grid max-h-[calc(100vh-32px)] grid-rows-[auto_minmax(0,1fr)] border border-[var(--color-divider)] bg-[var(--color-background)] shadow-2xl outline-none md:inset-8">
             <div className="flex min-h-11 items-center justify-between gap-3 border-b border-[var(--color-divider)] bg-[var(--color-surface)] px-3">
-              <div className="min-w-0"><Dialog.Title className="m-0 truncate text-[14px] font-semibold">{data.trade.exchange_instrument_id} {data.trade.position_side.toUpperCase()} · 15m K 线复盘</Dialog.Title><Dialog.Description className="m-0 truncate text-[11px] text-[var(--color-text-secondary)]">只读市场背景，标记对应本 Ticket 的生命周期事实</Dialog.Description></div>
+              <div className="min-w-0"><Dialog.Title className="m-0 truncate text-[14px] font-semibold">{data.trade.exchange_instrument_id} {data.trade.position_side.toUpperCase()} · {selectedTimeframe === null ? "K 线" : chartTimeframeLabel(selectedTimeframe)}</Dialog.Title><Dialog.Description className="m-0 truncate text-[11px] text-[var(--color-text-secondary)]">Entry、Stop 与 TP1 为冻结计划 / 实际执行价格，事件标记对应生命周期事实</Dialog.Description></div>
               <Dialog.Close asChild><button className="grid h-8 w-8 place-items-center bg-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]" type="button" aria-label="关闭全屏复盘"><X aria-hidden="true" className="h-4 w-4" /></button></Dialog.Close>
             </div>
-            <div className="min-h-0 p-2">{candles.data ? <Suspense fallback={<div className="grid h-full place-content-center text-[12px] text-[var(--color-text-secondary)]">正在加载图表组件</div>}><CausalityChart annotations={data.annotations} candles={candles.data.data.candles} fullscreen /></Suspense> : null}</div>
+            <div className="min-h-0 p-2">{candles.data ? <Suspense fallback={<div className="grid h-full place-content-center text-[12px] text-[var(--color-text-secondary)]">正在加载图表组件</div>}><CausalityChart annotations={data.annotations} candles={candles.data.data.candles} priceLevels={priceLevels} fullscreen /></Suspense> : null}</div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -177,12 +267,17 @@ export function TradeCausalityPage() {
         {[["状态", formatOwnerStatus(data.trade.aggregate_status)], ["退出原因", data.exit_reason?.label ?? (data.trade.exit_reason ? formatOwnerReason(data.trade.exit_reason).label : "—")], ["净盈亏", data.trade.net_pnl.value === null ? "—" : formatMoney(data.trade.net_pnl.value, data.trade.net_pnl.unit, { sign: true })], ["净 R", data.trade.net_r.value === null ? "—" : formatMoney(data.trade.net_r.value, data.trade.net_r.unit, { sign: true })], ["手续费 / 资金费", `${data.trade.fees.value === null ? "—" : formatMoney(data.trade.fees.value, data.trade.fees.unit)} / ${data.trade.funding.value === null ? "—" : formatMoney(data.trade.funding.value, data.trade.funding.unit)}`]].map(([label, value], index) => <div className={`grid min-h-[54px] content-center gap-1 px-2 ${index > 0 ? "border-l border-[var(--color-divider)]" : ""}`} key={label}><span className="text-[10px] text-[var(--color-text-secondary)]">{label}</span><strong className="truncate text-[12px]" title={value}>{value}</strong></div>)}
       </section>
 
-      <div className="grid gap-2 xl:grid-cols-2">
+      <section className="mb-2 border border-[var(--color-divider)] bg-[var(--color-surface)]" aria-label="审计证据">
+        <details>
+          <summary className="flex min-h-[34px] cursor-pointer list-none items-center justify-between gap-3 bg-[var(--color-surface-secondary)] px-2 marker:content-none"><h2 className="m-0 text-[11px] font-medium text-[var(--color-text-secondary)]">审计证据与原始事实</h2><span className="tabular-number text-[10px] text-[var(--color-text-secondary)]">Commands {data.raw_commands.length} · Events {data.raw_events.length} · Incidents {data.raw_incidents.length} · Evidence {data.evidence.length}</span></summary>
+          <div className="grid gap-2 border-t border-[var(--color-divider)] p-2 xl:grid-cols-2">
         <section className="border border-[var(--color-divider)] bg-[var(--color-surface)]"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">Exchange Commands · {data.raw_commands.length}</h2><div className="grid gap-2 p-2">{data.raw_commands.length === 0 ? <span className="text-[12px] text-[var(--color-text-secondary)]">无 Command</span> : data.raw_commands.map((command) => <article className="grid gap-1 border-b border-[var(--color-divider)] pb-2 last:border-b-0 last:pb-0" key={command.command_id}><div className="flex justify-between gap-2 text-[11px]"><strong>{command.command_kind} · gen {command.generation}</strong><StatusTag tone={command.status.includes("unknown") ? "danger" : "success"}>{command.status}</StatusTag></div><span className="break-all text-[10px] text-[var(--color-text-secondary)]">{command.command_id}</span><JsonValue value={{ request: command.request_payload, result: command.result_payload }} /></article>)}</div></section>
         <section className="border border-[var(--color-divider)] bg-[var(--color-surface)]"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">Incidents · {data.raw_incidents.length}</h2><div className="grid gap-2 p-2">{data.raw_incidents.length === 0 ? <span className="text-[12px] text-[var(--color-text-secondary)]">无 Incident</span> : data.raw_incidents.map((incident) => <article className="grid gap-1 border-b border-[var(--color-divider)] pb-2 last:border-b-0" key={incident.incident_id}><div className="flex justify-between gap-2"><strong>{incident.incident_kind}</strong><StatusTag tone={incident.status === "open" ? "danger" : "success"}>{incident.status}</StatusTag></div><span className="break-all text-[11px] text-[var(--color-danger)]">{incident.first_blocker}</span><JsonValue value={incident.details} /></article>)}</div></section>
         <section className="border border-[var(--color-divider)] bg-[var(--color-surface)] xl:col-span-2"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">Trade Events · {data.raw_events.length}</h2><div className="overflow-x-auto"><table className="w-full min-w-[760px] border-collapse text-left text-[11px]"><thead className="h-[30px] border-b border-[var(--color-divider)] text-[var(--color-text-secondary)]"><tr><th className="px-2">Seq</th><th className="px-2">Stage</th><th className="px-2">Event</th><th className="px-2">Time</th><th className="px-2">Payload</th></tr></thead><tbody>{data.raw_events.map((event) => <tr className="border-b border-[var(--color-divider)] last:border-b-0" key={event.event_id}><td className="px-2 py-2 tabular-number">{event.sequence}</td><td className="px-2 py-2 uppercase">{event.stage}</td><td className="px-2 py-2 font-medium">{event.event_type}</td><td className="px-2 py-2 tabular-number">{formatTimestamp(event.occurred_at_ms)}</td><td className="max-w-[420px] px-2 py-2"><JsonValue value={event.payload} /></td></tr>)}</tbody></table></div></section>
         <section className="border border-[var(--color-divider)] bg-[var(--color-surface)] xl:col-span-2"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">证据索引 · {data.evidence.length}</h2><div className="grid gap-3 p-2 md:grid-cols-3"><div><h3 className="mb-2 mt-0 text-[10px] uppercase text-[var(--color-text-secondary)]">Signal</h3><EvidenceList evidence={data.signal_evidence} /></div><div><h3 className="mb-2 mt-0 text-[10px] uppercase text-[var(--color-text-secondary)]">Orders / Incidents</h3><EvidenceList evidence={[...data.order_evidence, ...data.incident_evidence]} /></div><div><h3 className="mb-2 mt-0 text-[10px] uppercase text-[var(--color-text-secondary)]">Settlement / Review</h3><EvidenceList evidence={[...data.settlement_evidence, ...data.review_evidence]} /></div></div></section>
-      </div>
+          </div>
+        </details>
+      </section>
     </AppShell>
   );
 }

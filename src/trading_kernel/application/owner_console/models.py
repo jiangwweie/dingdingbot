@@ -454,6 +454,24 @@ class ChartAnnotation(FrozenModel):
         return str(value)
 
 
+class TradePricePlanView(FrozenModel):
+    """Frozen Ticket price plan and observed execution for one causality view."""
+
+    strategy_timeframe: Literal["15m", "1h"] | None
+    entry_reference_price: Decimal
+    entry_limit_price: Decimal | None
+    actual_entry_price: Decimal | None
+    initial_stop_price: Decimal
+    active_stop_price: Decimal | None
+    tp1_price: Decimal | None
+    ticket_quantity: Decimal
+    tp1_target_quantity: Decimal | None
+    tp1_filled_quantity: Decimal
+    initial_stop_distance_percent: Decimal | None
+    tp1_distance_percent: Decimal | None
+    tp1_reward_r: Decimal | None
+
+
 class CausalityExitReason(FrozenModel):
     code: str
     label: str
@@ -499,6 +517,7 @@ class RawIncidentView(FrozenModel):
 
 class TradeCausalityDetail(FrozenModel):
     trade: TradeListItem
+    price_plan: TradePricePlanView
     current_stage: LifecycleStageKey
     current_stage_summary: str
     stages: tuple[LifecycleStageView, ...]
@@ -831,6 +850,11 @@ class TradeCausalityAggregateFacts(FrozenModel):
     aggregate_status: str
     last_event_sequence: int = Field(gt=0)
     review_id: str | None
+    position_qty: Decimal
+    average_fill_price: Decimal | None
+    active_stop_price: Decimal | None
+    tp1_target_qty: Decimal
+    tp1_filled_qty: Decimal
     updated_at_ms: int
 
 

@@ -1339,6 +1339,7 @@ export interface components {
             incident_evidence: components["schemas"]["EvidenceRef"][];
             /** Order Evidence */
             order_evidence: components["schemas"]["EvidenceRef"][];
+            price_plan: components["schemas"]["TradePricePlanView"];
             /** Raw Commands */
             raw_commands: components["schemas"]["RawExchangeCommandView"][];
             /** Raw Events */
@@ -1416,6 +1417,38 @@ export interface components {
             items: components["schemas"]["TradeListItem"][];
             /** Next Cursor */
             next_cursor: string | null;
+        };
+        /**
+         * TradePricePlanView
+         * @description Frozen Ticket price plan and observed execution for one causality view.
+         */
+        TradePricePlanView: {
+            /** Active Stop Price */
+            active_stop_price: string | null;
+            /** Actual Entry Price */
+            actual_entry_price: string | null;
+            /** Entry Limit Price */
+            entry_limit_price: string | null;
+            /** Entry Reference Price */
+            entry_reference_price: string;
+            /** Initial Stop Distance Percent */
+            initial_stop_distance_percent: string | null;
+            /** Initial Stop Price */
+            initial_stop_price: string;
+            /** Strategy Timeframe */
+            strategy_timeframe: ("15m" | "1h") | null;
+            /** Ticket Quantity */
+            ticket_quantity: string;
+            /** Tp1 Distance Percent */
+            tp1_distance_percent: string | null;
+            /** Tp1 Filled Quantity */
+            tp1_filled_quantity: string;
+            /** Tp1 Price */
+            tp1_price: string | null;
+            /** Tp1 Reward R */
+            tp1_reward_r: string | null;
+            /** Tp1 Target Quantity */
+            tp1_target_quantity: string | null;
         };
         /** ValidationError */
         ValidationError: {

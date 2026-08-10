@@ -154,6 +154,21 @@ export const tradeCausalityFixture = {
   freshness: "fresh",
   data: {
     trade: activeTrade,
+    price_plan: {
+      strategy_timeframe: "1h",
+      entry_reference_price: "610.20",
+      entry_limit_price: null,
+      actual_entry_price: "612.80",
+      initial_stop_price: "598.40",
+      active_stop_price: "598.40",
+      tp1_price: "627.20",
+      ticket_quantity: "0.02",
+      tp1_target_quantity: "0.01",
+      tp1_filled_quantity: "0",
+      initial_stop_distance_percent: "-2.349869281045751633986928105",
+      tp1_distance_percent: "2.349869281045751633986928105",
+      tp1_reward_r: "1",
+    },
     current_stage: "protection",
     current_stage_summary: "InitialStopConfirmed 后持仓受保护",
     stages: activeStages,
@@ -177,7 +192,7 @@ export const candleFixture = {
   generated_at: generatedAt,
   source_watermark: generatedAt,
   freshness: "fresh",
-  data: { candles: Array.from({ length: 36 }, (_, index) => ({ open_time_ms: baseTime - 32_400_000 + index * 900_000, close_time_ms: baseTime - 31_500_001 + index * 900_000, open: `${600 + index}.00`, high: `${604 + index}.00`, low: `${598 + index}.00`, close: `${602 + index}.00`, volume: `${800 + index * 10}` })) },
+  data: { candles: Array.from({ length: 48 }, (_, index) => ({ open_time_ms: baseTime - 172_800_000 + index * 3_600_000, close_time_ms: baseTime - 169_200_001 + index * 3_600_000, open: `${600 + index * 0.4}`, high: `${604 + index * 0.4}`, low: `${598 + index * 0.4}`, close: `${602 + index * 0.4}`, volume: `${800 + index * 10}` })) },
 } satisfies components["schemas"]["ApiEnvelope_CandleSeries_"];
 
 const completeReviewItem = {

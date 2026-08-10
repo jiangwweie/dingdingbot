@@ -352,6 +352,25 @@ async def test_causality_reads_exact_bounded_histories_and_current_review(
 
         assert facts is not None
         detail = build_trade_causality(facts)
+        price_plan = detail.price_plan
+        assert price_plan.strategy_timeframe is None
+        assert price_plan.entry_reference_price == Decimal(100)
+        assert price_plan.actual_entry_price == Decimal("100.1")
+        assert price_plan.initial_stop_price == Decimal(99)
+        assert price_plan.active_stop_price == Decimal("100.2")
+        assert price_plan.tp1_price == Decimal(102)
+        assert price_plan.ticket_quantity == Decimal(1)
+        assert price_plan.tp1_target_quantity == Decimal("0.5")
+        assert price_plan.tp1_filled_quantity == Decimal("0.5")
+        assert price_plan.initial_stop_distance_percent == Decimal(
+            "-1.098901098901098901098901099"
+        )
+        assert price_plan.tp1_distance_percent == Decimal(
+            "1.898101898101898101898101898"
+        )
+        assert price_plan.tp1_reward_r == Decimal(
+            "1.727272727272727272727272727"
+        )
         assert detail.exit_reason is not None
         assert detail.exit_reason.label == "Initial Stop"
         assert detail.annotations[-1].model_dump(mode="json") == {

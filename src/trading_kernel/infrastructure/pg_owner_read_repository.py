@@ -871,6 +871,11 @@ def _causality_ticket_query(ticket_id: str) -> sa.Select[Any]:
             trade_aggregates.c.status.label("aggregate_status"),
             trade_aggregates.c.last_event_sequence,
             trade_aggregates.c.review_id.label("aggregate_review_id"),
+            trade_aggregates.c.position_qty,
+            trade_aggregates.c.average_fill_price,
+            trade_aggregates.c.active_stop_price,
+            trade_aggregates.c.tp1_target_qty,
+            trade_aggregates.c.tp1_filled_qty,
             trade_aggregates.c.updated_at_ms.label("aggregate_updated_at_ms"),
         )
         .select_from(
@@ -1004,6 +1009,11 @@ def _causality_aggregate_facts(
             if row["aggregate_review_id"] is None
             else str(row["aggregate_review_id"])
         ),
+        position_qty=row["position_qty"],
+        average_fill_price=row["average_fill_price"],
+        active_stop_price=row["active_stop_price"],
+        tp1_target_qty=row["tp1_target_qty"],
+        tp1_filled_qty=row["tp1_filled_qty"],
         updated_at_ms=int(row["aggregate_updated_at_ms"]),
     )
 

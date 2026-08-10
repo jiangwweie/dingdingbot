@@ -8,7 +8,7 @@ import { TradeCausalityPage } from "./TradeCausalityPage";
 import { getCandles, getTradeCausality } from "./api";
 
 vi.mock("../../components/charts/CausalityChart", () => ({
-  default: () => <div data-testid="causality-chart">chart</div>,
+  default: ({ priceLevels }: { priceLevels: Array<{ label: string }> }) => <div data-testid="causality-chart">{priceLevels.map((level) => <span key={level.label}>{level.label}</span>)}</div>,
 }));
 
 vi.mock("./api", async (importOriginal) => {
@@ -84,6 +84,21 @@ const detailEnvelope = {
   freshness: "fresh" as const,
   data: {
     trade,
+    price_plan: {
+      strategy_timeframe: "1h" as const,
+      entry_reference_price: "61000.0",
+      entry_limit_price: null,
+      actual_entry_price: "61200.0",
+      initial_stop_price: "60000.0",
+      active_stop_price: "60000.0",
+      tp1_price: "62400.0",
+      ticket_quantity: "0.02",
+      tp1_target_quantity: "0.01",
+      tp1_filled_quantity: "0",
+      initial_stop_distance_percent: "-1.960784313725490196078431373",
+      tp1_distance_percent: "1.960784313725490196078431373",
+      tp1_reward_r: "1",
+    },
     current_stage: "protection" as const,
     current_stage_summary: "InitialStopConfirmed 后持仓受保护",
     stages,
@@ -161,6 +176,37 @@ it("shows eight stages before requesting candles", async () => {
   expect(mockedGetCandles).toHaveBeenCalledTimes(1);
 });
 
+it("puts the frozen price plan before the audit workbench and uses the Ticket timeframe", async () => {
+  const user = userEvent.setup();
+  renderCausality("/trades/ticket%3A1");
+
+  expect(await screen.findByRole("heading", { name: "交易计划与执行" })).toBeInTheDocument();
+  expect(screen.getByText("实际 Entry")).toBeInTheDocument();
+  expect(screen.getByText("62,400.0")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "展开 K 线" }));
+  expect(mockedGetCandles).toHaveBeenCalledWith(expect.objectContaining({ timeframe: "1h" }));
+  expect(await screen.findByText("TP1 · 62,400.0")).toBeInTheDocument();
+});
+
+it("distinguishes an unfilled Entry plan from an actual fill", async () => {
+  mockedGetTradeCausality.mockResolvedValue({
+    ...detailEnvelope,
+    data: {
+      ...detailEnvelope.data,
+      price_plan: {
+        ...detailEnvelope.data.price_plan,
+        actual_entry_price: null,
+      },
+    },
+  });
+
+  renderCausality("/trades/ticket%3A1");
+
+  expect(await screen.findByText("计划 Entry")).toBeInTheDocument();
+  expect(screen.getByText("尚未实际成交")).toBeInTheDocument();
+});
+
 it("keeps lifecycle facts visible when public candles fail", async () => {
   const user = userEvent.setup();
   mockedGetCandles.mockRejectedValue(new Error("market unavailable"));
@@ -196,6 +242,6 @@ it("opens the already loaded K-line data in a full-screen review dialog without 
   expect(mockedGetCandles).toHaveBeenCalledTimes(1);
 
   await user.click(screen.getByRole("button", { name: "全屏复盘 K 线" }));
-  expect(await screen.findByRole("dialog", { name: /BNBUSDT LONG · 15m K 线复盘/ })).toBeInTheDocument();
+  expect(await screen.findByRole("dialog", { name: /BNBUSDT LONG · 1h 策略复盘/ })).toBeInTheDocument();
   expect(mockedGetCandles).toHaveBeenCalledTimes(1);
 });

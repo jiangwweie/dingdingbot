@@ -303,6 +303,8 @@ def trade_causality_facts(**overrides: Any) -> TradeCausalityFacts:
     )
     facts = TradeCausalityFacts(
         trade=trade_item_facts(
+            strategy_group_id="CPM-RO-001",
+            event_spec_id="event_spec:CPM-RO-001:CPM-LONG:v3",
             ticket_status=ticket_status,
             aggregate_status=aggregate_status,
             terminal_at_ms=terminal_at_ms,
@@ -320,6 +322,11 @@ def trade_causality_facts(**overrides: Any) -> TradeCausalityFacts:
             aggregate_status=aggregate_status,
             last_event_sequence=len(events),
             review_id=None if review is None else review.review_id,
+            position_qty=Decimal("0.5"),
+            average_fill_price=Decimal("100.10"),
+            active_stop_price=Decimal("100.20"),
+            tp1_target_qty=Decimal("0.5"),
+            tp1_filled_qty=Decimal("0.5"),
             updated_at_ms=1_800_000_000_000,
         ),
         signal=TradeCausalitySignalFacts(
@@ -327,9 +334,9 @@ def trade_causality_facts(**overrides: Any) -> TradeCausalityFacts:
             exposure_episode_id="episode:1",
             runtime_scope_id="scope:1",
             runtime_scope_version=1,
-            strategy_group_id="strategy-group:opening-range",
-            strategy_version_id="strategy-version:1",
-            event_spec_id="event:opening-range-breakout",
+            strategy_group_id="CPM-RO-001",
+            strategy_version_id="sgv:CPM-RO-001:v3",
+            event_spec_id="event_spec:CPM-RO-001:CPM-LONG:v3",
             universe_version_id="universe:1",
             universe_semantic_digest="sha256:" + "a" * 64,
             exchange_instrument_id="BTCUSDT",
@@ -340,9 +347,9 @@ def trade_causality_facts(**overrides: Any) -> TradeCausalityFacts:
             admission_decision_id="admission:1",
             signal_event_id="signal:1",
             exposure_episode_id="episode:1",
-            strategy_group_id="strategy-group:opening-range",
-            strategy_version_id="strategy-version:1",
-            event_spec_id="event:opening-range-breakout",
+            strategy_group_id="CPM-RO-001",
+            strategy_version_id="sgv:CPM-RO-001:v3",
+            event_spec_id="event_spec:CPM-RO-001:CPM-LONG:v3",
             universe_version_id="universe:1",
             universe_semantic_digest="sha256:" + "a" * 64,
             runtime_profile_id="profile:1",
@@ -448,9 +455,9 @@ def _causality_event(
 def _causality_trade_ticket() -> TradeTicket:
     runtime = RuntimeIdentity(
         runtime_profile_id="profile:1",
-        strategy_group_id="strategy-group:opening-range",
-        strategy_version_id="strategy-version:1",
-        event_spec_id="event:opening-range-breakout",
+        strategy_group_id="CPM-RO-001",
+        strategy_version_id="sgv:CPM-RO-001:v3",
+        event_spec_id="event_spec:CPM-RO-001:CPM-LONG:v3",
     )
     netting_domain = NettingDomain(
         venue_id="binance-usdm",

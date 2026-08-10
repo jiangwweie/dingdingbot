@@ -138,6 +138,75 @@ def test_chart_annotations_use_only_exact_authoritative_prices() -> None:
     ]
 
 
+def test_causality_projects_frozen_price_plan_and_actual_entry_for_owner_reading() -> None:
+    detail = build_trade_causality(trade_causality_facts())
+
+    price_plan = detail.model_dump(mode="json")["price_plan"]
+    assert price_plan["strategy_timeframe"] == "1h"
+    assert price_plan["entry_reference_price"] == "100.00"
+    assert price_plan["actual_entry_price"] == "100.10"
+    assert price_plan["initial_stop_price"] == "99.00"
+    assert price_plan["tp1_price"] == "102.00"
+    assert price_plan["tp1_target_quantity"] == "0.5"
+    assert price_plan["tp1_filled_quantity"] == "0.5"
+
+
+def test_price_plan_uses_unique_group_timeframe_for_retired_ticket_version() -> None:
+    facts = trade_causality_facts()
+    retired_runtime = facts.ticket.identity.runtime.model_copy(
+        update={
+            "strategy_version_id": "sgv:CPM-RO-001:v2",
+            "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
+        }
+    )
+    ticket = facts.ticket.model_copy(
+        update={
+            "identity": facts.ticket.identity.model_copy(
+                update={"runtime": retired_runtime}
+            )
+        }
+    )
+    events = tuple(
+        event.model_copy(
+            update={
+                "payload": {
+                    **event.payload,
+                    "ticket": ticket.model_dump(mode="json"),
+                }
+            }
+        )
+        if event.event_type == "TicketIssued"
+        else event
+        for event in facts.events
+    )
+    facts = facts.model_copy(
+        update={
+            "trade": facts.trade.model_copy(
+                update={
+                    "strategy_version_id": retired_runtime.strategy_version_id,
+                    "event_spec_id": retired_runtime.event_spec_id,
+                }
+            ),
+            "ticket": ticket,
+            "signal": facts.signal.model_copy(
+                update={
+                    "strategy_version_id": retired_runtime.strategy_version_id,
+                    "event_spec_id": retired_runtime.event_spec_id,
+                }
+            ),
+            "admission": facts.admission.model_copy(
+                update={
+                    "strategy_version_id": retired_runtime.strategy_version_id,
+                    "event_spec_id": retired_runtime.event_spec_id,
+                }
+            ),
+            "events": events,
+        }
+    )
+
+    assert build_trade_causality(facts).price_plan.strategy_timeframe == "1h"
+
+
 @pytest.mark.parametrize(
     "command_kind",
     ("entry", "set_leverage", "cancel_order"),
