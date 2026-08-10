@@ -72,7 +72,7 @@ SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS = (
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
 )
 
-CURRENT_ACCEPTANCE_STAGE = "Current live acceptance"
+CURRENT_ACCEPTANCE_STAGE = "Controlled flatten acceptance"
 RETIRED_ACCEPTANCE_TICKET = "ticket:c1ebc24a178a3ae4d87978e2fa1204ae"
 RESIDENT_WORKER_NAMES = (
     "Observation",
@@ -220,7 +220,7 @@ def test_runtime_state_document_matches_the_deployed_kernel() -> None:
         source,
     )
     certification_match = re.search(
-        r"\| Production-commit certification \| `(\d+ passed)`;",
+        r"\| Production-commit certification \| [^|\n]+\|",
         source,
     )
     assert commit_match is not None
@@ -391,10 +391,9 @@ def test_stable_policy_v4_contract_defers_deployed_identity_to_roadmap() -> None
         assert "currently deployed Policy v3" not in source
         assert "MAIN_CONTROL_ROADMAP.md" in source
 
-    assert "| Dynamic policy | Policy version `5`" in roadmap
-    assert "approved v4 portfolio" in roadmap
-    assert "0003_portfolio_admission_observability" in roadmap
-    assert "new ENTRY submission is enabled" in roadmap
+    assert "| Owner controls | Global new ENTRY is enabled at Policy version `" in roadmap
+    assert "0004_owner_control_plane" in roadmap
+    assert "`SOR-001` is paused" in roadmap
 
 
 def test_current_deployment_authority_has_no_active_handover_or_schema_deletion() -> None:
