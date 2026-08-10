@@ -1754,6 +1754,8 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
         )
     ]
     if tp1_event_id is not None:
+        if tp1_event_occurred_at_ms is None:
+            raise TradeFactsContradiction("partial TakeProfitFilled Event row")
         evidence.append(
             EvidenceRef(
                 kind="event",

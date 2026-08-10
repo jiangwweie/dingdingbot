@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from decimal import Decimal
+from typing import Literal
 
 from src.trading_kernel.application.owner_console.models import (
     EvidenceRef,
@@ -48,7 +49,9 @@ def build_strategy_page(facts: StrategyPageFacts) -> StrategySummaryPage:
     )
 
 
-def strategy_ticket_path(ticket: StrategyTicketFacts) -> str:
+def strategy_ticket_path(
+    ticket: StrategyTicketFacts,
+) -> Literal["tp1_reached", "tp1_not_reached", "controlled_exit", "not_terminal"]:
     """Classify a Ticket using its frozen exit reason and TP1 event fact."""
 
     if not _is_natural_terminal(ticket):
@@ -166,6 +169,12 @@ def _require_complete_economics(ticket: StrategyTicketFacts) -> None:
 
 def _strategy_ticket_list_item(facts: TradeItemFacts) -> StrategyTicketListItem:
     trade = build_trade_item(facts)
+    path: Literal[
+        "tp1_reached",
+        "tp1_not_reached",
+        "controlled_exit",
+        "not_terminal",
+    ]
     if not (
         facts.ticket_status == "terminal"
         and facts.aggregate_status == "terminal"
