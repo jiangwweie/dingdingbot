@@ -600,6 +600,15 @@
     color: var(--color-danger);
   }
 
+  .login-form__notice {
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid rgb(240 185 11 / 45%);
+    background: rgb(240 185 11 / 8%);
+    color: var(--color-emphasis);
+    font-size: 12px;
+  }
+
   .login-form__submit {
     width: 100%;
   }

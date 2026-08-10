@@ -860,6 +860,16 @@ class OwnerControlRepository(Protocol):
 
     async def get_latest_operation(self) -> OwnerControlOperation | None: ...
 
+    async def get_latest_nonterminal_operation(
+        self,
+    ) -> OwnerControlOperation | None: ...
+
+    async def list_recent_operations(
+        self,
+        *,
+        limit: int,
+    ) -> tuple[OwnerControlOperation, ...]: ...
+
     async def save_operation(
         self,
         operation: OwnerControlOperation,

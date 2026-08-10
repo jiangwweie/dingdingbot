@@ -10,6 +10,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Panel } from "../../components/ui/Panel";
 import { StatusTag } from "../../components/ui/StatusTag";
 import { UnavailablePanel } from "../../components/ui/UnavailablePanel";
+import { formatOwnerReason, formatOwnerStatus } from "../../components/ui/presentation";
 import {
   getControls,
   getFlattenPreview,
@@ -18,6 +19,7 @@ import {
   submitFlatten,
   type ControlWriteBody,
   type FlattenPreview,
+  type OwnerControlOperation,
 } from "./api";
 import { controlsQueryKey } from "./api";
 
@@ -38,6 +40,24 @@ function formatTime(value: number | null | undefined): string {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
+}
+
+function operationName(_operation: OwnerControlOperation): string {
+  return "受控平仓全部仓位";
+}
+
+function operationResult(operation: OwnerControlOperation): string {
+  if (operation.state === "completed") {
+    return operation.first_blocker ? "曾需关注，现已完成" : "已完成";
+  }
+  if (operation.state === "blocked") return "已阻断";
+  return formatOwnerStatus(operation.state);
+}
+
+function operationTone(operation: OwnerControlOperation): "success" | "attention" | "danger" {
+  if (operation.state === "completed" && !operation.first_blocker) return "success";
+  if (operation.state === "blocked" || operation.state === "needs_intervention") return "danger";
+  return "attention";
 }
 
 export function ControlsPage() {
@@ -133,7 +153,7 @@ export function ControlsPage() {
         <div><span>全局 ENTRY</span><strong>{globalPaused ? "已暂停" : "运行中"}</strong></div>
         <div><span>暂停策略</span><strong className="tabular-number">{pausedCount}</strong></div>
         <div><span>活动 Ticket</span><strong className="tabular-number">{data.global_entry.active_ticket_count}</strong></div>
-        <div><span>当前 Operation</span><strong>{operation?.state ?? "无"}</strong></div>
+        <div><span>当前受控操作</span><strong>{operation ? operationResult(operation) : "无"}</strong></div>
       </section>
 
       <Panel title="全局 ENTRY 控制">
@@ -144,7 +164,7 @@ export function ControlsPage() {
           </div>
           <StatusTag tone={globalPaused ? "attention" : "success"}>{globalPaused ? "已暂停" : "运行中"}</StatusTag>
           <div className="control-row__facts">
-            <span>Effective</span><strong>{data.global_entry.effective_state}</strong>
+            <span>当前状态</span><strong>{formatOwnerStatus(data.global_entry.effective_state)}</strong>
           </div>
           <Button onClick={() => setPendingAction({ kind: "global", action: globalPaused ? "resume" : "pause", version: data.global_entry.policy_version })}>
             {globalPaused ? "恢复新开仓" : "暂停新开仓"}
@@ -161,9 +181,9 @@ export function ControlsPage() {
             const paused = strategy.configured_state === "paused";
             return (
               <div className="strategy-control-table__row" role="row" key={strategy.strategy_group_id}>
-                <div><strong>{strategy.strategy_group_id}</strong><small>{strategy.reason}</small></div>
+                <div><strong>{strategy.strategy_group_id}</strong><small title={strategy.reason}>{formatOwnerReason(strategy.reason).label}</small></div>
                 <StatusTag tone={paused ? "attention" : "success"}>{paused ? "已暂停" : "已启用"}</StatusTag>
-                <span className="tabular-number">{strategy.effective_state}</span>
+                <span>{formatOwnerStatus(strategy.effective_state)}</span>
                 <span className="tabular-number">v{strategy.control_version} · {formatTime(strategy.updated_at_ms)}</span>
                 <Button onClick={() => setPendingAction({ kind: "strategy", action: paused ? "resume" : "pause", strategyGroupId: strategy.strategy_group_id, version: strategy.control_version })}>
                   {paused ? "恢复" : "暂停"}
@@ -174,15 +194,14 @@ export function ControlsPage() {
         </div>
       </Panel>
 
-      <Panel title="当前控制操作">
+      <Panel title="当前受控操作">
         {operation ? (
-          <div className="operation-line">
-            <StatusTag tone={operation.state === "completed" ? "success" : operation.state === "blocked" || operation.state === "needs_intervention" ? "danger" : "attention"}>{operation.state}</StatusTag>
-            <span className="tabular-number">{operation.authorization_id}</span>
-            <span>{operation.target_ticket_ids.length} 个目标 Ticket</span>
-            <span>{operation.first_blocker ?? "无 blocker"}</span>
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+            <StatusTag tone={operationTone(operation)}>{operationResult(operation)}</StatusTag>
+            <span className="min-w-0 truncate">{operationName(operation)}</span>
+            <span className="tabular-number text-[var(--color-text-secondary)]">{operation.target_ticket_ids.length} 个 Ticket</span>
           </div>
-        ) : <div className="compact-empty">当前没有控制操作</div>}
+        ) : <div className="compact-empty">当前没有进行中的受控操作</div>}
       </Panel>
 
       <section className="danger-zone">
@@ -196,12 +215,13 @@ export function ControlsPage() {
         </Button>
       </section>
 
-      <Panel title="最近控制记录">
-        {data.events.length ? data.events.map((event) => (
-          <div className="control-event-row" key={event.event_id}>
-            <span>{event.state}</span><span className="tabular-number">{event.authorization_id}</span><span>{event.first_blocker ?? "—"}</span><span className="tabular-number">{formatTime(event.created_at_ms)}</span>
+      <Panel title="控制操作历史">
+        {data.recent_operations.length ? data.recent_operations.map((item) => (
+          <div className="grid min-h-[52px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-t border-[var(--color-divider)] py-2 first:border-t-0" key={item.authorization_id}>
+            <div className="grid min-w-0 gap-1"><strong className="truncate text-[12px]">{operationName(item)}</strong><span className="truncate text-[11px] text-[var(--color-text-secondary)]">{item.target_ticket_ids.length} 个 Ticket · {formatTime(item.updated_at_ms)}</span>{item.first_blocker ? <small className="truncate text-[10px] text-[var(--color-text-secondary)]" title={item.first_blocker}>过程关注：{formatOwnerReason(item.first_blocker).label}</small> : null}</div>
+            <StatusTag tone={operationTone(item)}>{operationResult(item)}</StatusTag>
           </div>
-        )) : <div className="compact-empty">暂无控制记录</div>}
+        )) : <div className="compact-empty">暂无受控平仓操作记录</div>}
       </Panel>
 
       <AlertDialog.Root open={pendingAction !== null} onOpenChange={(open) => { if (!open) { setPendingAction(null); setTotpCode(""); } }}>

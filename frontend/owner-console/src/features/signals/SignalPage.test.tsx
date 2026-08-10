@@ -119,7 +119,7 @@ it("opens rejected signal detail inline and does not render a right drawer", asy
 
 it("links admitted signal to its exact ticket", async () => {
   renderSignals("/signals");
-  const link = await screen.findByRole("link", { name: "查看 Ticket" });
+  const link = await screen.findByRole("link", { name: "查看交易" });
   expect(link).toHaveAttribute("href", "/trades/ticket%3A1");
 });
 

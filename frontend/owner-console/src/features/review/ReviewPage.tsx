@@ -11,7 +11,9 @@ import { DataAge } from "../../components/ui/DataAge";
 import { ManualRefreshButton } from "../../components/ui/ManualRefreshButton";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { StatusTag, type StatusTone } from "../../components/ui/StatusTag";
+import { TimeRangeFilter } from "../../components/ui/TimeRangeFilter";
 import { UnavailablePanel } from "../../components/ui/UnavailablePanel";
+import { formatMoney, formatOwnerReason } from "../../components/ui/presentation";
 import { getReviewCenter, reviewQueryKey } from "./api";
 import { parseReviewSearchParams, reviewSearchParamsToString, type ReviewSearchParams } from "./searchParams";
 
@@ -29,18 +31,9 @@ function freshnessPresentation(freshness: Freshness) {
   return { label: "数据正常", tone: "success" as const };
 }
 
-function trimDecimal(value: string): string {
-  if (!/^-?\d+(?:\.\d+)?$/.test(value)) return value;
-  const [whole = value, fraction = ""] = value.split(".");
-  const trimmed = fraction.replace(/0+$/, "");
-  return trimmed ? `${whole}.${trimmed}` : whole;
-}
-
 function metricText(metric: MoneyMetric, sign = false): string {
-  if (metric.value === null) return `— · ${metric.unavailable_reason ?? "unavailable"}`;
-  const normalized = trimDecimal(metric.value);
-  const prefix = sign && !normalized.startsWith("-") && normalized !== "0" ? "+" : "";
-  return `${prefix}${normalized} ${metric.unit === "USDT" ? "U" : metric.unit}`;
+  if (metric.value === null) return "—";
+  return formatMoney(metric.value, metric.unit, { sign });
 }
 
 function MetricValue({ metric, sign = false }: { metric: MoneyMetric; sign?: boolean }) {
@@ -59,11 +52,11 @@ function executionTone(value: ReviewItem["review"]["execution_classification"]):
 }
 
 function executionLabel(value: ReviewItem["review"]["execution_classification"]): string {
-  if (value === "recovered_incident") return "recovered";
-  if (value === "evidence_incomplete") return "incomplete";
-  if (value === "waiting_review") return "waiting review";
-  if (value === "in_progress") return "in progress";
-  return value;
+  if (value === "complete") return "完整";
+  if (value === "recovered_incident") return "异常已恢复";
+  if (value === "evidence_incomplete") return "证据不完整";
+  if (value === "waiting_review") return "等待复盘";
+  return "进行中";
 }
 
 function evidenceStatusLabel(value: ReviewItem["review"]["review_status"]): string {
@@ -93,14 +86,11 @@ function ReviewFilters({ filters, onChange }: { filters: ReviewSearchParams; onC
   const setStatus = (event: ChangeEvent<HTMLSelectElement>) => {
     onChange({ ...filters, review_status: event.target.value ? event.target.value as ReviewSearchParams["review_status"] : undefined, cursor: undefined });
   };
-  return (
-    <form className="mb-2 grid grid-cols-2 gap-2 border border-[var(--color-divider)] bg-[var(--color-surface)] p-2 md:grid-cols-4" aria-label="复盘筛选条件">
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">StrategyGroup<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="strategy_group_id" value={filters.strategy_group_id ?? ""} onChange={setText} /></label>
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">Review Status<select className="h-[30px] border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" value={filters.review_status ?? ""} onChange={setStatus}><option value="">全部</option><option value="complete">Complete</option><option value="incomplete_evidence">Incomplete Evidence</option><option value="waiting_for_review">Waiting Review</option><option value="waiting_for_settlement">Waiting Settlement</option></select></label>
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">From (ms)<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" inputMode="numeric" name="from_ms" value={filters.from_ms ?? ""} onChange={setText} /></label>
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">To (ms)<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" inputMode="numeric" name="to_ms" value={filters.to_ms ?? ""} onChange={setText} /></label>
-    </form>
-  );
+  return <form className="mb-2 grid grid-cols-2 gap-2 border border-[var(--color-divider)] bg-[var(--color-surface)] p-2 md:grid-cols-4" aria-label="复盘筛选条件">
+    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">策略组<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="strategy_group_id" value={filters.strategy_group_id ?? ""} onChange={setText} /></label>
+    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">复盘状态<select className="h-[30px] border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" value={filters.review_status ?? ""} onChange={setStatus}><option value="">全部</option><option value="complete">完整</option><option value="incomplete_evidence">证据不完整</option><option value="waiting_for_review">等待复盘</option><option value="waiting_for_settlement">等待结算</option></select></label>
+    <TimeRangeFilter value={filters} onChange={(range) => onChange({ ...filters, ...range, cursor: undefined })} />
+  </form>;
 }
 
 function ReviewDetail({ item }: { item: ReviewItem }) {
@@ -138,15 +128,15 @@ export function ReviewPage() {
   const status = freshnessPresentation(envelope.freshness);
   const columns: DenseTableColumnDef<ReviewItem>[] = [
     { id: "instrument", header: "Instrument / Side", cell: ({ row }) => { const item = row.original; const expanded = expandedTicketId === item.ticket_id; return <div className="flex min-w-0 items-center gap-1"><button className="grid h-5 w-5 flex-none place-items-center bg-transparent p-0 text-[var(--color-text-secondary)]" type="button" aria-expanded={expanded} aria-label={`${expanded ? "收起" : "展开"} ${item.exchange_instrument_id} ${item.position_side.toUpperCase()} 复盘`} onClick={() => setExpandedTicketId(expanded ? null : item.ticket_id)}><ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-90" : ""}`} /></button><Link className="min-w-0 truncate text-[var(--color-emphasis)] hover:underline" to={`/trades/${encodeURIComponent(item.ticket_id)}`}>{item.exchange_instrument_id} {item.position_side.toUpperCase()}</Link></div>; } },
-    { accessorKey: "strategy_group_id", header: "StrategyGroup", cell: ({ getValue }) => <span className="block truncate">{String(getValue())}</span> },
-    { id: "execution", header: "Execution", cell: ({ row }) => <span title={row.original.review.execution_classification}><StatusTag tone={executionTone(row.original.review.execution_classification)}>{executionLabel(row.original.review.execution_classification)}</StatusTag></span> },
-    { id: "exit", header: "Exit Reason", cell: ({ row }) => <span className="block truncate" title={row.original.review.exit_reason ?? "exit_reason_unavailable"}>{row.original.review.exit_reason ?? "—"}</span> },
-    { id: "net_pnl", header: "Net PnL", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.net_pnl} sign /> },
-    { id: "net_r", header: "Net R", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.net_r} /> },
-    { id: "fees", header: "Fees", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.fees} /> },
-    { id: "funding", header: "Funding", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.funding} /> },
-    { id: "evidence", header: "Evidence", cell: ({ row }) => <StatusTag tone={row.original.review.review_status === "complete" ? "success" : row.original.review.review_status === "incomplete_evidence" ? "danger" : "neutral"}>{evidenceStatusLabel(row.original.review.review_status)}</StatusTag> },
-    { id: "attention", header: "Attention", cell: ({ row }) => <span className="tabular-number text-[var(--color-text-secondary)]">{row.original.review.attention_items.length || "—"}</span> },
+    { accessorKey: "strategy_group_id", header: "策略组", cell: ({ getValue }) => <span className="block truncate">{String(getValue())}</span> },
+    { id: "execution", header: "执行质量", cell: ({ row }) => <span title={row.original.review.execution_classification}><StatusTag tone={executionTone(row.original.review.execution_classification)}>{executionLabel(row.original.review.execution_classification)}</StatusTag></span> },
+    { id: "exit", header: "退出原因", cell: ({ row }) => <span className="block truncate" title={row.original.review.exit_reason ?? "exit_reason_unavailable"}>{row.original.review.exit_reason ? formatOwnerReason(row.original.review.exit_reason).label : "—"}</span> },
+    { id: "net_pnl", header: "净盈亏", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.net_pnl} sign /> },
+    { id: "net_r", header: "净 R", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.net_r} /> },
+    { id: "fees", header: "费用", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.fees} /> },
+    { id: "funding", header: "资金费", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.funding} /> },
+    { id: "evidence", header: "证据", cell: ({ row }) => <StatusTag tone={row.original.review.review_status === "complete" ? "success" : row.original.review.review_status === "incomplete_evidence" ? "danger" : "neutral"}>{evidenceStatusLabel(row.original.review.review_status)}</StatusTag> },
+    { id: "attention", header: "关注项", cell: ({ row }) => <span className="tabular-number text-[var(--color-text-secondary)]">{row.original.review.attention_items.length || "—"}</span> },
   ];
   const summary: { label: string; value: ReactNode }[] = [
     { label: "Completed Tickets", value: String(data.sample_count) },

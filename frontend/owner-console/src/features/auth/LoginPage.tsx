@@ -6,6 +6,7 @@ import { loginSchema, type LoginCredentials } from "./schema";
 interface LoginPageProps {
   onAuthenticated: () => void;
   onError: (error: unknown) => void;
+  notice?: string | null;
 }
 
 const defaultValues: LoginCredentials = {
@@ -14,7 +15,7 @@ const defaultValues: LoginCredentials = {
   totp_code: "",
 };
 
-export function LoginPage({ onAuthenticated, onError }: LoginPageProps) {
+export function LoginPage({ onAuthenticated, onError, notice = null }: LoginPageProps) {
   const {
     clearErrors,
     formState: { errors, isSubmitting },
@@ -56,6 +57,7 @@ export function LoginPage({ onAuthenticated, onError }: LoginPageProps) {
             <h1 id="login-title">Owner 登录</h1>
             <p>输入 Owner 凭据与当前动态验证码。</p>
           </div>
+          {notice ? <p className="login-form__notice" role="status">{notice}</p> : null}
 
           <div className="login-field">
             <label htmlFor="owner-username">用户名</label>

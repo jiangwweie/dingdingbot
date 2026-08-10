@@ -93,6 +93,7 @@ class ControlsResponse(BaseModel):
     global_entry: GlobalEntryView
     strategies: tuple[StrategyControlView, ...]
     current_operation: OwnerControlOperation | None
+    recent_operations: tuple[OwnerControlOperation, ...]
     events: tuple[ControlEventView, ...]
 
 
@@ -131,7 +132,8 @@ async def read_controls(request: Request) -> ControlsResponse:
             account_id=settings.account_id,
             limit=policy.max_concurrent_tickets,
         )
-        operation = await uow.owner_controls.get_latest_operation()
+        operation = await uow.owner_controls.get_latest_nonterminal_operation()
+        recent_operations = await uow.owner_controls.list_recent_operations(limit=20)
         events = await uow.owner_controls.list_recent_events(limit=20)
     global_state = "enabled" if policy.new_entry_submit_enabled else "paused"
     return ControlsResponse.model_validate(
@@ -159,6 +161,9 @@ async def read_controls(request: Request) -> ControlsResponse:
             "current_operation": (
                 None if operation is None else operation.model_dump(mode="json")
             ),
+            "recent_operations": [
+                item.model_dump(mode="json") for item in recent_operations
+            ],
             "events": list(events),
         }
     )

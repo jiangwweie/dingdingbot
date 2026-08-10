@@ -1,9 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import * as Dialog from "@radix-ui/react-dialog";
+import { Maximize2, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../../app/AppShell";
 import { DataAge } from "../../components/ui/DataAge";
 import { ManualRefreshButton } from "../../components/ui/ManualRefreshButton";
+import { formatMoney, formatOwnerReason, formatOwnerStatus } from "../../components/ui/presentation";
 import { StatusTag, type StatusTone } from "../../components/ui/StatusTag";
 import { UnavailablePanel } from "../../components/ui/UnavailablePanel";
 import type { components } from "../../api/schema";
@@ -64,7 +67,7 @@ function EvidenceList({ evidence }: { evidence: Evidence[] }) {
 function StageFacts({ stage }: { stage: Stage }) {
   return (
     <div className="grid content-start gap-3">
-      <div className="flex items-center justify-between gap-2"><h2 className="m-0 text-[14px] font-semibold">{stage.label}</h2><StatusTag tone={stageTone(stage)}>{stage.status}</StatusTag></div>
+      <div className="flex items-center justify-between gap-2"><h2 className="m-0 text-[14px] font-semibold">{stage.label}</h2><StatusTag tone={stageTone(stage)}>{formatOwnerStatus(stage.status)}</StatusTag></div>
       <p className="m-0 break-words text-[12px] leading-5 text-[var(--color-text-primary)]">{stage.summary}</p>
       <dl className="m-0 grid grid-cols-2 gap-2 text-[11px]"><div><dt className="text-[var(--color-text-secondary)]">开始</dt><dd className="m-0 mt-1 tabular-number">{formatTimestamp(stage.started_at_ms)}</dd></div><div><dt className="text-[var(--color-text-secondary)]">完成</dt><dd className="m-0 mt-1 tabular-number">{formatTimestamp(stage.completed_at_ms)}</dd></div><div><dt className="text-[var(--color-text-secondary)]">耗时</dt><dd className="m-0 mt-1 tabular-number">{formatDuration(stage.duration_ms)}</dd></div><div><dt className="text-[var(--color-text-secondary)]">证据数</dt><dd className="m-0 mt-1 tabular-number">{stage.evidence.length}</dd></div></dl>
       <section className="border-t border-[var(--color-divider)] pt-3"><h3 className="mb-2 mt-0 text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-secondary)]">阶段证据</h3><EvidenceList evidence={stage.evidence} /></section>
@@ -84,9 +87,11 @@ export function TradeCausalityPage() {
   const detail = useQuery({ queryKey: tradeCausalityQueryKey(ticketId), queryFn: () => getTradeCausality(ticketId), enabled: ticketId.length > 0 });
   const [selectedStageKey, setSelectedStageKey] = useState<Stage["key"] | null>(null);
   const [chartExpanded, setChartExpanded] = useState(false);
+  const [chartFullscreen, setChartFullscreen] = useState(false);
   useEffect(() => {
     setSelectedStageKey(null);
     setChartExpanded(false);
+    setChartFullscreen(false);
   }, [ticketId]);
   const envelope = detail.data;
   const closedAtMs = envelope ? envelope.data.trade.terminal_at_ms ?? Date.parse(envelope.generated_at) : 0;
@@ -134,19 +139,32 @@ export function TradeCausalityPage() {
       <section className="mb-2 grid border border-[var(--color-divider)] bg-[var(--color-surface)] lg:grid-cols-12">
         <div className="border-b border-[var(--color-divider)] lg:col-span-3 lg:border-b-0 lg:border-r">
           <div className="flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">生命周期 · 8 阶段</div>
-          <div className="grid">{data.stages.map((stage, index) => <button className={`grid min-h-[52px] grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 border-b border-[var(--color-divider)] bg-transparent px-2 text-left last:border-b-0 hover:bg-[var(--color-surface-secondary)] ${selectedStage?.key === stage.key ? "bg-[var(--color-surface-secondary)]" : ""}`} data-testid="lifecycle-stage" key={stage.key} type="button" onClick={() => setSelectedStageKey(stage.key)}><span className="grid h-5 w-5 place-items-center border border-[var(--color-divider)] text-[10px] tabular-number">{index + 1}</span><span className="min-w-0"><strong className="block truncate text-[12px] font-medium">{stage.label}</strong><small className="block truncate text-[10px] text-[var(--color-text-secondary)]">{stage.summary}</small></span><StatusTag tone={stageTone(stage)}>{stage.status}</StatusTag></button>)}</div>
+          <div className="grid">{data.stages.map((stage, index) => <button className={`grid min-h-[52px] grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 border-b border-[var(--color-divider)] bg-transparent px-2 text-left last:border-b-0 hover:bg-[var(--color-surface-secondary)] ${selectedStage?.key === stage.key ? "bg-[var(--color-surface-secondary)]" : ""}`} data-testid="lifecycle-stage" key={stage.key} type="button" onClick={() => setSelectedStageKey(stage.key)}><span className="grid h-5 w-5 place-items-center border border-[var(--color-divider)] text-[10px] tabular-number">{index + 1}</span><span className="min-w-0"><strong className="block truncate text-[12px] font-medium">{stage.label}</strong><small className="block truncate text-[10px] text-[var(--color-text-secondary)]">{stage.summary}</small></span><StatusTag tone={stageTone(stage)}>{formatOwnerStatus(stage.status)}</StatusTag></button>)}</div>
         </div>
 
         <div className="min-h-[456px] border-b border-[var(--color-divider)] lg:col-span-6 lg:border-b-0 lg:border-r">
-          <div className="flex min-h-[30px] items-center justify-between border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2"><span className="text-[11px] font-medium text-[var(--color-text-secondary)]">价格背景 · 15m · 手动加载</span>{chartExpanded ? <button className="bg-transparent p-0 text-[11px] text-[var(--color-emphasis)] hover:underline" type="button" onClick={() => setChartExpanded(false)}>收起 K 线</button> : null}</div>
+          <div className="flex min-h-[30px] items-center justify-between border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2"><span className="text-[11px] font-medium text-[var(--color-text-secondary)]">价格背景 · 15m · 手动加载</span>{chartExpanded ? <div className="flex items-center gap-3"><button className="inline-flex items-center gap-1 bg-transparent p-0 text-[11px] text-[var(--color-emphasis)] hover:underline" disabled={!candles.data} type="button" aria-label="全屏复盘 K 线" onClick={() => setChartFullscreen(true)}><Maximize2 aria-hidden="true" className="h-3 w-3" />全屏复盘</button><button className="bg-transparent p-0 text-[11px] text-[var(--color-emphasis)] hover:underline" type="button" onClick={() => { setChartExpanded(false); setChartFullscreen(false); }}>收起 K 线</button></div> : null}</div>
           {!chartExpanded ? <div className="grid min-h-[425px] place-content-center gap-3 text-center"><p className="m-0 text-[12px] text-[var(--color-text-secondary)]">生命周期事实已加载，公共 K 线尚未请求</p><button className="owner-button mx-auto h-8" type="button" onClick={() => setChartExpanded(true)}>展开 K 线</button></div> : candles.isError ? <div className="grid min-h-[425px] place-content-center gap-2 text-center"><strong>公共行情不可用</strong><span className="text-[12px] text-[var(--color-text-secondary)]">生命周期、订单与 Review 事实仍可阅读</span></div> : !candles.data ? <div className="grid min-h-[425px] place-content-center text-[12px] text-[var(--color-text-secondary)]">正在读取公共行情</div> : <Suspense fallback={<div className="grid min-h-[425px] place-content-center text-[12px] text-[var(--color-text-secondary)]">正在加载图表组件</div>}><CausalityChart annotations={data.annotations} candles={candles.data.data.candles} /></Suspense>}
         </div>
 
         <aside className="max-h-[520px] overflow-y-auto p-3 lg:col-span-3" aria-label="当前阶段事实"><StageFacts stage={selectedStage} /></aside>
       </section>
 
+      <Dialog.Root open={chartFullscreen} onOpenChange={setChartFullscreen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
+          <Dialog.Content className="fixed inset-4 z-50 grid max-h-[calc(100vh-32px)] grid-rows-[auto_minmax(0,1fr)] border border-[var(--color-divider)] bg-[var(--color-background)] shadow-2xl outline-none md:inset-8">
+            <div className="flex min-h-11 items-center justify-between gap-3 border-b border-[var(--color-divider)] bg-[var(--color-surface)] px-3">
+              <div className="min-w-0"><Dialog.Title className="m-0 truncate text-[14px] font-semibold">{data.trade.exchange_instrument_id} {data.trade.position_side.toUpperCase()} · 15m K 线复盘</Dialog.Title><Dialog.Description className="m-0 truncate text-[11px] text-[var(--color-text-secondary)]">只读市场背景，标记对应本 Ticket 的生命周期事实</Dialog.Description></div>
+              <Dialog.Close asChild><button className="grid h-8 w-8 place-items-center bg-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]" type="button" aria-label="关闭全屏复盘"><X aria-hidden="true" className="h-4 w-4" /></button></Dialog.Close>
+            </div>
+            <div className="min-h-0 p-2">{candles.data ? <Suspense fallback={<div className="grid h-full place-content-center text-[12px] text-[var(--color-text-secondary)]">正在加载图表组件</div>}><CausalityChart annotations={data.annotations} candles={candles.data.data.candles} fullscreen /></Suspense> : null}</div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
       <section className="mb-2 grid border border-[var(--color-divider)] bg-[var(--color-surface)] md:grid-cols-5" aria-label="交易经济事实">
-        {[["Status", data.trade.aggregate_status], ["Exit Reason", data.exit_reason?.label ?? data.trade.exit_reason ?? "—"], ["Net PnL", data.trade.net_pnl.value === null ? "—" : `${data.trade.net_pnl.value} ${data.trade.net_pnl.unit}`], ["Net R", data.trade.net_r.value === null ? "—" : `${data.trade.net_r.value} ${data.trade.net_r.unit}`], ["Fees / Funding", `${data.trade.fees.value ?? "—"} / ${data.trade.funding.value ?? "—"}`]].map(([label, value], index) => <div className={`grid min-h-[54px] content-center gap-1 px-2 ${index > 0 ? "border-l border-[var(--color-divider)]" : ""}`} key={label}><span className="text-[10px] text-[var(--color-text-secondary)]">{label}</span><strong className="truncate text-[12px]" title={value}>{value}</strong></div>)}
+        {[["状态", formatOwnerStatus(data.trade.aggregate_status)], ["退出原因", data.exit_reason?.label ?? (data.trade.exit_reason ? formatOwnerReason(data.trade.exit_reason).label : "—")], ["净盈亏", data.trade.net_pnl.value === null ? "—" : formatMoney(data.trade.net_pnl.value, data.trade.net_pnl.unit, { sign: true })], ["净 R", data.trade.net_r.value === null ? "—" : formatMoney(data.trade.net_r.value, data.trade.net_r.unit, { sign: true })], ["手续费 / 资金费", `${data.trade.fees.value === null ? "—" : formatMoney(data.trade.fees.value, data.trade.fees.unit)} / ${data.trade.funding.value === null ? "—" : formatMoney(data.trade.funding.value, data.trade.funding.unit)}`]].map(([label, value], index) => <div className={`grid min-h-[54px] content-center gap-1 px-2 ${index > 0 ? "border-l border-[var(--color-divider)]" : ""}`} key={label}><span className="text-[10px] text-[var(--color-text-secondary)]">{label}</span><strong className="truncate text-[12px]" title={value}>{value}</strong></div>)}
       </section>
 
       <div className="grid gap-2 xl:grid-cols-2">

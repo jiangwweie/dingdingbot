@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { useQuery } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -6,6 +7,7 @@ import { AppProviders } from "../../app/providers";
 import { ownerQueryClient } from "../../app/queryClient";
 import { AuthBoundary } from "./AuthBoundary";
 import { LoginPage } from "./LoginPage";
+import { ApiError } from "../../api/errors";
 
 const apiClientMock = vi.hoisted(() => ({
   GET: vi.fn(),
@@ -119,4 +121,28 @@ it("redirects a protected navigation to login on 401", async () => {
 
   expect(await screen.findByText("login route")).toBeInTheDocument();
   expect(router.state.location.pathname).toBe("/login");
+});
+
+it("redirects an already authenticated page to an explicit session-expired login after a later 401", async () => {
+  apiClientMock.GET.mockResolvedValue({
+    data: { authenticated: true },
+    error: undefined,
+    response: new Response(JSON.stringify({ authenticated: true }), { status: 200 }),
+  });
+  function ProtectedQuery() {
+    useQuery({ queryKey: ["owner", "expired"], queryFn: async () => { throw new ApiError(401, "unauthorized", "Authentication required"); } });
+    return <div>protected content</div>;
+  }
+  const router = createMemoryRouter(
+    [
+      { element: <AuthBoundary />, children: [{ path: "/", element: <ProtectedQuery /> }] },
+      { path: "/login", element: <div>login route</div> },
+    ],
+    { initialEntries: ["/"] },
+  );
+
+  render(<AppProviders><RouterProvider router={router} /></AppProviders>);
+
+  expect(await screen.findByText("login route")).toBeInTheDocument();
+  expect(router.state.location.search).toBe("?reason=session_expired");
 });

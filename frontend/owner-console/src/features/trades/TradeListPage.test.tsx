@@ -107,8 +107,8 @@ afterEach(() => {
 it("renders active and terminal tickets in one table", async () => {
   renderTrades("/trades?position_side=long");
 
-  expect(await screen.findByText("POSITION_PROTECTED")).toBeInTheDocument();
-  expect(screen.getByText("TERMINAL")).toBeInTheDocument();
+  expect(await screen.findByText("持仓已受保护")).toBeInTheDocument();
+  expect(screen.getByText("已结束")).toBeInTheDocument();
   expect(screen.getAllByRole("row")).toHaveLength(3);
 });
 
@@ -147,5 +147,14 @@ it("keeps summary totals exact from API decimal strings", async () => {
   renderTrades("/trades");
 
   const summary = await screen.findByRole("region", { name: "交易摘要" });
-  expect(within(summary).getByText("0.30000000000000003 USDT")).toBeInTheDocument();
+  expect(within(summary).getByText("0.30 USDT")).toBeInTheDocument();
+});
+
+it("uses a human time range instead of exposing millisecond inputs", async () => {
+  renderTrades("/trades?from_ms=1807408800000&to_ms=1807495200000");
+
+  expect(await screen.findByLabelText("开始时间")).toBeInTheDocument();
+  expect(screen.getByLabelText("结束时间")).toBeInTheDocument();
+  expect(screen.queryByText("From (ms)")).not.toBeInTheDocument();
+  expect(screen.queryByText("To (ms)")).not.toBeInTheDocument();
 });

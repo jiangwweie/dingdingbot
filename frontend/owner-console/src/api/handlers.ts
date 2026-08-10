@@ -20,6 +20,7 @@ export const ownerApiHandlers = [
       { strategy_group_id: "BRF2-001", entry_state: "enabled", control_version: 1, last_event_id: "strategy-control-event:seed:BRF2-001", reason: "seed_enabled", updated_at_ms: 1800000000000, configured_state: "enabled", effective_state: "enabled" },
     ],
     current_operation: null,
+    recent_operations: [],
     events: [],
   })),
   http.post("/api/owner/v1/controls/exposure/flatten-all/preview", () => HttpResponse.json({

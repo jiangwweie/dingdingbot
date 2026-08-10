@@ -2494,8 +2494,16 @@ def _monitor_scope(
     )
     return sa.or_(
         sa.and_(monitor.c.ticket_id.is_(None), monitor.c.incident_id.is_(None)),
-        sa.and_(monitor.c.ticket_id.is_not(None), ticket_scope),
-        sa.and_(monitor.c.incident_id.is_not(None), incident_scope),
+        sa.and_(
+            monitor.c.ticket_id.is_not(None),
+            ticket.c.terminal_at_ms.is_(None),
+            ticket_scope,
+        ),
+        sa.and_(
+            monitor.c.incident_id.is_not(None),
+            incident.c.status == "open",
+            incident_scope,
+        ),
     )
 
 
@@ -2876,14 +2884,6 @@ def _overview_freshness(
         f"account:{authority['venue_id']}:{authority['account_id']}"
     )
     required = [
-        (
-            f"owner_policy:{authority['owner_policy_id']}",
-            int(authority["policy_updated_at_ms"]),
-        ),
-        (
-            f"runtime_profile:{authority['runtime_profile_id']}",
-            int(authority["profile_updated_at_ms"]),
-        ),
         (
             account_identity,
             (

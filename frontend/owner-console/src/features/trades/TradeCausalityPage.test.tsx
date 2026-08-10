@@ -151,6 +151,9 @@ it("shows eight stages before requesting candles", async () => {
   renderCausality("/trades/ticket%3A1");
 
   expect(await screen.findAllByTestId("lifecycle-stage")).toHaveLength(8);
+  expect(screen.getAllByText("已完成")).toHaveLength(3);
+  expect(screen.getAllByText("进行中")).toHaveLength(2);
+  expect(screen.getAllByText("等待执行")).toHaveLength(4);
   expect(mockedGetCandles).not.toHaveBeenCalled();
 
   await user.click(screen.getByRole("button", { name: "展开 K 线" }));
@@ -182,4 +185,17 @@ it("retries failed candles only after an explicit manual refresh", async () => {
   await user.click(screen.getByRole("button", { name: "刷新当前页" }));
   expect(await screen.findByTestId("causality-chart")).toBeInTheDocument();
   expect(mockedGetCandles).toHaveBeenCalledTimes(2);
+});
+
+it("opens the already loaded K-line data in a full-screen review dialog without another request", async () => {
+  const user = userEvent.setup();
+  renderCausality("/trades/ticket%3A1");
+
+  await user.click(await screen.findByRole("button", { name: "展开 K 线" }));
+  await screen.findByTestId("causality-chart");
+  expect(mockedGetCandles).toHaveBeenCalledTimes(1);
+
+  await user.click(screen.getByRole("button", { name: "全屏复盘 K 线" }));
+  expect(await screen.findByRole("dialog", { name: /BNBUSDT LONG · 15m K 线复盘/ })).toBeInTheDocument();
+  expect(mockedGetCandles).toHaveBeenCalledTimes(1);
 });

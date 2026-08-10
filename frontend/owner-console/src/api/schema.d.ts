@@ -564,6 +564,8 @@ export interface components {
             /** Generated At Ms */
             generated_at_ms: number;
             global_entry: components["schemas"]["GlobalEntryView"];
+            /** Recent Operations */
+            recent_operations: components["schemas"]["OwnerControlOperation"][];
             /** Strategies */
             strategies: components["schemas"]["StrategyControlView"][];
         };

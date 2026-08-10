@@ -95,7 +95,7 @@ it("renders deterministic review sentences and evidence links", async () => {
   const user = userEvent.setup();
   renderReview();
 
-  expect(await screen.findAllByText("+3.51 U")).not.toHaveLength(0);
+  expect(await screen.findAllByText("+3.51 USDT")).not.toHaveLength(0);
   await user.click(screen.getByRole("button", { name: "展开 BNBUSDT LONG 复盘" }));
 
   expect(screen.getByText(/执行链完整/)).toBeInTheDocument();

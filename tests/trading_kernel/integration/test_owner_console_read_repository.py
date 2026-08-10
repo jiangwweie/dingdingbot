@@ -1424,6 +1424,40 @@ async def test_overview_freshness_uses_stalest_required_projection(
         await engine.dispose()
 
 
+async def test_overview_freshness_does_not_treat_stable_policy_or_profile_as_runtime_data(
+    owner_read_dsn: str,
+) -> None:
+    now_ms = 1_800_000_010_000
+    await _seed_overview_authority(owner_read_dsn, now_ms=now_ms)
+    stable_config_updated_at_ms = now_ms - 10 * 86_400_000
+    await _execute_owner_console_admin(
+        owner_read_dsn,
+        "UPDATE brc_owner_policy_current SET updated_at_ms = $1",
+        stable_config_updated_at_ms,
+    )
+    await _execute_owner_console_admin(
+        owner_read_dsn,
+        "UPDATE brc_runtime_profiles SET updated_at_ms = $1",
+        stable_config_updated_at_ms,
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            facts = await PostgresOwnerReadRepository(
+                connection
+            ).read_overview_facts(
+                day_start_ms=1_799_913_600_000,
+                now_ms=now_ms,
+        )
+
+        assert facts.runtime_freshness.value == "fresh"
+        assert facts.freshness_evidence_identity == (
+            "account:binance-usdm:owner-console-account"
+        )
+    finally:
+        await engine.dispose()
+
+
 async def test_overview_authority_ignores_disabled_policy_binding(
     owner_read_dsn: str,
 ) -> None:

@@ -11,6 +11,8 @@ import { ManualRefreshButton } from "../../components/ui/ManualRefreshButton";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { StatusTag, type StatusTone } from "../../components/ui/StatusTag";
 import { UnavailablePanel } from "../../components/ui/UnavailablePanel";
+import { TimeRangeFilter } from "../../components/ui/TimeRangeFilter";
+import { formatMoney, formatOwnerReason, formatOwnerStatus, formatTimestamp } from "../../components/ui/presentation";
 import type { components } from "../../api/schema";
 import { getTrades, tradesQueryKey } from "./api";
 import {
@@ -32,19 +34,9 @@ function freshnessPresentation(freshness: Freshness) {
   return { label: "数据正常", tone: "success" as const };
 }
 
-function formatTimestamp(value: number): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
-}
-
 function metricLabel(metric: MoneyMetric): string {
   if (metric.value === null) return "—";
-  return `${metric.value} ${metric.unit}`;
+  return formatMoney(metric.value, metric.unit);
 }
 
 function sumDecimalStrings(values: string[]): string {
@@ -72,7 +64,7 @@ function sumDecimalStrings(values: string[]): string {
 function sumMetric(items: TradeItem[], select: (item: TradeItem) => MoneyMetric, unit: "USDT" | "R"): string {
   const values = items.map(select).flatMap((metric) => metric.value === null ? [] : [metric.value]);
   if (values.length === 0) return "—";
-  return `${sumDecimalStrings(values)} ${unit}`;
+  return formatMoney(sumDecimalStrings(values), unit);
 }
 
 function TradeFilters({ filters, onChange }: { filters: TradeSearchParams; onChange: (filters: TradeSearchParams) => void }) {
@@ -85,16 +77,13 @@ function TradeFilters({ filters, onChange }: { filters: TradeSearchParams; onCha
     onChange({ ...filters, [name]: value || undefined, cursor: undefined } as TradeSearchParams);
   };
 
-  return (
-    <form className="mb-2 grid grid-cols-2 gap-2 border border-[var(--color-divider)] bg-[var(--color-surface)] p-2 md:grid-cols-6" aria-label="Ticket 筛选条件">
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">StrategyGroup<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="strategy_group_id" value={filters.strategy_group_id ?? ""} onChange={setTextFilter} /></label>
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">Instrument<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="exchange_instrument_id" value={filters.exchange_instrument_id ?? ""} onChange={setTextFilter} /></label>
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">Side<select className="h-[30px] border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="position_side" value={filters.position_side ?? ""} onChange={setSelectFilter}><option value="">全部</option><option value="long">Long</option><option value="short">Short</option></select></label>
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">Status<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="aggregate_status" value={filters.aggregate_status ?? ""} onChange={setTextFilter} /></label>
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">From (ms)<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" inputMode="numeric" name="from_ms" value={filters.from_ms ?? ""} onChange={setTextFilter} /></label>
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">To (ms)<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" inputMode="numeric" name="to_ms" value={filters.to_ms ?? ""} onChange={setTextFilter} /></label>
-    </form>
-  );
+  return <form className="mb-2 grid grid-cols-2 gap-2 border border-[var(--color-divider)] bg-[var(--color-surface)] p-2 md:grid-cols-4" aria-label="Ticket 筛选条件">
+    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">策略组<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="strategy_group_id" value={filters.strategy_group_id ?? ""} onChange={setTextFilter} /></label>
+    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">交易对<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="exchange_instrument_id" value={filters.exchange_instrument_id ?? ""} onChange={setTextFilter} /></label>
+    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">方向<select className="h-[30px] border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="position_side" value={filters.position_side ?? ""} onChange={setSelectFilter}><option value="">全部</option><option value="long">做多</option><option value="short">做空</option></select></label>
+    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">状态<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="aggregate_status" value={filters.aggregate_status ?? ""} onChange={setTextFilter} /></label>
+    <TimeRangeFilter value={filters} onChange={(range) => onChange({ ...filters, ...range, cursor: undefined })} />
+  </form>;
 }
 
 function TradeSummary({ trade }: { trade: TradeItem }) {
@@ -102,7 +91,7 @@ function TradeSummary({ trade }: { trade: TradeItem }) {
     <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[12px] sm:grid-cols-4">
       <span><small className="block text-[11px] text-[var(--color-text-secondary)]">Ticket</small><strong className="break-all">{trade.ticket_id}</strong></span>
       <span><small className="block text-[11px] text-[var(--color-text-secondary)]">生命周期</small><strong className="tabular-number">{trade.completed_stage_count}/{trade.total_stage_count}</strong></span>
-      <span><small className="block text-[11px] text-[var(--color-text-secondary)]">经济事实</small><strong>{trade.economics_completeness ?? "进行中"}</strong></span>
+      <span><small className="block text-[11px] text-[var(--color-text-secondary)]">经济事实</small><strong>{formatOwnerStatus(trade.economics_completeness ?? "in_progress")}</strong></span>
       <span><small className="block text-[11px] text-[var(--color-text-secondary)]">关注</small><strong className="break-words">{trade.attention_items.join(" · ") || "无"}</strong></span>
     </div>
   );
@@ -156,14 +145,14 @@ export function TradeListPage() {
         );
       },
     },
-    { accessorKey: "strategy_group_id", header: "StrategyGroup", cell: ({ getValue }) => <span className="block truncate">{String(getValue())}</span> },
-    { accessorKey: "aggregate_status", header: "Status", cell: ({ row }) => <StatusTag tone={row.original.terminal_at_ms === null ? "attention" : "success"}>{row.original.aggregate_status}</StatusTag> },
-    { accessorKey: "lifecycle_stage", header: "Lifecycle", cell: ({ row }) => <span className="tabular-number uppercase">{row.original.lifecycle_stage} {row.original.completed_stage_count}/{row.original.total_stage_count}</span> },
-    { accessorKey: "exit_reason", header: "Exit Reason", cell: ({ row }) => <span className="block truncate" title={row.original.exit_reason ?? row.original.exit_reason_unavailable_reason ?? undefined}>{row.original.exit_reason ?? "—"}</span> },
-    { accessorKey: "net_pnl", header: "Net PnL", cell: ({ row }) => <span className="tabular-number whitespace-nowrap">{metricLabel(row.original.net_pnl)}</span> },
-    { accessorKey: "net_r", header: "Net R", cell: ({ row }) => <span className="tabular-number whitespace-nowrap">{metricLabel(row.original.net_r)}</span> },
-    { accessorKey: "attention_items", header: "Attention", cell: ({ row }) => <span className="block truncate text-[var(--color-text-secondary)]" title={row.original.attention_items.join(" · ")}>{row.original.attention_items.length > 0 ? row.original.attention_items.length : "—"}</span> },
-    { accessorKey: "issued_at_ms", header: "Created", cell: ({ getValue }) => <span className="tabular-number whitespace-nowrap">{formatTimestamp(Number(getValue()))}</span> },
+    { accessorKey: "strategy_group_id", header: "策略组", cell: ({ getValue }) => <span className="block truncate">{String(getValue())}</span> },
+    { accessorKey: "aggregate_status", header: "状态", cell: ({ row }) => <StatusTag tone={row.original.terminal_at_ms === null ? "attention" : "success"}>{formatOwnerStatus(row.original.aggregate_status)}</StatusTag> },
+    { accessorKey: "lifecycle_stage", header: "生命周期", cell: ({ row }) => <span className="tabular-number">{formatOwnerStatus(row.original.lifecycle_stage)} {row.original.completed_stage_count}/{row.original.total_stage_count}</span> },
+    { accessorKey: "exit_reason", header: "退出原因", cell: ({ row }) => { const reason = row.original.exit_reason ?? row.original.exit_reason_unavailable_reason; return <span className="block truncate" title={reason ?? undefined}>{reason ? formatOwnerReason(reason).label : "—"}</span>; } },
+    { accessorKey: "net_pnl", header: "净盈亏", cell: ({ row }) => <span className="tabular-number whitespace-nowrap">{metricLabel(row.original.net_pnl)}</span> },
+    { accessorKey: "net_r", header: "净 R", cell: ({ row }) => <span className="tabular-number whitespace-nowrap">{metricLabel(row.original.net_r)}</span> },
+    { accessorKey: "attention_items", header: "关注项", cell: ({ row }) => <span className="block truncate text-[var(--color-text-secondary)]" title={row.original.attention_items.join(" · ")}>{row.original.attention_items.length > 0 ? row.original.attention_items.length : "—"}</span> },
+    { accessorKey: "issued_at_ms", header: "创建时间", cell: ({ getValue }) => <span className="tabular-number whitespace-nowrap">{formatTimestamp(Number(getValue()))}</span> },
   ];
 
   const summary = [

@@ -2057,6 +2057,44 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
         ).mappings().one_or_none()
         return None if row is None else _operation_from_row(row)
 
+    async def get_latest_nonterminal_operation(self) -> OwnerControlOperation | None:
+        row = (
+            await self._connection.execute(
+                sa.select(owner_control_operations_current)
+                .where(
+                    owner_control_operations_current.c.state.not_in(
+                        (
+                            ControlOperationState.COMPLETED.value,
+                            ControlOperationState.BLOCKED.value,
+                        )
+                    )
+                )
+                .order_by(
+                    owner_control_operations_current.c.updated_at_ms.desc(),
+                    owner_control_operations_current.c.authorization_id,
+                )
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        return None if row is None else _operation_from_row(row)
+
+    async def list_recent_operations(
+        self,
+        *,
+        limit: int,
+    ) -> tuple[OwnerControlOperation, ...]:
+        rows = (
+            await self._connection.execute(
+                sa.select(owner_control_operations_current)
+                .order_by(
+                    owner_control_operations_current.c.updated_at_ms.desc(),
+                    owner_control_operations_current.c.authorization_id,
+                )
+                .limit(max(1, min(limit, 20)))
+            )
+        ).mappings()
+        return tuple(_operation_from_row(row) for row in rows)
+
     async def save_operation(
         self,
         operation: OwnerControlOperation,

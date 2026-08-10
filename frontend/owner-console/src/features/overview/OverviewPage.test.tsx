@@ -78,6 +78,23 @@ it("renders intervention first and labels account values as admission snapshot",
   expect(screen.getByRole("button", { name: "刷新当前页" })).toBeInTheDocument();
 });
 
+it("formats admission account values to two decimal places", async () => {
+  mockedGetOverview.mockResolvedValue({
+    ...overviewFixture,
+    data: {
+      ...overviewFixture.data,
+      account_snapshot: {
+        ...overviewFixture.data.account_snapshot,
+        wallet_balance: { value: "438.953439370000000000", unit: "USDT" },
+      },
+    },
+  });
+  renderOverview();
+
+  expect(await screen.findByText("438.95 USDT")).toBeInTheDocument();
+  expect(screen.queryByText("438.953439370000000000 USDT")).not.toBeInTheDocument();
+});
+
 it("updates visible data age without issuing another request", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-08-09T02:00:30.000Z"));

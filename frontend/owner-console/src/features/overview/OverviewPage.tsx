@@ -7,6 +7,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Panel } from "../../components/ui/Panel";
 import { StatusTag, type StatusTone } from "../../components/ui/StatusTag";
 import { UnavailablePanel } from "../../components/ui/UnavailablePanel";
+import { formatMoney } from "../../components/ui/presentation";
 import type { components } from "../../api/schema";
 import { getOverview, overviewQueryKey } from "./api";
 
@@ -34,7 +35,7 @@ function formatMetric(metric: MoneyMetric): { text: string; reason: string | nul
   if (metric.value === null) {
     return { text: "—", reason: metric.unavailable_reason ?? "Unavailable" };
   }
-  return { text: `${metric.value} ${metric.unit}`, reason: null };
+  return { text: formatMoney(metric.value, metric.unit), reason: null };
 }
 
 function metricTone(metric: MoneyMetric): string {

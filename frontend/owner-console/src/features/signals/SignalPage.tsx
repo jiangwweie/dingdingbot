@@ -9,7 +9,9 @@ import { DataAge } from "../../components/ui/DataAge";
 import { ManualRefreshButton } from "../../components/ui/ManualRefreshButton";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { StatusTag, type StatusTone } from "../../components/ui/StatusTag";
+import { TimeRangeFilter } from "../../components/ui/TimeRangeFilter";
 import { UnavailablePanel } from "../../components/ui/UnavailablePanel";
+import { formatOwnerReason, formatOwnerStatus, formatTimestamp } from "../../components/ui/presentation";
 import type { components } from "../../api/schema";
 import {
   getSignalDetail,
@@ -34,22 +36,8 @@ function freshnessPresentation(freshness: Freshness) {
   return { label: "数据正常", tone: "success" as const };
 }
 
-function formatTimestamp(value: number): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
-}
-
 function shadowLabel(signal: SignalItem): string {
-  return signal.shadow_summary ? signal.shadow_summary.status : "—";
-}
-
-function compactBlockerLabel(blocker: string): string {
-  return blocker.length > 28 ? `${blocker.slice(0, 28)}…` : blocker;
+  return signal.shadow_summary ? formatOwnerStatus(signal.shadow_summary.status) : "—";
 }
 
 function DetailContent({ signalEventId, refreshVersion }: { signalEventId: string; refreshVersion: number }) {
@@ -111,35 +99,28 @@ function SignalFilters({ filters, onChange }: { filters: SignalSearchParams; onC
   };
 
   return (
-    <form className="mb-2 grid grid-cols-2 gap-2 border border-[var(--color-divider)] bg-[var(--color-surface)] p-2 md:grid-cols-6" aria-label="Signal 筛选条件">
+    <form className="mb-2 grid grid-cols-2 gap-2 border border-[var(--color-divider)] bg-[var(--color-surface)] p-2 md:grid-cols-4" aria-label="Signal 筛选条件">
       <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">
-        StrategyGroup
+        策略组
         <input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="strategy_group_id" value={filters.strategy_group_id ?? ""} onChange={setTextFilter} />
       </label>
       <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">
-        Instrument
+        交易对
         <input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="exchange_instrument_id" value={filters.exchange_instrument_id ?? ""} onChange={setTextFilter} />
       </label>
       <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">
-        Side
+        方向
         <select className="h-[30px] border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="position_side" value={filters.position_side ?? ""} onChange={setSelectFilter}>
-          <option value="">全部</option><option value="long">Long</option><option value="short">Short</option>
+          <option value="">全部</option><option value="long">做多</option><option value="short">做空</option>
         </select>
       </label>
       <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">
-        Decision
+        准入结果
         <select className="h-[30px] border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="decision_status" value={filters.decision_status ?? ""} onChange={setSelectFilter}>
-          <option value="">全部</option><option value="admitted">Admitted</option><option value="rejected">Rejected</option>
+          <option value="">全部</option><option value="admitted">已准入</option><option value="rejected">未准入</option>
         </select>
       </label>
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">
-        From (ms)
-        <input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" inputMode="numeric" name="from_ms" value={filters.from_ms ?? ""} onChange={setTextFilter} />
-      </label>
-      <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">
-        To (ms)
-        <input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" inputMode="numeric" name="to_ms" value={filters.to_ms ?? ""} onChange={setTextFilter} />
-      </label>
+      <TimeRangeFilter value={filters} onChange={(range) => onChange({ ...filters, ...range, cursor: undefined })} />
     </form>
   );
 }
@@ -194,13 +175,13 @@ export function SignalPage() {
         return <button className="min-w-0 max-w-full truncate bg-transparent p-0 text-left text-[var(--color-emphasis)] underline-offset-2 hover:underline" type="button" aria-expanded={isExpanded} aria-label={`${isExpanded ? "收起" : "展开"} ${row.original.strategy_group_id}`} title={row.original.signal_event_id} onClick={() => setExpandedSignalId(isExpanded ? null : row.original.signal_event_id)}>{row.original.signal_event_id}</button>;
       },
     },
-    { accessorKey: "strategy_group_id", header: "StrategyGroup", cell: ({ getValue }) => <span className="block truncate">{String(getValue())}</span> },
-    { accessorKey: "exchange_instrument_id", header: "Instrument", cell: ({ getValue }) => <span className="block truncate tabular-number">{String(getValue())}</span> },
-    { accessorKey: "position_side", header: "Side", cell: ({ getValue }) => <span className="uppercase">{String(getValue())}</span> },
+    { accessorKey: "strategy_group_id", header: "策略组", cell: ({ getValue }) => <span className="block truncate">{String(getValue())}</span> },
+    { accessorKey: "exchange_instrument_id", header: "交易对", cell: ({ getValue }) => <span className="block truncate tabular-number">{String(getValue())}</span> },
+    { accessorKey: "position_side", header: "方向", cell: ({ getValue }) => <span>{getValue() === "long" ? "做多" : "做空"}</span> },
     { accessorKey: "occurred_at_ms", header: "时间", cell: ({ getValue }) => <span className="tabular-number whitespace-nowrap">{formatTimestamp(Number(getValue()))}</span> },
-    { accessorKey: "decision_status", header: "Decision", cell: ({ getValue }) => <StatusTag tone={getValue() === "admitted" ? "success" : "attention"}>{getValue() === "admitted" ? "Admitted" : "Rejected"}</StatusTag> },
-    { accessorKey: "first_blocker", header: "First blocker", cell: ({ row }) => row.original.first_blocker ? <span className="block truncate text-[var(--color-text-primary)]" title={row.original.first_blocker}>{compactBlockerLabel(row.original.first_blocker)}</span> : row.original.ticket_id ? <Link className="text-[var(--color-emphasis)] hover:underline" to={`/trades/${encodeURIComponent(row.original.ticket_id)}`}>查看 Ticket</Link> : "—" },
-    { id: "shadow", header: "Shadow", cell: ({ row }) => <span className="tabular-number text-[var(--color-text-secondary)]">{shadowLabel(row.original)}</span> },
+    { accessorKey: "decision_status", header: "准入结果", cell: ({ getValue }) => <StatusTag tone={getValue() === "admitted" ? "success" : "attention"}>{getValue() === "admitted" ? "已准入" : "未准入"}</StatusTag> },
+    { accessorKey: "first_blocker", header: "未准入原因", cell: ({ row }) => row.original.first_blocker ? <span className="block truncate text-[var(--color-text-primary)]" title={row.original.first_blocker}>{formatOwnerReason(row.original.first_blocker).label}</span> : row.original.ticket_id ? <Link className="text-[var(--color-emphasis)] hover:underline" to={`/trades/${encodeURIComponent(row.original.ticket_id)}`}>查看交易</Link> : "—" },
+    { id: "shadow", header: "后续观察", cell: ({ row }) => <span className="tabular-number text-[var(--color-text-secondary)]">{shadowLabel(row.original)}</span> },
   ];
 
   return (
@@ -210,8 +191,8 @@ export function SignalPage() {
       <SignalFilters filters={filters} onChange={updateFilters} />
       <section className="mb-2 grid grid-cols-3 border border-[var(--color-divider)] bg-[var(--color-surface)]" aria-label="准入漏斗">
         <div className="grid min-h-[48px] content-center gap-1 px-2"><span className="text-[11px] text-[var(--color-text-secondary)]">本页 Signals</span><strong className="tabular-number text-[16px]">{items.length}</strong></div>
-        <div className="grid min-h-[48px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[11px] text-[var(--color-text-secondary)]">Admitted</span><strong className="tabular-number text-[16px] text-[var(--color-success)]">{admittedCount}</strong></div>
-        <div className="grid min-h-[48px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[11px] text-[var(--color-text-secondary)]">Rejected</span><strong className="tabular-number text-[16px]">{rejectedCount}</strong></div>
+        <div className="grid min-h-[48px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[11px] text-[var(--color-text-secondary)]">已准入</span><strong className="tabular-number text-[16px] text-[var(--color-success)]">{admittedCount}</strong></div>
+        <div className="grid min-h-[48px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[11px] text-[var(--color-text-secondary)]">未准入</span><strong className="tabular-number text-[16px]">{rejectedCount}</strong></div>
       </section>
       {items.length === 0 ? <div className="panel compact-empty px-2">当前筛选范围内没有持久化 Signal</div> : <DenseTable ariaLabel="Signal 准入决策" columns={columns} data={items} getRowId={(item) => item.signal_event_id} expandedRowId={expandedSignalId} renderExpandedRow={(item, columnCount) => <InlineDetailRow colSpan={columnCount}><DetailContent signalEventId={item.signal_event_id} refreshVersion={refreshVersion} /></InlineDetailRow>} />}
       <CursorPagination hasNextPage={envelope.data.next_cursor !== null} onNextPage={() => updateFilters({ ...filters, cursor: envelope.data.next_cursor ?? undefined })} />

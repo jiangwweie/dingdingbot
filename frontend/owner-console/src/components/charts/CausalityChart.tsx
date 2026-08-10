@@ -11,9 +11,10 @@ import { toCandlestickData, toSeriesMarkers } from "./chartAdapter";
 interface CausalityChartProps {
   annotations: components["schemas"]["ChartAnnotation"][];
   candles: components["schemas"]["CandleView"][];
+  fullscreen?: boolean;
 }
 
-export default function CausalityChart({ annotations, candles }: CausalityChartProps) {
+export default function CausalityChart({ annotations, candles, fullscreen = false }: CausalityChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -47,6 +48,5 @@ export default function CausalityChart({ annotations, candles }: CausalityChartP
     return () => chart.remove();
   }, [annotations, candles]);
 
-  return <div className="h-[420px] min-h-[320px] w-full" data-testid="causality-chart" ref={containerRef} />;
+  return <div className={fullscreen ? "h-[calc(100vh-156px)] min-h-[520px] w-full" : "h-[420px] min-h-[320px] w-full"} data-testid="causality-chart" ref={containerRef} />;
 }
-
