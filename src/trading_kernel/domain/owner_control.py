@@ -63,6 +63,7 @@ class OwnerAuthorization(BaseModel):
         "entry_pause",
         "entry_resume",
         "owner_flatten_all",
+        "universe_configure",
     ]
     owner_identity: str
     authentication_strength: Literal["session", "totp_step_up"]

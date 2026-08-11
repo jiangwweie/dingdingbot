@@ -1,4 +1,4 @@
-"""Versioned pure exit-policy contracts for the six registered Events."""
+"""Versioned pure exit-policy contracts for registered Events."""
 
 from __future__ import annotations
 
@@ -431,6 +431,8 @@ def _policy_for_contract(contract: RegisteredStrategyContract) -> ExitPolicy:
         exit_policy_version=(
             "2026-07-31-sor-v3"
             if contract.strategy_group_id == "SOR-001"
+            else "2026-08-11-us-sor-v1"
+            if contract.strategy_group_id == "SOR-US-EQ-PERP-001"
             else "2026-07-22-v1"
         ),
         event_spec_id=contract.event_spec_id,
@@ -460,6 +462,8 @@ def _policy_for_contract(contract: RegisteredStrategyContract) -> ExitPolicy:
         time_stop=(
             TimeStopRule(max_holding_bars=96)
             if contract.strategy_group_id == "SOR-001"
+            else TimeStopRule(max_holding_bars=8)
+            if contract.strategy_group_id == "SOR-US-EQ-PERP-001"
             else None
         ),
     )

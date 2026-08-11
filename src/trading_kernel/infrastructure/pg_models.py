@@ -128,6 +128,116 @@ instruments = sa.Table(
     ),
 )
 
+event_product_compatibility = sa.Table(
+    "brc_event_product_compatibility",
+    metadata,
+    _id("event_spec_id", primary_key=True),
+    sa.Column("product_family", SHORT_TEXT, nullable=False),
+    sa.Column("asset_class", SHORT_TEXT, nullable=False),
+    sa.Column("contract_type", SHORT_TEXT, nullable=False),
+    sa.Column("underlying_type", SHORT_TEXT, nullable=False),
+    sa.Column("margin_asset", SHORT_TEXT, nullable=False),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["event_spec_id"],
+        ["brc_event_specs.event_spec_id"],
+    ),
+    sa.CheckConstraint(
+        "product_family IN ('crypto_perpetual', 'tradfi_equity_perpetual')",
+        name="product_family_valid",
+    ),
+    sa.CheckConstraint(
+        "asset_class IN ('crypto', 'equity')",
+        name="asset_class_valid",
+    ),
+    sa.CheckConstraint(
+        "semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="semantic_digest_valid",
+    ),
+)
+
+instrument_product_profiles = sa.Table(
+    "brc_instrument_product_profiles",
+    metadata,
+    _id("exchange_instrument_id", primary_key=True),
+    sa.Column("product_family", SHORT_TEXT, nullable=False),
+    sa.Column("asset_class", SHORT_TEXT, nullable=False),
+    sa.Column("contract_type", SHORT_TEXT, nullable=False),
+    sa.Column("underlying_type", SHORT_TEXT, nullable=False),
+    sa.Column("margin_asset", SHORT_TEXT, nullable=False),
+    sa.Column("entry_session_policy", SHORT_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False),
+    _time("updated_at_ms"),
+    sa.CheckConstraint(
+        "product_family IN ('crypto_perpetual', 'tradfi_equity_perpetual')",
+        name="product_family_valid",
+    ),
+    sa.CheckConstraint(
+        "asset_class IN ('crypto', 'equity')",
+        name="asset_class_valid",
+    ),
+    sa.CheckConstraint(
+        "entry_session_policy IN ('continuous', 'regular_only', 'reference_only')",
+        name="entry_session_policy_valid",
+    ),
+    sa.CheckConstraint(
+        "status IN ('candidate', 'reference', 'active', 'retired')",
+        name="status_valid",
+    ),
+    sa.CheckConstraint(
+        "semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="semantic_digest_valid",
+    ),
+)
+
+instrument_product_current = sa.Table(
+    "brc_instrument_product_current",
+    metadata,
+    _id("exchange_instrument_id", primary_key=True),
+    sa.Column("product_status", SHORT_TEXT, nullable=False),
+    sa.Column("session_state", SHORT_TEXT, nullable=False),
+    _time("regular_session_open_ms", nullable=True),
+    _time("regular_session_close_ms", nullable=True),
+    sa.Column("mark_price", MONEY, nullable=True),
+    sa.Column("index_price", MONEY, nullable=True),
+    sa.Column("funding_rate", MONEY, nullable=True),
+    sa.Column("best_bid", MONEY, nullable=True),
+    sa.Column("best_ask", MONEY, nullable=True),
+    sa.Column("corporate_event_status", SHORT_TEXT, nullable=False),
+    _time("observed_at_ms"),
+    _time("valid_until_ms"),
+    sa.Column("source_ref", LONG_TEXT, nullable=False),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.ForeignKeyConstraint(
+        ["exchange_instrument_id"],
+        ["brc_instrument_product_profiles.exchange_instrument_id"],
+    ),
+    sa.CheckConstraint(
+        "product_status IN ('active', 'inactive', 'temporarily_unavailable')",
+        name="product_status_valid",
+    ),
+    sa.CheckConstraint(
+        "session_state IN ('pre_market', 'regular', 'after_market', 'overnight', 'no_trading', 'unavailable')",
+        name="session_state_valid",
+    ),
+    sa.CheckConstraint(
+        "corporate_event_status IN ('clear', 'blocked', 'unavailable')",
+        name="corporate_event_status_valid",
+    ),
+    sa.CheckConstraint(
+        "valid_until_ms > observed_at_ms",
+        name="validity_window_valid",
+    ),
+    sa.CheckConstraint(
+        "(regular_session_open_ms IS NULL AND regular_session_close_ms IS NULL) OR "
+        "(regular_session_open_ms IS NOT NULL AND regular_session_close_ms > regular_session_open_ms)",
+        name="regular_session_window_valid",
+    ),
+    sa.CheckConstraint("projection_version > 0", name="projection_version_positive"),
+)
+
 strategy_universe_versions = sa.Table(
     "brc_strategy_universe_versions",
     metadata,
@@ -1644,7 +1754,7 @@ owner_authorizations = sa.Table(
     sa.UniqueConstraint("idempotency_key"),
     sa.CheckConstraint(
         "purpose IN ('strategy_pause', 'strategy_resume', 'entry_pause', "
-        "'entry_resume', 'owner_flatten_all')",
+        "'entry_resume', 'owner_flatten_all', 'universe_configure')",
         name="purpose_valid",
     ),
     sa.CheckConstraint(

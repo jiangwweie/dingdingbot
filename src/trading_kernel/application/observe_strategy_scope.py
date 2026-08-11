@@ -45,6 +45,7 @@ from src.trading_kernel.domain.market import (
     MarketSnapshot,
     Timeframe,
 )
+from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     build_signal_fact_digest,
@@ -306,6 +307,11 @@ async def observe_strategy_scope(
                 event_spec_id=scope.event_spec_id,
                 reason="registry_scope_mismatch",
             )
+        product_session: ProductSessionSnapshot | None = None
+        if contract.strategy_group_id == "SOR-US-EQ-PERP-001":
+            product_session = await uow.signals.get_product_session(
+                scope.exchange_instrument_id
+            )
         comparative_lookback_bars = _comparative_lookback_bars(contract)
         comparative_projection: ComparativeUniverseProjection | None = None
         comparative_digest = None
@@ -387,6 +393,7 @@ async def observe_strategy_scope(
             request.trigger_candle_close_time_ms,
             observation_universe.exchange_instrument_ids,
             comparative_projection=comparative_projection,
+            product_session=product_session,
         )
     except ComparativeProjectionAuthorityChanged:
         async with uow_factory() as uow:
@@ -661,6 +668,7 @@ async def _load_market_snapshot(
     universe_member_ids: tuple[str, ...],
     *,
     comparative_projection: ComparativeUniverseProjection | None,
+    product_session: ProductSessionSnapshot | None,
 ) -> MarketSnapshot:
     if contract.event_id in {"SOR-LONG", "SOR-SHORT"}:
         raw = await _fetch(
@@ -677,6 +685,20 @@ async def _load_market_snapshot(
             candles_15m=tuple(
                 item for item in raw if item.open_time_ms >= session_start_ms
             ),
+        )
+    if contract.event_id in {"SOR-US-LONG-15M", "SOR-US-SHORT-15M"}:
+        raw = await _fetch(
+            market_source,
+            scope.exchange_instrument_id,
+            "15m",
+            limit=120,
+            trigger_ms=trigger_ms,
+        )
+        return MarketSnapshot(
+            exchange_instrument_id=scope.exchange_instrument_id,
+            trigger_candle_close_time_ms=trigger_ms,
+            candles_15m=raw,
+            product_session=product_session,
         )
 
     comparative_lookback_bars = _comparative_lookback_bars(contract)

@@ -1,4 +1,4 @@
-"""Idempotent PostgreSQL seed for the six registered strategy Events."""
+"""Idempotent PostgreSQL seed for the registered strategy Events."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import KernelUnitOfWork
 from src.trading_kernel.domain.exit_policy import ExitPolicy, registered_exit_policies
+from src.trading_kernel.domain.product import product_compatibility_for
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     RegistrySeedConflict,
@@ -20,6 +21,7 @@ from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    event_product_compatibility,
     event_required_facts,
     event_specs,
     exit_policies,
@@ -40,14 +42,23 @@ async def seed_strategy_registry(
     uow: KernelUnitOfWork,
     *,
     seeded_at_ms: int,
+    contracts: tuple[RegisteredStrategyContract, ...] | None = None,
+    include_product_compatibility: bool = True,
+    compatible_source_registry_semantic_hash: str | None = None,
 ) -> RegistrySeedResult:
     if seeded_at_ms <= 0:
         raise ValueError("strategy Registry seed time must be positive")
-    contracts = registered_strategy_contracts()
+    selected_contracts = (
+        registered_strategy_contracts() if contracts is None else contracts
+    )
     return await uow.strategy_registry.seed_exact(
-        contracts,
-        registry_semantic_hash=build_registry_semantic_hash(contracts),
+        selected_contracts,
+        registry_semantic_hash=build_registry_semantic_hash(selected_contracts),
         seeded_at_ms=seeded_at_ms,
+        include_product_compatibility=include_product_compatibility,
+        compatible_source_registry_semantic_hash=(
+            compatible_source_registry_semantic_hash
+        ),
     )
 
 
@@ -61,11 +72,14 @@ class PostgresStrategyRegistryRepository:
         *,
         registry_semantic_hash: str,
         seeded_at_ms: int,
+        include_product_compatibility: bool = True,
+        compatible_source_registry_semantic_hash: str | None = None,
     ) -> RegistrySeedResult:
         counters = {
             "inserted_strategy_group_count": 0,
             "inserted_strategy_version_count": 0,
             "inserted_event_count": 0,
+            "inserted_product_compatibility_count": 0,
             "inserted_exit_policy_count": 0,
             "inserted_fact_definition_count": 0,
             "inserted_event_fact_count": 0,
@@ -119,6 +133,9 @@ class PostgresStrategyRegistryRepository:
                     registry_semantic_hash=registry_semantic_hash,
                     status=status,
                     seeded_at_ms=seeded_at_ms,
+                    compatible_source_registry_semantic_hash=(
+                        compatible_source_registry_semantic_hash
+                    ),
                 )
             )
 
@@ -181,6 +198,33 @@ class PostgresStrategyRegistryRepository:
                     "created_at_ms": seeded_at_ms,
                 },
             )
+
+            if include_product_compatibility:
+                compatibility = product_compatibility_for(contract.event_spec_id)
+                counters["inserted_product_compatibility_count"] += (
+                    await self._insert_exact(
+                        event_product_compatibility,
+                        "event_spec_id",
+                        {
+                            "event_spec_id": compatibility.event_spec_id,
+                            "product_family": compatibility.product_family,
+                            "asset_class": compatibility.asset_class,
+                            "contract_type": compatibility.contract_type,
+                            "underlying_type": compatibility.underlying_type,
+                            "margin_asset": compatibility.margin_asset,
+                            "semantic_digest": compatibility.semantic_digest,
+                            "created_at_ms": seeded_at_ms,
+                        },
+                        compare_keys=(
+                            "product_family",
+                            "asset_class",
+                            "contract_type",
+                            "underlying_type",
+                            "margin_asset",
+                            "semantic_digest",
+                        ),
+                    )
+                )
 
             exit_policy = next(
                 policy
@@ -430,6 +474,7 @@ class PostgresStrategyRegistryRepository:
         registry_semantic_hash: str,
         status: str,
         seeded_at_ms: int,
+        compatible_source_registry_semantic_hash: str | None,
     ) -> int:
         semantics = {
             "event_spec_ids": list(event_spec_ids),
@@ -464,6 +509,29 @@ class PostgresStrategyRegistryRepository:
                 f"strategy Registry conflict for {strategy_version_id}"
             )
         if existing["semantics"] == semantics:
+            return 0
+        compatible_source_semantics = {
+            **semantics,
+            "registry_semantic_hash": compatible_source_registry_semantic_hash,
+        }
+        if (
+            compatible_source_registry_semantic_hash is not None
+            and existing["semantics"] == compatible_source_semantics
+        ):
+            updated = await self._connection.execute(
+                sa.update(strategy_versions)
+                .where(
+                    strategy_versions.c.strategy_version_id
+                    == strategy_version_id,
+                    strategy_versions.c.semantics == compatible_source_semantics,
+                )
+                .values(semantics=semantics)
+            )
+            if updated.rowcount != 1:
+                raise RegistrySeedConflict(
+                    "strategy Registry compatible manifest rotation was lost: "
+                    f"{strategy_version_id}"
+                )
             return 0
         raise RegistrySeedConflict(
             f"strategy Registry conflict for {strategy_version_id}"
@@ -615,6 +683,7 @@ def _display_name(strategy_group_id: str) -> str:
         "MPG-001": "MPG momentum persistence",
         "MI-001": "MI relative strength impulse",
         "SOR-001": "SOR opening range breakout and breakdown",
+        "SOR-US-EQ-PERP-001": "SOR U.S. equity regular-session opening range",
         "BRF2-001": "BRF2 bear rally failure",
     }[strategy_group_id]
 

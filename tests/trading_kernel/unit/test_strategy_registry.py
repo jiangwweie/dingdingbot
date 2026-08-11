@@ -17,17 +17,37 @@ EXPECTED_EVENTS = {
     ("SOR-001", "SOR-LONG", "long"),
     ("SOR-001", "SOR-SHORT", "short"),
     ("BRF2-001", "BRF2-SHORT", "short"),
+    ("SOR-US-EQ-PERP-001", "SOR-US-LONG-15M", "long"),
+    ("SOR-US-EQ-PERP-001", "SOR-US-SHORT-15M", "short"),
+}
+
+LEGACY_EVENT_HASHES = {
+    "event_spec:CPM-RO-001:CPM-LONG:v3": "sha256:9b83f84c170686b8bb1aaef886fe5b364580f6bb91cfacfdaae0a2665eb60bb2",
+    "event_spec:MPG-001:MPG-LONG:v3": "sha256:4a5de575897430b7345c47bb7d30669aeb4b489af4fcb31af5bb0309d1c00a34",
+    "event_spec:MI-001:MI-LONG:v3": "sha256:2d078dc0b4491a3a8ca46b31d232e8f9f15519b533e0bc9c3702e6cb84557a7c",
+    "event_spec:SOR-001:SOR-LONG:v4": "sha256:098e0367328e1041be4ce1ed570f5a72a475a2898191c6f8831e49d0b91de496",
+    "event_spec:SOR-001:SOR-SHORT:v4": "sha256:bbb50f9b1348b0cdec1834c482c63dd5713b6d6354ff4934af92b429b87698c9",
+    "event_spec:BRF2-001:BRF2-SHORT:v3": "sha256:94a6ef6b3ae3db0e01d780d3f6d1abea8c27264043657ab6cfcd7ef580d91bb4",
 }
 
 
-def test_registry_contains_only_the_six_owner_accepted_events() -> None:
+def test_registry_contains_the_six_existing_and_two_owner_accepted_tradfi_events() -> None:
     contracts = registered_strategy_contracts()
 
     assert {
         (item.strategy_group_id, item.event_id, item.position_side)
         for item in contracts
     } == EXPECTED_EVENTS
-    assert len(contracts) == 6
+    assert len(contracts) == 8
+
+
+def test_existing_six_event_semantic_hashes_do_not_drift() -> None:
+    contracts = {item.event_spec_id: item for item in registered_strategy_contracts()}
+
+    assert {
+        event_spec_id: build_registry_semantic_hash((contracts[event_spec_id],))
+        for event_spec_id in LEGACY_EVENT_HASHES
+    } == LEGACY_EVENT_HASHES
 
 
 def test_registry_preserves_exact_active_semantic_contracts_without_membership() -> None:
@@ -93,7 +113,13 @@ def test_registry_preserves_exact_active_semantic_contracts_without_membership()
 
 def test_registry_uses_exact_versioned_semantic_identities() -> None:
     for contract in registered_strategy_contracts():
-        version = 4 if contract.strategy_group_id == "SOR-001" else 3
+        version = (
+            4
+            if contract.strategy_group_id == "SOR-001"
+            else 1
+            if contract.strategy_group_id == "SOR-US-EQ-PERP-001"
+            else 3
+        )
         assert contract.strategy_version_id == f"sgv:{contract.strategy_group_id}:v{version}"
         assert contract.event_spec_id == f"event_spec:{contract.strategy_group_id}:{contract.event_id}:v{version}"
 
@@ -120,7 +146,16 @@ def test_registry_new_event_versions_use_new_exit_policy_identities() -> None:
     contracts = registered_strategy_contracts()
 
     assert len({item.exit_policy_id for item in contracts}) == len(contracts)
-    assert all("portfolio-admission-v1" in item.exit_policy_id for item in contracts)
+    assert all(
+        "portfolio-admission-v1" in item.exit_policy_id
+        for item in contracts
+        if item.strategy_group_id != "SOR-US-EQ-PERP-001"
+    )
+    assert all(
+        "us-regular-or-v1" in item.exit_policy_id
+        for item in contracts
+        if item.strategy_group_id == "SOR-US-EQ-PERP-001"
+    )
 
 
 def test_registry_fact_roles_are_generic_and_type_safe() -> None:

@@ -69,7 +69,7 @@ src/trading_kernel/interfaces     bounded runtime and readonly surfaces
 
 The forward schema chain is `0001_trading_kernel_baseline_v4 ->
 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability ->
-0004_owner_control_plane`.
+0004_owner_control_plane -> 0005_tradfi_instrument_center`.
 The frozen `0001_trading_kernel_baseline_v4` definition remains historical
 source lineage only. PostgreSQL owns current runtime truth and append-only
 lifecycle facts. Exchange readonly facts own external truth. Repository
@@ -81,6 +81,12 @@ certification, Warming/Active/Retired lifecycle and current pointer. Warming
 scopes read facts but emit no Signal; only exact Active members can emit a new
 Signal. Signal, Claim and Ticket freeze Universe version/digest; replacement
 never rewrites an existing protected Ticket.
+
+Product Compatibility is an immutable Registry-side contract, while Product
+Profile, Session and bounded market status are PostgreSQL current projections.
+Crypto and TradFi Events cannot share an incompatible Universe member. The
+independent `SOR-US-EQ-PERP-001` Profile and Policy are observation-only;
+their existence does not expand the main Crypto Policy or grant Entry.
 
 ## Signal, Capacity, And Ticket Boundary
 
@@ -189,7 +195,8 @@ not rollback authorities.
 
 The rebuild is complete only when:
 
-1. the six registered Events can naturally produce typed StrategySignals;
+1. the six approved Crypto Events can naturally produce typed StrategySignals
+   in their approved Product scope;
 2. current authority can issue serial Tickets and manage concurrent protected
    positions across independent Netting Domains;
 3. lifecycle, fault, unknown-outcome, and reconciliation branches are certified;

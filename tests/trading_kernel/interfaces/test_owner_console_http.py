@@ -19,6 +19,8 @@ from src.trading_kernel.application.owner_console.models import (
     CandleView,
     EvidenceRef,
     Freshness,
+    InstrumentCenterPage,
+    InstrumentCenterQuery,
     OverviewEvidenceGap,
     OverviewFacts,
     ReviewCenterFacts,
@@ -36,6 +38,7 @@ from src.trading_kernel.application.owner_console.models import (
 )
 from src.trading_kernel.infrastructure import pg_owner_read_repository
 from src.trading_kernel.infrastructure.owner_market_data import OwnerMarketData
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.interfaces.owner_console_http import app as app_module
 from src.trading_kernel.interfaces.owner_console_http.app import (
     OwnerConsoleSettings,
@@ -109,7 +112,7 @@ class _ReadOnlyEngine:
         self,
         *,
         statement_timeout: str = "3s",
-        schema_revision: str = "0004_owner_control_plane",
+        schema_revision: str = CURRENT_SCHEMA_REVISION,
         dispose_error: BaseException | None = None,
     ) -> None:
         self.dispose_calls = 0
@@ -173,6 +176,7 @@ class _RepositorySpy:
         self.review_queries: list[ReviewListQuery] = []
         self.strategy_queries: list[StrategySummaryQuery] = []
         self.strategy_ticket_queries: list[StrategyTicketQuery] = []
+        self.instrument_queries: list[InstrumentCenterQuery] = []
         self.overview_facts_override: OverviewFacts | None = None
 
     async def read_overview_facts(
@@ -250,6 +254,21 @@ class _RepositorySpy:
     ) -> StrategyTicketPageFacts:
         self.strategy_ticket_queries.append(query)
         return StrategyTicketPageFacts(items=(), requested_limit=query.limit)
+
+    async def read_instrument_center(
+        self,
+        query: InstrumentCenterQuery,
+    ) -> InstrumentCenterPage:
+        self.instrument_queries.append(query)
+        return InstrumentCenterPage(
+            items=(),
+            universes=(),
+            candidate_count=0,
+            reference_count=0,
+            unavailable_count=0,
+            regular_session_count=0,
+            source_watermark_ms=None,
+        )
 
 
 @pytest.fixture
@@ -334,6 +353,33 @@ async def test_overview_uses_one_read_transaction_and_envelope(
     assert response.json()["snapshot_id"].startswith("snap:")
     assert response.json()["generated_at"] == "2027-01-15T08:00:00.000Z"
     assert response.json()["source_watermark"] == "2027-01-15T08:00:00.000Z"
+    engine = cast(_ReadOnlyEngine, owner_console_app.state.owner_console_engine)
+    assert engine.transaction_count == 1
+
+
+async def test_instrument_center_is_bounded_and_uses_one_read_snapshot(
+    owner_console_client: AsyncClient,
+    owner_console_app: FastAPI,
+    repository_spy: _RepositorySpy,
+) -> None:
+    response = await owner_console_client.get(
+        "/api/owner/v1/instruments",
+        params={
+            "product_family": "tradfi_equity_perpetual",
+            "session_state": "regular",
+            "limit": 20,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["freshness"] == "unavailable"
+    assert repository_spy.instrument_queries == [
+        InstrumentCenterQuery(
+            product_family="tradfi_equity_perpetual",
+            session_state="regular",
+            limit=20,
+        )
+    ]
     engine = cast(_ReadOnlyEngine, owner_console_app.state.owner_console_engine)
     assert engine.transaction_count == 1
 
@@ -605,6 +651,10 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "/api/owner/v1/controls/exposure/flatten-all",
         "/api/owner/v1/control-operations/{authorization_id}",
         "/api/owner/v1/control-events",
+        "/api/owner/v1/instruments",
+        "/api/owner/v1/instruments/refresh",
+        "/api/owner/v1/instruments/universes/preview",
+        "/api/owner/v1/instruments/universes/apply",
     }
     assert not any(
         method in path_item

@@ -15,6 +15,7 @@ from src.trading_kernel.application.owner_console.causality import (
     build_trade_causality,
 )
 from src.trading_kernel.application.owner_console.models import (
+    InstrumentCenterQuery,
     ReviewListQuery,
     SignalListQuery,
     TradeListQuery,
@@ -285,6 +286,37 @@ async def test_owner_read_role_cannot_use_public_object_creation_capabilities(
             )
     finally:
         await connection.close()
+
+
+async def test_instrument_center_reads_seeded_tradfi_product_current(
+    owner_read_dsn: str,
+) -> None:
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            page = await PostgresOwnerReadRepository(
+                connection
+            ).read_instrument_center(
+                InstrumentCenterQuery(
+                    product_family="tradfi_equity_perpetual",
+                )
+            )
+
+        assert len(page.items) == 10
+        assert page.candidate_count == 8
+        assert page.reference_count == 2
+        assert page.unavailable_count == 10
+        assert page.regular_session_count == 0
+        assert page.source_watermark_ms is not None
+        assert {item.venue_symbol for item in page.items} >= {
+            "AAPLUSDT",
+            "GOOGLUSDT",
+            "QQQUSDT",
+            "SPYUSDT",
+        }
+        assert page.universes == ()
+    finally:
+        await engine.dispose()
 
 
 async def test_causality_nonexistent_ticket_returns_none_with_one_exact_read(

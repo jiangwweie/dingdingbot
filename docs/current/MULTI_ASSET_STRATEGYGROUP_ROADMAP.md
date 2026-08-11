@@ -30,6 +30,8 @@ last_verified: 2026-08-11
 7. 在多资产开发前插入 **M0.5：Deployment Simplification**。日常发布按
    静态前端、Owner API、同 Schema Kernel 和 Schema/Authority Upgrade 分级，
    Controlled Flatten 不再作为普通部署的默认步骤。
+8. Owner 已于 **2026-08-11** 采纳 M1，并授权本地实施 M2–M4；本授权不包含
+   生产部署、真实 TradFi ENTRY、资本增加或加密 `SOR-001` 恢复。
 
 ## Authority Boundary
 
@@ -109,6 +111,19 @@ Ticket、收益和 Review 必须独立统计。LONG 与 SHORT 可共享初始候
 | **M5：Observation/Shadow** | 获得产品微观结构和策略路径证据 | Spread、Depth、Slippage、Opening Range、TP1、MAE、失败退出、Session 分布 | 完成约定市场日窗口并形成独立的继续、修改或停止结论 |
 | **M6：小规模实盘闭环** | 完成受控真实资金自然 Ticket | 独立 Owner Policy、ENTRY 准入、保护、退出、结算、Review | 自然 Ticket 完整闭环，交易所与 PostgreSQL 无残留或未解决 Incident |
 | **M7：第二策略族** | 评估当前内核上的 `RSRVCB-001` | 按当前 Schema/Policy 重写可复用领域模块 | 仅在美股产品底座和 SOR 闭环稳定后进入实施 |
+
+### TradFi Strategy Backlog
+
+本轮只实现 `SOR-US-EQ-PERP-001`。其他策略保留为明确待办，不直接把加密版本迁移到
+美股产品，也不与本轮 Registry、Universe 或收益统计混合。
+
+| 策略族 | 拟议独立身份 | 需要重新验证的产品语义 | 排序 |
+| --- | --- | --- | --- |
+| **MPG** | `MPG-US-EQ-PERP-001` | REGULAR 动量、跨标的排名、开盘后追价和 Session 收尾 | SOR M5 后优先评估 |
+| **BRF2** | `BRF2-US-EQ-PERP-001` | 反弹失败、指数背景、企业事件和隔夜 Gap | MPG 后 |
+| **CPM** | `CPM-US-EQ-PERP-001` | Session 化回调、Stop distance、Time Stop | 暂缓 |
+| **MI** | `MI-US-EQ-PERP-001` | 12h impulse 重定义、Session 连续性和追价控制 | 暂缓 |
+| **RSRVCB** | `RSRVCB-001` | 当前 Kernel 上的全量重写与产品适配 | M7 |
 
 ## Workload Envelope
 
@@ -200,8 +215,9 @@ instrument identity。** 详细事实、Capability Matrix、候选池、Session�
 M2–M4 影响记录在
 `docs/superpowers/specs/2026-08-11-binance-usdm-tradfi-perpetual-m1-decision.md`。
 
-该记录当前为 `OWNER_RECOMMENDATION_READY / OWNER_DECISION_PENDING`。它不改变
-Registry、PostgreSQL Universe、Owner Policy、生产账户或真实 ENTRY 权限。
+该记录当前为 `OWNER_ADOPTED / M2_M4_IMPLEMENTATION_AUTHORIZED`。M1 已完成，
+M2–M4 进入本地实现；该状态不改变生产 Registry、PostgreSQL Universe、Owner Policy、
+生产账户或真实 ENTRY 权限。
 
 | 决策主题 | 初始推荐 | 本阶段不提前锁定的细节 |
 | --- | --- | --- |
@@ -209,7 +225,7 @@ Registry、PostgreSQL Universe、Owner Policy、生产账户或真实 ENTRY 权�
 | **账户** | 同一 USDⓈ-M account、独立 RuntimeProfile；暂不增加子账户 | M6 真实资本和是否需要物理隔离 |
 | **标的池** | AAPL、GOOGL、MSFT、NVDA、META、AMZN、TSLA、SNDK；QQQ/SPY 仅 reference | M4 是否使用 reference regime；M5 后是否替换成员 |
 | **Session** | 全时段 Observation；首版仅 US Regular Session 允许 ENTRY | 具体日历表和时间分类实现 |
-| **方向** | LONG、SHORT 都观察，M6 时分别批准实盘 | 两侧是否使用相同 Universe |
+| **方向** | LONG、SHORT 都观察，首期候选可相同但使用独立 Universe，M6 时分别批准实盘 | M5 后两侧成员是否分化 |
 | **资本** | M1–M5 不增加真实资本；M6 单独批准小规模边界 | 风险比例、并发容量和保证金值 |
 | **企业事件** | 数据缺失、过期或冲突时禁止新 ENTRY | 数据供应源和冻结窗口参数 |
 | **产品异常** | 阻止新 ENTRY，既有 Ticket 继续保护、退出和对账 | Venue 特定错误码映射 |

@@ -72,6 +72,7 @@ from src.trading_kernel.domain.owner_control import (
     StrategyEntryControl,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.shadow_outcome import (
     ShadowOutcomeClaim,
@@ -1124,6 +1125,11 @@ class SignalRepository(Protocol):
         exchange_instrument_id: str,
     ) -> InstrumentSnapshot | None: ...
 
+    async def get_product_session(
+        self,
+        exchange_instrument_id: str,
+    ) -> ProductSessionSnapshot | None: ...
+
     async def get_instrument_rules(
         self,
         venue_id: str,
@@ -1217,6 +1223,8 @@ class StrategyRegistryRepository(Protocol):
         *,
         registry_semantic_hash: str,
         seeded_at_ms: int,
+        include_product_compatibility: bool = True,
+        compatible_source_registry_semantic_hash: str | None = None,
     ) -> RegistrySeedResult: ...
 
     async def list_current_event_ids(self) -> tuple[str, ...]: ...

@@ -64,6 +64,16 @@ function modalTitle(item: Strategy | undefined, path: Path | undefined): string 
   return `${item.strategy_group_display_name} v${item.version} · ${pathLabel(path)}`;
 }
 
+function productFamilyLabel(value: components["schemas"]["StrategyProductEventFacts"]["product_family"]): string {
+  return value === "tradfi_equity_perpetual" ? "Equity Perp" : "Crypto Perp";
+}
+
+function entryWindowLabel(event: components["schemas"]["StrategyProductEventFacts"]): string {
+  if (event.product_family === "tradfi_equity_perpetual" && event.event_id.startsWith("SOR-US-")) return "REGULAR +30m–+150m";
+  if (event.product_family === "tradfi_equity_perpetual") return "REGULAR only";
+  return `Continuous · ${event.timeframe} close`;
+}
+
 export function StrategyPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseStrategySearchParams(searchParams), [searchParams]);
@@ -106,7 +116,7 @@ export function StrategyPage() {
   const pendingCount = data.items.reduce((total, item) => total + item.pending_natural_review_count, 0);
   const status = freshnessPresentation(envelope.freshness);
   const columns: DenseTableColumnDef<Strategy>[] = [
-    { id: "version", header: "StrategyVersion", cell: ({ row }) => <div className="grid min-w-0 gap-0.5"><strong className="truncate text-[12px]">{row.original.strategy_group_display_name} · v{row.original.version}</strong><span className="truncate text-[10px] text-[var(--color-text-secondary)]" title={row.original.strategy_version_id}>{row.original.strategy_version_id}</span></div> },
+    { id: "version", header: "StrategyVersion / Product", cell: ({ row }) => { const product = row.original.product_events[0]; const activeCount = row.original.product_events.reduce((total, event) => total + event.active_exchange_instrument_ids.length, 0); const warmingCount = row.original.product_events.reduce((total, event) => total + event.warming_exchange_instrument_ids.length, 0); return <div className="grid min-w-0 gap-0.5 py-1"><strong className="truncate text-[12px]">{row.original.strategy_group_display_name} · v{row.original.version}</strong>{product ? <><span className="truncate text-[10px] text-[var(--color-text-secondary)]">{product.venue_id ?? "Venue 未绑定"} · {productFamilyLabel(product.product_family)} · {entryWindowLabel(product)}</span><span className="truncate text-[10px] text-[var(--color-text-secondary)]" title={product.runtime_profile_id ?? undefined}>{product.runtime_profile_id ?? "Runtime 未绑定"} · Active {activeCount} / Warming {warmingCount}</span></> : <span className="truncate text-[10px] text-[var(--color-text-secondary)]" title={row.original.strategy_version_id}>产品摘要不可用 · {row.original.strategy_version_id}</span>}</div>; } },
     { id: "samples", header: "样本覆盖", cell: ({ row }) => <div className="grid gap-0.5 text-[11px]"><strong className="tabular-number">{row.original.natural_terminal_count} 自然终态</strong><span className="text-[var(--color-text-secondary)]">{row.original.ticket_count} Tickets</span></div> },
     { id: "reviews", header: "Review", cell: ({ row }) => <div className="grid gap-0.5 text-[11px]"><strong className="tabular-number">{row.original.confirmed_natural_review_count} 已确认</strong><span className="text-[var(--color-text-secondary)]">{row.original.pending_natural_review_count} 待确认</span></div> },
     { id: "pnl", header: "自然 Net PnL", cell: ({ row }) => <Metric metric={row.original.net_pnl} sign /> },

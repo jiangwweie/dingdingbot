@@ -127,6 +127,7 @@ def _build_version_summary(facts: StrategyVersionFacts) -> StrategyVersionSummar
         net_pnl=net_pnl,
         net_r=net_r,
         evidence=evidence,
+        product_events=facts.product_events,
     )
 
 

@@ -80,10 +80,10 @@ def test_kernel_has_no_legacy_or_compatibility_module_surface() -> None:
 
 def test_flat_upgrade_keeps_historical_preservation_and_current_0004_source() -> None:
     assert COMPATIBLE_SOURCE_SCHEMA_REVISION == (
-        "0003_portfolio_admission_observability"
+        "0004_owner_control_plane"
     )
     assert COMPATIBLE_SOURCE_REVISION == "0002_sor_v3_strategy_group_capacity"
-    assert SCHEMA_REVISION == "0004_owner_control_plane"
+    assert SCHEMA_REVISION == "0005_tradfi_instrument_center"
 
 
 def test_retired_0001_source_is_not_a_regular_deployment_compatibility_path() -> None:

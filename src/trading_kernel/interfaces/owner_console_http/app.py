@@ -14,6 +14,9 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import TimeoutError as SqlAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from src.trading_kernel.application.install_strategy_universe import (
+    UniverseControlConflict,
+)
 from src.trading_kernel.application.owner_console.causality import ContradictoryFacts
 from src.trading_kernel.application.owner_console.programmatic_review import (
     ProgrammaticReviewContradiction,
@@ -43,6 +46,9 @@ from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     create_owner_read_engine,
     owner_read_transaction,
 )
+from src.trading_kernel.infrastructure.pg_universe_repository import (
+    UniverseInstallConflict,
+)
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
@@ -69,6 +75,9 @@ from src.trading_kernel.interfaces.owner_console_http.routes.auth import (
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.controls import (
     router as controls_router,
+)
+from src.trading_kernel.interfaces.owner_console_http.routes.instruments import (
+    router as instruments_router,
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.market import (
     router as market_router,
@@ -159,6 +168,7 @@ def create_owner_console_app(
     app.include_router(strategies_router)
     app.include_router(review_router)
     app.include_router(market_router)
+    app.include_router(instruments_router)
     _register_error_handlers(app)
 
     @app.middleware("http")
@@ -285,6 +295,8 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(OwnerControlConflict, _handle_control_conflict)
     app.add_exception_handler(OwnerControlBlocked, _handle_control_blocked)
     app.add_exception_handler(OwnerControlUnavailable, _handle_control_unavailable)
+    app.add_exception_handler(UniverseControlConflict, _handle_control_conflict)
+    app.add_exception_handler(UniverseInstallConflict, _handle_control_blocked)
 
 
 async def _handle_control_conflict(_: Request, error: Exception) -> JSONResponse:

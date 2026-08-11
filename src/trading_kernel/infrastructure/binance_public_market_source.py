@@ -14,6 +14,10 @@ from src.trading_kernel.domain.instrument_identity import (
     to_ccxt_symbol,
 )
 from src.trading_kernel.domain.market import ClosedCandle, Timeframe
+from src.trading_kernel.domain.product import ProductSessionSnapshot
+from src.trading_kernel.infrastructure.binance_product_snapshot import (
+    parse_binance_product_snapshots,
+)
 
 
 class _CcxtPublicExchange(Protocol):
@@ -26,6 +30,14 @@ class _CcxtPublicExchange(Protocol):
     ) -> object: ...
 
     def close(self) -> object: ...
+
+    def fapiPublicGetExchangeInfo(self, params: object = None) -> object: ...
+
+    def fapiPublicGetTradingSchedule(self, params: object = None) -> object: ...
+
+    def fapiPublicGetPremiumIndex(self, params: object = None) -> object: ...
+
+    def fapiPublicGetDepth(self, params: object = None) -> object: ...
 
 
 _TIMEFRAME_MS: Mapping[Timeframe, int] = {
@@ -90,6 +102,47 @@ class CcxtBinancePublicMarketSource:
         if inspect.isawaitable(response):
             await response
 
+    async def fetch_product_sessions(
+        self,
+        exchange_instrument_ids: tuple[str, ...],
+        *,
+        observed_at_ms: int,
+    ) -> tuple[ProductSessionSnapshot, ...]:
+        if not 1 <= len(exchange_instrument_ids) <= 10:
+            raise ValueError("product refresh requires between one and ten instruments")
+        symbols = tuple(
+            parse_binance_usdm_instrument_id(item).symbol
+            for item in exchange_instrument_ids
+        )
+        exchange_info, trading_schedule, premium_index = await asyncio.gather(
+            self._raw_public(self._exchange.fapiPublicGetExchangeInfo, {}),
+            self._raw_public(self._exchange.fapiPublicGetTradingSchedule, {}),
+            self._raw_public(self._exchange.fapiPublicGetPremiumIndex, {}),
+        )
+        depth_results = await asyncio.gather(
+            *(
+                self._raw_public(
+                    self._exchange.fapiPublicGetDepth,
+                    {"symbol": symbol, "limit": 5},
+                )
+                for symbol in symbols
+            ),
+            return_exceptions=True,
+        )
+        depth_by_symbol = {
+            symbol: result
+            for symbol, result in zip(symbols, depth_results, strict=True)
+            if not isinstance(result, BaseException)
+        }
+        return parse_binance_product_snapshots(
+            exchange_instrument_ids=exchange_instrument_ids,
+            exchange_info=exchange_info,
+            trading_schedule=trading_schedule,
+            premium_index=premium_index,
+            depth_by_symbol=depth_by_symbol,
+            observed_at_ms=observed_at_ms,
+        )
+
     async def _fetch(
         self,
         symbol: str,
@@ -100,6 +153,20 @@ class CcxtBinancePublicMarketSource:
         if inspect.iscoroutinefunction(operation):
             return await operation(*args)
         return await asyncio.to_thread(operation, *args)
+
+    async def _raw_public(self, operation: object, params: object) -> object:
+        if not callable(operation):
+            raise TypeError("Binance public product operation is unavailable")
+        if inspect.iscoroutinefunction(operation):
+            return await asyncio.wait_for(
+                operation(params),
+                timeout=self._timeout_seconds,
+            )
+        response = await asyncio.wait_for(
+            asyncio.to_thread(operation, params),
+            timeout=self._timeout_seconds,
+        )
+        return await response if inspect.isawaitable(response) else response
 
 
 def _parse_row(row: object, duration_ms: int) -> ClosedCandle:

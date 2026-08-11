@@ -1,4 +1,4 @@
-"""Canonical contracts for the six Owner-accepted strategy Events."""
+"""Canonical contracts for the Owner-accepted strategy Events."""
 
 from __future__ import annotations
 
@@ -36,6 +36,7 @@ class RegistrySeedResult(BaseModel):
     inserted_strategy_group_count: int = 0
     inserted_strategy_version_count: int = 0
     inserted_event_count: int = 0
+    inserted_product_compatibility_count: int = 0
     inserted_exit_policy_count: int = 0
     inserted_fact_definition_count: int = 0
     inserted_event_fact_count: int = 0
@@ -46,6 +47,7 @@ class RegistrySeedResult(BaseModel):
             self.inserted_strategy_group_count
             + self.inserted_strategy_version_count
             + self.inserted_event_count
+            + self.inserted_product_compatibility_count
             + self.inserted_exit_policy_count
             + self.inserted_fact_definition_count
             + self.inserted_event_fact_count
@@ -246,7 +248,7 @@ class RegisteredStrategyContract(BaseModel):
         return int(self.strategy_version_id.rpartition(":v")[2])
 
 def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
-    """Return the exact six Event contracts recovered from committed runtime code."""
+    """Return existing Crypto contracts plus the independent TradFi SOR Events."""
 
     return (
         _contract(
@@ -363,6 +365,52 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
             shadow_horizon_bars=24,
             semantic_version=3,
             exit_policy_variant="portfolio-admission-v1",
+        ),
+        _contract(
+            strategy_group_id="SOR-US-EQ-PERP-001",
+            event_id="SOR-US-LONG-15M",
+            position_side="long",
+            timeframe="15m",
+            facts=(
+                ("regular_session_confirmed_us_v1", "condition"),
+                ("opening_range_defined_us_v1", "condition"),
+                ("breakout_edge_crossed_us_v1", "condition"),
+                ("opening_range_high_reference_us_v1", "lifecycle_reference"),
+                ("initial_stop_reference_us_v1", "protection_reference"),
+                ("regular_session_open_ms_us_v1", "identity_reference"),
+                ("session_exit_deadline_ms_us_v1", "lifecycle_reference"),
+            ),
+            protection_reference_fact="initial_stop_reference_us_v1",
+            pre_tp1_reclaim_reference_fact="opening_range_high_reference_us_v1",
+            exposure_session_end_reference_fact="session_exit_deadline_ms_us_v1",
+            episode_policy="session_reference",
+            exposure_family="opening_range",
+            shadow_horizon_bars=8,
+            semantic_version=1,
+            exit_policy_variant="us-regular-or-v1",
+        ),
+        _contract(
+            strategy_group_id="SOR-US-EQ-PERP-001",
+            event_id="SOR-US-SHORT-15M",
+            position_side="short",
+            timeframe="15m",
+            facts=(
+                ("regular_session_confirmed_us_v1", "condition"),
+                ("opening_range_defined_us_v1", "condition"),
+                ("breakdown_edge_crossed_us_v1", "condition"),
+                ("opening_range_low_reference_us_v1", "lifecycle_reference"),
+                ("initial_stop_reference_us_v1", "protection_reference"),
+                ("regular_session_open_ms_us_v1", "identity_reference"),
+                ("session_exit_deadline_ms_us_v1", "lifecycle_reference"),
+            ),
+            protection_reference_fact="initial_stop_reference_us_v1",
+            pre_tp1_reclaim_reference_fact="opening_range_low_reference_us_v1",
+            exposure_session_end_reference_fact="session_exit_deadline_ms_us_v1",
+            episode_policy="session_reference",
+            exposure_family="opening_range",
+            shadow_horizon_bars=8,
+            semantic_version=1,
+            exit_policy_variant="us-regular-or-v1",
         ),
     )
 

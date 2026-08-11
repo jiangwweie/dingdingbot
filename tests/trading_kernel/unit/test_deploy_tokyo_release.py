@@ -25,8 +25,8 @@ CURRENT_COMMIT = "b" * 40
 CURRENT_RELEASE = "/opt/brc/releases/brc-trading-kernel-bbbbbbbbbbbb"
 TARGET_RELEASE = "/opt/brc/releases/brc-trading-kernel-aaaaaaaaaaaa"
 RECOVERY_RELEASE = "/opt/brc/releases/brc-trading-kernel-cccccccccccc"
-SOURCE_SCHEMA_REVISION = "0003_portfolio_admission_observability"
-TARGET_SCHEMA_REVISION = "0004_owner_control_plane"
+SOURCE_SCHEMA_REVISION = "0004_owner_control_plane"
+TARGET_SCHEMA_REVISION = "0005_tradfi_instrument_center"
 SEED_IDENTITY = "sha256:" + "c" * 64
 PRESERVATION_DIGEST = "sha256:" + "d" * 64
 REGISTRY_DIGEST = "sha256:" + "f" * 64
@@ -67,7 +67,7 @@ def test_regular_plan_rejects_a_schema_change() -> None:
         )
 
 
-def test_dep_002_compatible_upgrade_accepts_only_exact_0003_to_0004() -> None:
+def test_dep_002_compatible_upgrade_accepts_only_exact_0004_to_0005() -> None:
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
@@ -81,7 +81,7 @@ def test_dep_002_compatible_upgrade_accepts_only_exact_0003_to_0004() -> None:
     assert plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
     assert plan.source_schema_revision == SOURCE_SCHEMA_REVISION
 
-    with pytest.raises(ValueError, match="exact 0003 source"):
+    with pytest.raises(ValueError, match="exact 0004 source"):
         DeploymentPlan(
             target_commit=TARGET_COMMIT,
             target_release=TARGET_RELEASE,
@@ -333,12 +333,12 @@ def test_mig_008_preservation_mismatch_keeps_entry_fenced() -> None:
     assert not any(call == ("start_services", (ENTRY_SERVICE,)) for call in backend.calls)
 
 
-def test_migration_unknown_outcome_confirmed_0002_keeps_all_workers_stopped() -> None:
+def test_migration_unknown_outcome_confirmed_source_keeps_all_workers_stopped() -> None:
     """Catches treating a failed SSH result as proof that migration can be resent."""
 
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
-        fail_at="migrate_schema_unknown_0002",
+        fail_at="migrate_schema_unknown_source",
     )
 
     with pytest.raises(RuntimeError, match="simulated migration unknown outcome"):
@@ -362,12 +362,12 @@ def test_migration_unknown_outcome_confirmed_0002_keeps_all_workers_stopped() ->
     assert backend.entry_is_inactive_disabled_and_fenced()
 
 
-def test_migration_unknown_outcome_confirmed_0003_enters_target_fix_forward() -> None:
-    """Catches leaving a committed 0003 stopped after an SSH outcome is unknown."""
+def test_migration_unknown_outcome_confirmed_target_enters_fix_forward() -> None:
+    """Catches leaving a committed target stopped after an SSH outcome is unknown."""
 
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
-        fail_at="migrate_schema_unknown_0003",
+        fail_at="migrate_schema_unknown_target",
     )
 
     with pytest.raises(RuntimeError, match="simulated migration unknown outcome"):
@@ -423,7 +423,7 @@ def test_migration_unknown_outcome_remains_primary_when_target_recovery_activati
 
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
-        fail_at="migrate_schema_unknown_0003_recovery_activation_failure",
+        fail_at="migrate_schema_unknown_target_recovery_activation_failure",
     )
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -446,7 +446,7 @@ def test_migration_unknown_outcome_remains_primary_when_target_recovery_start_fa
 
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
-        fail_at="migrate_schema_unknown_0003_recovery_start_failure",
+        fail_at="migrate_schema_unknown_target_recovery_start_failure",
     )
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -556,7 +556,7 @@ def test_post_activation_bootstrap_failure_restores_target_safety_workers() -> N
 
 
 def test_post_migration_preservation_failure_enters_fenced_target_fix_forward() -> None:
-    """Catches leaving 0003 without target safety or restarting 0002 workers."""
+    """Catches leaving the target without safety or restarting source workers."""
 
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
@@ -649,7 +649,7 @@ def test_compatible_source_authority_drift_blocks_before_entry_fence(
     source_seed_marker: str,
     expected_message: str,
 ) -> None:
-    """Catches mutating services before exact certified 0002 authority is proven."""
+    """Catches mutating services before exact certified source authority is proven."""
 
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
@@ -1704,19 +1704,19 @@ class FakeDeploymentBackend:
                 target_schema_revision,
             )
         )
-        if self.fail_at == "migrate_schema_unknown_0002":
+        if self.fail_at == "migrate_schema_unknown_source":
             raise RuntimeError("simulated migration unknown outcome")
-        if self.fail_at == "migrate_schema_unknown_0003":
+        if self.fail_at == "migrate_schema_unknown_target":
             self.source_schema_revision = target_schema_revision
             raise RuntimeError("simulated migration unknown outcome")
         if self.fail_at in {
-            "migrate_schema_unknown_0003_recovery_activation_failure",
-            "migrate_schema_unknown_0003_recovery_start_failure",
+            "migrate_schema_unknown_target_recovery_activation_failure",
+            "migrate_schema_unknown_target_recovery_start_failure",
         }:
             self.source_schema_revision = target_schema_revision
             raise self.migration_unknown_outcome_error
         if self.fail_at == "migrate_schema_unknown_revision":
-            self.source_schema_revision = "0004_unknown"
+            self.source_schema_revision = "0005_unknown"
             raise RuntimeError("simulated migration unknown outcome")
         if self.fail_at == "migrate_schema_inspection_failure":
             raise RuntimeError("simulated migration unknown outcome")
@@ -1829,7 +1829,7 @@ class FakeDeploymentBackend:
             raise RuntimeError("simulated activation failure")
         if (
             self.fail_at
-            == "migrate_schema_unknown_0003_recovery_activation_failure"
+            == "migrate_schema_unknown_target_recovery_activation_failure"
         ):
             raise self.target_recovery_error
         self.current_release = release
@@ -1839,7 +1839,7 @@ class FakeDeploymentBackend:
     def start_services(self, services: tuple[str, ...]) -> None:
         self.calls.append(("start_services", services))
         if (
-            self.fail_at == "migrate_schema_unknown_0003_recovery_start_failure"
+            self.fail_at == "migrate_schema_unknown_target_recovery_start_failure"
             and services == SAFETY_SERVICES
         ):
             raise self.target_recovery_error

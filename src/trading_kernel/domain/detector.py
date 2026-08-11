@@ -98,6 +98,7 @@ def detector_for(event_spec_id: str) -> StrategyDetector:
     from src.trading_kernel.domain.detectors.mi import MILongDetector
     from src.trading_kernel.domain.detectors.mpg import MPGLongDetector
     from src.trading_kernel.domain.detectors.sor import SORDetector
+    from src.trading_kernel.domain.detectors.us_equity_sor import USEquitySORDetector
 
     if contract.event_id == "CPM-LONG":
         return CPMLongDetector(contract)
@@ -107,6 +108,8 @@ def detector_for(event_spec_id: str) -> StrategyDetector:
         return MILongDetector(contract)
     if contract.event_id in {"SOR-LONG", "SOR-SHORT"}:
         return SORDetector(contract)
+    if contract.event_id in {"SOR-US-LONG-15M", "SOR-US-SHORT-15M"}:
+        return USEquitySORDetector(contract)
     if contract.event_id == "BRF2-SHORT":
         return BRF2ShortDetector(contract)
     raise KeyError(f"registered Event has no detector: {event_spec_id}")

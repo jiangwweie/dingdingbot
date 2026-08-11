@@ -194,7 +194,11 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
 
     async with runtime_seed_engine.connect() as connection:
         policy = (
-            await connection.execute(sa.select(owner_policy_current))
+            await connection.execute(
+                sa.select(owner_policy_current).where(
+                    owner_policy_current.c.owner_policy_id == "policy-main"
+                )
+            )
         ).mappings().one()
         assert policy["policy_version"] == 1
         assert policy["enabled"] is True
@@ -234,7 +238,19 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
 
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(runtime_profiles)
-        ) == 1
+        ) == 2
+        tradfi_policy = (
+            await connection.execute(
+                sa.select(owner_policy_current).where(
+                    owner_policy_current.c.owner_policy_id
+                    == "policy-tradfi-observe"
+                )
+            )
+        ).mappings().one()
+        assert tradfi_policy["new_entry_submit_enabled"] is False
+        assert tradfi_policy["scope"]["runtime_profile_id"] == (
+            "tradfi-equity-observe-v1"
+        )
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(
                 sa.table("brc_runtime_scopes_current")
@@ -320,7 +336,11 @@ async def test_deploy_identity_refreshes_commit_without_resetting_policy(
     assert first.runtime_seed_semantic_hash == second.runtime_seed_semantic_hash
     async with runtime_seed_engine.connect() as connection:
         policy = (
-            await connection.execute(sa.select(owner_policy_current))
+            await connection.execute(
+                sa.select(owner_policy_current).where(
+                    owner_policy_current.c.owner_policy_id == "policy-main"
+                )
+            )
         ).mappings().one()
         assert policy["policy_version"] == 2
         assert policy["new_entry_submit_enabled"] is True
@@ -606,13 +626,17 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
     assert result.schema_revision == CURRENT_SCHEMA_REVISION
     async with runtime_seed_engine.connect() as connection:
         current = (
-            await connection.execute(sa.select(owner_policy_current))
+            await connection.execute(
+                sa.select(owner_policy_current).where(
+                    owner_policy_current.c.owner_policy_id == "policy-main"
+                )
+            )
         ).mappings().one()
         events = (
             await connection.execute(
-                sa.select(owner_policy_events.c.policy_version).order_by(
-                    owner_policy_events.c.policy_version
-                )
+                sa.select(owner_policy_events.c.policy_version)
+                .where(owner_policy_events.c.owner_policy_id == "policy-main")
+                .order_by(owner_policy_events.c.policy_version)
             )
         ).scalars().all()
         metadata_rows = dict(

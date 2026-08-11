@@ -7,6 +7,7 @@ import { SignalsRoute } from "../pages/SignalsRoute";
 import { TradesRoute } from "../pages/TradesRoute";
 import { ControlsRoute } from "../pages/ControlsRoute";
 import { StrategiesRoute } from "../pages/StrategiesRoute";
+import { InstrumentsRoute } from "../pages/InstrumentsRoute";
 import { App } from "./App";
 
 const TradeCausalityRoute = lazy(() => import("../pages/TradeCausalityRoute").then((module) => ({ default: module.TradeCausalityRoute })));
@@ -55,6 +56,10 @@ export const router = createBrowserRouter([
       {
         path: "/strategies",
         element: <StrategiesRoute />,
+      },
+      {
+        path: "/instruments",
+        element: <InstrumentsRoute />,
       },
       {
         path: "*",

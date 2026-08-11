@@ -21,6 +21,11 @@ from src.trading_kernel.application.owner_console.causality import (
 from src.trading_kernel.application.owner_console.models import (
     EvidenceRef,
     Freshness,
+    InstrumentCenterItem,
+    InstrumentCenterPage,
+    InstrumentCenterQuery,
+    InstrumentUniverseMembership,
+    InstrumentUniverseView,
     MoneyMetric,
     OverviewEvidenceGap,
     OverviewFacts,
@@ -35,6 +40,7 @@ from src.trading_kernel.application.owner_console.models import (
     SignalListQuery,
     SignalPageFacts,
     StrategyPageFacts,
+    StrategyProductEventFacts,
     StrategySummaryQuery,
     StrategyTicketFacts,
     StrategyTicketPageFacts,
@@ -71,7 +77,12 @@ from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     admission_decisions,
     capacity_claims,
+    event_product_compatibility,
+    event_specs,
     exchange_commands,
+    instrument_product_current,
+    instrument_product_profiles,
+    instruments,
     monitor_current,
     owner_policy_current,
     runtime_incidents,
@@ -81,6 +92,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     signal_events,
     signal_fact_snapshots,
     strategy_groups,
+    strategy_universe_members,
+    strategy_universe_versions,
     strategy_versions,
     trade_aggregates,
     trade_events,
@@ -138,6 +151,582 @@ class PostgresOwnerReadRepository:
 
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
+
+    async def read_instrument_center(
+        self,
+        query: InstrumentCenterQuery,
+    ) -> InstrumentCenterPage:
+        conditions: list[sa.ColumnElement[bool]] = []
+        if query.product_family is not None:
+            conditions.append(
+                instrument_product_profiles.c.product_family
+                == query.product_family
+            )
+        if query.session_state is not None:
+            conditions.append(
+                instrument_product_current.c.session_state == query.session_state
+            )
+        rows = (
+            await self._connection.execute(
+                sa.select(
+                    instrument_product_profiles,
+                    instruments.c.venue_symbol,
+                    instrument_product_current.c.product_status,
+                    instrument_product_current.c.session_state,
+                    instrument_product_current.c.regular_session_open_ms,
+                    instrument_product_current.c.regular_session_close_ms,
+                    instrument_product_current.c.mark_price,
+                    instrument_product_current.c.index_price,
+                    instrument_product_current.c.funding_rate,
+                    instrument_product_current.c.best_bid,
+                    instrument_product_current.c.best_ask,
+                    instrument_product_current.c.corporate_event_status,
+                    instrument_product_current.c.observed_at_ms,
+                    instrument_product_current.c.valid_until_ms,
+                    instrument_product_current.c.source_ref,
+                )
+                .outerjoin(
+                    instruments,
+                    instruments.c.exchange_instrument_id
+                    == instrument_product_profiles.c.exchange_instrument_id,
+                )
+                .outerjoin(
+                    instrument_product_current,
+                    instrument_product_current.c.exchange_instrument_id
+                    == instrument_product_profiles.c.exchange_instrument_id,
+                )
+                .where(*conditions)
+                .order_by(
+                    instrument_product_profiles.c.product_family,
+                    instrument_product_profiles.c.exchange_instrument_id,
+                )
+                .limit(query.limit)
+            )
+        ).mappings().all()
+        instrument_ids = tuple(
+            str(row["exchange_instrument_id"]) for row in rows
+        )
+        memberships = await self._instrument_memberships(instrument_ids)
+        universes = await self._instrument_universes(
+            product_family=query.product_family,
+        )
+        items = tuple(
+            InstrumentCenterItem.model_validate(
+                {
+                    "exchange_instrument_id": str(row["exchange_instrument_id"]),
+                    "venue_symbol": (
+                        str(row["venue_symbol"])
+                        if row["venue_symbol"] is not None
+                        else str(row["exchange_instrument_id"]).split(":")[1]
+                    ),
+                    "product_family": str(row["product_family"]),
+                    "asset_class": str(row["asset_class"]),
+                    "contract_type": str(row["contract_type"]),
+                    "underlying_type": str(row["underlying_type"]),
+                    "margin_asset": str(row["margin_asset"]),
+                    "entry_session_policy": str(row["entry_session_policy"]),
+                    "profile_status": str(row["status"]),
+                    "product_status": (
+                        None
+                        if row["product_status"] is None
+                        else str(row["product_status"])
+                    ),
+                    "session_state": (
+                        None
+                        if row["session_state"] is None
+                        else str(row["session_state"])
+                    ),
+                    "regular_session_open_ms": (
+                        None
+                        if row["regular_session_open_ms"] is None
+                        else int(row["regular_session_open_ms"])
+                    ),
+                    "regular_session_close_ms": (
+                        None
+                        if row["regular_session_close_ms"] is None
+                        else int(row["regular_session_close_ms"])
+                    ),
+                    "mark_price": _optional_decimal_text(row["mark_price"]),
+                    "index_price": _optional_decimal_text(row["index_price"]),
+                    "funding_rate": _optional_decimal_text(row["funding_rate"]),
+                    "best_bid": _optional_decimal_text(row["best_bid"]),
+                    "best_ask": _optional_decimal_text(row["best_ask"]),
+                    "corporate_event_status": (
+                        None
+                        if row["corporate_event_status"] is None
+                        else str(row["corporate_event_status"])
+                    ),
+                    "observed_at_ms": (
+                        None
+                        if row["observed_at_ms"] is None
+                        else int(row["observed_at_ms"])
+                    ),
+                    "valid_until_ms": (
+                        None
+                        if row["valid_until_ms"] is None
+                        else int(row["valid_until_ms"])
+                    ),
+                    "source_ref": (
+                        None
+                        if row["source_ref"] is None
+                        else str(row["source_ref"])
+                    ),
+                    "memberships": memberships.get(
+                        str(row["exchange_instrument_id"]),
+                        (),
+                    ),
+                }
+            )
+            for row in rows
+        )
+        return InstrumentCenterPage(
+            items=items,
+            universes=universes,
+            candidate_count=sum(item.profile_status == "candidate" for item in items),
+            reference_count=sum(item.profile_status == "reference" for item in items),
+            unavailable_count=sum(
+                item.product_status in {None, "temporarily_unavailable"}
+                for item in items
+            ),
+            regular_session_count=sum(
+                item.session_state == "regular" for item in items
+            ),
+            source_watermark_ms=max(
+                (item.observed_at_ms for item in items if item.observed_at_ms is not None),
+                default=None,
+            ),
+        )
+
+    async def _instrument_memberships(
+        self,
+        instrument_ids: tuple[str, ...],
+    ) -> dict[str, tuple[InstrumentUniverseMembership, ...]]:
+        if not instrument_ids:
+            return {}
+        rows = (
+            await self._connection.execute(
+                sa.select(
+                    strategy_universe_members.c.exchange_instrument_id,
+                    strategy_universe_versions.c.universe_version_id,
+                    strategy_universe_versions.c.lifecycle_state,
+                    strategy_groups.c.strategy_group_id,
+                    strategy_groups.c.display_name,
+                    strategy_versions.c.strategy_version_id,
+                    event_specs.c.event_spec_id,
+                    event_specs.c.event_id,
+                    event_specs.c.position_side,
+                    runtime_scopes_current.c.runtime_profile_id,
+                    runtime_scopes_current.c.owner_policy_id,
+                )
+                .join(
+                    strategy_universe_versions,
+                    strategy_universe_versions.c.universe_version_id
+                    == strategy_universe_members.c.universe_version_id,
+                )
+                .join(
+                    event_specs,
+                    event_specs.c.event_spec_id
+                    == strategy_universe_versions.c.event_spec_id,
+                )
+                .join(
+                    strategy_versions,
+                    strategy_versions.c.strategy_version_id
+                    == event_specs.c.strategy_version_id,
+                )
+                .join(
+                    strategy_groups,
+                    strategy_groups.c.strategy_group_id
+                    == strategy_versions.c.strategy_group_id,
+                )
+                .join(
+                    runtime_scopes_current,
+                    sa.and_(
+                        runtime_scopes_current.c.universe_version_id
+                        == strategy_universe_versions.c.universe_version_id,
+                        runtime_scopes_current.c.exchange_instrument_id
+                        == strategy_universe_members.c.exchange_instrument_id,
+                    ),
+                )
+                .where(
+                    strategy_universe_members.c.exchange_instrument_id.in_(
+                        instrument_ids
+                    ),
+                    strategy_universe_versions.c.lifecycle_state.in_(
+                        ("warming", "active")
+                    ),
+                )
+                .order_by(
+                    strategy_universe_members.c.exchange_instrument_id,
+                    event_specs.c.event_spec_id,
+                )
+                .limit(1_001)
+            )
+        ).mappings().all()
+        if len(rows) > 1_000:
+            raise ContradictoryFacts("Instrument memberships exceed hard maximum")
+        grouped: dict[str, list[InstrumentUniverseMembership]] = {}
+        for row in rows:
+            grouped.setdefault(str(row["exchange_instrument_id"]), []).append(
+                InstrumentUniverseMembership(
+                    strategy_group_id=str(row["strategy_group_id"]),
+                    strategy_group_display_name=str(row["display_name"]),
+                    strategy_version_id=str(row["strategy_version_id"]),
+                    event_spec_id=str(row["event_spec_id"]),
+                    event_id=str(row["event_id"]),
+                    position_side=cast(
+                        Literal["long", "short"], str(row["position_side"])
+                    ),
+                    runtime_profile_id=str(row["runtime_profile_id"]),
+                    owner_policy_id=str(row["owner_policy_id"]),
+                    universe_version_id=str(row["universe_version_id"]),
+                    lifecycle_state=cast(
+                        Literal["warming", "active"],
+                        str(row["lifecycle_state"]),
+                    ),
+                )
+            )
+        return {key: tuple(value) for key, value in grouped.items()}
+
+    async def _instrument_universes(
+        self,
+        *,
+        product_family: Literal[
+            "crypto_perpetual",
+            "tradfi_equity_perpetual",
+        ]
+        | None,
+    ) -> tuple[InstrumentUniverseView, ...]:
+        event_conditions: list[sa.ColumnElement[bool]] = [
+            strategy_groups.c.status == "active",
+            strategy_versions.c.status == "active",
+            event_specs.c.status == "active",
+        ]
+        if product_family is not None:
+            event_conditions.append(
+                event_product_compatibility.c.product_family == product_family
+            )
+        event_rows = (
+            await self._connection.execute(
+                sa.select(
+                    strategy_groups.c.strategy_group_id,
+                    strategy_groups.c.display_name,
+                    strategy_versions.c.strategy_version_id,
+                    event_specs.c.event_spec_id,
+                    event_specs.c.event_id,
+                    event_specs.c.position_side,
+                    event_product_compatibility.c.product_family,
+                )
+                .join(
+                    strategy_versions,
+                    strategy_versions.c.strategy_version_id
+                    == strategy_groups.c.active_version_id,
+                )
+                .join(
+                    event_specs,
+                    event_specs.c.strategy_version_id
+                    == strategy_versions.c.strategy_version_id,
+                )
+                .join(
+                    event_product_compatibility,
+                    event_product_compatibility.c.event_spec_id
+                    == event_specs.c.event_spec_id,
+                )
+                .where(*event_conditions)
+                .order_by(event_specs.c.event_spec_id)
+                .limit(101)
+            )
+        ).mappings().all()
+        if len(event_rows) > 100:
+            raise ContradictoryFacts("Instrument Event authority exceeds hard maximum")
+        policy_rows = (
+            await self._connection.execute(
+                sa.select(
+                    owner_policy_current.c.owner_policy_id,
+                    owner_policy_current.c.scope,
+                )
+                .where(owner_policy_current.c.enabled.is_(True))
+                .order_by(owner_policy_current.c.priority_rank)
+                .limit(101)
+            )
+        ).mappings().all()
+        authority: dict[str, tuple[str, str]] = {}
+        for row in policy_rows:
+            scope = row["scope"]
+            if not isinstance(scope, dict):
+                continue
+            runtime_profile_id = scope.get("runtime_profile_id")
+            allowed = scope.get("allowed_event_spec_ids")
+            if not isinstance(runtime_profile_id, str) or not isinstance(allowed, list):
+                continue
+            for event_spec_id in allowed:
+                if isinstance(event_spec_id, str):
+                    authority[event_spec_id] = (
+                        runtime_profile_id,
+                        str(row["owner_policy_id"]),
+                    )
+        universe_rows = (
+            await self._connection.execute(
+                sa.select(
+                    strategy_universe_versions.c.event_spec_id,
+                    strategy_universe_versions.c.universe_version_id,
+                    strategy_universe_versions.c.lifecycle_state,
+                    strategy_universe_members.c.exchange_instrument_id,
+                )
+                .join(
+                    strategy_universe_members,
+                    strategy_universe_members.c.universe_version_id
+                    == strategy_universe_versions.c.universe_version_id,
+                )
+                .where(
+                    strategy_universe_versions.c.lifecycle_state.in_(
+                        ("warming", "active")
+                    )
+                )
+                .order_by(
+                    strategy_universe_versions.c.event_spec_id,
+                    strategy_universe_versions.c.lifecycle_state,
+                    strategy_universe_members.c.exchange_instrument_id,
+                )
+                .limit(1_001)
+            )
+        ).mappings().all()
+        current_by_event: dict[str, tuple[str, str, list[str]]] = {}
+        for row in universe_rows:
+            event_spec_id = str(row["event_spec_id"])
+            current = current_by_event.get(event_spec_id)
+            identity = (
+                str(row["universe_version_id"]),
+                str(row["lifecycle_state"]),
+            )
+            if current is None:
+                current_by_event[event_spec_id] = (*identity, [str(row["exchange_instrument_id"])])
+            elif current[:2] == identity:
+                current[2].append(str(row["exchange_instrument_id"]))
+        result: list[InstrumentUniverseView] = []
+        for row in event_rows:
+            event_spec_id = str(row["event_spec_id"])
+            policy = authority.get(event_spec_id)
+            if policy is None:
+                continue
+            universe = current_by_event.get(event_spec_id)
+            result.append(
+                InstrumentUniverseView.model_validate(
+                    {
+                        "strategy_group_id": str(row["strategy_group_id"]),
+                        "strategy_group_display_name": str(row["display_name"]),
+                        "strategy_version_id": str(row["strategy_version_id"]),
+                        "event_spec_id": event_spec_id,
+                        "event_id": str(row["event_id"]),
+                        "position_side": str(row["position_side"]),
+                        "product_family": str(row["product_family"]),
+                        "runtime_profile_id": policy[0],
+                        "owner_policy_id": policy[1],
+                        "universe_version_id": (
+                            None if universe is None else universe[0]
+                        ),
+                        "lifecycle_state": (
+                            None if universe is None else universe[1]
+                        ),
+                        "exchange_instrument_ids": (
+                            () if universe is None else tuple(universe[2])
+                        ),
+                    }
+                )
+            )
+        return tuple(result)
+
+    async def _strategy_product_events(
+        self,
+        strategy_version_ids: tuple[str, ...],
+    ) -> dict[str, tuple[StrategyProductEventFacts, ...]]:
+        if not strategy_version_ids:
+            return {}
+        event_rows = (
+            await self._connection.execute(
+                sa.select(
+                    event_specs.c.strategy_version_id,
+                    event_specs.c.event_spec_id,
+                    event_specs.c.event_id,
+                    event_specs.c.position_side,
+                    event_specs.c.timeframe,
+                    event_product_compatibility.c.product_family,
+                )
+                .outerjoin(
+                    event_product_compatibility,
+                    event_product_compatibility.c.event_spec_id
+                    == event_specs.c.event_spec_id,
+                )
+                .where(
+                    event_specs.c.strategy_version_id.in_(strategy_version_ids)
+                )
+                .order_by(
+                    event_specs.c.strategy_version_id,
+                    event_specs.c.event_spec_id,
+                )
+                .limit(3_201)
+            )
+        ).mappings().all()
+        if len(event_rows) > 3_200:
+            raise ContradictoryFacts("Strategy product Events exceed hard maximum")
+        if any(row["product_family"] is None for row in event_rows):
+            raise ContradictoryFacts("Strategy Event lacks Product Compatibility")
+
+        policy_rows = (
+            await self._connection.execute(
+                sa.select(
+                    owner_policy_current.c.owner_policy_id,
+                    owner_policy_current.c.scope,
+                )
+                .where(owner_policy_current.c.enabled.is_(True))
+                .order_by(owner_policy_current.c.priority_rank)
+                .limit(101)
+            )
+        ).mappings().all()
+        authority: dict[str, tuple[str, str]] = {}
+        for row in policy_rows:
+            scope = row["scope"]
+            if not isinstance(scope, dict):
+                continue
+            runtime_profile_id = scope.get("runtime_profile_id")
+            event_spec_ids = scope.get("allowed_event_spec_ids")
+            if not isinstance(runtime_profile_id, str) or not isinstance(
+                event_spec_ids,
+                list,
+            ):
+                continue
+            for event_spec_id in event_spec_ids:
+                if not isinstance(event_spec_id, str):
+                    continue
+                if event_spec_id in authority:
+                    raise ContradictoryFacts(
+                        "Strategy Event belongs to multiple Owner Policies"
+                    )
+                authority[event_spec_id] = (
+                    runtime_profile_id,
+                    str(row["owner_policy_id"]),
+                )
+
+        profile_ids = tuple(sorted({item[0] for item in authority.values()}))
+        profile_rows = (
+            ()
+            if not profile_ids
+            else (
+                await self._connection.execute(
+                    sa.select(
+                        runtime_profiles.c.runtime_profile_id,
+                        runtime_profiles.c.venue_id,
+                    ).where(
+                        runtime_profiles.c.runtime_profile_id.in_(profile_ids)
+                    )
+                )
+            ).mappings().all()
+        )
+        venue_by_profile = {
+            str(row["runtime_profile_id"]): str(row["venue_id"])
+            for row in profile_rows
+        }
+
+        event_spec_ids = tuple(str(row["event_spec_id"]) for row in event_rows)
+        universe_rows = (
+            ()
+            if not event_spec_ids
+            else (
+                await self._connection.execute(
+                    sa.select(
+                        strategy_universe_versions.c.event_spec_id,
+                        strategy_universe_versions.c.universe_version_id,
+                        strategy_universe_versions.c.lifecycle_state,
+                        strategy_universe_members.c.exchange_instrument_id,
+                    )
+                    .join(
+                        strategy_universe_members,
+                        strategy_universe_members.c.universe_version_id
+                        == strategy_universe_versions.c.universe_version_id,
+                    )
+                    .where(
+                        strategy_universe_versions.c.event_spec_id.in_(
+                            event_spec_ids
+                        ),
+                        strategy_universe_versions.c.lifecycle_state.in_(
+                            ("active", "warming")
+                        ),
+                    )
+                    .order_by(
+                        strategy_universe_versions.c.event_spec_id,
+                        strategy_universe_versions.c.lifecycle_state,
+                        strategy_universe_members.c.exchange_instrument_id,
+                    )
+                    .limit(1_001)
+                )
+            ).mappings().all()
+        )
+        if len(universe_rows) > 1_000:
+            raise ContradictoryFacts("Strategy product Universes exceed hard maximum")
+        universes: dict[str, dict[str, tuple[str, list[str]]]] = {}
+        for row in universe_rows:
+            event_spec_id = str(row["event_spec_id"])
+            lifecycle_state = str(row["lifecycle_state"])
+            version_id = str(row["universe_version_id"])
+            by_state = universes.setdefault(event_spec_id, {})
+            current = by_state.get(lifecycle_state)
+            if current is None:
+                by_state[lifecycle_state] = (
+                    version_id,
+                    [str(row["exchange_instrument_id"])],
+                )
+            elif current[0] == version_id:
+                current[1].append(str(row["exchange_instrument_id"]))
+            else:
+                raise ContradictoryFacts(
+                    "Strategy Event has multiple current Universes"
+                )
+
+        grouped: dict[str, list[StrategyProductEventFacts]] = {}
+        for row in event_rows:
+            strategy_version_id = str(row["strategy_version_id"])
+            event_spec_id = str(row["event_spec_id"])
+            event_authority = authority.get(event_spec_id)
+            runtime_profile_id = (
+                None if event_authority is None else event_authority[0]
+            )
+            event_universes = universes.get(event_spec_id, {})
+            active = event_universes.get("active")
+            warming = event_universes.get("warming")
+            grouped.setdefault(strategy_version_id, []).append(
+                StrategyProductEventFacts.model_validate(
+                    {
+                        "event_spec_id": event_spec_id,
+                        "event_id": str(row["event_id"]),
+                        "position_side": str(row["position_side"]),
+                        "timeframe": str(row["timeframe"]),
+                        "venue_id": (
+                            None
+                            if runtime_profile_id is None
+                            else venue_by_profile.get(runtime_profile_id)
+                        ),
+                        "product_family": str(row["product_family"]),
+                        "runtime_profile_id": runtime_profile_id,
+                        "owner_policy_id": (
+                            None
+                            if event_authority is None
+                            else event_authority[1]
+                        ),
+                        "active_universe_version_id": (
+                            None if active is None else active[0]
+                        ),
+                        "active_exchange_instrument_ids": (
+                            () if active is None else tuple(active[1])
+                        ),
+                        "warming_universe_version_id": (
+                            None if warming is None else warming[0]
+                        ),
+                        "warming_exchange_instrument_ids": (
+                            () if warming is None else tuple(warming[1])
+                        ),
+                    }
+                )
+            )
+        return {key: tuple(value) for key, value in grouped.items()}
 
     async def read_overview_facts(
         self,
@@ -709,6 +1298,7 @@ class PostgresOwnerReadRepository:
                 "StrategyVersion page exceeded hard maximum 100"
             )
         version_ids = tuple(str(row["strategy_version_id"]) for row in version_rows)
+        product_events_by_version = await self._strategy_product_events(version_ids)
         ticket_rows: Sequence[RowMapping] = ()
         if version_ids:
             ticket_rows = (
@@ -758,6 +1348,10 @@ class PostgresOwnerReadRepository:
                             identity=str(row["strategy_version_id"]),
                             occurred_at_ms=int(row["version_created_at_ms"]),
                         ),
+                    ),
+                    product_events=product_events_by_version.get(
+                        str(row["strategy_version_id"]),
+                        (),
                     ),
                 )
                 for row in version_rows
@@ -2445,6 +3039,14 @@ def _exact_decimal_or_none(
     if not isinstance(value, Decimal):
         raise SignalFactsContradiction(f"{field_name} did not decode as Decimal")
     return value
+
+
+def _optional_decimal_text(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, Decimal) or not value.is_finite():
+        raise ContradictoryFacts("Instrument current price did not decode as Decimal")
+    return str(value)
 
 
 def _overview_authority_query() -> sa.Select[Any]:

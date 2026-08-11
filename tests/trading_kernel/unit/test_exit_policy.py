@@ -63,8 +63,26 @@ def test_both_sor_v3_sides_have_registered_96_bar_time_stop() -> None:
     assert all(
         policy.time_stop is None
         for event_id, policy in policies.items()
-        if event_id not in {"SOR-LONG", "SOR-SHORT"}
+        if event_id
+        not in {
+            "SOR-LONG",
+            "SOR-SHORT",
+            "SOR-US-LONG-15M",
+            "SOR-US-SHORT-15M",
+        }
     )
+
+
+def test_us_equity_sor_uses_eight_bar_pre_tp1_time_stop() -> None:
+    policies = {
+        contract.event_id: exit_policy_for(contract.event_spec_id)
+        for contract in registered_strategy_contracts()
+    }
+
+    assert policies["SOR-US-LONG-15M"].time_stop is not None
+    assert policies["SOR-US-SHORT-15M"].time_stop is not None
+    assert policies["SOR-US-LONG-15M"].time_stop.max_holding_bars == 8
+    assert policies["SOR-US-SHORT-15M"].time_stop.max_holding_bars == 8
 
 
 @pytest.mark.parametrize(

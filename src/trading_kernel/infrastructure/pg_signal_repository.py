@@ -30,6 +30,7 @@ from src.trading_kernel.application.ports import (
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
+from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -41,6 +42,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     exposure_episode_current,
     facts_current,
     instrument_certification_current,
+    instrument_product_current,
+    instrument_product_profiles,
     instrument_rules_current,
     instruments,
     owner_policy_current,
@@ -932,6 +935,34 @@ class PostgresSignalRepository:
             None
             if row is None
             else InstrumentSnapshot.model_validate(row, extra="ignore")
+        )
+
+    async def get_product_session(
+        self,
+        exchange_instrument_id: str,
+    ) -> ProductSessionSnapshot | None:
+        row = (
+            await self._connection.execute(
+                sa.select(
+                    instrument_product_current,
+                    instrument_product_profiles.c.product_family,
+                )
+                .join(
+                    instrument_product_profiles,
+                    instrument_product_profiles.c.exchange_instrument_id
+                    == instrument_product_current.c.exchange_instrument_id,
+                )
+                .where(
+                    instrument_product_current.c.exchange_instrument_id
+                    == exchange_instrument_id
+                )
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        return (
+            None
+            if row is None
+            else ProductSessionSnapshot.model_validate(row, extra="ignore")
         )
 
     async def get_instrument_rules(

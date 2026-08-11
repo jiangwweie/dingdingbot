@@ -56,7 +56,7 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| PostgreSQL revision chain | Complete | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability -> 0004_owner_control_plane`; one head, forward-only preservation, and no downgrade or runtime fallback |
+| PostgreSQL revision chain | Current tracked head implemented locally | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability -> 0004_owner_control_plane -> 0005_tradfi_instrument_center`; the `0004 -> 0005` release remains undeployed and separately Owner-confirmed |
 | Owner control plane | Complete | Explicit StrategyGroup pause/resume, global new-ENTRY pause/resume, durable flatten-all authorization and progress projection, authenticated Owner API, and `/trading/` console |
 | Six Strategy Events | Complete | CPM/MPG/MI/BRF2 v3 and SOR v4 Registry contracts |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, rising-edge or session Exposure Episode identity, deterministic Live/Replay parity |
@@ -68,7 +68,6 @@ settle, and review concurrently.
 | Reconciliation, Settlement, Review | Complete | Exact typed Binance order identities, append-only Review revisions, explicit funding availability, and atomic terminal Owner projection |
 | Runtime ownership | Complete | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
 | StrategyUniverse capability | Complete and deployed | Versioned 1..10 member pools, readonly certification, Warming with zero Signal, automatic atomic activation, frozen Ticket lineage, bounded CLI and PostgreSQL evidence |
-
 Exact production identity, certification, runtime state, and remaining progress
 belong only to `MAIN_CONTROL_ROADMAP.md`.
 
@@ -80,7 +79,7 @@ readonly facts.
 
 | Boundary | Required local evidence | Rejected outcome |
 | --- | --- | --- |
-| Revision integrity | Disposable PostgreSQL upgrades from empty base to the single head, historical production-shaped `0002` to `0003`, and flat `0003` to `0004`; exact source authority remains preserved | A branch, downgrade, schema fallback, old-table reader, dual write, active handover, or changed historical value is accepted |
+| Revision integrity | Disposable PostgreSQL upgrades from empty base to the single head, historical production-shaped `0002` to `0003`, flat `0003` to `0004`, and exact flat `0004` to `0005`; each source authority remains preserved | A branch, downgrade, schema fallback, old-table reader, dual write, active handover, or changed historical value is accepted |
 | Batch bootstrap | The six Registry Events receive the approved fixed initial member set in one bounded run; no operator configures members one Event at a time | A second Warming Universe is required for every Event or member |
 | Warming and readiness | Warming performs readonly market/account certification, produces zero StrategySignal, preserves observation time separately from certification time, and activates only after every member passes | Warming can submit an order, stale evidence activates, or a failed member becomes eligible |
 | Concurrency and recovery | One global Warming slot is enforced; the official `abandon_strategy_universe.py` CLI permanently abandons one exact Warming Universe with an audited reason so the slot is released | A failed Warming state blocks all later deployment work, is changed by direct SQL, or can be silently reused |
@@ -128,15 +127,18 @@ starts Entry last. Any failure after service stop fences Entry and restores the
 safety workers. This bounded regular-release path does not rebuild PostgreSQL
 and does not run the historical destructive cutover.
 
-The one approved schema-changing path is explicit `compatible_upgrade`. It
-accepts only the exact flat `0002` -> `0003` transition, requires zero active
-Ticket, position, order, Reservation, Netting Domain, unresolved Command,
-unreviewed terminal Ticket and open Incident, and requires Entry fenced with all
-old writers stopped. It computes the canonical source-column preservation
-digest, runs the single Alembic revision, verifies the same digest, installs
-CPM/MPG/MI/BRF2 v3 and SOR v4 Registry authority with Policy v4 and Entry
-fenced, starts safety workers, completes Universe bootstrap, and starts Entry
-last. It is not an active-position handover or a runtime compatibility reader.
+The one approved schema-changing path is explicit `compatible_upgrade`. Its
+current source is exact flat `0004_owner_control_plane` and its target is
+`0005_tradfi_instrument_center`. It requires zero active Ticket, position,
+order, Reservation, Netting Domain, unresolved Command, unreviewed terminal
+Ticket and open Incident, and requires Entry fenced with all old writers
+stopped. It computes the canonical `0004` source-column preservation digest,
+runs the single Alembic revision, verifies the same digest, preserves the main
+Crypto Policy and Universe authority, installs Product Compatibility plus the
+independent observation-only TradFi Profile/Policy/control, and starts safety
+workers while Entry stays fenced. Historical `0002 -> 0003` and `0003 -> 0004`
+evidence remains intact; none of these transitions is an active-position
+handover or a runtime compatibility reader.
 
 ## Completed Destructive Cutover
 

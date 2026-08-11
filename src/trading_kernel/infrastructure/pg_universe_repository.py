@@ -66,6 +66,12 @@ from src.trading_kernel.domain.instrument_certification import (
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
+from src.trading_kernel.domain.product import (
+    InstrumentProductProfile,
+    ProductCompatibility,
+    ProductCompatibilityError,
+    require_product_compatibility,
+)
 from src.trading_kernel.domain.strategy_universe import (
     MAX_UNIVERSE_MEMBERS,
     StrategyUniverseVersion,
@@ -73,10 +79,12 @@ from src.trading_kernel.domain.strategy_universe import (
 )
 from src.trading_kernel.infrastructure.pg_models import (
     comparative_projection_current,
+    event_product_compatibility,
     event_specs,
     instrument_certification_batch_members,
     instrument_certification_batches,
     instrument_certification_current,
+    instrument_product_profiles,
     instruments,
     monitor_current,
     owner_policy_current,
@@ -106,6 +114,7 @@ class _InstallAuthority:
     strategy_group_id: str
     strategy_version_id: str
     position_side: Literal["long", "short"]
+    product_compatibility: ProductCompatibility
 
 
 class PostgresStrategyUniverseRepository:
@@ -257,7 +266,10 @@ class PostgresStrategyUniverseRepository:
             exchange_instrument_ids=request.exchange_instrument_ids,
             installed_at_ms=request.installed_at_ms,
         )
-        inserted_instruments = await self._install_instruments(universe)
+        inserted_instruments = await self._install_instruments(
+            universe,
+            authority=authority,
+        )
         await self._connection.execute(
             sa.insert(strategy_universe_versions).values(
                 universe_version_id=universe.universe_version_id,
@@ -2391,6 +2403,17 @@ class PostgresStrategyUniverseRepository:
                 .limit(1)
             )
         ).mappings().one_or_none()
+        compatibility_row = (
+            await self._connection.execute(
+                sa.select(event_product_compatibility)
+                .where(
+                    event_product_compatibility.c.event_spec_id
+                    == request.event_spec_id
+                )
+                .with_for_update(of=event_product_compatibility)
+                .limit(1)
+            )
+        ).mappings().one_or_none()
         profile_row = (
             await self._connection.execute(
                 sa.select(
@@ -2429,6 +2452,7 @@ class PostgresStrategyUniverseRepository:
             or event_row is None
             or event_row["status"] != "active"
             or event_row["strategy_version_id"] != strategy_version_id
+            or compatibility_row is None
         ):
             raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
         if (
@@ -2453,10 +2477,26 @@ class PostgresStrategyUniverseRepository:
         position_side = str(event_row["position_side"])
         if position_side not in {"long", "short"}:
             raise UniverseInstallConflict("EVENT_AUTHORITY_CONFLICT")
+        try:
+            compatibility = ProductCompatibility.model_validate(
+                {
+                    "event_spec_id": str(compatibility_row["event_spec_id"]),
+                    "product_family": str(compatibility_row["product_family"]),
+                    "asset_class": str(compatibility_row["asset_class"]),
+                    "contract_type": str(compatibility_row["contract_type"]),
+                    "underlying_type": str(compatibility_row["underlying_type"]),
+                    "margin_asset": str(compatibility_row["margin_asset"]),
+                }
+            )
+        except ValidationError as exc:
+            raise UniverseInstallConflict("PRODUCT_COMPATIBILITY_CONFLICT") from exc
+        if compatibility.semantic_digest != compatibility_row["semantic_digest"]:
+            raise UniverseInstallConflict("PRODUCT_COMPATIBILITY_CONFLICT")
         return _InstallAuthority(
             strategy_group_id=strategy_group_id,
             strategy_version_id=strategy_version_id,
             position_side=cast(Literal["long", "short"], position_side),
+            product_compatibility=compatibility,
         )
 
     async def _get_current_semantic_version(
@@ -2512,10 +2552,81 @@ class PostgresStrategyUniverseRepository:
     async def _install_instruments(
         self,
         universe: StrategyUniverseVersion,
+        *,
+        authority: _InstallAuthority,
     ) -> int:
         inserted = 0
         for exchange_instrument_id in universe.exchange_instrument_ids:
             identity = parse_binance_usdm_instrument_id(exchange_instrument_id)
+            profile_row = (
+                await self._connection.execute(
+                    sa.select(instrument_product_profiles)
+                    .where(
+                        instrument_product_profiles.c.exchange_instrument_id
+                        == exchange_instrument_id
+                    )
+                    .with_for_update(of=instrument_product_profiles)
+                    .limit(1)
+                )
+            ).mappings().one_or_none()
+            if profile_row is None:
+                if (
+                    authority.product_compatibility.product_family
+                    != "crypto_perpetual"
+                ):
+                    raise UniverseInstallConflict(
+                        "INSTRUMENT_PRODUCT_PROFILE_MISSING"
+                    )
+                profile = InstrumentProductProfile(
+                    exchange_instrument_id=exchange_instrument_id,
+                    product_family="crypto_perpetual",
+                    asset_class="crypto",
+                    contract_type="PERPETUAL",
+                    underlying_type="CRYPTO",
+                    margin_asset="USDT",
+                    entry_session_policy="continuous",
+                    status="candidate",
+                )
+                await self._connection.execute(
+                    sa.insert(instrument_product_profiles).values(
+                        **profile.model_dump(mode="python"),
+                        semantic_digest=profile.semantic_digest,
+                        updated_at_ms=universe.installed_at_ms,
+                    )
+                )
+            else:
+                try:
+                    profile = InstrumentProductProfile.model_validate(
+                        {
+                            "exchange_instrument_id": str(
+                                profile_row["exchange_instrument_id"]
+                            ),
+                            "product_family": str(profile_row["product_family"]),
+                            "asset_class": str(profile_row["asset_class"]),
+                            "contract_type": str(profile_row["contract_type"]),
+                            "underlying_type": str(profile_row["underlying_type"]),
+                            "margin_asset": str(profile_row["margin_asset"]),
+                            "entry_session_policy": str(
+                                profile_row["entry_session_policy"]
+                            ),
+                            "status": str(profile_row["status"]),
+                        }
+                    )
+                except ValidationError as exc:
+                    raise UniverseInstallConflict(
+                        "INSTRUMENT_PRODUCT_PROFILE_CONFLICT"
+                    ) from exc
+                if profile.semantic_digest != profile_row["semantic_digest"]:
+                    raise UniverseInstallConflict(
+                        "INSTRUMENT_PRODUCT_PROFILE_CONFLICT"
+                    )
+            try:
+                require_product_compatibility(
+                    authority.product_compatibility,
+                    profile,
+                )
+            except ProductCompatibilityError as exc:
+                raise UniverseInstallConflict(str(exc)) from exc
             rows = (
                 await self._connection.execute(
                     sa.select(instruments)
@@ -2538,6 +2649,7 @@ class PostgresStrategyUniverseRepository:
                     rows[0],
                     exchange_instrument_id=exchange_instrument_id,
                     venue_symbol=identity.symbol,
+                    asset_class=profile.asset_class,
                 ):
                     raise UniverseInstallConflict(
                         "CANONICAL_INSTRUMENT_IDENTITY_CONFLICT"
@@ -2547,7 +2659,7 @@ class PostgresStrategyUniverseRepository:
                 sa.insert(instruments).values(
                     exchange_instrument_id=exchange_instrument_id,
                     venue_id=identity.venue_id,
-                    asset_class="crypto",
+                    asset_class=profile.asset_class,
                     venue_symbol=identity.symbol,
                     contract_kind=identity.product_type,
                     status="pending_certification",
@@ -2762,11 +2874,12 @@ def _instrument_identity_matches(
     *,
     exchange_instrument_id: str,
     venue_symbol: str,
+    asset_class: str,
 ) -> bool:
     return (
         row["exchange_instrument_id"] == exchange_instrument_id
         and row["venue_id"] == "binance-usdm"
-        and row["asset_class"] == "crypto"
+        and row["asset_class"] == asset_class
         and row["venue_symbol"] == venue_symbol
         and row["contract_kind"] == "perpetual"
         and row["status"] in {"pending_certification", "active"}

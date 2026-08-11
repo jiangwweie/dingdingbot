@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
+from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, field_validator
 
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
+from src.trading_kernel.domain.owner_control import OwnerAuthorization
 from src.trading_kernel.domain.strategy_universe import (
     MAX_UNIVERSE_MEMBERS,
     StrategyUniverseVersion,
@@ -24,6 +28,10 @@ class UniverseInstallStatus(StrEnum):
     ALREADY_WARMING = "already_warming"
     ALREADY_ACTIVE = "already_active"
     WARMING_UNIVERSE_ALREADY_EXISTS = "WARMING_UNIVERSE_ALREADY_EXISTS"
+
+
+class UniverseControlConflict(RuntimeError):
+    """The submitted Universe edit no longer matches current authority."""
 
 
 class UniverseInstallRequest(BaseModel):
@@ -107,6 +115,31 @@ class UniverseConfigurationRequest(BaseModel):
         return UniverseInstallRequest._require_install_time(value)
 
 
+class OwnerUniverseConfigurationRequest(UniverseConfigurationRequest):
+    """One TOTP-authorized Owner edit against an exact Active Universe base."""
+
+    expected_base_universe_version_id: str | None
+    reason: str
+    idempotency_key: str
+    owner_identity: str
+
+    @field_validator("expected_base_universe_version_id", mode="before")
+    @classmethod
+    def _require_optional_base_identity(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise ValueError("Universe base identity must be exact")
+        return value
+
+    @field_validator("reason", "idempotency_key", "owner_identity", mode="before")
+    @classmethod
+    def _require_owner_text(cls, value: object) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Universe Owner request text must be non-blank")
+        return value.strip()
+
+
 class UniverseInstallContext(BaseModel):
     """Exact current Event and Owner Policy selected for one configuration."""
 
@@ -130,6 +163,7 @@ class UniverseInstallPolicyScope(BaseModel):
 
     runtime_profile_id: str
     allowed_event_spec_ids: tuple[str, ...]
+    owner_console_primary: bool | None = None
 
     @field_validator("runtime_profile_id", mode="before")
     @classmethod
@@ -220,3 +254,114 @@ async def configure_strategy_universe(
             installed_at_ms=request.installed_at_ms,
         ),
     )
+
+
+async def configure_strategy_universe_by_owner(
+    uow: KernelUnitOfWork,
+    request: OwnerUniverseConfigurationRequest,
+) -> UniverseInstallResult:
+    """Create only a Warming Universe under one durable Owner authorization."""
+
+    context = await uow.strategy_universes.resolve_install_context(
+        runtime_profile_id=request.runtime_profile_id,
+        event_id=request.event_id,
+    )
+    current = await uow.strategy_universes.get_current(context.event_spec_id)
+    current_version_id = None if current is None else current.universe_version_id
+    if current_version_id != request.expected_base_universe_version_id:
+        raise UniverseControlConflict("universe_base_changed")
+
+    target_scope: dict[str, JsonValue] = {
+        "runtime_profile_id": request.runtime_profile_id,
+        "event_id": request.event_id,
+        "event_spec_id": context.event_spec_id,
+        "owner_policy_id": context.owner_policy_id,
+        "expected_base_universe_version_id": (
+            request.expected_base_universe_version_id
+        ),
+        "exchange_instrument_ids": list(request.exchange_instrument_ids),
+    }
+    existing = await uow.owner_controls.get_authorization_by_idempotency_key(
+        request.idempotency_key
+    )
+    if existing is not None:
+        _require_matching_universe_authorization(
+            existing,
+            request=request,
+            target_scope=target_scope,
+        )
+
+    result = await install_strategy_universe(
+        uow,
+        UniverseInstallRequest(
+            event_spec_id=context.event_spec_id,
+            runtime_profile_id=request.runtime_profile_id,
+            owner_policy_id=context.owner_policy_id,
+            exchange_instrument_ids=request.exchange_instrument_ids,
+            installed_at_ms=request.installed_at_ms,
+        ),
+    )
+    if existing is None and result.status is UniverseInstallStatus.INSTALLED:
+        await uow.owner_controls.add_authorization(
+            _universe_authorization(request=request, target_scope=target_scope)
+        )
+    return result
+
+
+def _universe_authorization(
+    *,
+    request: OwnerUniverseConfigurationRequest,
+    target_scope: dict[str, JsonValue],
+) -> OwnerAuthorization:
+    return OwnerAuthorization(
+        authorization_id=f"owner-authorization:{uuid4().hex}",
+        purpose="universe_configure",
+        owner_identity=request.owner_identity,
+        authentication_strength="totp_step_up",
+        request_digest=_universe_authorization_digest(
+            request=request,
+            target_scope=target_scope,
+        ),
+        target_scope=target_scope,
+        idempotency_key=request.idempotency_key,
+        authorized_at_ms=request.installed_at_ms,
+    )
+
+
+def _universe_authorization_digest(
+    *,
+    request: OwnerUniverseConfigurationRequest,
+    target_scope: dict[str, JsonValue],
+) -> str:
+    canonical_request = {
+        "purpose": "universe_configure",
+        "reason": request.reason,
+        "idempotency_key": request.idempotency_key,
+        "target_scope": target_scope,
+    }
+    return "sha256:" + sha256(
+        json.dumps(
+            canonical_request,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def _require_matching_universe_authorization(
+    existing: OwnerAuthorization,
+    *,
+    request: OwnerUniverseConfigurationRequest,
+    target_scope: dict[str, JsonValue],
+) -> None:
+    if (
+        existing.purpose != "universe_configure"
+        or existing.owner_identity != request.owner_identity
+        or existing.target_scope != target_scope
+        or existing.request_digest
+        != _universe_authorization_digest(
+            request=request,
+            target_scope=target_scope,
+        )
+    ):
+        raise UniverseControlConflict("idempotency_key_conflict")

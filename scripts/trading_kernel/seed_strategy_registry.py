@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seed the exact six registered StrategyGroup Event contracts into PostgreSQL."""
+"""Seed the exact registered StrategyGroup Event contracts into PostgreSQL."""
 
 from __future__ import annotations
 

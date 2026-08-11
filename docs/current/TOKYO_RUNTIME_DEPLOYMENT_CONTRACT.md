@@ -162,6 +162,14 @@ atomically leaves global new ENTRY paused while seeding explicit StrategyGroup
 control authority. The Owner API is started on a Unix Socket before Nginx
 publishes only `/api/owner/v1/` and `/trading/`.
 
+The `0004 -> 0005` Product Authority upgrade also requires a stopped, exact
+flat source. It preserves all existing Crypto StrategyUniverse and Strategy
+Control rows, pauses global new ENTRY during identity rotation, installs the
+new Product Compatibility and Instrument Center projections, and adds the
+independent observation-only TradFi RuntimeProfile, Owner Policy and paused
+`SOR-US-EQ-PERP-001` control. It does not add TradFi Events to `policy-main`,
+activate a TradFi Universe or authorize a real TradFi Ticket.
+
 ## Flat Compatible Upgrade
 
 The only schema-changing release path is an exact, forward-only, stopped
@@ -172,6 +180,7 @@ upgrade:
 -> 0002_sor_v3_strategy_group_capacity
 -> 0003_portfolio_admission_observability
 -> 0004_owner_control_plane
+-> 0005_tradfi_instrument_center
 ```
 
 It preserves terminal PostgreSQL lineage from the exact `0002` source; it does
@@ -202,17 +211,20 @@ The official bounded sequence is:
    substitutes for an EXIT, protection cleanup, Settlement, or Review.
 3. Flat cutover: stage the exact target release, repeat source-schema and
    exchange flat checks, stop all four writers, and atomically repeat them.
-4. Compute and persist a canonical SHA-256 manifest over every preserved
-   `0002` source table and column; `alembic_version` and `0003`-only columns
-   are excluded.
+4. Compute and persist a canonical SHA-256 manifest over every table and column
+   owned by the exact `0004` source; `alembic_version` and `0005`-only Product
+   Authority tables are excluded. The historical database-bound `0002`
+   preservation proof remains independently intact.
 5. Run the single certified Alembic revision without `DROP SCHEMA`.
-6. Recompute the same frozen `0002` manifest and require an exact digest match.
-7. In one PostgreSQL transaction, install CPM/MPG/MI/BRF2 v3 and SOR v4
-   Registry authority, apply Policy v4 with Entry fenced, and rotate
+6. Recompute the same frozen `0004` manifest and require an exact digest match.
+7. In one PostgreSQL transaction, preserve the main Crypto Policy scope and
+   existing Strategy Controls, add Product Compatibility and the independent
+   observation-only TradFi authority, pause global new ENTRY, and rotate the
    schema/commit/seed capability identity.
 8. Activate the target release and start Observation, Lifecycle and
    Reconciliation while Entry remains fenced.
-9. Run one bounded six-Event StrategyUniverse bootstrap; PostgreSQL may
+9. Revalidate the existing bounded six-Crypto-Event StrategyUniverse bootstrap;
+   no TradFi Universe is activated by migration. PostgreSQL may
    serialize the Warming slot internally, but the operator does not install
    Events one at a time.
 10. Target verify: repeat database, history, exchange, Universe, worker and

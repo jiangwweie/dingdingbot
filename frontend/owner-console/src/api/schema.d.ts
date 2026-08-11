@@ -217,6 +217,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/instruments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Instrument Center */
+        get: operations["instrument_center_api_owner_v1_instruments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/instruments/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Instrument Current */
+        post: operations["refresh_instrument_current_api_owner_v1_instruments_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/instruments/universes/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Universe Change */
+        post: operations["apply_universe_change_api_owner_v1_instruments_universes_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/instruments/universes/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Universe Change */
+        post: operations["preview_universe_change_api_owner_v1_instruments_universes_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/market/candles": {
         parameters: {
             query?: never;
@@ -439,6 +507,17 @@ export interface components {
         /** ApiEnvelope[CandleSeries] */
         ApiEnvelope_CandleSeries_: {
             data: components["schemas"]["CandleSeries"];
+            freshness: components["schemas"]["Freshness"];
+            /** Generated At */
+            generated_at: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Source Watermark */
+            source_watermark: string | null;
+        };
+        /** ApiEnvelope[InstrumentCenterPage] */
+        ApiEnvelope_InstrumentCenterPage_: {
+            data: components["schemas"]["InstrumentCenterPage"];
             freshness: components["schemas"]["Freshness"];
             /** Generated At */
             generated_at: string;
@@ -731,6 +810,166 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** InstrumentCenterItem */
+        InstrumentCenterItem: {
+            /**
+             * Asset Class
+             * @enum {string}
+             */
+            asset_class: "crypto" | "equity";
+            /** Best Ask */
+            best_ask: string | null;
+            /** Best Bid */
+            best_bid: string | null;
+            /**
+             * Contract Type
+             * @enum {string}
+             */
+            contract_type: "PERPETUAL" | "TRADIFI_PERPETUAL";
+            /** Corporate Event Status */
+            corporate_event_status: ("clear" | "blocked" | "unavailable") | null;
+            /**
+             * Entry Session Policy
+             * @enum {string}
+             */
+            entry_session_policy: "continuous" | "regular_only" | "reference_only";
+            /** Exchange Instrument Id */
+            exchange_instrument_id: string;
+            /** Funding Rate */
+            funding_rate: string | null;
+            /** Index Price */
+            index_price: string | null;
+            /**
+             * Margin Asset
+             * @constant
+             */
+            margin_asset: "USDT";
+            /** Mark Price */
+            mark_price: string | null;
+            /** Memberships */
+            memberships: components["schemas"]["InstrumentUniverseMembership"][];
+            /** Observed At Ms */
+            observed_at_ms: number | null;
+            /**
+             * Product Family
+             * @enum {string}
+             */
+            product_family: "crypto_perpetual" | "tradfi_equity_perpetual";
+            /** Product Status */
+            product_status: ("active" | "inactive" | "temporarily_unavailable") | null;
+            /**
+             * Profile Status
+             * @enum {string}
+             */
+            profile_status: "candidate" | "reference" | "active" | "retired";
+            /** Regular Session Close Ms */
+            regular_session_close_ms: number | null;
+            /** Regular Session Open Ms */
+            regular_session_open_ms: number | null;
+            /** Session State */
+            session_state: ("pre_market" | "regular" | "after_market" | "overnight" | "no_trading" | "unavailable") | null;
+            /** Source Ref */
+            source_ref: string | null;
+            /**
+             * Underlying Type
+             * @enum {string}
+             */
+            underlying_type: "CRYPTO" | "EQUITY";
+            /** Valid Until Ms */
+            valid_until_ms: number | null;
+            /** Venue Symbol */
+            venue_symbol: string;
+        };
+        /** InstrumentCenterPage */
+        InstrumentCenterPage: {
+            /** Candidate Count */
+            candidate_count: number;
+            /** Items */
+            items: components["schemas"]["InstrumentCenterItem"][];
+            /** Reference Count */
+            reference_count: number;
+            /** Regular Session Count */
+            regular_session_count: number;
+            /** Source Watermark Ms */
+            source_watermark_ms: number | null;
+            /** Unavailable Count */
+            unavailable_count: number;
+            /** Universes */
+            universes: components["schemas"]["InstrumentUniverseView"][];
+        };
+        /** InstrumentRefreshResponse */
+        InstrumentRefreshResponse: {
+            /** Attempted Count */
+            attempted_count: number;
+            /** Observed At Ms */
+            observed_at_ms: number;
+            /** Unavailable Count */
+            unavailable_count: number;
+            /** Updated Count */
+            updated_count: number;
+        };
+        /** InstrumentUniverseMembership */
+        InstrumentUniverseMembership: {
+            /** Event Id */
+            event_id: string;
+            /** Event Spec Id */
+            event_spec_id: string;
+            /**
+             * Lifecycle State
+             * @enum {string}
+             */
+            lifecycle_state: "warming" | "active";
+            /** Owner Policy Id */
+            owner_policy_id: string;
+            /**
+             * Position Side
+             * @enum {string}
+             */
+            position_side: "long" | "short";
+            /** Runtime Profile Id */
+            runtime_profile_id: string;
+            /** Strategy Group Display Name */
+            strategy_group_display_name: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Strategy Version Id */
+            strategy_version_id: string;
+            /** Universe Version Id */
+            universe_version_id: string;
+        };
+        /** InstrumentUniverseView */
+        InstrumentUniverseView: {
+            /** Event Id */
+            event_id: string;
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Exchange Instrument Ids */
+            exchange_instrument_ids: string[];
+            /** Lifecycle State */
+            lifecycle_state: ("warming" | "active") | null;
+            /** Owner Policy Id */
+            owner_policy_id: string;
+            /**
+             * Position Side
+             * @enum {string}
+             */
+            position_side: "long" | "short";
+            /**
+             * Product Family
+             * @enum {string}
+             */
+            product_family: "crypto_perpetual" | "tradfi_equity_perpetual";
+            /** Runtime Profile Id */
+            runtime_profile_id: string;
+            /** Strategy Group Display Name */
+            strategy_group_display_name: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Strategy Version Id */
+            strategy_version_id: string;
+            /** Universe Version Id */
+            universe_version_id: string | null;
         };
         JsonValue: unknown;
         /** LifecycleStageView */
@@ -1199,6 +1438,42 @@ export interface components {
             /** Strategy Group Id */
             strategy_group_id: string;
         };
+        /**
+         * StrategyProductEventFacts
+         * @description Compact Event-to-product and Universe authority for strategy display.
+         */
+        StrategyProductEventFacts: {
+            /** Active Exchange Instrument Ids */
+            active_exchange_instrument_ids: string[];
+            /** Active Universe Version Id */
+            active_universe_version_id: string | null;
+            /** Event Id */
+            event_id: string;
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Owner Policy Id */
+            owner_policy_id: string | null;
+            /**
+             * Position Side
+             * @enum {string}
+             */
+            position_side: "long" | "short";
+            /**
+             * Product Family
+             * @enum {string}
+             */
+            product_family: "crypto_perpetual" | "tradfi_equity_perpetual";
+            /** Runtime Profile Id */
+            runtime_profile_id: string | null;
+            /** Timeframe */
+            timeframe: string;
+            /** Venue Id */
+            venue_id: string | null;
+            /** Warming Exchange Instrument Ids */
+            warming_exchange_instrument_ids: string[];
+            /** Warming Universe Version Id */
+            warming_universe_version_id: string | null;
+        };
         /** StrategySummaryPage */
         StrategySummaryPage: {
             /** Evidence */
@@ -1282,6 +1557,23 @@ export interface components {
             /** Next Cursor */
             next_cursor: string | null;
         };
+        /** StrategyUniverseVersion */
+        StrategyUniverseVersion: {
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Exchange Instrument Ids */
+            exchange_instrument_ids: string[];
+            /** Installed At Ms */
+            installed_at_ms: number;
+            /** Semantic Digest */
+            semantic_digest: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Universe Version */
+            universe_version: number;
+            /** Universe Version Id */
+            universe_version_id: string;
+        };
         /** StrategyVersionSummary */
         StrategyVersionSummary: {
             /** Confirmed Natural Review Count */
@@ -1300,6 +1592,11 @@ export interface components {
             net_r: components["schemas"]["MoneyMetric"];
             /** Pending Natural Review Count */
             pending_natural_review_count: number;
+            /**
+             * Product Events
+             * @default []
+             */
+            product_events: components["schemas"]["StrategyProductEventFacts"][];
             /** Strategy Group Display Name */
             strategy_group_display_name: string;
             /** Strategy Group Id */
@@ -1449,6 +1746,79 @@ export interface components {
             tp1_reward_r: string | null;
             /** Tp1 Target Quantity */
             tp1_target_quantity: string | null;
+        };
+        /** UniverseApplyBody */
+        UniverseApplyBody: {
+            /** Event Id */
+            event_id: string;
+            /** Exchange Instrument Ids */
+            exchange_instrument_ids: string[];
+            /** Expected Base Universe Version Id */
+            expected_base_universe_version_id?: string | null;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Runtime Profile Id */
+            runtime_profile_id: string;
+            /** Totp Code */
+            totp_code: string;
+        };
+        /** UniverseChangePreview */
+        UniverseChangePreview: {
+            /** Added Exchange Instrument Ids */
+            added_exchange_instrument_ids: string[];
+            /** Base Universe Version Id */
+            base_universe_version_id: string | null;
+            /** Can Apply */
+            can_apply: boolean;
+            /** Current Exchange Instrument Ids */
+            current_exchange_instrument_ids: string[];
+            /** Event Id */
+            event_id: string;
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** First Blocker */
+            first_blocker?: "no_membership_change" | null;
+            /** Owner Policy Id */
+            owner_policy_id: string;
+            /** Proposed Exchange Instrument Ids */
+            proposed_exchange_instrument_ids: string[];
+            /** Removed Exchange Instrument Ids */
+            removed_exchange_instrument_ids: string[];
+            /** Runtime Profile Id */
+            runtime_profile_id: string;
+            /** Unchanged Exchange Instrument Ids */
+            unchanged_exchange_instrument_ids: string[];
+        };
+        /** UniverseInstallResult */
+        UniverseInstallResult: {
+            /** Inserted Instrument Count */
+            inserted_instrument_count: number;
+            /** Inserted Member Count */
+            inserted_member_count: number;
+            /** Inserted Scope Count */
+            inserted_scope_count: number;
+            /** Inserted Version Count */
+            inserted_version_count: number;
+            /** Lifecycle State */
+            lifecycle_state: ("warming" | "active") | null;
+            status: components["schemas"]["UniverseInstallStatus"];
+            universe: components["schemas"]["StrategyUniverseVersion"] | null;
+        };
+        /**
+         * UniverseInstallStatus
+         * @enum {string}
+         */
+        UniverseInstallStatus: "installed" | "already_warming" | "already_active" | "WARMING_UNIVERSE_ALREADY_EXISTS";
+        /** UniversePreviewBody */
+        UniversePreviewBody: {
+            /** Event Id */
+            event_id: string;
+            /** Exchange Instrument Ids */
+            exchange_instrument_ids: string[];
+            /** Runtime Profile Id */
+            runtime_profile_id: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -1823,6 +2193,125 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrategyEntryControl"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    instrument_center_api_owner_v1_instruments_get: {
+        parameters: {
+            query?: {
+                product_family?: ("crypto_perpetual" | "tradfi_equity_perpetual") | null;
+                session_state?: ("pre_market" | "regular" | "after_market" | "overnight" | "no_trading" | "unavailable") | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiEnvelope_InstrumentCenterPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_instrument_current_api_owner_v1_instruments_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentRefreshResponse"];
+                };
+            };
+        };
+    };
+    apply_universe_change_api_owner_v1_instruments_universes_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UniverseApplyBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UniverseInstallResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_universe_change_api_owner_v1_instruments_universes_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UniversePreviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UniverseChangePreview"];
                 };
             };
             /** @description Validation Error */

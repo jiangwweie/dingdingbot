@@ -4,6 +4,7 @@ from src.trading_kernel.application.owner_console.models import (
     EvidenceRef,
     MoneyMetric,
     StrategyPageFacts,
+    StrategyProductEventFacts,
     StrategyTicketFacts,
     StrategyVersionFacts,
 )
@@ -75,6 +76,24 @@ def _version(*tickets: StrategyTicketFacts) -> StrategyVersionFacts:
                 1_800_000_000_000,
             ),
         ),
+        product_events=(
+            StrategyProductEventFacts(
+                event_spec_id="event_spec:BRF2-001:v3:BRF2-SHORT-1H",
+                event_id="BRF2-SHORT-1H",
+                position_side="short",
+                timeframe="1h",
+                venue_id="binance-usdm",
+                product_family="crypto_perpetual",
+                runtime_profile_id="tiny-live-v1",
+                owner_policy_id="policy-main",
+                active_universe_version_id="universe:brf2:v1",
+                active_exchange_instrument_ids=(
+                    "binance-usdm:BTCUSDT:perpetual",
+                ),
+                warming_universe_version_id=None,
+                warming_exchange_instrument_ids=(),
+            ),
+        ),
     )
 
 
@@ -134,6 +153,7 @@ def test_strategy_version_summary_keeps_natural_and_controlled_outcomes_separate
     assert item.loss_count == 1
     assert item.net_pnl.value == Decimal("8.00")
     assert item.net_r.value == Decimal("0.80")
+    assert item.product_events == _version().product_events
 
 
 def test_strategy_version_with_no_confirmed_natural_review_never_emits_zero_return() -> (

@@ -1,6 +1,6 @@
 # Binance USDⓈ-M TradFi Perpetual M1 Decision Record
 
-**状态：** `OWNER_RECOMMENDATION_READY / OWNER_DECISION_PENDING`
+**状态：** `OWNER_ADOPTED / M2_M4_IMPLEMENTATION_AUTHORIZED`
 
 **日期：** 2026-08-11
 
@@ -21,7 +21,8 @@ Binance USDⓈ-M Venue
     └── SOR-US-EQ-PERP-001
 ```
 
-推荐边界如下：
+Owner 于 2026-08-11 采纳本记录，并授权在不部署生产、不开放真实 TradFi ENTRY、
+不增加资本的边界内实施 M2–M4。最终边界如下：
 
 1. 继续使用 `binance-usdm`、现有 Binance Futures API、CCXT adapter 和
    Ticket/Command/Lifecycle/Reconciliation/Review 链；
@@ -32,9 +33,12 @@ Binance USDⓈ-M Venue
 4. M1–M5 继续使用现有 USDⓈ-M 账户，以独立 RuntimeProfile、StrategyGroup、
    StrategyVersion、Universe 和证据隔离产品语义；
 5. 全时段 Observation，第一版只允许 **U.S. Regular Session** 新 ENTRY；
-6. LONG、SHORT 都进入 Observation，任何真实 ENTRY 留到 M6 分方向批准；
+6. LONG、SHORT 都进入 Observation；首期候选可以相同，但必须拥有独立 Event 和
+   独立 StrategyUniverse，任何真实 ENTRY 留到 M6 分方向批准；
 7. 首期候选为 **8 个**，QQQ/SPY 只作为市场背景参考，不创建 SOR Ticket；
-8. M1–M5 不增加真实资本，不恢复加密 `SOR-001`，不部署生产。
+8. 策略定义和标的成员通过 Product Compatibility 与 StrategyUniverse 解耦；
+   Universe 变更不产生新的 StrategyVersion，错误产品不能仅靠编辑 Universe 进入策略；
+9. M1–M5 不增加真实资本，不恢复加密 `SOR-001`，本地 M2–M4 实施不授权生产部署。
 
 本记录是规划和后续设计输入，不是 Registry、PostgreSQL Universe、Owner Policy
 或生产运行时权威。
@@ -274,14 +278,20 @@ M4 再定义 `SOR-US-EQ-PERP-001` 的：
 
 M1 不提前锁定任何收益参数或恢复加密 SOR 的决定。
 
-## 10. M1 完成条件
+## 10. M1 Owner 决策与完成状态
 
-M1 在 Owner 明确采纳或修改以下四项后完成：
+Owner 已明确采纳以下四项，**M1 已完成决策收口**：
 
 1. Venue：`binance-usdm`；
 2. Account：同一 USDⓈ-M account，以独立 RuntimeProfile 逻辑隔离；
 3. Scope：8 candidates + QQQ/SPY reference；
 4. Direction/Session：LONG/SHORT 都观察，第一版仅 REGULAR new ENTRY。
 
-完成 M1 不授权 Schema、Registry、Universe、Owner Policy、API credential、生产部署或
-真实交易所写入。任何实现从 M2A 或 M3 的单独设计与批准开始。
+Owner 已另行授权本地实施 M2、M3、M4，包括前向 Schema、Registry、Universe、
+Observation-only RuntimeProfile/Policy、Owner API 和 Owner Console 变更。该授权不包含：
+
+1. 生产部署或服务器变更；
+2. TradFi API agreement 接受、credential 变更或交易所写入；
+3. 开放真实 TradFi ENTRY 或增加资本；
+4. 恢复加密 `SOR-001`；
+5. MPG、BRF2、CPM、MI 或 RSRVCB 的 TradFi 实施。

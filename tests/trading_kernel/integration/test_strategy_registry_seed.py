@@ -107,12 +107,13 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         second = await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)
         event_ids = await uow.strategy_registry.list_current_event_ids()
 
-    assert first.inserted_strategy_group_count == 5
-    assert first.inserted_strategy_version_count == 5
-    assert first.inserted_event_count == 6
-    assert first.inserted_exit_policy_count == 6
-    assert first.inserted_fact_definition_count == 20
-    assert first.inserted_event_fact_count == 25
+    assert first.inserted_strategy_group_count == 6
+    assert first.inserted_strategy_version_count == 6
+    assert first.inserted_event_count == 8
+    assert first.inserted_product_compatibility_count == 8
+    assert first.inserted_exit_policy_count == 8
+    assert first.inserted_fact_definition_count == 29
+    assert first.inserted_event_fact_count == 39
     assert "inserted_instrument_count" not in type(first).model_fields
     assert "inserted_candidate_scope_count" not in type(first).model_fields
     assert second.total_inserted_count == 0
@@ -123,6 +124,8 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         "MPG-LONG",
         "SOR-LONG",
         "SOR-SHORT",
+        "SOR-US-LONG-15M",
+        "SOR-US-SHORT-15M",
     )
 
     async with registry_engine.connect() as connection:
@@ -130,7 +133,7 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         assert await connection.scalar(sa.select(sa.func.count()).select_from(runtime_scopes_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(owner_policy_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(instruments)) == 0
-        assert await connection.scalar(sa.select(sa.func.count()).select_from(exit_policies)) == 6
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(exit_policies)) == 8
         current_versions = dict(
             (
                 await connection.execute(
@@ -148,6 +151,7 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
             "MI-001": "sgv:MI-001:v3",
             "MPG-001": "sgv:MPG-001:v3",
             "SOR-001": "sgv:SOR-001:v4",
+            "SOR-US-EQ-PERP-001": "sgv:SOR-US-EQ-PERP-001:v1",
         }
 
 
@@ -284,9 +288,9 @@ async def test_strategy_seed_monotonically_retires_source_sor_v3_and_activates_v
         ("exit-policy:SOR-001:SOR-SHORT:portfolio-admission-v1", "active"),
         ("exit-policy:SOR-001:SOR-SHORT:sor-v3-right-tail-v1", "retired"),
     ]
-    assert first.inserted_strategy_group_count == 4
-    assert first.inserted_strategy_version_count == 5
-    assert first.inserted_event_count == 6
+    assert first.inserted_strategy_group_count == 5
+    assert first.inserted_strategy_version_count == 6
+    assert first.inserted_event_count == 8
     assert second.total_inserted_count == 0
 
 

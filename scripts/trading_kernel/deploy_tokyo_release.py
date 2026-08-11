@@ -34,7 +34,7 @@ from src.trading_kernel.infrastructure.runtime_identity import (
 )
 
 SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
-COMPATIBLE_SOURCE_SCHEMA_REVISION = "0003_portfolio_admission_observability"
+COMPATIBLE_SOURCE_SCHEMA_REVISION = "0004_owner_control_plane"
 EXPECTED_CONFIGURED_LEVERAGE = 5
 RELEASE_ROOT = "/opt/brc/releases"
 CURRENT_RELEASE = "/opt/brc/current"
@@ -100,7 +100,7 @@ class DeploymentPlan:
                 raise ValueError("regular deployment cannot change schema revision")
         elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
             if self.source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
-                raise ValueError("compatible upgrade requires the exact 0003 source")
+                raise ValueError("compatible upgrade requires the exact 0004 source")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("compatible upgrade requires the current schema head")
             if self.closure_ticket_id is not None:
@@ -124,7 +124,7 @@ class DeploymentPlan:
                 != COMPATIBLE_SOURCE_SCHEMA_REVISION
             ):
                 raise ValueError(
-                    "Deployment Drain integration currently requires exact 0003 compatible upgrade"
+                    "Deployment Drain integration currently requires exact 0004 compatible upgrade"
                 )
             if self.enable_entry:
                 raise ValueError("Deployment Drain must keep ENTRY disabled")
@@ -1459,12 +1459,16 @@ class SshTokyoReleaseBackend:
         payload = self._release_json(
             release,
             "scripts/trading_kernel/verify_schema.py",
-            "--verify-stored-preservation-proof",
+            "--preserve-source-revision",
+            COMPATIBLE_SOURCE_SCHEMA_REVISION,
+            "--expected-preservation-digest",
+            digest,
             check=False,
         )
-        _require_database_lineage_verification(
+        _require_preservation_verification(
             payload,
             target_schema_revision=SCHEMA_REVISION,
+            expected_digest=digest,
         )
         return True
 

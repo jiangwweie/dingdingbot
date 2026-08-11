@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.product import ProductSessionSnapshot
+
 Timeframe = Literal["15m", "1h", "4h"]
 
 
@@ -114,6 +116,7 @@ class MarketSnapshot(BaseModel):
     candles_1h: tuple[ClosedCandle, ...] = ()
     candles_4h: tuple[ClosedCandle, ...] = ()
     comparative_strength: ComparativeStrengthSnapshot | None = None
+    product_session: ProductSessionSnapshot | None = None
 
     @field_validator("exchange_instrument_id", mode="before")
     @classmethod
@@ -139,6 +142,12 @@ class MarketSnapshot(BaseModel):
                 for close_time in close_times
             ):
                 raise ValueError("market snapshot cannot contain open or future candles")
+        if (
+            self.product_session is not None
+            and self.product_session.exchange_instrument_id
+            != self.exchange_instrument_id
+        ):
+            raise ValueError("product Session instrument differs from market snapshot")
         return self
 
     def candles(self, timeframe: Timeframe) -> tuple[ClosedCandle, ...]:

@@ -282,6 +282,107 @@ class CandleSeries(FrozenModel):
         return self
 
 
+class InstrumentCenterQuery(FrozenModel):
+    product_family: Literal[
+        "crypto_perpetual",
+        "tradfi_equity_perpetual",
+    ] | None = None
+    session_state: Literal[
+        "pre_market",
+        "regular",
+        "after_market",
+        "overnight",
+        "no_trading",
+        "unavailable",
+    ] | None = None
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class InstrumentUniverseMembership(FrozenModel):
+    strategy_group_id: str
+    strategy_group_display_name: str
+    strategy_version_id: str
+    event_spec_id: str
+    event_id: str
+    position_side: Literal["long", "short"]
+    runtime_profile_id: str
+    owner_policy_id: str
+    universe_version_id: str
+    lifecycle_state: Literal["warming", "active"]
+
+
+class InstrumentCenterItem(FrozenModel):
+    exchange_instrument_id: str
+    venue_symbol: str
+    product_family: Literal[
+        "crypto_perpetual",
+        "tradfi_equity_perpetual",
+    ]
+    asset_class: Literal["crypto", "equity"]
+    contract_type: Literal["PERPETUAL", "TRADIFI_PERPETUAL"]
+    underlying_type: Literal["CRYPTO", "EQUITY"]
+    margin_asset: Literal["USDT"]
+    entry_session_policy: Literal[
+        "continuous",
+        "regular_only",
+        "reference_only",
+    ]
+    profile_status: Literal["candidate", "reference", "active", "retired"]
+    product_status: Literal[
+        "active",
+        "inactive",
+        "temporarily_unavailable",
+    ] | None
+    session_state: Literal[
+        "pre_market",
+        "regular",
+        "after_market",
+        "overnight",
+        "no_trading",
+        "unavailable",
+    ] | None
+    regular_session_open_ms: int | None
+    regular_session_close_ms: int | None
+    mark_price: str | None
+    index_price: str | None
+    funding_rate: str | None
+    best_bid: str | None
+    best_ask: str | None
+    corporate_event_status: Literal["clear", "blocked", "unavailable"] | None
+    observed_at_ms: int | None
+    valid_until_ms: int | None
+    source_ref: str | None
+    memberships: tuple[InstrumentUniverseMembership, ...]
+
+
+class InstrumentUniverseView(FrozenModel):
+    strategy_group_id: str
+    strategy_group_display_name: str
+    strategy_version_id: str
+    event_spec_id: str
+    event_id: str
+    position_side: Literal["long", "short"]
+    product_family: Literal[
+        "crypto_perpetual",
+        "tradfi_equity_perpetual",
+    ]
+    runtime_profile_id: str
+    owner_policy_id: str
+    universe_version_id: str | None
+    lifecycle_state: Literal["warming", "active"] | None
+    exchange_instrument_ids: tuple[str, ...]
+
+
+class InstrumentCenterPage(FrozenModel):
+    items: tuple[InstrumentCenterItem, ...] = Field(max_length=100)
+    universes: tuple[InstrumentUniverseView, ...] = Field(max_length=100)
+    candidate_count: int = Field(ge=0)
+    reference_count: int = Field(ge=0)
+    unavailable_count: int = Field(ge=0)
+    regular_session_count: int = Field(ge=0)
+    source_watermark_ms: int | None
+
+
 class AdmissionAccountSnapshot(FrozenModel):
     label: Literal["Latest Admission Snapshot"]
     is_realtime: Literal[False] = False
@@ -648,6 +749,26 @@ class StrategyTicketFacts(FrozenModel):
     evidence: tuple[EvidenceRef, ...]
 
 
+class StrategyProductEventFacts(FrozenModel):
+    """Compact Event-to-product and Universe authority for strategy display."""
+
+    event_spec_id: str
+    event_id: str
+    position_side: Literal["long", "short"]
+    timeframe: str
+    venue_id: str | None
+    product_family: Literal[
+        "crypto_perpetual",
+        "tradfi_equity_perpetual",
+    ]
+    runtime_profile_id: str | None
+    owner_policy_id: str | None
+    active_universe_version_id: str | None
+    active_exchange_instrument_ids: tuple[str, ...]
+    warming_universe_version_id: str | None
+    warming_exchange_instrument_ids: tuple[str, ...]
+
+
 class StrategyVersionFacts(FrozenModel):
     """Persisted strategy identity plus bounded Ticket facts for one version."""
 
@@ -659,6 +780,10 @@ class StrategyVersionFacts(FrozenModel):
     is_current: bool
     tickets: tuple[StrategyTicketFacts, ...] = Field(max_length=5_000)
     evidence: tuple[EvidenceRef, ...]
+    product_events: tuple[StrategyProductEventFacts, ...] = Field(
+        default=(),
+        max_length=32,
+    )
 
 
 class StrategyPageFacts(FrozenModel):
@@ -687,6 +812,10 @@ class StrategyVersionSummary(FrozenModel):
     net_pnl: MoneyMetric
     net_r: MoneyMetric
     evidence: tuple[EvidenceRef, ...]
+    product_events: tuple[StrategyProductEventFacts, ...] = Field(
+        default=(),
+        max_length=32,
+    )
 
 
 class StrategySummaryPage(FrozenModel):

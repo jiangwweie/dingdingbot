@@ -37,6 +37,8 @@ it("opens a URL-backed TP1 Ticket dialog and preserves strategy detail context",
   renderStrategies();
 
   expect(await screen.findByText("BRF2 · v3")).toBeInTheDocument();
+  expect(screen.getByText(/binance-usdm · Crypto Perp · Continuous · 1h close/)).toBeInTheDocument();
+  expect(screen.getByText(/binance-usdm · Equity Perp · REGULAR \+30m–\+150m/)).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "TP1 1" }));
 
   expect(await screen.findByRole("dialog", { name: /BRF2 v3 · 已达 TP1/ })).toBeInTheDocument();

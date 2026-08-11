@@ -25,7 +25,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from migrations.trading_kernel import v4_schema
 from src.trading_kernel.domain.exit_policy import registered_exit_policies
-from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.domain.strategy_registry import (
+    build_registry_semantic_hash,
+    registered_strategy_contracts,
+)
 from src.trading_kernel.infrastructure.pg_models import metadata
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     OWNER_POLICY_ID,
@@ -41,6 +44,7 @@ PRESERVATION_PROOF_SCHEMA = "brc.trading_kernel.0002_preservation_proof.v1"
 EXPECTED_ALEMBIC_REVISION = CURRENT_SCHEMA_REVISION
 COMPATIBLE_SOURCE_REVISION = "0002_sor_v3_strategy_group_capacity"
 OWNER_CONTROL_SOURCE_REVISION = "0003_portfolio_admission_observability"
+TRADFI_INSTRUMENT_SOURCE_REVISION = "0004_owner_control_plane"
 HISTORICAL_PRESERVATION_TARGET_REVISION = (
     "0003_portfolio_admission_observability"
 )
@@ -51,6 +55,13 @@ _OWNER_CONTROL_TABLES = frozenset(
         "brc_strategy_entry_controls_current",
         "brc_owner_control_operation_events",
         "brc_owner_control_operations_current",
+    }
+)
+_TRADFI_INSTRUMENT_TABLES = frozenset(
+    {
+        "brc_event_product_compatibility",
+        "brc_instrument_product_profiles",
+        "brc_instrument_product_current",
     }
 )
 _PRESERVATION_PROOF_METADATA_KEYS = (
@@ -236,6 +247,11 @@ async def _verify_compatible_source(
     database_url: str,
     source_revision: str,
 ) -> dict[str, object]:
+    if source_revision == TRADFI_INSTRUMENT_SOURCE_REVISION:
+        return await _verify_tradfi_instrument_source(
+            database_url,
+            source_revision,
+        )
     if source_revision == OWNER_CONTROL_SOURCE_REVISION:
         return await _verify_owner_control_source(database_url, source_revision)
     if source_revision != COMPATIBLE_SOURCE_REVISION:
@@ -314,6 +330,7 @@ async def _verify_preservation(
     if source_revision not in {
         COMPATIBLE_SOURCE_REVISION,
         OWNER_CONTROL_SOURCE_REVISION,
+        TRADFI_INSTRUMENT_SOURCE_REVISION,
     }:
         raise ValueError("preservation source revision is unsupported")
     if not _is_sha256_identity(expected_digest):
@@ -323,14 +340,15 @@ async def _verify_preservation(
         async with engine.connect() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
-            manifest = (
-                await _owner_control_preservation_manifest(connection)
-                if source_revision == OWNER_CONTROL_SOURCE_REVISION
-                else await _source_preservation_manifest(
+            if source_revision == TRADFI_INSTRUMENT_SOURCE_REVISION:
+                manifest = await _tradfi_instrument_preservation_manifest(connection)
+            elif source_revision == OWNER_CONTROL_SOURCE_REVISION:
+                manifest = await _owner_control_preservation_manifest(connection)
+            else:
+                manifest = await _source_preservation_manifest(
                     connection,
                     revision=revision,
                 )
-            )
             await connection.rollback()
     finally:
         await engine.dispose()
@@ -408,6 +426,74 @@ async def _verify_owner_control_source(
         "registry_identity": registry_identity,
         "owner_policy": owner_policy,
         "runtime_profile": runtime_profile,
+        "capabilities": capabilities,
+        "account_mode": account_mode,
+        "migration_gate": migration_gate,
+        "preservation_manifest": manifest,
+    }
+
+
+async def _verify_tradfi_instrument_source(
+    database_url: str,
+    source_revision: str,
+) -> dict[str, object]:
+    engine = _create_engine(database_url)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            revision = await _alembic_revision(connection)
+            shape = await _verify_exact_metadata_shape(
+                connection,
+                expected_columns=_source_0004_table_columns(),
+            )
+            migration_gate = await _migration_gate(connection)
+            manifest = await _tradfi_instrument_preservation_manifest(connection)
+            runtime_identity = await _runtime_identity(connection)
+            registry_identity = await _current_registry_identity(connection)
+            owner_policy = await _current_owner_policy(connection)
+            runtime_profile = await _current_runtime_profile(connection)
+            controls = await _current_strategy_controls(connection)
+            capabilities = await _current_capabilities(
+                connection,
+                runtime_identity=runtime_identity,
+            )
+            account_mode = {
+                "status": (
+                    "pass"
+                    if runtime_profile["status"] == "pass"
+                    and runtime_profile["position_mode"] == "independent_sides"
+                    and owner_policy["status"] == "pass"
+                    and owner_policy["supported_margin_mode"] == "cross"
+                    else "fail"
+                ),
+                "position_mode": runtime_profile["position_mode"],
+                "margin_mode": owner_policy["supported_margin_mode"],
+            }
+            await connection.rollback()
+    finally:
+        await engine.dispose()
+    passed = bool(
+        revision == source_revision
+        and shape["status"] == "pass"
+        and all(int(value) == 0 for value in migration_gate.values())
+        and runtime_identity["schema_revision"] == source_revision
+        and registry_identity["status"] == "pass"
+        and owner_policy["status"] == "pass"
+        and runtime_profile["status"] == "pass"
+        and controls["status"] == "pass"
+        and capabilities["status"] == "pass"
+        and account_mode["status"] == "pass"
+    )
+    return {
+        "schema": SCHEMA,
+        "status": "pass" if passed else "fail",
+        "alembic_revision": revision,
+        "source_shape": shape,
+        "runtime_identity": runtime_identity,
+        "registry_identity": registry_identity,
+        "owner_policy": owner_policy,
+        "runtime_profile": runtime_profile,
+        "strategy_controls": controls,
         "capabilities": capabilities,
         "account_mode": account_mode,
         "migration_gate": migration_gate,
@@ -1024,7 +1110,15 @@ def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
     return {
         table.name: tuple(table.c.keys())
         for table in metadata.sorted_tables
-        if table.name not in _OWNER_CONTROL_TABLES
+        if table.name not in _OWNER_CONTROL_TABLES | _TRADFI_INSTRUMENT_TABLES
+    }
+
+
+def _source_0004_table_columns() -> dict[str, tuple[str, ...]]:
+    return {
+        table.name: tuple(table.c.keys())
+        for table in metadata.sorted_tables
+        if table.name not in _TRADFI_INSTRUMENT_TABLES
     }
 
 
@@ -1067,9 +1161,61 @@ async def _owner_control_preservation_manifest(
     return {**payload, "digest": _sha256_json(payload)}
 
 
+async def _tradfi_instrument_preservation_manifest(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    table_entries: list[dict[str, object]] = []
+    total_rows = 0
+    for table_name, column_names in sorted(_source_0004_table_columns().items()):
+        table = sa.table(table_name, *(sa.column(name) for name in column_names))
+        rows = (
+            await connection.execute(
+                sa.select(*(table.c[name] for name in column_names))
+            )
+        ).mappings().all()
+        canonical_rows = sorted(
+            (_row_manifest(column_names, dict(row)) for row in rows),
+            key=lambda row: str(row["digest"]),
+        )
+        table_payload = {
+            "table": table_name,
+            "columns": list(column_names),
+            "row_count": len(canonical_rows),
+            "rows": canonical_rows,
+        }
+        table_entries.append(
+            {
+                **table_payload,
+                "digest": _sha256_json(table_payload),
+            }
+        )
+        total_rows += len(canonical_rows)
+    payload = {
+        "schema": "brc.trading_kernel.0004_preservation.v1",
+        "source_revision": TRADFI_INSTRUMENT_SOURCE_REVISION,
+        "tables": table_entries,
+        "table_count": len(table_entries),
+        "row_count": total_rows,
+    }
+    return {**payload, "digest": _sha256_json(payload)}
+
+
 async def _current_registry_identity(
     connection: AsyncConnection,
 ) -> dict[str, object]:
+    source_contracts = tuple(
+        contract
+        for contract in registered_strategy_contracts()
+        if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
+    )
+    expected_hash = build_registry_semantic_hash(source_contracts)
+    expected_groups = {
+        contract.strategy_group_id for contract in source_contracts
+    }
+    expected_versions = {
+        contract.strategy_version_id for contract in source_contracts
+    }
+    expected_events = {contract.event_spec_id for contract in source_contracts}
     metadata_hash = str(
         (
             await connection.scalar(
@@ -1081,23 +1227,90 @@ async def _current_registry_identity(
         )
         or ""
     )
-    group_count = int(
-        (
-            await connection.scalar(
+    groups = {
+        str(row["strategy_group_id"]): str(row["active_version_id"])
+        for row in (
+            await connection.execute(
                 text(
-                    "SELECT count(*) FROM brc_strategy_groups "
-                    "WHERE status = 'active' AND active_version_id IS NOT NULL"
+                    "SELECT strategy_group_id, active_version_id "
+                    "FROM brc_strategy_groups WHERE status = 'active' "
+                    "ORDER BY strategy_group_id"
                 )
             )
+        ).mappings()
+    }
+    versions = {
+        str(row["strategy_version_id"]): row["semantics"]
+        for row in (
+            await connection.execute(
+                text(
+                    "SELECT strategy_version_id, semantics "
+                    "FROM brc_strategy_versions WHERE status = 'active' "
+                    "ORDER BY strategy_version_id"
+                )
+            )
+        ).mappings()
+    }
+    events = {
+        str(value)
+        for value in (
+            await connection.execute(
+                text(
+                    "SELECT event_spec_id FROM brc_event_specs "
+                    "WHERE status = 'active' ORDER BY event_spec_id"
+                )
+            )
+        ).scalars()
+    }
+    passed = bool(
+        metadata_hash == expected_hash
+        and set(groups) == expected_groups
+        and set(groups.values()) == expected_versions
+        and set(versions) == expected_versions
+        and events == expected_events
+        and all(
+            isinstance(semantics, Mapping)
+            and semantics.get("registry_semantic_hash") == expected_hash
+            for semantics in versions.values()
         )
-        or 0
     )
-    passed = _is_sha256_identity(metadata_hash) and group_count == 5
     return {
         "status": "pass" if passed else "fail",
-        "expected_semantic_hash": metadata_hash,
+        "expected_semantic_hash": expected_hash,
         "live_semantic_hash": metadata_hash,
-        "active_group_count": group_count,
+        "active_group_count": len(groups),
+    }
+
+
+async def _current_strategy_controls(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    expected_groups = {
+        contract.strategy_group_id
+        for contract in registered_strategy_contracts()
+        if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
+    }
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT strategy_group_id, entry_state, control_version "
+                "FROM brc_strategy_entry_controls_current "
+                "ORDER BY strategy_group_id"
+            )
+        )
+    ).mappings().all()
+    actual_groups = {str(row["strategy_group_id"]) for row in rows}
+    passed = bool(
+        actual_groups == expected_groups
+        and all(
+            row["entry_state"] in {"paused", "enabled"}
+            and int(str(row["control_version"])) > 0
+            for row in rows
+        )
+    )
+    return {
+        "status": "pass" if passed else "fail",
+        "strategy_group_ids": sorted(actual_groups),
     }
 
 
@@ -1395,6 +1608,7 @@ async def _inspect_deployment_revision(database_url: str) -> dict[str, object]:
             in {
                 COMPATIBLE_SOURCE_REVISION,
                 OWNER_CONTROL_SOURCE_REVISION,
+                TRADFI_INSTRUMENT_SOURCE_REVISION,
                 EXPECTED_ALEMBIC_REVISION,
             }
             else "fail"

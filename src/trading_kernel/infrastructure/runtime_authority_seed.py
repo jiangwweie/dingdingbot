@@ -49,11 +49,14 @@ from src.trading_kernel.infrastructure.strategy_registry_seed import (
 
 RUNTIME_PROFILE_ID = "tiny-live-v1"
 OWNER_POLICY_ID = "policy-main"
+TRADFI_RUNTIME_PROFILE_ID = "tradfi-equity-observe-v1"
+TRADFI_OWNER_POLICY_ID = "policy-tradfi-observe"
 GLOBAL_ENTRY_LANE_ID = "global-entry"
 VENUE_ID = "binance-usdm"
 POSITION_MODE = "independent_sides"
 COMPATIBLE_SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
 OWNER_CONTROL_SOURCE_SCHEMA_REVISION = "0003_portfolio_admission_observability"
+TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION = "0004_owner_control_plane"
 _RUNTIME_FENCE_INCIDENT_ID = "incident:runtime-fence"
 _RUNTIME_FENCE_INCIDENT_KIND = "runtime_identity_mismatch"
 _PRESERVATION_METADATA_KEYS = frozenset(
@@ -240,12 +243,14 @@ _POLICY_COMPARE_KEYS = (
 def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
     """Compute the exact seed identity before touching PostgreSQL."""
 
-    contracts = registered_strategy_contracts()
+    contracts = _contracts_for_schema(request.schema_revision)
+    include_tradfi = request.schema_revision == "0005_tradfi_instrument_center"
     return _seed_identity(
         account_id=request.account_id,
         schema_revision=request.schema_revision,
         registry_semantic_hash=build_registry_semantic_hash(contracts),
         allowed_event_spec_ids=_allowed_event_spec_ids(contracts),
+        include_tradfi=include_tradfi,
     )
 
 
@@ -255,20 +260,34 @@ async def seed_runtime_authority(
 ) -> RuntimeAuthoritySeedResult:
     """Install the exact observation-only authority in one transaction."""
 
-    registry = await seed_strategy_registry(uow, seeded_at_ms=request.seeded_at_ms)
+    contracts = _contracts_for_schema(request.schema_revision)
+    include_tradfi = request.schema_revision == "0005_tradfi_instrument_center"
+    registry = await seed_strategy_registry(
+        uow,
+        seeded_at_ms=request.seeded_at_ms,
+        contracts=contracts,
+        include_product_compatibility=include_tradfi,
+    )
     connection = uow._require_connection()
     control_inserted_count = 0
-    if request.schema_revision == "0004_owner_control_plane":
+    if request.schema_revision in {
+        "0004_owner_control_plane",
+        "0005_tradfi_instrument_center",
+    }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
             seeded_at_ms=request.seeded_at_ms,
+            strategy_group_ids=tuple(
+                sorted({contract.strategy_group_id for contract in contracts})
+            ),
         )
-    allowed_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
+    allowed_event_spec_ids = _allowed_event_spec_ids(contracts)
     seed_identity = _seed_identity(
         account_id=request.account_id,
         schema_revision=request.schema_revision,
         registry_semantic_hash=registry.registry_semantic_hash,
         allowed_event_spec_ids=allowed_event_spec_ids,
+        include_tradfi=include_tradfi,
     )
     policy = _policy_values(
         version=1,
@@ -360,6 +379,13 @@ async def seed_runtime_authority(
             ),
         ),
     ]
+    if include_tradfi:
+        rows.extend(
+            _tradfi_observation_rows(
+                account_id=request.account_id,
+                seeded_at_ms=request.seeded_at_ms,
+            )
+        )
     rows.extend(
         _ExactRow(
             runtime_capabilities_current,
@@ -403,13 +429,21 @@ async def seed_runtime_authority(
         connection,
         runtime_profiles,
         "runtime_profile_id",
-        {RUNTIME_PROFILE_ID},
+        (
+            {RUNTIME_PROFILE_ID, TRADFI_RUNTIME_PROFILE_ID}
+            if include_tradfi
+            else {RUNTIME_PROFILE_ID}
+        ),
     )
     await _assert_exact_identity_set(
         connection,
         owner_policy_current,
         "owner_policy_id",
-        {OWNER_POLICY_ID},
+        (
+            {OWNER_POLICY_ID, TRADFI_OWNER_POLICY_ID}
+            if include_tradfi
+            else {OWNER_POLICY_ID}
+        ),
     )
     await _assert_exact_identity_set(
         connection,
@@ -462,6 +496,7 @@ async def deploy_compatible_upgrade_identity(
     if source_schema_revision not in {
         COMPATIBLE_SOURCE_SCHEMA_REVISION,
         OWNER_CONTROL_SOURCE_SCHEMA_REVISION,
+        TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION,
     }:
         raise RuntimeAuthorityTransitionRefused(
             "compatible identity requires an approved flat source authority"
@@ -509,25 +544,90 @@ async def deploy_compatible_upgrade_identity(
             "compatible identity time must advance monotonically"
         )
 
-    registry = await seed_strategy_registry(uow, seeded_at_ms=request.seeded_at_ms)
-    if source_schema_revision == OWNER_CONTROL_SOURCE_SCHEMA_REVISION:
+    compatible_registry_hash = build_registry_semantic_hash(
+        _crypto_strategy_contracts()
+    )
+    registry = await seed_strategy_registry(
+        uow,
+        seeded_at_ms=request.seeded_at_ms,
+        compatible_source_registry_semantic_hash=(
+            compatible_registry_hash
+            if source_schema_revision
+            in {
+                OWNER_CONTROL_SOURCE_SCHEMA_REVISION,
+                TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION,
+            }
+            else None
+        ),
+    )
+    if source_schema_revision in {
+        COMPATIBLE_SOURCE_SCHEMA_REVISION,
+        OWNER_CONTROL_SOURCE_SCHEMA_REVISION,
+    }:
         await _seed_strategy_entry_controls(
             connection,
             seeded_at_ms=request.seeded_at_ms,
         )
-        if source_entry_enabled:
-            current_policy = await _pause_entry_for_owner_control_upgrade(
-                connection,
-                current_policy=current_policy,
-                occurred_at_ms=request.seeded_at_ms,
-                runtime_commit=request.runtime_commit,
-            )
-            expected_policy_version = int(str(current_policy["policy_version"]))
+    else:
+        await _seed_strategy_entry_controls(
+            connection,
+            seeded_at_ms=request.seeded_at_ms,
+            strategy_group_ids=("SOR-US-EQ-PERP-001",),
+            assert_exact_identity_set=False,
+        )
+    if source_entry_enabled:
+        current_policy = await _pause_entry_for_compatible_upgrade(
+            connection,
+            current_policy=current_policy,
+            occurred_at_ms=request.seeded_at_ms,
+            runtime_commit=request.runtime_commit,
+            operation=(
+                "tradfi_instrument_upgrade_pause_entry"
+                if source_schema_revision
+                == TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION
+                else "owner_control_upgrade_pause_entry"
+            ),
+            event_namespace=(
+                "tradfi-instrument-upgrade"
+                if source_schema_revision
+                == TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION
+                else "owner-control-upgrade"
+            ),
+        )
+        expected_policy_version = int(str(current_policy["policy_version"]))
+
+    for row in _tradfi_observation_rows(
+        account_id=request.account_id,
+        seeded_at_ms=request.seeded_at_ms,
+    ):
+        await _insert_exact(connection, row)
+    await _assert_exact_identity_set(
+        connection,
+        runtime_profiles,
+        "runtime_profile_id",
+        {RUNTIME_PROFILE_ID, TRADFI_RUNTIME_PROFILE_ID},
+    )
+    await _assert_exact_identity_set(
+        connection,
+        owner_policy_current,
+        "owner_policy_id",
+        {OWNER_POLICY_ID, TRADFI_OWNER_POLICY_ID},
+    )
+    await _assert_exact_identity_set(
+        connection,
+        strategy_entry_controls_current,
+        "strategy_group_id",
+        {
+            contract.strategy_group_id
+            for contract in registered_strategy_contracts()
+        },
+    )
     seed_identity = _seed_identity(
         account_id=request.account_id,
         schema_revision=request.schema_revision,
         registry_semantic_hash=registry.registry_semantic_hash,
         allowed_event_spec_ids=target_event_spec_ids,
+        include_tradfi=True,
     )
     if not _policy_matches(
         current_policy,
@@ -944,11 +1044,43 @@ def _allowed_event_spec_ids(
             {
                 str(contract.event_spec_id)
                 for contract in contracts
+                if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
             }
         )
     )
     if not event_spec_ids:
         raise RuntimeAuthoritySeedConflict("runtime policy requires registered Events")
+    return event_spec_ids
+
+
+def _crypto_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
+    return tuple(
+        contract
+        for contract in registered_strategy_contracts()
+        if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
+    )
+
+
+def _contracts_for_schema(
+    schema_revision: TradingKernelSchemaRevision,
+) -> tuple[RegisteredStrategyContract, ...]:
+    if schema_revision == "0005_tradfi_instrument_center":
+        return registered_strategy_contracts()
+    return _crypto_strategy_contracts()
+
+
+def _tradfi_event_spec_ids() -> tuple[str, ...]:
+    event_spec_ids = tuple(
+        sorted(
+            contract.event_spec_id
+            for contract in registered_strategy_contracts()
+            if contract.strategy_group_id == "SOR-US-EQ-PERP-001"
+        )
+    )
+    if len(event_spec_ids) != 2:
+        raise RuntimeAuthoritySeedConflict(
+            "TradFi observation policy requires exactly two Events"
+        )
     return event_spec_ids
 
 
@@ -999,16 +1131,91 @@ def _policy_values(
     }
 
 
+def _tradfi_policy_values(*, updated_at_ms: int) -> dict[str, object]:
+    return {
+        "owner_policy_id": TRADFI_OWNER_POLICY_ID,
+        "policy_version": 1,
+        "enabled": True,
+        "new_entry_submit_enabled": False,
+        "priority_rank": 200,
+        "max_concurrent_tickets": 1,
+        "family_ticket_limits": FamilyTicketLimits(
+            long_continuation=1,
+            opening_range=1,
+            rally_failure_short=1,
+        ).model_dump(),
+        "max_ticket_stop_risk_fraction": Decimal("0.005"),
+        "max_gross_stop_risk_fraction": Decimal("0.005"),
+        "max_ticket_initial_margin_fraction": Decimal("0.10"),
+        "max_gross_initial_margin_utilization": Decimal("0.10"),
+        "directional_stop_risk_limit_fraction": Decimal("0.005"),
+        "min_materialization_ratio": Decimal("0.50"),
+        "max_leverage": 5,
+        "supported_margin_mode": "cross",
+        "post_stop_stress_multiple": Decimal("2.0"),
+        "max_post_fill_stop_risk_overrun_fraction": Decimal("0.10"),
+        "scope": {
+            "runtime_profile_id": TRADFI_RUNTIME_PROFILE_ID,
+            "allowed_event_spec_ids": list(_tradfi_event_spec_ids()),
+            "owner_console_primary": False,
+        },
+        "updated_at_ms": updated_at_ms,
+    }
+
+
+def _tradfi_observation_rows(
+    *,
+    account_id: str,
+    seeded_at_ms: int,
+) -> tuple[_ExactRow, ...]:
+    policy = _tradfi_policy_values(updated_at_ms=seeded_at_ms)
+    return (
+        _ExactRow(
+            runtime_profiles,
+            "runtime_profile_id",
+            {
+                "runtime_profile_id": TRADFI_RUNTIME_PROFILE_ID,
+                "venue_id": VENUE_ID,
+                "account_id": account_id,
+                "environment": "live",
+                "position_mode": POSITION_MODE,
+                "status": "active",
+                "updated_at_ms": seeded_at_ms,
+            },
+            ("venue_id", "account_id", "environment", "position_mode", "status"),
+        ),
+        _ExactRow(
+            owner_policy_events,
+            "owner_policy_event_id",
+            _policy_event(
+                version=1,
+                operation="seed_tradfi_observation_only",
+                policy=policy,
+                occurred_at_ms=seeded_at_ms,
+                owner_policy_id=TRADFI_OWNER_POLICY_ID,
+            ),
+            ("owner_policy_id", "policy_version", "operation", "payload"),
+        ),
+        _ExactRow(
+            owner_policy_current,
+            "owner_policy_id",
+            policy,
+            _POLICY_COMPARE_KEYS,
+        ),
+    )
+
+
 def _policy_event(
     *,
     version: int,
     operation: str,
     policy: Mapping[str, object],
     occurred_at_ms: int,
+    owner_policy_id: str = OWNER_POLICY_ID,
 ) -> dict[str, object]:
     return {
-        "owner_policy_event_id": f"policy-event:{OWNER_POLICY_ID}:v{version}",
-        "owner_policy_id": OWNER_POLICY_ID,
+        "owner_policy_event_id": f"policy-event:{owner_policy_id}:v{version}",
+        "owner_policy_id": owner_policy_id,
         "policy_version": version,
         "operation": operation,
         "payload": {
@@ -1026,6 +1233,7 @@ def _seed_identity(
     schema_revision: str,
     registry_semantic_hash: str,
     allowed_event_spec_ids: tuple[str, ...],
+    include_tradfi: bool,
 ) -> str:
     semantics = _policy_values(
         version=1,
@@ -1034,6 +1242,10 @@ def _seed_identity(
         updated_at_ms=1,
     )
     semantics.pop("updated_at_ms")
+    tradfi_semantics = None
+    if include_tradfi:
+        tradfi_semantics = _tradfi_policy_values(updated_at_ms=1)
+        tradfi_semantics.pop("updated_at_ms")
     canonical = json.dumps(
         {
             "account_id": account_id,
@@ -1042,6 +1254,11 @@ def _seed_identity(
             "schema_revision": schema_revision,
             "position_mode": POSITION_MODE,
             "acceptance_policy": semantics,
+            **(
+                {"tradfi_observation_policy": tradfi_semantics}
+                if tradfi_semantics is not None
+                else {}
+            ),
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -1639,14 +1856,23 @@ async def _seed_strategy_entry_controls(
     connection: AsyncConnection,
     *,
     seeded_at_ms: int,
+    strategy_group_ids: tuple[str, ...] | None = None,
+    assert_exact_identity_set: bool = True,
 ) -> int:
-    """Install one explicit enabled control row for every registered StrategyGroup."""
+    """Install explicit controls; TradFi SOR starts paused and remains non-entry."""
 
-    strategy_group_ids = tuple(
-        sorted({item.strategy_group_id for item in registered_strategy_contracts()})
+    selected_group_ids = (
+        tuple(
+            sorted(
+                {item.strategy_group_id for item in registered_strategy_contracts()}
+            )
+        )
+        if strategy_group_ids is None
+        else tuple(sorted(strategy_group_ids))
     )
     inserted = 0
-    for strategy_group_id in strategy_group_ids:
+    for strategy_group_id in selected_group_ids:
+        paused = strategy_group_id == "SOR-US-EQ-PERP-001"
         authorization_id = f"owner-authorization:seed:{strategy_group_id}"
         event_id = f"strategy-control-event:seed:{strategy_group_id}"
         inserted += await _insert_exact(
@@ -1656,7 +1882,7 @@ async def _seed_strategy_entry_controls(
                 "authorization_id",
                 {
                     "authorization_id": authorization_id,
-                    "purpose": "strategy_resume",
+                    "purpose": "strategy_pause" if paused else "strategy_resume",
                     "owner_identity": "system-seed",
                     "authentication_strength": "session",
                     "request_digest": "sha256:" + "0" * 64,
@@ -1683,10 +1909,10 @@ async def _seed_strategy_entry_controls(
                     "strategy_entry_control_event_id": event_id,
                     "strategy_group_id": strategy_group_id,
                     "control_version": 1,
-                    "operation": "resume",
-                    "target_state": "enabled",
+                    "operation": "pause" if paused else "resume",
+                    "target_state": "paused" if paused else "enabled",
                     "authorization_id": authorization_id,
-                    "reason": "seed_enabled",
+                    "reason": "seed_observation_only" if paused else "seed_enabled",
                     "payload": {},
                     "created_at_ms": seeded_at_ms,
                 },
@@ -1708,10 +1934,10 @@ async def _seed_strategy_entry_controls(
                 "strategy_group_id",
                 {
                     "strategy_group_id": strategy_group_id,
-                    "entry_state": "enabled",
+                    "entry_state": "paused" if paused else "enabled",
                     "control_version": 1,
                     "last_event_id": event_id,
-                    "reason": "seed_enabled",
+                    "reason": "seed_observation_only" if paused else "seed_enabled",
                     "updated_at_ms": seeded_at_ms,
                 },
                 (
@@ -1722,27 +1948,30 @@ async def _seed_strategy_entry_controls(
                 ),
             ),
         )
-    await _assert_exact_identity_set(
-        connection,
-        strategy_entry_controls_current,
-        "strategy_group_id",
-        set(strategy_group_ids),
-    )
+    if assert_exact_identity_set:
+        await _assert_exact_identity_set(
+            connection,
+            strategy_entry_controls_current,
+            "strategy_group_id",
+            set(selected_group_ids),
+        )
     return inserted
 
 
-async def _pause_entry_for_owner_control_upgrade(
+async def _pause_entry_for_compatible_upgrade(
     connection: AsyncConnection,
     *,
     current_policy: Mapping[str, object],
     occurred_at_ms: int,
     runtime_commit: str,
+    operation: str,
+    event_namespace: str,
 ) -> dict[str, object]:
     """Atomically retain a flat upgrade with new ENTRY paused and audited."""
 
     current_version = int(str(current_policy["policy_version"]))
     target_version = current_version + 1
-    event_id = f"owner-policy-event:owner-control-upgrade:{target_version}"
+    event_id = f"owner-policy-event:{event_namespace}:{target_version}"
     await _insert_exact(
         connection,
         _ExactRow(
@@ -1752,7 +1981,7 @@ async def _pause_entry_for_owner_control_upgrade(
                 "owner_policy_event_id": event_id,
                 "owner_policy_id": OWNER_POLICY_ID,
                 "policy_version": target_version,
-                "operation": "owner_control_upgrade_pause_entry",
+                "operation": operation,
                 "payload": {
                     "runtime_commit": runtime_commit,
                     "new_entry_submit_enabled": False,

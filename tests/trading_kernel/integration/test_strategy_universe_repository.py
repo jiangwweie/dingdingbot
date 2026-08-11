@@ -36,9 +36,12 @@ from src.trading_kernel.infrastructure.pg_universe_repository import (
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     OWNER_POLICY_ID,
     RUNTIME_PROFILE_ID,
+    TRADFI_OWNER_POLICY_ID,
+    TRADFI_RUNTIME_PROFILE_ID,
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -70,7 +73,7 @@ async def universe_engine() -> AsyncGenerator[AsyncEngine, None]:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-universe-test",
                     runtime_commit="task-5-test",
-                    schema_revision="0004_owner_control_plane",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
                     seeded_at_ms=1_800_000_000_000,
                 ),
             )
@@ -480,6 +483,55 @@ async def test_conflicting_canonical_instrument_identity_rejects_atomically(
         )
     assert instrument_ids == (conflicting_id,)
     assert universe_count == 0
+
+
+@pytest.mark.asyncio
+async def test_crypto_event_rejects_tradfi_equity_product_profile(
+    universe_engine: AsyncEngine,
+) -> None:
+    with pytest.raises(RuntimeError, match="PRODUCT_COMPATIBILITY_MISMATCH"):
+        async with PostgresKernelUnitOfWork(universe_engine) as uow:
+            await install_strategy_universe(
+                uow,
+                _request(("binance-usdm:AAPLUSDT:perpetual",)),
+            )
+
+
+@pytest.mark.asyncio
+async def test_tradfi_sor_installs_equity_member_only_into_warming_scope(
+    universe_engine: AsyncEngine,
+) -> None:
+    contract = next(
+        item
+        for item in registered_strategy_contracts()
+        if item.event_id == "SOR-US-LONG-15M"
+    )
+    request = UniverseInstallRequest(
+        event_spec_id=contract.event_spec_id,
+        runtime_profile_id=TRADFI_RUNTIME_PROFILE_ID,
+        owner_policy_id=TRADFI_OWNER_POLICY_ID,
+        exchange_instrument_ids=("binance-usdm:AAPLUSDT:perpetual",),
+        installed_at_ms=1_800_000_000_000,
+    )
+
+    async with PostgresKernelUnitOfWork(universe_engine) as uow:
+        result = await install_strategy_universe(uow, request)
+
+    assert result.status is UniverseInstallStatus.INSTALLED
+    assert result.lifecycle_state == "warming"
+    assert result.inserted_instrument_count == 1
+    async with universe_engine.connect() as connection:
+        row = (
+            await connection.execute(
+                sa.text(
+                    "SELECT i.asset_class, s.observation_enabled, s.entry_enabled "
+                    "FROM brc_instruments i JOIN brc_runtime_scopes_current s "
+                    "ON s.exchange_instrument_id = i.exchange_instrument_id "
+                    "WHERE i.exchange_instrument_id = 'binance-usdm:AAPLUSDT:perpetual'"
+                )
+            )
+        ).one()
+    assert tuple(row) == ("equity", True, False)
 
 
 @pytest.mark.asyncio

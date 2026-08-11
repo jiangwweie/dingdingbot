@@ -71,6 +71,7 @@ is one unbranched forward Alembic chain:
 -> 0002_sor_v3_strategy_group_capacity
 -> 0003_portfolio_admission_observability
 -> 0004_owner_control_plane
+-> 0005_tradfi_instrument_center
 ```
 
 `0001` is a frozen historical schema snapshot. `0002 -> 0003` is a stopped,
@@ -83,6 +84,14 @@ Ticket or exchange-command semantics. No runtime reads an old schema, performs d
 writes, falls back, downgrades, or hands active exposure between schemas. The
 deployed schema identity remains a volatile fact owned only by
 `MAIN_CONTROL_ROADMAP.md`.
+
+`0004 -> 0005` is the stopped, flat, forward-only Product Authority upgrade.
+It preserves the existing Crypto Registry, Owner Policy versions, Strategy
+Controls, terminal lineage and StrategyUniverse rows, then adds Product
+Compatibility, the bounded Instrument Center projections and the independent
+observation-only `SOR-US-EQ-PERP-001` authority. The main Crypto Policy never
+inherits TradFi Events; TradFi ENTRY remains disabled and its Strategy Control
+starts paused.
 
 Strategy semantics live in the Registry, while concrete instrument membership,
 certification, warming, current activation, and frozen Signal/Ticket lineage

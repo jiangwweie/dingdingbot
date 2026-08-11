@@ -13,6 +13,7 @@ from src.trading_kernel.application.owner_console.models import (
     CandleView,
 )
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.product import ProductSessionSnapshot
 
 
 class _ClosedCandleSource(Protocol):
@@ -22,6 +23,13 @@ class _ClosedCandleSource(Protocol):
     ) -> tuple[ClosedCandle, ...]: ...
 
     async def close(self) -> None: ...
+
+    async def fetch_product_sessions(
+        self,
+        exchange_instrument_ids: tuple[str, ...],
+        *,
+        observed_at_ms: int,
+    ) -> tuple[ProductSessionSnapshot, ...]: ...
 
 
 class OwnerMarketData:
@@ -52,6 +60,25 @@ class OwnerMarketData:
             return
         self._closed = True
         await self._source.close()
+
+    async def read_product_sessions(
+        self,
+        exchange_instrument_ids: tuple[str, ...],
+        *,
+        observed_at_ms: int,
+    ) -> tuple[ProductSessionSnapshot, ...]:
+        snapshots = await self._source.fetch_product_sessions(
+            exchange_instrument_ids,
+            observed_at_ms=observed_at_ms,
+        )
+        if tuple(item.exchange_instrument_id for item in snapshots) != (
+            exchange_instrument_ids
+        ):
+            raise ValueError("public product snapshots changed requested identity order")
+        return tuple(
+            ProductSessionSnapshot.model_validate(item.model_dump())
+            for item in snapshots
+        )
 
 
 def _to_candle_view(candle: ClosedCandle, *, closed_at_ms: int) -> CandleView:
