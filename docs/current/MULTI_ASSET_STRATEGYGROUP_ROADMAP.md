@@ -27,10 +27,13 @@ last_verified: 2026-08-11
    待策略组、标的中心和跨资产运行底座稳定后再评估；
 6. 任何新 Venue、账户、标的、资本和真实 ENTRY 都必须在对应阶段单独确认，
    不能由本路线图隐含授权。
+7. 在多资产开发前插入 **M0.5：Deployment Simplification**。日常发布按
+   静态前端、Owner API、同 Schema Kernel 和 Schema/Authority Upgrade 分级，
+   Controlled Flatten 不再作为普通部署的默认步骤。
 
 ## Authority Boundary
 
-本文件只拥有 **M0–M7 的稳定阶段顺序、目标、依赖、工作量区间和阶段门**。
+本文件只拥有 **M0–M7（含 M0.5）的稳定阶段顺序、目标、依赖、工作量区间和阶段门**。
 它不拥有以下易变或运行时事实：
 
 | 信息 | 唯一权威 |
@@ -98,6 +101,7 @@ Ticket、收益和 Review 必须独立统计。LONG 与 SHORT 可共享初始候
 | 阶段 | 目标结果 | 主要范围 | 阶段完成条件 |
 | --- | --- | --- | --- |
 | **M0：现有内核收尾** | 关闭既有 P0 重建计划 | `promote-full`、最终需求审计、文档状态收口 | `MAIN_CONTROL_ROADMAP.md` 从行动时直接证据记录 P0 完成 |
+| **M0.5：部署精简** | 日常改动按影响面进入独立发布通道 | 静态前端、Owner API、同 Schema Kernel、Schema/Authority Upgrade；自然空仓优先 | 前端/API 不再触发 Kernel 停机或空仓；Kernel 和 Migration 保留相称门禁 |
 | **M1：Venue/Product 决策** | 形成当前可执行的 Capability Matrix | Venue、账户、产品、Session、方向、数据、企业事件、故障语义 | Owner 明确 Venue、账户隔离、首批候选和首期方向范围 |
 | **M2：产品化前端** | StrategyGroup 驾驶舱、标的中心和 Universe 管理 | 只读标的状态、归属、Universe Diff、Warming、Activation、审计记录 | 日常策略与标的管理不依赖手工 SQL 或拼装多处事实 |
 | **M3：跨资产运行底座** | 当前 Kernel 能表达目标 Venue/Product | 通用 Instrument Identity、Venue Adapter、RuntimeProfile、Product、Session、Corporate Action | 新 Profile 可完成只读认证和 Observation，且现有加密 Profile 无行为漂移 |
@@ -115,6 +119,7 @@ Owner Console，并采用与风险相称的聚焦测试。真实市场观察和�
 | 阶段 | 净开发工作量 | 典型日历时间 | 主要不确定性 | 影响等级 |
 | --- | ---: | ---: | --- | --- |
 | **M0** | 1–2 天 | 1–2 天 | 行动时生产事实和最终审计发现 | 低 |
+| **M0.5** | 10–17 天 | 2–3.5 周 | Owner API 解耦和自然空仓发布边界 | 中，部署控制面 |
 | **M1** | 2–4 天 | 2–4 天 | 目标 Venue 当前官方产品与账户能力 | 极低，只读 |
 | **M2** | 10–16 天 | 2–3 周 | 只读页面与受控 Universe 写能力的边界 | 低至中 |
 | **M3，同一 Venue** | 10–15 天 | 2–3 周 | 当前 Binance 绑定点和产品事实扩展 | 中 |
@@ -124,15 +129,47 @@ Owner Console，并采用与风险相称的聚焦测试。真实市场观察和�
 | **M6** | 2–5 天开发 | 样本等待约 4–12 周 | 信号频率和自然 Ticket 生命周期 | 高但有界 |
 | **M7** | 15–25 天 | 3–5 周 | 旧设计向当前 Schema/Policy 的重写范围 | 中 |
 
-如果目标产品可以继续使用当前 Venue，预计约 **5–7 周净开发时间**进入
-Observation；如果必须接入全新 Venue，预计约 **8–11 周净开发时间**进入
-Observation。M2 的只读信息架构可以在 M1 后开始，受控 Universe 操作则依赖
-M3 的正式后端契约。
+M0.5 全部完成后，如果目标产品可以继续使用当前 Venue，预计约 **7–10 周净开发时间**
+进入 Observation；如果必须接入全新 Venue，预计约 **10–14 周净开发时间**
+进入 Observation。M1 的只读研究可以在 M0.5 期间交错进行；M2 的只读信息架构
+可以在 M1 后开始，受控 Universe 操作则依赖 M3 的正式后端契约。
+
+## M0.5 Release Model
+
+M0.5 只确认发布分级和安全边界，具体脚本、路径、服务单元、认证 Manifest 和
+恢复行为由后续专项设计决定。在该设计部署完成前，当前
+`TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` 仍是唯一有效生产流程。
+
+| 发布级别 | 适用范围 | 空仓要求 | 受影响服务 | 目标操作时间 |
+| --- | --- | --- | --- | ---: |
+| **R0：无需部署** | 文档、研究、规划 | 否 | 无 | 0 |
+| **R1：静态前端** | React、CSS、图表、路由和文案 | 否 | 仅静态 Release Symlink | 1–3 分钟 |
+| **R2：Owner API** | 查询、展示模型、认证和兼容的 Owner Control API | 否 | 仅 Owner API | 3–8 分钟 |
+| **R3：同 Schema Kernel** | 策略、Worker、Lifecycle、Risk、Venue Adapter | 是 | 四类 Kernel Worker | 空仓后 12–20 分钟 |
+| **R4：Schema/Authority Upgrade** | Migration、Registry、Policy、RuntimeProfile | 是 | Kernel 与 PostgreSQL Authority | 空仓后 20–60 分钟 |
+
+M0.5 必须实现以下稳定语义：
+
+1. 变更范围只能向更重发布级别升级；未知或共享 Kernel 文件默认进入 R3；
+2. R1 不运行 Kernel 全量认证，不停止 Worker，不访问交易所；
+3. R2 使用独立 Owner API Release 身份，只执行聚焦契约、认证、数据库兼容和
+   Unix Socket/HTTPS Smoke；
+4. R3 保留完整 Kernel 认证、精确 Runtime Identity、内外部空仓、Entry 最后
+   启动和失败后 Fence；
+5. R4 保留停止、空仓、前向 Migration、历史保留验证和 Fix-forward；
+6. 普通 Kernel 发布优先 Stage 后等待自然空仓，现有 Ticket 正常保护和退出；
+7. Controlled Flatten 仅用于紧急安全修复、不能等待的 Migration 或独立 Owner
+   平仓决策，不由普通部署自动触发；
+8. 发布输出应显示 Release 类型、受影响服务、当前阶段、单一首要 Blocker 和
+   每阶段耗时，避免人工拼装多处日志；
+9. 前端可只读展示发布状态，但实际发布继续由本地 SSH 控制面执行。
 
 ## Dependency Order
 
 ```text
 M0
+ ↓
+M0.5: Deployment Simplification
  ↓
 M1
  ├── M2A: 标的中心与 StrategyGroup 只读驾驶舱
@@ -147,9 +184,10 @@ M1
              M7: RSRVCB-001
 ```
 
-M0 是当前既有程序的收尾，不应被新的产品设计长期拖延。M1 是 M3 和 M4 的
-前置决策；M2A 可以先行，但 M2B 不得在后端版本、事务和审计语义未确定时通过
-前端直接修改运行时表。
+M0 是当前既有程序的收尾，不应被新的产品设计长期拖延。M0.5 优先解决后续
+频繁前端、API 和 Kernel 迭代的发布成本；M1 的只读调研可与其交错，但 M2–M4
+的实施不应继续扩大现有发布耦合。M1 是 M3 和 M4 的前置决策；M2A 可以先行，
+但 M2B 不得在后端版本、事务和审计语义未确定时通过前端直接修改运行时表。
 
 ## M1 Owner Decision Package
 
@@ -221,19 +259,25 @@ Active Universe
 - 在 M5 证据完成前开放美股永续真实 ENTRY；
 - 在 M6 稳定前启动 M7 实施；
 - 由本规划文件授权生产部署或交易所写入。
+- 为追求速度而取消 Runtime Identity、Unknown Outcome、Partial Fill、
+  Reconciliation 或 Schema Preservation 边界；
+- 让普通发布自动触发 Controlled Flatten；
+- 引入新旧 Kernel 混合运行、活动持仓蓝绿交接或 Kubernetes。
 
 ## Follow-Up Design Records
 
 每个阶段开始前再形成与该阶段匹配的具体设计，不在本路线图提前冻结：
 
-1. M1：Venue/Product/Account Capability Matrix 与 Owner Decision Record；
-2. M2：Owner Console Instrument Center 与 Universe Control 设计；
-3. M3：Instrument、RuntimeProfile、Venue Adapter、Product/Session/Corporate
+1. M0.5：分级发布、Owner API 独立 Release、自然空仓 Cutover、阶段耗时和
+   失败恢复设计；
+2. M1：Venue/Product/Account Capability Matrix 与 Owner Decision Record；
+3. M2：Owner Console Instrument Center 与 Universe Control 设计；
+4. M3：Instrument、RuntimeProfile、Venue Adapter、Product/Session/Corporate
    Action 架构设计和前向 migration 计划；
-4. M4：`SOR-US-EQ-PERP-001` 策略语义、退出政策和 Live/Replay 验收矩阵；
-5. M5：Observation 指标、证据窗口和 go/hold/stop 判定合同；
-6. M6：独立资本政策、受控实盘和自然 Ticket 验收计划；
-7. M7：旧 RSRVCB 设计的可移植模块审计与当前内核重写计划。
+5. M4：`SOR-US-EQ-PERP-001` 策略语义、退出政策和 Live/Replay 验收矩阵；
+6. M5：Observation 指标、证据窗口和 go/hold/stop 判定合同；
+7. M6：独立资本政策、受控实盘和自然 Ticket 验收计划；
+8. M7：旧 RSRVCB 设计的可移植模块审计与当前内核重写计划。
 
 任何阶段的实现、迁移和部署状态仍由当前代码、PostgreSQL、Venue 事实和
 `MAIN_CONTROL_ROADMAP.md` 记录，本路线图不自行宣告阶段完成。
