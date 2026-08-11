@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-08-10
+last_verified: 2026-08-11
 ---
 
 # Main Control Roadmap
@@ -42,13 +42,31 @@ different Netting Domains progress concurrently.
 | Owner controls | Global new ENTRY is enabled at Policy version `9`; `SOR-001` is paused at Strategy Control version `2`, so both SOR 15-minute Events reject new admission while the other registered StrategyGroups remain enabled |
 | Runtime ownership | Observation, Entry, Lifecycle and Reconciliation are active and enabled; the Entry write fence is absent after official promotion |
 | Runtime stability | Observation, Entry, Lifecycle, Reconciliation and Owner API are active/enabled with zero restarts in the post-release samples |
-| Current PostgreSQL activity | No nonterminal Ticket, non-flat Position, active Budget Reservation, unresolved Exchange Command or open Incident exists |
-| Exchange postflight | Binance is `independent_sides` and `cross`; the seven approved instruments remain configured at `5x`, with no non-flat position or open-order domain |
+| 2026-08-10 PostgreSQL postflight | No nonterminal Ticket, non-flat Position, active Budget Reservation, unresolved Exchange Command or open Incident existed at the completed release postflight |
+| 2026-08-10 exchange postflight | Binance was `independent_sides` and `cross`; the seven approved instruments were configured at `5x`, with no non-flat position or open-order domain at the completed release postflight |
 | Controlled flatten acceptance | Natural Ticket `ticket:fb99bed7ca2b28e49b6346d498b8a23c` entered through the official path, was exited by Owner authorization `owner-authorization:3ae1622e6e124ffab141b350f89e3330`, and is terminal, reconciled, settled and reviewed; the durable Operation is `completed` with no blocker |
 | Owner Console | `https://jiaoyingpan.cloud/trading/` is active behind the existing Nginx HTTPS server; the Strategy Workbench static route is deployed from the exact verified build, and its protected API returns `401` before password-plus-TOTP authentication |
 | Nginx isolation | Existing Nginx configuration was not rewritten; syntax passes, the Owner API remains Unix-Socket proxied, and unauthenticated data access returns `401` |
 | Full capability | Natural v4 closure evidence now exists; `promote-full` and the final requirement audit remain explicit follow-up operations and were not bundled into this release |
 | Scope boundary | Funding ownership and broader Incident-quality work were not changed by this release |
+
+## Deferred Release Candidate
+
+The Owner reported active production exposure on 2026-08-11 and explicitly
+chose natural lifecycle completion instead of manual or deployment-driven
+flattening. This report supersedes the prior flat postflight only for current
+deployment readiness; exact current PostgreSQL and exchange state has not been
+refreshed by this documentation-only action.
+
+| Area | Deferred state |
+| --- | --- |
+| Candidate commit | `5e902453360f884d2ec2a7d8c6c92568d9459f4a` — `feat(owner-console): add ticket price decision map` |
+| Candidate branch | Exact commit is present on `dev` and `origin/dev`; later branch movement does not change the frozen candidate identity |
+| Certification | Existing exact Release Certification Manifest is `pass` for Schema `0004_owner_control_plane`; Registry, Owner Policy, runtime authority and command-set semantic digests match the current production certification |
+| Production identity | Production remains `1c3063bf520a52c15b144bf613884c7e00147bfc` and `tokyo-runtime-2026.08.10.2`; the candidate has no production tag and has not changed the current release symlink, PostgreSQL identity or services |
+| Deferral decision | No Controlled Flatten, no deployment, no Owner Policy change, no Entry service/fence change and no StrategyGroup control change are authorized by this record |
+| Activation boundary | When the Owner opens a later deployment window, stop/disable and write-fence Entry without mutating Owner Policy, keep Lifecycle and Reconciliation active until every Ticket finishes naturally, refresh PostgreSQL/systemd/exchange facts, verify the reusable exact certification, and deploy only while internal and external exposure are flat |
+| Supersession | Replacing this SHA with a later candidate requires an explicit new record and an exact passing certification for that replacement |
 
 ## Current Performance Snapshot
 
@@ -71,9 +89,13 @@ it is not a gate retroactively added to this completed deployment.
 
 | Order | Work | Exit condition |
 | ---: | --- | --- |
-| 1 | Full policy promotion | Run and certify `promote-full` from current flat PostgreSQL and Binance facts |
-| 2 | Final requirement audit | Re-run local and Tokyo evidence and close every acceptance item |
-| 3 | Owner Console iteration | Continue only from observed daily-use gaps; current deployment is operational and does not block trading |
+| 1 | Natural lifecycle continuation | The current production release protects, exits, reconciles, settles and reviews every existing Ticket without deployment-driven flattening |
+| 2 | Deployment-window freeze | Owner explicitly opens the window; Entry is stopped, disabled and write-fenced without changing Owner Policy, safety workers remain active, and current PostgreSQL, systemd, release-marker and exchange facts prove exact internal/external flatness |
+| 3 | Deferred candidate release | Reuse the exact certification for `5e902453360f884d2ec2a7d8c6c92568d9459f4a`, refresh action-time gates, deploy through the current regular-release contract and complete postflight while Entry remains fenced |
+| 4 | Full policy promotion | Run and certify `promote-full` only from current flat PostgreSQL and Binance facts with exact deployed identity, then restore Entry explicitly after all promotion gates pass |
+| 5 | Final requirement audit | Re-run local and Tokyo evidence and close every acceptance item |
+| 6 | Deployment simplification | Implement the approved M0.5 R0–R4 release model so later frontend and Owner API releases no longer wait for Kernel flatness |
+| 7 | Multi-asset planning | Continue M1 Venue/Product decisions and M2 product design without changing current production authority, capital or Venue scope |
 
 ## Current Stop Conditions
 
@@ -86,5 +108,7 @@ The `0004` production deployment, Owner Console Strategy Workbench, Owner
 control plane, controlled flatten acceptance and official Entry restoration are
 complete and sealed.
 `SOR-001` remains paused by explicit Owner control. The broader rebuild program
-is not final until `promote-full` and the final requirement audit are certified
-from current direct evidence.
+is not final until the deferred candidate window, `promote-full` and the final
+requirement audit are certified from current direct evidence. Until that
+window, production remains on `1c3063bf520a52c15b144bf613884c7e00147bfc`
+and active exposure follows the existing certified lifecycle.
