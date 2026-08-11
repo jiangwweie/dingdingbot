@@ -104,7 +104,7 @@ Ticket、收益和 Review 必须独立统计。LONG 与 SHORT 可共享初始候
 | **M0.5：部署精简** | 日常改动按影响面进入独立发布通道 | 静态前端、Owner API、同 Schema Kernel、Schema/Authority Upgrade；自然空仓优先 | 前端/API 不再触发 Kernel 停机或空仓；Kernel 和 Migration 保留相称门禁 |
 | **M1：Venue/Product 决策** | 形成当前可执行的 Capability Matrix | Venue、账户、产品、Session、方向、数据、企业事件、故障语义 | Owner 明确 Venue、账户隔离、首批候选和首期方向范围 |
 | **M2：产品化前端** | StrategyGroup 驾驶舱、标的中心和 Universe 管理 | 只读标的状态、归属、Universe Diff、Warming、Activation、审计记录 | 日常策略与标的管理不依赖手工 SQL 或拼装多处事实 |
-| **M3：跨资产运行底座** | 当前 Kernel 能表达目标 Venue/Product | 通用 Instrument Identity、Venue Adapter、RuntimeProfile、Product、Session、Corporate Action | 新 Profile 可完成只读认证和 Observation，且现有加密 Profile 无行为漂移 |
+| **M3：跨资产运行底座** | 当前 Kernel 能表达目标 Venue/Product | 保留 canonical Instrument ID，扩展 RuntimeProfile、Product Profile、Session、Corporate Action 和当前 Venue capability | 新 Profile 可完成只读认证和 Observation，且现有加密 Profile 无行为漂移 |
 | **M4：美股 SOR** | 新 StrategyGroup 可以自然产生标准 Signal | 美股 Opening Range、LONG/SHORT Event、Market Plan、Exit Policy、版本身份 | `SOR-US-EQ-PERP-001` 在 Entry 禁用状态完成 Live/Replay 一致的 Observation |
 | **M5：Observation/Shadow** | 获得产品微观结构和策略路径证据 | Spread、Depth、Slippage、Opening Range、TP1、MAE、失败退出、Session 分布 | 完成约定市场日窗口并形成独立的继续、修改或停止结论 |
 | **M6：小规模实盘闭环** | 完成受控真实资金自然 Ticket | 独立 Owner Policy、ENTRY 准入、保护、退出、结算、Review | 自然 Ticket 完整闭环，交易所与 PostgreSQL 无残留或未解决 Incident |
@@ -193,11 +193,21 @@ M0 是当前既有程序的收尾，不应被新的产品设计长期拖延。M0
 
 M1 只要求 Owner 确定产品边界，具体 API、表结构和失败恢复由后续设计负责。
 
+2026-08-11 的官方 API、官方产品说明、当前代码和 Binance 只读产品事实已经把
+推荐方向收敛为：**继续使用 Binance USDⓈ-M，同一 Venue 下增加 TradFi Equity
+Perpetual Product Family，不建设新 Venue Adapter，也不迁移现有 canonical
+instrument identity。** 详细事实、Capability Matrix、候选池、Session、账户和
+M2–M4 影响记录在
+`docs/superpowers/specs/2026-08-11-binance-usdm-tradfi-perpetual-m1-decision.md`。
+
+该记录当前为 `OWNER_RECOMMENDATION_READY / OWNER_DECISION_PENDING`。它不改变
+Registry、PostgreSQL Universe、Owner Policy、生产账户或真实 ENTRY 权限。
+
 | 决策主题 | 初始推荐 | 本阶段不提前锁定的细节 |
 | --- | --- | --- |
-| **Venue** | 优先验证当前 Venue；能力不足时再接新 Venue | Adapter 类、API 参数和部署单元 |
-| **账户** | 同一 Kernel、独立 RuntimeProfile；条件允许时使用独立账户或子账户 | 账户凭据和具体资本值 |
-| **标的池** | 首批 5–8 个候选，全部以行动时官方产品事实为准 | AAPL、SNDK、GOOGL 等具体成员是否最终纳入 |
+| **Venue** | `binance-usdm`；复用当前 CCXT/REST adapter | Product/Session port 和 API 参数 |
+| **账户** | 同一 USDⓈ-M account、独立 RuntimeProfile；暂不增加子账户 | M6 真实资本和是否需要物理隔离 |
+| **标的池** | AAPL、GOOGL、MSFT、NVDA、META、AMZN、TSLA、SNDK；QQQ/SPY 仅 reference | M4 是否使用 reference regime；M5 后是否替换成员 |
 | **Session** | 全时段 Observation；首版仅 US Regular Session 允许 ENTRY | 具体日历表和时间分类实现 |
 | **方向** | LONG、SHORT 都观察，M6 时分别批准实盘 | 两侧是否使用相同 Universe |
 | **资本** | M1–M5 不增加真实资本；M6 单独批准小规模边界 | 风险比例、并发容量和保证金值 |
@@ -270,10 +280,11 @@ Active Universe
 
 1. M0.5：分级发布、Owner API 独立 Release、自然空仓 Cutover、阶段耗时和
    失败恢复设计；
-2. M1：Venue/Product/Account Capability Matrix 与 Owner Decision Record；
+2. M1：`docs/superpowers/specs/2026-08-11-binance-usdm-tradfi-perpetual-m1-decision.md`
+   记录 Venue/Product/Account Capability Matrix 与待 Owner 采纳的推荐；
 3. M2：Owner Console Instrument Center 与 Universe Control 设计；
-4. M3：Instrument、RuntimeProfile、Venue Adapter、Product/Session/Corporate
-   Action 架构设计和前向 migration 计划；
+4. M3：保持 canonical Instrument ID 的 RuntimeProfile、Product Profile、当前
+   Venue capability、Session/Corporate Action 架构设计和前向 migration 计划；
 5. M4：`SOR-US-EQ-PERP-001` 策略语义、退出政策和 Live/Replay 验收矩阵；
 6. M5：Observation 指标、证据窗口和 go/hold/stop 判定合同；
 7. M6：独立资本政策、受控实盘和自然 Ticket 验收计划；

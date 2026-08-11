@@ -48,6 +48,7 @@ different Netting Domains progress concurrently.
 | Owner Console | `https://jiaoyingpan.cloud/trading/` is active behind the existing Nginx HTTPS server; the Strategy Workbench static route is deployed from the exact verified build, and its protected API returns `401` before password-plus-TOTP authentication |
 | Nginx isolation | Existing Nginx configuration was not rewritten; syntax passes, the Owner API remains Unix-Socket proxied, and unauthenticated data access returns `401` |
 | Full capability | Natural v4 closure evidence now exists; `promote-full` and the final requirement audit remain explicit follow-up operations and were not bundled into this release |
+| M1 multi-asset planning | Binance official USDⓈ-M API, official TradFi product guidance, current adapter code and bounded public readonly checks support a same-Venue Product Family design; the M1 recommendation is recorded outside runtime authority and awaits Owner adoption |
 | Scope boundary | Funding ownership and broader Incident-quality work were not changed by this release |
 
 ## Deferred Release Candidate
@@ -99,7 +100,8 @@ it is not a gate retroactively added to this completed deployment.
 | 3 | M0.5 R1/R2 activation | Owner explicitly confirms deployment; record the exact superseding static/API Commit, install the split release roots and prove Kernel workers and `/opt/brc/current` were untouched |
 | 4 | Full policy promotion | After current exposure is naturally flat, run and certify `promote-full` from current PostgreSQL and Binance facts with exact Kernel identity |
 | 5 | Final requirement audit | Re-run local and Tokyo evidence and close every acceptance item |
-| 6 | Multi-asset planning | Continue M1 Venue/Product decisions and M2 product design without changing current production authority, capital or Venue scope |
+| 6 | M1 Owner decision | Adopt or modify the recorded Binance USDⓈ-M TradFi Product Family, same-account RuntimeProfile, first candidate/reference scope and REGULAR-only ENTRY recommendation without changing current production authority or capital |
+| 7 | M2A/M3 design | After M1 Owner decision, begin readonly Instrument Center/StrategyGroup product design and the same-Venue Product/Session runtime design; implementation remains separately approved |
 
 ## Current Stop Conditions
 
