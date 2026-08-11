@@ -46,7 +46,9 @@ def parse_binance_product_snapshots(
             observed_at_ms=observed_at_ms,
         )
         premium = premium_by_symbol.get(identity.symbol)
-        best_bid, best_ask = _best_bid_ask(depth_by_symbol.get(identity.symbol))
+        best_bid, best_ask, best_bid_quantity, best_ask_quantity = _best_bid_ask(
+            depth_by_symbol.get(identity.symbol)
+        )
         snapshots.append(
             ProductSessionSnapshot(
                 exchange_instrument_id=exchange_instrument_id,
@@ -66,6 +68,8 @@ def parse_binance_product_snapshots(
                 funding_rate=_decimal_field(premium, "lastFundingRate"),
                 best_bid=best_bid,
                 best_ask=best_ask,
+                best_bid_quantity=best_bid_quantity,
+                best_ask_quantity=best_ask_quantity,
                 corporate_event_status="unavailable",
                 observed_at_ms=observed_at_ms,
                 valid_until_ms=observed_at_ms + _VALID_FOR_MS,
@@ -226,20 +230,31 @@ def _decimal_field(
     return value if value.is_finite() else None
 
 
-def _best_bid_ask(payload: object) -> tuple[Decimal | None, Decimal | None]:
+def _best_bid_ask(
+    payload: object,
+) -> tuple[Decimal | None, Decimal | None, Decimal | None, Decimal | None]:
     if not isinstance(payload, Mapping):
-        return None, None
-    return _book_price(payload.get("bids")), _book_price(payload.get("asks"))
+        return None, None, None, None
+    best_bid, best_bid_quantity = _book_level(payload.get("bids"))
+    best_ask, best_ask_quantity = _book_level(payload.get("asks"))
+    return best_bid, best_ask, best_bid_quantity, best_ask_quantity
 
 
-def _book_price(rows: object) -> Decimal | None:
+def _book_level(rows: object) -> tuple[Decimal | None, Decimal | None]:
     if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)) or not rows:
-        return None
+        return None, None
     first = rows[0]
     if not isinstance(first, Sequence) or isinstance(first, (str, bytes)) or not first:
-        return None
+        return None, None
     try:
-        value = Decimal(str(first[0]))
+        price = Decimal(str(first[0]))
+        quantity = Decimal(str(first[1])) if len(first) > 1 else None
     except (InvalidOperation, ValueError):
-        return None
-    return value if value.is_finite() and value > 0 else None
+        return None, None
+    valid_price = price if price.is_finite() and price > 0 else None
+    valid_quantity = (
+        quantity
+        if quantity is not None and quantity.is_finite() and quantity >= 0
+        else None
+    )
+    return valid_price, valid_quantity

@@ -102,9 +102,10 @@ An Exposure Episode identifies one continuous eligible structure and may own at
 most one Ticket. Every final admission result is an immutable
 `AdmissionDecision`: an admitted Decision freezes its Claim and Ticket lineage;
 a rejected Decision freezes the first blocker and creates no command. A
-`Shadow Outcome` is only bounded, read-only market-excursion evidence for an
-eligible portfolio rejection. It cannot create a Ticket, reserve capital,
-dispatch a command, or write to a venue.
+`Shadow Outcome` is Signal-owned, bounded, read-only market-path evidence. Its
+source is either an eligible portfolio rejection or a strategy observation
+whose Entry Admission is intentionally not run. It cannot create a Ticket,
+reserve capital, dispatch a command, or write to a venue.
 
 Production runtime must not depend on repository Markdown, generated JSON,
 report directories, local caches, or archived database rows. Current state is

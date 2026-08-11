@@ -34,6 +34,7 @@ _TRADFI_REFERENCES = ("QQQ", "SPY")
 
 def upgrade() -> None:
     _assert_flat_source()
+    _upgrade_shadow_observation()
     op.drop_constraint(
         "ck_brc_owner_authorizations_purpose_valid",
         "brc_owner_authorizations",
@@ -117,6 +118,8 @@ def upgrade() -> None:
         sa.Column("funding_rate", MONEY, nullable=True),
         sa.Column("best_bid", MONEY, nullable=True),
         sa.Column("best_ask", MONEY, nullable=True),
+        sa.Column("best_bid_quantity", MONEY, nullable=True),
+        sa.Column("best_ask_quantity", MONEY, nullable=True),
         sa.Column("corporate_event_status", SHORT_TEXT, nullable=False),
         sa.Column("observed_at_ms", sa.BigInteger(), nullable=False),
         sa.Column("valid_until_ms", sa.BigInteger(), nullable=False),
@@ -183,6 +186,159 @@ def _assert_flat_source() -> None:
         raise RuntimeError(
             "0005 migration requires exact flat source: " + ",".join(blockers)
         )
+
+
+def _upgrade_shadow_observation() -> None:
+    table = "brc_shadow_outcomes_current"
+    op.add_column(table, sa.Column("signal_event_id", ID, nullable=True))
+    op.add_column(table, sa.Column("source_kind", SHORT_TEXT, nullable=True))
+    op.add_column(table, sa.Column("take_profit_price", MONEY, nullable=True))
+    op.add_column(
+        table,
+        sa.Column("opening_range_boundary_price", MONEY, nullable=True),
+    )
+    op.add_column(
+        table,
+        sa.Column("session_exit_deadline_ms", sa.BigInteger(), nullable=True),
+    )
+    op.add_column(table, sa.Column("mark_price", MONEY, nullable=True))
+    op.add_column(table, sa.Column("index_price", MONEY, nullable=True))
+    op.add_column(table, sa.Column("funding_rate", MONEY, nullable=True))
+    op.add_column(table, sa.Column("best_bid_price", MONEY, nullable=True))
+    op.add_column(table, sa.Column("best_ask_price", MONEY, nullable=True))
+    op.add_column(table, sa.Column("best_bid_quantity", MONEY, nullable=True))
+    op.add_column(table, sa.Column("best_ask_quantity", MONEY, nullable=True))
+    op.add_column(table, sa.Column("spread_bps", MONEY, nullable=True))
+    op.add_column(
+        table,
+        sa.Column("mark_index_deviation_bps", MONEY, nullable=True),
+    )
+    op.add_column(table, sa.Column("first_path", SHORT_TEXT, nullable=True))
+    op.add_column(
+        table,
+        sa.Column("first_path_at_ms", sa.BigInteger(), nullable=True),
+    )
+    op.add_column(
+        table,
+        sa.Column("observed_bar_count", sa.BigInteger(), nullable=True),
+    )
+    op.execute(
+        sa.text(
+            """
+            UPDATE brc_shadow_outcomes_current AS shadow
+               SET signal_event_id = decision.signal_event_id,
+                   source_kind = 'portfolio_rejection'
+              FROM brc_admission_decisions AS decision
+             WHERE decision.admission_decision_id = shadow.admission_decision_id
+            """
+        )
+    )
+    connection = op.get_bind()
+    unresolved = int(
+        connection.scalar(
+            sa.text(
+                "SELECT count(*) FROM brc_shadow_outcomes_current "
+                "WHERE signal_event_id IS NULL OR source_kind IS NULL"
+            )
+        )
+        or 0
+    )
+    if unresolved:
+        raise RuntimeError("0005 cannot bind existing Shadow Outcomes to Signals")
+    op.alter_column(table, "signal_event_id", nullable=False)
+    op.alter_column(table, "source_kind", nullable=False)
+    op.alter_column(table, "admission_decision_id", nullable=True)
+    op.alter_column(table, "entry_reference_price", nullable=True)
+    op.alter_column(table, "initial_stop_price", nullable=True)
+    op.alter_column(table, "initial_risk_per_unit", nullable=True)
+    op.create_unique_constraint(
+        "uq_brc_shadow_outcomes_current_signal_event_id",
+        table,
+        ["signal_event_id"],
+    )
+    for name in (
+        "ck_brc_shadow_outcomes_current_evaluation_kind_valid",
+        "ck_brc_shadow_outcomes_current_risk_horizon_valid",
+        "ck_brc_shadow_outcomes_current_lease_shape_valid",
+    ):
+        op.drop_constraint(name, table, type_="check")
+    op.create_check_constraint(
+        "ck_brc_shadow_outcomes_current_source_kind_valid",
+        table,
+        "(source_kind = 'portfolio_rejection' "
+        "AND admission_decision_id IS NOT NULL "
+        "AND evaluation_kind = 'fixed_horizon_excursion_v1') OR "
+        "(source_kind = 'strategy_observation' "
+        "AND admission_decision_id IS NULL "
+        "AND evaluation_kind = 'sor_path_observation_v1')",
+    )
+    op.create_check_constraint(
+        "ck_brc_shadow_outcomes_current_evaluation_kind_valid",
+        table,
+        "evaluation_kind IN ('fixed_horizon_excursion_v1', "
+        "'sor_path_observation_v1')",
+    )
+    op.create_check_constraint(
+        "ck_brc_shadow_outcomes_current_risk_horizon_valid",
+        table,
+        "(initial_risk_per_unit IS NULL OR initial_risk_per_unit >= 0) "
+        "AND horizon_end_ms > horizon_start_ms "
+        "AND (session_exit_deadline_ms IS NULL "
+        "OR session_exit_deadline_ms > horizon_start_ms)",
+    )
+    op.create_check_constraint(
+        "ck_brc_shadow_outcomes_current_path_valid",
+        table,
+        "first_path IS NULL OR first_path IN ("
+        "'tp1_first', 'initial_stop_first', 'ambiguous_same_bar', "
+        "'opening_range_failure', 'time_stop', 'session_exit', "
+        "'horizon_complete')",
+    )
+    op.create_check_constraint(
+        "ck_brc_shadow_outcomes_current_lease_shape_valid",
+        table,
+        "(status IN ('pending', 'claimed', 'completed') "
+        "AND entry_reference_price IS NOT NULL "
+        "AND initial_stop_price IS NOT NULL "
+        "AND initial_risk_per_unit IS NOT NULL) OR status = 'unavailable'",
+    )
+    op.create_check_constraint(
+        "ck_brc_shadow_outcomes_current_projection_shape_valid",
+        table,
+        "(status = 'claimed' AND claim_owner IS NOT NULL "
+        "AND claim_token IS NOT NULL AND lease_until_ms IS NOT NULL "
+        "AND completed_at_ms IS NULL AND max_favorable_price IS NULL "
+        "AND max_adverse_price IS NULL AND mfe_r IS NULL AND mae_r IS NULL "
+        "AND observed_through_ms IS NULL AND completion_reason IS NULL "
+        "AND first_path IS NULL AND first_path_at_ms IS NULL "
+        "AND observed_bar_count IS NULL) OR "
+        "(status = 'pending' AND claim_owner IS NULL "
+        "AND claim_token IS NULL AND lease_until_ms IS NULL "
+        "AND completed_at_ms IS NULL AND max_favorable_price IS NULL "
+        "AND max_adverse_price IS NULL AND mfe_r IS NULL AND mae_r IS NULL "
+        "AND observed_through_ms IS NULL AND completion_reason IS NULL "
+        "AND first_path IS NULL AND first_path_at_ms IS NULL "
+        "AND observed_bar_count IS NULL) OR "
+        "(status = 'completed' AND claim_owner IS NULL "
+        "AND claim_token IS NULL AND lease_until_ms IS NULL "
+        "AND completed_at_ms IS NOT NULL AND max_favorable_price IS NOT NULL "
+        "AND max_adverse_price IS NOT NULL AND mfe_r IS NOT NULL "
+        "AND mae_r IS NOT NULL AND observed_through_ms IS NOT NULL "
+        "AND completion_reason IS NOT NULL "
+        "AND ((evaluation_kind = 'fixed_horizon_excursion_v1' "
+        "AND first_path IS NULL AND first_path_at_ms IS NULL "
+        "AND observed_bar_count IS NULL) OR "
+        "(evaluation_kind = 'sor_path_observation_v1' "
+        "AND first_path IS NOT NULL AND first_path_at_ms IS NOT NULL "
+        "AND observed_bar_count > 0))) OR "
+        "(status = 'unavailable' AND claim_owner IS NULL "
+        "AND claim_token IS NULL AND lease_until_ms IS NULL "
+        "AND completed_at_ms IS NOT NULL AND max_favorable_price IS NULL "
+        "AND max_adverse_price IS NULL AND mfe_r IS NULL AND mae_r IS NULL "
+        "AND observed_through_ms IS NULL AND completion_reason IS NOT NULL "
+        "AND first_path IS NULL AND first_path_at_ms IS NULL "
+        "AND observed_bar_count IS NULL)",
+    )
 
 
 def _replace_universe_member_guard() -> None:
@@ -313,6 +469,8 @@ def _seed_product_catalog() -> None:
         sa.column("funding_rate"),
         sa.column("best_bid"),
         sa.column("best_ask"),
+        sa.column("best_bid_quantity"),
+        sa.column("best_ask_quantity"),
         sa.column("corporate_event_status"),
         sa.column("observed_at_ms"),
         sa.column("valid_until_ms"),
@@ -337,6 +495,8 @@ def _seed_product_catalog() -> None:
                 "funding_rate": None,
                 "best_bid": None,
                 "best_ask": None,
+                "best_bid_quantity": None,
+                "best_ask_quantity": None,
                 "corporate_event_status": "unavailable",
                 "observed_at_ms": now_ms,
                 "valid_until_ms": now_ms + 900_000,

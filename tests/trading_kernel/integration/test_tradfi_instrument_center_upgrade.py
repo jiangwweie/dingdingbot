@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import suppress
+from decimal import Decimal
 from uuid import uuid4
 
 import asyncpg
@@ -18,12 +19,15 @@ from src.trading_kernel.application.owner_console.models import (
     StrategySummaryQuery,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    admission_decisions,
     instruments,
     owner_authorizations,
     owner_policy_current,
     runtime_capabilities_current,
     runtime_scopes_current,
     schema_metadata,
+    shadow_outcomes_current,
+    signal_events,
     strategy_entry_control_events,
     strategy_entry_controls_current,
     strategy_universe_current,
@@ -85,6 +89,7 @@ async def test_flat_0004_upgrade_installs_observation_only_tradfi_authority() ->
                 .values(policy_version=9, updated_at_ms=1_800_000_000_120)
             )
         await _install_source_crypto_universe(engine)
+        await _install_source_portfolio_shadow(engine)
 
         source = await _verify_compatible_source(
             database_url,
@@ -176,6 +181,23 @@ async def test_flat_0004_upgrade_installs_observation_only_tradfi_authority() ->
                     == "event_spec:SOR-001:SOR-LONG:v4"
                 )
             ) == "universe:source-sor-long:v1"
+            preserved_shadow = (
+                await connection.execute(
+                    sa.select(shadow_outcomes_current).where(
+                        shadow_outcomes_current.c.shadow_outcome_id
+                        == "shadow:source:portfolio-rejection"
+                    )
+                )
+            ).mappings().one()
+            assert preserved_shadow["signal_event_id"] == "signal:source:rejected"
+            assert preserved_shadow["source_kind"] == "portfolio_rejection"
+            assert preserved_shadow["admission_decision_id"] == "admission:source:rejected"
+            assert preserved_shadow["status"] == "completed"
+            assert preserved_shadow["max_favorable_price"] == 104
+            assert preserved_shadow["max_adverse_price"] == 99
+            assert preserved_shadow["mfe_r"] == 2
+            assert preserved_shadow["mae_r"] == Decimal("0.5")
+            assert preserved_shadow["projection_version"] == 2
 
             facts = await PostgresOwnerReadRepository(
                 connection
@@ -328,5 +350,92 @@ async def _install_source_crypto_universe(engine) -> None:
                 warm_valid_until_ms=1_800_000_900_000,
                 observation_generation=0,
                 updated_at_ms=1_800_000_000_170,
+            )
+        )
+
+
+async def _install_source_portfolio_shadow(engine) -> None:
+    digest = "sha256:" + "d" * 64
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(signal_events).values(
+                signal_event_id="signal:source:rejected",
+                exposure_episode_id="episode:source:rejected",
+                runtime_scope_id="runtime-scope:source-sor-long:btc",
+                runtime_scope_version=1,
+                strategy_group_id="SOR-001",
+                strategy_version_id="sgv:SOR-001:v4",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
+                universe_version_id="universe:source-sor-long:v1",
+                universe_semantic_digest="sha256:" + "a" * 64,
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                position_side="long",
+                fact_digest=digest,
+                occurred_at_ms=1_800_000_000_180,
+                observed_at_ms=1_800_000_000_180,
+                expires_at_ms=1_800_000_900_000,
+            )
+        )
+        await connection.execute(
+            sa.insert(admission_decisions).values(
+                admission_decision_id="admission:source:rejected",
+                signal_event_id="signal:source:rejected",
+                exposure_episode_id="episode:source:rejected",
+                strategy_group_id="SOR-001",
+                strategy_version_id="sgv:SOR-001:v4",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
+                universe_version_id="universe:source-sor-long:v1",
+                universe_semantic_digest="sha256:" + "a" * 64,
+                runtime_profile_id="tiny-live-v1",
+                runtime_scope_id="runtime-scope:source-sor-long:btc",
+                runtime_scope_version=1,
+                owner_policy_id="policy-main",
+                owner_policy_version=9,
+                venue_id="binance-usdm",
+                account_id="owner-account",
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                position_side="long",
+                exposure_family="opening_range",
+                candidate_rank=1,
+                candidate_count=1,
+                candidate_set_digest=digest,
+                candidate_set_summary={},
+                portfolio_usage={},
+                decision_status="rejected",
+                first_blocker="gross_stop_risk_exhausted",
+                binding_constraint="gross_stop_risk_exhausted",
+                capacity_claim_id=None,
+                ticket_id=None,
+                entry_admission_snapshot_digest=None,
+                decision_digest="sha256:" + "e" * 64,
+                decided_at_ms=1_800_000_000_200,
+            )
+        )
+        await connection.execute(
+            sa.insert(shadow_outcomes_current).values(
+                shadow_outcome_id="shadow:source:portfolio-rejection",
+                admission_decision_id="admission:source:rejected",
+                status="completed",
+                evaluation_kind="fixed_horizon_excursion_v1",
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                position_side="long",
+                timeframe="15m",
+                entry_reference_price=100,
+                initial_stop_price=98,
+                initial_risk_per_unit=2,
+                horizon_start_ms=1_800_000_000_200,
+                horizon_end_ms=1_800_007_200_200,
+                claim_owner=None,
+                claim_token=None,
+                lease_until_ms=None,
+                max_favorable_price=104,
+                max_adverse_price=99,
+                mfe_r=2,
+                mae_r=Decimal("0.5"),
+                observed_through_ms=1_800_007_200_200,
+                completion_reason="horizon_complete",
+                projection_version=2,
+                created_at_ms=1_800_000_000_200,
+                completed_at_ms=1_800_007_200_200,
             )
         )

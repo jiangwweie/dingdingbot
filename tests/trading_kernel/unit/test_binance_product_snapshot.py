@@ -69,6 +69,8 @@ def test_recorded_binance_product_payload_builds_regular_session_snapshot() -> N
     assert snapshot.index_price == Decimal("228.08")
     assert snapshot.best_bid == Decimal("228.10")
     assert snapshot.best_ask == Decimal("228.14")
+    assert snapshot.best_bid_quantity == Decimal(12)
+    assert snapshot.best_ask_quantity == Decimal(9)
 
 
 def test_missing_schedule_fails_closed_without_discarding_product_status() -> None:

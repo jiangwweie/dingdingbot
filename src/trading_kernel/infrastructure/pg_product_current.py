@@ -67,6 +67,8 @@ class PostgresProductCurrentRepository:
                 "funding_rate": item.funding_rate,
                 "best_bid": item.best_bid,
                 "best_ask": item.best_ask,
+                "best_bid_quantity": item.best_bid_quantity,
+                "best_ask_quantity": item.best_ask_quantity,
                 "corporate_event_status": item.corporate_event_status,
                 "observed_at_ms": item.observed_at_ms,
                 "valid_until_ms": item.valid_until_ms,
@@ -95,6 +97,8 @@ class PostgresProductCurrentRepository:
                     "funding_rate": statement.excluded.funding_rate,
                     "best_bid": statement.excluded.best_bid,
                     "best_ask": statement.excluded.best_ask,
+                    "best_bid_quantity": statement.excluded.best_bid_quantity,
+                    "best_ask_quantity": statement.excluded.best_ask_quantity,
                     "corporate_event_status": (
                         statement.excluded.corporate_event_status
                     ),

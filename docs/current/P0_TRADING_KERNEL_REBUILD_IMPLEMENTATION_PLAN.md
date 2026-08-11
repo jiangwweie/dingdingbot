@@ -2,7 +2,7 @@
 title: P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN
 status: CURRENT_PLAN
 program_id: P0-TKR
-last_verified: 2026-07-31
+last_verified: 2026-08-11
 ---
 
 # P0 Trading Kernel Rebuild Implementation Plan
@@ -61,7 +61,7 @@ settle, and review concurrently.
 | Six Strategy Events | Complete | CPM/MPG/MI/BRF2 v3 and SOR v4 Registry contracts |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, rising-edge or session Exposure Episode identity, deterministic Live/Replay parity |
 | Arbitration and CapacityClaim | Complete | Deterministic priority, Policy v4 Family/directional/materialization limits, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
-| Admission evidence and Shadow Outcome | Complete | One immutable AdmissionDecision per final Signal; eligible capacity rejection can produce one bounded read-only `fixed_horizon_excursion_v1` outcome without Ticket or Command authority |
+| Admission evidence and Shadow Outcome | Complete | One Signal-owned Outcome supports eligible portfolio rejection through `fixed_horizon_excursion_v1` and TradFi strategy observation through `sor_path_observation_v1`; observation-only mode creates no `AdmissionDecision`, CapacityClaim, Ticket, or Command, and later real trading still uses the same formal Ticket path |
 | Ticket issuance | Complete | Atomic Claim, budget, domain, Ticket, aggregate, event, and ENTRY command |
 | Venue Truth and recovery | Complete | ENTRY, protection, EXIT, flatten, cancel, timeout and unknown resolution |
 | Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |

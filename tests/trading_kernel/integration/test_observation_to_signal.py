@@ -21,15 +21,24 @@ from src.trading_kernel.application.observe_strategy_scope import (
     observe_strategy_scope,
 )
 from src.trading_kernel.domain.market import ClosedCandle, MarketSnapshot
+from src.trading_kernel.domain.product import (
+    InstrumentProductProfile,
+    ProductSessionSnapshot,
+)
 from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 from src.trading_kernel.infrastructure.pg_models import (
+    admission_decisions,
+    capacity_claims,
     comparative_projection_current,
     exchange_commands,
     facts_current,
+    instrument_product_current,
+    instrument_product_profiles,
     instruments,
     readiness_current,
     runtime_capabilities_current,
     runtime_scopes_current,
+    shadow_outcomes_current,
     signal_events,
     signal_fact_snapshots,
     strategy_universe_current,
@@ -38,6 +47,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
@@ -67,15 +77,27 @@ from tests.trading_kernel.unit.detectors.fixtures import (
     mpg_long_snapshot,
     sor_snapshot,
 )
+from tests.trading_kernel.unit.detectors.test_us_equity_sor import (
+    AAPL,
+)
+from tests.trading_kernel.unit.detectors.test_us_equity_sor import (
+    _snapshot as us_equity_sor_snapshot,
+)
 
 
 class FakeMarketSource:
     def __init__(
         self,
         responses: dict[tuple[str, str], tuple[ClosedCandle, ...]],
+        *,
+        product_sessions: tuple[ProductSessionSnapshot, ...] = (),
     ) -> None:
         self._responses = responses
+        self._product_sessions = {
+            item.exchange_instrument_id: item for item in product_sessions
+        }
         self.calls: list[ClosedCandleRequest] = []
+        self.product_calls: list[tuple[tuple[str, ...], int]] = []
 
     async def fetch_closed_candles(
         self,
@@ -85,6 +107,17 @@ class FakeMarketSource:
         return self._responses.get(
             (request.exchange_instrument_id, request.timeframe),
             (),
+        )
+
+    async def fetch_product_sessions(
+        self,
+        exchange_instrument_ids: tuple[str, ...],
+        *,
+        observed_at_ms: int,
+    ) -> tuple[ProductSessionSnapshot, ...]:
+        self.product_calls.append((exchange_instrument_ids, observed_at_ms))
+        return tuple(
+            self._product_sessions[item] for item in exchange_instrument_ids
         )
 
 
@@ -294,6 +327,86 @@ async def test_triggered_observation_persists_one_stable_strategy_signal(
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(exchange_commands)
         ) == 0
+
+
+@pytest.mark.asyncio
+async def test_tradfi_signal_creates_one_observation_without_execution_authority(
+    observation_engine: AsyncEngine,
+) -> None:
+    await _seed_tradfi_scope(observation_engine)
+    snapshot = us_equity_sor_snapshot(side="long")
+    assert snapshot.product_session is not None
+    product = snapshot.product_session.model_copy(
+        update={
+            "mark_price": Decimal("104.01"),
+            "index_price": Decimal("104.00"),
+            "funding_rate": Decimal("0.0001"),
+            "best_bid": Decimal("103.99"),
+            "best_ask": Decimal("104.01"),
+            "best_bid_quantity": Decimal(25),
+            "best_ask_quantity": Decimal(18),
+            "corporate_event_status": "clear",
+        }
+    )
+    source = FakeMarketSource(
+        {(AAPL, "15m"): snapshot.candles_15m},
+        product_sessions=(product,),
+    )
+    request = ObservationRequest(
+        runtime_scope_id="scope-sor-us-aapl-long",
+        runtime_commit="kernel-test-head",
+        schema_revision=CURRENT_SCHEMA_REVISION,
+        trigger_candle_close_time_ms=snapshot.trigger_candle_close_time_ms,
+    )
+
+    first = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        source,
+        request,
+    )
+    duplicate = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        source,
+        request,
+    )
+
+    assert first.status is ObservationStatus.SIGNAL_CREATED
+    assert duplicate.status is ObservationStatus.DUPLICATE_SIGNAL
+    assert first.signal_event_id == duplicate.signal_event_id
+    async with observation_engine.connect() as connection:
+        shadows = (
+            await connection.execute(sa.select(shadow_outcomes_current))
+        ).mappings().all()
+        product_row = (
+            await connection.execute(
+                sa.select(instrument_product_current).where(
+                    instrument_product_current.c.exchange_instrument_id == AAPL
+                )
+            )
+        ).mappings().one()
+        counts = {
+            "admission": await connection.scalar(
+                sa.select(sa.func.count()).select_from(admission_decisions)
+            ),
+            "claim": await connection.scalar(
+                sa.select(sa.func.count()).select_from(capacity_claims)
+            ),
+            "ticket": await connection.scalar(
+                sa.select(sa.func.count()).select_from(trade_tickets)
+            ),
+            "command": await connection.scalar(
+                sa.select(sa.func.count()).select_from(exchange_commands)
+            ),
+        }
+
+    assert len(shadows) == 1
+    assert shadows[0]["signal_event_id"] == first.signal_event_id
+    assert shadows[0]["source_kind"] == "strategy_observation"
+    assert shadows[0]["evaluation_kind"] == "sor_path_observation_v1"
+    assert shadows[0]["admission_decision_id"] is None
+    assert product_row["best_bid_quantity"] == Decimal(25)
+    assert product_row["best_ask_quantity"] == Decimal(18)
+    assert counts == {"admission": 0, "claim": 0, "ticket": 0, "command": 0}
 
 
 @pytest.mark.asyncio
@@ -799,6 +912,89 @@ async def _seed_sor_scope(engine: AsyncEngine) -> None:
         )
 
 
+async def _seed_tradfi_scope(engine: AsyncEngine) -> None:
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
+    event_spec_id = "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1"
+    universe_version_id, universe_digest = _universe_identity(
+        strategy_group_id="SOR-US-EQ-PERP-001",
+        event_spec_id=event_spec_id,
+        members=(AAPL,),
+    )
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(instruments).values(
+                exchange_instrument_id=AAPL,
+                venue_id="binance-usdm",
+                asset_class="equity",
+                venue_symbol="AAPLUSDT",
+                contract_kind="perpetual",
+                status="active",
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_versions).values(
+                universe_version_id=universe_version_id,
+                strategy_group_id="SOR-US-EQ-PERP-001",
+                event_spec_id=event_spec_id,
+                universe_version=1,
+                semantic_digest=universe_digest,
+                lifecycle_state="active",
+                installed_at_ms=NOW_MS - 1,
+                activated_at_ms=NOW_MS - 1,
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_members).values(
+                universe_version_id=universe_version_id,
+                exchange_instrument_id=AAPL,
+            )
+        )
+        await connection.execute(
+            sa.insert(strategy_universe_current).values(
+                event_spec_id=event_spec_id,
+                universe_version_id=universe_version_id,
+                semantic_digest=universe_digest,
+                lifecycle_state="active",
+                activation_generation=1,
+                activated_at_ms=NOW_MS - 1,
+            )
+        )
+        await connection.execute(
+            sa.insert(runtime_scopes_current).values(
+                runtime_scope_id="scope-sor-us-aapl-long",
+                strategy_group_id="SOR-US-EQ-PERP-001",
+                strategy_version_id="sgv:SOR-US-EQ-PERP-001:v1",
+                event_spec_id=event_spec_id,
+                runtime_profile_id="tradfi-equity-observe-v1",
+                owner_policy_id="policy-tradfi-observe",
+                exchange_instrument_id=AAPL,
+                position_side="long",
+                universe_version_id=universe_version_id,
+                universe_semantic_digest=universe_digest,
+                lifecycle_state="active",
+                observation_enabled=True,
+                entry_enabled=True,
+                scope_version=1,
+                warm_closed_bar_time_ms=NOW_MS - 1,
+                warm_completed_at_ms=NOW_MS - 1,
+                warm_readiness_digest=universe_digest,
+                warm_valid_until_ms=NOW_MS + 1,
+                updated_at_ms=NOW_MS - 1,
+            )
+        )
+        await connection.execute(
+            sa.insert(runtime_capabilities_current).values(
+                capability_key="strategy_signal_ingest",
+                enabled=True,
+                certified_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                certification={},
+                updated_at_ms=NOW_MS - 1,
+            )
+        )
+
+
 async def _seed_six_scopes(engine: AsyncEngine) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
@@ -956,6 +1152,29 @@ async def _seed_active_universe(
             )
             .on_conflict_do_nothing(
                 index_elements=[instruments.c.exchange_instrument_id]
+            )
+        )
+        profile = InstrumentProductProfile(
+            exchange_instrument_id=member,
+            product_family="crypto_perpetual",
+            asset_class="crypto",
+            contract_type="PERPETUAL",
+            underlying_type="CRYPTO",
+            margin_asset="USDT",
+            entry_session_policy="continuous",
+            status="candidate",
+        )
+        await connection.execute(
+            pg_insert(instrument_product_profiles)
+            .values(
+                **profile.model_dump(mode="python"),
+                semantic_digest=profile.semantic_digest,
+                updated_at_ms=NOW_MS - 1,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    instrument_product_profiles.c.exchange_instrument_id
+                ]
             )
         )
     await connection.execute(

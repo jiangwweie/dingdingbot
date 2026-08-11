@@ -15,7 +15,7 @@ export async function getSignals(filters: SignalSearchParams): Promise<SignalLis
     from_ms?: number | null;
     to_ms?: number | null;
     cursor?: string | null;
-    decision_status?: "admitted" | "rejected" | null;
+    decision_status?: "admitted" | "rejected" | "not_evaluated" | null;
     strategy_group_id?: string | null;
     exchange_instrument_id?: string | null;
     position_side?: "long" | "short" | null;

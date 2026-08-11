@@ -9,6 +9,7 @@ export interface ApiRequestCounts {
   overview: number;
   review: number;
   strategies: number;
+  strategyObservations: number;
   strategyTickets: number;
   session: number;
   signals: number;
@@ -29,7 +30,7 @@ function json(route: Route, body: unknown, status = 200) {
 
 export async function installApiRoutes(page: Page, options: ApiRouteOptions = {}): Promise<ApiRequestCounts> {
   let authenticated = options.authenticated ?? false;
-  const counts: ApiRequestCounts = { candles: 0, causality: 0, login: 0, logout: 0, overview: 0, review: 0, session: 0, signals: 0, signalDetail: 0, strategies: 0, strategyTickets: 0, trades: 0 };
+  const counts: ApiRequestCounts = { candles: 0, causality: 0, login: 0, logout: 0, overview: 0, review: 0, session: 0, signals: 0, signalDetail: 0, strategies: 0, strategyObservations: 0, strategyTickets: 0, trades: 0 };
 
   await page.route("**/api/owner/v1/**", async (route) => {
     const request = route.request();
@@ -101,7 +102,10 @@ export async function installApiRoutes(page: Page, options: ApiRouteOptions = {}
       if (options.candleFailure) {
         await json(route, { error: { code: "public_market_unavailable", message: "Fixture candle failure" } }, 503);
       } else {
-        await json(route, ownerApiFixtures.candleFixture);
+        const fixture = url.searchParams.get("exchange_instrument_id")?.includes("AAPLUSDT")
+          ? ownerApiFixtures.observationCandleFixture
+          : ownerApiFixtures.candleFixture;
+        await json(route, fixture);
       }
       return;
     }
@@ -118,6 +122,11 @@ export async function installApiRoutes(page: Page, options: ApiRouteOptions = {}
     if (path.startsWith("/api/owner/v1/strategies/") && path.endsWith("/tickets")) {
       counts.strategyTickets += 1;
       await json(route, ownerApiFixtures.strategyTicketFixture);
+      return;
+    }
+    if (path.startsWith("/api/owner/v1/strategies/") && path.endsWith("/observations")) {
+      counts.strategyObservations += 1;
+      await json(route, ownerApiFixtures.strategyObservationFixture);
       return;
     }
     await json(route, { error: { code: "not_found", message: "Fixture route not found" } }, 404);

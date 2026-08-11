@@ -40,7 +40,19 @@ function freshnessPresentation(freshness: Freshness) {
 
 function safeReturnPath(searchParams: URLSearchParams, stateValue?: string): string {
   if (searchParams.get("origin") === "strategy") {
-    const allowed = ["view", "from_ms", "to_ms", "strategy_version_id", "ticket_modal", "exit_path", "scope"] as const;
+    const allowed = [
+      "view",
+      "from_ms",
+      "to_ms",
+      "strategy_version_id",
+      "ticket_modal",
+      "exit_path",
+      "scope",
+      "observation_modal",
+      "observation_path",
+      "observation_id",
+      "observation_cursor",
+    ] as const;
     const strategyParams = new URLSearchParams();
     for (const key of allowed) {
       const value = searchParams.get(key);

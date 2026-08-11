@@ -7,9 +7,14 @@ from decimal import Decimal
 from typing import Literal
 
 from src.trading_kernel.application.owner_console.models import (
+    ChartAnnotation,
     EvidenceRef,
     MoneyMetric,
     PageCursor,
+    StrategyObservationFacts,
+    StrategyObservationListItem,
+    StrategyObservationListPage,
+    StrategyObservationPageFacts,
     StrategyPageFacts,
     StrategySummaryPage,
     StrategyTicketFacts,
@@ -77,6 +82,29 @@ def build_strategy_ticket_page(
     return StrategyTicketListPage(items=items, next_cursor=next_cursor)
 
 
+def build_strategy_observation_page(
+    facts: StrategyObservationPageFacts,
+) -> StrategyObservationListPage:
+    """Build one bounded Observation modal page with frozen price annotations."""
+
+    if len(facts.items) > facts.requested_limit + 1:
+        raise StrategyFactsContradiction(
+            "Strategy Observation page exceeded limit+1 bound"
+        )
+    page_facts = facts.items[: facts.requested_limit]
+    items = tuple(_strategy_observation_item(item) for item in page_facts)
+    next_cursor = None
+    if len(facts.items) > facts.requested_limit and page_facts:
+        boundary = page_facts[-1]
+        next_cursor = encode_cursor(
+            PageCursor(
+                sort_ms=boundary.occurred_at_ms,
+                identity=boundary.shadow_outcome_id,
+            )
+        )
+    return StrategyObservationListPage(items=items, next_cursor=next_cursor)
+
+
 def _build_version_summary(facts: StrategyVersionFacts) -> StrategyVersionSummary:
     natural = tuple(ticket for ticket in facts.tickets if _is_natural_terminal(ticket))
     confirmed = tuple(
@@ -95,8 +123,15 @@ def _build_version_summary(facts: StrategyVersionFacts) -> StrategyVersionSummar
     )
     evidence = _deduplicate_evidence(
         evidence
-        for source in (facts.evidence, *(ticket.evidence for ticket in facts.tickets))
+        for source in (
+            facts.evidence,
+            *(ticket.evidence for ticket in facts.tickets),
+            *(observation.evidence for observation in facts.observations),
+        )
         for evidence in source
+    )
+    completed_observations = tuple(
+        item for item in facts.observations if item.status == "completed"
     )
     return StrategyVersionSummary(
         strategy_group_id=facts.strategy_group_id,
@@ -126,8 +161,112 @@ def _build_version_summary(facts: StrategyVersionFacts) -> StrategyVersionSummar
         ),
         net_pnl=net_pnl,
         net_r=net_r,
+        observation_count=len(facts.observations),
+        completed_observation_count=len(completed_observations),
+        unavailable_observation_count=sum(
+            1 for item in facts.observations if item.status == "unavailable"
+        ),
+        tp1_first_count=_observation_path_count(facts, "tp1_first"),
+        initial_stop_first_count=_observation_path_count(
+            facts,
+            "initial_stop_first",
+        ),
+        opening_range_failure_count=_observation_path_count(
+            facts,
+            "opening_range_failure",
+        ),
+        ambiguous_observation_count=_observation_path_count(
+            facts,
+            "ambiguous_same_bar",
+        ),
+        time_stop_count=_observation_path_count(facts, "time_stop"),
+        session_exit_count=_observation_path_count(facts, "session_exit"),
+        median_mfe_r=_median_decimal(
+            item.mfe_r for item in completed_observations
+        ),
+        median_mae_r=_median_decimal(
+            item.mae_r for item in completed_observations
+        ),
+        median_spread_bps=_median_decimal(
+            item.spread_bps for item in facts.observations
+        ),
         evidence=evidence,
         product_events=facts.product_events,
+    )
+
+
+def _observation_path_count(
+    facts: StrategyVersionFacts,
+    path: str,
+) -> int:
+    return sum(1 for item in facts.observations if item.first_path == path)
+
+
+def _median_decimal(values: Iterable[Decimal | None]) -> Decimal | None:
+    exact = sorted(item for item in values if item is not None)
+    if not exact:
+        return None
+    midpoint = len(exact) // 2
+    if len(exact) % 2:
+        return exact[midpoint]
+    return (exact[midpoint - 1] + exact[midpoint]) / Decimal(2)
+
+
+def _strategy_observation_item(
+    facts: StrategyObservationFacts,
+) -> StrategyObservationListItem:
+    annotations: list[ChartAnnotation] = []
+    if facts.entry_reference_price is not None:
+        annotations.append(
+            ChartAnnotation(
+                kind="signal",
+                occurred_at_ms=facts.occurred_at_ms,
+                price=facts.entry_reference_price,
+                label="OBSERVATION SIGNAL",
+                evidence=facts.evidence,
+            )
+        )
+    if facts.first_path_at_ms is not None:
+        if facts.first_path in {"tp1_first", "ambiguous_same_bar"} and (
+            facts.take_profit_price is not None
+        ):
+            annotations.append(
+                ChartAnnotation(
+                    kind="take_profit",
+                    occurred_at_ms=facts.first_path_at_ms,
+                    price=facts.take_profit_price,
+                    label="TP1 OBSERVED",
+                    evidence=facts.evidence,
+                )
+            )
+        if facts.first_path in {"initial_stop_first", "ambiguous_same_bar"} and (
+            facts.initial_stop_price is not None
+        ):
+            annotations.append(
+                ChartAnnotation(
+                    kind="stop",
+                    occurred_at_ms=facts.first_path_at_ms,
+                    price=facts.initial_stop_price,
+                    label="STOP OBSERVED",
+                    evidence=facts.evidence,
+                )
+            )
+        if (
+            facts.first_path == "opening_range_failure"
+            and facts.opening_range_boundary_price is not None
+        ):
+            annotations.append(
+                ChartAnnotation(
+                    kind="exit",
+                    occurred_at_ms=facts.first_path_at_ms,
+                    price=facts.opening_range_boundary_price,
+                    label="OPENING RANGE FAILURE",
+                    evidence=facts.evidence,
+                )
+            )
+    return StrategyObservationListItem(
+        **facts.model_dump(mode="python"),
+        annotations=tuple(annotations),
     )
 
 

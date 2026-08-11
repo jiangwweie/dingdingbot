@@ -117,7 +117,7 @@ function SignalFilters({ filters, onChange }: { filters: SignalSearchParams; onC
       <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">
         准入结果
         <select className="h-[30px] border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="decision_status" value={filters.decision_status ?? ""} onChange={setSelectFilter}>
-          <option value="">全部</option><option value="admitted">已准入</option><option value="rejected">未准入</option>
+          <option value="">全部</option><option value="admitted">已准入</option><option value="rejected">已拒绝</option><option value="not_evaluated">仅观察</option>
         </select>
       </label>
       <TimeRangeFilter value={filters} onChange={(range) => onChange({ ...filters, ...range, cursor: undefined })} />
@@ -164,7 +164,8 @@ export function SignalPage() {
 
   const items = envelope.data.items;
   const admittedCount = items.filter((item) => item.decision_status === "admitted").length;
-  const rejectedCount = items.length - admittedCount;
+  const rejectedCount = items.filter((item) => item.decision_status === "rejected").length;
+  const observationOnlyCount = items.filter((item) => item.decision_status === "not_evaluated").length;
   const status = freshnessPresentation(envelope.freshness);
   const columns: DenseTableColumnDef<SignalItem>[] = [
     {
@@ -179,8 +180,8 @@ export function SignalPage() {
     { accessorKey: "exchange_instrument_id", header: "交易对", cell: ({ getValue }) => <span className="block truncate tabular-number">{String(getValue())}</span> },
     { accessorKey: "position_side", header: "方向", cell: ({ getValue }) => <span>{getValue() === "long" ? "做多" : "做空"}</span> },
     { accessorKey: "occurred_at_ms", header: "时间", cell: ({ getValue }) => <span className="tabular-number whitespace-nowrap">{formatTimestamp(Number(getValue()))}</span> },
-    { accessorKey: "decision_status", header: "准入结果", cell: ({ getValue }) => <StatusTag tone={getValue() === "admitted" ? "success" : "attention"}>{getValue() === "admitted" ? "已准入" : "未准入"}</StatusTag> },
-    { accessorKey: "first_blocker", header: "未准入原因", cell: ({ row }) => row.original.first_blocker ? <span className="block truncate text-[var(--color-text-primary)]" title={row.original.first_blocker}>{formatOwnerReason(row.original.first_blocker).label}</span> : row.original.ticket_id ? <Link className="text-[var(--color-emphasis)] hover:underline" to={`/trades/${encodeURIComponent(row.original.ticket_id)}`}>查看交易</Link> : "—" },
+    { accessorKey: "decision_status", header: "准入结果", cell: ({ getValue }) => { const value = getValue(); return <StatusTag tone={value === "admitted" ? "success" : value === "rejected" ? "attention" : "neutral"}>{value === "admitted" ? "已准入" : value === "rejected" ? "已拒绝" : "仅观察"}</StatusTag>; } },
+    { accessorKey: "first_blocker", header: "结果说明", cell: ({ row }) => row.original.first_blocker ? <span className="block truncate text-[var(--color-text-primary)]" title={row.original.first_blocker}>{formatOwnerReason(row.original.first_blocker).label}</span> : row.original.ticket_id ? <Link className="text-[var(--color-emphasis)] hover:underline" to={`/trades/${encodeURIComponent(row.original.ticket_id)}`}>查看交易</Link> : row.original.decision_status === "not_evaluated" ? <span className="text-[var(--color-text-secondary)]">Entry 未运行</span> : "—" },
     { id: "shadow", header: "后续观察", cell: ({ row }) => <span className="tabular-number text-[var(--color-text-secondary)]">{shadowLabel(row.original)}</span> },
   ];
 
@@ -189,10 +190,11 @@ export function SignalPage() {
       {pageHeader}
       {signals.isRefetchError ? <div className="refresh-error" role="status">刷新失败 · {new Date(signals.errorUpdatedAt).toLocaleTimeString("zh-CN", { hour12: false })}<span>继续显示上一次成功快照</span></div> : null}
       <SignalFilters filters={filters} onChange={updateFilters} />
-      <section className="mb-2 grid grid-cols-3 border border-[var(--color-divider)] bg-[var(--color-surface)]" aria-label="准入漏斗">
+      <section className="mb-2 grid grid-cols-2 border border-[var(--color-divider)] bg-[var(--color-surface)] md:grid-cols-4" aria-label="准入漏斗">
         <div className="grid min-h-[48px] content-center gap-1 px-2"><span className="text-[11px] text-[var(--color-text-secondary)]">本页 Signals</span><strong className="tabular-number text-[16px]">{items.length}</strong></div>
         <div className="grid min-h-[48px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[11px] text-[var(--color-text-secondary)]">已准入</span><strong className="tabular-number text-[16px] text-[var(--color-success)]">{admittedCount}</strong></div>
         <div className="grid min-h-[48px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[11px] text-[var(--color-text-secondary)]">未准入</span><strong className="tabular-number text-[16px]">{rejectedCount}</strong></div>
+        <div className="grid min-h-[48px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[11px] text-[var(--color-text-secondary)]">仅观察</span><strong className="tabular-number text-[16px] text-[var(--color-emphasis)]">{observationOnlyCount}</strong></div>
       </section>
       {items.length === 0 ? <div className="panel compact-empty px-2">当前筛选范围内没有持久化 Signal</div> : <DenseTable ariaLabel="Signal 准入决策" columns={columns} data={items} getRowId={(item) => item.signal_event_id} expandedRowId={expandedSignalId} renderExpandedRow={(item, columnCount) => <InlineDetailRow colSpan={columnCount}><DetailContent signalEventId={item.signal_event_id} refreshVersion={refreshVersion} /></InlineDetailRow>} />}
       <CursorPagination hasNextPage={envelope.data.next_cursor !== null} onNextPage={() => updateFilters({ ...filters, cursor: envelope.data.next_cursor ?? undefined })} />

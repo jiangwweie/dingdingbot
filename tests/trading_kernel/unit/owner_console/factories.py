@@ -125,6 +125,8 @@ def signal_item_facts(**overrides: Any) -> SignalItemFacts:
         ticket_id="ticket:1",
         decided_at_ms=1_799_999_900_000,
         shadow_outcome_id=None,
+        shadow_source_kind=None,
+        shadow_evaluation_kind=None,
         shadow_status=None,
         shadow_mfe_r=None,
         shadow_mae_r=None,
@@ -136,6 +138,12 @@ def signal_item_facts(**overrides: Any) -> SignalItemFacts:
             _evidence("admission", "admission:1", 1_799_999_900_000),
         ),
     )
+    if overrides.get("shadow_outcome_id") is not None:
+        overrides.setdefault("shadow_source_kind", "portfolio_rejection")
+        overrides.setdefault(
+            "shadow_evaluation_kind",
+            "fixed_horizon_excursion_v1",
+        )
     return _copy_with_named_overrides(facts, overrides)
 
 

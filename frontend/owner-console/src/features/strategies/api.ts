@@ -5,9 +5,11 @@ import type { StrategySearchParams } from "./searchParams";
 
 export type StrategySummaryEnvelope = components["schemas"]["ApiEnvelope_StrategySummaryPage_"];
 export type StrategyTicketEnvelope = components["schemas"]["ApiEnvelope_StrategyTicketListPage_"];
+export type StrategyObservationEnvelope = components["schemas"]["ApiEnvelope_StrategyObservationListPage_"];
 
 export const strategiesQueryKey = (filters: Pick<StrategySearchParams, "from_ms" | "to_ms" | "view">) => ["owner", "strategies", filters] as const;
 export const strategyTicketsQueryKey = (filters: Pick<StrategySearchParams, "strategy_version_id" | "from_ms" | "to_ms" | "scope" | "exit_path" | "cursor">) => ["owner", "strategies", "tickets", filters] as const;
+export const strategyObservationsQueryKey = (filters: Pick<StrategySearchParams, "strategy_version_id" | "from_ms" | "to_ms" | "observation_path" | "observation_cursor">) => ["owner", "strategies", "observations", filters] as const;
 
 export async function getStrategies(filters: Pick<StrategySearchParams, "from_ms" | "to_ms" | "view">): Promise<StrategySummaryEnvelope> {
   const query: { from_ms?: number | null; to_ms?: number | null; view?: "current" | "all" } = {};
@@ -37,5 +39,22 @@ export async function getStrategyTickets(filters: { strategy_version_id: string;
   });
   if (!response.ok) throw apiErrorFromResponse(response, error);
   if (!data) throw new ApiError(502, "invalid_response", "Strategy Ticket response is missing");
+  return data;
+}
+
+export async function getStrategyObservations(filters: { strategy_version_id: string; from_ms?: number | undefined; to_ms?: number | undefined; first_path?: NonNullable<StrategySearchParams["observation_path"]> | undefined; cursor?: string | undefined }): Promise<StrategyObservationEnvelope> {
+  const query: { from_ms?: number | null; to_ms?: number | null; first_path?: NonNullable<StrategySearchParams["observation_path"]> | null; cursor?: string | null } = {};
+  if (filters.from_ms !== undefined) query.from_ms = filters.from_ms;
+  if (filters.to_ms !== undefined) query.to_ms = filters.to_ms;
+  if (filters.first_path !== undefined) query.first_path = filters.first_path;
+  if (filters.cursor !== undefined) query.cursor = filters.cursor;
+  const { data, error, response } = await apiClient.GET("/api/owner/v1/strategies/{strategy_version_id}/observations", {
+    params: {
+      path: { strategy_version_id: filters.strategy_version_id },
+      query,
+    },
+  });
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, "invalid_response", "Strategy Observation response is missing");
   return data;
 }

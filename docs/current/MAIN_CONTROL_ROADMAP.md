@@ -50,6 +50,7 @@ different Netting Domains progress concurrently.
 | Full capability | Natural v4 closure evidence now exists; `promote-full` and the final requirement audit remain explicit follow-up operations and were not bundled into this release |
 | M1 multi-asset planning | Owner adopted the same-Venue Binance USDⓈ-M TradFi Equity Product Family, same-account isolated RuntimeProfile, eight candidates plus QQQ/SPY references, LONG/SHORT Observation and REGULAR-only first Entry boundary; local M2–M4 implementation is authorized without production deployment, real TradFi Entry or capital increase |
 | M2–M4 local candidate | Product Compatibility, Instrument Center, Product-filtered controlled Warming Universe edit, independent observation-only TradFi RuntimeProfile/Policy, and `SOR-US-EQ-PERP-001` LONG/SHORT detector and ExitPolicy are implemented and focused acceptance is complete on the focused branch. The exact `0004 -> 0005` flat preservation and authority transition is locally verified; production remains unchanged and TradFi Entry remains disabled |
+| M5 local candidate | Signal-owned TradFi SOR Observation Outcomes, automatic bounded Product/Session refresh, version-isolated Strategy Observation reads and Owner Console path review are implemented locally. Focused acceptance proves no AdmissionDecision, CapacityClaim, Ticket, Exchange Command or venue mutation is created; production remains unchanged and TradFi Entry remains disabled |
 | Scope boundary | Funding ownership and broader Incident-quality work were not changed by this release |
 
 ## Deferred Release Candidate
@@ -101,7 +102,7 @@ it is not a gate retroactively added to this completed deployment.
 | 3 | M0.5 R1/R2 activation | Owner explicitly confirms deployment; record the exact superseding static/API Commit, install the split release roots and prove Kernel workers and `/opt/brc/current` were untouched |
 | 4 | Full policy promotion | After current exposure is naturally flat, run and certify `promote-full` from current PostgreSQL and Binance facts with exact Kernel identity |
 | 5 | Final requirement audit | Re-run local and Tokyo evidence and close every acceptance item |
-| 6 | M2–M4 deployment decision | After current exposure and exact R4 deployment gates permit, Owner separately confirms or defers the forward migration and production release |
+| 6 | M2–M5 deployment decision | After current exposure and exact R4 deployment gates permit, Owner separately confirms or defers the forward migration and production release |
 
 ## Current Stop Conditions
 

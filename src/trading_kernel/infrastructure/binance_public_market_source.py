@@ -58,6 +58,8 @@ class CcxtBinancePublicMarketSource:
             raise ValueError("public market timeout must be positive")
         self._exchange = exchange
         self._timeout_seconds = timeout_seconds
+        self._product_cache_key: tuple[tuple[str, ...], int] | None = None
+        self._product_cache_value: tuple[ProductSessionSnapshot, ...] = ()
 
     async def fetch_closed_candles(
         self,
@@ -110,6 +112,9 @@ class CcxtBinancePublicMarketSource:
     ) -> tuple[ProductSessionSnapshot, ...]:
         if not 1 <= len(exchange_instrument_ids) <= 10:
             raise ValueError("product refresh requires between one and ten instruments")
+        cache_key = (exchange_instrument_ids, observed_at_ms)
+        if cache_key == self._product_cache_key:
+            return self._product_cache_value
         symbols = tuple(
             parse_binance_usdm_instrument_id(item).symbol
             for item in exchange_instrument_ids
@@ -134,7 +139,7 @@ class CcxtBinancePublicMarketSource:
             for symbol, result in zip(symbols, depth_results, strict=True)
             if not isinstance(result, BaseException)
         }
-        return parse_binance_product_snapshots(
+        snapshots = parse_binance_product_snapshots(
             exchange_instrument_ids=exchange_instrument_ids,
             exchange_info=exchange_info,
             trading_schedule=trading_schedule,
@@ -142,6 +147,9 @@ class CcxtBinancePublicMarketSource:
             depth_by_symbol=depth_by_symbol,
             observed_at_ms=observed_at_ms,
         )
+        self._product_cache_key = cache_key
+        self._product_cache_value = snapshots
+        return snapshots
 
     async def _fetch(
         self,

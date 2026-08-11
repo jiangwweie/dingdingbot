@@ -38,7 +38,7 @@ async def signals(
     to_ms: int | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     cursor: Annotated[str | None, Query(max_length=2_048)] = None,
-    decision_status: Literal["admitted", "rejected"] | None = None,
+    decision_status: Literal["admitted", "rejected", "not_evaluated"] | None = None,
     strategy_group_id: str | None = None,
     exchange_instrument_id: str | None = None,
     position_side: Literal["long", "short"] | None = None,

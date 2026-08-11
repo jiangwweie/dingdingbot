@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy import event
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.trading_kernel.application.owner_console.causality import (
     ContradictoryFacts,
@@ -18,6 +19,8 @@ from src.trading_kernel.application.owner_console.models import (
     InstrumentCenterQuery,
     ReviewListQuery,
     SignalListQuery,
+    StrategyObservationQuery,
+    StrategySummaryQuery,
     TradeListQuery,
 )
 from src.trading_kernel.application.owner_console.overview import (
@@ -33,6 +36,10 @@ from src.trading_kernel.application.owner_console.signals import (
     SignalNotFound,
     build_signal_detail,
     build_signal_page,
+)
+from src.trading_kernel.application.owner_console.strategies import (
+    build_strategy_observation_page,
+    build_strategy_page,
 )
 from src.trading_kernel.application.owner_console.trades import (
     TradeFactsContradiction,
@@ -50,6 +57,10 @@ from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     _review_metrics,
     create_owner_read_engine,
     owner_read_transaction,
+)
+from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.strategy_registry_seed import (
+    seed_strategy_registry,
 )
 from tests.trading_kernel.integration.owner_console_support import (
     ADMIN_DSN,
@@ -653,6 +664,85 @@ async def test_signal_list_applies_exact_window_and_all_optional_filters(
         await engine.dispose()
 
 
+async def test_strategy_observation_reads_are_version_path_and_cursor_bounded(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_strategy_observations(owner_read_dsn)
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            repository = PostgresOwnerReadRepository(connection)
+            signal_page = build_signal_page(
+                await repository.read_signal_page_facts(
+                    SignalListQuery(
+                        from_ms=1_800_000_000_000,
+                        to_ms=1_800_010_000_000,
+                        strategy_group_id="SOR-US-EQ-PERP-001",
+                        decision_status="not_evaluated",
+                        limit=10,
+                    )
+                )
+            )
+            strategy_page = build_strategy_page(
+                await repository.read_strategy_page_facts(
+                    StrategySummaryQuery(
+                        from_ms=1_800_000_000_000,
+                        to_ms=1_800_010_000_000,
+                        view="current",
+                    )
+                )
+            )
+            first = build_strategy_observation_page(
+                await repository.read_strategy_observation_page_facts(
+                    StrategyObservationQuery(
+                        strategy_version_id="sgv:SOR-US-EQ-PERP-001:v1",
+                        from_ms=1_800_000_000_000,
+                        to_ms=1_800_010_000_000,
+                        first_path="tp1_first",
+                        limit=1,
+                    )
+                )
+            )
+            assert first.next_cursor is not None
+            second = build_strategy_observation_page(
+                await repository.read_strategy_observation_page_facts(
+                    StrategyObservationQuery(
+                        strategy_version_id="sgv:SOR-US-EQ-PERP-001:v1",
+                        from_ms=1_800_000_000_000,
+                        to_ms=1_800_010_000_000,
+                        first_path="tp1_first",
+                        limit=1,
+                        cursor=first.next_cursor,
+                    )
+                )
+            )
+
+        assert {item.signal_event_id for item in signal_page.items} == {
+            "signal:observation:tp1:new",
+            "signal:observation:tp1:old",
+            "signal:observation:stop",
+        }
+        by_version = {
+            item.strategy_version_id: item for item in strategy_page.items
+        }
+        assert by_version["sgv:SOR-US-EQ-PERP-001:v1"].observation_count == 3
+        assert by_version["sgv:SOR-US-EQ-PERP-001:v1"].tp1_first_count == 2
+        assert by_version["sgv:SOR-001:v4"].observation_count == 1
+        assert [item.shadow_outcome_id for item in first.items] == [
+            "shadow:observation:tp1:new"
+        ]
+        assert [item.shadow_outcome_id for item in second.items] == [
+            "shadow:observation:tp1:old"
+        ]
+        assert all(item.first_path == "tp1_first" for item in (*first.items, *second.items))
+        assert all(
+            item.strategy_version_id == "sgv:SOR-US-EQ-PERP-001:v1"
+            for item in (*first.items, *second.items)
+        )
+    finally:
+        await engine.dispose()
+
+
 async def test_signal_detail_reads_exact_identity_bound_facts_and_decimal_shadow(
     owner_read_dsn: str,
 ) -> None:
@@ -710,7 +800,7 @@ async def test_signal_detail_reads_exact_identity_bound_facts_and_decimal_shadow
             statements[2]
         )
         assert "limit" in statements[2]
-        assert "brc_shadow_outcomes_current.admission_decision_id =" in (
+        assert "brc_shadow_outcomes_current.signal_event_id =" in (
             statements[3]
         )
     finally:
@@ -2267,6 +2357,173 @@ async def _execute_owner_console_admin(
         await connection.close()
 
 
+async def _seed_owner_console_strategy_observations(dsn: str) -> None:
+    database_name = make_url(dsn).database
+    assert database_name is not None
+    admin_async_url = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql+asyncpg", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    admin_engine = create_async_engine(admin_async_url)
+    try:
+        async with PostgresKernelUnitOfWork(admin_engine) as uow:
+            await seed_strategy_registry(uow, seeded_at_ms=1_799_999_000_000)
+    finally:
+        await admin_engine.dispose()
+
+    admin_dsn = (
+        make_url(ADMIN_DSN)
+        .set(drivername="postgresql", database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    connection = await asyncpg.connect(admin_dsn)
+    tradfi_digest = "sha256:" + "7" * 64
+    crypto_digest = "sha256:" + "8" * 64
+    signal_rows = (
+        (
+            "signal:observation:tp1:new",
+            "episode:observation:tp1:new",
+            "scope:observation:tp1:new",
+            "SOR-US-EQ-PERP-001",
+            "sgv:SOR-US-EQ-PERP-001:v1",
+            "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1",
+            "universe:owner-console-observation:tradfi",
+            tradfi_digest,
+            "binance-usdm:AAPLUSDT:perpetual",
+            "long",
+            1_800_000_300_000,
+        ),
+        (
+            "signal:observation:tp1:old",
+            "episode:observation:tp1:old",
+            "scope:observation:tp1:old",
+            "SOR-US-EQ-PERP-001",
+            "sgv:SOR-US-EQ-PERP-001:v1",
+            "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1",
+            "universe:owner-console-observation:tradfi",
+            tradfi_digest,
+            "binance-usdm:AAPLUSDT:perpetual",
+            "long",
+            1_800_000_200_000,
+        ),
+        (
+            "signal:observation:stop",
+            "episode:observation:stop",
+            "scope:observation:stop",
+            "SOR-US-EQ-PERP-001",
+            "sgv:SOR-US-EQ-PERP-001:v1",
+            "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1",
+            "universe:owner-console-observation:tradfi",
+            tradfi_digest,
+            "binance-usdm:AAPLUSDT:perpetual",
+            "long",
+            1_800_000_100_000,
+        ),
+        (
+            "signal:observation:other-version",
+            "episode:observation:other-version",
+            "scope:observation:other-version",
+            "SOR-001",
+            "sgv:SOR-001:v4",
+            "event_spec:SOR-001:SOR-LONG:v4",
+            "universe:owner-console-observation:crypto",
+            crypto_digest,
+            "binance-usdm:BTCUSDT:perpetual",
+            "long",
+            1_800_000_400_000,
+        ),
+    )
+    shadow_rows = (
+        ("shadow:observation:tp1:new", "signal:observation:tp1:new", "tp1_first", 1_800_000_400_000, "1.40", "0.20"),
+        ("shadow:observation:tp1:old", "signal:observation:tp1:old", "tp1_first", 1_800_000_300_000, "1.20", "0.30"),
+        ("shadow:observation:stop", "signal:observation:stop", "initial_stop_first", 1_800_000_200_000, "0.30", "1.00"),
+        ("shadow:observation:other-version", "signal:observation:other-version", "tp1_first", 1_800_000_500_000, "2.00", "0.10"),
+    )
+    try:
+        async with connection.transaction():
+            await connection.executemany(
+                """
+                INSERT INTO brc_strategy_universe_versions (
+                    universe_version_id, strategy_group_id, event_spec_id,
+                    universe_version, semantic_digest, lifecycle_state,
+                    installed_at_ms, activated_at_ms, retired_at_ms,
+                    abandoned_at_ms, abandon_reason_code
+                ) VALUES ($1, $2, $3, 1, $4, 'active',
+                    1799999000000, 1799999000000, NULL, NULL, NULL)
+                """,
+                (
+                    (
+                        "universe:owner-console-observation:tradfi",
+                        "SOR-US-EQ-PERP-001",
+                        "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1",
+                        tradfi_digest,
+                    ),
+                    (
+                        "universe:owner-console-observation:crypto",
+                        "SOR-001",
+                        "event_spec:SOR-001:SOR-LONG:v4",
+                        crypto_digest,
+                    ),
+                ),
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_signal_events (
+                    signal_event_id, exposure_episode_id, runtime_scope_id,
+                    runtime_scope_version, strategy_group_id,
+                    strategy_version_id, event_spec_id, universe_version_id,
+                    universe_semantic_digest, exchange_instrument_id,
+                    position_side, fact_digest, occurred_at_ms, observed_at_ms,
+                    expires_at_ms
+                ) VALUES (
+                    $1, $2, $3, 1, $4, $5, $6, $7, $8, $9, $10,
+                    'sha256:' || repeat('9', 64), $11::bigint,
+                    $11::bigint, $11::bigint + 900000
+                )
+                """,
+                signal_rows,
+            )
+            await connection.executemany(
+                """
+                INSERT INTO brc_shadow_outcomes_current (
+                    shadow_outcome_id, signal_event_id, admission_decision_id,
+                    source_kind, status, evaluation_kind,
+                    exchange_instrument_id, position_side, timeframe,
+                    entry_reference_price, initial_stop_price,
+                    initial_risk_per_unit, take_profit_price,
+                    opening_range_boundary_price, session_exit_deadline_ms,
+                    mark_price, index_price, funding_rate,
+                    best_bid_price, best_ask_price,
+                    best_bid_quantity, best_ask_quantity, spread_bps,
+                    mark_index_deviation_bps, horizon_start_ms, horizon_end_ms,
+                    claim_owner, claim_token, lease_until_ms,
+                    max_favorable_price, max_adverse_price, mfe_r, mae_r,
+                    observed_through_ms, completion_reason, first_path,
+                    first_path_at_ms, observed_bar_count, projection_version,
+                    created_at_ms, completed_at_ms
+                )
+                SELECT
+                    $1::varchar(160), $2::varchar(160), NULL,
+                    'strategy_observation', 'completed',
+                    'sor_path_observation_v1', signal.exchange_instrument_id,
+                    signal.position_side, '15m', 100, 98, 2, 102, 99,
+                    signal.occurred_at_ms + 7200000, 100.01, 100, 0.0001,
+                    99.99, 100.01, 20, 18, 2, 1,
+                    signal.occurred_at_ms, signal.occurred_at_ms + 7200000,
+                    NULL, NULL, NULL, 103, 98.5, $5::numeric, $6::numeric,
+                    signal.occurred_at_ms + 7200000, 'sor_path_observed',
+                    $3::varchar(96), $4::bigint, 2, 1, signal.occurred_at_ms,
+                    signal.occurred_at_ms + 7200000
+                FROM brc_signal_events AS signal
+                WHERE signal.signal_event_id = $2::varchar(160)
+                """,
+                shadow_rows,
+            )
+    finally:
+        await connection.close()
+
+
 async def _seed_owner_console_trades(
     dsn: str,
     *,
@@ -3008,8 +3265,9 @@ async def _seed_owner_console_signals(
             await connection.execute(
                 """
                 INSERT INTO brc_shadow_outcomes_current (
-                    shadow_outcome_id, admission_decision_id, status,
-                    evaluation_kind, exchange_instrument_id, position_side,
+                    shadow_outcome_id, signal_event_id, admission_decision_id,
+                    source_kind, status, evaluation_kind,
+                    exchange_instrument_id, position_side,
                     timeframe, entry_reference_price, initial_stop_price,
                     initial_risk_per_unit, horizon_start_ms, horizon_end_ms,
                     claim_owner, claim_token, lease_until_ms,
@@ -3017,7 +3275,8 @@ async def _seed_owner_console_signals(
                     observed_through_ms, completion_reason, projection_version,
                     created_at_ms, completed_at_ms
                 ) VALUES (
-                    'shadow:z', 'admission:z', 'completed',
+                    'shadow:z', 'signal:z', 'admission:z',
+                    'portfolio_rejection', 'completed',
                     'fixed_horizon_excursion_v1', 'BTCUSDT', 'long', '15m',
                     100.000000000000000001, 99.000000000000000001,
                     1.000000000000000000, 1800000000000, 1800000900000,

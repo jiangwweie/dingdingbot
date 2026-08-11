@@ -14,11 +14,14 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     canonical_digest,
 )
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.domain.shadow_outcome import (
+    SHADOW_EVALUATION_KIND,
+    SOR_PATH_EVALUATION_KIND,
     ShadowOutcomeClaim,
     ShadowOutcomeSpec,
     ShadowOutcomeUnavailable,
-    evaluate_fixed_horizon_excursion,
+    evaluate_shadow_outcome,
     has_complete_closed_candle_sequence,
 )
 from src.trading_kernel.domain.signal import StrategySignal
@@ -84,7 +87,10 @@ def pending_shadow_spec_for_rejection(
         shadow_outcome_id=(
             f"shadow:{shadow_digest.removeprefix('sha256:')[:32]}"
         ),
+        signal_event_id=signal.signal_event_id,
         admission_decision_id=decision.admission_decision_id,
+        source_kind="portfolio_rejection",
+        evaluation_kind=SHADOW_EVALUATION_KIND,
         exchange_instrument_id=signal.exchange_instrument_id,
         position_side=signal.position_side,
         timeframe=contract.timeframe,
@@ -93,6 +99,113 @@ def pending_shadow_spec_for_rejection(
         horizon_start_ms=signal.occurred_at_ms,
         horizon_end_ms=horizon_end_ms,
         created_at_ms=decision.decided_at_ms,
+    )
+
+
+def pending_shadow_spec_for_strategy_observation(
+    *,
+    signal: StrategySignal,
+    product: ProductSessionSnapshot,
+) -> ShadowOutcomeSpec | None:
+    """Freeze one read-only SOR path directly from its official Signal."""
+
+    if (
+        signal.strategy_group_id != "SOR-US-EQ-PERP-001"
+        or product.exchange_instrument_id != signal.exchange_instrument_id
+        or product.product_family != "tradfi_equity_perpetual"
+        or product.observed_at_ms > signal.occurred_at_ms
+        or product.valid_until_ms <= signal.occurred_at_ms
+    ):
+        return None
+    contract = strategy_contract_for(signal.event_spec_id)
+    if (
+        contract.strategy_group_id != signal.strategy_group_id
+        or contract.timeframe != "15m"
+        or contract.position_side != signal.position_side
+        or contract.pre_tp1_reclaim_reference_fact is None
+        or contract.exposure_session_end_reference_fact is None
+    ):
+        return None
+    horizon_end_ms = _horizon_end_ms(signal, contract.shadow_horizon_bars)
+    if horizon_end_ms is None:
+        return None
+    entry_reference_price = (
+        product.best_ask if signal.position_side == "long" else product.best_bid
+    )
+    initial_stop_price = _fact_decimal(
+        signal,
+        contract.protection_reference_fact,
+    )
+    opening_range_boundary_price = _fact_decimal(
+        signal,
+        contract.pre_tp1_reclaim_reference_fact,
+    )
+    session_exit_deadline_ms = _fact_integer(
+        signal,
+        contract.exposure_session_end_reference_fact,
+    )
+    unavailable_reason = None
+    if entry_reference_price is None:
+        unavailable_reason = "entry_quote_unavailable"
+    elif initial_stop_price is None:
+        unavailable_reason = "initial_stop_unavailable"
+    elif opening_range_boundary_price is None:
+        unavailable_reason = "opening_range_boundary_unavailable"
+    elif session_exit_deadline_ms is None:
+        unavailable_reason = "session_exit_deadline_unavailable"
+    elif not _valid_stop_direction(
+        position_side=signal.position_side,
+        entry_reference_price=entry_reference_price,
+        initial_stop_price=initial_stop_price,
+    ):
+        unavailable_reason = "invalid_initial_stop_direction"
+    initial_risk = (
+        None
+        if entry_reference_price is None or initial_stop_price is None
+        else abs(entry_reference_price - initial_stop_price)
+    )
+    if unavailable_reason is None and (initial_risk is None or initial_risk <= 0):
+        unavailable_reason = "zero_initial_risk_distance"
+    take_profit_price = (
+        None
+        if unavailable_reason is not None
+        or entry_reference_price is None
+        or initial_risk is None
+        else entry_reference_price + initial_risk
+        if signal.position_side == "long"
+        else entry_reference_price - initial_risk
+    )
+    shadow_digest = canonical_digest(
+        {
+            "evaluation_kind": SOR_PATH_EVALUATION_KIND,
+            "signal_event_id": signal.signal_event_id,
+        }
+    )
+    return ShadowOutcomeSpec(
+        shadow_outcome_id=f"shadow:{shadow_digest.removeprefix('sha256:')[:32]}",
+        signal_event_id=signal.signal_event_id,
+        admission_decision_id=None,
+        source_kind="strategy_observation",
+        evaluation_kind=SOR_PATH_EVALUATION_KIND,
+        exchange_instrument_id=signal.exchange_instrument_id,
+        position_side=signal.position_side,
+        timeframe="15m",
+        entry_reference_price=entry_reference_price,
+        initial_stop_price=initial_stop_price,
+        take_profit_price=take_profit_price,
+        opening_range_boundary_price=opening_range_boundary_price,
+        session_exit_deadline_ms=session_exit_deadline_ms,
+        mark_price=product.mark_price,
+        index_price=product.index_price,
+        funding_rate=product.funding_rate,
+        best_bid_price=product.best_bid,
+        best_ask_price=product.best_ask,
+        best_bid_quantity=product.best_bid_quantity,
+        best_ask_quantity=product.best_ask_quantity,
+        unavailable_reason=unavailable_reason,
+        horizon_start_ms=signal.occurred_at_ms,
+        horizon_end_ms=horizon_end_ms,
+        created_at_ms=signal.observed_at_ms,
     )
 
 
@@ -105,7 +218,7 @@ async def project_claimed_shadow_outcome(
 ) -> bool:
     """Persist a terminal read-only projection after market I/O already ended."""
 
-    if claim.spec.initial_risk_per_unit <= 0:
+    if claim.spec.initial_risk_per_unit is None or claim.spec.initial_risk_per_unit <= 0:
         async with uow_factory() as uow:
             await uow.shadow_outcomes.mark_unavailable(
                 claim=claim,
@@ -118,7 +231,7 @@ async def project_claimed_shadow_outcome(
             await uow.shadow_outcomes.release_expired_claim(claim=claim)
         return False
     try:
-        projection = evaluate_fixed_horizon_excursion(claim.spec, candles)
+        projection = evaluate_shadow_outcome(claim.spec, candles)
     except ShadowOutcomeUnavailable as exc:
         async with uow_factory() as uow:
             await uow.shadow_outcomes.mark_unavailable(
@@ -145,6 +258,37 @@ def _protection_reference(signal: StrategySignal) -> Decimal | None:
     except Exception:  # noqa: BLE001 - invalid frozen evidence is ineligible.
         return None
     return value if value.is_finite() and value > 0 else None
+
+
+def _fact_decimal(signal: StrategySignal, fact_name: str) -> Decimal | None:
+    contract = strategy_contract_for(signal.event_spec_id)
+    fact_definition_id = next(
+        (
+            item.fact_definition_id
+            for item in contract.required_facts
+            if item.fact_name == fact_name
+        ),
+        None,
+    )
+    if fact_definition_id is None:
+        return None
+    matches = tuple(
+        fact for fact in signal.facts if fact.fact_definition_id == fact_definition_id
+    )
+    if len(matches) != 1:
+        return None
+    try:
+        value = Decimal(str(matches[0].value))
+    except Exception:  # noqa: BLE001 - invalid frozen evidence is explicit.
+        return None
+    return value if value.is_finite() and value > 0 else None
+
+
+def _fact_integer(signal: StrategySignal, fact_name: str) -> int | None:
+    value = _fact_decimal(signal, fact_name)
+    if value is None or value != value.to_integral_value():
+        return None
+    return int(value)
 
 
 def _valid_stop_direction(
@@ -194,7 +338,6 @@ def _horizon_end_ms(signal: StrategySignal, horizon_bars: int) -> int | None:
         not session_end.is_finite()
         or session_end != session_end.to_integral_value()
         or session_end <= signal.occurred_at_ms
-        or session_end > maximum
     ):
         return None
-    return int(session_end)
+    return min(maximum, int(session_end))

@@ -1,7 +1,7 @@
 ---
 title: TOKYO_RUNTIME_DEPLOYMENT_CONTRACT
 status: CURRENT
-last_verified: 2026-08-04
+last_verified: 2026-08-11
 ---
 
 # Tokyo Runtime Deployment Contract
@@ -169,6 +169,12 @@ new Product Compatibility and Instrument Center projections, and adds the
 independent observation-only TradFi RuntimeProfile, Owner Policy and paused
 `SOR-US-EQ-PERP-001` control. It does not add TradFi Events to `policy-main`,
 activate a TradFi Universe or authorize a real TradFi Ticket.
+
+The same revision binds every existing portfolio-rejection Shadow to its exact
+Signal without changing its completed MFE/MAE lineage, and permits new
+Signal-owned `strategy_observation` Outcomes for TradFi SOR. That projection
+does not authorize TradFi ENTRY, construct a Ticket, or add exchange mutation;
+M6 must still pass the official Readiness, CapacityClaim and Ticket gates.
 
 ## Flat Compatible Upgrade
 

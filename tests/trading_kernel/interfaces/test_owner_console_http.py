@@ -28,6 +28,8 @@ from src.trading_kernel.application.owner_console.models import (
     SignalDetailFacts,
     SignalListQuery,
     SignalPageFacts,
+    StrategyObservationPageFacts,
+    StrategyObservationQuery,
     StrategyPageFacts,
     StrategySummaryQuery,
     StrategyTicketPageFacts,
@@ -176,6 +178,7 @@ class _RepositorySpy:
         self.review_queries: list[ReviewListQuery] = []
         self.strategy_queries: list[StrategySummaryQuery] = []
         self.strategy_ticket_queries: list[StrategyTicketQuery] = []
+        self.strategy_observation_queries: list[StrategyObservationQuery] = []
         self.instrument_queries: list[InstrumentCenterQuery] = []
         self.overview_facts_override: OverviewFacts | None = None
 
@@ -254,6 +257,13 @@ class _RepositorySpy:
     ) -> StrategyTicketPageFacts:
         self.strategy_ticket_queries.append(query)
         return StrategyTicketPageFacts(items=(), requested_limit=query.limit)
+
+    async def read_strategy_observation_page_facts(
+        self,
+        query: StrategyObservationQuery,
+    ) -> StrategyObservationPageFacts:
+        self.strategy_observation_queries.append(query)
+        return StrategyObservationPageFacts(items=(), requested_limit=query.limit)
 
     async def read_instrument_center(
         self,
@@ -453,6 +463,7 @@ async def test_candles_do_not_open_database_transaction(
         "/api/owner/v1/tickets",
         "/api/owner/v1/review",
         "/api/owner/v1/strategies/strategy-version:1/tickets",
+        "/api/owner/v1/strategies/strategy-version:1/observations",
     ),
 )
 async def test_list_limit_above_hard_cap_returns_422(
@@ -477,6 +488,7 @@ async def test_list_limit_above_hard_cap_returns_422(
         "/api/owner/v1/review",
         "/api/owner/v1/strategies",
         "/api/owner/v1/strategies/strategy-version:1/tickets",
+        "/api/owner/v1/strategies/strategy-version:1/observations",
     ),
 )
 async def test_each_postgres_data_route_uses_one_read_transaction(
@@ -640,6 +652,7 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "/api/owner/v1/tickets/{ticket_id}/causality",
         "/api/owner/v1/review",
         "/api/owner/v1/strategies",
+        "/api/owner/v1/strategies/{strategy_version_id}/observations",
         "/api/owner/v1/strategies/{strategy_version_id}/tickets",
         "/api/owner/v1/market/candles",
         "/api/owner/v1/controls",

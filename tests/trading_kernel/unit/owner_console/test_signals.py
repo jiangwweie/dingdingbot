@@ -67,6 +67,54 @@ def test_admitted_signal_links_exact_ticket_and_never_uses_shadow_as_execution()
     assert item.shadow_summary is None
 
 
+def test_not_evaluated_signal_keeps_strategy_observation_without_admission() -> None:
+    item = build_signal_item(
+        signal_item_facts(
+            admission_decision_id=None,
+            decision_status="not_evaluated",
+            first_blocker=None,
+            binding_constraint=None,
+            ticket_id=None,
+            decided_at_ms=None,
+            shadow_outcome_id="shadow:observation:1",
+            shadow_source_kind="strategy_observation",
+            shadow_evaluation_kind="sor_path_observation_v1",
+            shadow_status="completed",
+            shadow_mfe_r="1.25",
+            shadow_mae_r="0.40",
+            shadow_completion_reason="sor_path_observed",
+            shadow_observed_through_ms=1_800_000_000_000,
+            shadow_completed_at_ms=1_800_000_000_000,
+            shadow_first_path="tp1_first",
+            shadow_first_path_at_ms=1_800_000_000_000,
+            shadow_observed_bar_count=3,
+            shadow_spread_bps="2.50",
+        )
+    )
+
+    assert item.admission_decision_id is None
+    assert item.decision_status == "not_evaluated"
+    assert item.ticket_id is None
+    assert item.shadow_summary is not None
+    assert item.shadow_summary.source_kind == "strategy_observation"
+    assert item.shadow_summary.first_path == "tp1_first"
+
+
+def test_admitted_signal_can_retain_strategy_observation_for_comparison() -> None:
+    item = build_signal_item(
+        signal_item_facts(
+            shadow_outcome_id="shadow:observation:1",
+            shadow_source_kind="strategy_observation",
+            shadow_evaluation_kind="sor_path_observation_v1",
+            shadow_status="pending",
+        )
+    )
+
+    assert item.ticket_id == "ticket:1"
+    assert item.shadow_summary is not None
+    assert item.shadow_summary.source_kind == "strategy_observation"
+
+
 def test_signal_page_uses_last_returned_identity_and_excludes_extra_row() -> None:
     facts = SignalPageFacts(
         items=(

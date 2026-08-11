@@ -47,6 +47,28 @@ class SlowExchange:
         return None
 
 
+class ProductExchange(FakeExchange):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.product_calls = 0
+
+    def fapiPublicGetExchangeInfo(self, params=None):
+        self.product_calls += 1
+        return {"symbols": [{"symbol": "AAPLUSDT", "contractType": "TRADIFI_PERPETUAL", "underlyingType": "EQUITY", "marginAsset": "USDT", "status": "TRADING"}]}
+
+    def fapiPublicGetTradingSchedule(self, params=None):
+        self.product_calls += 1
+        return {"data": [{"symbol": "AAPLUSDT", "tradingSessions": [{"session": "REGULAR", "startTime": 1_799_999_000_000, "endTime": 1_800_010_000_000}]}]}
+
+    def fapiPublicGetPremiumIndex(self, params=None):
+        self.product_calls += 1
+        return [{"symbol": "AAPLUSDT", "markPrice": "100", "indexPrice": "100", "lastFundingRate": "0"}]
+
+    def fapiPublicGetDepth(self, params=None):
+        self.product_calls += 1
+        return {"bids": [["99.9", "10"]], "asks": [["100", "9"]]}
+
+
 def test_public_market_source_rejects_retired_venue_symbol_map() -> None:
     assert "venue_symbols" not in inspect.signature(
         CcxtBinancePublicMarketSource
@@ -132,3 +154,22 @@ async def test_public_source_bounds_exchange_timeout() -> None:
                 closed_at_ms=10_000_000,
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_product_snapshot_reuses_exact_same_bar_universe_read() -> None:
+    exchange = ProductExchange()
+    source = CcxtBinancePublicMarketSource(exchange=exchange, timeout_seconds=1)
+    instruments = ("binance-usdm:AAPLUSDT:perpetual",)
+
+    first = await source.fetch_product_sessions(
+        instruments,
+        observed_at_ms=1_800_000_000_000,
+    )
+    second = await source.fetch_product_sessions(
+        instruments,
+        observed_at_ms=1_800_000_000_000,
+    )
+
+    assert first == second
+    assert exchange.product_calls == 4

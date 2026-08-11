@@ -1,7 +1,7 @@
 ---
 title: STRATEGY_EXPERIMENT_EVALUATION_CONTRACT
 status: CURRENT
-last_verified: 2026-07-24
+last_verified: 2026-08-11
 ---
 
 # Strategy Experiment Evaluation Contract
@@ -50,15 +50,20 @@ show both the aggregate result and the contribution of tail outcomes. Missing
 funding or execution evidence remains explicit rather than being treated as
 zero.
 
-## Rejected-Opportunity Evidence
+## Signal-Owned Observation Evidence
 
-An eligible portfolio-rejected Signal may have one read-only `Shadow Outcome`
-with evaluation kind `fixed_horizon_excursion_v1`. It freezes the admission-time
-entry reference and Initial Stop distance as one R, then records bounded closed
-candle MFE/MAE. It is not a fill, realized PnL, fee/funding/slippage estimate,
-or substitute for a real Ticket lifecycle. Shadow evidence is created only from
-an immutable rejected AdmissionDecision and never creates a Ticket, Capacity
-Claim, Reservation, Exchange Command, or venue mutation.
+One Signal may own at most one read-only `Shadow Outcome`. An eligible
+portfolio-rejected Signal uses `fixed_horizon_excursion_v1` and preserves its
+immutable rejected AdmissionDecision. An Entry-disabled TradFi strategy
+observation uses `sor_path_observation_v1` directly from the Signal and has no
+AdmissionDecision. Both freeze explicit price and time facts and record bounded
+closed-candle path evidence.
+
+This evidence is not a fill, not simulated PnL, not realized PnL, and not a
+fee, funding, or real slippage estimate. It never creates CapacityClaim,
+Reservation, Ticket, Exchange Command, or venue mutation. If real Entry is
+later authorized, the formal Ticket lifecycle remains the only source of
+execution economics and may coexist with the Signal-owned observation.
 
 ## Outcomes
 

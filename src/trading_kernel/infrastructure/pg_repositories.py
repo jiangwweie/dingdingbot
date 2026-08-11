@@ -83,7 +83,6 @@ from src.trading_kernel.domain.post_fill_risk import (
     PostFillRiskStatus,
 )
 from src.trading_kernel.domain.shadow_outcome import (
-    SHADOW_EVALUATION_KIND,
     ShadowOutcomeClaim,
     ShadowOutcomeProjection,
     ShadowOutcomeSpec,
@@ -1306,7 +1305,7 @@ class PostgresShadowOutcomeRepository:
         )
         await self._connection.execute(
             statement.on_conflict_do_nothing(
-                index_elements=[shadow_outcomes_current.c.admission_decision_id]
+                index_elements=[shadow_outcomes_current.c.signal_event_id]
             )
         )
 
@@ -1371,7 +1370,7 @@ class PostgresShadowOutcomeRepository:
         projection: ShadowOutcomeProjection,
         completed_at_ms: int,
     ) -> None:
-        if projection.evaluation_kind != SHADOW_EVALUATION_KIND:
+        if projection.evaluation_kind != claim.spec.evaluation_kind:
             raise ValueError("unsupported Shadow evaluation kind")
         if any(
             value is None
@@ -1406,7 +1405,14 @@ class PostgresShadowOutcomeRepository:
                 mfe_r=projection.mfe_r,
                 mae_r=projection.mae_r,
                 observed_through_ms=projection.observed_through_ms,
-                completion_reason="fixed_horizon_observed",
+                completion_reason=(
+                    "sor_path_observed"
+                    if claim.spec.evaluation_kind == "sor_path_observation_v1"
+                    else "fixed_horizon_observed"
+                ),
+                first_path=projection.first_path,
+                first_path_at_ms=projection.first_path_at_ms,
+                observed_bar_count=projection.observed_bar_count,
                 completed_at_ms=completed_at_ms,
                 projection_version=shadow_outcomes_current.c.projection_version + 1,
             )
@@ -3141,17 +3147,32 @@ def _admission_decision_from_row(row: RowMapping) -> AdmissionDecision:
 
 
 def _shadow_outcome_pending_values(spec: ShadowOutcomeSpec) -> dict[str, object]:
+    unavailable = spec.unavailable_reason is not None
     return {
         "shadow_outcome_id": spec.shadow_outcome_id,
+        "signal_event_id": spec.signal_event_id,
         "admission_decision_id": spec.admission_decision_id,
-        "status": "pending",
-        "evaluation_kind": SHADOW_EVALUATION_KIND,
+        "source_kind": spec.source_kind,
+        "status": "unavailable" if unavailable else "pending",
+        "evaluation_kind": spec.evaluation_kind,
         "exchange_instrument_id": spec.exchange_instrument_id,
         "position_side": spec.position_side,
         "timeframe": spec.timeframe,
         "entry_reference_price": spec.entry_reference_price,
         "initial_stop_price": spec.initial_stop_price,
         "initial_risk_per_unit": spec.initial_risk_per_unit,
+        "take_profit_price": spec.take_profit_price,
+        "opening_range_boundary_price": spec.opening_range_boundary_price,
+        "session_exit_deadline_ms": spec.session_exit_deadline_ms,
+        "mark_price": spec.mark_price,
+        "index_price": spec.index_price,
+        "funding_rate": spec.funding_rate,
+        "best_bid_price": spec.best_bid_price,
+        "best_ask_price": spec.best_ask_price,
+        "best_bid_quantity": spec.best_bid_quantity,
+        "best_ask_quantity": spec.best_ask_quantity,
+        "spread_bps": spec.spread_bps,
+        "mark_index_deviation_bps": spec.mark_index_deviation_bps,
         "horizon_start_ms": spec.horizon_start_ms,
         "horizon_end_ms": spec.horizon_end_ms,
         "claim_owner": None,
@@ -3162,26 +3183,67 @@ def _shadow_outcome_pending_values(spec: ShadowOutcomeSpec) -> dict[str, object]
         "mfe_r": None,
         "mae_r": None,
         "observed_through_ms": None,
-        "completion_reason": None,
+        "completion_reason": spec.unavailable_reason,
+        "first_path": None,
+        "first_path_at_ms": None,
+        "observed_bar_count": None,
         "projection_version": 1,
         "created_at_ms": spec.created_at_ms,
-        "completed_at_ms": None,
+        "completed_at_ms": spec.created_at_ms if unavailable else None,
     }
 
 
 def _shadow_outcome_spec_from_row(row: RowMapping) -> ShadowOutcomeSpec:
     return ShadowOutcomeSpec(
         shadow_outcome_id=str(row["shadow_outcome_id"]),
-        admission_decision_id=str(row["admission_decision_id"]),
+        signal_event_id=str(row["signal_event_id"]),
+        admission_decision_id=(
+            None
+            if row["admission_decision_id"] is None
+            else str(row["admission_decision_id"])
+        ),
+        source_kind=cast(
+            Literal["portfolio_rejection", "strategy_observation"],
+            str(row["source_kind"]),
+        ),
+        evaluation_kind=cast(
+            Literal["fixed_horizon_excursion_v1", "sor_path_observation_v1"],
+            str(row["evaluation_kind"]),
+        ),
         exchange_instrument_id=str(row["exchange_instrument_id"]),
         position_side=cast(Literal["long", "short"], str(row["position_side"])),
         timeframe=cast(Literal["1h", "15m"], str(row["timeframe"])),
-        entry_reference_price=Decimal(row["entry_reference_price"]),
-        initial_stop_price=Decimal(row["initial_stop_price"]),
+        entry_reference_price=_decimal_or_none(row["entry_reference_price"]),
+        initial_stop_price=_decimal_or_none(row["initial_stop_price"]),
+        take_profit_price=_decimal_or_none(row["take_profit_price"]),
+        opening_range_boundary_price=_decimal_or_none(
+            row["opening_range_boundary_price"]
+        ),
+        session_exit_deadline_ms=(
+            None
+            if row["session_exit_deadline_ms"] is None
+            else int(row["session_exit_deadline_ms"])
+        ),
+        mark_price=_decimal_or_none(row["mark_price"]),
+        index_price=_decimal_or_none(row["index_price"]),
+        funding_rate=_decimal_or_none(row["funding_rate"]),
+        best_bid_price=_decimal_or_none(row["best_bid_price"]),
+        best_ask_price=_decimal_or_none(row["best_ask_price"]),
+        best_bid_quantity=_decimal_or_none(row["best_bid_quantity"]),
+        best_ask_quantity=_decimal_or_none(row["best_ask_quantity"]),
+        unavailable_reason=(
+            str(row["completion_reason"])
+            if row["status"] == "unavailable"
+            else None
+        ),
         horizon_start_ms=int(row["horizon_start_ms"]),
         horizon_end_ms=int(row["horizon_end_ms"]),
         created_at_ms=int(row["created_at_ms"]),
     )
+
+
+def _decimal_or_none(value: object) -> Decimal | None:
+    return None if value is None else Decimal(str(value))
 
 
 def _aggregate_from_row(

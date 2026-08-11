@@ -60,6 +60,9 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_versions,
     trade_tickets,
 )
+from src.trading_kernel.infrastructure.pg_product_current import (
+    PostgresProductCurrentRepository,
+)
 
 
 class PostgresSignalRepository:
@@ -964,6 +967,14 @@ class PostgresSignalRepository:
             if row is None
             else ProductSessionSnapshot.model_validate(row, extra="ignore")
         )
+
+    async def upsert_product_sessions(
+        self,
+        snapshots: tuple[ProductSessionSnapshot, ...],
+    ) -> int:
+        return await PostgresProductCurrentRepository(
+            self._connection
+        ).upsert_snapshots(snapshots)
 
     async def get_instrument_rules(
         self,

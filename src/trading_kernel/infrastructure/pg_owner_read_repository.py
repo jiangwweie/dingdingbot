@@ -39,6 +39,9 @@ from src.trading_kernel.application.owner_console.models import (
     SignalItemFacts,
     SignalListQuery,
     SignalPageFacts,
+    StrategyObservationFacts,
+    StrategyObservationPageFacts,
+    StrategyObservationQuery,
     StrategyPageFacts,
     StrategyProductEventFacts,
     StrategySummaryQuery,
@@ -112,6 +115,7 @@ _REVIEW_CENTER_INCIDENT_LIMIT = 64
 _REVIEW_CENTER_FILTER_CANDIDATE_LIMIT = 512
 _STRATEGY_SUMMARY_VERSION_LIMIT = 100
 _STRATEGY_SUMMARY_TICKET_LIMIT = 5_000
+_STRATEGY_SUMMARY_OBSERVATION_LIMIT = 5_000
 
 
 def create_owner_read_engine(dsn: str) -> AsyncEngine:
@@ -1128,11 +1132,11 @@ class PostgresOwnerReadRepository:
             .mappings()
             .all()
         )
-        if len(decision_rows) != 1:
+        if len(decision_rows) > 1:
             raise SignalFactsContradiction(
-                "Signal requires exactly one AdmissionDecision"
+                "Signal has multiple AdmissionDecisions"
             )
-        decision = decision_rows[0]
+        decision = decision_rows[0] if decision_rows else None
 
         fact_rows = (
             (await self._connection.execute(_exact_signal_facts_query(signal_event_id)))
@@ -1140,21 +1144,20 @@ class PostgresOwnerReadRepository:
             .all()
         )
 
-        admission_decision_id = str(decision["admission_decision_id"])
         shadow_rows = (
-            (await self._connection.execute(_exact_shadow_query(admission_decision_id)))
+            (await self._connection.execute(_exact_shadow_query(signal_event_id)))
             .mappings()
             .all()
         )
         if len(shadow_rows) > 1:
             raise SignalFactsContradiction(
-                "AdmissionDecision has multiple Shadow Outcomes"
+                "Signal has multiple Shadow Outcomes"
             )
         if len(fact_rows) > 256:
             raise SignalFactsContradiction("Signal has more than 256 fact snapshots")
         shadow = shadow_rows[0] if shadow_rows else None
         _validate_signal_admission_identity(signal=signal, decision=decision)
-        _validate_shadow_identity(decision=decision, shadow=shadow)
+        _validate_shadow_identity(signal=signal, decision=decision, shadow=shadow)
 
         item = _signal_item_facts_from_detail_rows(
             signal=signal,
@@ -1300,6 +1303,7 @@ class PostgresOwnerReadRepository:
         version_ids = tuple(str(row["strategy_version_id"]) for row in version_rows)
         product_events_by_version = await self._strategy_product_events(version_ids)
         ticket_rows: Sequence[RowMapping] = ()
+        observation_rows: Sequence[RowMapping] = ()
         if version_ids:
             ticket_rows = (
                 (
@@ -1313,9 +1317,25 @@ class PostgresOwnerReadRepository:
                 .mappings()
                 .all()
             )
+            observation_rows = (
+                (
+                    await self._connection.execute(
+                        _strategy_summary_observation_query(
+                            query=query,
+                            strategy_version_ids=version_ids,
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
         if len(ticket_rows) > _STRATEGY_SUMMARY_TICKET_LIMIT:
             raise TradeFactsContradiction(
                 "StrategyVersion summary exceeds hard maximum 5000 Tickets"
+            )
+        if len(observation_rows) > _STRATEGY_SUMMARY_OBSERVATION_LIMIT:
+            raise TradeFactsContradiction(
+                "StrategyVersion summary exceeds hard maximum 5000 Observations"
             )
         tickets_by_version: dict[str, list[StrategyTicketFacts]] = {
             strategy_version_id: [] for strategy_version_id in version_ids
@@ -1328,6 +1348,18 @@ class PostgresOwnerReadRepository:
                 )
             tickets_by_version[strategy_version_id].append(
                 _strategy_ticket_facts_from_row(row)
+            )
+        observations_by_version: dict[str, list[StrategyObservationFacts]] = {
+            strategy_version_id: [] for strategy_version_id in version_ids
+        }
+        for row in observation_rows:
+            strategy_version_id = str(row["strategy_version_id"])
+            if strategy_version_id not in observations_by_version:
+                raise TradeFactsContradiction(
+                    "StrategyVersion Observation is outside selected version authority"
+                )
+            observations_by_version[strategy_version_id].append(
+                _strategy_observation_facts_from_row(row)
             )
         return StrategyPageFacts(
             from_ms=query.from_ms,
@@ -1342,6 +1374,9 @@ class PostgresOwnerReadRepository:
                     strategy_version_status=str(row["strategy_version_status"]),
                     is_current=bool(row["is_current"]),
                     tickets=tuple(tickets_by_version[str(row["strategy_version_id"])]),
+                    observations=tuple(
+                        observations_by_version[str(row["strategy_version_id"])]
+                    ),
                     evidence=(
                         EvidenceRef(
                             kind="fact",
@@ -1376,6 +1411,27 @@ class PostgresOwnerReadRepository:
         )
         return StrategyTicketPageFacts(
             items=tuple(_trade_item_facts_from_row(row) for row in rows),
+            requested_limit=query.limit,
+        )
+
+    async def read_strategy_observation_page_facts(
+        self,
+        query: StrategyObservationQuery,
+    ) -> StrategyObservationPageFacts:
+        """Read one version/path-bounded Observation modal page."""
+
+        cursor = None if query.cursor is None else decode_cursor(query.cursor)
+        rows = (
+            (
+                await self._connection.execute(
+                    _strategy_observation_query(query=query, cursor=cursor)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return StrategyObservationPageFacts(
+            items=tuple(_strategy_observation_facts_from_row(row) for row in rows),
             requested_limit=query.limit,
         )
 
@@ -1817,7 +1873,9 @@ def _signal_list_query(
         conditions.append(signal_events.c.position_side == query.position_side)
     if query.decision_status is not None:
         conditions.append(
-            admission_decisions.c.decision_status == query.decision_status
+            admission_decisions.c.admission_decision_id.is_(None)
+            if query.decision_status == "not_evaluated"
+            else admission_decisions.c.decision_status == query.decision_status
         )
     if cursor is not None:
         conditions.append(
@@ -1931,6 +1989,87 @@ def _strategy_summary_ticket_query(
             trade_tickets.c.strategy_version_id.in_(strategy_version_ids),
         ),
         limit=_STRATEGY_SUMMARY_TICKET_LIMIT + 1,
+    )
+
+
+def _strategy_summary_observation_query(
+    *,
+    query: StrategySummaryQuery,
+    strategy_version_ids: tuple[str, ...],
+) -> sa.Select[Any]:
+    return _strategy_observation_select(
+        conditions=(
+            signal_events.c.occurred_at_ms >= query.from_ms,
+            signal_events.c.occurred_at_ms < query.to_ms,
+            signal_events.c.strategy_version_id.in_(strategy_version_ids),
+        ),
+        limit=_STRATEGY_SUMMARY_OBSERVATION_LIMIT + 1,
+    )
+
+
+def _strategy_observation_query(
+    *,
+    query: StrategyObservationQuery,
+    cursor: PageCursor | None,
+) -> sa.Select[Any]:
+    conditions: list[sa.ColumnElement[bool]] = [
+        signal_events.c.occurred_at_ms >= query.from_ms,
+        signal_events.c.occurred_at_ms < query.to_ms,
+        signal_events.c.strategy_version_id == query.strategy_version_id,
+    ]
+    if query.first_path is not None:
+        conditions.append(shadow_outcomes_current.c.first_path == query.first_path)
+    if cursor is not None:
+        conditions.append(
+            sa.tuple_(
+                signal_events.c.occurred_at_ms,
+                shadow_outcomes_current.c.shadow_outcome_id,
+            )
+            < sa.tuple_(
+                sa.literal(cursor.sort_ms),
+                sa.literal(cursor.identity),
+            )
+        )
+    return _strategy_observation_select(
+        conditions=conditions,
+        limit=query.limit + 1,
+    )
+
+
+def _strategy_observation_select(
+    *,
+    conditions: Sequence[sa.ColumnElement[bool]],
+    limit: int,
+) -> sa.Select[Any]:
+    return (
+        sa.select(
+            shadow_outcomes_current,
+            signal_events.c.strategy_version_id,
+            signal_events.c.occurred_at_ms,
+            admission_decisions.c.ticket_id,
+        )
+        .select_from(
+            shadow_outcomes_current.join(
+                signal_events,
+                signal_events.c.signal_event_id
+                == shadow_outcomes_current.c.signal_event_id,
+            ).outerjoin(
+                admission_decisions,
+                admission_decisions.c.signal_event_id
+                == signal_events.c.signal_event_id,
+            )
+        )
+        .where(
+            shadow_outcomes_current.c.source_kind == "strategy_observation",
+            shadow_outcomes_current.c.evaluation_kind
+            == "sor_path_observation_v1",
+            *conditions,
+        )
+        .order_by(
+            signal_events.c.occurred_at_ms.desc(),
+            shadow_outcomes_current.c.shadow_outcome_id.desc(),
+        )
+        .limit(limit)
     )
 
 
@@ -2465,6 +2604,133 @@ def _strategy_ticket_facts_from_row(row: RowMapping) -> StrategyTicketFacts:
     )
 
 
+def _strategy_observation_facts_from_row(
+    row: RowMapping,
+) -> StrategyObservationFacts:
+    if (
+        row["source_kind"] != "strategy_observation"
+        or row["evaluation_kind"] != "sor_path_observation_v1"
+    ):
+        raise TradeFactsContradiction(
+            "StrategyVersion Observation has incompatible semantics"
+        )
+    occurred_at_ms = int(row["occurred_at_ms"])
+    completed_at_ms = (
+        None if row["completed_at_ms"] is None else int(row["completed_at_ms"])
+    )
+    return StrategyObservationFacts(
+        shadow_outcome_id=str(row["shadow_outcome_id"]),
+        signal_event_id=str(row["signal_event_id"]),
+        ticket_id=None if row["ticket_id"] is None else str(row["ticket_id"]),
+        strategy_version_id=str(row["strategy_version_id"]),
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
+        position_side=cast(Literal["long", "short"], str(row["position_side"])),
+        occurred_at_ms=occurred_at_ms,
+        horizon_start_ms=int(row["horizon_start_ms"]),
+        horizon_end_ms=int(row["horizon_end_ms"]),
+        status=cast(
+            Literal["pending", "claimed", "completed", "unavailable"],
+            str(row["status"]),
+        ),
+        entry_reference_price=_exact_decimal_or_none(
+            row["entry_reference_price"],
+            field_name="entry_reference_price",
+        ),
+        initial_stop_price=_exact_decimal_or_none(
+            row["initial_stop_price"],
+            field_name="initial_stop_price",
+        ),
+        take_profit_price=_exact_decimal_or_none(
+            row["take_profit_price"],
+            field_name="take_profit_price",
+        ),
+        opening_range_boundary_price=_exact_decimal_or_none(
+            row["opening_range_boundary_price"],
+            field_name="opening_range_boundary_price",
+        ),
+        session_exit_deadline_ms=(
+            None
+            if row["session_exit_deadline_ms"] is None
+            else int(row["session_exit_deadline_ms"])
+        ),
+        best_bid_price=_exact_decimal_or_none(
+            row["best_bid_price"],
+            field_name="best_bid_price",
+        ),
+        best_ask_price=_exact_decimal_or_none(
+            row["best_ask_price"],
+            field_name="best_ask_price",
+        ),
+        best_bid_quantity=_exact_decimal_or_none(
+            row["best_bid_quantity"],
+            field_name="best_bid_quantity",
+        ),
+        best_ask_quantity=_exact_decimal_or_none(
+            row["best_ask_quantity"],
+            field_name="best_ask_quantity",
+        ),
+        spread_bps=_exact_decimal_or_none(
+            row["spread_bps"],
+            field_name="spread_bps",
+        ),
+        mark_index_deviation_bps=_exact_decimal_or_none(
+            row["mark_index_deviation_bps"],
+            field_name="mark_index_deviation_bps",
+        ),
+        max_favorable_price=_exact_decimal_or_none(
+            row["max_favorable_price"],
+            field_name="max_favorable_price",
+        ),
+        max_adverse_price=_exact_decimal_or_none(
+            row["max_adverse_price"],
+            field_name="max_adverse_price",
+        ),
+        mfe_r=_exact_decimal_or_none(row["mfe_r"], field_name="mfe_r"),
+        mae_r=_exact_decimal_or_none(row["mae_r"], field_name="mae_r"),
+        completion_reason=(
+            None
+            if row["completion_reason"] is None
+            else str(row["completion_reason"])
+        ),
+        first_path=cast(
+            Literal[
+                "tp1_first",
+                "initial_stop_first",
+                "ambiguous_same_bar",
+                "opening_range_failure",
+                "time_stop",
+                "session_exit",
+                "horizon_complete",
+            ]
+            | None,
+            None if row["first_path"] is None else str(row["first_path"]),
+        ),
+        first_path_at_ms=(
+            None
+            if row["first_path_at_ms"] is None
+            else int(row["first_path_at_ms"])
+        ),
+        observed_bar_count=(
+            None
+            if row["observed_bar_count"] is None
+            else int(row["observed_bar_count"])
+        ),
+        completed_at_ms=completed_at_ms,
+        evidence=(
+            EvidenceRef(
+                kind="signal",
+                identity=str(row["signal_event_id"]),
+                occurred_at_ms=occurred_at_ms,
+            ),
+            EvidenceRef(
+                kind="shadow",
+                identity=str(row["shadow_outcome_id"]),
+                occurred_at_ms=completed_at_ms or occurred_at_ms,
+            ),
+        ),
+    )
+
+
 def _review_center_incidents_by_ticket(
     rows: Sequence[RowMapping],
 ) -> dict[str, tuple[RowMapping, ...]]:
@@ -2730,8 +2996,13 @@ def _signal_joined_select() -> sa.Select[Any]:
         admission_decisions.c.ticket_id,
         admission_decisions.c.decided_at_ms,
         shadow_outcomes_current.c.shadow_outcome_id,
+        shadow_outcomes_current.c.signal_event_id.label("shadow_signal_event_id"),
         shadow_outcomes_current.c.admission_decision_id.label(
             "shadow_admission_decision_id"
+        ),
+        shadow_outcomes_current.c.source_kind.label("shadow_source_kind"),
+        shadow_outcomes_current.c.evaluation_kind.label(
+            "shadow_evaluation_kind"
         ),
         shadow_outcomes_current.c.exchange_instrument_id.label(
             "shadow_exchange_instrument_id"
@@ -2745,14 +3016,25 @@ def _signal_joined_select() -> sa.Select[Any]:
             "shadow_observed_through_ms"
         ),
         shadow_outcomes_current.c.completed_at_ms.label("shadow_completed_at_ms"),
+        shadow_outcomes_current.c.first_path.label("shadow_first_path"),
+        shadow_outcomes_current.c.first_path_at_ms.label(
+            "shadow_first_path_at_ms"
+        ),
+        shadow_outcomes_current.c.observed_bar_count.label(
+            "shadow_observed_bar_count"
+        ),
+        shadow_outcomes_current.c.spread_bps.label("shadow_spread_bps"),
+        shadow_outcomes_current.c.mark_index_deviation_bps.label(
+            "shadow_mark_index_deviation_bps"
+        ),
     ).select_from(
-        signal_events.join(
+        signal_events.outerjoin(
             admission_decisions,
             admission_decisions.c.signal_event_id == signal_events.c.signal_event_id,
         ).outerjoin(
             shadow_outcomes_current,
-            shadow_outcomes_current.c.admission_decision_id
-            == admission_decisions.c.admission_decision_id,
+            shadow_outcomes_current.c.signal_event_id
+            == signal_events.c.signal_event_id,
         )
     )
 
@@ -2782,11 +3064,16 @@ def _exact_signal_facts_query(signal_event_id: str) -> sa.Select[Any]:
     )
 
 
-def _exact_shadow_query(admission_decision_id: str) -> sa.Select[Any]:
+def _exact_shadow_query(signal_event_id: str) -> sa.Select[Any]:
     return (
         sa.select(
             shadow_outcomes_current.c.shadow_outcome_id,
+            shadow_outcomes_current.c.signal_event_id,
             shadow_outcomes_current.c.admission_decision_id,
+            shadow_outcomes_current.c.source_kind.label("shadow_source_kind"),
+            shadow_outcomes_current.c.evaluation_kind.label(
+                "shadow_evaluation_kind"
+            ),
             shadow_outcomes_current.c.exchange_instrument_id,
             shadow_outcomes_current.c.position_side,
             shadow_outcomes_current.c.status.label("shadow_status"),
@@ -2799,8 +3086,19 @@ def _exact_shadow_query(admission_decision_id: str) -> sa.Select[Any]:
                 "shadow_observed_through_ms"
             ),
             shadow_outcomes_current.c.completed_at_ms.label("shadow_completed_at_ms"),
+            shadow_outcomes_current.c.first_path.label("shadow_first_path"),
+            shadow_outcomes_current.c.first_path_at_ms.label(
+                "shadow_first_path_at_ms"
+            ),
+            shadow_outcomes_current.c.observed_bar_count.label(
+                "shadow_observed_bar_count"
+            ),
+            shadow_outcomes_current.c.spread_bps.label("shadow_spread_bps"),
+            shadow_outcomes_current.c.mark_index_deviation_bps.label(
+                "shadow_mark_index_deviation_bps"
+            ),
         )
-        .where(shadow_outcomes_current.c.admission_decision_id == admission_decision_id)
+        .where(shadow_outcomes_current.c.signal_event_id == signal_event_id)
         .limit(2)
     )
 
@@ -2809,7 +3107,7 @@ def _signal_item_facts_from_joined_row(row: RowMapping) -> SignalItemFacts:
     _validate_joined_signal_identity(row)
     return _signal_item_facts(
         signal=row,
-        decision=row,
+        decision=row if row["admission_decision_id"] is not None else None,
         shadow=row if row["shadow_outcome_id"] is not None else None,
     )
 
@@ -2817,7 +3115,7 @@ def _signal_item_facts_from_joined_row(row: RowMapping) -> SignalItemFacts:
 def _signal_item_facts_from_detail_rows(
     *,
     signal: RowMapping,
-    decision: RowMapping,
+    decision: RowMapping | None,
     shadow: RowMapping | None,
 ) -> SignalItemFacts:
     return _signal_item_facts(
@@ -2830,25 +3128,30 @@ def _signal_item_facts_from_detail_rows(
 def _signal_item_facts(
     *,
     signal: RowMapping,
-    decision: RowMapping,
+    decision: RowMapping | None,
     shadow: RowMapping | None,
 ) -> SignalItemFacts:
     signal_event_id = str(signal["signal_event_id"])
-    admission_decision_id = str(decision["admission_decision_id"])
     occurred_at_ms = int(signal["occurred_at_ms"])
-    decided_at_ms = int(decision["decided_at_ms"])
+    admission_decision_id = (
+        None if decision is None else str(decision["admission_decision_id"])
+    )
+    decided_at_ms = None if decision is None else int(decision["decided_at_ms"])
     evidence = [
         EvidenceRef(
             kind="signal",
             identity=signal_event_id,
             occurred_at_ms=occurred_at_ms,
         ),
-        EvidenceRef(
-            kind="admission",
-            identity=admission_decision_id,
-            occurred_at_ms=decided_at_ms,
-        ),
     ]
+    if admission_decision_id is not None and decided_at_ms is not None:
+        evidence.append(
+            EvidenceRef(
+                kind="admission",
+                identity=admission_decision_id,
+                occurred_at_ms=decided_at_ms,
+            )
+        )
     shadow_outcome_id = None
     shadow_status = None
     shadow_mfe_r = None
@@ -2856,8 +3159,17 @@ def _signal_item_facts(
     shadow_completion_reason = None
     shadow_observed_through_ms = None
     shadow_completed_at_ms = None
+    shadow_source_kind = None
+    shadow_evaluation_kind = None
+    shadow_first_path = None
+    shadow_first_path_at_ms = None
+    shadow_observed_bar_count = None
+    shadow_spread_bps = None
+    shadow_mark_index_deviation_bps = None
     if shadow is not None:
         shadow_outcome_id = str(shadow["shadow_outcome_id"])
+        shadow_source_kind = str(shadow["shadow_source_kind"])
+        shadow_evaluation_kind = str(shadow["shadow_evaluation_kind"])
         shadow_status = str(shadow["shadow_status"])
         shadow_mfe_r = _exact_decimal_or_none(
             shadow["shadow_mfe_r"],
@@ -2882,11 +3194,34 @@ def _signal_item_facts(
             if shadow["shadow_completed_at_ms"] is None
             else int(shadow["shadow_completed_at_ms"])
         )
+        shadow_first_path = (
+            None
+            if shadow["shadow_first_path"] is None
+            else str(shadow["shadow_first_path"])
+        )
+        shadow_first_path_at_ms = (
+            None
+            if shadow["shadow_first_path_at_ms"] is None
+            else int(shadow["shadow_first_path_at_ms"])
+        )
+        shadow_observed_bar_count = (
+            None
+            if shadow["shadow_observed_bar_count"] is None
+            else int(shadow["shadow_observed_bar_count"])
+        )
+        shadow_spread_bps = _exact_decimal_or_none(
+            shadow["shadow_spread_bps"],
+            field_name="shadow_spread_bps",
+        )
+        shadow_mark_index_deviation_bps = _exact_decimal_or_none(
+            shadow["shadow_mark_index_deviation_bps"],
+            field_name="shadow_mark_index_deviation_bps",
+        )
         evidence.append(
             EvidenceRef(
                 kind="shadow",
                 identity=shadow_outcome_id,
-                occurred_at_ms=shadow_completed_at_ms or decided_at_ms,
+                occurred_at_ms=shadow_completed_at_ms or decided_at_ms or occurred_at_ms,
             )
         )
 
@@ -2902,24 +3237,40 @@ def _signal_item_facts(
         expires_at_ms=int(signal["expires_at_ms"]),
         admission_decision_id=admission_decision_id,
         decision_status=cast(
-            Literal["admitted", "rejected"],
-            str(decision["decision_status"]),
+            Literal["admitted", "rejected", "not_evaluated"],
+            "not_evaluated"
+            if decision is None
+            else str(decision["decision_status"]),
         ),
         first_blocker=(
             None
-            if decision["first_blocker"] is None
+            if decision is None or decision["first_blocker"] is None
             else str(decision["first_blocker"])
         ),
         binding_constraint=(
             None
-            if decision["binding_constraint"] is None
+            if decision is None or decision["binding_constraint"] is None
             else str(decision["binding_constraint"])
         ),
         ticket_id=(
-            None if decision["ticket_id"] is None else str(decision["ticket_id"])
+            None
+            if decision is None or decision["ticket_id"] is None
+            else str(decision["ticket_id"])
         ),
         decided_at_ms=decided_at_ms,
         shadow_outcome_id=shadow_outcome_id,
+        shadow_source_kind=cast(
+            Literal["portfolio_rejection", "strategy_observation"] | None,
+            shadow_source_kind,
+        ),
+        shadow_evaluation_kind=cast(
+            Literal[
+                "fixed_horizon_excursion_v1",
+                "sor_path_observation_v1",
+            ]
+            | None,
+            shadow_evaluation_kind,
+        ),
         shadow_status=cast(
             Literal["pending", "claimed", "completed", "unavailable"] | None,
             shadow_status,
@@ -2929,47 +3280,80 @@ def _signal_item_facts(
         shadow_completion_reason=shadow_completion_reason,
         shadow_observed_through_ms=shadow_observed_through_ms,
         shadow_completed_at_ms=shadow_completed_at_ms,
+        shadow_first_path=cast(
+            Literal[
+                "tp1_first",
+                "initial_stop_first",
+                "ambiguous_same_bar",
+                "opening_range_failure",
+                "time_stop",
+                "session_exit",
+                "horizon_complete",
+            ]
+            | None,
+            shadow_first_path,
+        ),
+        shadow_first_path_at_ms=shadow_first_path_at_ms,
+        shadow_observed_bar_count=shadow_observed_bar_count,
+        shadow_spread_bps=shadow_spread_bps,
+        shadow_mark_index_deviation_bps=shadow_mark_index_deviation_bps,
         evidence=tuple(evidence),
     )
 
 
 def _validate_joined_signal_identity(row: RowMapping) -> None:
-    pairs = (
-        ("signal_event_id", "decision_signal_event_id"),
-        ("exposure_episode_id", "decision_exposure_episode_id"),
-        ("runtime_scope_id", "decision_runtime_scope_id"),
-        ("runtime_scope_version", "decision_runtime_scope_version"),
-        ("strategy_group_id", "decision_strategy_group_id"),
-        ("strategy_version_id", "decision_strategy_version_id"),
-        ("event_spec_id", "decision_event_spec_id"),
-        ("universe_version_id", "decision_universe_version_id"),
-        (
-            "universe_semantic_digest",
-            "decision_universe_semantic_digest",
-        ),
-        (
-            "exchange_instrument_id",
-            "decision_exchange_instrument_id",
-        ),
-        ("position_side", "decision_position_side"),
-    )
-    if any(row[left] != row[right] for left, right in pairs):
-        raise SignalFactsContradiction("signal and admission identity mismatch")
+    if row["admission_decision_id"] is not None:
+        pairs = (
+            ("signal_event_id", "decision_signal_event_id"),
+            ("exposure_episode_id", "decision_exposure_episode_id"),
+            ("runtime_scope_id", "decision_runtime_scope_id"),
+            ("runtime_scope_version", "decision_runtime_scope_version"),
+            ("strategy_group_id", "decision_strategy_group_id"),
+            ("strategy_version_id", "decision_strategy_version_id"),
+            ("event_spec_id", "decision_event_spec_id"),
+            ("universe_version_id", "decision_universe_version_id"),
+            (
+                "universe_semantic_digest",
+                "decision_universe_semantic_digest",
+            ),
+            (
+                "exchange_instrument_id",
+                "decision_exchange_instrument_id",
+            ),
+            ("position_side", "decision_position_side"),
+        )
+        if any(row[left] != row[right] for left, right in pairs):
+            raise SignalFactsContradiction("signal and admission identity mismatch")
     if row["shadow_outcome_id"] is not None:
         shadow_pairs = (
-            ("admission_decision_id", "shadow_admission_decision_id"),
+            ("signal_event_id", "shadow_signal_event_id"),
             ("exchange_instrument_id", "shadow_exchange_instrument_id"),
             ("position_side", "shadow_position_side"),
         )
         if any(row[left] != row[right] for left, right in shadow_pairs):
             raise SignalFactsContradiction(
-                "admission and Shadow Outcome identity mismatch"
+                "signal and Shadow Outcome identity mismatch"
+            )
+        if row["shadow_source_kind"] == "portfolio_rejection" and (
+            row["admission_decision_id"] is None
+            or row["admission_decision_id"] != row["shadow_admission_decision_id"]
+        ):
+            raise SignalFactsContradiction(
+                "admission and portfolio Shadow identity mismatch"
+            )
+        if row["shadow_source_kind"] == "strategy_observation" and (
+            row["shadow_admission_decision_id"] is not None
+        ):
+            raise SignalFactsContradiction(
+                "strategy Observation unexpectedly owns Admission identity"
             )
 
 
 def _validate_signal_admission_identity(
-    *, signal: RowMapping, decision: RowMapping
+    *, signal: RowMapping, decision: RowMapping | None
 ) -> None:
+    if decision is None:
+        return
     names = (
         "signal_event_id",
         "exposure_episode_id",
@@ -2988,16 +3372,32 @@ def _validate_signal_admission_identity(
 
 
 def _validate_shadow_identity(
-    *, decision: RowMapping, shadow: RowMapping | None
+    *,
+    signal: RowMapping,
+    decision: RowMapping | None,
+    shadow: RowMapping | None,
 ) -> None:
     if shadow is None:
         return
     if (
-        shadow["admission_decision_id"] != decision["admission_decision_id"]
-        or shadow["exchange_instrument_id"] != decision["exchange_instrument_id"]
-        or shadow["position_side"] != decision["position_side"]
+        shadow["signal_event_id"] != signal["signal_event_id"]
+        or shadow["exchange_instrument_id"] != signal["exchange_instrument_id"]
+        or shadow["position_side"] != signal["position_side"]
     ):
-        raise SignalFactsContradiction("admission and Shadow Outcome identity mismatch")
+        raise SignalFactsContradiction("signal and Shadow Outcome identity mismatch")
+    if shadow["shadow_source_kind"] == "portfolio_rejection":
+        if (
+            decision is None
+            or shadow["admission_decision_id"]
+            != decision["admission_decision_id"]
+        ):
+            raise SignalFactsContradiction(
+                "admission and portfolio Shadow identity mismatch"
+            )
+    elif shadow["admission_decision_id"] is not None:
+        raise SignalFactsContradiction(
+            "strategy Observation unexpectedly owns Admission identity"
+        )
 
 
 def _signal_fact_snapshot_from_row(

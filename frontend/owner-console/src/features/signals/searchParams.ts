@@ -13,7 +13,7 @@ const signalSearchParamsSchema = z.object({
   strategy_group_id: optionalNonBlankText,
   exchange_instrument_id: optionalNonBlankText,
   position_side: z.enum(["long", "short"]).optional(),
-  decision_status: z.enum(["admitted", "rejected"]).optional(),
+  decision_status: z.enum(["admitted", "rejected", "not_evaluated"]).optional(),
   cursor: z.string().min(1).max(2048).optional(),
 });
 

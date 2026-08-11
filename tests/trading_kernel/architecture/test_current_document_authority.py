@@ -375,6 +375,44 @@ def test_current_documents_converge_on_portfolio_admission_authority() -> None:
         assert not missing, f"{relative_path} lacks portfolio authority: {missing}"
 
 
+def test_current_documents_define_signal_owned_observation_without_execution_authority() -> (
+    None
+):
+    required_meaning = {
+        "docs/current/PROJECT_INFORMATION_ARCHITECTURE.md": (
+            "Signal-owned",
+            "strategy observation",
+            "cannot create a Ticket",
+        ),
+        "docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md": (
+            "Signal-owned",
+            "strategy observation",
+            "never creates CapacityClaim",
+        ),
+        "docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md": (
+            "strategy observation",
+            "same formal Ticket path",
+        ),
+        "docs/current/MULTI_ASSET_STRATEGYGROUP_ROADMAP.md": (
+            "只暂停 TradFi Ticket",
+            "不构造模拟 Ticket",
+        ),
+        "docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md": (
+            "Signal-owned",
+            "sor_path_observation_v1",
+            "not simulated PnL",
+        ),
+        "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md": (
+            "strategy_observation",
+            "does not authorize TradFi ENTRY",
+        ),
+    }
+    for relative_path, markers in required_meaning.items():
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        missing = [marker for marker in markers if marker not in source]
+        assert not missing, f"{relative_path} lacks M5 Observation boundary: {missing}"
+
+
 def test_stable_policy_v4_contract_defers_deployed_identity_to_roadmap() -> None:
     runtime_profile = (
         REPO_ROOT / "docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md"

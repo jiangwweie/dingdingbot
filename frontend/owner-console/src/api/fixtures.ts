@@ -43,7 +43,7 @@ export const rejectedSignal = {
   first_blocker: "gross_stop_risk_capacity_exhausted",
   binding_constraint: "gross_stop_risk_capacity_exhausted",
   ticket_id: null,
-  shadow_summary: { shadow_outcome_id: "shadow:1", status: "completed", mfe_r: "1.25", mae_r: "-0.40", completion_reason: "horizon_complete", observed_through_ms: baseTime, completed_at_ms: baseTime, interpretation: "Observation only; this Shadow Outcome is not execution.", evidence: [evidence("shadow", "shadow:1")] },
+  shadow_summary: { shadow_outcome_id: "shadow:1", source_kind: "portfolio_rejection", evaluation_kind: "fixed_horizon_excursion_v1", status: "completed", mfe_r: "1.25", mae_r: "-0.40", first_path: null, first_path_at_ms: null, observed_bar_count: null, spread_bps: null, mark_index_deviation_bps: null, completion_reason: "horizon_complete", observed_through_ms: baseTime, completed_at_ms: baseTime, interpretation: "Observation only; this Shadow Outcome is not execution.", evidence: [evidence("shadow", "shadow:1")] },
   evidence: [evidence("signal", "signal:rejected:1"), evidence("admission", "decision:rejected:1")],
 } satisfies components["schemas"]["SignalListItem"];
 
@@ -195,6 +195,27 @@ export const candleFixture = {
   data: { candles: Array.from({ length: 48 }, (_, index) => ({ open_time_ms: baseTime - 172_800_000 + index * 3_600_000, close_time_ms: baseTime - 169_200_001 + index * 3_600_000, open: `${600 + index * 0.4}`, high: `${604 + index * 0.4}`, low: `${598 + index * 0.4}`, close: `${602 + index * 0.4}`, volume: `${800 + index * 10}` })) },
 } satisfies components["schemas"]["ApiEnvelope_CandleSeries_"];
 
+export const observationCandleFixture = {
+  snapshot_id: "snapshot:candles:observation:e2e",
+  generated_at: generatedAt,
+  source_watermark: generatedAt,
+  freshness: "fresh",
+  data: {
+    candles: Array.from({ length: 24 }, (_, index) => {
+      const open = 209.4 + index * 0.12;
+      return {
+        open_time_ms: baseTime - 21_600_000 + index * 900_000,
+        close_time_ms: baseTime - 20_700_001 + index * 900_000,
+        open: open.toFixed(2),
+        high: (open + 0.35).toFixed(2),
+        low: (open - 0.25).toFixed(2),
+        close: (open + 0.18).toFixed(2),
+        volume: `${800 + index * 10}`,
+      };
+    }),
+  },
+} satisfies components["schemas"]["ApiEnvelope_CandleSeries_"];
+
 const completeReviewItem = {
   ticket_id: terminalTrade.ticket_id,
   strategy_group_id: terminalTrade.strategy_group_id,
@@ -230,6 +251,18 @@ const strategyVersionFixture = {
   loss_count: 1,
   net_pnl: money("8.12"),
   net_r: money("0.81", "R"),
+  observation_count: 0,
+  completed_observation_count: 0,
+  unavailable_observation_count: 0,
+  tp1_first_count: 0,
+  initial_stop_first_count: 0,
+  opening_range_failure_count: 0,
+  ambiguous_observation_count: 0,
+  time_stop_count: 0,
+  session_exit_count: 0,
+  median_mfe_r: null,
+  median_mae_r: null,
+  median_spread_bps: null,
   evidence: [evidence("fact", "strategy-version:brf2:v3")],
   product_events: [{
     event_spec_id: "event_spec:BRF2-001:v3:BRF2-SHORT-1H",
@@ -265,6 +298,18 @@ const tradfiStrategyVersionFixture = {
   loss_count: 0,
   net_pnl: money(null, "USDT", "no_confirmed_natural_review"),
   net_r: money(null, "R", "no_confirmed_natural_review"),
+  observation_count: 7,
+  completed_observation_count: 6,
+  unavailable_observation_count: 1,
+  tp1_first_count: 2,
+  initial_stop_first_count: 2,
+  opening_range_failure_count: 1,
+  ambiguous_observation_count: 1,
+  time_stop_count: 0,
+  session_exit_count: 0,
+  median_mfe_r: "0.82",
+  median_mae_r: "0.64",
+  median_spread_bps: "2.35",
   evidence: [evidence("fact", "sgv:SOR-US-EQ-PERP-001:v1")],
   product_events: [
     {
@@ -297,6 +342,52 @@ const tradfiStrategyVersionFixture = {
     },
   ],
 } satisfies components["schemas"]["StrategyVersionSummary"];
+
+const strategyObservationRowFixture = {
+  shadow_outcome_id: "shadow:strategy:sor-us:1",
+  signal_event_id: "signal:sor-us:1",
+  ticket_id: null,
+  strategy_version_id: "sgv:SOR-US-EQ-PERP-001:v1",
+  exchange_instrument_id: "binance-usdm:AAPLUSDT:perpetual",
+  position_side: "long",
+  occurred_at_ms: baseTime - 3_600_000,
+  horizon_start_ms: baseTime - 3_600_000,
+  horizon_end_ms: baseTime + 3_600_000,
+  status: "completed",
+  entry_reference_price: "210.12",
+  initial_stop_price: "207.84",
+  take_profit_price: "212.40",
+  opening_range_boundary_price: "209.60",
+  session_exit_deadline_ms: baseTime + 3_600_000,
+  best_bid_price: "210.10",
+  best_ask_price: "210.12",
+  best_bid_quantity: "18",
+  best_ask_quantity: "15",
+  spread_bps: "0.95",
+  mark_index_deviation_bps: "1.10",
+  max_favorable_price: "212.80",
+  max_adverse_price: "209.70",
+  mfe_r: "1.18",
+  mae_r: "0.18",
+  completion_reason: "sor_path_observed",
+  first_path: "tp1_first",
+  first_path_at_ms: baseTime - 900_000,
+  observed_bar_count: 3,
+  completed_at_ms: baseTime,
+  annotations: [
+    { kind: "signal", occurred_at_ms: baseTime - 3_600_000, price: "210.12", label: "OBSERVATION SIGNAL", evidence: [evidence("signal", "signal:sor-us:1")] },
+    { kind: "take_profit", occurred_at_ms: baseTime - 900_000, price: "212.40", label: "TP1 OBSERVED", evidence: [evidence("shadow", "shadow:strategy:sor-us:1")] },
+  ],
+  evidence: [evidence("signal", "signal:sor-us:1"), evidence("shadow", "shadow:strategy:sor-us:1")],
+} satisfies components["schemas"]["StrategyObservationListItem"];
+
+export const strategyObservationFixture = {
+  snapshot_id: "snapshot:strategy-observations:e2e",
+  generated_at: generatedAt,
+  source_watermark: generatedAt,
+  freshness: "fresh",
+  data: { items: [strategyObservationRowFixture], next_cursor: null },
+} satisfies components["schemas"]["ApiEnvelope_StrategyObservationListPage_"];
 
 const strategyTicketRowFixture = {
   ticket_id: "ticket:strategy:brf2:tp1",
@@ -439,4 +530,4 @@ export const instrumentFixture = {
   },
 } satisfies components["schemas"]["ApiEnvelope_InstrumentCenterPage_"];
 
-export const ownerApiFixtures = { overviewFixture, signalListFixture, signalDetailFixture, tradeListFixture, tradeCausalityFixture, candleFixture, reviewFixture, strategyFixture, strategyTicketFixture, instrumentFixture } as const;
+export const ownerApiFixtures = { overviewFixture, signalListFixture, signalDetailFixture, tradeListFixture, tradeCausalityFixture, candleFixture, observationCandleFixture, reviewFixture, strategyFixture, strategyTicketFixture, strategyObservationFixture, instrumentFixture } as const;

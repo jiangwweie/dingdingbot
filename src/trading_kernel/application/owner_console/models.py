@@ -151,7 +151,7 @@ class BoundedWindowQuery(FrozenModel):
 
 
 class SignalListQuery(BoundedWindowQuery):
-    decision_status: Literal["admitted", "rejected"] | None = None
+    decision_status: Literal["admitted", "rejected", "not_evaluated"] | None = None
     strategy_group_id: str | None = None
     exchange_instrument_id: str | None = None
     position_side: Literal["long", "short"] | None = None
@@ -211,6 +211,24 @@ class StrategyTicketQuery(BoundedWindowQuery):
         if self.scope == "natural" and self.exit_path == "controlled_exit":
             raise ValueError("controlled exit path requires all scope")
         return self
+
+
+class StrategyObservationQuery(BoundedWindowQuery):
+    """Bounded Signal-owned Observation query for one StrategyVersion."""
+
+    strategy_version_id: str = Field(min_length=1, max_length=160)
+    first_path: (
+        Literal[
+            "tp1_first",
+            "initial_stop_first",
+            "ambiguous_same_bar",
+            "opening_range_failure",
+            "time_stop",
+            "session_exit",
+            "horizon_complete",
+        ]
+        | None
+    ) = None
 
 
 class CandleQuery(FrozenModel):
@@ -417,9 +435,30 @@ class OwnerOverview(FrozenModel):
 
 class ShadowOutcomeSummary(FrozenModel):
     shadow_outcome_id: str
+    source_kind: Literal["portfolio_rejection", "strategy_observation"]
+    evaluation_kind: Literal[
+        "fixed_horizon_excursion_v1",
+        "sor_path_observation_v1",
+    ]
     status: Literal["pending", "claimed", "completed", "unavailable"]
     mfe_r: Decimal | None
     mae_r: Decimal | None
+    first_path: (
+        Literal[
+            "tp1_first",
+            "initial_stop_first",
+            "ambiguous_same_bar",
+            "opening_range_failure",
+            "time_stop",
+            "session_exit",
+            "horizon_complete",
+        ]
+        | None
+    ) = None
+    first_path_at_ms: int | None = None
+    observed_bar_count: int | None = None
+    spread_bps: Decimal | None = None
+    mark_index_deviation_bps: Decimal | None = None
     completion_reason: str | None
     observed_through_ms: int | None
     completed_at_ms: int | None
@@ -428,14 +467,25 @@ class ShadowOutcomeSummary(FrozenModel):
     ] = "Observation only; this Shadow Outcome is not execution."
     evidence: tuple[EvidenceRef, ...]
 
-    @field_validator("mfe_r", "mae_r", mode="before")
+    @field_validator(
+        "mfe_r",
+        "mae_r",
+        "spread_bps",
+        "mark_index_deviation_bps",
+        mode="before",
+    )
     @classmethod
     def _reject_float_decimal(cls, value: object) -> object:
         if isinstance(value, float):
             raise TypeError("shadow decimal values must not be floats")
         return value
 
-    @field_serializer("mfe_r", "mae_r")
+    @field_serializer(
+        "mfe_r",
+        "mae_r",
+        "spread_bps",
+        "mark_index_deviation_bps",
+    )
     def _serialize_decimal(self, value: Decimal | None) -> str | None:
         return None if value is None else str(value)
 
@@ -450,8 +500,8 @@ class SignalListItem(FrozenModel):
     position_side: Literal["long", "short"]
     occurred_at_ms: int
     expires_at_ms: int
-    admission_decision_id: str
-    decision_status: Literal["admitted", "rejected"]
+    admission_decision_id: str | None
+    decision_status: Literal["admitted", "rejected", "not_evaluated"]
     first_blocker: str | None
     binding_constraint: str | None
     ticket_id: str | None
@@ -749,6 +799,76 @@ class StrategyTicketFacts(FrozenModel):
     evidence: tuple[EvidenceRef, ...]
 
 
+class StrategyObservationFacts(FrozenModel):
+    """One exact Signal-owned Observation used by summary and sample reads."""
+
+    shadow_outcome_id: str
+    signal_event_id: str
+    ticket_id: str | None
+    strategy_version_id: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
+    occurred_at_ms: int
+    horizon_start_ms: int
+    horizon_end_ms: int
+    status: Literal["pending", "claimed", "completed", "unavailable"]
+    entry_reference_price: Decimal | None
+    initial_stop_price: Decimal | None
+    take_profit_price: Decimal | None
+    opening_range_boundary_price: Decimal | None
+    session_exit_deadline_ms: int | None
+    best_bid_price: Decimal | None
+    best_ask_price: Decimal | None
+    best_bid_quantity: Decimal | None
+    best_ask_quantity: Decimal | None
+    spread_bps: Decimal | None
+    mark_index_deviation_bps: Decimal | None
+    max_favorable_price: Decimal | None
+    max_adverse_price: Decimal | None
+    mfe_r: Decimal | None
+    mae_r: Decimal | None
+    completion_reason: str | None
+    first_path: (
+        Literal[
+            "tp1_first",
+            "initial_stop_first",
+            "ambiguous_same_bar",
+            "opening_range_failure",
+            "time_stop",
+            "session_exit",
+            "horizon_complete",
+        ]
+        | None
+    )
+    first_path_at_ms: int | None
+    observed_bar_count: int | None
+    completed_at_ms: int | None
+    evidence: tuple[EvidenceRef, ...]
+
+    @field_validator(
+        "entry_reference_price",
+        "initial_stop_price",
+        "take_profit_price",
+        "opening_range_boundary_price",
+        "best_bid_price",
+        "best_ask_price",
+        "best_bid_quantity",
+        "best_ask_quantity",
+        "spread_bps",
+        "mark_index_deviation_bps",
+        "max_favorable_price",
+        "max_adverse_price",
+        "mfe_r",
+        "mae_r",
+        mode="before",
+    )
+    @classmethod
+    def _reject_float_observation_decimal(cls, value: object) -> object:
+        if isinstance(value, float):
+            raise TypeError("observation decimal values must not be floats")
+        return value
+
+
 class StrategyProductEventFacts(FrozenModel):
     """Compact Event-to-product and Universe authority for strategy display."""
 
@@ -779,6 +899,10 @@ class StrategyVersionFacts(FrozenModel):
     strategy_version_status: str
     is_current: bool
     tickets: tuple[StrategyTicketFacts, ...] = Field(max_length=5_000)
+    observations: tuple[StrategyObservationFacts, ...] = Field(
+        default=(),
+        max_length=5_000,
+    )
     evidence: tuple[EvidenceRef, ...]
     product_events: tuple[StrategyProductEventFacts, ...] = Field(
         default=(),
@@ -811,11 +935,27 @@ class StrategyVersionSummary(FrozenModel):
     loss_count: int = Field(ge=0)
     net_pnl: MoneyMetric
     net_r: MoneyMetric
+    observation_count: int = Field(ge=0)
+    completed_observation_count: int = Field(ge=0)
+    unavailable_observation_count: int = Field(ge=0)
+    tp1_first_count: int = Field(ge=0)
+    initial_stop_first_count: int = Field(ge=0)
+    opening_range_failure_count: int = Field(ge=0)
+    ambiguous_observation_count: int = Field(ge=0)
+    time_stop_count: int = Field(ge=0)
+    session_exit_count: int = Field(ge=0)
+    median_mfe_r: Decimal | None
+    median_mae_r: Decimal | None
+    median_spread_bps: Decimal | None
     evidence: tuple[EvidenceRef, ...]
     product_events: tuple[StrategyProductEventFacts, ...] = Field(
         default=(),
         max_length=32,
     )
+
+    @field_serializer("median_mfe_r", "median_mae_r", "median_spread_bps")
+    def _serialize_observation_decimal(self, value: Decimal | None) -> str | None:
+        return None if value is None else str(value)
 
 
 class StrategySummaryPage(FrozenModel):
@@ -837,6 +977,20 @@ class StrategyTicketListItem(TradeListItem):
 
 class StrategyTicketListPage(FrozenModel):
     items: tuple[StrategyTicketListItem, ...] = Field(max_length=100)
+    next_cursor: str | None
+
+
+class StrategyObservationListItem(StrategyObservationFacts):
+    annotations: tuple[ChartAnnotation, ...]
+
+
+class StrategyObservationPageFacts(FrozenModel):
+    items: tuple[StrategyObservationFacts, ...] = Field(max_length=101)
+    requested_limit: int = Field(ge=1, le=100)
+
+
+class StrategyObservationListPage(FrozenModel):
+    items: tuple[StrategyObservationListItem, ...] = Field(max_length=100)
     next_cursor: str | None
 
 
@@ -883,22 +1037,52 @@ class SignalItemFacts(FrozenModel):
     position_side: Literal["long", "short"]
     occurred_at_ms: int
     expires_at_ms: int
-    admission_decision_id: str
-    decision_status: Literal["admitted", "rejected"]
+    admission_decision_id: str | None
+    decision_status: Literal["admitted", "rejected", "not_evaluated"]
     first_blocker: str | None
     binding_constraint: str | None
     ticket_id: str | None
-    decided_at_ms: int
+    decided_at_ms: int | None
     shadow_outcome_id: str | None
+    shadow_source_kind: Literal[
+        "portfolio_rejection",
+        "strategy_observation",
+    ] | None = None
+    shadow_evaluation_kind: Literal[
+        "fixed_horizon_excursion_v1",
+        "sor_path_observation_v1",
+    ] | None = None
     shadow_status: Literal["pending", "claimed", "completed", "unavailable"] | None
     shadow_mfe_r: Decimal | None
     shadow_mae_r: Decimal | None
     shadow_completion_reason: str | None
     shadow_observed_through_ms: int | None
     shadow_completed_at_ms: int | None
+    shadow_first_path: (
+        Literal[
+            "tp1_first",
+            "initial_stop_first",
+            "ambiguous_same_bar",
+            "opening_range_failure",
+            "time_stop",
+            "session_exit",
+            "horizon_complete",
+        ]
+        | None
+    ) = None
+    shadow_first_path_at_ms: int | None = None
+    shadow_observed_bar_count: int | None = None
+    shadow_spread_bps: Decimal | None = None
+    shadow_mark_index_deviation_bps: Decimal | None = None
     evidence: tuple[EvidenceRef, ...]
 
-    @field_validator("shadow_mfe_r", "shadow_mae_r", mode="before")
+    @field_validator(
+        "shadow_mfe_r",
+        "shadow_mae_r",
+        "shadow_spread_bps",
+        "shadow_mark_index_deviation_bps",
+        mode="before",
+    )
     @classmethod
     def _reject_float_decimal(cls, value: object) -> object:
         if isinstance(value, float):

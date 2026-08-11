@@ -35,6 +35,9 @@ from src.trading_kernel.application.project_comparative_universe import (
     project_comparative_universe,
     serialize_comparative_projection,
 )
+from src.trading_kernel.application.project_shadow_outcome import (
+    pending_shadow_spec_for_strategy_observation,
+)
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.exposure_episode import (
     advance_exposure_episode,
@@ -308,10 +311,6 @@ async def observe_strategy_scope(
                 reason="registry_scope_mismatch",
             )
         product_session: ProductSessionSnapshot | None = None
-        if contract.strategy_group_id == "SOR-US-EQ-PERP-001":
-            product_session = await uow.signals.get_product_session(
-                scope.exchange_instrument_id
-            )
         comparative_lookback_bars = _comparative_lookback_bars(contract)
         comparative_projection: ComparativeUniverseProjection | None = None
         comparative_digest = None
@@ -366,6 +365,27 @@ async def observe_strategy_scope(
                 )
 
     try:
+        if contract.strategy_group_id == "SOR-US-EQ-PERP-001":
+            product_snapshots = await market_source.fetch_product_sessions(
+                observation_universe.exchange_instrument_ids,
+                observed_at_ms=request.trigger_candle_close_time_ms,
+            )
+            if tuple(
+                item.exchange_instrument_id for item in product_snapshots
+            ) != observation_universe.exchange_instrument_ids:
+                raise ValueError("product snapshot identities changed")
+            product_session = next(
+                (
+                    item
+                    for item in product_snapshots
+                    if item.exchange_instrument_id == scope.exchange_instrument_id
+                ),
+                None,
+            )
+            if product_session is None:
+                raise ValueError("scope Product snapshot is unavailable")
+            async with uow_factory() as uow:
+                await uow.signals.upsert_product_sessions(product_snapshots)
         if (
             comparative_lookback_bars is not None
             and comparative_projection is None
@@ -574,6 +594,23 @@ async def observe_strategy_scope(
                 now_ms=request.trigger_candle_close_time_ms,
             ),
         )
+        if (
+            ingest_result.status
+            in {
+                IngestSignalStatus.CANDIDATE_READY,
+                IngestSignalStatus.DUPLICATE_SIGNAL,
+            }
+            and contract.strategy_group_id == "SOR-US-EQ-PERP-001"
+        ):
+            if product_session is None:
+                raise RuntimeError("TradFi Signal lacks its Product snapshot")
+            shadow = pending_shadow_spec_for_strategy_observation(
+                signal=signal,
+                product=product_session,
+            )
+            if shadow is None:
+                raise RuntimeError("TradFi Signal cannot freeze Observation Outcome")
+            await uow.shadow_outcomes.add_pending(shadow)
         if ingest_result.status is IngestSignalStatus.CANDIDATE_READY:
             status = ObservationStatus.SIGNAL_CREATED
         elif ingest_result.status is IngestSignalStatus.DUPLICATE_SIGNAL:

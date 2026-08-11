@@ -2,7 +2,7 @@
 title: P0_TRADING_KERNEL_REBUILD_DESIGN
 status: CURRENT
 program_id: P0-TKR
-last_verified: 2026-07-31
+last_verified: 2026-08-11
 ---
 
 # P0 Trading Kernel Rebuild Design
@@ -108,9 +108,10 @@ Every final candidate also owns one immutable `AdmissionDecision`. An admitted
 Decision commits with the CapacityClaim, Ticket, Reservation, Netting Domain
 hold, aggregate, TicketIssued Event, and ENTRY Command. A rejected Decision
 commits with its terminal readiness blocker and has no Ticket, Reservation, or
-Exchange Command. `Shadow Outcome` is an Observation-owned, read-only fixed
-horizon MFE/MAE projection for eligible capacity rejections; it never imports
-Ticket, Command dispatch, or venue-write authority.
+Exchange Command. `Shadow Outcome` is Signal-owned read-only path evidence. It
+supports both an eligible portfolio rejection and a strategy observation when
+Admission is intentionally not run. It never creates CapacityClaim, Ticket,
+Reservation, Command dispatch, simulated PnL, or venue-write authority.
 
 ## Dynamic Policy Boundary
 

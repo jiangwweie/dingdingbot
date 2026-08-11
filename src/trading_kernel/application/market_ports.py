@@ -7,6 +7,7 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.market import ClosedCandle, Timeframe
+from src.trading_kernel.domain.product import ProductSessionSnapshot
 
 
 class ClosedCandleRequest(BaseModel):
@@ -59,3 +60,10 @@ class PublicMarketSource(Protocol):
         self,
         request: ClosedCandleRequest,
     ) -> tuple[ClosedCandle, ...]: ...
+
+    async def fetch_product_sessions(
+        self,
+        exchange_instrument_ids: tuple[str, ...],
+        *,
+        observed_at_ms: int,
+    ) -> tuple[ProductSessionSnapshot, ...]: ...

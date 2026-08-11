@@ -415,6 +415,12 @@ def test_shadow_metadata_closes_claim_and_terminal_shapes() -> None:
     assert any("claim_token IS NOT NULL" in check for check in checks)
     assert any("status = 'completed'" in check and "mfe_r IS NOT NULL" in check for check in checks)
     assert any("status = 'unavailable'" in check and "mfe_r IS NULL" in check for check in checks)
+    assert any("session_exit_deadline_ms > horizon_start_ms" in check for check in checks)
+    assert any("first_path IS NULL OR first_path IN" in check for check in checks)
+    assert any(
+        "sor_path_observation_v1" in check and "observed_bar_count > 0" in check
+        for check in checks
+    )
 
 
 @pytest.mark.asyncio
@@ -488,6 +494,7 @@ def _spec(
     horizon_end_ms = horizon_start_ms + (24 if timeframe == "1h" else 96) * duration_ms
     return ShadowOutcomeSpec(
         shadow_outcome_id=f"shadow:{admission_decision_id}",
+        signal_event_id=f"signal:{admission_decision_id}",
         admission_decision_id=admission_decision_id,
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side="long",
@@ -506,6 +513,7 @@ def _hour_spec(
 ) -> ShadowOutcomeSpec:
     return ShadowOutcomeSpec(
         shadow_outcome_id="shadow:historical-hour",
+        signal_event_id="signal:historical-hour",
         admission_decision_id="admission:historical-hour",
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side="long",
@@ -580,6 +588,7 @@ class _RecordingMarketSource:
         return _complete_hour_candles(
             ShadowOutcomeSpec(
                 shadow_outcome_id="shadow:recording",
+                signal_event_id="signal:recording",
                 admission_decision_id="admission:recording",
                 exchange_instrument_id=request.exchange_instrument_id,
                 position_side="long",
@@ -602,6 +611,7 @@ class _CompleteHistoricalSource:
         return _complete_hour_candles(
             ShadowOutcomeSpec(
                 shadow_outcome_id="shadow:source",
+                signal_event_id="signal:source",
                 admission_decision_id="admission:source",
                 exchange_instrument_id=request.exchange_instrument_id,
                 position_side="long",

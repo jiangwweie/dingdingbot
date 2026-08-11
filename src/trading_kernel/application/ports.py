@@ -1130,6 +1130,11 @@ class SignalRepository(Protocol):
         exchange_instrument_id: str,
     ) -> ProductSessionSnapshot | None: ...
 
+    async def upsert_product_sessions(
+        self,
+        snapshots: tuple[ProductSessionSnapshot, ...],
+    ) -> int: ...
+
     async def get_instrument_rules(
         self,
         venue_id: str,

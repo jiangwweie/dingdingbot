@@ -29,14 +29,34 @@ def build_signal_item(facts: SignalItemFacts) -> SignalListItem:
 
     shadow = _shadow_summary(facts)
     if facts.decision_status == "admitted":
-        if facts.first_blocker is not None or facts.ticket_id is None:
+        if (
+            facts.admission_decision_id is None
+            or facts.decided_at_ms is None
+            or facts.first_blocker is not None
+            or facts.ticket_id is None
+        ):
             raise SignalFactsContradiction("admitted signal decision shape mismatch")
-        if shadow is not None:
+        if shadow is not None and shadow.source_kind != "strategy_observation":
             raise SignalFactsContradiction(
-                "admitted signal cannot own a Shadow Outcome"
+                "admitted signal can own only a strategy Observation"
             )
-    elif facts.first_blocker is None or facts.ticket_id is not None:
-        raise SignalFactsContradiction("rejected signal decision shape mismatch")
+    elif facts.decision_status == "rejected":
+        if (
+            facts.admission_decision_id is None
+            or facts.decided_at_ms is None
+            or facts.first_blocker is None
+            or facts.ticket_id is not None
+        ):
+            raise SignalFactsContradiction("rejected signal decision shape mismatch")
+    elif (
+        facts.admission_decision_id is not None
+        or facts.decided_at_ms is not None
+        or facts.first_blocker is not None
+        or facts.binding_constraint is not None
+        or facts.ticket_id is not None
+        or (shadow is not None and shadow.source_kind != "strategy_observation")
+    ):
+        raise SignalFactsContradiction("not-evaluated signal shape mismatch")
 
     evidence = [
         EvidenceRef(
@@ -44,12 +64,15 @@ def build_signal_item(facts: SignalItemFacts) -> SignalListItem:
             identity=facts.signal_event_id,
             occurred_at_ms=facts.occurred_at_ms,
         ),
-        EvidenceRef(
-            kind="admission",
-            identity=facts.admission_decision_id,
-            occurred_at_ms=facts.decided_at_ms,
-        ),
     ]
+    if facts.admission_decision_id is not None and facts.decided_at_ms is not None:
+        evidence.append(
+            EvidenceRef(
+                kind="admission",
+                identity=facts.admission_decision_id,
+                occurred_at_ms=facts.decided_at_ms,
+            )
+        )
     if shadow is not None:
         evidence.extend(shadow.evidence)
 
@@ -122,12 +145,18 @@ def build_signal_detail(facts: SignalDetailFacts) -> SignalAdmissionDetail:
             "its exact Ticket."
         )
         why_no_ticket = None
-    else:
+    elif signal.decision_status == "rejected":
         what_happened = (
             "The persisted AdmissionDecision rejected this Signal; no Ticket "
             "was created."
         )
         why_no_ticket = signal.first_blocker
+    else:
+        what_happened = (
+            "This Signal was retained for Observation while production Entry "
+            "admission was not evaluated."
+        )
+        why_no_ticket = "observation_only"
 
     fact_evidence = tuple(
         EvidenceRef(
@@ -151,12 +180,19 @@ def build_signal_detail(facts: SignalDetailFacts) -> SignalAdmissionDetail:
 
 def _shadow_summary(facts: SignalItemFacts) -> ShadowOutcomeSummary | None:
     shadow_values = (
+        facts.shadow_source_kind,
+        facts.shadow_evaluation_kind,
         facts.shadow_status,
         facts.shadow_mfe_r,
         facts.shadow_mae_r,
         facts.shadow_completion_reason,
         facts.shadow_observed_through_ms,
         facts.shadow_completed_at_ms,
+        facts.shadow_first_path,
+        facts.shadow_first_path_at_ms,
+        facts.shadow_observed_bar_count,
+        facts.shadow_spread_bps,
+        facts.shadow_mark_index_deviation_bps,
     )
     if facts.shadow_outcome_id is None:
         if any(value is not None for value in shadow_values):
@@ -164,6 +200,8 @@ def _shadow_summary(facts: SignalItemFacts) -> ShadowOutcomeSummary | None:
         return None
     if facts.shadow_status is None:
         raise SignalFactsContradiction("Shadow Outcome status is missing")
+    if facts.shadow_source_kind is None or facts.shadow_evaluation_kind is None:
+        raise SignalFactsContradiction("Shadow Outcome semantics are missing")
     pending_or_claimed_shape = (
         facts.shadow_completed_at_ms is None
         and facts.shadow_completion_reason is None
@@ -197,17 +235,46 @@ def _shadow_summary(facts: SignalItemFacts) -> ShadowOutcomeSummary | None:
         raise SignalFactsContradiction(
             "Shadow Outcome status shape mismatch"
         )
+    if facts.shadow_evaluation_kind == "fixed_horizon_excursion_v1":
+        if facts.shadow_source_kind != "portfolio_rejection" or any(
+            value is not None
+            for value in (
+                facts.shadow_first_path,
+                facts.shadow_first_path_at_ms,
+                facts.shadow_observed_bar_count,
+            )
+        ):
+            raise SignalFactsContradiction("fixed-horizon Shadow semantics mismatch")
+    elif facts.shadow_source_kind != "strategy_observation":
+        raise SignalFactsContradiction("SOR Observation semantics mismatch")
+    elif facts.shadow_status == "completed" and (
+        facts.shadow_first_path is None
+        or facts.shadow_first_path_at_ms is None
+        or facts.shadow_observed_bar_count is None
+    ):
+        raise SignalFactsContradiction("completed SOR Observation path is missing")
 
     shadow_evidence = EvidenceRef(
         kind="shadow",
         identity=facts.shadow_outcome_id,
-        occurred_at_ms=facts.shadow_completed_at_ms or facts.decided_at_ms,
+        occurred_at_ms=(
+            facts.shadow_completed_at_ms
+            or facts.decided_at_ms
+            or facts.occurred_at_ms
+        ),
     )
     return ShadowOutcomeSummary(
         shadow_outcome_id=facts.shadow_outcome_id,
+        source_kind=facts.shadow_source_kind,
+        evaluation_kind=facts.shadow_evaluation_kind,
         status=facts.shadow_status,
         mfe_r=facts.shadow_mfe_r,
         mae_r=facts.shadow_mae_r,
+        first_path=facts.shadow_first_path,
+        first_path_at_ms=facts.shadow_first_path_at_ms,
+        observed_bar_count=facts.shadow_observed_bar_count,
+        spread_bps=facts.shadow_spread_bps,
+        mark_index_deviation_bps=facts.shadow_mark_index_deviation_bps,
         completion_reason=facts.shadow_completion_reason,
         observed_through_ms=facts.shadow_observed_through_ms,
         completed_at_ms=facts.shadow_completed_at_ms,

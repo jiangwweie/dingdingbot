@@ -3,12 +3,15 @@ from decimal import Decimal
 from src.trading_kernel.application.owner_console.models import (
     EvidenceRef,
     MoneyMetric,
+    StrategyObservationFacts,
+    StrategyObservationPageFacts,
     StrategyPageFacts,
     StrategyProductEventFacts,
     StrategyTicketFacts,
     StrategyVersionFacts,
 )
 from src.trading_kernel.application.owner_console.strategies import (
+    build_strategy_observation_page,
     build_strategy_page,
 )
 
@@ -60,7 +63,56 @@ def _ticket(
     )
 
 
-def _version(*tickets: StrategyTicketFacts) -> StrategyVersionFacts:
+def _observation(
+    shadow_outcome_id: str,
+    *,
+    first_path: str,
+    mfe_r: str,
+    mae_r: str,
+    spread_bps: str,
+) -> StrategyObservationFacts:
+    return StrategyObservationFacts(
+        shadow_outcome_id=shadow_outcome_id,
+        signal_event_id=f"signal:{shadow_outcome_id}",
+        ticket_id=None,
+        strategy_version_id="strategy-version:brf2:v3",
+        exchange_instrument_id="binance-usdm:AAPLUSDT:perpetual",
+        position_side="long",
+        occurred_at_ms=1_800_000_000_000,
+        horizon_start_ms=1_800_000_000_000,
+        horizon_end_ms=1_800_007_200_000,
+        status="completed",
+        entry_reference_price=Decimal(100),
+        initial_stop_price=Decimal(98),
+        take_profit_price=Decimal(102),
+        opening_range_boundary_price=Decimal(99),
+        session_exit_deadline_ms=1_800_007_200_000,
+        best_bid_price=Decimal("99.99"),
+        best_ask_price=Decimal("100.01"),
+        best_bid_quantity=Decimal(20),
+        best_ask_quantity=Decimal(18),
+        spread_bps=Decimal(spread_bps),
+        mark_index_deviation_bps=Decimal("1.25"),
+        max_favorable_price=Decimal(103),
+        max_adverse_price=Decimal("98.5"),
+        mfe_r=Decimal(mfe_r),
+        mae_r=Decimal(mae_r),
+        completion_reason="sor_path_observed",
+        first_path=first_path,  # type: ignore[arg-type]
+        first_path_at_ms=1_800_000_900_000,
+        observed_bar_count=1,
+        completed_at_ms=1_800_001_000_000,
+        evidence=(
+            _evidence("signal", f"signal:{shadow_outcome_id}", 1_800_000_000_000),
+            _evidence("shadow", shadow_outcome_id, 1_800_001_000_000),
+        ),
+    )
+
+
+def _version(
+    *tickets: StrategyTicketFacts,
+    observations: tuple[StrategyObservationFacts, ...] = (),
+) -> StrategyVersionFacts:
     return StrategyVersionFacts(
         strategy_group_id="strategy-group:brf2",
         strategy_group_display_name="BRF2",
@@ -69,6 +121,7 @@ def _version(*tickets: StrategyTicketFacts) -> StrategyVersionFacts:
         strategy_version_status="active",
         is_current=True,
         tickets=tickets,
+        observations=observations,
         evidence=(
             _evidence(
                 "fact",
@@ -182,3 +235,46 @@ def test_strategy_version_with_no_confirmed_natural_review_never_emits_zero_retu
     assert item.net_pnl.unavailable_reason == "no_confirmed_natural_review"
     assert item.net_r.value is None
     assert item.net_r.unavailable_reason == "no_confirmed_natural_review"
+
+
+def test_strategy_version_summary_isolates_observation_paths_and_medians() -> None:
+    observations = (
+        _observation(
+            "shadow:tp1",
+            first_path="tp1_first",
+            mfe_r="1.50",
+            mae_r="0.25",
+            spread_bps="2.00",
+        ),
+        _observation(
+            "shadow:stop",
+            first_path="initial_stop_first",
+            mfe_r="0.20",
+            mae_r="1.10",
+            spread_bps="4.00",
+        ),
+    )
+    page = build_strategy_page(
+        StrategyPageFacts(
+            from_ms=1_799_000_000_000,
+            to_ms=1_801_000_000_000,
+            view="current",
+            versions=(_version(observations=observations),),
+        )
+    )
+
+    item = page.items[0]
+    assert item.observation_count == 2
+    assert item.completed_observation_count == 2
+    assert item.tp1_first_count == 1
+    assert item.initial_stop_first_count == 1
+    assert item.median_mfe_r == Decimal("0.85")
+    assert item.median_mae_r == Decimal("0.675")
+    assert item.median_spread_bps == Decimal("3.00")
+
+    observation_page = build_strategy_observation_page(
+        StrategyObservationPageFacts(items=observations, requested_limit=50)
+    )
+    assert observation_page.items[0].annotations[0].kind == "signal"
+    assert observation_page.items[0].annotations[1].kind == "take_profit"
+    assert observation_page.items[1].annotations[1].kind == "stop"

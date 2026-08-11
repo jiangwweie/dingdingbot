@@ -93,6 +93,8 @@ class ProductSessionSnapshot(BaseModel):
     funding_rate: Decimal | None = None
     best_bid: Decimal | None = None
     best_ask: Decimal | None = None
+    best_bid_quantity: Decimal | None = None
+    best_ask_quantity: Decimal | None = None
     corporate_event_status: CorporateEventStatus = "unavailable"
     observed_at_ms: int
     valid_until_ms: int
@@ -136,6 +138,9 @@ class ProductSessionSnapshot(BaseModel):
             and self.best_ask < self.best_bid
         ):
             raise ValueError("best ask cannot be below best bid")
+        for quantity in (self.best_bid_quantity, self.best_ask_quantity):
+            if quantity is not None and quantity < 0:
+                raise ValueError("product market quantity must be nonnegative")
         return self
 
     def usable_for_regular_observation(self, trigger_ms: int) -> bool:

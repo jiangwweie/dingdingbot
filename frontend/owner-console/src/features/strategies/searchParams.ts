@@ -9,8 +9,12 @@ const strategySearchParamsSchema = z.object({
   view: z.enum(["current", "all"]).optional(),
   strategy_version_id: optionalId,
   ticket_modal: z.literal("1").optional(),
+  observation_modal: z.literal("1").optional(),
   scope: z.enum(["natural", "all"]).optional(),
   exit_path: z.enum(["tp1_reached", "tp1_not_reached", "controlled_exit"]).optional(),
+  observation_path: z.enum(["tp1_first", "initial_stop_first", "ambiguous_same_bar", "opening_range_failure", "time_stop", "session_exit", "horizon_complete"]).optional(),
+  observation_id: optionalId,
+  observation_cursor: z.string().min(1).max(2048).optional(),
   cursor: z.string().min(1).max(2048).optional(),
 });
 

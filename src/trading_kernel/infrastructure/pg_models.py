@@ -205,6 +205,8 @@ instrument_product_current = sa.Table(
     sa.Column("funding_rate", MONEY, nullable=True),
     sa.Column("best_bid", MONEY, nullable=True),
     sa.Column("best_ask", MONEY, nullable=True),
+    sa.Column("best_bid_quantity", MONEY, nullable=True),
+    sa.Column("best_ask_quantity", MONEY, nullable=True),
     sa.Column("corporate_event_status", SHORT_TEXT, nullable=False),
     _time("observed_at_ms"),
     _time("valid_until_ms"),
@@ -1087,15 +1089,29 @@ shadow_outcomes_current = sa.Table(
     "brc_shadow_outcomes_current",
     metadata,
     _id("shadow_outcome_id", primary_key=True),
-    _id("admission_decision_id"),
+    _id("signal_event_id"),
+    _id("admission_decision_id", nullable=True),
+    sa.Column("source_kind", SHORT_TEXT, nullable=False),
     sa.Column("status", SHORT_TEXT, nullable=False),
     sa.Column("evaluation_kind", SHORT_TEXT, nullable=False),
     _id("exchange_instrument_id"),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("timeframe", SHORT_TEXT, nullable=False),
-    sa.Column("entry_reference_price", MONEY, nullable=False),
-    sa.Column("initial_stop_price", MONEY, nullable=False),
-    sa.Column("initial_risk_per_unit", MONEY, nullable=False),
+    sa.Column("entry_reference_price", MONEY, nullable=True),
+    sa.Column("initial_stop_price", MONEY, nullable=True),
+    sa.Column("initial_risk_per_unit", MONEY, nullable=True),
+    sa.Column("take_profit_price", MONEY, nullable=True),
+    sa.Column("opening_range_boundary_price", MONEY, nullable=True),
+    _time("session_exit_deadline_ms", nullable=True),
+    sa.Column("mark_price", MONEY, nullable=True),
+    sa.Column("index_price", MONEY, nullable=True),
+    sa.Column("funding_rate", MONEY, nullable=True),
+    sa.Column("best_bid_price", MONEY, nullable=True),
+    sa.Column("best_ask_price", MONEY, nullable=True),
+    sa.Column("best_bid_quantity", MONEY, nullable=True),
+    sa.Column("best_ask_quantity", MONEY, nullable=True),
+    sa.Column("spread_bps", MONEY, nullable=True),
+    sa.Column("mark_index_deviation_bps", MONEY, nullable=True),
     _time("horizon_start_ms"),
     _time("horizon_end_ms"),
     _id("claim_owner", nullable=True),
@@ -1107,46 +1123,90 @@ shadow_outcomes_current = sa.Table(
     sa.Column("mae_r", MONEY, nullable=True),
     _time("observed_through_ms", nullable=True),
     sa.Column("completion_reason", LONG_TEXT, nullable=True),
+    sa.Column("first_path", SHORT_TEXT, nullable=True),
+    _time("first_path_at_ms", nullable=True),
+    sa.Column("observed_bar_count", sa.BigInteger, nullable=True),
     sa.Column("projection_version", sa.BigInteger, nullable=False),
     _time("created_at_ms"),
     _time("completed_at_ms", nullable=True),
+    sa.UniqueConstraint("signal_event_id"),
     sa.UniqueConstraint("admission_decision_id"),
     sa.CheckConstraint(
         "status IN ('pending', 'claimed', 'completed', 'unavailable')",
         name="status_valid",
     ),
     sa.CheckConstraint(
-        "evaluation_kind = 'fixed_horizon_excursion_v1'",
+        "evaluation_kind IN ('fixed_horizon_excursion_v1', "
+        "'sor_path_observation_v1')",
         name="evaluation_kind_valid",
     ),
     sa.CheckConstraint("position_side IN ('long', 'short')", name="side_valid"),
     sa.CheckConstraint("timeframe IN ('15m', '1h')", name="timeframe_valid"),
     sa.CheckConstraint(
-        "initial_risk_per_unit >= 0 AND horizon_end_ms > horizon_start_ms",
+        "(initial_risk_per_unit IS NULL OR initial_risk_per_unit >= 0) "
+        "AND horizon_end_ms > horizon_start_ms "
+        "AND (session_exit_deadline_ms IS NULL "
+        "OR session_exit_deadline_ms > horizon_start_ms)",
         name="risk_horizon_valid",
     ),
     sa.CheckConstraint(
-        "(status = 'claimed' AND claim_owner IS NOT NULL AND claim_token IS NOT NULL "
-        "AND lease_until_ms IS NOT NULL AND completed_at_ms IS NULL "
-        "AND max_favorable_price IS NULL AND max_adverse_price IS NULL "
-        "AND mfe_r IS NULL AND mae_r IS NULL AND observed_through_ms IS NULL "
-        "AND completion_reason IS NULL) OR "
-        "(status = 'pending' AND claim_owner IS NULL AND claim_token IS NULL "
-        "AND lease_until_ms IS NULL AND completed_at_ms IS NULL "
-        "AND max_favorable_price IS NULL AND max_adverse_price IS NULL "
-        "AND mfe_r IS NULL AND mae_r IS NULL AND observed_through_ms IS NULL "
-        "AND completion_reason IS NULL) OR "
-        "(status = 'completed' AND claim_owner IS NULL AND claim_token IS NULL "
-        "AND lease_until_ms IS NULL AND completed_at_ms IS NOT NULL "
-        "AND max_favorable_price IS NOT NULL AND max_adverse_price IS NOT NULL "
-        "AND mfe_r IS NOT NULL AND mae_r IS NOT NULL "
-        "AND observed_through_ms IS NOT NULL AND completion_reason IS NOT NULL) OR "
-        "(status = 'unavailable' AND claim_owner IS NULL AND claim_token IS NULL "
-        "AND lease_until_ms IS NULL AND completed_at_ms IS NOT NULL "
-        "AND max_favorable_price IS NULL AND max_adverse_price IS NULL "
-        "AND mfe_r IS NULL AND mae_r IS NULL AND observed_through_ms IS NULL "
-        "AND completion_reason IS NOT NULL)",
+        "(source_kind = 'portfolio_rejection' "
+        "AND admission_decision_id IS NOT NULL "
+        "AND evaluation_kind = 'fixed_horizon_excursion_v1') OR "
+        "(source_kind = 'strategy_observation' "
+        "AND admission_decision_id IS NULL "
+        "AND evaluation_kind = 'sor_path_observation_v1')",
+        name="source_kind_valid",
+    ),
+    sa.CheckConstraint(
+        "first_path IS NULL OR first_path IN ("
+        "'tp1_first', 'initial_stop_first', 'ambiguous_same_bar', "
+        "'opening_range_failure', 'time_stop', 'session_exit', "
+        "'horizon_complete')",
+        name="path_valid",
+    ),
+    sa.CheckConstraint(
+        "(status IN ('pending', 'claimed', 'completed') "
+        "AND entry_reference_price IS NOT NULL "
+        "AND initial_stop_price IS NOT NULL "
+        "AND initial_risk_per_unit IS NOT NULL) OR status = 'unavailable'",
         name="lease_shape_valid",
+    ),
+    sa.CheckConstraint(
+        "(status = 'claimed' AND claim_owner IS NOT NULL "
+        "AND claim_token IS NOT NULL AND lease_until_ms IS NOT NULL "
+        "AND completed_at_ms IS NULL AND max_favorable_price IS NULL "
+        "AND max_adverse_price IS NULL AND mfe_r IS NULL AND mae_r IS NULL "
+        "AND observed_through_ms IS NULL AND completion_reason IS NULL "
+        "AND first_path IS NULL AND first_path_at_ms IS NULL "
+        "AND observed_bar_count IS NULL) OR "
+        "(status = 'pending' AND claim_owner IS NULL "
+        "AND claim_token IS NULL AND lease_until_ms IS NULL "
+        "AND completed_at_ms IS NULL AND max_favorable_price IS NULL "
+        "AND max_adverse_price IS NULL AND mfe_r IS NULL AND mae_r IS NULL "
+        "AND observed_through_ms IS NULL AND completion_reason IS NULL "
+        "AND first_path IS NULL AND first_path_at_ms IS NULL "
+        "AND observed_bar_count IS NULL) OR "
+        "(status = 'completed' AND claim_owner IS NULL "
+        "AND claim_token IS NULL AND lease_until_ms IS NULL "
+        "AND completed_at_ms IS NOT NULL AND max_favorable_price IS NOT NULL "
+        "AND max_adverse_price IS NOT NULL AND mfe_r IS NOT NULL "
+        "AND mae_r IS NOT NULL AND observed_through_ms IS NOT NULL "
+        "AND completion_reason IS NOT NULL "
+        "AND ((evaluation_kind = 'fixed_horizon_excursion_v1' "
+        "AND first_path IS NULL AND first_path_at_ms IS NULL "
+        "AND observed_bar_count IS NULL) OR "
+        "(evaluation_kind = 'sor_path_observation_v1' "
+        "AND first_path IS NOT NULL AND first_path_at_ms IS NOT NULL "
+        "AND observed_bar_count > 0))) OR "
+        "(status = 'unavailable' AND claim_owner IS NULL "
+        "AND claim_token IS NULL AND lease_until_ms IS NULL "
+        "AND completed_at_ms IS NOT NULL AND max_favorable_price IS NULL "
+        "AND max_adverse_price IS NULL AND mfe_r IS NULL AND mae_r IS NULL "
+        "AND observed_through_ms IS NULL AND completion_reason IS NOT NULL "
+        "AND first_path IS NULL AND first_path_at_ms IS NULL "
+        "AND observed_bar_count IS NULL)",
+        name="projection_shape_valid",
     ),
 )
 

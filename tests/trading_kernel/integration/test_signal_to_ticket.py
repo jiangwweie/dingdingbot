@@ -37,6 +37,7 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     EntryAdmissionSnapshot,
     canonical_digest,
 )
+from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -48,6 +49,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
     facts_current,
     instrument_certification_current,
+    instrument_product_profiles,
     instrument_rules_current,
     instruments,
     owner_authorizations,
@@ -1073,6 +1075,23 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 venue_symbol="BTCUSDT",
                 contract_kind="perpetual",
                 status="active",
+            )
+        )
+        product_profile = InstrumentProductProfile(
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            product_family="crypto_perpetual",
+            asset_class="crypto",
+            contract_type="PERPETUAL",
+            underlying_type="CRYPTO",
+            margin_asset="USDT",
+            entry_session_policy="continuous",
+            status="candidate",
+        )
+        await connection.execute(
+            sa.insert(instrument_product_profiles).values(
+                **product_profile.model_dump(mode="python"),
+                semantic_digest=product_profile.semantic_digest,
+                updated_at_ms=1_000,
             )
         )
         await connection.execute(

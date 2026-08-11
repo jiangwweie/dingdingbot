@@ -5,8 +5,14 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from src.trading_kernel.application.ports import RuntimeScopeSnapshot
+from src.trading_kernel.application.produce_strategy_signal import (
+    evaluate_strategy_snapshot,
+    produce_strategy_signal,
+)
 from src.trading_kernel.application.project_shadow_outcome import (
     pending_shadow_spec_for_rejection,
+    pending_shadow_spec_for_strategy_observation,
 )
 from src.trading_kernel.domain.admission_decision import (
     AdmissionDecisionStatus,
@@ -20,13 +26,18 @@ from src.trading_kernel.domain.shadow_outcome import (
     ShadowOutcomeProjection,
     ShadowOutcomeSpec,
     evaluate_fixed_horizon_excursion,
+    evaluate_sor_path_observation,
 )
 from src.trading_kernel.domain.signal import build_signal_fact_digest
+from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from tests.trading_kernel.integration.test_signal_to_ticket import (
     _admission_snapshot,
 )
 from tests.trading_kernel.integration.test_signal_to_ticket import (
     _signal as _runtime_signal,
+)
+from tests.trading_kernel.unit.detectors.test_us_equity_sor import (
+    _snapshot as _us_sor_snapshot,
 )
 
 
@@ -87,6 +98,81 @@ def test_fixed_horizon_excursion_reports_zero_for_unreached_adverse_move() -> No
 
     assert projection.mfe_r == Decimal(2)
     assert projection.mae_r == Decimal(0)
+
+
+def test_sor_path_observation_classifies_first_path() -> None:
+    cases = (
+        ((_candle(close_time_ms=2, high=Decimal(106), low=Decimal(99)),), "tp1_first"),
+        ((_candle(close_time_ms=2, high=Decimal(104), low=Decimal(94)),), "initial_stop_first"),
+        ((_candle(close_time_ms=2, high=Decimal(106), low=Decimal(94)),), "ambiguous_same_bar"),
+        ((
+            _candle(
+                close_time_ms=2,
+                high=Decimal(104),
+                low=Decimal(98),
+                close_price=Decimal(102),
+            ),
+        ), "opening_range_failure"),
+    )
+
+    for candles, expected_path in cases:
+        projection = evaluate_sor_path_observation(
+            _sor_spec(horizon_end_ms=2),
+            candles,
+        )
+
+        assert projection.evaluation_kind == "sor_path_observation_v1"
+        assert projection.first_path == expected_path
+        assert projection.first_path_at_ms == 2
+        assert projection.mfe_r is not None
+        assert projection.mae_r is not None
+
+
+def test_sor_path_observation_uses_time_stop_after_eight_closed_bars() -> None:
+    spec = _sor_spec(
+        opening_range_boundary_price=Decimal(90),
+        horizon_start_ms=1,
+        horizon_end_ms=9,
+    )
+    candles = tuple(
+        _candle(
+            close_time_ms=index,
+            high=Decimal(104),
+            low=Decimal(98),
+            close_price=Decimal(101),
+        )
+        for index in range(2, 10)
+    )
+
+    projection = evaluate_sor_path_observation(spec, candles)
+
+    assert projection.first_path == "time_stop"
+    assert projection.first_path_at_ms == 9
+    assert projection.observed_bar_count == 8
+
+
+def test_sor_path_observation_counts_bars_until_the_first_path() -> None:
+    spec = _sor_spec(
+        opening_range_boundary_price=Decimal(90),
+        horizon_start_ms=1,
+        horizon_end_ms=9,
+    )
+    candles = tuple(
+        _candle(
+            close_time_ms=index,
+            high=Decimal(106) if index == 4 else Decimal(104),
+            low=Decimal(98),
+            close_price=Decimal(101),
+        )
+        for index in range(2, 10)
+    )
+
+    projection = evaluate_sor_path_observation(spec, candles)
+
+    assert projection.first_path == "tp1_first"
+    assert projection.first_path_at_ms == 4
+    assert projection.observed_bar_count == 3
+    assert projection.observed_through_ms == 9
 
 
 def test_shadow_projection_rejects_incomplete_completed_shape() -> None:
@@ -167,6 +253,62 @@ def test_pending_shadow_keeps_zero_risk_for_explicit_unavailable_result() -> Non
     assert shadow.initial_risk_per_unit == Decimal(0)
 
 
+def test_tradfi_signal_freezes_observation_without_admission_identity() -> None:
+    contract = next(
+        item
+        for item in registered_strategy_contracts()
+        if item.event_id == "SOR-US-LONG-15M"
+    )
+    market = _us_sor_snapshot(side="long")
+    detector = evaluate_strategy_snapshot(contract, market)
+    signal = produce_strategy_signal(
+        contract=contract,
+        scope=RuntimeScopeSnapshot(
+            runtime_scope_id="scope:sor-us:aapl:long",
+            strategy_group_id=contract.strategy_group_id,
+            strategy_version_id=contract.strategy_version_id,
+            event_spec_id=contract.event_spec_id,
+            runtime_profile_id="tradfi-equity-observe-v1",
+            owner_policy_id="policy-tradfi-observe",
+            exchange_instrument_id=market.exchange_instrument_id,
+            position_side="long",
+            universe_version_id="universe:sor-us:long:v1",
+            universe_semantic_digest="sha256:" + "a" * 64,
+            lifecycle_state="active",
+            observation_enabled=True,
+            entry_enabled=True,
+            scope_version=1,
+            observation_generation=1,
+        ),
+        detector_result=detector,
+        persisted_facts=detector.facts,
+    )
+    assert market.product_session is not None
+    product = market.product_session.model_copy(
+        update={
+            "mark_price": Decimal("104.05"),
+            "index_price": Decimal(104),
+            "best_bid": Decimal("103.9"),
+            "best_ask": Decimal(104),
+            "best_bid_quantity": Decimal(20),
+            "best_ask_quantity": Decimal(15),
+        }
+    )
+
+    shadow = pending_shadow_spec_for_strategy_observation(
+        signal=signal,
+        product=product,
+    )
+
+    assert shadow is not None
+    assert shadow.source_kind == "strategy_observation"
+    assert shadow.admission_decision_id is None
+    assert shadow.signal_event_id == signal.signal_event_id
+    assert shadow.entry_reference_price == Decimal(104)
+    assert shadow.take_profit_price is not None
+    assert shadow.spread_bps is not None
+
+
 def _spec(
     *,
     position_side: str,
@@ -177,12 +319,48 @@ def _spec(
 ) -> ShadowOutcomeSpec:
     return ShadowOutcomeSpec(
         shadow_outcome_id="shadow:test",
+        signal_event_id="signal:test",
         admission_decision_id="admission:test",
+        source_kind="portfolio_rejection",
+        evaluation_kind="fixed_horizon_excursion_v1",
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side=position_side,
         timeframe="1h",
         entry_reference_price=entry_reference_price,
         initial_stop_price=initial_stop_price,
+        horizon_start_ms=horizon_start_ms,
+        horizon_end_ms=horizon_end_ms,
+        created_at_ms=1,
+    )
+
+
+def _sor_spec(
+    *,
+    opening_range_boundary_price: Decimal = Decimal(103),
+    horizon_start_ms: int = 1,
+    horizon_end_ms: int = 2,
+) -> ShadowOutcomeSpec:
+    return ShadowOutcomeSpec(
+        shadow_outcome_id="shadow:sor-test",
+        signal_event_id="signal:sor-test",
+        admission_decision_id=None,
+        source_kind="strategy_observation",
+        evaluation_kind="sor_path_observation_v1",
+        exchange_instrument_id="binance-usdm:AAPLUSDT:perpetual",
+        position_side="long",
+        timeframe="15m",
+        entry_reference_price=Decimal(100),
+        initial_stop_price=Decimal(95),
+        take_profit_price=Decimal(105),
+        opening_range_boundary_price=opening_range_boundary_price,
+        session_exit_deadline_ms=9,
+        mark_price=Decimal("100.1"),
+        index_price=Decimal(100),
+        funding_rate=Decimal("0.0001"),
+        best_bid_price=Decimal("99.9"),
+        best_ask_price=Decimal(100),
+        best_bid_quantity=Decimal(10),
+        best_ask_quantity=Decimal(12),
         horizon_start_ms=horizon_start_ms,
         horizon_end_ms=horizon_end_ms,
         created_at_ms=1,

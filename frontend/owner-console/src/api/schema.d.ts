@@ -405,6 +405,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/strategies/{strategy_version_id}/observations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Strategy Version Observations
+         * @description Return bounded Signal-owned Observation evidence for one version.
+         */
+        get: operations["strategy_version_observations_api_owner_v1_strategies__strategy_version_id__observations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/strategies/{strategy_version_id}/tickets": {
         parameters: {
             query?: never;
@@ -562,6 +582,17 @@ export interface components {
         /** ApiEnvelope[SignalListPage] */
         ApiEnvelope_SignalListPage_: {
             data: components["schemas"]["SignalListPage"];
+            freshness: components["schemas"]["Freshness"];
+            /** Generated At */
+            generated_at: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Source Watermark */
+            source_watermark: string | null;
+        };
+        /** ApiEnvelope[StrategyObservationListPage] */
+        ApiEnvelope_StrategyObservationListPage_: {
+            data: components["schemas"]["StrategyObservationListPage"];
             freshness: components["schemas"]["Freshness"];
             /** Generated At */
             generated_at: string;
@@ -1282,8 +1313,17 @@ export interface components {
             completed_at_ms: number | null;
             /** Completion Reason */
             completion_reason: string | null;
+            /**
+             * Evaluation Kind
+             * @enum {string}
+             */
+            evaluation_kind: "fixed_horizon_excursion_v1" | "sor_path_observation_v1";
             /** Evidence */
             evidence: components["schemas"]["EvidenceRef"][];
+            /** First Path */
+            first_path?: ("tp1_first" | "initial_stop_first" | "ambiguous_same_bar" | "opening_range_failure" | "time_stop" | "session_exit" | "horizon_complete") | null;
+            /** First Path At Ms */
+            first_path_at_ms?: number | null;
             /**
              * Interpretation
              * @default Observation only; this Shadow Outcome is not execution.
@@ -1292,12 +1332,23 @@ export interface components {
             interpretation: "Observation only; this Shadow Outcome is not execution.";
             /** Mae R */
             mae_r: string | null;
+            /** Mark Index Deviation Bps */
+            mark_index_deviation_bps?: string | null;
             /** Mfe R */
             mfe_r: string | null;
+            /** Observed Bar Count */
+            observed_bar_count?: number | null;
             /** Observed Through Ms */
             observed_through_ms: number | null;
             /** Shadow Outcome Id */
             shadow_outcome_id: string;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "portfolio_rejection" | "strategy_observation";
+            /** Spread Bps */
+            spread_bps?: string | null;
             /**
              * Status
              * @enum {string}
@@ -1341,14 +1392,14 @@ export interface components {
         /** SignalListItem */
         SignalListItem: {
             /** Admission Decision Id */
-            admission_decision_id: string;
+            admission_decision_id: string | null;
             /** Binding Constraint */
             binding_constraint: string | null;
             /**
              * Decision Status
              * @enum {string}
              */
-            decision_status: "admitted" | "rejected";
+            decision_status: "admitted" | "rejected" | "not_evaluated";
             /** Event Spec Id */
             event_spec_id: string;
             /** Evidence */
@@ -1437,6 +1488,86 @@ export interface components {
             sample_count: number;
             /** Strategy Group Id */
             strategy_group_id: string;
+        };
+        /** StrategyObservationListItem */
+        StrategyObservationListItem: {
+            /** Annotations */
+            annotations: components["schemas"]["ChartAnnotation"][];
+            /** Best Ask Price */
+            best_ask_price: string | null;
+            /** Best Ask Quantity */
+            best_ask_quantity: string | null;
+            /** Best Bid Price */
+            best_bid_price: string | null;
+            /** Best Bid Quantity */
+            best_bid_quantity: string | null;
+            /** Completed At Ms */
+            completed_at_ms: number | null;
+            /** Completion Reason */
+            completion_reason: string | null;
+            /** Entry Reference Price */
+            entry_reference_price: string | null;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /** Exchange Instrument Id */
+            exchange_instrument_id: string;
+            /** First Path */
+            first_path: ("tp1_first" | "initial_stop_first" | "ambiguous_same_bar" | "opening_range_failure" | "time_stop" | "session_exit" | "horizon_complete") | null;
+            /** First Path At Ms */
+            first_path_at_ms: number | null;
+            /** Horizon End Ms */
+            horizon_end_ms: number;
+            /** Horizon Start Ms */
+            horizon_start_ms: number;
+            /** Initial Stop Price */
+            initial_stop_price: string | null;
+            /** Mae R */
+            mae_r: string | null;
+            /** Mark Index Deviation Bps */
+            mark_index_deviation_bps: string | null;
+            /** Max Adverse Price */
+            max_adverse_price: string | null;
+            /** Max Favorable Price */
+            max_favorable_price: string | null;
+            /** Mfe R */
+            mfe_r: string | null;
+            /** Observed Bar Count */
+            observed_bar_count: number | null;
+            /** Occurred At Ms */
+            occurred_at_ms: number;
+            /** Opening Range Boundary Price */
+            opening_range_boundary_price: string | null;
+            /**
+             * Position Side
+             * @enum {string}
+             */
+            position_side: "long" | "short";
+            /** Session Exit Deadline Ms */
+            session_exit_deadline_ms: number | null;
+            /** Shadow Outcome Id */
+            shadow_outcome_id: string;
+            /** Signal Event Id */
+            signal_event_id: string;
+            /** Spread Bps */
+            spread_bps: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "claimed" | "completed" | "unavailable";
+            /** Strategy Version Id */
+            strategy_version_id: string;
+            /** Take Profit Price */
+            take_profit_price: string | null;
+            /** Ticket Id */
+            ticket_id: string | null;
+        };
+        /** StrategyObservationListPage */
+        StrategyObservationListPage: {
+            /** Items */
+            items: components["schemas"]["StrategyObservationListItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
         };
         /**
          * StrategyProductEventFacts
@@ -1576,20 +1707,36 @@ export interface components {
         };
         /** StrategyVersionSummary */
         StrategyVersionSummary: {
+            /** Ambiguous Observation Count */
+            ambiguous_observation_count: number;
+            /** Completed Observation Count */
+            completed_observation_count: number;
             /** Confirmed Natural Review Count */
             confirmed_natural_review_count: number;
             /** Controlled Exit Count */
             controlled_exit_count: number;
             /** Evidence */
             evidence: components["schemas"]["EvidenceRef"][];
+            /** Initial Stop First Count */
+            initial_stop_first_count: number;
             /** Is Current */
             is_current: boolean;
             /** Loss Count */
             loss_count: number;
+            /** Median Mae R */
+            median_mae_r: string | null;
+            /** Median Mfe R */
+            median_mfe_r: string | null;
+            /** Median Spread Bps */
+            median_spread_bps: string | null;
             /** Natural Terminal Count */
             natural_terminal_count: number;
             net_pnl: components["schemas"]["MoneyMetric"];
             net_r: components["schemas"]["MoneyMetric"];
+            /** Observation Count */
+            observation_count: number;
+            /** Opening Range Failure Count */
+            opening_range_failure_count: number;
             /** Pending Natural Review Count */
             pending_natural_review_count: number;
             /**
@@ -1597,6 +1744,8 @@ export interface components {
              * @default []
              */
             product_events: components["schemas"]["StrategyProductEventFacts"][];
+            /** Session Exit Count */
+            session_exit_count: number;
             /** Strategy Group Display Name */
             strategy_group_display_name: string;
             /** Strategy Group Id */
@@ -1607,10 +1756,16 @@ export interface components {
             strategy_version_status: string;
             /** Ticket Count */
             ticket_count: number;
+            /** Time Stop Count */
+            time_stop_count: number;
+            /** Tp1 First Count */
+            tp1_first_count: number;
             /** Tp1 Not Reached Count */
             tp1_not_reached_count: number;
             /** Tp1 Reached Count */
             tp1_reached_count: number;
+            /** Unavailable Observation Count */
+            unavailable_observation_count: number;
             /** Version */
             version: number;
             /** Win Count */
@@ -2422,7 +2577,7 @@ export interface operations {
                 to_ms?: number | null;
                 limit?: number;
                 cursor?: string | null;
-                decision_status?: ("admitted" | "rejected") | null;
+                decision_status?: ("admitted" | "rejected" | "not_evaluated") | null;
                 strategy_group_id?: string | null;
                 exchange_instrument_id?: string | null;
                 position_side?: ("long" | "short") | null;
@@ -2504,6 +2659,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiEnvelope_StrategySummaryPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    strategy_version_observations_api_owner_v1_strategies__strategy_version_id__observations_get: {
+        parameters: {
+            query?: {
+                from_ms?: number | null;
+                to_ms?: number | null;
+                limit?: number;
+                cursor?: string | null;
+                first_path?: ("tp1_first" | "initial_stop_first" | "ambiguous_same_bar" | "opening_range_failure" | "time_stop" | "session_exit" | "horizon_complete") | null;
+            };
+            header?: never;
+            path: {
+                strategy_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiEnvelope_StrategyObservationListPage_"];
                 };
             };
             /** @description Validation Error */

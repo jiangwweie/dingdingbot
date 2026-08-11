@@ -27,6 +27,7 @@ const approvedPaths = [
   "/api/owner/v1/signals",
   "/api/owner/v1/signals/{signal_event_id}",
   "/api/owner/v1/strategies",
+  "/api/owner/v1/strategies/{strategy_version_id}/observations",
   "/api/owner/v1/strategies/{strategy_version_id}/tickets",
   "/api/owner/v1/tickets",
   "/api/owner/v1/tickets/{ticket_id}/causality",

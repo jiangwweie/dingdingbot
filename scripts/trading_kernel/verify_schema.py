@@ -64,6 +64,27 @@ _TRADFI_INSTRUMENT_TABLES = frozenset(
         "brc_instrument_product_current",
     }
 )
+_TRADFI_SHADOW_COLUMNS = frozenset(
+    {
+        "signal_event_id",
+        "source_kind",
+        "take_profit_price",
+        "opening_range_boundary_price",
+        "session_exit_deadline_ms",
+        "mark_price",
+        "index_price",
+        "funding_rate",
+        "best_bid_price",
+        "best_ask_price",
+        "best_bid_quantity",
+        "best_ask_quantity",
+        "spread_bps",
+        "mark_index_deviation_bps",
+        "first_path",
+        "first_path_at_ms",
+        "observed_bar_count",
+    }
+)
 _PRESERVATION_PROOF_METADATA_KEYS = (
     "preservation_source_revision",
     "preservation_target_revision",
@@ -1108,7 +1129,7 @@ def _source_0002_table_columns() -> dict[str, tuple[str, ...]]:
 
 def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
     return {
-        table.name: tuple(table.c.keys())
+        table.name: _source_columns_before_tradfi(table)
         for table in metadata.sorted_tables
         if table.name not in _OWNER_CONTROL_TABLES | _TRADFI_INSTRUMENT_TABLES
     }
@@ -1116,10 +1137,17 @@ def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
 
 def _source_0004_table_columns() -> dict[str, tuple[str, ...]]:
     return {
-        table.name: tuple(table.c.keys())
+        table.name: _source_columns_before_tradfi(table)
         for table in metadata.sorted_tables
         if table.name not in _TRADFI_INSTRUMENT_TABLES
     }
+
+
+def _source_columns_before_tradfi(table: sa.Table) -> tuple[str, ...]:
+    columns = tuple(table.c.keys())
+    if table.name != "brc_shadow_outcomes_current":
+        return columns
+    return tuple(name for name in columns if name not in _TRADFI_SHADOW_COLUMNS)
 
 
 async def _owner_control_preservation_manifest(

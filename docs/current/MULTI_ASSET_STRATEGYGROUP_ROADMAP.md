@@ -30,8 +30,11 @@ last_verified: 2026-08-11
 7. 在多资产开发前插入 **M0.5：Deployment Simplification**。日常发布按
    静态前端、Owner API、同 Schema Kernel 和 Schema/Authority Upgrade 分级，
    Controlled Flatten 不再作为普通部署的默认步骤。
-8. Owner 已于 **2026-08-11** 采纳 M1，并授权本地实施 M2–M4；本授权不包含
-   生产部署、真实 TradFi ENTRY、资本增加或加密 `SOR-001` 恢复。
+8. Owner 已于 **2026-08-11** 采纳 M1，并授权本地实施 M2–M5；本授权不包含
+   生产部署、真实 TradFi ENTRY、资本增加或加密 `SOR-001` 恢复；
+9. M5 **只暂停 TradFi Ticket** 的生产准入，不删除未来实盘能力。
+   Observation Outcome 不构造模拟 Ticket、模拟订单或第二执行链；M6 恢复权限后
+   仍接回正式 Readiness、CapacityClaim、Ticket 和 Command 链。
 
 ## Authority Boundary
 
@@ -108,7 +111,7 @@ Ticket、收益和 Review 必须独立统计。LONG 与 SHORT 可共享初始候
 | **M2：产品化前端** | StrategyGroup 驾驶舱、标的中心和 Universe 管理 | 只读标的状态、归属、Universe Diff、Warming、Activation、审计记录 | 日常策略与标的管理不依赖手工 SQL 或拼装多处事实 |
 | **M3：跨资产运行底座** | 当前 Kernel 能表达目标 Venue/Product | 保留 canonical Instrument ID，扩展 RuntimeProfile、Product Profile、Session、Corporate Action 和当前 Venue capability | 新 Profile 可完成只读认证和 Observation，且现有加密 Profile 无行为漂移 |
 | **M4：美股 SOR** | 新 StrategyGroup 可以自然产生标准 Signal | 美股 Opening Range、LONG/SHORT Event、Market Plan、Exit Policy、版本身份 | `SOR-US-EQ-PERP-001` 在 Entry 禁用状态完成 Live/Replay 一致的 Observation |
-| **M5：Observation/Shadow** | 获得产品微观结构和策略路径证据 | Spread、Depth、Slippage、Opening Range、TP1、MAE、失败退出、Session 分布 | 完成约定市场日窗口并形成独立的继续、修改或停止结论 |
+| **M5：Observation/Shadow** | 获得产品微观结构和策略路径证据 | Spread、Top-of-book quantity、Mark/Index、Opening Range、TP1、MFE/MAE、失败退出、Session 分布；不把报价摩擦称为真实 Slippage | 完成约定市场日窗口并形成独立的继续、修改或停止结论 |
 | **M6：小规模实盘闭环** | 完成受控真实资金自然 Ticket | 独立 Owner Policy、ENTRY 准入、保护、退出、结算、Review | 自然 Ticket 完整闭环，交易所与 PostgreSQL 无残留或未解决 Incident |
 | **M7：第二策略族** | 评估当前内核上的 `RSRVCB-001` | 按当前 Schema/Policy 重写可复用领域模块 | 仅在美股产品底座和 SOR 闭环稳定后进入实施 |
 
@@ -266,7 +269,7 @@ Active Universe
 2. 首期 Universe 限制为 5–8 个标的，保持在当前 1–10 成员边界内；
 3. 15m 策略按闭合 K 线增量运行，不在每次 cadence 重拉完整历史窗口；
 4. Depth、Mark/Index 和高成本事实只在有界候选范围获取；
-5. 新 RuntimeProfile 在 M5 前保持 ENTRY 禁用；
+5. 新 RuntimeProfile 在 M1–M5 全程保持 ENTRY 禁用；
 6. 新 Schema 只能走停止、空仓、前向、历史保留的 migration；
 7. 新 Venue 必须复用 durable Exchange Command、unknown outcome、partial fill、
    reconciliation 和 controlled exit 语义；
