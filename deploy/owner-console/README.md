@@ -39,42 +39,57 @@ Expected values are `on`, `3s`, and `brc_owner_console`. Build the
 `postgresql+asyncpg://` DSN with a URL-encoded password, then install that DSN
 only in the root-owned mode-`0600` systemd credential source described below.
 
-## Independent Python Environment And Frontend
+## Independent Release Roots
 
-From the reviewed release directory:
+The four Kernel workers continue to use `/opt/brc/current/.venv`. The Owner
+Console uses two independent committed release roots:
 
-```bash
-python3 -m venv .venv-owner-console
-.venv-owner-console/bin/pip install --requirement requirements-owner-console.txt
-pnpm --dir frontend/owner-console install --frozen-lockfile
-pnpm --dir frontend/owner-console build
-```
+| Surface | Release root | Current symlink | Runtime effect |
+| --- | --- | --- | --- |
+| Static frontend | `/opt/brc/owner-console/releases/<commit>` | `/opt/brc/owner-console/current` | Nginx reads the new static files; no service restart |
+| Owner API | `/opt/brc/owner-console-api/releases/<commit>` | `/opt/brc/owner-console-api/current` | Only `brc-owner-console-api.service` restarts |
 
-The four Kernel workers continue to use `.venv`. Nginx serves only the built
-`frontend/owner-console/dist` directory, so Node.js is not a runtime process.
+Nginx serves only the built `dist` directory, so Node.js is not a runtime
+process. The API release contains its own `.venv-owner-console`, exact Commit
+marker and systemd unit. Neither release changes `/opt/brc/current`, stops a
+Kernel worker, checks exchange flatness or calls the exchange.
 
-Install each verified static build under an Nginx-readable independent release
-root instead of serving through `/opt/brc/current`. Kernel releases are owned
-by `brc:brc` and intentionally are not traversable by the `www-data` Nginx
-worker.
+Classify an exact change set before selecting a release path:
 
 ```bash
-sudo install -d -o root -g www-data -m 0750 /opt/brc/owner-console
-sudo install -d -o root -g www-data -m 0750 /opt/brc/owner-console/releases
-sudo install -d -o root -g www-data -m 0750 \
-  /opt/brc/owner-console/releases/<commit>/dist
-sudo cp -a frontend/owner-console/dist/. \
-  /opt/brc/owner-console/releases/<commit>/dist/
-sudo chown -R root:www-data /opt/brc/owner-console/releases/<commit>
-sudo find /opt/brc/owner-console/releases/<commit> -type d -exec chmod 0750 {} +
-sudo find /opt/brc/owner-console/releases/<commit> -type f -exec chmod 0640 {} +
-sudo ln -sfn /opt/brc/owner-console/releases/<commit> \
-  /opt/brc/owner-console/current
+.venv/bin/python scripts/classify_release.py \
+  --base <production-commit> \
+  --target <candidate-commit>
 ```
 
-The Nginx include reads only
-`/opt/brc/owner-console/current/dist`. Switching this symlink does not stop or
-restart the Owner API or any Trading Kernel worker.
+Deploy an **R1 static release** from an exact committed tree:
+
+```bash
+.venv/bin/python scripts/owner_console/deploy_release.py \
+  --kind static \
+  --commit <candidate-commit>
+```
+
+The command builds in a disposable local directory, uploads only `dist`,
+switches `/opt/brc/owner-console/current`, verifies the exact `index.html`
+SHA-256 and performs one public HTTPS smoke. Failure restores only the prior
+static symlink.
+
+Certify and deploy an **R2 Owner API release**:
+
+```bash
+.venv/bin/python scripts/owner_console/certify_release_candidate.py \
+  --commit <candidate-commit>
+.venv/bin/python scripts/owner_console/deploy_release.py \
+  --kind api \
+  --commit <candidate-commit>
+```
+
+The focused certification covers Owner Console unit/interface/architecture
+tests, Ruff and `git diff --check`. Deployment installs the exact API release,
+updates only its systemd unit, restarts only the Owner API and verifies the
+Unix-Socket `/healthz` endpoint. API startup rejects a PostgreSQL Alembic
+revision different from the release's exact current Schema.
 
 ## systemd Credentials
 
@@ -129,20 +144,12 @@ The locations serve the SPA with `no-store`, serve fingerprinted assets with a
 one-year immutable cache, proxy `/api/` through the Unix Socket, and apply the
 login rate limit only to the login endpoint.
 
-## Release Preservation
+## Kernel Isolation
 
-Regular Kernel release installation conditionally copies these two untracked
-runtime artifacts from `/opt/brc/current` into the new release before the
-current symlink changes:
-
-```text
-.venv-owner-console
-frontend/owner-console/dist
-```
-
-If neither artifact exists, a Kernel-only release continues normally. This
-preservation rule does not add the Owner Console unit to the four-worker
-deployment membership and does not start or reload Owner Console services.
+Regular Kernel release installation does not copy, preserve, start, stop or
+reload Owner Console artifacts. The API service executes only from
+`/opt/brc/owner-console-api/current`; Nginx reads static files only from
+`/opt/brc/owner-console/current/dist`.
 
 ## Production DML Snapshot For Local Acceptance
 
@@ -203,5 +210,9 @@ elapsed time below 3000 ms.
 
 ## Rollback
 
-Stop and disable `brc-owner-console-api.service`, remove the Nginx include, and
-reload Nginx. No database migration or Trading Kernel rollback is required.
+Both independent release commands automatically restore their previous exact
+symlink when activation smoke fails. Static rollback changes only
+`/opt/brc/owner-console/current`. API rollback restores the previous
+`/opt/brc/owner-console-api/current`, systemd unit and Owner API process. No
+database migration, Kernel service action or Trading Kernel rollback is
+required.

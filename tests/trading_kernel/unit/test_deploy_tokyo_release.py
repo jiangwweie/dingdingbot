@@ -14,7 +14,6 @@ from scripts.trading_kernel.deploy_tokyo_release import (
     DeploymentPlan,
     SshTokyoReleaseBackend,
     deploy_tokyo_release,
-    preserved_owner_console_artifacts,
 )
 from scripts.trading_kernel.deploy_tokyo_release import (
     CURRENT_RELEASE as CURRENT_RELEASE_SYMLINK,
@@ -41,22 +40,6 @@ TARGET_EXCHANGE_INSTRUMENT_IDS = (
     "binance-usdm:SOLUSDT:perpetual",
     "binance-usdm:XRPUSDT:perpetual",
 )
-
-
-def test_regular_release_declares_exact_owner_console_artifact_pairs() -> None:
-    assert preserved_owner_console_artifacts(
-        current_release="/opt/brc/current",
-        target_release="/opt/brc/releases/a",
-    ) == (
-        (
-            "/opt/brc/current/.venv-owner-console",
-            "/opt/brc/releases/a/.venv-owner-console",
-        ),
-        (
-            "/opt/brc/current/frontend/owner-console/dist",
-            "/opt/brc/releases/a/frontend/owner-console/dist",
-        ),
-    )
 
 
 def test_regular_plan_freezes_current_schema_without_operator_probe_scope() -> None:

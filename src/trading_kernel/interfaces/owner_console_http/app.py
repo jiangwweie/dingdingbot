@@ -43,6 +43,9 @@ from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     create_owner_read_engine,
     owner_read_transaction,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from src.trading_kernel.interfaces.owner_console_http.auth import (
     InvalidCredentials,
     LoginThrottled,
@@ -184,8 +187,13 @@ async def _verify_startup_read_transaction(engine: AsyncEngine) -> None:
         read_only = await connection.scalar(sa.text("SHOW transaction_read_only"))
         isolation = await connection.scalar(sa.text("SHOW transaction_isolation"))
         statement_timeout = await connection.scalar(sa.text("SHOW statement_timeout"))
+        schema_revision = await connection.scalar(
+            sa.text("SELECT version_num FROM alembic_version")
+        )
     if read_only != "on" or isolation != "repeatable read" or statement_timeout != "3s":
         raise RuntimeError("Owner Console read transaction verification failed")
+    if schema_revision != CURRENT_SCHEMA_REVISION:
+        raise RuntimeError("Owner Console schema revision differs")
 
 
 def _build_owner_market_data(settings: OwnerConsoleSettings) -> OwnerMarketData:

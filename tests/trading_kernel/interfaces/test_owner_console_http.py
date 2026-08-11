@@ -109,6 +109,7 @@ class _ReadOnlyEngine:
         self,
         *,
         statement_timeout: str = "3s",
+        schema_revision: str = "0004_owner_control_plane",
         dispose_error: BaseException | None = None,
     ) -> None:
         self.dispose_calls = 0
@@ -118,6 +119,7 @@ class _ReadOnlyEngine:
             "SHOW transaction_read_only": "on",
             "SHOW transaction_isolation": "repeatable read",
             "SHOW statement_timeout": statement_timeout,
+            "SELECT version_num FROM alembic_version": schema_revision,
         }
 
     def connect(self) -> _ConnectionContext:
@@ -717,6 +719,19 @@ async def test_lifespan_cleans_each_resource_when_startup_fails() -> None:
 
     assert engine.dispose_calls == 1
     assert market_data.close_calls == 1
+
+
+async def test_lifespan_rejects_an_incompatible_owner_api_schema() -> None:
+    engine = _ReadOnlyEngine(schema_revision="0003_portfolio_admission_observability")
+    app = create_owner_console_app(
+        _settings(),
+        engine=cast(AsyncEngine, engine),
+        market_data=cast(OwnerMarketData, _PublicMarketData()),
+    )
+
+    with pytest.raises(RuntimeError, match="schema revision differs"):
+        async with app.router.lifespan_context(app):
+            pass
 
 
 async def test_lifespan_disposes_the_engine_when_market_construction_fails(

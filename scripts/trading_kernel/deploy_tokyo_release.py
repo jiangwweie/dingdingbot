@@ -62,25 +62,6 @@ _SEED_IDENTITY = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DRAIN_AUTHORIZATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
-def preserved_owner_console_artifacts(
-    *,
-    current_release: str,
-    target_release: str,
-) -> tuple[tuple[str, str], ...]:
-    """Return the exact untracked Owner Console artifacts kept across releases."""
-
-    return (
-        (
-            f"{current_release}/.venv-owner-console",
-            f"{target_release}/.venv-owner-console",
-        ),
-        (
-            f"{current_release}/frontend/owner-console/dist",
-            f"{target_release}/frontend/owner-console/dist",
-        ),
-    )
-
-
 class DeploymentBlocked(RuntimeError):
     """Preflight or postflight facts do not satisfy the release contract."""
 
@@ -1377,20 +1358,6 @@ class SshTokyoReleaseBackend:
                 f"{release}/.venv",
             )
         )
-        for source, target in preserved_owner_console_artifacts(
-            current_release=CURRENT_RELEASE,
-            target_release=release,
-        ):
-            source_status = self._remote(
-                ("sudo", "test", "-e", source),
-                check=False,
-            )
-            if source_status.returncode == 0:
-                self._remote(("sudo", "cp", "-a", source, target))
-            elif source_status.returncode != 1:
-                raise RuntimeError(
-                    f"Owner Console artifact preflight failed: {source}"
-                )
         self._remote(("sudo", "chown", "-R", "brc:brc", release))
 
     def deploy_identity(
@@ -1947,29 +1914,63 @@ def _resolve_commit(reference: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    started = time.monotonic()
     args = _parser().parse_args(argv)
-    commit = _resolve_commit(args.commit)
-    validate_release_certification(REPO_ROOT, commit)
-    plan = DeploymentPlan(
-        target_commit=commit,
-        target_release=f"{RELEASE_ROOT}/brc-trading-kernel-{commit[:12]}",
-        schema_revision=SCHEMA_REVISION,
-        expected_configured_leverage=EXPECTED_CONFIGURED_LEVERAGE,
-        enable_entry=args.enable_entry,
-        source_schema_revision=args.source_schema_revision,
-        mode=DeploymentMode(args.mode),
-        closure_ticket_id=args.closure_ticket_id,
-        drain_active_tickets=args.drain_active_tickets,
-        drain_authorization_id=args.drain_authorization_id,
-        drain_timeout_seconds=args.drain_timeout_seconds,
+    release_level = (
+        "R4"
+        if DeploymentMode(args.mode) is DeploymentMode.COMPATIBLE_UPGRADE
+        else "R3"
     )
-    backend = SshTokyoReleaseBackend(
-        target=args.target,
-        repo_root=REPO_ROOT,
-        timeout_seconds=args.timeout_seconds,
+    try:
+        commit = _resolve_commit(args.commit)
+        validate_release_certification(REPO_ROOT, commit)
+        plan = DeploymentPlan(
+            target_commit=commit,
+            target_release=f"{RELEASE_ROOT}/brc-trading-kernel-{commit[:12]}",
+            schema_revision=SCHEMA_REVISION,
+            expected_configured_leverage=EXPECTED_CONFIGURED_LEVERAGE,
+            enable_entry=args.enable_entry,
+            source_schema_revision=args.source_schema_revision,
+            mode=DeploymentMode(args.mode),
+            closure_ticket_id=args.closure_ticket_id,
+            drain_active_tickets=args.drain_active_tickets,
+            drain_authorization_id=args.drain_authorization_id,
+            drain_timeout_seconds=args.drain_timeout_seconds,
+        )
+        backend = SshTokyoReleaseBackend(
+            target=args.target,
+            repo_root=REPO_ROOT,
+            timeout_seconds=args.timeout_seconds,
+        )
+        result = deploy_tokyo_release(backend, plan)
+    except (DeploymentBlocked, RuntimeError, ValueError) as error:
+        print(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "release_level": release_level,
+                    "phase": "deployment",
+                    "primary_blocker": str(error),
+                    "elapsed_ms": max(
+                        0, int((time.monotonic() - started) * 1_000)
+                    ),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    payload = asdict(result)
+    payload.update(
+        {
+            "release_level": release_level,
+            "phase": "completed",
+            "primary_blocker": None,
+            "elapsed_ms": max(0, int((time.monotonic() - started) * 1_000)),
+        }
     )
-    result = deploy_tokyo_release(backend, plan)
-    print(json.dumps(asdict(result), ensure_ascii=False, sort_keys=True))
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0
 
 

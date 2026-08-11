@@ -14,6 +14,12 @@ def test_owner_console_service_is_unix_socket_only_and_resource_bounded() -> Non
     resource_slice = _read("deploy/owner-console/systemd/brc-owner-console.slice")
 
     assert "--uds /run/brc-owner-console/api.sock" in service
+    assert "WorkingDirectory=/opt/brc/owner-console-api/current" in service
+    assert (
+        "ExecStart=/opt/brc/owner-console-api/current/.venv-owner-console/bin/python "
+        "scripts/owner_console/run_api.py"
+    ) in service
+    assert "/opt/brc/current" not in service
     assert "EnvironmentFile=" not in service
     assert "TRADING_KERNEL_API_KEY" not in service
     assert (
@@ -78,3 +84,10 @@ def test_owner_console_units_do_not_change_kernel_worker_membership() -> None:
         "brc-trading-kernel-lifecycle-worker.service",
         "brc-trading-kernel-reconciliation-worker.service",
     }
+
+
+def test_kernel_release_no_longer_carries_owner_console_runtime_artifacts() -> None:
+    source = _read("scripts/trading_kernel/deploy_tokyo_release.py")
+
+    assert ".venv-owner-console" not in source
+    assert "frontend/owner-console/dist" not in source

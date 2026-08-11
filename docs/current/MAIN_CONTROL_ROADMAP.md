@@ -65,7 +65,10 @@ refreshed by this documentation-only action.
 | Certification | Existing exact Release Certification Manifest is `pass` for Schema `0004_owner_control_plane`; Registry, Owner Policy, runtime authority and command-set semantic digests match the current production certification |
 | Production identity | Production remains `1c3063bf520a52c15b144bf613884c7e00147bfc` and `tokyo-runtime-2026.08.10.2`; the candidate has no production tag and has not changed the current release symlink, PostgreSQL identity or services |
 | Deferral decision | No Controlled Flatten, no deployment, no Owner Policy change, no Entry service/fence change and no StrategyGroup control change are authorized by this record |
-| Activation boundary | When the Owner opens a later deployment window, stop/disable and write-fence Entry without mutating Owner Policy, keep Lifecycle and Reconciliation active until every Ticket finishes naturally, refresh PostgreSQL/systemd/exchange facts, verify the reusable exact certification, and deploy only while internal and external exposure are flat |
+| Pre-M0.5 activation boundary | Under the currently installed combined release path, deployment still requires Entry fencing and exact internal/external flatness; existing Tickets continue naturally and no deployment-driven flattening is authorized |
+| M0.5 classification | The exact `1c3063bf..5e902453` change set classifies as `R2`: Owner API and static presentation only, with no Schema, Registry, Owner Policy, runtime-authority or Exchange Command change |
+| M0.5 local state | The R0-R4 classifier, independent R1/R2 release roots, focused Owner API certification, schema-compatible API startup and removal of Kernel artifact preservation are implemented locally on the focused branch; no production service or symlink has changed |
+| M0.5 activation boundary | After focused certification and explicit Owner deployment confirmation, R1/R2 may activate without flatness or Kernel service changes; the resulting exact API/static candidate must explicitly supersede `5e902453...` before production activation |
 | Supersession | Replacing this SHA with a later candidate requires an explicit new record and an exact passing certification for that replacement |
 
 ## Current Performance Snapshot
@@ -90,12 +93,11 @@ it is not a gate retroactively added to this completed deployment.
 | Order | Work | Exit condition |
 | ---: | --- | --- |
 | 1 | Natural lifecycle continuation | The current production release protects, exits, reconciles, settles and reviews every existing Ticket without deployment-driven flattening |
-| 2 | Deployment-window freeze | Owner explicitly opens the window; Entry is stopped, disabled and write-fenced without changing Owner Policy, safety workers remain active, and current PostgreSQL, systemd, release-marker and exchange facts prove exact internal/external flatness |
-| 3 | Deferred candidate release | Reuse the exact certification for `5e902453360f884d2ec2a7d8c6c92568d9459f4a`, refresh action-time gates, deploy through the current regular-release contract and complete postflight while Entry remains fenced |
-| 4 | Full policy promotion | Run and certify `promote-full` only from current flat PostgreSQL and Binance facts with exact deployed identity, then restore Entry explicitly after all promotion gates pass |
+| 2 | M0.5 local acceptance | Complete focused code review, Owner API tests, release-classifier checks, frontend build, Ruff, Mypy and document authority checks without production mutation |
+| 3 | M0.5 R1/R2 activation | Owner explicitly confirms deployment; record the exact superseding static/API Commit, install the split release roots and prove Kernel workers and `/opt/brc/current` were untouched |
+| 4 | Full policy promotion | After current exposure is naturally flat, run and certify `promote-full` from current PostgreSQL and Binance facts with exact Kernel identity |
 | 5 | Final requirement audit | Re-run local and Tokyo evidence and close every acceptance item |
-| 6 | Deployment simplification | Implement the approved M0.5 R0–R4 release model so later frontend and Owner API releases no longer wait for Kernel flatness |
-| 7 | Multi-asset planning | Continue M1 Venue/Product decisions and M2 product design without changing current production authority, capital or Venue scope |
+| 6 | Multi-asset planning | Continue M1 Venue/Product decisions and M2 product design without changing current production authority, capital or Venue scope |
 
 ## Current Stop Conditions
 
@@ -108,7 +110,8 @@ The `0004` production deployment, Owner Console Strategy Workbench, Owner
 control plane, controlled flatten acceptance and official Entry restoration are
 complete and sealed.
 `SOR-001` remains paused by explicit Owner control. The broader rebuild program
-is not final until the deferred candidate window, `promote-full` and the final
-requirement audit are certified from current direct evidence. Until that
-window, production remains on `1c3063bf520a52c15b144bf613884c7e00147bfc`
-and active exposure follows the existing certified lifecycle.
+is not final until M0.5 activation, `promote-full` and the final requirement
+audit are certified from current direct evidence. Until an explicit M0.5
+deployment confirmation, production remains on
+`1c3063bf520a52c15b144bf613884c7e00147bfc` and active exposure follows the
+existing certified lifecycle.

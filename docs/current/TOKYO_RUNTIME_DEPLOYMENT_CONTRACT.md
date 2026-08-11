@@ -12,6 +12,71 @@ Exact production commit, immutable tag, certification, measured resource state,
 and remaining gates belong only to `MAIN_CONTROL_ROADMAP.md`. This contract owns
 the procedure and limits used to deploy and evaluate that state.
 
+## M0.5 Release Classification
+
+Every committed change set is classified by its heaviest affected boundary
+before deployment:
+
+```bash
+.venv/bin/python scripts/classify_release.py \
+  --base <production-commit> \
+  --target <candidate-commit>
+```
+
+| Level | Scope | Flatness | Certification | Mutated runtime |
+| --- | --- | --- | --- | --- |
+| `R0` | Documentation, tests, research and local release tooling | Not required | `git diff --check` only when applicable | None |
+| `R1` | Owner Console static frontend | Not required | Exact frontend build | Static release symlink only |
+| `R2` | Owner API, authentication, presentation queries and Owner Console service assets | Not required | Focused Owner API manifest | Owner API release symlink and service only |
+| `R3` | Same-Schema Trading Kernel behavior | Required | Exact Kernel Release Certification | Four Kernel workers and Runtime Identity |
+| `R4` | Schema, Registry, Owner Policy or runtime-authority semantics | Required | Exact Kernel Release Certification plus migration gates | PostgreSQL authority and four Kernel workers |
+
+Mixed changes always use the highest level. Unknown or shared runtime files
+default to `R3`. Migration files, Strategy Registry, runtime identity, runtime
+authority seeds and Owner-control PostgreSQL grants are always `R4`.
+
+The split R1/R2 procedure becomes a production-active path only after its exact
+installation is recorded in `MAIN_CONTROL_ROADMAP.md`. Before that cutover, the
+currently recorded production procedure remains authoritative.
+
+## R1 Static Frontend Release
+
+`scripts/owner_console/deploy_release.py --kind static` builds the exact target
+Commit in a disposable local directory and installs only:
+
+```text
+/opt/brc/owner-console/releases/<commit>/dist
+-> /opt/brc/owner-console/current
+```
+
+It does not connect to PostgreSQL, stop a service, inspect positions or call an
+exchange. Activation is one symlink switch followed by exact `index.html`
+SHA-256 verification and one public HTTPS smoke. Failure restores only the
+previous static symlink.
+
+## R2 Owner API Release
+
+An exact Owner API Commit first passes
+`scripts/owner_console/certify_release_candidate.py`. Its focused manifest is
+bound to the Commit, current Schema and the small Owner API certification
+command set. It does not run Kernel integration or full-chain suites.
+
+`scripts/owner_console/deploy_release.py --kind api` installs only:
+
+```text
+/opt/brc/owner-console-api/releases/<commit>
+-> /opt/brc/owner-console-api/current
+```
+
+The API owns an independent `.venv-owner-console`, exact Commit marker and
+systemd unit. Deployment restarts only `brc-owner-console-api.service`, then
+verifies its exact symlink, marker, active service and Unix-Socket `/healthz`.
+Startup reads `alembic_version` through the bounded Owner read transaction and
+fails when it differs from the release's current Schema revision. Failure
+restores the prior API symlink and unit. The API never loads exchange
+credentials; Owner controls still write only PostgreSQL authority and the
+current Lifecycle worker remains the sole exchange writer.
+
 ## Deployment Model
 
 Tokyo runs committed releases only. Local SSH is the control plane; ad hoc
@@ -19,7 +84,7 @@ server source edits are forbidden. Production workers are persistent systemd
 services with bounded polling, restart-on-failure, and a shared resource slice.
 Timer-based worker cold starts are forbidden.
 
-Normal code updates use
+`R3` same-Schema Kernel updates use
 `scripts/trading_kernel/deploy_tokyo_release.py`. One command stages the exact
 commit, verifies PostgreSQL flatness and zero runtime activity, verifies
 exchange flatness, zero open orders, independent sides, Cross margin, and

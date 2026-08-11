@@ -136,9 +136,9 @@ M0.5 全部完成后，如果目标产品可以继续使用当前 Venue，预计
 
 ## M0.5 Release Model
 
-M0.5 只确认发布分级和安全边界，具体脚本、路径、服务单元、认证 Manifest 和
-恢复行为由后续专项设计决定。在该设计部署完成前，当前
-`TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` 仍是唯一有效生产流程。
+M0.5 的具体分类器、独立 Release 路径、服务单元、认证 Manifest 和恢复行为由
+`TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` 统一定义。其生产安装状态继续只由
+`MAIN_CONTROL_ROADMAP.md` 记录；在该状态明确切换前，既有生产流程保持有效。
 
 | 发布级别 | 适用范围 | 空仓要求 | 受影响服务 | 目标操作时间 |
 | --- | --- | --- | --- | ---: |
