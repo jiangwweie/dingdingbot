@@ -1,7 +1,7 @@
 ---
 title: PROJECT_INFORMATION_ARCHITECTURE
 status: CURRENT
-last_verified: 2026-07-31
+last_verified: 2026-08-11
 ---
 
 # Project Information Architecture
@@ -39,6 +39,7 @@ owner; other documents summarize stable meaning and link to that owner.
 | Strategy right-tail evaluation | `STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md` | Medium | Link to the evaluation contract |
 | Target architecture and invariants | `P0_TRADING_KERNEL_REBUILD_DESIGN.md` | Low | Reuse the canonical chain only |
 | Implementation stages and acceptance checklist | `P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md` | Medium | Do not treat as runtime state |
+| Multi-asset StrategyGroup program stages, dependencies, and workload envelope | `MULTI_ASSET_STRATEGYGROUP_ROADMAP.md` | Medium | Defer implementation details and current runtime state |
 | Current commit, tag, certification, runtime state, and blockers | `MAIN_CONTROL_ROADMAP.md` | High | Link; never copy current values |
 | Deployment procedure and resource limits | `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` | Medium | Do not copy current runtime values |
 | Entry navigation | repository `README.md` and `docs/README.md` | Low | Stay short and point to owners |
@@ -54,6 +55,11 @@ promotion, deployment recovery, migration, and capacity semantics are already
 consolidated into the P0 design, experiment profile, and deployment contract.
 Completed repair task cards are historical material and must not return to
 `docs/current` as a second authority.
+
+`MULTI_ASSET_STRATEGYGROUP_ROADMAP.md` owns only the stable M0-M7 program shape
+for product expansion. It does not own current Venue products, production
+identity, current Universe members, capital policy, implementation status, or
+deployment authority. Those facts remain with their existing canonical sources.
 
 ## Current Runtime Authority
 

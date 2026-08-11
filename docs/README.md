@@ -11,6 +11,7 @@ Status: current Trading Kernel authority index
 | `docs/current/AI_AGENT_CONSTRAINTS.md` | Agent implementation and safety constraints |
 | `docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md` | Approved target architecture and invariants |
 | `docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md` | Implementation stages and acceptance checklist |
+| `docs/current/MULTI_ASSET_STRATEGYGROUP_ROADMAP.md` | Multi-asset StrategyGroup product stages, dependencies, workload envelope, and decision gates |
 | `docs/current/MAIN_CONTROL_ROADMAP.md` | Sole current production identity, measured state, and critical path |
 | `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` | Regular release, recovery, and resource contract |
 | `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Product objective, experiment-capital premise, and order-capable profile |
@@ -33,3 +34,8 @@ kernel invariants, and remaining acceptance checklist. Completed repair task
 cards are historical material outside `docs/current`; their stable scheduling,
 certification, promotion, deployment, migration, and capacity semantics are
 consolidated into the P0 design, experiment profile, and deployment contract.
+
+The multi-asset roadmap owns the stable expansion sequence only. Venue facts,
+Universe membership, capital authority, implementation status, and deployment
+state continue to come from code, PostgreSQL, exchange facts, and
+`MAIN_CONTROL_ROADMAP.md`.

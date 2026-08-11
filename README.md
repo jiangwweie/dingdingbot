@@ -70,6 +70,7 @@ are owned by `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
 | `docs/README.md` | Current authority index |
 | `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Product objective, capital premise, and order-capable profile |
 | `docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md` | Architecture and business invariants |
+| `docs/current/MULTI_ASSET_STRATEGYGROUP_ROADMAP.md` | Multi-asset StrategyGroup product roadmap and stage gates |
 | `docs/current/MAIN_CONTROL_ROADMAP.md` | Current production facts and critical path |
 | `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` | Release, recovery, and resource contract |
 
