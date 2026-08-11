@@ -60,16 +60,18 @@ refreshed by this documentation-only action.
 
 | Area | Deferred state |
 | --- | --- |
-| Candidate commit | `5e902453360f884d2ec2a7d8c6c92568d9459f4a` — `feat(owner-console): add ticket price decision map` |
-| Candidate branch | Exact commit is present on `dev` and `origin/dev`; later branch movement does not change the frozen candidate identity |
-| Certification | Existing exact Release Certification Manifest is `pass` for Schema `0004_owner_control_plane`; Registry, Owner Policy, runtime authority and command-set semantic digests match the current production certification |
-| Production identity | Production remains `1c3063bf520a52c15b144bf613884c7e00147bfc` and `tokyo-runtime-2026.08.10.2`; the candidate has no production tag and has not changed the current release symlink, PostgreSQL identity or services |
+| Candidate commit | `ae2462562245ee236669407d997cbfaff1ca3020` — `feat(deploy): split owner console release paths`; it contains the prior Ticket price-map candidate plus M0.5 R1/R2 release separation |
+| Candidate branch | Exact commit is on focused branch `codex/owner-console-phase1-20260805`; it is not a production tag and has not been pushed or deployed by this work |
+| Classification | Exact `1c3063bf..ae246256` classification is `R2`; affected runtime is only `brc-owner-console-api.service`, with no flatness or Kernel Release Certification requirement |
+| Certification | Exact focused Owner API Certification Manifest is `pass` for Schema `0004_owner_control_plane`; the static frontend exact production build also passes |
+| Previous candidate | `5e902453360f884d2ec2a7d8c6c92568d9459f4a` remains immutable certified provenance but is superseded as the proposed R1/R2 deployment target by `ae246256...` |
+| Production identity | Production remains `1c3063bf520a52c15b144bf613884c7e00147bfc` and `tokyo-runtime-2026.08.10.2`; the new candidate has not changed the current release symlink, PostgreSQL identity or services |
 | Deferral decision | No Controlled Flatten, no deployment, no Owner Policy change, no Entry service/fence change and no StrategyGroup control change are authorized by this record |
 | Pre-M0.5 activation boundary | Under the currently installed combined release path, deployment still requires Entry fencing and exact internal/external flatness; existing Tickets continue naturally and no deployment-driven flattening is authorized |
-| M0.5 classification | The exact `1c3063bf..5e902453` change set classifies as `R2`: Owner API and static presentation only, with no Schema, Registry, Owner Policy, runtime-authority or Exchange Command change |
+| M0.5 classification | The exact `1c3063bf..ae246256` change set classifies as `R2`: Owner API and static presentation only, with no Schema, Registry, Owner Policy, runtime-authority or Exchange Command change |
 | M0.5 local state | The R0-R4 classifier, independent R1/R2 release roots, focused Owner API certification, schema-compatible API startup and removal of Kernel artifact preservation are implemented locally on the focused branch; no production service or symlink has changed |
-| M0.5 activation boundary | After focused certification and explicit Owner deployment confirmation, R1/R2 may activate without flatness or Kernel service changes; the resulting exact API/static candidate must explicitly supersede `5e902453...` before production activation |
-| Supersession | Replacing this SHA with a later candidate requires an explicit new record and an exact passing certification for that replacement |
+| M0.5 activation boundary | After explicit Owner deployment confirmation, exact candidate `ae246256...` may activate through R1/R2 without flatness or Kernel service changes |
+| Supersession | Replacing `ae246256...` with a later candidate requires another explicit record and an exact passing focused certification |
 
 ## Current Performance Snapshot
 
