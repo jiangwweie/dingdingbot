@@ -426,6 +426,8 @@ def test_tradfi_m6_uses_direct_live_entry_without_observation_unlock_gate() -> N
         "上线即小额实盘",
         "不作为实盘解锁门槛",
         "StrategyGroup pause/resume",
+        "TradFi 不拥有独立资金 Policy",
+        "policy-main / Policy v4",
     ):
         assert marker in roadmap
 
@@ -434,6 +436,9 @@ def test_tradfi_m6_uses_direct_live_entry_without_observation_unlock_gate() -> N
         "不设置先观察若干天",
         "既有 Ticket",
         "正式 Readiness、Authority、CapacityClaim、Ticket",
+        "不建立第二资金池或第二套单 Ticket 参数",
+        "Event-to-RuntimeProfile 映射",
+        "不存在第二个 TradFi Owner Policy",
     ):
         assert marker in design
 

@@ -39,6 +39,10 @@ last_verified: 2026-08-12
     Observation 天数或样本数，直接通过 StrategyGroup resume 开放
     `SOR-US-EQ-PERP-001` 新 ENTRY；异常时复用 StrategyGroup pause，既有 Ticket
     继续安全闭环。
+11. Owner 已明确 **TradFi 不拥有独立资金 Policy 或单 Ticket 参数**。Crypto 与 TradFi
+    共同使用 `policy-main / Policy v4` 的 Ticket、风险、方向、保证金、杠杆和
+    Exposure Family 约束；产品差异仅由 RuntimeProfile、Product Compatibility、
+    Universe、Event 和 StrategyGroup Control 表达。
 
 ## Authority Boundary
 
@@ -116,7 +120,7 @@ Ticket、收益和 Review 必须独立统计。LONG 与 SHORT 可共享初始候
 | **M3：跨资产运行底座** | 当前 Kernel 能表达目标 Venue/Product | 保留 canonical Instrument ID，扩展 RuntimeProfile、Product Profile、Session、Corporate Action 和当前 Venue capability | 新 Profile 可完成只读认证和 Observation，且现有加密 Profile 无行为漂移 |
 | **M4：美股 SOR** | 新 StrategyGroup 可以自然产生标准 Signal | 美股 Opening Range、LONG/SHORT Event、Market Plan、Exit Policy、版本身份 | `SOR-US-EQ-PERP-001` 在 Entry 禁用状态完成 Live/Replay 一致的 Observation |
 | **M5：Observation/Shadow** | 获得产品微观结构和策略路径证据 | Spread、Top-of-book quantity、Mark/Index、Opening Range、TP1、MFE/MAE、失败退出、Session 分布；不把报价摩擦称为真实 Slippage | Signal-owned Outcome 可稳定形成并在 M6 与真实 Ticket 并行；不作为实盘解锁门槛 |
-| **M6：小规模实盘闭环** | 上线后直接进入受控小额真实交易 | 独立 Owner Policy、StrategyGroup pause/resume、ENTRY 准入、保护、退出、结算、Review | R4 认证后无观察等待期；自然 Ticket 完整闭环，交易所与 PostgreSQL 无残留或未解决 Incident |
+| **M6：小规模实盘闭环** | 上线后直接进入受控小额真实交易 | 统一 Policy v4、StrategyGroup pause/resume、ENTRY 准入、保护、退出、结算、Review | R4 认证后无观察等待期；Crypto/TradFi 共用账户预算，自然 Ticket 完整闭环且无残留或未解决 Incident |
 | **M7：第二策略族** | 评估当前内核上的 `RSRVCB-001` | 按当前 Schema/Policy 重写可复用领域模块 | 仅在美股产品底座和 SOR 闭环稳定后进入实施 |
 
 ### TradFi Strategy Backlog
@@ -233,7 +237,7 @@ M2–M4 进入本地实现；该状态不改变生产 Registry、PostgreSQL Univ
 | **标的池** | AAPL、GOOGL、MSFT、NVDA、META、AMZN、TSLA、SNDK；QQQ/SPY 仅 reference | M4 是否使用 reference regime；M5 后是否替换成员 |
 | **Session** | 全时段 Observation；首版仅 US Regular Session 允许 ENTRY | 具体日历表和时间分类实现 |
 | **方向** | LONG、SHORT 都观察；M6 上线直接实盘，最终 Active Universe 与方向范围由部署包冻结 | 两侧成员是否分化 |
-| **资本** | M1–M5 不增加真实资本；M6 使用独立单 Ticket 小额边界并共享账户总容量 | 精确账户总风险、方向和保证金值 |
+| **资本** | M1–M5 不增加真实资本；M6 完整复用 Policy v4，不设置 TradFi 独立单 Ticket 或账户参数 | 不扩大既有 Policy v4 边界 |
 | **企业事件** | `blocked` 禁止新 ENTRY；M6 v1 对 `unavailable` 显式告警和冻结证据，不以其单独阻断 | 机构级数据供应源和未来硬门禁版本 |
 | **产品异常** | 阻止新 ENTRY，既有 Ticket 继续保护、退出和对账 | Venue 特定错误码映射 |
 

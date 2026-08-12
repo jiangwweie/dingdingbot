@@ -138,7 +138,8 @@ Signal 页面允许 `not_evaluated`：它表示 Signal 已形成但 Entry Admiss
 
 M6 不删除或替换 M5：
 
-1. Owner 在 M6 R4 部署包中批准 TradFi Policy、资本、方向和 Universe；
+1. Owner 在 M6 R4 部署包中批准方向和 Universe；资本完整复用统一的
+   `policy-main / Policy v4`，不增加 TradFi 专属参数；
 2. `new_entry_submit_enabled` 与 Strategy Control 恢复后，同一 StrategySignal 进入
    正式 Admission；
 3. CapacityClaim、Ticket 和 Command 仍由既有 Kernel 生成；

@@ -37,6 +37,9 @@ date: 2026-08-12
    产品不是物理隔离资金池。
 5. Binance Product Snapshot 当前可提供 Product、Session、Mark、Index、Funding、
    best bid/ask 和 Top-of-book；`corporate_event_status` 仍可能为 `unavailable`。
+6. Owner 已明确 **TradFi 不设计任何独立单 Ticket 资金参数**。Crypto 与 TradFi
+   共同使用 `policy-main / Policy v4` 的 Ticket、总风险、方向风险、保证金、杠杆和
+   Exposure Family 边界。
 
 ## 产品状态机
 
@@ -92,43 +95,47 @@ Observation 关联，Owner Console 在 Observation 详情与 Ticket 详情之间
 - **既有 Ticket**：继续保护、退出、对账、结算和 Review；
 - **Controlled flatten**：仍是独立 Owner 操作，Strategy pause 不隐含平仓。
 
-### TradFi Policy 控制
+### 统一账户 Policy 控制
 
-独立 TradFi Owner Policy 仍有实际价值：它拥有 Product/Event scope、单 Ticket 小额风险、
-Family capacity 和 live-submit authority。首期只有一个 TradFi StrategyGroup，因此前端不
-增加一个与 Strategy pause 语义重复的 TradFi Policy 开关：
+M6 删除独立 TradFi Owner Policy。**`policy-main / Policy v4` 是同一 Binance account
+唯一的资本和 live-submit authority**，同时覆盖 Crypto 与 TradFi 的精确 Event/Profile
+组合。产品和策略隔离不再通过第二套资金参数表达：
 
 | 控制 | 首期前端 | 作用 |
 | --- | --- | --- |
 | **Runtime Entry Fence** | 状态只读 | 部署、身份不一致和故障时阻止整个 Writer |
-| **TradFi Owner Policy** | 状态与风险只读 | 定义 TradFi 产品域范围和资本边界 |
+| **Policy v4** | 统一账户风险与全局 Entry 控制 | Crypto + TradFi 共用一套 Ticket、风险和保证金边界 |
 | **StrategyGroup pause/resume** | 主操作按钮 | Owner 日常暂停或恢复美股 SOR 新 ENTRY |
 
-M6 首次部署前，将尚未生产化的本地身份改为状态中性的
-**`tradfi-equity-usdm-v1`** 和 **`policy-tradfi-main`**。不得保留
-`*-observe*` alias、双读或兼容 adapter。
+M6 首次部署前，将尚未生产化的 RuntimeProfile 改为状态中性的
+**`tradfi-equity-usdm-v1`**，并删除本地候选 `policy-tradfi-observe`。不得保留
+`*-observe*` Policy alias、双读或兼容 adapter。
 
-## 同账户跨 Policy 资金边界
+## 统一账户资金边界
 
-M6 不建立第二资金池，也不能让两个 Policy 使用互相矛盾的账户总风险上限。推荐使用
-现有 account exposure 投影并增加一个 Seed/Certification 不变量：
+M6 不建立第二资金池或第二套单 Ticket 参数。现有 account exposure 投影继续按
+`venue_id + account_id` 合并 Crypto 与 TradFi；所有准入只读取同一个 Policy v4：
 
-1. 同一 `venue_id + account_id` 下的所有启用 Policy 必须拥有相同的账户级上限：
-   `max_concurrent_tickets`、`max_gross_stop_risk_fraction`、
-   `max_gross_initial_margin_utilization`、`directional_stop_risk_limit_fraction`、
-   `max_leverage` 和 `supported_margin_mode`；
-2. Policy 仍可拥有不同的单 Ticket 上限、Event scope、Family limit、最小成单比例和
-   Entry 状态；
-3. TradFi 首期维持 **单 Ticket Stop Risk 上限 0.005**、**单 Ticket Initial Margin
-   上限 0.10**，并通过 `opening_range` Family limit 限制同类并发；
-4. CapacityClaim 冻结当前 account usage 和 TradFi Policy 版本，Ticket 签发与 dispatch
+1. Policy v4 的 `max_concurrent_tickets=3` 同时统计 Crypto 与 TradFi Ticket；
+2. `max_ticket_stop_risk_fraction=0.02` 和
+   `max_ticket_initial_margin_fraction=0.30` 对两类产品完全相同；
+3. `max_gross_stop_risk_fraction=0.06`、
+   `directional_stop_risk_limit_fraction=0.04` 和
+   `max_gross_initial_margin_utilization=0.90` 是整个账户的共同上限；
+4. `opening_range=2` 同时统计 Crypto SOR 与 TradFi SOR，不为 TradFi 增加 Family
+   配额；
+5. CapacityClaim 冻结当前 account usage 和同一个 Policy v4 版本，Ticket 签发与 dispatch
    前继续使用同一 account exposure 重新验证；
-5. 若行动时 Crypto Reservation 已占用账户风险或保证金，TradFi 只使用剩余容量，不能
-   以独立 Policy 为由重复计算余额。
+6. 若行动时任一产品 Reservation 已占用 Ticket、风险、方向或保证金容量，另一产品只
+   使用 Policy v4 的剩余容量。
 
-该设计避免为首期引入新的“虚拟子账户”概念，也关闭了不同 Policy 总风险上限造成的
-顺序依赖。具体账户总上限继续由实验 Profile 和行动时 Owner 批准的 PostgreSQL Policy
-事实拥有，本设计不自行扩大资本、杠杆或总风险。
+Owner Policy scope 从单一 `runtime_profile_id` 改为一个有界、精确、排序的
+**Event-to-RuntimeProfile 映射**。每个 Event 只属于一个 Profile，但一个 Policy 可以覆盖
+多个 Profile。这使 Policy v4 同时覆盖 `tiny-live-v1` 和 `tradfi-equity-usdm-v1`，而
+Product Compatibility、RuntimeScope 和 StrategyUniverse 仍保持严格隔离。
+
+该设计减少一个不必要的 Policy 概念，消除顺序依赖，也不会扩大 Policy v4 已有资本、
+杠杆或总风险边界。
 
 ## Product 与 Corporate Event 准入
 
@@ -167,8 +174,8 @@ StrategyGroup 驾驶舱增加一个紧凑的 **Live Control** 区域：
    `Needs intervention`；
 2. 新 ENTRY 状态：Strategy Control、Policy capability、Entry Fence 三层结果和首要
    blocker；
-3. 小额风险摘要：单 Ticket Stop Risk、单 Ticket Margin、Family capacity 和账户剩余
-   Ticket/Stop Risk/Margin；
+3. 统一 Policy v4 风险摘要：账户剩余 Ticket、Stop Risk、方向风险、Margin 和
+   Exposure Family capacity；
 4. Active Universe、当前 Session、下一可交易窗口和 Product facts 新鲜度；
 5. 主按钮：`Pause strategy` 或 `Resume strategy`，使用现有 TOTP 确认；
 6. 次按钮：查看 Signals、Observations、Tickets、Reviews 和受控平仓；
@@ -185,8 +192,8 @@ M6 复用：
 
 M6 后端新增或完善：
 
-1. TradFi live Profile/Policy 的状态中性身份和 Seed；
-2. 同账户多 Policy 的账户级字段一致性认证；
+1. TradFi live RuntimeProfile 的状态中性身份和 Seed，并删除第二 TradFi Policy；
+2. Policy scope 支持一个 Policy 对多个精确 Event-to-RuntimeProfile 映射；
 3. TradFi Product/Session/Spread/Mark-Index 的 Readiness 与 action-time revalidation；
 4. `unavailable` Corporate Event 的显式 evidence 语义；
 5. live Signal 同时创建 Observation Outcome，并允许它与 AdmissionDecision/Ticket 并存；
@@ -204,7 +211,7 @@ current production 0004
 -> fence Entry and stop old writers
 -> preserve 0004 history digest
 -> migrate once to final 0005 authority
--> install final neutral TradFi Profile/Policy identities
+-> install final neutral TradFi Profile and extend policy-main scope
 -> install + certify + activate approved TradFi Universes
 -> start safety workers
 -> start Entry while SOR-US-EQ-PERP-001 remains paused
@@ -226,9 +233,7 @@ Owner 已确认“上线即交易”和“异常时暂停策略”，但以下�
 | --- | --- | --- |
 | **方向** | LONG、SHORT 都可交易，使用独立 Event/Universe 和 Netting Domain | 部署前冻结 |
 | **Active Universe** | 从 8 个候选中安装经行动时认证通过的 5–8 个成员；两侧可先相同 | 部署前冻结 |
-| **单 Ticket Stop Risk** | 账户权益的 `0.005` 上限 | 部署前冻结 |
-| **单 Ticket Initial Margin** | 账户 Margin Balance 的 `0.10` 上限 | 部署前冻结 |
-| **账户总容量** | 与同账户 Crypto Policy 使用同一组账户级上限 | 代码审查后冻结 |
+| **全部资金参数** | 完整复用 `policy-main / Policy v4`，不增加 TradFi 专属字段或数值 | Owner 已确认 |
 | **Corporate Event unavailable** | 显式告警和冻结证据，但 M6 v1 不单独阻止 ENTRY | 部署前冻结 |
 
 这些值不由 Migration 推断，也不从文档直接读取；最终由 PostgreSQL Owner Policy、
@@ -241,8 +246,10 @@ StrategyUniverse 和对应 Certification evidence 成为运行时权威。
 1. 一个自然 TradFi Signal 可通过正式链创建 immutable Ticket 和 durable ENTRY Command；
 2. Pause 在 Signal、Ticket issue 和 dispatch revalidation 边界阻止新 ENTRY；
 3. Pause 后既有 Ticket 仍完成 protection、exit、reconciliation、settlement 和 review；
-4. Crypto 与 TradFi 共用 account exposure，不能重复使用风险或保证金；
-5. 同账户 Policy 账户级字段不一致时 Seed/Certification 失败；
+4. Crypto 与 TradFi 使用同一个 Policy v4 和 account exposure，不能重复使用 Ticket、
+   风险、方向、Family 或保证金容量；
+5. PostgreSQL 中不存在第二个 TradFi Owner Policy，所有 TradFi RuntimeScope 冻结
+   `policy-main` 的精确版本；
 6. 非 REGULAR、stale Product/Schedule、非法 Spread/Mark-Index、错误身份和 occupied
    Netting Domain 均拒绝 ENTRY；
 7. live Signal 的 Observation 与真实 Ticket 可并存并双向访问；
@@ -253,6 +260,7 @@ StrategyUniverse 和对应 Certification evidence 成为运行时权威。
 ## 非目标
 
 - 不以 Observation 样本量、观察天数或人工收益判断作为 M6 Entry 前置条件；
+- 不为 TradFi 增加单 Ticket Stop Risk、Margin、Leverage、并发或 Family 参数；
 - 不自动扩大账户总风险、杠杆、保证金利用率或资本；
 - 不恢复加密 `SOR-001`；
 - 不引入美股专用 Ticket、Command、Lifecycle 或数据库权威；
