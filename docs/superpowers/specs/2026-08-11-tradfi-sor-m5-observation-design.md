@@ -6,6 +6,14 @@ date: 2026-08-11
 
 # TradFi SOR M5 Observation / Shadow 设计
 
+## 2026-08-12 M6 决策补充
+
+Owner 已明确 **M6 上线即开启小额真实交易**，不以 Observation 天数、样本数或人工
+go/hold/stop 结论作为 Entry 解锁门槛。本文件继续拥有 M5 Observation 的数据、路径和
+展示语义；M6 上线状态机、StrategyGroup pause 和真实资金边界由
+`docs/superpowers/specs/2026-08-12-tradfi-sor-m6-live-entry-design.md` 取代此前可能被理解为
+“先观察后交易”的阶段解释。
+
 ## Owner 解释与设计结论
 
 Owner 对 M5 的解释被采纳：Observation 不舍弃实盘交易能力，只暂停新
@@ -130,12 +138,15 @@ Signal 页面允许 `not_evaluated`：它表示 Signal 已形成但 Entry Admiss
 
 M6 不删除或替换 M5：
 
-1. Owner 单独批准 TradFi Policy、资本、方向和 Universe；
+1. Owner 在 M6 R4 部署包中批准 TradFi Policy、资本、方向和 Universe；
 2. `new_entry_submit_enabled` 与 Strategy Control 恢复后，同一 StrategySignal 进入
    正式 Admission；
 3. CapacityClaim、Ticket 和 Command 仍由既有 Kernel 生成；
 4. Observation Outcome 继续完成，只作为真实 Ticket 的对照证据；
 5. 真实成交、Fees、Funding、Slippage、Settlement 和 Review 只来自 Ticket 链。
+
+M6 认证完成后不增加 Observation 等待期；StrategyGroup resume 即允许后续新鲜 Signal
+参与正式准入。
 
 ## 验收标准
 

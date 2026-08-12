@@ -2,7 +2,7 @@
 title: MULTI_ASSET_STRATEGYGROUP_ROADMAP
 status: CURRENT_PLAN
 program_id: MASG-P1
-last_verified: 2026-08-11
+last_verified: 2026-08-12
 ---
 
 # Multi-Asset StrategyGroup Roadmap
@@ -35,6 +35,10 @@ last_verified: 2026-08-11
 9. M5 **只暂停 TradFi Ticket** 的生产准入，不删除未来实盘能力。
    Observation Outcome 不构造模拟 Ticket、模拟订单或第二执行链；M6 恢复权限后
    仍接回正式 Readiness、CapacityClaim、Ticket 和 Command 链。
+10. Owner 已于 **2026-08-12** 明确 M6 采用上线即小额实盘：R4 认证完成后不等待
+    Observation 天数或样本数，直接通过 StrategyGroup resume 开放
+    `SOR-US-EQ-PERP-001` 新 ENTRY；异常时复用 StrategyGroup pause，既有 Ticket
+    继续安全闭环。
 
 ## Authority Boundary
 
@@ -111,8 +115,8 @@ Ticket、收益和 Review 必须独立统计。LONG 与 SHORT 可共享初始候
 | **M2：产品化前端** | StrategyGroup 驾驶舱、标的中心和 Universe 管理 | 只读标的状态、归属、Universe Diff、Warming、Activation、审计记录 | 日常策略与标的管理不依赖手工 SQL 或拼装多处事实 |
 | **M3：跨资产运行底座** | 当前 Kernel 能表达目标 Venue/Product | 保留 canonical Instrument ID，扩展 RuntimeProfile、Product Profile、Session、Corporate Action 和当前 Venue capability | 新 Profile 可完成只读认证和 Observation，且现有加密 Profile 无行为漂移 |
 | **M4：美股 SOR** | 新 StrategyGroup 可以自然产生标准 Signal | 美股 Opening Range、LONG/SHORT Event、Market Plan、Exit Policy、版本身份 | `SOR-US-EQ-PERP-001` 在 Entry 禁用状态完成 Live/Replay 一致的 Observation |
-| **M5：Observation/Shadow** | 获得产品微观结构和策略路径证据 | Spread、Top-of-book quantity、Mark/Index、Opening Range、TP1、MFE/MAE、失败退出、Session 分布；不把报价摩擦称为真实 Slippage | 完成约定市场日窗口并形成独立的继续、修改或停止结论 |
-| **M6：小规模实盘闭环** | 完成受控真实资金自然 Ticket | 独立 Owner Policy、ENTRY 准入、保护、退出、结算、Review | 自然 Ticket 完整闭环，交易所与 PostgreSQL 无残留或未解决 Incident |
+| **M5：Observation/Shadow** | 获得产品微观结构和策略路径证据 | Spread、Top-of-book quantity、Mark/Index、Opening Range、TP1、MFE/MAE、失败退出、Session 分布；不把报价摩擦称为真实 Slippage | Signal-owned Outcome 可稳定形成并在 M6 与真实 Ticket 并行；不作为实盘解锁门槛 |
+| **M6：小规模实盘闭环** | 上线后直接进入受控小额真实交易 | 独立 Owner Policy、StrategyGroup pause/resume、ENTRY 准入、保护、退出、结算、Review | R4 认证后无观察等待期；自然 Ticket 完整闭环，交易所与 PostgreSQL 无残留或未解决 Incident |
 | **M7：第二策略族** | 评估当前内核上的 `RSRVCB-001` | 按当前 Schema/Policy 重写可复用领域模块 | 仅在美股产品底座和 SOR 闭环稳定后进入实施 |
 
 ### TradFi Strategy Backlog
@@ -143,8 +147,8 @@ Owner Console，并采用与风险相称的聚焦测试。真实市场观察和�
 | **M3，同一 Venue** | 10–15 天 | 2–3 周 | 当前 Binance 绑定点和产品事实扩展 | 中 |
 | **M3，全新 Venue** | 20–30 天 | 4–6 周 | Adapter、账户模式、命令和对账语义 | 中至高 |
 | **M4** | 7–12 天 | 1.5–2.5 周 | Opening Range、Session 和退出语义 | 低至中 |
-| **M5** | 4–8 天开发 | 另加 4–8 周观察 | 自然市场日和有效 Observation 数量 | 极低 |
-| **M6** | 2–5 天开发 | 样本等待约 4–12 周 | 信号频率和自然 Ticket 生命周期 | 高但有界 |
+| **M5** | 4–8 天开发 | 已完成本地候选；生产后持续积累 | 自然市场日和有效 Observation 数量 | 极低 |
+| **M6** | 4–8 天开发 | 上线后等待自然 Ticket 闭环，不等待 Observation 解锁 | 同账户跨 Policy 风险、行动时 Product 准入和自然 Ticket 生命周期 | 高但有界 |
 | **M7** | 15–25 天 | 3–5 周 | 旧设计向当前 Schema/Policy 的重写范围 | 中 |
 
 M0.5 全部完成后，如果目标产品可以继续使用当前 Venue，预计约 **7–10 周净开发时间**
@@ -195,9 +199,9 @@ M1
        ├── M2B: Universe 受控编辑
        └── M4: SOR-US-EQ-PERP-001
               ↓
-             M5: Observation / Shadow
-              ↓
-             M6: 小规模实盘
+             M5: Observation / Shadow evidence
+              ↓（无样本解锁门槛）
+             M6: 上线即小规模实盘
               ↓
              M7: RSRVCB-001
 ```
@@ -228,9 +232,9 @@ M2–M4 进入本地实现；该状态不改变生产 Registry、PostgreSQL Univ
 | **账户** | 同一 USDⓈ-M account、独立 RuntimeProfile；暂不增加子账户 | M6 真实资本和是否需要物理隔离 |
 | **标的池** | AAPL、GOOGL、MSFT、NVDA、META、AMZN、TSLA、SNDK；QQQ/SPY 仅 reference | M4 是否使用 reference regime；M5 后是否替换成员 |
 | **Session** | 全时段 Observation；首版仅 US Regular Session 允许 ENTRY | 具体日历表和时间分类实现 |
-| **方向** | LONG、SHORT 都观察，首期候选可相同但使用独立 Universe，M6 时分别批准实盘 | M5 后两侧成员是否分化 |
-| **资本** | M1–M5 不增加真实资本；M6 单独批准小规模边界 | 风险比例、并发容量和保证金值 |
-| **企业事件** | 数据缺失、过期或冲突时禁止新 ENTRY | 数据供应源和冻结窗口参数 |
+| **方向** | LONG、SHORT 都观察；M6 上线直接实盘，最终 Active Universe 与方向范围由部署包冻结 | 两侧成员是否分化 |
+| **资本** | M1–M5 不增加真实资本；M6 使用独立单 Ticket 小额边界并共享账户总容量 | 精确账户总风险、方向和保证金值 |
+| **企业事件** | `blocked` 禁止新 ENTRY；M6 v1 对 `unavailable` 显式告警和冻结证据，不以其单独阻断 | 机构级数据供应源和未来硬门禁版本 |
 | **产品异常** | 阻止新 ENTRY，既有 Ticket 继续保护、退出和对账 | Venue 特定错误码映射 |
 
 ## Frontend Product Boundary
@@ -269,7 +273,8 @@ Active Universe
 2. 首期 Universe 限制为 5–8 个标的，保持在当前 1–10 成员边界内；
 3. 15m 策略按闭合 K 线增量运行，不在每次 cadence 重拉完整历史窗口；
 4. Depth、Mark/Index 和高成本事实只在有界候选范围获取；
-5. 新 RuntimeProfile 在 M1–M5 全程保持 ENTRY 禁用；
+5. 新 RuntimeProfile 在 M1–M5 本地候选保持 ENTRY 禁用；M6 首次生产 R4 认证后不等待
+   Observation 样本，通过 StrategyGroup resume 直接开放小额 ENTRY；
 6. 新 Schema 只能走停止、空仓、前向、历史保留的 migration；
 7. 新 Venue 必须复用 durable Exchange Command、unknown outcome、partial fill、
    reconciliation 和 controlled exit 语义；
@@ -285,7 +290,7 @@ Active Universe
 - 将多个 StrategyVersion 合并后决定当前版本能力；
 - 直接合并旧 US-equity 分支；
 - 建立第二套美股订单或生命周期系统；
-- 在 M5 证据完成前开放美股永续真实 ENTRY；
+- 以 M5 样本量、观察天数或人工收益判断作为 M6 实盘解锁门槛；
 - 在 M6 稳定前启动 M7 实施；
 - 由本规划文件授权生产部署或交易所写入。
 - 为追求速度而取消 Runtime Identity、Unknown Outcome、Partial Fill、
@@ -306,7 +311,8 @@ Active Universe
    Venue capability、Session/Corporate Action 架构设计和前向 migration 计划；
 5. M4：`SOR-US-EQ-PERP-001` 策略语义、退出政策和 Live/Replay 验收矩阵；
 6. M5：Observation 指标、证据窗口和 go/hold/stop 判定合同；
-7. M6：独立资本政策、受控实盘和自然 Ticket 验收计划；
+7. M6：`docs/superpowers/specs/2026-08-12-tradfi-sor-m6-live-entry-design.md`
+   记录上线即小额实盘、StrategyGroup pause、跨 Policy 账户容量和联合 R4 部署边界；
 8. M7：旧 RSRVCB 设计的可移植模块审计与当前内核重写计划。
 
 任何阶段的实现、迁移和部署状态仍由当前代码、PostgreSQL、Venue 事实和

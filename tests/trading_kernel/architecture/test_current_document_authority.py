@@ -413,6 +413,31 @@ def test_current_documents_define_signal_owned_observation_without_execution_aut
         assert not missing, f"{relative_path} lacks M5 Observation boundary: {missing}"
 
 
+def test_tradfi_m6_uses_direct_live_entry_without_observation_unlock_gate() -> None:
+    roadmap = (
+        REPO_ROOT / "docs/current/MULTI_ASSET_STRATEGYGROUP_ROADMAP.md"
+    ).read_text(encoding="utf-8")
+    design = (
+        REPO_ROOT
+        / "docs/superpowers/specs/2026-08-12-tradfi-sor-m6-live-entry-design.md"
+    ).read_text(encoding="utf-8")
+
+    for marker in (
+        "上线即小额实盘",
+        "不作为实盘解锁门槛",
+        "StrategyGroup pause/resume",
+    ):
+        assert marker in roadmap
+
+    for marker in (
+        "上线后直接允许小额真实 ENTRY",
+        "不设置先观察若干天",
+        "既有 Ticket",
+        "正式 Readiness、Authority、CapacityClaim、Ticket",
+    ):
+        assert marker in design
+
+
 def test_stable_policy_v4_contract_defers_deployed_identity_to_roadmap() -> None:
     runtime_profile = (
         REPO_ROOT / "docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md"
