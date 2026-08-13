@@ -35,6 +35,9 @@ from src.trading_kernel.infrastructure.runtime_identity import (
 
 SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
 COMPATIBLE_SOURCE_SCHEMA_REVISION = "0004_owner_control_plane"
+R4_LEGACY_PRESERVATION_DIGEST = (
+    "sha256:830ed497a82630805504e9f34ba72dcafcad9164a6fc65aa2a70ae1e3c21ec34"
+)
 EXPECTED_CONFIGURED_LEVERAGE = 5
 RELEASE_ROOT = "/opt/brc/releases"
 CURRENT_RELEASE = "/opt/brc/current"
@@ -200,22 +203,11 @@ class TokyoReleaseBackend(Protocol):
         target_schema_revision: str,
     ) -> None: ...
 
-    def verify_preservation(
+    def certify_r4_recovery(
         self,
         release: str,
-        source_schema_revision: str,
-        expected_digest: str,
+        legacy_preservation_digest: str,
     ) -> Mapping[str, object]: ...
-
-    def persist_preservation_digest(self, release: str, digest: str) -> None: ...
-
-    def inherit_preservation_digest(self, source_release: str, target_release: str) -> None: ...
-
-    def read_preservation_digest(self, release: str) -> str: ...
-
-    def mark_preservation_verified(self, release: str, digest: str) -> None: ...
-
-    def preservation_verified(self, release: str, digest: str) -> bool: ...
 
     def deploy_compatible_identity(
         self,
@@ -478,10 +470,8 @@ def _deploy_compatible_upgrade(
         raise DeploymentBlocked(
             "compatible upgrade requires ENTRY inactive disabled and fenced"
         )
-    target_release_installed = False
     if not backend.release_exists(plan.target_release):
         backend.install_release(plan.target_commit, plan.target_release)
-        target_release_installed = True
 
     schema_state = backend.inspect_schema(plan.target_release)
     database_revision = str(schema_state.get("alembic_revision", ""))
@@ -491,7 +481,6 @@ def _deploy_compatible_upgrade(
     }:
         raise DeploymentBlocked("compatible source schema revision differs")
 
-    preservation_digest: str | None
     recovery_seed_identity: str
     source_identity: dict[str, str] | None = None
     if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
@@ -501,7 +490,6 @@ def _deploy_compatible_upgrade(
             exchange_probe_release=current_release,
         )
         _require_preservation_digest(source_certification)
-        preservation_digest = None
         _require_marker(
             backend,
             current_release,
@@ -524,12 +512,6 @@ def _deploy_compatible_upgrade(
             raise DeploymentBlocked("exact source Seed marker differs")
         recovery_seed_identity = source_identity["seed_identity"]
     else:
-        if target_release_installed:
-            backend.inherit_preservation_digest(
-                current_release,
-                plan.target_release,
-            )
-        preservation_digest = None
         recovery_seed_identity = backend.read_release_marker(
             current_release,
             ".brc-seed-identity",
@@ -559,11 +541,7 @@ def _deploy_compatible_upgrade(
             )
             if final_identity != source_identity:
                 raise DeploymentBlocked("source runtime identity changed during cutover")
-            preservation_digest = _require_preservation_digest(final_source)
-            backend.persist_preservation_digest(
-                plan.target_release,
-                preservation_digest,
-            )
+            _require_preservation_digest(final_source)
             try:
                 migration_attempted = True
                 backend.migrate_schema(
@@ -586,34 +564,15 @@ def _deploy_compatible_upgrade(
                 raise
             else:
                 schema_migrated = True
-        else:
-            preservation_digest = backend.read_preservation_digest(
-                plan.target_release
-            )
-            if not _SEED_IDENTITY.fullmatch(preservation_digest):
-                raise DeploymentBlocked("source preservation digest is invalid")
-
-        if preservation_digest is None:
-            raise DeploymentBlocked("source preservation digest is missing")
-
-        if not backend.preservation_verified(
+        recovery_certification = backend.certify_r4_recovery(
             plan.target_release,
-            preservation_digest,
-        ):
-            preservation = backend.verify_preservation(
-                plan.target_release,
-                COMPATIBLE_SOURCE_SCHEMA_REVISION,
-                preservation_digest,
-            )
-            _require_preservation_verification(
-                preservation,
-                target_schema_revision=plan.schema_revision,
-                expected_digest=preservation_digest,
-            )
-            backend.mark_preservation_verified(
-                plan.target_release,
-                preservation_digest,
-            )
+            R4_LEGACY_PRESERVATION_DIGEST,
+        )
+        _require_r4_recovery_certification(
+            recovery_certification,
+            target_schema_revision=plan.schema_revision,
+            legacy_preservation_digest=R4_LEGACY_PRESERVATION_DIGEST,
+        )
 
         deployment_identity = backend.deploy_compatible_identity(
             plan.target_release,
@@ -949,6 +908,38 @@ def _require_preservation_verification(
         raise DeploymentBlocked("compatible target schema revision differs")
     if _require_preservation_digest(payload) != expected_digest:
         raise DeploymentBlocked("history preservation digest differs")
+
+
+def _require_r4_recovery_certification(
+    payload: Mapping[str, object],
+    *,
+    target_schema_revision: str,
+    legacy_preservation_digest: str,
+) -> None:
+    """Require immutable history and mutable target projections separately."""
+
+    if (
+        payload.get("status") != "pass"
+        or payload.get("alembic_revision") != target_schema_revision
+        or payload.get("legacy_preservation_digest")
+        != legacy_preservation_digest
+    ):
+        raise DeploymentBlocked("R4 recovery certification failed")
+    target_shape = payload.get("target_shape")
+    migration_gate = payload.get("migration_gate")
+    historical_proof = payload.get("historical_preservation_proof")
+    terminal_lineage = payload.get("terminal_lineage_manifest")
+    if (
+        not isinstance(target_shape, Mapping)
+        or target_shape.get("status") != "pass"
+        or not isinstance(migration_gate, Mapping)
+        or any(int(str(value)) != 0 for value in migration_gate.values())
+        or not isinstance(historical_proof, Mapping)
+        or historical_proof.get("status") != "pass"
+        or not isinstance(terminal_lineage, Mapping)
+        or not _SEED_IDENTITY.fullmatch(str(terminal_lineage.get("digest", "")))
+    ):
+        raise DeploymentBlocked("R4 recovery history or projection certification failed")
 
 
 def _require_database_lineage_verification(
@@ -1404,85 +1395,19 @@ class SshTokyoReleaseBackend:
             target_schema_revision,
         )
 
-    def verify_preservation(
+    def certify_r4_recovery(
         self,
         release: str,
-        source_schema_revision: str,
-        expected_digest: str,
+        legacy_preservation_digest: str,
     ) -> Mapping[str, object]:
         return self._release_json(
             release,
             "scripts/trading_kernel/verify_schema.py",
-            "--preserve-source-revision",
-            source_schema_revision,
-            "--expected-preservation-digest",
-            expected_digest,
+            "--certify-r4-recovery",
+            "--legacy-preservation-digest",
+            legacy_preservation_digest,
             "--summary-only",
         )
-
-    def persist_preservation_digest(self, release: str, digest: str) -> None:
-        self._write_release_marker(
-            release,
-            ".brc-0002-preservation-digest",
-            digest,
-        )
-
-    def inherit_preservation_digest(
-        self,
-        source_release: str,
-        target_release: str,
-    ) -> None:
-        digest = self.read_preservation_digest(source_release)
-        self.persist_preservation_digest(target_release, digest)
-
-    def read_preservation_digest(self, release: str) -> str:
-        return self.read_release_marker(
-            release,
-            ".brc-0002-preservation-digest",
-        )
-
-    def mark_preservation_verified(self, release: str, digest: str) -> None:
-        # The immediately preceding verify_preservation call has already
-        # recomputed and checked the database-bound source manifest.  Do not
-        # repeat that full-history scan merely to write its successful marker.
-        # A later resumable invocation still calls preservation_verified,
-        # which recomputes the digest before trusting this marker.
-        self._write_release_marker(
-            release,
-            ".brc-0002-preservation-verified",
-            digest,
-        )
-
-    def preservation_verified(self, release: str, digest: str) -> bool:
-        result = self._remote(
-            (
-                "sudo",
-                "cat",
-                f"{release}/.brc-0002-preservation-verified",
-            ),
-            check=False,
-        )
-        if result.returncode != 0:
-            return False
-        verified_digest = result.stdout
-        if verified_digest != digest:
-            raise DeploymentBlocked("preservation verification marker differs")
-        payload = self._release_json(
-            release,
-            "scripts/trading_kernel/verify_schema.py",
-            "--preserve-source-revision",
-            COMPATIBLE_SOURCE_SCHEMA_REVISION,
-            "--expected-preservation-digest",
-            digest,
-            "--summary-only",
-            check=False,
-        )
-        _require_preservation_verification(
-            payload,
-            target_schema_revision=SCHEMA_REVISION,
-            expected_digest=digest,
-        )
-        return True
 
     def deploy_compatible_identity(
         self,

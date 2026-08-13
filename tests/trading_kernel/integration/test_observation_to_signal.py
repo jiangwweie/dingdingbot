@@ -26,6 +26,9 @@ from src.trading_kernel.domain.product import (
     ProductSessionSnapshot,
 )
 from src.trading_kernel.domain.strategy_universe import build_strategy_universe
+from src.trading_kernel.infrastructure.binance_product_snapshot import (
+    parse_binance_product_snapshots,
+)
 from src.trading_kernel.infrastructure.pg_models import (
     admission_decisions,
     capacity_claims,
@@ -407,6 +410,94 @@ async def test_tradfi_signal_creates_one_observation_without_execution_authority
     assert product_row["best_bid_quantity"] == Decimal(25)
     assert product_row["best_ask_quantity"] == Decimal(18)
     assert counts == {"admission": 0, "claim": 0, "ticket": 0, "command": 0}
+
+
+@pytest.mark.asyncio
+async def test_tradfi_warming_uses_production_schedule_shape_without_signal_chain(
+    observation_engine: AsyncEngine,
+) -> None:
+    await _seed_tradfi_scope(observation_engine, lifecycle_state="warming")
+    snapshot = us_equity_sor_snapshot(side="long")
+    assert snapshot.product_session is not None
+    session = snapshot.product_session
+    trigger_ms = snapshot.trigger_candle_close_time_ms
+    product = parse_binance_product_snapshots(
+        exchange_instrument_ids=(AAPL,),
+        exchange_info={
+            "symbols": [
+                {
+                    "symbol": "AAPLUSDT",
+                    "contractType": "TRADIFI_PERPETUAL",
+                    "underlyingType": "EQUITY",
+                    "marginAsset": "USDT",
+                    "status": "TRADING",
+                }
+            ]
+        },
+        trading_schedule={
+            "updateTime": str(trigger_ms - 60_000),
+            "marketSchedules": {
+                "EQUITY": {
+                    "sessions": [
+                        {
+                            "startTime": str(session.regular_session_open_ms),
+                            "endTime": str(session.regular_session_close_ms),
+                            "type": "REGULAR",
+                        }
+                    ]
+                }
+            },
+        },
+        premium_index=[],
+        depth_by_symbol={},
+        observed_at_ms=trigger_ms,
+    )[0]
+    source = FakeMarketSource(
+        {(AAPL, "15m"): snapshot.candles_15m},
+        product_sessions=(product,),
+    )
+
+    result = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        source,
+        ObservationRequest(
+            runtime_scope_id="scope-sor-us-aapl-long",
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            trigger_candle_close_time_ms=snapshot.trigger_candle_close_time_ms,
+        ),
+    )
+
+    async with observation_engine.connect() as connection:
+        scope = (
+            await connection.execute(
+                sa.select(runtime_scopes_current).where(
+                    runtime_scopes_current.c.runtime_scope_id
+                    == "scope-sor-us-aapl-long"
+                )
+            )
+        ).mappings().one()
+        counts = {
+            "facts": await connection.scalar(
+                sa.select(sa.func.count()).select_from(facts_current)
+            ),
+            "signals": await connection.scalar(
+                sa.select(sa.func.count()).select_from(signal_events)
+            ),
+            "tickets": await connection.scalar(
+                sa.select(sa.func.count()).select_from(trade_tickets)
+            ),
+            "commands": await connection.scalar(
+                sa.select(sa.func.count()).select_from(exchange_commands)
+            ),
+        }
+
+    assert result.status is ObservationStatus.WARMED
+    assert result.signal_event_id is None
+    assert result.current_fact_count == 7
+    assert scope["warm_closed_bar_time_ms"] == snapshot.trigger_candle_close_time_ms
+    assert scope["warm_readiness_digest"].startswith("sha256:")
+    assert counts == {"facts": 7, "signals": 0, "tickets": 0, "commands": 0}
 
 
 @pytest.mark.asyncio
@@ -912,7 +1003,11 @@ async def _seed_sor_scope(engine: AsyncEngine) -> None:
         )
 
 
-async def _seed_tradfi_scope(engine: AsyncEngine) -> None:
+async def _seed_tradfi_scope(
+    engine: AsyncEngine,
+    *,
+    lifecycle_state: str = "active",
+) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=NOW_MS - 1)
     event_spec_id = "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1"
@@ -939,9 +1034,11 @@ async def _seed_tradfi_scope(engine: AsyncEngine) -> None:
                 event_spec_id=event_spec_id,
                 universe_version=1,
                 semantic_digest=universe_digest,
-                lifecycle_state="active",
+                lifecycle_state=lifecycle_state,
                 installed_at_ms=NOW_MS - 1,
-                activated_at_ms=NOW_MS - 1,
+                activated_at_ms=(
+                    NOW_MS - 1 if lifecycle_state == "active" else None
+                ),
             )
         )
         await connection.execute(
@@ -950,16 +1047,17 @@ async def _seed_tradfi_scope(engine: AsyncEngine) -> None:
                 exchange_instrument_id=AAPL,
             )
         )
-        await connection.execute(
-            sa.insert(strategy_universe_current).values(
-                event_spec_id=event_spec_id,
-                universe_version_id=universe_version_id,
-                semantic_digest=universe_digest,
-                lifecycle_state="active",
-                activation_generation=1,
-                activated_at_ms=NOW_MS - 1,
+        if lifecycle_state == "active":
+            await connection.execute(
+                sa.insert(strategy_universe_current).values(
+                    event_spec_id=event_spec_id,
+                    universe_version_id=universe_version_id,
+                    semantic_digest=universe_digest,
+                    lifecycle_state="active",
+                    activation_generation=1,
+                    activated_at_ms=NOW_MS - 1,
+                )
             )
-        )
         await connection.execute(
             sa.insert(runtime_scopes_current).values(
                 runtime_scope_id="scope-sor-us-aapl-long",
@@ -972,14 +1070,22 @@ async def _seed_tradfi_scope(engine: AsyncEngine) -> None:
                 position_side="long",
                 universe_version_id=universe_version_id,
                 universe_semantic_digest=universe_digest,
-                lifecycle_state="active",
+                lifecycle_state=lifecycle_state,
                 observation_enabled=True,
-                entry_enabled=True,
+                entry_enabled=lifecycle_state == "active",
                 scope_version=1,
-                warm_closed_bar_time_ms=NOW_MS - 1,
-                warm_completed_at_ms=NOW_MS - 1,
-                warm_readiness_digest=universe_digest,
-                warm_valid_until_ms=NOW_MS + 1,
+                warm_closed_bar_time_ms=(
+                    NOW_MS - 1 if lifecycle_state == "active" else None
+                ),
+                warm_completed_at_ms=(
+                    NOW_MS - 1 if lifecycle_state == "active" else None
+                ),
+                warm_readiness_digest=(
+                    universe_digest if lifecycle_state == "active" else None
+                ),
+                warm_valid_until_ms=(
+                    NOW_MS + 1 if lifecycle_state == "active" else None
+                ),
                 updated_at_ms=NOW_MS - 1,
             )
         )

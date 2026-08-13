@@ -33,7 +33,10 @@ def parse_binance_product_snapshots(
     """Fail closed per instrument while preserving one successful shared batch."""
 
     exchange_by_symbol = _by_symbol(_rows(exchange_info, keys=("symbols", "data")))
-    schedule_by_symbol = _schedule_by_symbol(trading_schedule)
+    schedule_by_symbol = _schedule_by_symbol(
+        trading_schedule,
+        exchange_by_symbol=exchange_by_symbol,
+    )
     premium_by_symbol = _by_symbol(_rows(premium_index, keys=("data", "symbols")))
     snapshots: list[ProductSessionSnapshot] = []
     for exchange_instrument_id in exchange_instrument_ids:
@@ -109,6 +112,8 @@ def _by_symbol(
 
 def _schedule_by_symbol(
     payload: object,
+    *,
+    exchange_by_symbol: Mapping[str, Mapping[str, object]],
 ) -> dict[str, tuple[tuple[SessionState, int, int], ...]]:
     grouped: dict[str, list[tuple[SessionState, int, int]]] = {}
     for row in _rows(payload, keys=("data", "symbols")):
@@ -134,6 +139,28 @@ def _schedule_by_symbol(
             parsed = _session_interval(session_row)
             if parsed is not None:
                 grouped.setdefault(symbol, []).append(parsed)
+    if isinstance(payload, Mapping):
+        market_schedules = payload.get("marketSchedules")
+        if isinstance(market_schedules, Mapping):
+            for market_name, market_schedule in market_schedules.items():
+                market_type = str(market_name or "").strip().upper()
+                if not market_type or not isinstance(market_schedule, Mapping):
+                    continue
+                intervals = tuple(
+                    parsed
+                    for row in _rows(market_schedule, keys=("sessions", "data"))
+                    if (parsed := _session_interval(row)) is not None
+                )
+                if not intervals:
+                    continue
+                for symbol, product in exchange_by_symbol.items():
+                    if symbol in grouped:
+                        continue
+                    underlying_type = str(
+                        product.get("underlyingType") or ""
+                    ).strip().upper()
+                    if underlying_type == market_type:
+                        grouped[symbol] = list(intervals)
     return {
         symbol: tuple(sorted(intervals, key=lambda item: (item[1], item[2])))
         for symbol, intervals in grouped.items()

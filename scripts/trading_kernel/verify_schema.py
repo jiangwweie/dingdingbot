@@ -41,6 +41,7 @@ from src.trading_kernel.infrastructure.runtime_identity import (
 SCHEMA = "brc.trading_kernel.schema_verification.v1"
 PRESERVATION_SCHEMA = "brc.trading_kernel.0002_preservation.v1"
 PRESERVATION_PROOF_SCHEMA = "brc.trading_kernel.0002_preservation_proof.v1"
+R4_RECOVERY_SCHEMA = "brc.trading_kernel.0005_recovery_certification.v1"
 EXPECTED_ALEMBIC_REVISION = CURRENT_SCHEMA_REVISION
 COMPATIBLE_SOURCE_REVISION = "0002_sor_v3_strategy_group_capacity"
 OWNER_CONTROL_SOURCE_REVISION = "0003_portfolio_admission_observability"
@@ -83,6 +84,23 @@ _TRADFI_SHADOW_COLUMNS = frozenset(
         "first_path",
         "first_path_at_ms",
         "observed_bar_count",
+    }
+)
+_R4_TERMINAL_LINEAGE_TABLES = frozenset(
+    {
+        "brc_admission_decisions",
+        "brc_capacity_claims",
+        "brc_exchange_commands",
+        "brc_owner_authorizations",
+        "brc_owner_control_operation_events",
+        "brc_owner_policy_events",
+        "brc_signal_events",
+        "brc_signal_fact_snapshots",
+        "brc_strategy_entry_control_events",
+        "brc_trade_events",
+        "brc_trade_aggregates",
+        "brc_trade_reviews",
+        "brc_trade_tickets",
     }
 )
 _PRESERVATION_PROOF_METADATA_KEYS = (
@@ -211,6 +229,18 @@ def _parser() -> argparse.ArgumentParser:
         "--summary-only",
         action="store_true",
         help="Emit only bounded preservation-manifest metadata for deployment RPC.",
+    )
+    parser.add_argument(
+        "--certify-r4-recovery",
+        action="store_true",
+        help=(
+            "Certify the one 0005 fix-forward recovery after a frozen 0004 "
+            "full-projection manifest drifted."
+        ),
+    )
+    parser.add_argument(
+        "--legacy-preservation-digest",
+        help="Frozen 0004 full-projection digest bound into R4 recovery evidence.",
     )
     return parser
 
@@ -391,6 +421,59 @@ async def _verify_preservation(
         "source_revision": source_revision,
         "expected_preservation_digest": expected_digest,
         "preservation_manifest": manifest,
+    }
+
+
+async def _certify_r4_recovery(
+    database_url: str,
+    *,
+    legacy_preservation_digest: str,
+) -> dict[str, object]:
+    """Certify fix-forward recovery without treating mutable projections as history.
+
+    The initial 0004 preservation gate deliberately hashed every source table.
+    That makes an interrupted target recovery unrecoverable once the target's
+    readonly safety cadence refreshes a ``*_current`` projection.  The recovery
+    gate instead keeps all append-only terminal lineage exact, independently
+    proves the pre-existing 0002 database-bound lineage, and requires the
+    current target projection/authority shape to be healthy.
+    """
+
+    if not _is_sha256_identity(legacy_preservation_digest):
+        raise ValueError("legacy preservation digest must be an exact sha256 identity")
+    engine = _create_engine(database_url)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            revision = await _alembic_revision(connection)
+            target_shape = await _verify_exact_metadata_shape(
+                connection,
+                expected_columns={
+                    table.name: tuple(table.c.keys())
+                    for table in metadata.sorted_tables
+                },
+            )
+            migration_gate = await _migration_gate(connection)
+            lineage_manifest = await _r4_terminal_lineage_manifest(connection)
+            historical_proof = await _stored_preservation_proof_status(connection)
+            await connection.rollback()
+    finally:
+        await engine.dispose()
+    passed = bool(
+        revision == EXPECTED_ALEMBIC_REVISION
+        and target_shape["status"] == "pass"
+        and all(int(value) == 0 for value in migration_gate.values())
+        and historical_proof["status"] == "pass"
+    )
+    return {
+        "schema": R4_RECOVERY_SCHEMA,
+        "status": "pass" if passed else "fail",
+        "alembic_revision": revision,
+        "legacy_preservation_digest": legacy_preservation_digest,
+        "target_shape": target_shape,
+        "migration_gate": migration_gate,
+        "terminal_lineage_manifest": lineage_manifest,
+        "historical_preservation_proof": historical_proof,
     }
 
 
@@ -633,12 +716,19 @@ async def _verify_stored_preservation_proof(
     try:
         async with engine.connect() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
-            revision = await _alembic_revision(connection)
-            database_identity = await _database_identity(connection)
-            stored = await _preservation_proof_metadata(connection, for_update=False)
+            payload = await _stored_preservation_proof_status(connection)
             await connection.rollback()
     finally:
         await engine.dispose()
+    return payload
+
+
+async def _stored_preservation_proof_status(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    revision = await _alembic_revision(connection)
+    database_identity = await _database_identity(connection)
+    stored = await _preservation_proof_metadata(connection, for_update=False)
     complete = set(stored) == set(_PRESERVATION_PROOF_METADATA_KEYS)
     proof = _build_preservation_proof(
         source_revision=stored.get("preservation_source_revision", ""),
@@ -1233,6 +1323,53 @@ async def _tradfi_instrument_preservation_manifest(
     return {**payload, "digest": _sha256_json(payload)}
 
 
+async def _r4_terminal_lineage_manifest(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    """Hash the immutable, terminal trading lineage in the target schema.
+
+    Mutable ``*_current`` projections are intentionally absent.  Their health
+    is checked through target shape, flatness, registry/policy identity and the
+    exchange postflight; they are not historic evidence.
+    """
+
+    table_entries: list[dict[str, object]] = []
+    total_rows = 0
+    for table_name in sorted(_R4_TERMINAL_LINEAGE_TABLES):
+        table = metadata.tables[table_name]
+        column_names = tuple(table.c.keys())
+        rows = (
+            await connection.execute(
+                sa.select(*(table.c[name] for name in column_names))
+            )
+        ).mappings().all()
+        canonical_rows = sorted(
+            (_row_manifest(column_names, dict(row)) for row in rows),
+            key=lambda row: str(row["digest"]),
+        )
+        table_payload = {
+            "table": table_name,
+            "columns": list(column_names),
+            "row_count": len(canonical_rows),
+            "rows": canonical_rows,
+        }
+        table_entries.append(
+            {
+                **table_payload,
+                "digest": _sha256_json(table_payload),
+            }
+        )
+        total_rows += len(canonical_rows)
+    payload = {
+        "schema": "brc.trading_kernel.0004_terminal_lineage.v1",
+        "source_revision": TRADFI_INSTRUMENT_SOURCE_REVISION,
+        "tables": table_entries,
+        "table_count": len(table_entries),
+        "row_count": total_rows,
+    }
+    return {**payload, "digest": _sha256_json(payload)}
+
+
 async def _current_registry_identity(
     connection: AsyncConnection,
 ) -> dict[str, object]:
@@ -1315,6 +1452,78 @@ async def _current_registry_identity(
     }
 
 
+async def _target_registry_identity(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    contracts = registered_strategy_contracts()
+    expected_hash = build_registry_semantic_hash(contracts)
+    expected_groups = {contract.strategy_group_id for contract in contracts}
+    expected_versions = {contract.strategy_version_id for contract in contracts}
+    expected_events = {contract.event_spec_id for contract in contracts}
+    metadata_hash = str(
+        (
+            await connection.scalar(
+                text(
+                    "SELECT metadata_value FROM brc_schema_metadata "
+                    "WHERE metadata_key = 'registry_semantic_hash'"
+                )
+            )
+        )
+        or ""
+    )
+    groups = {
+        str(row["strategy_group_id"]): str(row["active_version_id"])
+        for row in (
+            await connection.execute(
+                text(
+                    "SELECT strategy_group_id, active_version_id "
+                    "FROM brc_strategy_groups WHERE status = 'active'"
+                )
+            )
+        ).mappings()
+    }
+    versions = {
+        str(row["strategy_version_id"]): row["semantics"]
+        for row in (
+            await connection.execute(
+                text(
+                    "SELECT strategy_version_id, semantics "
+                    "FROM brc_strategy_versions WHERE status = 'active'"
+                )
+            )
+        ).mappings()
+    }
+    events = {
+        str(value)
+        for value in (
+            await connection.execute(
+                text(
+                    "SELECT event_spec_id FROM brc_event_specs "
+                    "WHERE status = 'active'"
+                )
+            )
+        ).scalars()
+    }
+    passed = bool(
+        metadata_hash == expected_hash
+        and set(groups) == expected_groups
+        and set(groups.values()) == expected_versions
+        and set(versions) == expected_versions
+        and events == expected_events
+        and all(
+            isinstance(semantics, Mapping)
+            and semantics.get("registry_semantic_hash") == expected_hash
+            for semantics in versions.values()
+        )
+    )
+    return {
+        "status": "pass" if passed else "fail",
+        "expected_semantic_hash": expected_hash,
+        "live_semantic_hash": metadata_hash,
+        "active_group_count": len(groups),
+    }
+
+
 async def _current_strategy_controls(
     connection: AsyncConnection,
 ) -> dict[str, object]:
@@ -1329,6 +1538,35 @@ async def _current_strategy_controls(
                 "SELECT strategy_group_id, entry_state, control_version "
                 "FROM brc_strategy_entry_controls_current "
                 "ORDER BY strategy_group_id"
+            )
+        )
+    ).mappings().all()
+    actual_groups = {str(row["strategy_group_id"]) for row in rows}
+    passed = bool(
+        actual_groups == expected_groups
+        and all(
+            row["entry_state"] in {"paused", "enabled"}
+            and int(str(row["control_version"])) > 0
+            for row in rows
+        )
+    )
+    return {
+        "status": "pass" if passed else "fail",
+        "strategy_group_ids": sorted(actual_groups),
+    }
+
+
+async def _target_strategy_controls(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    expected_groups = {
+        contract.strategy_group_id for contract in registered_strategy_contracts()
+    }
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT strategy_group_id, entry_state, control_version "
+                "FROM brc_strategy_entry_controls_current"
             )
         )
     ).mappings().all()
@@ -1688,7 +1926,26 @@ def _is_sha256_identity(value: str) -> bool:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     database_url = str(args.database_url or "").strip()
-    if args.deployment_revision:
+    if args.certify_r4_recovery:
+        if (
+            args.deployment_revision
+            or args.compatible_source_revision
+            or args.preserve_source_revision
+            or args.expected_preservation_digest
+            or args.record_preservation_proof
+            or args.verify_preservation_proof
+            or args.verify_stored_preservation_proof
+            or args.expected_preservation_proof_digest
+            or not args.legacy_preservation_digest
+        ):
+            raise ValueError("R4 recovery certification mode is ambiguous")
+        payload = asyncio.run(
+            _certify_r4_recovery(
+                database_url,
+                legacy_preservation_digest=str(args.legacy_preservation_digest),
+            )
+        )
+    elif args.deployment_revision:
         if (
             args.compatible_source_revision
             or args.preserve_source_revision
@@ -1697,6 +1954,7 @@ def main(argv: list[str] | None = None) -> int:
             or args.verify_preservation_proof
             or args.verify_stored_preservation_proof
             or args.expected_preservation_proof_digest
+            or args.legacy_preservation_digest
         ):
             raise ValueError("schema verification mode is ambiguous")
         payload = asyncio.run(_inspect_deployment_revision(database_url))
@@ -1708,6 +1966,7 @@ def main(argv: list[str] | None = None) -> int:
             or args.verify_preservation_proof
             or args.verify_stored_preservation_proof
             or args.expected_preservation_proof_digest
+            or args.legacy_preservation_digest
         ):
             raise ValueError("schema verification mode is ambiguous")
         payload = asyncio.run(
@@ -1767,10 +2026,11 @@ def main(argv: list[str] | None = None) -> int:
             or args.expected_preservation_proof_digest
             or args.record_preservation_proof
             or args.verify_preservation_proof
+            or args.legacy_preservation_digest
         ):
             raise ValueError("stored proof verification mode is ambiguous")
         payload = asyncio.run(_verify_stored_preservation_proof(database_url))
-    elif args.expected_preservation_digest:
+    elif args.expected_preservation_digest or args.legacy_preservation_digest:
         raise ValueError("expected preservation digest requires a source revision")
     elif (
         args.record_preservation_proof

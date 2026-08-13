@@ -73,6 +73,38 @@ def test_recorded_binance_product_payload_builds_regular_session_snapshot() -> N
     assert snapshot.best_ask_quantity == Decimal(9)
 
 
+def test_production_grouped_equity_schedule_builds_regular_session_snapshot() -> None:
+    """Regression for Binance's live marketSchedules.EQUITY response shape."""
+
+    snapshots = parse_binance_product_snapshots(
+        exchange_instrument_ids=(INSTRUMENT_ID,),
+        exchange_info=_exchange_info(),
+        trading_schedule={
+            "updateTime": str(OBSERVED_MS - 60_000),
+            "marketSchedules": {
+                "EQUITY": {
+                    "sessions": [
+                        {
+                            "startTime": str(OBSERVED_MS - 3_600_000),
+                            "endTime": str(OBSERVED_MS + 18_000_000),
+                            "type": "REGULAR",
+                        }
+                    ]
+                }
+            },
+        },
+        premium_index=[],
+        depth_by_symbol={},
+        observed_at_ms=OBSERVED_MS,
+    )
+
+    snapshot = snapshots[0]
+    assert snapshot.product_status == "active"
+    assert snapshot.session_state == "regular"
+    assert snapshot.regular_session_open_ms == OBSERVED_MS - 3_600_000
+    assert snapshot.regular_session_close_ms == OBSERVED_MS + 18_000_000
+
+
 def test_missing_schedule_fails_closed_without_discarding_product_status() -> None:
     snapshot = parse_binance_product_snapshots(
         exchange_instrument_ids=(INSTRUMENT_ID,),

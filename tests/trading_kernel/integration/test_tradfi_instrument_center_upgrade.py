@@ -11,6 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from scripts.trading_kernel.verify_schema import (
+    _certify_r4_recovery,
     _verify_compatible_source,
     _verify_preservation,
 )
@@ -211,7 +212,9 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
             assert {item.owner_policy_id for item in tradfi_events} == {
                 "policy-main"
             }
-            assert all(item.active_universe_version_id is None for item in tradfi_events)
+            assert all(
+                item.active_universe_version_id is None for item in tradfi_events
+            )
             instrument_page = await PostgresOwnerReadRepository(
                 connection
             ).read_instrument_center(
@@ -223,6 +226,41 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
                 "SOR-US-LONG-15M",
                 "SOR-US-SHORT-15M",
             }
+
+        recovery = await _certify_r4_recovery(
+            database_url,
+            legacy_preservation_digest=preservation_digest,
+        )
+        assert recovery["target_shape"]["status"] == "pass", recovery
+        assert recovery["migration_gate"] == {
+            key: 0 for key in recovery["migration_gate"]
+        }
+        terminal_digest = str(recovery["terminal_lineage_manifest"]["digest"])
+
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.update(owner_policy_current)
+                .where(owner_policy_current.c.owner_policy_id == "policy-main")
+                .values(updated_at_ms=1_800_000_000_400)
+            )
+        refreshed = await _certify_r4_recovery(
+            database_url,
+            legacy_preservation_digest=preservation_digest,
+        )
+        assert refreshed["target_shape"]["status"] == "pass", refreshed
+        assert str(refreshed["terminal_lineage_manifest"]["digest"]) == terminal_digest
+
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.text(
+                    "UPDATE brc_signal_events SET observed_at_ms = observed_at_ms + 1"
+                )
+            )
+        tampered = await _certify_r4_recovery(
+            database_url,
+            legacy_preservation_digest=preservation_digest,
+        )
+        assert str(tampered["terminal_lineage_manifest"]["digest"]) != terminal_digest
     finally:
         await engine.dispose()
         with suppress(asyncpg.UndefinedObjectError):

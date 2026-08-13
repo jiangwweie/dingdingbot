@@ -235,12 +235,11 @@ def test_mig_007_compatible_upgrade_migrates_only_after_final_flat_recheck() -> 
         ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
     )
     assert (
-        "verify_preservation",
+        "certify_r4_recovery",
         TARGET_RELEASE,
-        SOURCE_SCHEMA_REVISION,
-        PRESERVATION_DIGEST,
+        "sha256:830ed497a82630805504e9f34ba72dcafcad9164a6fc65aa2a70ae1e3c21ec34",
     ) in backend.calls
-    assert sum(call[0] == "verify_preservation" for call in backend.calls) == 1
+    assert sum(call[0] == "certify_r4_recovery" for call in backend.calls) == 1
     bootstrap_index = backend.calls.index(
         ("bootstrap_strategy_universes", TARGET_RELEASE)
     )
@@ -256,7 +255,7 @@ def test_mig_007_compatible_upgrade_migrates_only_after_final_flat_recheck() -> 
     assert backend.entry_is_inactive_disabled_and_fenced()
 
 
-def test_compatible_upgrade_freezes_preservation_baseline_only_after_writer_stop() -> None:
+def test_compatible_upgrade_certifies_recovery_only_after_writer_stop() -> None:
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
         source_preservation_changes_before_stop=True,
@@ -266,13 +265,17 @@ def test_compatible_upgrade_freezes_preservation_baseline_only_after_writer_stop
 
     assert result.status == "pass"
     service_stop = backend.calls.index(("stop_services", SAFETY_SERVICES))
-    persisted = backend.calls.index(
-        ("persist_preservation_digest", TARGET_RELEASE, PRESERVATION_DIGEST)
+    certified = backend.calls.index(
+        (
+            "certify_r4_recovery",
+            TARGET_RELEASE,
+            "sha256:830ed497a82630805504e9f34ba72dcafcad9164a6fc65aa2a70ae1e3c21ec34",
+        )
     )
-    assert service_stop < persisted
+    assert service_stop < certified
 
 
-def test_compatible_upgrade_carries_preservation_digest_to_a_new_release_after_migration() -> None:
+def test_compatible_upgrade_recovers_target_without_copying_a_stale_manifest() -> None:
     backend = FakeDeploymentBackend(
         source_schema_revision=TARGET_SCHEMA_REVISION,
         current_release=CURRENT_RELEASE,
@@ -282,20 +285,17 @@ def test_compatible_upgrade_carries_preservation_digest_to_a_new_release_after_m
     result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
 
     assert result.status == "pass"
-    inherited = (
-        "inherit_preservation_digest",
-        CURRENT_RELEASE,
-        TARGET_RELEASE,
-    )
-    assert inherited in backend.calls
     install_index = backend.calls.index(
         ("install_release", TARGET_COMMIT, TARGET_RELEASE)
     )
-    inherited_index = backend.calls.index(inherited)
-    target_digest_index = backend.calls.index(
-        ("read_preservation_digest", TARGET_RELEASE)
+    certified_index = backend.calls.index(
+        (
+            "certify_r4_recovery",
+            TARGET_RELEASE,
+            "sha256:830ed497a82630805504e9f34ba72dcafcad9164a6fc65aa2a70ae1e3c21ec34",
+        )
     )
-    assert install_index < inherited_index < target_digest_index
+    assert install_index < certified_index
 
 
 def test_pre_migration_failure_restores_exact_source_safety_workers() -> None:
@@ -319,7 +319,7 @@ def test_default_ssh_timeout_covers_bounded_preservation_scan() -> None:
     assert args.timeout_seconds == 600.0
 
 
-def test_ssh_deployment_requests_only_bounded_preservation_output(
+def test_ssh_deployment_requests_only_bounded_r4_recovery_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = SshTokyoReleaseBackend(
@@ -349,13 +349,13 @@ def test_ssh_deployment_requests_only_bounded_preservation_output(
         )()
 
     monkeypatch.setattr(backend, "_remote", fake_remote)
-    backend.verify_preservation(
+    backend.certify_r4_recovery(
         TARGET_RELEASE,
-        SOURCE_SCHEMA_REVISION,
         PRESERVATION_DIGEST,
     )
 
     assert "--summary-only" in commands[-1][-1]
+    assert "--certify-r4-recovery" in commands[-1][-1]
 
 
 @pytest.mark.parametrize(
@@ -391,7 +391,7 @@ def test_mig_008_preservation_mismatch_keeps_entry_fenced() -> None:
         preservation_matches=False,
     )
 
-    with pytest.raises(DeploymentBlocked, match="preservation digest"):
+    with pytest.raises(DeploymentBlocked, match="R4 recovery certification"):
         deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
 
     assert backend.entry_fenced is True
@@ -467,7 +467,7 @@ def test_migration_unknown_outcome_confirmed_target_enters_fix_forward() -> None
     assert backend.entry_is_inactive_disabled_and_fenced()
 
 
-def test_target_schema_fix_forward_reuses_persisted_preservation_digest() -> None:
+def test_target_schema_fix_forward_recertifies_without_a_stale_manifest() -> None:
     """Catches rebuilding a source manifest after the target schema committed."""
 
     backend = FakeDeploymentBackend(
@@ -479,8 +479,8 @@ def test_target_schema_fix_forward_reuses_persisted_preservation_digest() -> Non
     result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
 
     assert result.status == "pass"
-    assert ("read_preservation_digest", TARGET_RELEASE) in backend.calls
-    assert not any(call[0] == "recover_preservation_proof" for call in backend.calls)
+    assert any(call[0] == "certify_r4_recovery" for call in backend.calls)
+    assert not any(call[0] == "verify_preservation" for call in backend.calls)
 
 
 def test_migration_unknown_outcome_remains_primary_when_target_recovery_activation_fails(
@@ -621,15 +621,15 @@ def test_post_activation_bootstrap_failure_restores_target_safety_workers() -> N
     assert backend.entry_is_inactive_disabled_and_fenced()
 
 
-def test_post_migration_preservation_failure_enters_fenced_target_fix_forward() -> None:
+def test_post_migration_recovery_certification_failure_enters_fenced_target_fix_forward() -> None:
     """Catches leaving the target without safety or restarting source workers."""
 
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
-        fail_at="verify_preservation",
+        fail_at="certify_r4_recovery",
     )
 
-    with pytest.raises(RuntimeError, match="simulated preservation failure"):
+    with pytest.raises(RuntimeError, match="simulated R4 recovery certification failure"):
         deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
 
     migration = backend.calls.index(
@@ -823,7 +823,7 @@ def test_compatible_upgrade_resumes_target_fix_forward_idempotently() -> None:
     assert backend.entry_is_inactive_disabled_and_fenced()
 
 
-def test_resume_rejects_verified_file_marker_bound_to_a_different_database() -> None:
+def test_resume_recertifies_the_database_instead_of_trusting_a_file_marker() -> None:
     """Catches reusing a release-local proof marker against a restored database."""
 
     backend = FakeDeploymentBackend(
@@ -838,13 +838,10 @@ def test_resume_rejects_verified_file_marker_bound_to_a_different_database() -> 
     backend.entry_fenced = True
     backend.entry_enabled = False
 
-    with pytest.raises(DeploymentBlocked, match="database-bound preservation proof"):
-        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+    result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
 
-    assert not any(
-        call[0] in {"deploy_compatible_identity", "activate_release"}
-        for call in backend.calls
-    )
+    assert result.status == "pass"
+    assert any(call[0] == "certify_r4_recovery" for call in backend.calls)
 
 
 def test_regular_release_uses_database_derived_probe_manifest() -> None:
@@ -1815,6 +1812,40 @@ class FakeDeploymentBackend:
             "status": "pass" if self.preservation_matches else "fail",
             "alembic_revision": TARGET_SCHEMA_REVISION,
             "preservation_manifest": {"digest": digest},
+        }
+
+    def certify_r4_recovery(
+        self,
+        release: str,
+        legacy_preservation_digest: str,
+    ) -> Mapping[str, object]:
+        self.calls.append(
+            (
+                "certify_r4_recovery",
+                release,
+                legacy_preservation_digest,
+            )
+        )
+        if self.fail_at == "certify_r4_recovery":
+            raise RuntimeError("simulated R4 recovery certification failure")
+        return {
+            "status": "pass" if self.preservation_matches else "fail",
+            "alembic_revision": TARGET_SCHEMA_REVISION,
+            "legacy_preservation_digest": legacy_preservation_digest,
+            "target_shape": {"status": "pass"},
+            "migration_gate": {
+                "active_tickets": 0,
+                "non_flat_positions": 0,
+                "active_reservations": 0,
+                "active_domains": 0,
+                "unreviewed_terminal_tickets": 0,
+                "unresolved_commands": 0,
+                "open_incidents": 0,
+                "busy_entry_lane": 0,
+                "nonterminal_aggregates": 0,
+            },
+            "historical_preservation_proof": {"status": "pass"},
+            "terminal_lineage_manifest": {"digest": PRESERVATION_DIGEST},
         }
 
     def persist_preservation_digest(self, release: str, digest: str) -> None:
