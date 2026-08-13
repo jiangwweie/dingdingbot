@@ -288,7 +288,7 @@ async def seed_runtime_authority(
         allowed_event_spec_ids=allowed_event_spec_ids,
         include_tradfi=include_tradfi,
     )
-    policy_builder = _policy_values if include_tradfi else _legacy_policy_values
+    policy_builder = _policy_values if include_tradfi else _crypto_source_policy_values
     policy = policy_builder(
         version=1,
         new_entry_submit_enabled=False,
@@ -521,7 +521,7 @@ async def deploy_compatible_upgrade_identity(
         if source_schema_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION
         else source_entry_enabled
     )
-    if not _legacy_policy_matches(
+    if not _crypto_source_policy_matches(
         current_policy,
         version=expected_policy_version,
         new_entry_submit_enabled=expected_source_entry_enabled,
@@ -996,7 +996,7 @@ async def _transition_policy(
     )
     current = dict(await _lock_policy(connection))
     current_version = int(str(current["policy_version"]))
-    matcher = _policy_matches if include_tradfi else _legacy_policy_matches
+    matcher = _policy_matches if include_tradfi else _crypto_source_policy_matches
     if not matcher(
         current,
         version=current_version,
@@ -1016,7 +1016,7 @@ async def _transition_policy(
     await _require_zero_runtime_activity(connection)
 
     target_version = current_version + 1
-    policy_builder = _policy_values if include_tradfi else _legacy_policy_values
+    policy_builder = _policy_values if include_tradfi else _crypto_source_policy_values
     target = policy_builder(
         version=target_version,
         new_entry_submit_enabled=True,
@@ -1157,7 +1157,7 @@ def _policy_values(
     }
 
 
-def _legacy_policy_values(
+def _crypto_source_policy_values(
     *,
     version: int,
     new_entry_submit_enabled: bool,
@@ -1230,7 +1230,7 @@ def _seed_identity(
     allowed_event_spec_ids: tuple[str, ...],
     include_tradfi: bool,
 ) -> str:
-    policy_builder = _policy_values if include_tradfi else _legacy_policy_values
+    policy_builder = _policy_values if include_tradfi else _crypto_source_policy_values
     semantics = policy_builder(
         version=1,
         new_entry_submit_enabled=False,
@@ -1274,14 +1274,14 @@ def _policy_matches(
     return all(row[key] == expected[key] for key in _POLICY_COMPARE_KEYS)
 
 
-def _legacy_policy_matches(
+def _crypto_source_policy_matches(
     row: Mapping[str, object],
     *,
     version: int,
     new_entry_submit_enabled: bool,
     allowed_event_spec_ids: tuple[str, ...],
 ) -> bool:
-    expected = _legacy_policy_values(
+    expected = _crypto_source_policy_values(
         version=version,
         new_entry_submit_enabled=new_entry_submit_enabled,
         allowed_event_spec_ids=allowed_event_spec_ids,

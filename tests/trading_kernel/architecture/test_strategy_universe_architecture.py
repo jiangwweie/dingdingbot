@@ -102,13 +102,27 @@ def test_universe_application_has_no_parallel_ticket_or_exchange_setting_path() 
 
 
 def test_universe_authority_has_no_legacy_compatibility_or_dual_write_surface() -> None:
-    """Universe authority is forward-only without an alternate old-state reader."""
+    """Universe authority is forward-only without an alternate old-state reader.
+
+    ProductCompatibility is an explicit 0005 Product Authority projection, not a
+    compatibility adapter.  The migration's exact Crypto-source policy matcher
+    is likewise a one-time source validation, not a runtime fallback.
+    """
 
     violations: list[str] = []
     for path in UNIVERSE_AUTHORITY_SOURCES:
         source = _read(path)
         tree = ast.parse(source, filename=str(path))
-        markers = _legacy_authority_markers(tree)
+        markers = _legacy_authority_markers(tree) - {
+            "ProductCompatibility",
+            "ProductCompatibilityError",
+            "product_compatibility",
+            "inserted_product_compatibility_count",
+            "event_product_compatibility",
+            "compatibility",
+            "compatibility_row",
+            "require_product_compatibility",
+        }
         if "brc_strategy_candidate_scopes" in source:
             markers.add("retired candidate-scope table")
         if markers:

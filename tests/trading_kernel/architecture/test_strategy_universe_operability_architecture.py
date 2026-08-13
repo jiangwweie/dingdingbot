@@ -79,7 +79,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
 
 
 def test_bootstrap_and_promotion_have_no_operator_shrinkable_instrument_scope() -> None:
-    """The approved PostgreSQL-derived seven-instrument manifest is non-optional."""
+    """The approved Crypto and TradFi manifests are non-optional."""
 
     bootstrap_source = _read("scripts/trading_kernel/bootstrap_strategy_universes.py")
     promotion_source = _read("scripts/trading_kernel/promote_entry.py")
@@ -87,7 +87,8 @@ def test_bootstrap_and_promotion_have_no_operator_shrinkable_instrument_scope() 
 
     assert "--instrument" not in bootstrap_source
     assert "--exchange-instrument-id" not in deployment_source
-    assert "len(manifest) == 7" in promotion_source
+    assert "APPROVED_ACTIVE_INSTRUMENT_COUNT = len(" in promotion_source
+    assert "APPROVED_UNIVERSE_BATCHES.values()" in promotion_source
     assert "binance-usdm:AVAXUSDT:perpetual" not in bootstrap_source
 
 
