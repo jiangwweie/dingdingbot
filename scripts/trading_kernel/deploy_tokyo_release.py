@@ -1423,19 +1423,11 @@ class SshTokyoReleaseBackend:
         )
 
     def mark_preservation_verified(self, release: str, digest: str) -> None:
-        payload = self._release_json(
-            release,
-            "scripts/trading_kernel/verify_schema.py",
-            "--preserve-source-revision",
-            COMPATIBLE_SOURCE_SCHEMA_REVISION,
-            "--expected-preservation-digest",
-            digest,
-        )
-        _require_preservation_verification(
-            payload,
-            target_schema_revision=SCHEMA_REVISION,
-            expected_digest=digest,
-        )
+        # The immediately preceding verify_preservation call has already
+        # recomputed and checked the database-bound source manifest.  Do not
+        # repeat that full-history scan merely to write its successful marker.
+        # A later resumable invocation still calls preservation_verified,
+        # which recomputes the digest before trusting this marker.
         self._write_release_marker(
             release,
             ".brc-0002-preservation-verified",

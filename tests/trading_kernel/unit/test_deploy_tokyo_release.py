@@ -240,6 +240,7 @@ def test_mig_007_compatible_upgrade_migrates_only_after_final_flat_recheck() -> 
         SOURCE_SCHEMA_REVISION,
         PRESERVATION_DIGEST,
     ) in backend.calls
+    assert sum(call[0] == "verify_preservation" for call in backend.calls) == 1
     bootstrap_index = backend.calls.index(
         ("bootstrap_strategy_universes", TARGET_RELEASE)
     )
