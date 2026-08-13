@@ -34,6 +34,7 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.domain.identities import (
     NettingDomain,
+    RuntimeIdentity,
     TicketIdentity,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
@@ -46,6 +47,7 @@ from src.trading_kernel.infrastructure.binance_public_market_source import (
 )
 from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
+    instrument_product_profiles,
     instruments,
     runtime_scopes_current,
     strategy_universe_current,
@@ -56,18 +58,19 @@ from src.trading_kernel.infrastructure.pg_models import (
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
 from tests.trading_kernel.integration.test_command_dispatch import (
     CountingVenue,
     PreflightFacts,
     _commit_passed_post_fill_stress_if_pending,
     _issue,
+    _registered_sor_ticket,
     _seed_policy,
 )
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
-    _ticket_for_signal,
 )
 from tests.trading_kernel.unit.test_ticket import _ticket
 from tests.trading_kernel.unit.test_venue_adapter import FakeAsyncExchange
@@ -349,13 +352,29 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
     dispatch_engine: AsyncEngine,
 ) -> None:
     ticket = _dynamic_ticket()
-    second_ticket = _ticket_for_signal(
-        "signal-second-during-protection",
-        "episode-second-during-protection",
-        position_side="short",
+    second_ticket = _registered_short_ticket(
+        signal_event_id="signal-second-during-protection",
+        exposure_episode_id="episode-second-during-protection",
     )
     await _seed_policy(dispatch_engine)
     await _seed_ticket_runtime_scope(dispatch_engine, second_ticket)
+    async with dispatch_engine.begin() as connection:
+        await connection.execute(
+            sa.update(instrument_product_profiles)
+            .where(
+                instrument_product_profiles.c.exchange_instrument_id
+                == ticket.identity.netting_domain.exchange_instrument_id
+            )
+            .values(
+                product_family="crypto_perpetual",
+                asset_class="crypto",
+                contract_type="PERPETUAL",
+                underlying_type="CRYPTO",
+                margin_asset="USDT",
+                entry_session_policy="continuous",
+                status="active",
+            )
+        )
     await _issue(dispatch_engine, ticket)
     exchange = RecordingBinanceExchange()
     venue = CcxtVenueAdapter(
@@ -373,11 +392,12 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0004_owner_control_plane",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
     )
+    assert entry.status is DispatchCommandStatus.ACCEPTED
 
     async with dispatch_engine.begin() as connection:
         await connection.execute(
@@ -554,7 +574,7 @@ def _order_request(
 
 
 def _dynamic_ticket():
-    original = _ticket()
+    original = _registered_sor_ticket()
     domain = NettingDomain(
         venue_id=original.identity.netting_domain.venue_id,
         account_id=original.identity.netting_domain.account_id,
@@ -576,6 +596,42 @@ def _dynamic_ticket():
         update={
             "identity": identity,
             "runtime_scope_id": "scope-sor-op-long",
+        }
+    )
+
+
+def _registered_short_ticket(*, signal_event_id: str, exposure_episode_id: str):
+    original = _registered_sor_ticket()
+    runtime = RuntimeIdentity(
+        runtime_profile_id=original.identity.runtime.runtime_profile_id,
+        strategy_group_id=original.identity.runtime.strategy_group_id,
+        strategy_version_id=original.identity.runtime.strategy_version_id,
+        event_spec_id="event_spec:SOR-001:SOR-SHORT:v4",
+    )
+    domain = NettingDomain(
+        venue_id=original.identity.netting_domain.venue_id,
+        account_id=original.identity.netting_domain.account_id,
+        exchange_instrument_id=original.identity.netting_domain.exchange_instrument_id,
+        position_side="short",
+    )
+    identity = TicketIdentity(
+        ticket_id=build_ticket_id(
+            signal_event_id=signal_event_id,
+            runtime=runtime,
+            netting_domain=domain,
+        ),
+        exposure_episode_id=exposure_episode_id,
+        signal_event_id=signal_event_id,
+        runtime=runtime,
+        netting_domain=domain,
+    )
+    return original.model_copy(
+        update={
+            "identity": identity,
+            "runtime_scope_id": "scope-sor-btc-short",
+            "universe_version_id": "universe:sor-short:4",
+            "initial_stop_price": Decimal(61000),
+            "take_profit_prices": (Decimal(58000),),
         }
     )
 
