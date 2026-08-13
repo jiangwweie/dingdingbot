@@ -272,6 +272,32 @@ def test_compatible_upgrade_freezes_preservation_baseline_only_after_writer_stop
     assert service_stop < persisted
 
 
+def test_compatible_upgrade_carries_preservation_digest_to_a_new_release_after_migration() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=TARGET_SCHEMA_REVISION,
+        current_release=CURRENT_RELEASE,
+        entry_gate_ready=True,
+    )
+
+    result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert result.status == "pass"
+    inherited = (
+        "inherit_preservation_digest",
+        CURRENT_RELEASE,
+        TARGET_RELEASE,
+    )
+    assert inherited in backend.calls
+    install_index = backend.calls.index(
+        ("install_release", TARGET_COMMIT, TARGET_RELEASE)
+    )
+    inherited_index = backend.calls.index(inherited)
+    target_digest_index = backend.calls.index(
+        ("read_preservation_digest", TARGET_RELEASE)
+    )
+    assert install_index < inherited_index < target_digest_index
+
+
 def test_pre_migration_failure_restores_exact_source_safety_workers() -> None:
     backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
@@ -1754,6 +1780,15 @@ class FakeDeploymentBackend:
 
     def persist_preservation_digest(self, release: str, digest: str) -> None:
         self.calls.append(("persist_preservation_digest", release, digest))
+
+    def inherit_preservation_digest(
+        self,
+        source_release: str,
+        target_release: str,
+    ) -> None:
+        self.calls.append(
+            ("inherit_preservation_digest", source_release, target_release)
+        )
 
     def read_preservation_digest(self, release: str) -> str:
         self.calls.append(("read_preservation_digest", release))

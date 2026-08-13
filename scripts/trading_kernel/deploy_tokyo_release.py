@@ -209,6 +209,8 @@ class TokyoReleaseBackend(Protocol):
 
     def persist_preservation_digest(self, release: str, digest: str) -> None: ...
 
+    def inherit_preservation_digest(self, source_release: str, target_release: str) -> None: ...
+
     def read_preservation_digest(self, release: str) -> str: ...
 
     def mark_preservation_verified(self, release: str, digest: str) -> None: ...
@@ -476,8 +478,10 @@ def _deploy_compatible_upgrade(
         raise DeploymentBlocked(
             "compatible upgrade requires ENTRY inactive disabled and fenced"
         )
+    target_release_installed = False
     if not backend.release_exists(plan.target_release):
         backend.install_release(plan.target_commit, plan.target_release)
+        target_release_installed = True
 
     schema_state = backend.inspect_schema(plan.target_release)
     database_revision = str(schema_state.get("alembic_revision", ""))
@@ -520,6 +524,11 @@ def _deploy_compatible_upgrade(
             raise DeploymentBlocked("exact source Seed marker differs")
         recovery_seed_identity = source_identity["seed_identity"]
     else:
+        if target_release_installed:
+            backend.inherit_preservation_digest(
+                current_release,
+                plan.target_release,
+            )
         preservation_digest = None
         recovery_seed_identity = backend.read_release_marker(
             current_release,
@@ -1415,6 +1424,14 @@ class SshTokyoReleaseBackend:
             ".brc-0002-preservation-digest",
             digest,
         )
+
+    def inherit_preservation_digest(
+        self,
+        source_release: str,
+        target_release: str,
+    ) -> None:
+        digest = self.read_preservation_digest(source_release)
+        self.persist_preservation_digest(target_release, digest)
 
     def read_preservation_digest(self, release: str) -> str:
         return self.read_release_marker(
