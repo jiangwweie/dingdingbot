@@ -57,7 +57,7 @@ SOURCE_SCHEMA_REVISION = "0004_owner_control_plane"
 
 
 @pytest.mark.asyncio
-async def test_flat_0004_upgrade_installs_observation_only_tradfi_authority() -> None:
+async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> None:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -127,26 +127,16 @@ async def test_flat_0004_upgrade_installs_observation_only_tradfi_authority() ->
                     )
                 ).mappings()
             }
-            assert set(policies) == {"policy-main", "policy-tradfi-observe"}
-            assert policies["policy-main"]["policy_version"] == 10
+            assert set(policies) == {"policy-main"}
+            assert policies["policy-main"]["policy_version"] == 11
             assert not policies["policy-main"]["new_entry_submit_enabled"]
-            assert all(
-                "SOR-US-EQ-PERP-001" not in event_spec_id
-                for event_spec_id in policies["policy-main"]["scope"][
-                    "allowed_event_spec_ids"
-                ]
-            )
-            assert not policies["policy-tradfi-observe"][
-                "new_entry_submit_enabled"
+            mappings = policies["policy-main"]["scope"][
+                "event_runtime_profiles"
             ]
-            assert policies["policy-tradfi-observe"]["scope"] == {
-                "runtime_profile_id": "tradfi-equity-observe-v1",
-                "allowed_event_spec_ids": [
-                    "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1",
-                    "event_spec:SOR-US-EQ-PERP-001:SOR-US-SHORT-15M:v1",
-                ],
-                "owner_console_primary": False,
-            }
+            assert len(mappings) == 8
+            assert {
+                item["runtime_profile_id"] for item in mappings
+            } == {"tiny-live-v1", "tradfi-equity-usdm-v1"}
 
             controls = {
                 str(row["strategy_group_id"]): row
@@ -219,7 +209,7 @@ async def test_flat_0004_upgrade_installs_observation_only_tradfi_authority() ->
                 for item in crypto_events
             )
             assert {item.owner_policy_id for item in tradfi_events} == {
-                "policy-tradfi-observe"
+                "policy-main"
             }
             assert all(item.active_universe_version_id is None for item in tradfi_events)
             instrument_page = await PostgresOwnerReadRepository(

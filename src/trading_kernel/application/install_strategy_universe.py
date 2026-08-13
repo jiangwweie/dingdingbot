@@ -14,6 +14,7 @@ from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
 from src.trading_kernel.domain.owner_control import OwnerAuthorization
+from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.strategy_universe import (
     MAX_UNIVERSE_MEMBERS,
     StrategyUniverseVersion,
@@ -156,42 +157,7 @@ class UniverseInstallContext(BaseModel):
         return value
 
 
-class UniverseInstallPolicyScope(BaseModel):
-    """Exact Owner Policy shape consumed by Universe installation."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    runtime_profile_id: str
-    allowed_event_spec_ids: tuple[str, ...]
-    owner_console_primary: bool | None = None
-
-    @field_validator("runtime_profile_id", mode="before")
-    @classmethod
-    def _require_runtime_profile_id(cls, value: object) -> str:
-        if not isinstance(value, str) or not value or value != value.strip():
-            raise ValueError("Policy scope runtime profile id must be exact")
-        return value
-
-    @field_validator("allowed_event_spec_ids", mode="before")
-    @classmethod
-    def _require_canonical_event_ids(cls, value: object) -> tuple[str, ...]:
-        if not isinstance(value, (list, tuple)):
-            raise ValueError(  # noqa: TRY004 - Pydantic must surface a ValidationError.
-                "Policy scope Event ids must be a list or tuple"
-            )
-        event_ids: tuple[object, ...] = tuple(value)
-        if not event_ids or any(
-            not isinstance(event_id, str)
-            or not event_id
-            or event_id != event_id.strip()
-            or not event_id.startswith("event_spec:")
-            for event_id in event_ids
-        ):
-            raise ValueError("Policy scope Event ids must be exact identities")
-        canonical_event_ids = tuple(str(event_id) for event_id in event_ids)
-        if canonical_event_ids != tuple(sorted(set(canonical_event_ids))):
-            raise ValueError("Policy scope Event ids must be sorted and unique")
-        return canonical_event_ids
+UniverseInstallPolicyScope = OwnerPolicyScope
 
 
 class UniverseInstallResult(BaseModel):

@@ -506,6 +506,52 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountCapacityView */
+        AccountCapacityView: {
+            /** Active Ticket Count */
+            active_ticket_count: number;
+            /** Directional Stop Risk Limit */
+            directional_stop_risk_limit: string | null;
+            /** Directional Stop Risk Limit Fraction */
+            directional_stop_risk_limit_fraction: string | null;
+            /** Family Active Counts */
+            family_active_counts: {
+                [key: string]: number;
+            };
+            /** Family Limits */
+            family_limits: {
+                [key: string]: number;
+            };
+            /** Gross Initial Margin Limit */
+            gross_initial_margin_limit: string | null;
+            /** Gross Stop Risk */
+            gross_stop_risk: string | null;
+            /** Gross Stop Risk Limit */
+            gross_stop_risk_limit: string | null;
+            /** Long Stop Risk */
+            long_stop_risk: string | null;
+            /** Margin Balance Basis */
+            margin_balance_basis: string | null;
+            /** Max Concurrent Tickets */
+            max_concurrent_tickets: number;
+            /** Max Gross Initial Margin Utilization */
+            max_gross_initial_margin_utilization: string | null;
+            /** Max Gross Stop Risk Fraction */
+            max_gross_stop_risk_fraction: string | null;
+            /** Remaining Ticket Slots */
+            remaining_ticket_slots: number;
+            /** Reserved Margin */
+            reserved_margin: string | null;
+            /** Short Stop Risk */
+            short_stop_risk: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "current_projection" | "no_active_exposure";
+            /** Wallet Balance Basis */
+            wallet_balance_basis: string | null;
+        };
         /** AdmissionAccountSnapshot */
         AdmissionAccountSnapshot: {
             available_margin: components["schemas"]["MoneyMetric"];
@@ -730,6 +776,7 @@ export interface components {
         };
         /** ControlsResponse */
         ControlsResponse: {
+            account_capacity: components["schemas"]["AccountCapacityView"];
             current_operation: components["schemas"]["OwnerControlOperation"] | null;
             /** Events */
             events: components["schemas"]["ControlEventView"][];
@@ -738,6 +785,7 @@ export interface components {
             global_entry: components["schemas"]["GlobalEntryView"];
             /** Recent Operations */
             recent_operations: components["schemas"]["OwnerControlOperation"][];
+            runtime_entry_authority: components["schemas"]["RuntimeEntryAuthorityView"];
             /** Strategies */
             strategies: components["schemas"]["StrategyControlView"][];
         };
@@ -783,8 +831,12 @@ export interface components {
             global_entry_enabled: boolean;
             /** Owner Policy Version */
             owner_policy_version: number;
-            /** Runtime Profile Id */
-            runtime_profile_id: string;
+            /**
+             * Runtime Profile Id
+             * @default account-wide
+             * @constant
+             */
+            runtime_profile_id: "account-wide";
             /** Snapshot Digest */
             snapshot_digest: string;
             /** Ticket Ids */
@@ -878,6 +930,10 @@ export interface components {
             margin_asset: "USDT";
             /** Mark Price */
             mark_price: string | null;
+            /** Max Entry Spread Bps */
+            max_entry_spread_bps: string | null;
+            /** Max Mark Index Deviation Bps */
+            max_mark_index_deviation_bps: string | null;
             /** Memberships */
             memberships: components["schemas"]["InstrumentUniverseMembership"][];
             /** Observed At Ms */
@@ -1306,6 +1362,20 @@ export interface components {
             template_id: "execution_complete" | "execution_recovered" | "economics_complete" | "economics_incomplete" | "review_waiting" | "ticket_in_progress";
             /** Text */
             text: string;
+        };
+        /** RuntimeEntryAuthorityView */
+        RuntimeEntryAuthorityView: {
+            /**
+             * Effective Status
+             * @enum {string}
+             */
+            effective_status: "ready" | "fenced";
+            /** Exchange Commands Enabled */
+            exchange_commands_enabled: boolean;
+            /** First Blocker */
+            first_blocker?: string | null;
+            /** Runtime Profile Ids */
+            runtime_profile_ids: string[];
         };
         /** ShadowOutcomeSummary */
         ShadowOutcomeSummary: {

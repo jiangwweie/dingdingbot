@@ -85,8 +85,11 @@ never rewrites an existing protected Ticket.
 Product Compatibility is an immutable Registry-side contract, while Product
 Profile, Session and bounded market status are PostgreSQL current projections.
 Crypto and TradFi Events cannot share an incompatible Universe member. The
-independent `SOR-US-EQ-PERP-001` Profile and Policy are observation-only;
-their existence does not expand the main Crypto Policy or grant Entry.
+independent `SOR-US-EQ-PERP-001` strategy lineage uses the neutral
+`tradfi-equity-usdm-v1` RuntimeProfile, while Crypto and TradFi share the sole
+`policy-main / Policy v4` capital authority. Product Session, Spread,
+Mark/Index and Corporate Event gates constrain TradFi ENTRY without creating a
+second Ticket, Command, Lifecycle or funds policy.
 
 ## Signal, Capacity, And Ticket Boundary
 

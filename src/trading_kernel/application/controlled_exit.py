@@ -1,4 +1,4 @@
-"""Owner-authorized source-runtime Controlled Exit semantics."""
+"""Owner-authorized account-wide Controlled Exit semantics."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class ControlledExitRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     authorization: ControlledExitAuthorization
-    runtime_profile_id: str
+    runtime_profile_id: Literal["account-wide"] = "account-wide"
     venue_id: str
     account_id: str
     max_active_tickets: int
@@ -140,7 +140,6 @@ async def request_controlled_exits(
 
     async with uow_factory() as uow:
         ticket_ids = await uow.aggregates.list_active_ticket_ids(
-            runtime_profile_id=request.runtime_profile_id,
             venue_id=request.venue_id,
             account_id=request.account_id,
             limit=request.max_active_tickets,

@@ -40,6 +40,7 @@ from src.trading_kernel.application.runtime_facts import (
     InstrumentRulesRequest,
     LifecycleFactsRequest,
     PositionSnapshotRequest,
+    ProductSessionRequest,
     ReviewEconomicsRequest,
 )
 from src.trading_kernel.domain.commands import (
@@ -80,6 +81,7 @@ from src.trading_kernel.domain.order_attribution import (
     ResolvedOrderIdentity,
 )
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.domain.review import ReviewEconomicsFacts, ReviewFill
 from src.trading_kernel.domain.venue_truth import (
     VenueLookupStatus,
@@ -91,6 +93,9 @@ from src.trading_kernel.infrastructure.binance_fee_valuation import (
 )
 from src.trading_kernel.infrastructure.binance_order_attribution import (
     resolve_binance_order_identity,
+)
+from src.trading_kernel.infrastructure.binance_product_snapshot import (
+    parse_binance_product_snapshots,
 )
 
 CcxtNetworkError = ccxt_errors.NetworkError
@@ -141,6 +146,12 @@ class _CcxtExchange(Protocol):
     def fapiPrivateV2GetPositionRisk(self, params: Mapping[str, object]) -> object: ...
 
     def fapiPublicGetPremiumIndex(self, params: Mapping[str, object]) -> object: ...
+
+    def fapiPublicGetExchangeInfo(self, params: Mapping[str, object]) -> object: ...
+
+    def fapiPublicGetTradingSchedule(self, params: Mapping[str, object]) -> object: ...
+
+    def fapiPublicGetDepth(self, params: Mapping[str, object]) -> object: ...
 
     def fapiPrivateV2GetAccount(self, params: Mapping[str, object]) -> object: ...
 
@@ -328,6 +339,36 @@ class CcxtVenueAdapter:
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
+
+    async def read_product_session(
+        self,
+        request: ProductSessionRequest,
+    ) -> ProductSessionSnapshot:
+        exchange, _symbol = self._resolve_exchange_and_symbol(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+        )
+        market_id = parse_binance_usdm_instrument_id(
+            request.exchange_instrument_id
+        ).symbol
+        exchange_info, schedule, premium, depth = await asyncio.gather(
+            _call_raw_exchange(exchange.fapiPublicGetExchangeInfo, {}),
+            _call_raw_exchange(exchange.fapiPublicGetTradingSchedule, {}),
+            _call_raw_exchange(exchange.fapiPublicGetPremiumIndex, {}),
+            _call_raw_exchange(
+                exchange.fapiPublicGetDepth,
+                {"symbol": market_id, "limit": 5},
+            ),
+        )
+        return parse_binance_product_snapshots(
+            exchange_instrument_ids=(request.exchange_instrument_id,),
+            exchange_info=exchange_info,
+            trading_schedule=schedule,
+            premium_index=premium,
+            depth_by_symbol={market_id: depth},
+            observed_at_ms=request.observed_at_ms,
+        )[0]
 
     async def read_account_risk_snapshot(
         self,

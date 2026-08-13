@@ -46,6 +46,7 @@ from src.trading_kernel.domain.instrument_entry_health import (
     InstrumentEntryHealth,
     InstrumentEntryHealthStatus,
 )
+from src.trading_kernel.domain.product import ProductEntryDecision
 from src.trading_kernel.domain.ticket import TradeTicket
 
 
@@ -68,6 +69,7 @@ class EntryDispatchPreflightStatus(StrEnum):
         "exposure_family_capacity_exhausted"
     )
     QUOTE_RISK = "quote_risk"
+    PRODUCT_ENTRY_BLOCKED = "product_entry_blocked"
     STRESS_FAILED = "stress_failed"
     LEVERAGE_MISMATCH = "leverage_mismatch"
 
@@ -96,6 +98,7 @@ class EntryDispatchPreflightRequest(BaseModel):
     active_family_ticket_count: int
     active_directional_risk_at_stop: Decimal
     now_ms: int
+    product_entry_decision: ProductEntryDecision | None = None
     strategy_entry_enabled: bool = True
 
     @field_validator("runtime_commit", "schema_revision", mode="before")
@@ -165,6 +168,11 @@ def revalidate_entry_dispatch(
     if not _policy_matches(request.owner_policy, ticket, claim):
         return _refused(EntryDispatchPreflightStatus.POLICY_DRIFT)
     assert request.owner_policy is not None
+    if request.owner_policy.scope is None or not request.owner_policy.scope.authorizes(
+        event_spec_id=ticket.identity.runtime.event_spec_id,
+        runtime_profile_id=ticket.identity.runtime.runtime_profile_id,
+    ):
+        return _refused(EntryDispatchPreflightStatus.POLICY_DRIFT)
     if not request.owner_policy.new_entry_submit_enabled:
         return _refused(EntryDispatchPreflightStatus.NEW_ENTRY_DISABLED)
     if not request.strategy_entry_enabled:
@@ -195,6 +203,11 @@ def revalidate_entry_dispatch(
         return _refused(EntryDispatchPreflightStatus.RUNTIME_FENCED)
     if not _snapshot_and_rules_are_current(request):
         return _refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
+    if (
+        request.product_entry_decision is not None
+        and not request.product_entry_decision.allowed
+    ):
+        return _refused(EntryDispatchPreflightStatus.PRODUCT_ENTRY_BLOCKED)
     if (
         account_risk.venue_id != domain.venue_id
         or account_risk.account_id != domain.account_id

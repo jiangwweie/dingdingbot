@@ -168,6 +168,8 @@ instrument_product_profiles = sa.Table(
     sa.Column("margin_asset", SHORT_TEXT, nullable=False),
     sa.Column("entry_session_policy", SHORT_TEXT, nullable=False),
     sa.Column("status", SHORT_TEXT, nullable=False),
+    sa.Column("max_entry_spread_bps", MONEY, nullable=True),
+    sa.Column("max_mark_index_deviation_bps", MONEY, nullable=True),
     sa.Column("semantic_digest", LONG_TEXT, nullable=False),
     _time("updated_at_ms"),
     sa.CheckConstraint(
@@ -185,6 +187,15 @@ instrument_product_profiles = sa.Table(
     sa.CheckConstraint(
         "status IN ('candidate', 'reference', 'active', 'retired')",
         name="status_valid",
+    ),
+    sa.CheckConstraint(
+        "max_entry_spread_bps IS NULL OR max_entry_spread_bps > 0",
+        name="max_entry_spread_bps_positive",
+    ),
+    sa.CheckConstraint(
+        "max_mark_index_deviation_bps IS NULL OR "
+        "max_mark_index_deviation_bps > 0",
+        name="max_mark_index_deviation_bps_positive",
     ),
     sa.CheckConstraint(
         "semantic_digest ~ '^sha256:[0-9a-f]{64}$'",

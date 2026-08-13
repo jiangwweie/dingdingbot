@@ -21,6 +21,7 @@ from src.trading_kernel.domain.order_attribution import (
     TicketOrderReference,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.domain.review import ReviewEconomicsFacts
 
 
@@ -196,6 +197,42 @@ class InstrumentRulesSource(Protocol):
         self,
         request: InstrumentRulesRequest,
     ) -> InstrumentRulesFacts: ...
+
+
+class ProductSessionRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    observed_at_ms: int
+
+    @field_validator(
+        "venue_id",
+        "account_id",
+        "exchange_instrument_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_product_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("Product Session request identities must be non-blank")
+        return normalized
+
+    @field_validator("observed_at_ms")
+    @classmethod
+    def _require_product_time(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Product Session request time must be positive")
+        return value
+
+
+class ProductSessionSource(Protocol):
+    async def read_product_session(
+        self,
+        request: ProductSessionRequest,
+    ) -> ProductSessionSnapshot: ...
 
 
 class EntryFactsSource(

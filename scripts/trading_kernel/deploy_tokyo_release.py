@@ -810,14 +810,14 @@ def _require_portfolio_admission_postflight(
     ):
         raise DeploymentBlocked("exact Universe identity differs")
     if strategy_universe.get("deployment_stage") != "active":
-        raise DeploymentBlocked("exact six Active Universes are missing")
+        raise DeploymentBlocked("exact eight Active Universes are missing")
     if (
-        int(str(strategy_universe.get("active_current_count", -1))) != 6
+        int(str(strategy_universe.get("active_current_count", -1))) != 8
         or int(str(strategy_universe.get("warming_count", -1))) != 0
     ):
-        raise DeploymentBlocked("exact six Active Universes are missing")
+        raise DeploymentBlocked("exact eight Active Universes are missing")
     if certification.get("universe_bootstrap_pass") is not True:
-        raise DeploymentBlocked("exact six Active Universes are missing")
+        raise DeploymentBlocked("exact eight Active Universes are missing")
     if certification.get("certification_batch_pass") is not True:
         raise DeploymentBlocked("exact Certification Batch identity differs")
     runtime_identity = certification.get("runtime_identity")
@@ -1010,15 +1010,15 @@ def _require_release_facts(
             or strategy_universe.get("identity_status") != "pass"
             or strategy_universe.get("semantic_digest_status") != "pass"
             or strategy_universe.get("deployment_stage") != "active"
-            or int(str(strategy_universe.get("active_current_count", -1))) != 6
+            or int(str(strategy_universe.get("active_current_count", -1))) != 8
             or int(str(strategy_universe.get("warming_count", -1))) != 0
             or not isinstance(entry_promotion_counts, Mapping)
             or int(
                 str(entry_promotion_counts.get("active_current_universes", -1))
             )
-            != 6
-            or int(str(entry_promotion_counts.get("active_instruments", -1))) != 7
-            or int(str(entry_promotion_counts.get("active_scopes", -1))) != 42
+            != 8
+            or int(str(entry_promotion_counts.get("active_instruments", -1))) != 15
+            or int(str(entry_promotion_counts.get("active_scopes", -1))) != 58
             or int(str(entry_promotion_counts.get("warming_scopes", -1))) != 0
         ):
             raise DeploymentBlocked("exact Active StrategyUniverse manifest failed")
@@ -1556,31 +1556,52 @@ class SshTokyoReleaseBackend:
         self._remote(("sudo", "systemctl", "enable", "--now", *services))
 
     def bootstrap_strategy_universes(self, release: str) -> None:
-        self._release_command(
-            release,
-            "scripts/trading_kernel/bootstrap_strategy_universes.py",
-            "--runtime-profile-id",
+        for runtime_profile_id in (
             "tiny-live-v1",
-        )
+            "tradfi-equity-usdm-v1",
+        ):
+            self._release_command(
+                release,
+                "scripts/trading_kernel/bootstrap_strategy_universes.py",
+                "--runtime-profile-id",
+                runtime_profile_id,
+            )
 
     def refresh_active_certification_batch(self, release: str) -> None:
-        self._release_command(
-            release,
-            "scripts/trading_kernel/bootstrap_strategy_universes.py",
-            "--runtime-profile-id",
+        for runtime_profile_id in (
             "tiny-live-v1",
-            "--refresh-active-certification-batch-only",
-        )
+            "tradfi-equity-usdm-v1",
+        ):
+            self._release_command(
+                release,
+                "scripts/trading_kernel/bootstrap_strategy_universes.py",
+                "--runtime-profile-id",
+                runtime_profile_id,
+                "--refresh-active-certification-batch-only",
+            )
         deadline = time.monotonic() + self._timeout_seconds
         while True:
             certification = self.certify_flat(release)
             if certification.get("certification_batch_pass") is True:
                 return
-            batch = certification.get("compatible_certification_batch")
-            if isinstance(batch, Mapping) and batch.get("status") == "blocked":
+            batches = certification.get("compatible_certification_batches")
+            blocked_batch = next(
+                (
+                    batch
+                    for batch in (
+                        batches.values()
+                        if isinstance(batches, Mapping)
+                        else ()
+                    )
+                    if isinstance(batch, Mapping)
+                    and batch.get("status") == "blocked"
+                ),
+                None,
+            )
+            if blocked_batch is not None:
                 raise DeploymentBlocked(
                     "target Certification Batch is blocked: "
-                    + str(batch.get("blocker_code", "unknown"))
+                    + str(blocked_batch.get("blocker_code", "unknown"))
                 )
             remaining = deadline - time.monotonic()
             if remaining <= 0:

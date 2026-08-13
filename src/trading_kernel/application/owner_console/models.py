@@ -346,6 +346,8 @@ class InstrumentCenterItem(FrozenModel):
         "reference_only",
     ]
     profile_status: Literal["candidate", "reference", "active", "retired"]
+    max_entry_spread_bps: str | None
+    max_mark_index_deviation_bps: str | None
     product_status: Literal[
         "active",
         "inactive",

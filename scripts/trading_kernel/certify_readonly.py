@@ -15,6 +15,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from sqlalchemy import text
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -22,12 +23,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
-    APPROVED_FIRST_BATCH_INSTRUMENT_IDS,
+    APPROVED_UNIVERSE_BATCHES,
 )
 from src.trading_kernel.domain.exit_policy import registered_exit_policies
 from src.trading_kernel.domain.instrument_certification import (
     build_certification_manifest_digest,
 )
+from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     build_registry_semantic_hash,
@@ -142,7 +144,7 @@ def _registry_manifest_hash(manifest: Mapping[str, object]) -> str:
 
 
 def _certification_batch_manifest(
-    row: Mapping[str, object] | None,
+    row: Mapping[str, object] | RowMapping | None,
 ) -> dict[str, object] | None:
     if row is None:
         return None
@@ -161,6 +163,73 @@ def _certification_batch_manifest(
         "member_ids": list(member_ids),
         "live_manifest_digest": live_manifest_digest,
     }
+
+
+def _latest_batches_by_profile(
+    rows: Sequence[RowMapping],
+) -> dict[str, dict[str, object]]:
+    batches: dict[str, dict[str, object]] = {}
+    for row in rows:
+        runtime_profile_id = str(row.get("runtime_profile_id", ""))
+        if runtime_profile_id in batches:
+            continue
+        manifest = _certification_batch_manifest(row)
+        if manifest is not None:
+            batches[runtime_profile_id] = manifest
+    return batches
+
+
+def _batch_matches(
+    batch: Mapping[str, object] | None,
+    *,
+    runtime_profile_id: str,
+    expected_member_ids: tuple[str, ...],
+    runtime_identity: Mapping[str, object],
+    owner_policy_row: RowMapping | None,
+    require_completed: bool,
+) -> bool:
+    if batch is None or owner_policy_row is None:
+        return False
+    expected_digest = build_certification_manifest_digest(expected_member_ids)
+    policy_version_matches = (
+        _certification_batch_policy_stage_matches(
+            batch_policy_version=int(str(batch["owner_policy_version"])),
+            current_policy_version=int(str(owner_policy_row["policy_version"])),
+            new_entry_submit_enabled=bool(
+                owner_policy_row["new_entry_submit_enabled"]
+            ),
+        )
+        if require_completed
+        else int(str(batch["owner_policy_version"]))
+        == int(str(owner_policy_row["policy_version"]))
+    )
+    return bool(
+        batch["runtime_profile_id"] == runtime_profile_id
+        and batch["target_commit"] == runtime_identity.get("runtime_commit")
+        and batch["target_schema_revision"]
+        == runtime_identity.get("schema_revision")
+        and batch["target_seed_identity"]
+        == runtime_identity.get("seed_identity")
+        and batch["owner_policy_id"] == OWNER_POLICY_ID
+        and policy_version_matches
+        and int(str(owner_policy_row["policy_version"])) >= 4
+        and (
+            require_completed
+            or owner_policy_row["new_entry_submit_enabled"] is False
+        )
+        and batch["manifest_digest"] == expected_digest
+        and batch["live_manifest_digest"] == expected_digest
+        and batch["member_ids"] == list(expected_member_ids)
+        and int(str(batch["member_count"])) == len(expected_member_ids)
+        and (
+            not require_completed
+            or (
+                batch["status"] == "completed"
+                and int(str(batch["eligible_member_count"]))
+                == len(expected_member_ids)
+            )
+        )
+    )
 
 
 def _expected_registry_manifest() -> dict[str, object]:
@@ -768,7 +837,7 @@ async def _certify(
                     {"now_ms": effective_now_ms},
                 )
             ).one()
-            certification_batch_row = (
+            certification_batch_rows = (
                 await connection.execute(
                     text(
                         """
@@ -798,15 +867,15 @@ async def _certify(
                          WHERE batch.status = 'completed'
                            AND batch.valid_until_ms > :now_ms
                          GROUP BY batch.certification_batch_id
-                         ORDER BY batch.completed_at_ms DESC,
+                         ORDER BY batch.runtime_profile_id,
+                                  batch.completed_at_ms DESC,
                                   batch.certification_batch_id
-                         LIMIT 1
                         """
                     ),
                     {"now_ms": effective_now_ms},
                 )
-            ).mappings().one_or_none()
-            compatible_batch_row = (
+            ).mappings().all()
+            compatible_batch_rows = (
                 await connection.execute(
                     text(
                         """
@@ -819,6 +888,8 @@ async def _certify(
                                batch.owner_policy_version,
                                batch.manifest_digest,
                                batch.status,
+                               batch.started_at_ms,
+                               batch.blocker_code,
                                count(member.exchange_instrument_id) AS member_count,
                                array_agg(
                                    member.exchange_instrument_id
@@ -830,13 +901,13 @@ async def _certify(
                                batch.certification_batch_id
                          WHERE batch.status IN ('pending', 'completed')
                          GROUP BY batch.certification_batch_id
-                         ORDER BY batch.started_at_ms DESC,
+                         ORDER BY batch.runtime_profile_id,
+                                  batch.started_at_ms DESC,
                                   batch.certification_batch_id
-                         LIMIT 1
                         """
                     )
                 )
-            ).mappings().one_or_none()
+            ).mappings().all()
             integrity_orphans = int(
                 (
                     await connection.execute(
@@ -1205,32 +1276,25 @@ async def _certify(
         "live_semantic_hash": live_registry_hash,
     }
     policy_scope = None if owner_policy_row is None else owner_policy_row["scope"]
+    try:
+        parsed_policy_scope = OwnerPolicyScope.model_validate(policy_scope)
+    except ValueError:
+        parsed_policy_scope = None
     policy_events = (
         ()
-        if not isinstance(policy_scope, dict)
-        or not isinstance(policy_scope.get("allowed_event_spec_ids"), list)
-        else tuple(sorted(str(value) for value in policy_scope["allowed_event_spec_ids"]))
+        if parsed_policy_scope is None
+        else tuple(
+            item.event_spec_id
+            for item in parsed_policy_scope.event_runtime_profiles
+        )
     )
     active_current_count = int(entry_gate_counts[0])
     active_scope_count = int(entry_gate_counts[1])
     warming_scope_count = int(entry_gate_counts[2])
     active_member_count = int(entry_gate_counts[3])
     eligible_fresh_certification_count = int(entry_gate_counts[4])
-    expected_manifest_digest = build_certification_manifest_digest(
-        APPROVED_FIRST_BATCH_INSTRUMENT_IDS
-    )
-    expected_member_ids = tuple(sorted(APPROVED_FIRST_BATCH_INSTRUMENT_IDS))
-    certification_batch = _certification_batch_manifest(
-        None if certification_batch_row is None else dict(certification_batch_row)
-    )
-    compatible_batch = _certification_batch_manifest(
-        None if compatible_batch_row is None else dict(compatible_batch_row)
-    )
-    runtime_profile_id = (
-        None
-        if not isinstance(policy_scope, dict)
-        else policy_scope.get("runtime_profile_id")
-    )
+    completed_batches = _latest_batches_by_profile(certification_batch_rows)
+    compatible_batches = _latest_batches_by_profile(compatible_batch_rows)
     active_universe_manifest = [
         {
             "event_spec_id": str(row["event_spec_id"]),
@@ -1240,11 +1304,27 @@ async def _certify(
         }
         for row in active_universe_rows
     ]
-    universe_identity_pass = _universe_manifest_matches(
-        active_universe_manifest,
-        expected_event_specs=expected_event_specs,
-        expected_member_ids=expected_member_ids,
-    )
+    active_by_event = {
+        str(row["event_spec_id"]): row for row in active_universe_manifest
+    }
+    universe_profile_checks: dict[str, bool] = {}
+    for runtime_profile_id, (event_specs, member_ids) in APPROVED_UNIVERSE_BATCHES.items():
+        profile_manifest = [
+            active_by_event[event_spec_id]
+            for _event_id, event_spec_id in event_specs
+            if event_spec_id in active_by_event
+        ]
+        expected_groups = tuple(
+            (strategy_group_id, event_spec_id)
+            for strategy_group_id, event_spec_id in expected_event_specs
+            if event_spec_id in {item[1] for item in event_specs}
+        )
+        universe_profile_checks[runtime_profile_id] = _universe_manifest_matches(
+            profile_manifest,
+            expected_event_specs=expected_groups,
+            expected_member_ids=member_ids,
+        )
+    universe_identity_pass = all(universe_profile_checks.values())
     warming_universe_manifest = [
         {
             "event_spec_id": str(row["event_spec_id"]),
@@ -1254,27 +1334,18 @@ async def _certify(
         }
         for row in warming_universe_rows
     ]
-    compatible_batch_pass = bool(
-        compatible_batch is not None
-        and compatible_batch["runtime_profile_id"] == runtime_profile_id
-        and compatible_batch["target_commit"]
-        == runtime_identity.get("runtime_commit")
-        and compatible_batch["target_schema_revision"]
-        == runtime_identity.get("schema_revision")
-        and compatible_batch["target_seed_identity"]
-        == runtime_identity.get("seed_identity")
-        and compatible_batch["owner_policy_id"] == OWNER_POLICY_ID
-        and owner_policy_row is not None
-        and int(str(compatible_batch["owner_policy_version"]))
-        == int(owner_policy_row["policy_version"])
-        and int(owner_policy_row["policy_version"]) >= 4
-        and owner_policy_row["new_entry_submit_enabled"] is False
-        and compatible_batch["manifest_digest"] == expected_manifest_digest
-        and compatible_batch["live_manifest_digest"] == expected_manifest_digest
-        and compatible_batch["member_ids"] == list(expected_member_ids)
-        and int(str(compatible_batch["member_count"]))
-        == len(APPROVED_FIRST_BATCH_INSTRUMENT_IDS)
-    )
+    compatible_batch_profile_checks = {
+        runtime_profile_id: _batch_matches(
+            compatible_batches.get(runtime_profile_id),
+            runtime_profile_id=runtime_profile_id,
+            expected_member_ids=member_ids,
+            runtime_identity=runtime_identity,
+            owner_policy_row=owner_policy_row,
+            require_completed=False,
+        )
+        for runtime_profile_id, (_event_specs, member_ids) in APPROVED_UNIVERSE_BATCHES.items()
+    }
+    compatible_batch_pass = all(compatible_batch_profile_checks.values())
     deployment_stage = (
         "active"
         if universe_identity_pass and not warming_universe_manifest
@@ -1294,44 +1365,40 @@ async def _certify(
     strategy_universe["approved_vnext_event_spec_ids"] = list(
         expected_event_spec_ids
     )
-    certification_batch_pass = bool(
-        certification_batch is not None
-        and certification_batch["runtime_profile_id"] == runtime_profile_id
-        and certification_batch["target_commit"]
-        == runtime_identity.get("runtime_commit")
-        and certification_batch["target_schema_revision"]
-        == runtime_identity.get("schema_revision")
-        and certification_batch["target_seed_identity"]
-        == runtime_identity.get("seed_identity")
-        and certification_batch["owner_policy_id"] == OWNER_POLICY_ID
-        and owner_policy_row is not None
-        and _certification_batch_policy_stage_matches(
-            batch_policy_version=int(
-                str(certification_batch["owner_policy_version"])
-            ),
-            current_policy_version=int(owner_policy_row["policy_version"]),
-            new_entry_submit_enabled=bool(
-                owner_policy_row["new_entry_submit_enabled"]
-            ),
+    certification_batch_profile_checks = {
+        runtime_profile_id: _batch_matches(
+            completed_batches.get(runtime_profile_id),
+            runtime_profile_id=runtime_profile_id,
+            expected_member_ids=member_ids,
+            runtime_identity=runtime_identity,
+            owner_policy_row=owner_policy_row,
+            require_completed=True,
         )
-        and certification_batch["manifest_digest"]
-        == expected_manifest_digest
-        and certification_batch["live_manifest_digest"]
-        == expected_manifest_digest
-        and certification_batch["member_ids"] == list(expected_member_ids)
-        and certification_batch["status"] == "completed"
-        and int(str(certification_batch["member_count"]))
-        == len(APPROVED_FIRST_BATCH_INSTRUMENT_IDS)
-        and int(str(certification_batch["eligible_member_count"]))
-        == len(APPROVED_FIRST_BATCH_INSTRUMENT_IDS)
+        for runtime_profile_id, (_event_specs, member_ids) in APPROVED_UNIVERSE_BATCHES.items()
+    }
+    certification_batch_pass = all(certification_batch_profile_checks.values())
+    expected_active_universes = sum(
+        len(event_specs)
+        for event_specs, _member_ids in APPROVED_UNIVERSE_BATCHES.values()
+    )
+    expected_active_scopes = sum(
+        len(event_specs) * len(member_ids)
+        for event_specs, member_ids in APPROVED_UNIVERSE_BATCHES.values()
+    )
+    expected_active_instruments = len(
+        {
+            member_id
+            for _event_specs, member_ids in APPROVED_UNIVERSE_BATCHES.values()
+            for member_id in member_ids
+        }
     )
     universe_bootstrap_pass = (
         database_integrity_pass
-        and active_current_count == 6
-        and active_scope_count == 42
+        and active_current_count == expected_active_universes
+        and active_scope_count == expected_active_scopes
         and warming_scope_count == 0
         and not warming_universe_manifest
-        and active_member_count == 7
+        and active_member_count == expected_active_instruments
         and certification_batch_pass
         and policy_events == expected_event_spec_ids
     )
@@ -1430,11 +1497,17 @@ async def _certify(
             "active_instruments": active_member_count,
             "eligible_fresh_certifications": eligible_fresh_certification_count,
         },
-        "certification_batch": (
-            certification_batch
+        "certification_batch": completed_batches.get("tiny-live-v1"),
+        "certification_batches": completed_batches,
+        "certification_batch_profile_checks": (
+            certification_batch_profile_checks
         ),
-        "compatible_certification_batch": (
-            compatible_batch
+        "compatible_certification_batch": compatible_batches.get(
+            "tiny-live-v1"
+        ),
+        "compatible_certification_batches": compatible_batches,
+        "compatible_certification_batch_profile_checks": (
+            compatible_batch_profile_checks
         ),
         "compatible_certification_batch_pass": compatible_batch_pass,
         "certification_batch_pass": certification_batch_pass,

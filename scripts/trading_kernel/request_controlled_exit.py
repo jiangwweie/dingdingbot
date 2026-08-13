@@ -144,7 +144,7 @@ async def _execute(args: argparse.Namespace) -> ControlledExitResult:
             lambda: PostgresKernelUnitOfWork(engine),
             ControlledExitRequest(
                 authorization=authorization,
-                runtime_profile_id=RUNTIME_PROFILE_ID,
+                runtime_profile_id="account-wide",
                 venue_id=VENUE_ID,
                 account_id=account_id,
                 max_active_tickets=min(policy.max_concurrent_tickets, 3),

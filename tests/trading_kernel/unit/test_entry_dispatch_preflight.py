@@ -38,6 +38,11 @@ from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnershi
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
 )
+from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
+from src.trading_kernel.domain.product import (
+    ProductEntryDecision,
+    ProductEntryStatus,
+)
 from src.trading_kernel.domain.ticket import EntryOrderType
 from tests.trading_kernel.unit.test_capacity import (
     _long_signal,
@@ -177,6 +182,61 @@ def test_entry_preflight_refuses_family_policy_drift() -> None:
     decision = revalidate_entry_dispatch(request)
 
     assert decision.status is EntryDispatchPreflightStatus.POLICY_DRIFT
+
+
+def test_entry_preflight_refuses_policy_scope_drift() -> None:
+    base = _preflight_request(snapshot=_snapshot())
+    assert base.owner_policy is not None
+    request = base.model_copy(
+        update={
+            "owner_policy": base.owner_policy.model_copy(
+                update={
+                    "scope": OwnerPolicyScope.model_validate(
+                        {
+                            "event_runtime_profiles": [
+                                {
+                                    "event_spec_id": (
+                                        base.ticket.identity.runtime.event_spec_id
+                                    ),
+                                    "runtime_profile_id": "replacement-profile",
+                                }
+                            ]
+                        }
+                    )
+                }
+            )
+        }
+    )
+
+    decision = revalidate_entry_dispatch(request)
+
+    assert decision.status is EntryDispatchPreflightStatus.POLICY_DRIFT
+
+
+def test_entry_preflight_refuses_paused_strategy() -> None:
+    request = _preflight_request(snapshot=_snapshot()).model_copy(
+        update={"strategy_entry_enabled": False}
+    )
+
+    decision = revalidate_entry_dispatch(request)
+
+    assert decision.status is EntryDispatchPreflightStatus.STRATEGY_PAUSED
+
+
+def test_entry_preflight_refuses_blocked_product() -> None:
+    request = _preflight_request(snapshot=_snapshot()).model_copy(
+        update={
+            "product_entry_decision": ProductEntryDecision(
+                status=ProductEntryStatus.SPREAD_TOO_WIDE,
+                spread_bps=Decimal(21),
+                mark_index_deviation_bps=Decimal(0),
+            )
+        }
+    )
+
+    decision = revalidate_entry_dispatch(request)
+
+    assert decision.status is EntryDispatchPreflightStatus.PRODUCT_ENTRY_BLOCKED
 
 
 def test_entry_preflight_refuses_forged_ten_x_claim_even_when_policy_allows_ten_x() -> None:
@@ -335,6 +395,18 @@ def _preflight_request(*, snapshot):
             supported_margin_mode="cross",
             post_stop_stress_multiple=Decimal(2),
             max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
+            scope=OwnerPolicyScope.model_validate(
+                {
+                    "event_runtime_profiles": [
+                        {
+                            "event_spec_id": ticket.identity.runtime.event_spec_id,
+                            "runtime_profile_id": (
+                                ticket.identity.runtime.runtime_profile_id
+                            ),
+                        }
+                    ]
+                }
+            ),
         ),
         runtime_scope=RuntimeScopeSnapshot(
             runtime_scope_id=ticket.runtime_scope_id,

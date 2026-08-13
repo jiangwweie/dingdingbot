@@ -44,7 +44,9 @@ from src.trading_kernel.domain.instrument_identity import (
 from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
     entry_lane_current,
+    event_product_compatibility,
     event_specs,
+    instrument_product_profiles,
     instruments,
     owner_authorizations,
     owner_policy_current,
@@ -425,6 +427,41 @@ async def test_missing_or_stale_owner_policy_blocks_ticket(
 
     assert missing.status is IssueTicketStatus.POLICY_MISSING_OR_STALE
     assert stale.status is IssueTicketStatus.POLICY_MISSING_OR_STALE
+
+
+@pytest.mark.asyncio
+async def test_policy_scope_drift_before_ticket_issue_creates_no_durable_state(
+    issue_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(issue_engine)
+    async with issue_engine.begin() as connection:
+        await connection.execute(
+            sa.update(owner_policy_current)
+            .where(owner_policy_current.c.owner_policy_id == ticket.owner_policy_id)
+            .values(
+                scope={
+                    "event_runtime_profiles": [
+                        {
+                            "event_spec_id": ticket.identity.runtime.event_spec_id,
+                            "runtime_profile_id": "tradfi-equity-usdm-v1",
+                        }
+                    ]
+                }
+            )
+        )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result = await issue_ticket(
+            uow,
+            _issue_request(ticket=ticket, now_ms=1_001, claim_owner="worker-1"),
+        )
+
+    assert result.status is IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        assert await uow.tickets.get(ticket.identity.ticket_id) is None
+        assert await uow.budgets.get_for_ticket(ticket.identity.ticket_id) is None
+        assert await uow.capacity_claims.get_for_ticket(ticket.identity.ticket_id) is None
 
 
 @pytest.mark.asyncio
@@ -912,7 +949,22 @@ async def _seed_policy(
                 supported_margin_mode="cross",
                 post_stop_stress_multiple="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
-                scope={},
+                scope={
+                    "event_runtime_profiles": [
+                        {
+                            "event_spec_id": "mi-long-v2",
+                            "runtime_profile_id": "tiny-live-v1",
+                        },
+                        {
+                            "event_spec_id": "sor-long-v2",
+                            "runtime_profile_id": "tiny-live-v1",
+                        },
+                        {
+                            "event_spec_id": "sor-short-v2",
+                            "runtime_profile_id": "tiny-live-v1",
+                        },
+                    ]
+                },
                 updated_at_ms=1_000,
             )
         )
@@ -1545,6 +1597,44 @@ async def _seed_ticket_registry(connection, ticket) -> None:
                 "entry_order_type": ticket.entry_order_type.value,
                 "status": "active",
             },
+        )
+    )
+    await connection.execute(
+        pg_insert(event_product_compatibility)
+        .values(
+            event_spec_id=runtime.event_spec_id,
+            product_family="crypto_perpetual",
+            asset_class="crypto",
+            contract_type="PERPETUAL",
+            underlying_type="CRYPTO",
+            margin_asset="USDT",
+            semantic_digest="sha256:" + "f" * 64,
+            created_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[event_product_compatibility.c.event_spec_id]
+        )
+    )
+    await connection.execute(
+        pg_insert(instrument_product_profiles)
+        .values(
+            exchange_instrument_id=(
+                identity.netting_domain.exchange_instrument_id
+            ),
+            product_family="crypto_perpetual",
+            asset_class="crypto",
+            contract_type="PERPETUAL",
+            underlying_type="CRYPTO",
+            margin_asset="USDT",
+            entry_session_policy="continuous",
+            status="candidate",
+            max_entry_spread_bps=None,
+            max_mark_index_deviation_bps=None,
+            semantic_digest="sha256:" + "e" * 64,
+            updated_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[instrument_product_profiles.c.exchange_instrument_id]
         )
     )
     await connection.execute(

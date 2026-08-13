@@ -71,8 +71,12 @@ from src.trading_kernel.domain.owner_control import (
     OwnerControlOperation,
     StrategyEntryControl,
 )
+from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.position import PositionSnapshot
-from src.trading_kernel.domain.product import ProductSessionSnapshot
+from src.trading_kernel.domain.product import (
+    InstrumentProductProfile,
+    ProductSessionSnapshot,
+)
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.shadow_outcome import (
     ShadowOutcomeClaim,
@@ -232,6 +236,7 @@ class OwnerPolicySnapshot(BaseModel):
     supported_margin_mode: Literal["cross"]
     post_stop_stress_multiple: Decimal
     max_post_fill_stop_risk_overrun_fraction: Decimal
+    scope: OwnerPolicyScope | None = None
 
 
 class AccountExposureSnapshot(BaseModel):
@@ -560,7 +565,6 @@ class AggregateRepository(Protocol):
     async def list_active_ticket_ids(
         self,
         *,
-        runtime_profile_id: str,
         venue_id: str,
         account_id: str,
         limit: int,
@@ -740,6 +744,13 @@ class CapacityClaimRepository(Protocol):
 
     async def get_for_ticket(self, ticket_id: str) -> CapacityClaim | None: ...
 
+    async def get_latest_for_account(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+    ) -> CapacityClaim | None: ...
+
 
 class IncidentRepository(Protocol):
     async def add(self, incident: RuntimeIncidentRecord) -> None: ...
@@ -834,7 +845,7 @@ class OwnerControlRepository(Protocol):
     async def get_global_entry_resume_blocker(
         self,
         *,
-        runtime_profile_id: str,
+        owner_policy_id: str,
     ) -> str | None: ...
 
     async def add_operation(self, operation: OwnerControlOperation) -> None: ...
@@ -1129,6 +1140,11 @@ class SignalRepository(Protocol):
         self,
         exchange_instrument_id: str,
     ) -> ProductSessionSnapshot | None: ...
+
+    async def get_product_profile(
+        self,
+        exchange_instrument_id: str,
+    ) -> InstrumentProductProfile | None: ...
 
     async def upsert_product_sessions(
         self,

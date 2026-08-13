@@ -86,12 +86,14 @@ deployed schema identity remains a volatile fact owned only by
 `MAIN_CONTROL_ROADMAP.md`.
 
 `0004 -> 0005` is the stopped, flat, forward-only Product Authority upgrade.
-It preserves the existing Crypto Registry, Owner Policy versions, Strategy
+It preserves the existing Crypto Registry, Owner Policy lineage, Strategy
 Controls, terminal lineage and StrategyUniverse rows, then adds Product
 Compatibility, the bounded Instrument Center projections and the independent
-observation-only `SOR-US-EQ-PERP-001` authority. The main Crypto Policy never
-inherits TradFi Events; TradFi ENTRY remains disabled and its Strategy Control
-starts paused.
+`SOR-US-EQ-PERP-001` strategy lineage. Crypto and TradFi use the same
+`policy-main / Policy v4` capital authority through an exact bounded
+Event-to-RuntimeProfile mapping. The neutral TradFi RuntimeProfile is
+`tradfi-equity-usdm-v1`; its Strategy Control starts paused, and only an
+explicit postflight Owner resume permits later new ENTRY.
 
 Strategy semantics live in the Registry, while concrete instrument membership,
 certification, warming, current activation, and frozen Signal/Ticket lineage

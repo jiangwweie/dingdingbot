@@ -77,6 +77,7 @@ export function formatOwnerReason(raw: string): OwnerReason {
   if (raw === "incomplete_review_economics") return { label: "经济数据尚不完整", raw };
   if (raw === "monitor_limit_reached") return { label: "总览范围受限", raw };
   if (raw === "seed_enabled") return { label: "系统初始化启用", raw };
+  if (raw === "seed_deployment_paused") return { label: "部署后等待 Owner 恢复", raw };
   if (raw === "owner_manual_control") return { label: "Owner 手动操作", raw };
   if (raw === "hard_safety_stop") return { label: "安全保护已阻断", raw };
   return { label: "技术原因待查看", raw };

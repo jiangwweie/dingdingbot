@@ -49,8 +49,7 @@ from src.trading_kernel.infrastructure.strategy_registry_seed import (
 
 RUNTIME_PROFILE_ID = "tiny-live-v1"
 OWNER_POLICY_ID = "policy-main"
-TRADFI_RUNTIME_PROFILE_ID = "tradfi-equity-observe-v1"
-TRADFI_OWNER_POLICY_ID = "policy-tradfi-observe"
+TRADFI_RUNTIME_PROFILE_ID = "tradfi-equity-usdm-v1"
 GLOBAL_ENTRY_LANE_ID = "global-entry"
 VENUE_ID = "binance-usdm"
 POSITION_MODE = "independent_sides"
@@ -289,7 +288,8 @@ async def seed_runtime_authority(
         allowed_event_spec_ids=allowed_event_spec_ids,
         include_tradfi=include_tradfi,
     )
-    policy = _policy_values(
+    policy_builder = _policy_values if include_tradfi else _legacy_policy_values
+    policy = policy_builder(
         version=1,
         new_entry_submit_enabled=False,
         allowed_event_spec_ids=allowed_event_spec_ids,
@@ -297,7 +297,7 @@ async def seed_runtime_authority(
     )
 
     certification = {
-        "stage": "observation_only",
+        "stage": "entry_paused" if include_tradfi else "observation_only",
         "seed_identity": seed_identity,
         "position_mode": POSITION_MODE,
     }
@@ -321,7 +321,11 @@ async def seed_runtime_authority(
             "owner_policy_event_id",
             _policy_event(
                 version=1,
-                operation="seed_observation_only",
+                operation=(
+                    "seed_entry_paused"
+                    if include_tradfi
+                    else "seed_observation_only"
+                ),
                 policy=policy,
                 occurred_at_ms=request.seeded_at_ms,
             ),
@@ -381,7 +385,7 @@ async def seed_runtime_authority(
     ]
     if include_tradfi:
         rows.extend(
-            _tradfi_observation_rows(
+            _tradfi_runtime_rows(
                 account_id=request.account_id,
                 seeded_at_ms=request.seeded_at_ms,
             )
@@ -439,11 +443,7 @@ async def seed_runtime_authority(
         connection,
         owner_policy_current,
         "owner_policy_id",
-        (
-            {OWNER_POLICY_ID, TRADFI_OWNER_POLICY_ID}
-            if include_tradfi
-            else {OWNER_POLICY_ID}
-        ),
+        {OWNER_POLICY_ID},
     )
     await _assert_exact_identity_set(
         connection,
@@ -508,6 +508,7 @@ async def deploy_compatible_upgrade_identity(
     )
     current_policy = dict(await _lock_policy(connection))
     target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
+    source_event_spec_ids = _allowed_event_spec_ids(_crypto_strategy_contracts())
     current_policy_version = int(str(current_policy["policy_version"]))
     expected_policy_version = (
         4
@@ -520,11 +521,11 @@ async def deploy_compatible_upgrade_identity(
         if source_schema_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION
         else source_entry_enabled
     )
-    if not _policy_matches(
+    if not _legacy_policy_matches(
         current_policy,
         version=expected_policy_version,
         new_entry_submit_enabled=expected_source_entry_enabled,
-        allowed_event_spec_ids=target_event_spec_ids,
+        allowed_event_spec_ids=source_event_spec_ids,
     ) or (
         source_schema_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION
         and current_policy["max_strategy_group_concurrent_tickets"] is not None
@@ -596,7 +597,15 @@ async def deploy_compatible_upgrade_identity(
         )
         expected_policy_version = int(str(current_policy["policy_version"]))
 
-    for row in _tradfi_observation_rows(
+    current_policy = await _expand_policy_for_tradfi(
+        connection,
+        current_policy=current_policy,
+        allowed_event_spec_ids=target_event_spec_ids,
+        occurred_at_ms=request.seeded_at_ms,
+    )
+    expected_policy_version = int(str(current_policy["policy_version"]))
+
+    for row in _tradfi_runtime_rows(
         account_id=request.account_id,
         seeded_at_ms=request.seeded_at_ms,
     ):
@@ -611,7 +620,7 @@ async def deploy_compatible_upgrade_identity(
         connection,
         owner_policy_current,
         "owner_policy_id",
-        {OWNER_POLICY_ID, TRADFI_OWNER_POLICY_ID},
+        {OWNER_POLICY_ID},
     )
     await _assert_exact_identity_set(
         connection,
@@ -974,10 +983,21 @@ async def _transition_policy(
     acceptance_ticket_id: str | None = None,
 ) -> RuntimePolicyState:
     connection = uow._require_connection()
-    allowed_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
+    schema_revision = await connection.scalar(
+        sa.select(schema_metadata.c.metadata_value).where(
+            schema_metadata.c.metadata_key == "schema_revision"
+        )
+    )
+    include_tradfi = schema_revision == "0005_tradfi_instrument_center"
+    allowed_event_spec_ids = _allowed_event_spec_ids(
+        registered_strategy_contracts()
+        if include_tradfi
+        else _crypto_strategy_contracts()
+    )
     current = dict(await _lock_policy(connection))
     current_version = int(str(current["policy_version"]))
-    if not _policy_matches(
+    matcher = _policy_matches if include_tradfi else _legacy_policy_matches
+    if not matcher(
         current,
         version=current_version,
         new_entry_submit_enabled=expected_submit,
@@ -996,7 +1016,8 @@ async def _transition_policy(
     await _require_zero_runtime_activity(connection)
 
     target_version = current_version + 1
-    target = _policy_values(
+    policy_builder = _policy_values if include_tradfi else _legacy_policy_values
+    target = policy_builder(
         version=target_version,
         new_entry_submit_enabled=True,
         allowed_event_spec_ids=allowed_event_spec_ids,
@@ -1041,11 +1062,7 @@ def _allowed_event_spec_ids(
 ) -> tuple[str, ...]:
     event_spec_ids = tuple(
         sorted(
-            {
-                str(contract.event_spec_id)
-                for contract in contracts
-                if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
-            }
+            {str(contract.event_spec_id) for contract in contracts}
         )
     )
     if not event_spec_ids:
@@ -1124,51 +1141,47 @@ def _policy_values(
             DYNAMIC_POLICY.max_post_fill_stop_risk_overrun_fraction
         ),
         "scope": {
-            "runtime_profile_id": RUNTIME_PROFILE_ID,
-            "allowed_event_spec_ids": list(allowed_event_spec_ids),
+            "event_runtime_profiles": [
+                {
+                    "event_spec_id": event_spec_id,
+                    "runtime_profile_id": (
+                        TRADFI_RUNTIME_PROFILE_ID
+                        if event_spec_id in _tradfi_event_spec_ids()
+                        else RUNTIME_PROFILE_ID
+                    ),
+                }
+                for event_spec_id in allowed_event_spec_ids
+            ]
         },
         "updated_at_ms": updated_at_ms,
     }
 
 
-def _tradfi_policy_values(*, updated_at_ms: int) -> dict[str, object]:
-    return {
-        "owner_policy_id": TRADFI_OWNER_POLICY_ID,
-        "policy_version": 1,
-        "enabled": True,
-        "new_entry_submit_enabled": False,
-        "priority_rank": 200,
-        "max_concurrent_tickets": 1,
-        "family_ticket_limits": FamilyTicketLimits(
-            long_continuation=1,
-            opening_range=1,
-            rally_failure_short=1,
-        ).model_dump(),
-        "max_ticket_stop_risk_fraction": Decimal("0.005"),
-        "max_gross_stop_risk_fraction": Decimal("0.005"),
-        "max_ticket_initial_margin_fraction": Decimal("0.10"),
-        "max_gross_initial_margin_utilization": Decimal("0.10"),
-        "directional_stop_risk_limit_fraction": Decimal("0.005"),
-        "min_materialization_ratio": Decimal("0.50"),
-        "max_leverage": 5,
-        "supported_margin_mode": "cross",
-        "post_stop_stress_multiple": Decimal("2.0"),
-        "max_post_fill_stop_risk_overrun_fraction": Decimal("0.10"),
-        "scope": {
-            "runtime_profile_id": TRADFI_RUNTIME_PROFILE_ID,
-            "allowed_event_spec_ids": list(_tradfi_event_spec_ids()),
-            "owner_console_primary": False,
-        },
-        "updated_at_ms": updated_at_ms,
+def _legacy_policy_values(
+    *,
+    version: int,
+    new_entry_submit_enabled: bool,
+    allowed_event_spec_ids: tuple[str, ...],
+    updated_at_ms: int,
+) -> dict[str, object]:
+    values = _policy_values(
+        version=version,
+        new_entry_submit_enabled=new_entry_submit_enabled,
+        allowed_event_spec_ids=allowed_event_spec_ids,
+        updated_at_ms=updated_at_ms,
+    )
+    values["scope"] = {
+        "runtime_profile_id": RUNTIME_PROFILE_ID,
+        "allowed_event_spec_ids": list(allowed_event_spec_ids),
     }
+    return values
 
 
-def _tradfi_observation_rows(
+def _tradfi_runtime_rows(
     *,
     account_id: str,
     seeded_at_ms: int,
 ) -> tuple[_ExactRow, ...]:
-    policy = _tradfi_policy_values(updated_at_ms=seeded_at_ms)
     return (
         _ExactRow(
             runtime_profiles,
@@ -1183,24 +1196,6 @@ def _tradfi_observation_rows(
                 "updated_at_ms": seeded_at_ms,
             },
             ("venue_id", "account_id", "environment", "position_mode", "status"),
-        ),
-        _ExactRow(
-            owner_policy_events,
-            "owner_policy_event_id",
-            _policy_event(
-                version=1,
-                operation="seed_tradfi_observation_only",
-                policy=policy,
-                occurred_at_ms=seeded_at_ms,
-                owner_policy_id=TRADFI_OWNER_POLICY_ID,
-            ),
-            ("owner_policy_id", "policy_version", "operation", "payload"),
-        ),
-        _ExactRow(
-            owner_policy_current,
-            "owner_policy_id",
-            policy,
-            _POLICY_COMPARE_KEYS,
         ),
     )
 
@@ -1235,30 +1230,25 @@ def _seed_identity(
     allowed_event_spec_ids: tuple[str, ...],
     include_tradfi: bool,
 ) -> str:
-    semantics = _policy_values(
+    policy_builder = _policy_values if include_tradfi else _legacy_policy_values
+    semantics = policy_builder(
         version=1,
         new_entry_submit_enabled=False,
         allowed_event_spec_ids=allowed_event_spec_ids,
         updated_at_ms=1,
     )
     semantics.pop("updated_at_ms")
-    tradfi_semantics = None
-    if include_tradfi:
-        tradfi_semantics = _tradfi_policy_values(updated_at_ms=1)
-        tradfi_semantics.pop("updated_at_ms")
     canonical = json.dumps(
         {
             "account_id": account_id,
             "registry_semantic_hash": registry_semantic_hash,
-            "runtime_profile_id": RUNTIME_PROFILE_ID,
+            "runtime_profile_ids": [
+                RUNTIME_PROFILE_ID,
+                *([TRADFI_RUNTIME_PROFILE_ID] if include_tradfi else []),
+            ],
             "schema_revision": schema_revision,
             "position_mode": POSITION_MODE,
             "acceptance_policy": semantics,
-            **(
-                {"tradfi_observation_policy": tradfi_semantics}
-                if tradfi_semantics is not None
-                else {}
-            ),
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -1276,6 +1266,22 @@ def _policy_matches(
     allowed_event_spec_ids: tuple[str, ...],
 ) -> bool:
     expected = _policy_values(
+        version=version,
+        new_entry_submit_enabled=new_entry_submit_enabled,
+        allowed_event_spec_ids=allowed_event_spec_ids,
+        updated_at_ms=int(str(row["updated_at_ms"])),
+    )
+    return all(row[key] == expected[key] for key in _POLICY_COMPARE_KEYS)
+
+
+def _legacy_policy_matches(
+    row: Mapping[str, object],
+    *,
+    version: int,
+    new_entry_submit_enabled: bool,
+    allowed_event_spec_ids: tuple[str, ...],
+) -> bool:
+    expected = _legacy_policy_values(
         version=version,
         new_entry_submit_enabled=new_entry_submit_enabled,
         allowed_event_spec_ids=allowed_event_spec_ids,
@@ -1859,7 +1865,7 @@ async def _seed_strategy_entry_controls(
     strategy_group_ids: tuple[str, ...] | None = None,
     assert_exact_identity_set: bool = True,
 ) -> int:
-    """Install explicit controls; TradFi SOR starts paused and remains non-entry."""
+    """Install controls; TradFi SOR starts paused until postflight resume."""
 
     selected_group_ids = (
         tuple(
@@ -1912,7 +1918,7 @@ async def _seed_strategy_entry_controls(
                     "operation": "pause" if paused else "resume",
                     "target_state": "paused" if paused else "enabled",
                     "authorization_id": authorization_id,
-                    "reason": "seed_observation_only" if paused else "seed_enabled",
+                    "reason": "seed_deployment_paused" if paused else "seed_enabled",
                     "payload": {},
                     "created_at_ms": seeded_at_ms,
                 },
@@ -1937,7 +1943,7 @@ async def _seed_strategy_entry_controls(
                     "entry_state": "paused" if paused else "enabled",
                     "control_version": 1,
                     "last_event_id": event_id,
-                    "reason": "seed_observation_only" if paused else "seed_enabled",
+                    "reason": "seed_deployment_paused" if paused else "seed_enabled",
                     "updated_at_ms": seeded_at_ms,
                 },
                 (
@@ -2014,6 +2020,54 @@ async def _pause_entry_for_compatible_upgrade(
     if row is None:
         raise RuntimeAuthorityTransitionRefused(
             "owner-control upgrade lost the ENTRY pause transition"
+        )
+    return dict(row)
+
+
+async def _expand_policy_for_tradfi(
+    connection: AsyncConnection,
+    *,
+    current_policy: Mapping[str, object],
+    allowed_event_spec_ids: tuple[str, ...],
+    occurred_at_ms: int,
+) -> dict[str, object]:
+    """Create one new paused Policy version with exact multi-profile scope."""
+
+    current_version = int(str(current_policy["policy_version"]))
+    target = _policy_values(
+        version=current_version + 1,
+        new_entry_submit_enabled=False,
+        allowed_event_spec_ids=allowed_event_spec_ids,
+        updated_at_ms=occurred_at_ms,
+    )
+    await _insert_exact(
+        connection,
+        _ExactRow(
+            owner_policy_events,
+            "owner_policy_event_id",
+            _policy_event(
+                version=current_version + 1,
+                operation="tradfi_live_policy_scope_expanded",
+                policy=target,
+                occurred_at_ms=occurred_at_ms,
+            ),
+            ("owner_policy_id", "policy_version", "operation", "payload"),
+        ),
+    )
+    updated = await connection.execute(
+        sa.update(owner_policy_current)
+        .where(
+            owner_policy_current.c.owner_policy_id == OWNER_POLICY_ID,
+            owner_policy_current.c.policy_version == current_version,
+            owner_policy_current.c.new_entry_submit_enabled.is_(False),
+        )
+        .values(target)
+        .returning(owner_policy_current)
+    )
+    row = updated.mappings().one_or_none()
+    if row is None:
+        raise RuntimeAuthorityTransitionRefused(
+            "TradFi Policy scope expansion lost optimistic authority"
         )
     return dict(row)
 

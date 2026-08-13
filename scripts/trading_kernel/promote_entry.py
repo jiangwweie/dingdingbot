@@ -16,6 +16,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.trading_kernel.application.strategy_universe_batch_manifest import (
+    APPROVED_UNIVERSE_BATCHES,
+)
+
+APPROVED_ACTIVE_INSTRUMENT_COUNT = len(
+    {
+        member_id
+        for _event_specs, member_ids in APPROVED_UNIVERSE_BATCHES.values()
+        for member_id in member_ids
+    }
+)
+
 ENTRY_SERVICE = "brc-trading-kernel-entry-worker.service"
 SAFETY_SERVICES = (
     "brc-trading-kernel-observation-worker.service",
@@ -149,9 +161,9 @@ class LocalEntryPromotionBackend:
             and probe.get("non_flat_domain_count") == 0
             and probe.get("open_order_domain_count") == 0
             and isinstance(manifest, list)
-            and len(manifest) == 7
+            and len(manifest) == APPROVED_ACTIVE_INSTRUMENT_COUNT
             and isinstance(rules, list)
-            and len(rules) == 7
+            and len(rules) == APPROVED_ACTIVE_INSTRUMENT_COUNT
             and {str(row.get("exchange_instrument_id")) for row in rules if isinstance(row, Mapping)}
             == {str(item) for item in manifest}
             and all(

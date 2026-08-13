@@ -49,6 +49,8 @@ READONLY_WORKERS = (
     "brc-trading-kernel-reconciliation-worker.service",
 )
 LIFECYCLE_WORKER = "brc-trading-kernel-lifecycle-worker.service"
+CRYPTO_RUNTIME_PROFILE_ID = "tiny-live-v1"
+TRADFI_RUNTIME_PROFILE_ID = "tradfi-equity-usdm-v1"
 WRITE_FENCE = PurePosixPath("/etc/brc/trading-kernel.write-fenced")
 RUNTIME_ENV = PurePosixPath("/etc/brc/trading-kernel.env")
 RELEASE_ROOT = PurePosixPath("/opt/brc/releases")
@@ -1032,11 +1034,13 @@ class SshTokyoSystem:
     async def start_readonly_workers(self, plan: CutoverPlan) -> None:
         await self._require_entry_authority_disabled()
         release = _release_path(plan)
+        if plan.runtime_profile_id != CRYPTO_RUNTIME_PROFILE_ID:
+            raise RuntimeError("cutover primary RuntimeProfile differs from Crypto")
         await self._release_python(
             release,
             "scripts/trading_kernel/bootstrap_strategy_universes.py",
             "--runtime-profile-id",
-            plan.runtime_profile_id,
+            CRYPTO_RUNTIME_PROFILE_ID,
             "--prepare-certification-batch-only",
         )
         for unit in READONLY_WORKERS:
@@ -1055,11 +1059,31 @@ class SshTokyoSystem:
     async def complete_target_certification(self, plan: CutoverPlan) -> None:
         await self._require_entry_authority_disabled()
         release = _release_path(plan)
+        if plan.runtime_profile_id != CRYPTO_RUNTIME_PROFILE_ID:
+            raise RuntimeError("cutover primary RuntimeProfile differs from Crypto")
         await self._release_python(
             release,
             "scripts/trading_kernel/bootstrap_strategy_universes.py",
             "--runtime-profile-id",
-            plan.runtime_profile_id,
+            CRYPTO_RUNTIME_PROFILE_ID,
+            "--wait-timeout-ms",
+            "900000",
+            "--poll-interval-ms",
+            "5000",
+            timeout_seconds=930,
+        )
+        await self._release_python(
+            release,
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            TRADFI_RUNTIME_PROFILE_ID,
+            "--prepare-certification-batch-only",
+        )
+        await self._release_python(
+            release,
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            TRADFI_RUNTIME_PROFILE_ID,
             "--wait-timeout-ms",
             "900000",
             "--poll-interval-ms",

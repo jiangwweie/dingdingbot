@@ -32,7 +32,7 @@ async def test_deployment_drain_persists_one_exit_request_and_reduce_only_comman
     )
     request = ControlledExitRequest(
         authorization=authorization,
-        runtime_profile_id=ticket.identity.runtime.runtime_profile_id,
+        runtime_profile_id="account-wide",
         venue_id=ticket.identity.netting_domain.venue_id,
         account_id=ticket.identity.netting_domain.account_id,
         max_active_tickets=3,

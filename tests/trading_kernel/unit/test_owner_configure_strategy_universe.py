@@ -40,7 +40,7 @@ class _Universes:
     async def resolve_install_context(self, **_kwargs):
         return UniverseInstallContext(
             event_spec_id=self.current.event_spec_id,
-            owner_policy_id="policy-tradfi-observe",
+            owner_policy_id="policy-main",
         )
 
     async def get_current(self, _event_spec_id: str):
@@ -61,7 +61,7 @@ class _Universes:
 
 def _request(**overrides: object) -> OwnerUniverseConfigurationRequest:
     values = {
-        "runtime_profile_id": "tradfi-equity-observe-v1",
+        "runtime_profile_id": "tradfi-equity-usdm-v1",
         "event_id": "SOR-US-LONG-15M",
         "exchange_instrument_ids": (
             "binance-usdm:AAPLUSDT:perpetual",

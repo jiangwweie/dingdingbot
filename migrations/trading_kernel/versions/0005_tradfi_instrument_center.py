@@ -83,6 +83,8 @@ def upgrade() -> None:
         sa.Column("margin_asset", SHORT_TEXT, nullable=False),
         sa.Column("entry_session_policy", SHORT_TEXT, nullable=False),
         sa.Column("status", SHORT_TEXT, nullable=False),
+        sa.Column("max_entry_spread_bps", MONEY, nullable=True),
+        sa.Column("max_mark_index_deviation_bps", MONEY, nullable=True),
         sa.Column("semantic_digest", LONG_TEXT, nullable=False),
         sa.Column("updated_at_ms", sa.BigInteger(), nullable=False),
         sa.CheckConstraint(
@@ -100,6 +102,15 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "status IN ('candidate', 'reference', 'active', 'retired')",
             name="ck_brc_instrument_product_profiles_status_valid",
+        ),
+        sa.CheckConstraint(
+            "max_entry_spread_bps IS NULL OR max_entry_spread_bps > 0",
+            name="ck_brc_instrument_product_profiles_spread_limit_positive",
+        ),
+        sa.CheckConstraint(
+            "max_mark_index_deviation_bps IS NULL OR "
+            "max_mark_index_deviation_bps > 0",
+            name="ck_brc_instrument_product_profiles_index_limit_positive",
         ),
         sa.CheckConstraint(
             "semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
@@ -451,6 +462,8 @@ def _seed_product_catalog() -> None:
         sa.column("margin_asset"),
         sa.column("entry_session_policy"),
         sa.column("status"),
+        sa.column("max_entry_spread_bps"),
+        sa.column("max_mark_index_deviation_bps"),
         sa.column("semantic_digest"),
         sa.column("updated_at_ms"),
     )
@@ -532,15 +545,30 @@ def _profile(
             else "continuous"
         ),
         "status": "reference" if reference else "candidate",
+        "max_entry_spread_bps": (
+            "20" if tradfi and not reference else None
+        ),
+        "max_mark_index_deviation_bps": (
+            "50" if tradfi and not reference else None
+        ),
+    }
+    semantic_payload = {
+        **payload,
+        "max_entry_spread_bps": (
+            "20.000000000000000000" if tradfi and not reference else None
+        ),
+        "max_mark_index_deviation_bps": (
+            "50.000000000000000000" if tradfi and not reference else None
+        ),
     }
     encoded = json.dumps(
-        payload,
+        semantic_payload,
         ensure_ascii=True,
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
     return {
-        **payload,
+        **semantic_payload,
         "semantic_digest": f"sha256:{hashlib.sha256(encoded).hexdigest()}",
         "updated_at_ms": updated_at_ms,
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install and boundedly await the one approved six-Event StrategyUniverse batch."""
+"""Install and boundedly await one approved RuntimeProfile Universe batch."""
 
 from __future__ import annotations
 
@@ -36,6 +36,7 @@ from src.trading_kernel.application.read_strategy_universe_status import (
 )
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_FIRST_BATCH_INSTRUMENT_IDS,
+    APPROVED_UNIVERSE_BATCHES,
     APPROVED_UNIVERSE_EVENT_ORDER,
     APPROVED_UNIVERSE_EVENT_SPECS,
 )
@@ -43,6 +44,7 @@ from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
     build_certification_manifest_digest,
 )
+from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
@@ -94,17 +96,35 @@ def _select_bootstrap_universe(
     return exact[0]
 
 
-def _validate_static_manifest() -> None:
+def _manifest_for_profile(
+    runtime_profile_id: str,
+) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
+    manifest = APPROVED_UNIVERSE_BATCHES.get(runtime_profile_id)
+    if manifest is None:
+        raise BootstrapBlocked("runtime_profile_manifest_missing")
+    return manifest
+
+
+def _validate_static_manifest(
+    runtime_profile_id: str = "tiny-live-v1",
+) -> None:
+    event_specs, members = _manifest_for_profile(runtime_profile_id)
+    event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
+    event_spec_by_event_id = dict(event_specs)
     contracts = {contract.event_id: contract for contract in registered_strategy_contracts()}
-    if tuple(EVENT_SPEC_BY_EVENT_ID) != EVENT_ORDER or {
+    if tuple(event_spec_by_event_id) != event_order or {
         event_id: contracts[event_id].event_spec_id
-        for event_id in EVENT_ORDER
+        for event_id in event_order
         if event_id in contracts
-    } != EVENT_SPEC_BY_EVENT_ID:
+    } != event_spec_by_event_id:
         raise BootstrapBlocked("registry_event_manifest_mismatch")
-    if len(INITIAL_MEMBERS) != 7 or len(set(INITIAL_MEMBERS)) != 7:
+    expected_size = 7 if runtime_profile_id == "tiny-live-v1" else 8
+    if len(members) != expected_size or len(set(members)) != expected_size:
         raise BootstrapBlocked("initial_member_manifest_invalid")
-    if any("AVAX" in member or not member.startswith("binance-usdm:") for member in INITIAL_MEMBERS):
+    if any(
+        "AVAX" in member or not member.startswith("binance-usdm:")
+        for member in members
+    ):
         raise BootstrapBlocked("initial_member_manifest_out_of_scope")
 
 
@@ -113,8 +133,11 @@ async def _validate_database_authority(
     *,
     runtime_profile_id: str,
 ) -> BootstrapAuthority:
+    event_specs, _members = _manifest_for_profile(runtime_profile_id)
+    event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
+    event_spec_by_event_id = dict(event_specs)
     expected_event_specs = tuple(
-        EVENT_SPEC_BY_EVENT_ID[event_id] for event_id in EVENT_ORDER
+        event_spec_by_event_id[event_id] for event_id in event_order
     )
     async with engine.connect() as connection:
         event_rows = (
@@ -124,18 +147,16 @@ async def _validate_database_authority(
                     "WHERE event_id = ANY(:event_ids) AND status = 'active' "
                     "ORDER BY event_id"
                 ),
-                {"event_ids": list(EVENT_ORDER)},
+                {"event_ids": list(event_order)},
             )
         ).mappings().all()
         policy_rows = (
             await connection.execute(
                 text(
-                    "SELECT scope FROM brc_owner_policy_current "
-                    "WHERE enabled = true "
-                    "AND scope ->> 'runtime_profile_id' = :runtime_profile_id "
-                    "ORDER BY owner_policy_id LIMIT 2"
-                ),
-                {"runtime_profile_id": runtime_profile_id},
+                    "SELECT owner_policy_id, policy_version, scope "
+                    "FROM brc_owner_policy_current WHERE enabled = true "
+                    "ORDER BY priority_rank, owner_policy_id LIMIT 101"
+                )
             )
         ).mappings().all()
         identity_rows = (
@@ -148,46 +169,39 @@ async def _validate_database_authority(
                 )
             )
         ).all()
-        policy_identity = (
-            await connection.execute(
-                text(
-                    "SELECT owner_policy_id, policy_version "
-                    "FROM brc_owner_policy_current "
-                    "WHERE enabled = true "
-                    "AND scope ->> 'runtime_profile_id' = :runtime_profile_id "
-                    "ORDER BY owner_policy_id LIMIT 2"
-                ),
-                {"runtime_profile_id": runtime_profile_id},
-            )
-        ).all()
     actual_event_specs = {
         str(row["event_id"]): str(row["event_spec_id"]) for row in event_rows
     }
     if actual_event_specs != {
-        event_id: EVENT_SPEC_BY_EVENT_ID[event_id] for event_id in EVENT_ORDER
+        event_id: event_spec_by_event_id[event_id] for event_id in event_order
     }:
         raise BootstrapBlocked("registry_event_authority_mismatch")
-    if len(policy_rows) != 1:
+    matching_policies = []
+    for row in policy_rows:
+        try:
+            scope = OwnerPolicyScope.model_validate(row["scope"])
+        except ValueError:
+            continue
+        if all(
+            scope.authorizes(
+                event_spec_id=event_spec_id,
+                runtime_profile_id=runtime_profile_id,
+            )
+            for event_spec_id in expected_event_specs
+        ):
+            matching_policies.append(row)
+    if len(matching_policies) != 1:
         raise BootstrapBlocked("owner_policy_authority_mismatch")
-    scope = policy_rows[0]["scope"]
-    if not isinstance(scope, dict):
-        raise BootstrapBlocked("owner_policy_scope_invalid")
-    allowed = scope.get("allowed_event_spec_ids")
-    if not isinstance(allowed, list) or tuple(sorted(str(value) for value in allowed)) != tuple(
-        sorted(expected_event_specs)
-    ):
-        raise BootstrapBlocked("owner_policy_event_manifest_mismatch")
     identity = {str(key): str(value) for key, value in identity_rows}
     if set(identity) != {"runtime_commit", "schema_revision", "seed_identity"}:
         raise BootstrapBlocked("runtime_identity_incomplete")
-    if len(policy_identity) != 1:
-        raise BootstrapBlocked("owner_policy_identity_mismatch")
+    policy_identity = matching_policies[0]
     return BootstrapAuthority(
         runtime_commit=identity["runtime_commit"],
         schema_revision=identity["schema_revision"],
         seed_identity=identity["seed_identity"],
-        owner_policy_id=str(policy_identity[0][0]),
-        owner_policy_version=int(policy_identity[0][1]),
+        owner_policy_id=str(policy_identity["owner_policy_id"]),
+        owner_policy_version=int(policy_identity["policy_version"]),
     )
 
 
@@ -198,7 +212,8 @@ async def _ensure_certification_batch(
     authority: BootstrapAuthority,
     started_at_ms: int,
 ) -> str:
-    manifest_digest = build_certification_manifest_digest(INITIAL_MEMBERS)
+    _event_specs, members = _manifest_for_profile(runtime_profile_id)
+    manifest_digest = build_certification_manifest_digest(members)
     required_valid_until_ms = started_at_ms + CERTIFICATION_PROMOTION_WINDOW_MS
     async with engine.connect() as connection:
         existing = (
@@ -262,7 +277,7 @@ async def _ensure_certification_batch(
                 target_seed_identity=authority.seed_identity,
                 owner_policy_id=authority.owner_policy_id,
                 owner_policy_version=authority.owner_policy_version,
-                exchange_instrument_ids=INITIAL_MEMBERS,
+                exchange_instrument_ids=members,
                 started_at_ms=batch_started_at_ms,
                 minimum_valid_until_ms=minimum_valid_until_ms,
             ),
@@ -291,7 +306,14 @@ async def _read_certification_batch_state(
     return str(row[0]), None if row[1] is None else str(row[1])
 
 
-async def _validate_active_universe_manifest(engine: AsyncEngine) -> None:
+async def _validate_active_universe_manifest(
+    engine: AsyncEngine,
+    *,
+    runtime_profile_id: str,
+) -> None:
+    event_specs, members = _manifest_for_profile(runtime_profile_id)
+    event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
+    event_spec_by_event_id = dict(event_specs)
     async with engine.connect() as connection:
         rows = (
             await connection.execute(
@@ -311,18 +333,22 @@ async def _validate_active_universe_manifest(engine: AsyncEngine) -> None:
                     "ON event.event_spec_id = current.event_spec_id "
                     "JOIN brc_strategy_universe_members AS member "
                     "ON member.universe_version_id = current.universe_version_id "
+                    "WHERE current.event_spec_id = ANY(:event_spec_ids) "
                     "GROUP BY event.event_id, current.event_spec_id, "
                     "current.universe_version_id, current.lifecycle_state, "
                     "version.lifecycle_state"
-                )
+                ),
+                {"event_spec_ids": [item[1] for item in event_specs]},
             )
         ).mappings().all()
         active_version_count = int(
             await connection.scalar(
                 text(
                     "SELECT count(*) FROM brc_strategy_universe_versions "
-                    "WHERE lifecycle_state = 'active'"
-                )
+                    "WHERE lifecycle_state = 'active' "
+                    "AND event_spec_id = ANY(:event_spec_ids)"
+                ),
+                {"event_spec_ids": [item[1] for item in event_specs]},
             )
             or 0
         )
@@ -330,30 +356,32 @@ async def _validate_active_universe_manifest(engine: AsyncEngine) -> None:
             await connection.scalar(
                 text(
                     "SELECT count(*) FROM brc_strategy_universe_versions "
-                    "WHERE lifecycle_state = 'warming'"
-                )
+                    "WHERE lifecycle_state = 'warming' "
+                    "AND event_spec_id = ANY(:event_spec_ids)"
+                ),
+                {"event_spec_ids": [item[1] for item in event_specs]},
             )
             or 0
         )
 
     if warming_version_count != 0:
         raise BootstrapBlocked("warming_universe_present")
-    if len(rows) != len(EVENT_ORDER) or active_version_count != len(EVENT_ORDER):
+    if len(rows) != len(event_order) or active_version_count != len(event_order):
         raise BootstrapBlocked("active_universe_manifest_mismatch")
     row_by_event = {str(row["event_id"]): row for row in rows}
-    if set(row_by_event) != set(EVENT_ORDER):
+    if set(row_by_event) != set(event_order):
         raise BootstrapBlocked("active_universe_manifest_mismatch")
-    for event_id in EVENT_ORDER:
+    for event_id in event_order:
         row = row_by_event[event_id]
         if (
-            str(row["event_spec_id"]) != EVENT_SPEC_BY_EVENT_ID[event_id]
+            str(row["event_spec_id"]) != event_spec_by_event_id[event_id]
             or str(row["current_lifecycle_state"]) != "active"
             or str(row["version_lifecycle_state"]) != "active"
         ):
             raise BootstrapBlocked(
                 f"active_universe_identity_mismatch:{event_id}"
             )
-        if tuple(str(member) for member in row["members"]) != INITIAL_MEMBERS:
+        if tuple(str(member) for member in row["members"]) != members:
             raise BootstrapBlocked(
                 f"active_universe_member_manifest_mismatch:{event_id}"
             )
@@ -371,14 +399,17 @@ async def refresh_active_certification_batch(
         raise ValueError("database URL must use postgresql+asyncpg")
     if not runtime_profile_id.strip():
         raise ValueError("runtime profile identity must be non-blank")
-    _validate_static_manifest()
+    _validate_static_manifest(runtime_profile_id)
     engine = create_async_engine(database_url)
     try:
         authority = await _validate_database_authority(
             engine,
             runtime_profile_id=runtime_profile_id,
         )
-        await _validate_active_universe_manifest(engine)
+        await _validate_active_universe_manifest(
+            engine,
+            runtime_profile_id=runtime_profile_id,
+        )
         return await _ensure_certification_batch(
             engine,
             runtime_profile_id=runtime_profile_id,
@@ -401,7 +432,10 @@ async def prepare_certification_batch(
         raise ValueError("database URL must use postgresql+asyncpg")
     if not runtime_profile_id.strip():
         raise ValueError("runtime profile identity must be non-blank")
-    _validate_static_manifest()
+    _validate_static_manifest(runtime_profile_id)
+    event_specs, members = _manifest_for_profile(runtime_profile_id)
+    event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
+    event_spec_by_event_id = dict(event_specs)
     engine = create_async_engine(database_url)
     try:
         authority = await _validate_database_authority(
@@ -414,14 +448,14 @@ async def prepare_certification_batch(
                 uow,
                 UniverseConfigurationRequest(
                     runtime_profile_id=runtime_profile_id,
-                    event_id=EVENT_ORDER[0],
-                    exchange_instrument_ids=INITIAL_MEMBERS,
+                    event_id=event_order[0],
+                    exchange_instrument_ids=members,
                     installed_at_ms=prepared_at_ms,
                 ),
             )
         if prepared.universe is None:
             raise BootstrapBlocked("warming_universe_slot_occupied")
-        if prepared.universe.event_spec_id != EVENT_SPEC_BY_EVENT_ID[EVENT_ORDER[0]]:
+        if prepared.universe.event_spec_id != event_spec_by_event_id[event_order[0]]:
             raise BootstrapBlocked("warming_universe_event_spec_mismatch")
         return await _ensure_certification_batch(
             engine,
@@ -448,7 +482,10 @@ async def bootstrap_strategy_universes(
         raise ValueError("database URL must use postgresql+asyncpg")
     if not runtime_profile_id.strip() or wait_timeout_ms <= 0 or poll_interval_ms <= 0:
         raise ValueError("bootstrap identities and timing must be positive")
-    _validate_static_manifest()
+    _validate_static_manifest(runtime_profile_id)
+    event_specs, members = _manifest_for_profile(runtime_profile_id)
+    event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
+    event_spec_by_event_id = dict(event_specs)
     engine = create_async_engine(database_url)
     try:
         authority = await _validate_database_authority(
@@ -458,7 +495,7 @@ async def bootstrap_strategy_universes(
         deadline_ms = now_ms() + wait_timeout_ms
         results: list[BootstrapResult] = []
         certification_batch_id: str | None = None
-        for event_id in EVENT_ORDER:
+        for event_id in event_order:
             installed_at_ms = now_ms()
             async with PostgresKernelUnitOfWork(engine) as uow:
                 installed = await configure_strategy_universe(
@@ -466,13 +503,13 @@ async def bootstrap_strategy_universes(
                     UniverseConfigurationRequest(
                         runtime_profile_id=runtime_profile_id,
                         event_id=event_id,
-                        exchange_instrument_ids=INITIAL_MEMBERS,
+                        exchange_instrument_ids=members,
                         installed_at_ms=installed_at_ms,
                     ),
                 )
             if installed.universe is None:
                 raise BootstrapBlocked("warming_universe_slot_occupied")
-            expected_event_spec_id = EVENT_SPEC_BY_EVENT_ID[event_id]
+            expected_event_spec_id = event_spec_by_event_id[event_id]
             if installed.universe.event_spec_id != expected_event_spec_id:
                 raise BootstrapBlocked(
                     f"warming_universe_event_spec_mismatch:{event_id}"
@@ -502,7 +539,7 @@ async def bootstrap_strategy_universes(
                     event_id=event_id,
                     universe_version_id=universe_version_id,
                 )
-                if tuple(member.exchange_instrument_id for member in current.members) != INITIAL_MEMBERS:
+                if tuple(member.exchange_instrument_id for member in current.members) != members:
                     raise BootstrapBlocked(f"universe_member_manifest_mismatch:{event_id}")
                 if current.event_spec_id != expected_event_spec_id:
                     raise BootstrapBlocked(

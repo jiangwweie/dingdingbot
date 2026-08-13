@@ -62,12 +62,16 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     canonical_digest,
 )
 from src.trading_kernel.domain.events import PostFillStressAssessed, TakeProfitFilled
+from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.reducer import reduce_event
+from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
+    instrument_product_profiles,
     owner_policy_current,
     runtime_capabilities_current,
+    strategy_entry_controls_current,
     strategy_universe_current,
     strategy_versions,
 )
@@ -81,7 +85,7 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _seed_ticket_runtime_scope,
     _stress_evidence,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.unit.test_ticket import _ticket as _retired_ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -470,6 +474,172 @@ async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations
     assert reservation is not None and reservation.status == "released"
     assert exposure is not None and exposure.active_ticket_count == 0
     assert domain_active is False
+
+
+@pytest.mark.parametrize(
+    ("drift", "expected_reason"),
+    [
+        ("policy_scope", "dispatch_preflight:policy_drift"),
+        ("strategy_pause", "dispatch_preflight:strategy_paused"),
+        ("product_identity", "dispatch_preflight:product_entry_blocked"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_action_time_entry_authority_drift_causes_zero_venue_mutations(
+    dispatch_engine: AsyncEngine,
+    drift: str,
+    expected_reason: str,
+) -> None:
+    ticket = _registered_sor_ticket()
+    await _seed_policy(dispatch_engine)
+    async with dispatch_engine.begin() as connection:
+        await connection.execute(
+            sa.update(owner_policy_current)
+            .where(owner_policy_current.c.owner_policy_id == "policy-main")
+            .values(
+                scope={
+                    "event_runtime_profiles": [
+                        {
+                            "event_spec_id": (
+                                ticket.identity.runtime.event_spec_id
+                            ),
+                            "runtime_profile_id": (
+                                ticket.identity.runtime.runtime_profile_id
+                            ),
+                        }
+                    ]
+                }
+            )
+        )
+    await _issue(dispatch_engine, ticket)
+    async with dispatch_engine.begin() as connection:
+        if drift == "policy_scope":
+            await connection.execute(
+                sa.update(owner_policy_current)
+                .where(owner_policy_current.c.owner_policy_id == "policy-main")
+                .values(
+                    scope={
+                        "event_runtime_profiles": [
+                            {
+                                "event_spec_id": (
+                                    ticket.identity.runtime.event_spec_id
+                                ),
+                                "runtime_profile_id": "replacement-profile",
+                            }
+                        ]
+                    }
+                )
+            )
+        elif drift == "strategy_pause":
+            await connection.execute(
+                sa.update(strategy_entry_controls_current)
+                .where(
+                    strategy_entry_controls_current.c.strategy_group_id
+                    == ticket.identity.runtime.strategy_group_id
+                )
+                .values(
+                    entry_state="paused",
+                    control_version=2,
+                    reason="test_action_time_pause",
+                    updated_at_ms=1_050,
+                )
+            )
+        else:
+            await connection.execute(
+                sa.update(instrument_product_profiles)
+                .where(
+                    instrument_product_profiles.c.exchange_instrument_id
+                    == ticket.identity.netting_domain.exchange_instrument_id
+                )
+                .values(
+                    product_family="tradfi_equity_perpetual",
+                    asset_class="equity",
+                    contract_type="TRADIFI_PERPETUAL",
+                    underlying_type="EQUITY",
+                    entry_session_policy="regular_only",
+                    status="active",
+                    max_entry_spread_bps=Decimal(20),
+                    max_mark_index_deviation_bps=Decimal(50),
+                    semantic_digest="sha256:" + "d" * 64,
+                    updated_at_ms=1_050,
+                )
+            )
+    venue = CountingVenue()
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            admission_snapshot_validity_ms=1_000,
+        ),
+        entry_facts_source=PreflightFacts(),
+    )
+
+    assert result.status is DispatchCommandStatus.SUPERSEDED
+    assert venue.calls == 0
+    async with dispatch_engine.connect() as connection:
+        command = (
+            await connection.execute(
+                sa.select(exchange_commands).where(
+                    exchange_commands.c.command_id == result.command_id
+                )
+            )
+        ).mappings().one()
+    assert command["status"] == ExchangeCommandStatus.REJECTED.value
+    assert command["result_payload"]["reason"] == expected_reason
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.ENTRY_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_unregistered_event_at_dispatch_is_terminally_fenced_before_venue(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _retired_ticket()
+    await _seed_policy(
+        dispatch_engine,
+        event_spec_id=ticket.identity.runtime.event_spec_id,
+    )
+    await _issue(dispatch_engine, ticket)
+    venue = CountingVenue()
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            admission_snapshot_validity_ms=1_000,
+        ),
+        entry_facts_source=PreflightFacts(),
+    )
+
+    assert result.status is DispatchCommandStatus.SUPERSEDED
+    assert venue.calls == 0
+    async with dispatch_engine.connect() as connection:
+        command = (
+            await connection.execute(
+                sa.select(exchange_commands).where(
+                    exchange_commands.c.command_id == result.command_id
+                )
+            )
+        ).mappings().one()
+    assert command["status"] == ExchangeCommandStatus.REJECTED.value
+    assert command["result_payload"]["reason"] == (
+        "dispatch_preflight:product_entry_blocked"
+    )
 
 
 @pytest.mark.asyncio
@@ -1704,7 +1874,11 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
     assert reservation is not None and reservation.status == "released"
 
 
-async def _seed_policy(engine: AsyncEngine) -> None:
+async def _seed_policy(
+    engine: AsyncEngine,
+    *,
+    event_spec_id: str = "event_spec:SOR-001:SOR-LONG:v4",
+) -> None:
     async with engine.begin() as connection:
         await connection.execute(
             sa.insert(owner_policy_current).values(
@@ -1730,10 +1904,44 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 supported_margin_mode="cross",
                 post_stop_stress_multiple="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
-                scope={},
+                scope={
+                    "event_runtime_profiles": [
+                        {
+                            "event_spec_id": event_spec_id,
+                            "runtime_profile_id": "tiny-live-v1",
+                        }
+                    ]
+                },
                 updated_at_ms=1_000,
             )
         )
+
+
+def _ticket():
+    return _registered_sor_ticket()
+
+
+def _registered_sor_ticket():
+    base = _retired_ticket()
+    runtime = base.identity.runtime.model_copy(
+        update={
+            "strategy_group_id": "SOR-001",
+            "strategy_version_id": "sgv:SOR-001:v4",
+            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v4",
+        }
+    )
+    identity = TicketIdentity(
+        ticket_id=build_ticket_id(
+            signal_event_id=base.identity.signal_event_id,
+            runtime=runtime,
+            netting_domain=base.identity.netting_domain,
+        ),
+        exposure_episode_id=base.identity.exposure_episode_id,
+        signal_event_id=base.identity.signal_event_id,
+        runtime=runtime,
+        netting_domain=base.identity.netting_domain,
+    )
+    return base.model_copy(update={"identity": identity})
 
 
 async def _issue(engine: AsyncEngine, ticket) -> None:

@@ -34,6 +34,28 @@ def test_bootstrap_manifest_is_exactly_the_approved_six_events_and_seven_members
     assert "--instrument" not in bootstrap._parser().format_help()
 
 
+def test_tradfi_bootstrap_manifest_has_two_events_and_eight_equity_members() -> None:
+    event_specs, members = bootstrap._manifest_for_profile(
+        "tradfi-equity-usdm-v1"
+    )
+
+    assert tuple(event_id for event_id, _event_spec_id in event_specs) == (
+        "SOR-US-LONG-15M",
+        "SOR-US-SHORT-15M",
+    )
+    assert members == (
+        "binance-usdm:AAPLUSDT:perpetual",
+        "binance-usdm:AMZNUSDT:perpetual",
+        "binance-usdm:GOOGLUSDT:perpetual",
+        "binance-usdm:METAUSDT:perpetual",
+        "binance-usdm:MSFTUSDT:perpetual",
+        "binance-usdm:NVDAUSDT:perpetual",
+        "binance-usdm:SNDKUSDT:perpetual",
+        "binance-usdm:TSLAUSDT:perpetual",
+    )
+    bootstrap._validate_static_manifest("tradfi-equity-usdm-v1")
+
+
 def test_bootstrap_refuses_a_registry_that_no_longer_matches_the_fixed_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

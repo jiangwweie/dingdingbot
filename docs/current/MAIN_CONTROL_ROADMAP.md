@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-08-12
+last_verified: 2026-08-13
 ---
 
 # Main Control Roadmap
@@ -49,9 +49,9 @@ different Netting Domains progress concurrently.
 | Nginx isolation | Existing Nginx configuration was not rewritten; syntax passes, the Owner API remains Unix-Socket proxied, and unauthenticated data access returns `401` |
 | Full capability | Natural v4 closure evidence now exists; `promote-full` and the final requirement audit remain explicit follow-up operations and were not bundled into this release |
 | M1 multi-asset planning | Owner adopted the same-Venue Binance USDⓈ-M TradFi Equity Product Family, same-account isolated RuntimeProfile, eight candidates plus QQQ/SPY references, LONG/SHORT Observation and REGULAR-only first Entry boundary; local M2–M4 implementation is authorized without production deployment, real TradFi Entry or capital increase |
-| M2–M4 local candidate | Product Compatibility, Instrument Center, Product-filtered controlled Warming Universe edit, independent observation-only TradFi RuntimeProfile/Policy, and `SOR-US-EQ-PERP-001` LONG/SHORT detector and ExitPolicy are implemented and focused acceptance is complete on the focused branch. The exact `0004 -> 0005` flat preservation and authority transition is locally verified; production remains unchanged and TradFi Entry remains disabled |
+| M2–M4 local candidate | Product Compatibility, Instrument Center, Product-filtered controlled Warming Universe edit, neutral TradFi RuntimeProfile, and `SOR-US-EQ-PERP-001` LONG/SHORT detector and ExitPolicy are implemented on the focused branch. M6 supersedes the earlier observation-only Policy/Profile identities; production remains unchanged |
 | M5 local candidate | Signal-owned TradFi SOR Observation Outcomes, automatic bounded Product/Session refresh, version-isolated Strategy Observation reads and Owner Console path review are implemented locally. Focused acceptance proves no AdmissionDecision, CapacityClaim, Ticket, Exchange Command or venue mutation is created; production remains unchanged and TradFi Entry remains disabled |
-| M6 Owner decision | Owner adopted direct small-capital TradFi live Entry after the combined R4 certification, with no Observation-day or sample-count unlock gate. `SOR-US-EQ-PERP-001` reuses StrategyGroup pause/resume as the daily control; pause blocks only new ENTRY and leaves existing Ticket safety work intact. Crypto and TradFi must use one `policy-main / Policy v4` capital contract with no TradFi-specific Ticket parameters or second capital Policy. M6 implementation and production activation have not started |
+| M6 local candidate | The focused branch implements direct small-capital TradFi live Entry through the official Signal → AdmissionDecision → CapacityClaim → Ticket → durable Command chain, one `policy-main / Policy v4` Event-to-Profile scope, neutral `tradfi-equity-usdm-v1`, Product action-time gates, account-wide Owner flatten/Drain, Strategy Live Control and Instrument threshold display. Focused backend, migration, deployment, document, frontend, Ruff, Mypy and diff verification pass. The candidate remains local and unpushed; no R4 deployment, Entry promotion, Strategy resume or exchange write has occurred |
 | Scope boundary | Funding ownership and broader Incident-quality work were not changed by this release |
 
 ## Deferred Release Candidate
@@ -103,7 +103,7 @@ it is not a gate retroactively added to this completed deployment.
 | 3 | M0.5 R1/R2 activation | Owner explicitly confirms deployment; record the exact superseding static/API Commit, install the split release roots and prove Kernel workers and `/opt/brc/current` were untouched |
 | 4 | Full policy promotion | After current exposure is naturally flat, run and certify `promote-full` from current PostgreSQL and Binance facts with exact Kernel identity |
 | 5 | Final requirement audit | Re-run local and Tokyo evidence and close every acceptance item |
-| 6 | M6 implementation and combined R4 decision | Complete the adopted direct-live M6 design, then combine M0.5 and M2–M6 into one exact candidate. After current exposure and R4 gates permit, Owner separately confirms the forward migration and direct small-capital TradFi activation |
+| 6 | M6 combined R4 activation | The local M0.5 + M2–M6 candidate is sealed and remains unpushed. After explicit Owner deployment confirmation, refresh current PostgreSQL, Binance, systemd and Nginx facts; require exact flatness and R4 gates; perform the forward `0005` migration and readonly postflight; then use TOTP Strategy resume to open direct small-capital TradFi ENTRY |
 
 ## Current Stop Conditions
 

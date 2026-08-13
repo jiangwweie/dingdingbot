@@ -995,7 +995,7 @@ def test_ssh_probe_exchange_has_no_operator_instrument_arguments(
     assert calls == [(TARGET_RELEASE, "scripts/trading_kernel/probe_production_runtime.py")]
 
 
-def test_compatible_upgrade_runs_full_bootstrap_and_finishes_six_active_universes(
+def test_compatible_upgrade_bootstraps_crypto_and_tradfi_active_universes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = SshTokyoReleaseBackend(
@@ -1019,13 +1019,19 @@ def test_compatible_upgrade_runs_full_bootstrap_and_finishes_six_active_universe
             "scripts/trading_kernel/bootstrap_strategy_universes.py",
             "--runtime-profile-id",
             "tiny-live-v1",
-        )
+        ),
+        (
+            TARGET_RELEASE,
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            "tradfi-equity-usdm-v1",
+        ),
     ]
 
     deployment_backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
         universe_stage="active",
-        active_universe_count=6,
+        active_universe_count=8,
         warming_universe_count=0,
     )
 
@@ -1255,7 +1261,7 @@ class FakeDeploymentBackend:
         postflight_drift: str | None = None,
         shadow_pending_count: int = 0,
         universe_stage: str = "active",
-        active_universe_count: int = 6,
+        active_universe_count: int = 8,
         warming_universe_count: int = 0,
         current_release: str = CURRENT_RELEASE,
         target_release_exists: bool = False,
@@ -1377,9 +1383,9 @@ class FakeDeploymentBackend:
             },
             "compatible_certification_batch_pass": True,
             "entry_promotion_counts": {
-                "active_current_universes": 6,
-                "active_instruments": 7,
-                "active_scopes": 42,
+                "active_current_universes": 8,
+                "active_instruments": 15,
+                "active_scopes": 58,
                 "warming_scopes": 0,
             },
         }

@@ -26,6 +26,7 @@ from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     EntryFactsSource,
     InstrumentRulesRequest,
+    ProductSessionRequest,
 )
 from src.trading_kernel.domain.account_entry_health import classify_account_entry_health
 from src.trading_kernel.domain.aggregate import AggregateStatus
@@ -73,6 +74,11 @@ from src.trading_kernel.domain.events import (
 )
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
+)
+from src.trading_kernel.domain.product import (
+    ProductEntryStatus,
+    evaluate_event_product_entry,
+    product_compatibility_for,
 )
 from src.trading_kernel.domain.reducer import reduce_event
 
@@ -390,16 +396,51 @@ async def _preflight_new_entry_mutation(
         valid_for_ms=request.admission_snapshot_validity_ms,
     )
     try:
-        snapshot, rules = await asyncio.wait_for(
+        product_compatibility = product_compatibility_for(
+            command.ticket_identity.runtime.event_spec_id
+        )
+    except ValueError:
+        return EntryDispatchPreflightStatus.PRODUCT_ENTRY_BLOCKED
+    product_request = ProductSessionRequest(
+        venue_id=domain.venue_id,
+        account_id=domain.account_id,
+        exchange_instrument_id=domain.exchange_instrument_id,
+        observed_at_ms=request.now_ms,
+    )
+    async with uow_factory() as uow:
+        product_profile = await uow.signals.get_product_profile(
+            domain.exchange_instrument_id
+        )
+    try:
+        snapshot, rules, product_session = await asyncio.wait_for(
             asyncio.gather(
                 entry_facts_source.read_entry_admission_snapshot(snapshot_request),
                 entry_facts_source.read_instrument_rules(rules_request),
+                (
+                    _read_product_session(
+                        entry_facts_source,
+                        product_request,
+                    )
+                    if product_compatibility.product_family
+                    == "tradfi_equity_perpetual"
+                    else _no_product_session()
+                ),
             ),
             timeout=request.timeout_seconds,
         )
     except Exception:  # noqa: BLE001 - unreadable admission facts must fence Entry.
         return EntryDispatchPreflightStatus.STALE_SNAPSHOT
+    source_product_decision = evaluate_event_product_entry(
+        compatibility=product_compatibility,
+        profile=product_profile,
+        snapshot=product_session,
+        now_ms=request.now_ms,
+    )
+    if source_product_decision.status is ProductEntryStatus.IDENTITY_MISMATCH:
+        return EntryDispatchPreflightStatus.PRODUCT_ENTRY_BLOCKED
     async with uow_factory() as uow:
+        if product_session is not None:
+            await uow.signals.upsert_product_sessions((product_session,))
         current_command = await uow.exchange_commands.get(command.command_id)
         aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
         claim = await uow.capacity_claims.get_for_ticket(
@@ -433,6 +474,12 @@ async def _preflight_new_entry_mutation(
             aggregate.ticket.identity.runtime.event_spec_id
         )
         capability = await uow.signals.get_runtime_capability("exchange_commands")
+        current_product_profile = await uow.signals.get_product_profile(
+            domain.exchange_instrument_id
+        )
+        current_product_session = await uow.signals.get_product_session(
+            domain.exchange_instrument_id
+        )
         ownership = await uow.entry_admission.read_admission_ownership(
             venue_id=domain.venue_id,
             account_id=domain.account_id,
@@ -452,6 +499,12 @@ async def _preflight_new_entry_mutation(
                 position_side=domain.position_side,
             )
         )
+    product_entry_decision = evaluate_event_product_entry(
+        compatibility=product_compatibility,
+        profile=current_product_profile,
+        snapshot=current_product_session,
+        now_ms=request.now_ms,
+    )
     decision = revalidate_entry_dispatch(
         EntryDispatchPreflightRequest(
             command=current_command,
@@ -478,10 +531,22 @@ async def _preflight_new_entry_mutation(
             active_family_ticket_count=active_family_ticket_count,
             active_directional_risk_at_stop=active_directional_risk_at_stop,
             now_ms=request.now_ms,
+            product_entry_decision=product_entry_decision,
             strategy_entry_enabled=strategy_entry_is_enabled(strategy_control),
         )
     )
     return decision.status
+
+
+async def _no_product_session():
+    return None
+
+
+async def _read_product_session(entry_facts_source, request):
+    reader = getattr(entry_facts_source, "read_product_session", None)
+    if not callable(reader):
+        raise TypeError("TradFi dispatch Product source is unavailable")
+    return await reader(request)
 
 
 async def _record_preflight_refusal(

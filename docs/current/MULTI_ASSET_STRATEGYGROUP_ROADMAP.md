@@ -152,7 +152,7 @@ Owner Console，并采用与风险相称的聚焦测试。真实市场观察和�
 | **M3，全新 Venue** | 20–30 天 | 4–6 周 | Adapter、账户模式、命令和对账语义 | 中至高 |
 | **M4** | 7–12 天 | 1.5–2.5 周 | Opening Range、Session 和退出语义 | 低至中 |
 | **M5** | 4–8 天开发 | 已完成本地候选；生产后持续积累 | 自然市场日和有效 Observation 数量 | 极低 |
-| **M6** | 4–8 天开发 | 上线后等待自然 Ticket 闭环，不等待 Observation 解锁 | 同账户跨 Policy 风险、行动时 Product 准入和自然 Ticket 生命周期 | 高但有界 |
+| **M6** | 4–8 天开发 | 上线后等待自然 Ticket 闭环，不等待 Observation 解锁 | 同一 Policy 下的跨 Profile 账户容量、行动时 Product 准入和自然 Ticket 生命周期 | 高但有界 |
 | **M7** | 15–25 天 | 3–5 周 | 旧设计向当前 Schema/Policy 的重写范围 | 中 |
 
 M0.5 全部完成后，如果目标产品可以继续使用当前 Venue，预计约 **7–10 周净开发时间**
@@ -316,7 +316,7 @@ Active Universe
 5. M4：`SOR-US-EQ-PERP-001` 策略语义、退出政策和 Live/Replay 验收矩阵；
 6. M5：Observation 指标、证据窗口和 go/hold/stop 判定合同；
 7. M6：`docs/superpowers/specs/2026-08-12-tradfi-sor-m6-live-entry-design.md`
-   记录上线即小额实盘、StrategyGroup pause、跨 Policy 账户容量和联合 R4 部署边界；
+   记录上线即小额实盘、StrategyGroup pause、统一 Policy 账户容量和联合 R4 部署边界；
 8. M7：旧 RSRVCB 设计的可移植模块审计与当前内核重写计划。
 
 任何阶段的实现、迁移和部署状态仍由当前代码、PostgreSQL、Venue 事实和

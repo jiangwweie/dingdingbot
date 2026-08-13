@@ -30,7 +30,7 @@ def _candle(
         high=Decimal(high),
         low=Decimal(low),
         close=Decimal(close),
-        volume=Decimal("1000"),
+        volume=Decimal(1000),
     )
 
 

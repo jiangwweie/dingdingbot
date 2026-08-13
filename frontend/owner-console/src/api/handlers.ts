@@ -17,8 +17,8 @@ export const ownerApiHandlers = [
   http.get("/api/owner/v1/instruments", () => HttpResponse.json(ownerApiFixtures.instrumentFixture)),
   http.post("/api/owner/v1/instruments/refresh", () => HttpResponse.json({ attempted_count: 2, updated_count: 2, unavailable_count: 0, observed_at_ms: 1800000000000 })),
   http.post("/api/owner/v1/instruments/universes/preview", () => HttpResponse.json({
-    runtime_profile_id: "tradfi-equity-observe-v1",
-    owner_policy_id: "policy-tradfi-observe",
+    runtime_profile_id: "tradfi-equity-usdm-v1",
+    owner_policy_id: "policy-main",
     event_spec_id: "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1",
     event_id: "SOR-US-LONG-15M",
     base_universe_version_id: "universe:SOR-US-LONG-15M:v1",
@@ -33,6 +33,8 @@ export const ownerApiHandlers = [
   http.get("/api/owner/v1/controls", () => HttpResponse.json({
     generated_at_ms: 1800000000000,
     global_entry: { configured_state: "enabled", effective_state: "enabled", policy_version: 5, active_ticket_count: 2, first_blocker: null },
+    account_capacity: { max_concurrent_tickets: 3, active_ticket_count: 2, remaining_ticket_slots: 1, gross_stop_risk: "8.40", gross_stop_risk_limit: "25.80", max_gross_stop_risk_fraction: "0.06", long_stop_risk: "3.20", short_stop_risk: "5.20", directional_stop_risk_limit: "17.20", directional_stop_risk_limit_fraction: "0.04", reserved_margin: "42.00", gross_initial_margin_limit: "387.00", max_gross_initial_margin_utilization: "0.90", wallet_balance_basis: "430.00", margin_balance_basis: "430.00", family_active_counts: { long_continuation: 0, opening_range: 2, rally_failure_short: 0 }, family_limits: { long_continuation: 1, opening_range: 2, rally_failure_short: 1 }, source: "current_projection" },
+    runtime_entry_authority: { exchange_commands_enabled: true, effective_status: "ready", runtime_profile_ids: ["tiny-live-v1", "tradfi-equity-usdm-v1"], first_blocker: null },
     strategies: [
       { strategy_group_id: "SOR-001", entry_state: "enabled", control_version: 1, last_event_id: "strategy-control-event:seed:SOR-001", reason: "seed_enabled", updated_at_ms: 1800000000000, configured_state: "enabled", effective_state: "enabled" },
       { strategy_group_id: "BRF2-001", entry_state: "enabled", control_version: 1, last_event_id: "strategy-control-event:seed:BRF2-001", reason: "seed_enabled", updated_at_ms: 1800000000000, configured_state: "enabled", effective_state: "enabled" },
@@ -42,7 +44,7 @@ export const ownerApiHandlers = [
     events: [],
   })),
   http.post("/api/owner/v1/controls/exposure/flatten-all/preview", () => HttpResponse.json({
-    runtime_profile_id: "tiny-live-v1", venue_id: "binance-usdm", account_id: "owner-account", owner_policy_version: 5, global_entry_enabled: true,
+    runtime_profile_id: "account-wide", venue_id: "binance-usdm", account_id: "owner-account", owner_policy_version: 5, global_entry_enabled: true,
     ticket_ids: ["ticket:ada-short", "ticket:btc-long"], ticket_states: { "ticket:ada-short": "eligible", "ticket:btc-long": "eligible" }, snapshot_digest: `sha256:${"a".repeat(64)}`, first_blocker: null,
   })),
   http.post("/api/owner/v1/controls/strategies/:strategyGroupId/pause", () => HttpResponse.json({})),
@@ -50,6 +52,6 @@ export const ownerApiHandlers = [
   http.post("/api/owner/v1/controls/entry/pause", () => HttpResponse.json({})),
   http.post("/api/owner/v1/controls/entry/resume", () => HttpResponse.json({})),
   http.post("/api/owner/v1/controls/exposure/flatten-all", () => HttpResponse.json({
-    authorization_id: "owner-authorization:test", operation_kind: "flatten_all", state: "pending", version: 2, runtime_profile_id: "tiny-live-v1", venue_id: "binance-usdm", account_id: "owner-account", target_ticket_ids: ["ticket:ada-short", "ticket:btc-long"], snapshot_digest: `sha256:${"a".repeat(64)}`, first_blocker: null, claimed_by: null, lease_until_ms: null, created_at_ms: 1800000000000, updated_at_ms: 1800000000000,
+    authorization_id: "owner-authorization:test", operation_kind: "flatten_all", state: "pending", version: 2, runtime_profile_id: "account-wide", venue_id: "binance-usdm", account_id: "owner-account", target_ticket_ids: ["ticket:ada-short", "ticket:btc-long"], snapshot_digest: `sha256:${"a".repeat(64)}`, first_blocker: null, claimed_by: null, lease_until_ms: null, created_at_ms: 1800000000000, updated_at_ms: 1800000000000,
   }, { status: 201 })),
 ];

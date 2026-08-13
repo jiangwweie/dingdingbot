@@ -67,9 +67,14 @@ async def test_certification_batch_is_prepared_before_readonly_workers_start(
 
     await system.start_readonly_workers(plan)
 
-    prepare_command = runner.commands[0]
-    assert "bootstrap_strategy_universes.py" in prepare_command[-1]
-    assert "--prepare-certification-batch-only" in prepare_command[-1]
+    prepare_commands = [
+        command
+        for command in runner.commands
+        if "bootstrap_strategy_universes.py" in command[-1]
+    ]
+    assert len(prepare_commands) == 1
+    assert "--runtime-profile-id tiny-live-v1" in prepare_commands[0][-1]
+    assert "--prepare-certification-batch-only" in prepare_commands[0][-1]
     systemctl_indexes = [
         index
         for index, command in enumerate(runner.commands)
@@ -77,6 +82,73 @@ async def test_certification_batch_is_prepared_before_readonly_workers_start(
     ]
     assert systemctl_indexes
     assert min(systemctl_indexes) > 0
+
+
+@pytest.mark.asyncio
+async def test_target_certification_serializes_two_profile_warming_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _production_adapter_module()
+    system = module.SshTokyoSystem(RecordingRunner(module))
+    plan = _plan()
+    calls: list[tuple[str, ...]] = []
+
+    async def authority_disabled(**_kwargs) -> None:
+        return None
+
+    async def release_python(_release, script, *args, **_kwargs):
+        calls.append((script, *args))
+        payload = (
+            {
+                "status": "pass",
+                "universe_bootstrap_pass": True,
+                "certification_batch_pass": True,
+                "entry_promotion_pass": True,
+            }
+            if script.endswith("certify_readonly.py")
+            else {}
+        )
+        return module._RemoteResult(
+            returncode=0,
+            stdout=__import__("json").dumps(payload),
+            stderr="",
+        )
+
+    async def target_int(_query: str) -> int:
+        return 0
+
+    monkeypatch.setattr(system, "_require_entry_authority_disabled", authority_disabled)
+    monkeypatch.setattr(system, "_release_python", release_python)
+    monkeypatch.setattr(system, "_target_int", target_int)
+
+    await system.complete_target_certification(plan)
+
+    assert calls[:3] == [
+        (
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            "tiny-live-v1",
+            "--wait-timeout-ms",
+            "900000",
+            "--poll-interval-ms",
+            "5000",
+        ),
+        (
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            "tradfi-equity-usdm-v1",
+            "--prepare-certification-batch-only",
+        ),
+        (
+            "scripts/trading_kernel/bootstrap_strategy_universes.py",
+            "--runtime-profile-id",
+            "tradfi-equity-usdm-v1",
+            "--wait-timeout-ms",
+            "900000",
+            "--poll-interval-ms",
+            "5000",
+        ),
+    ]
 
 
 @pytest.mark.asyncio

@@ -161,6 +161,36 @@ async def test_controlled_exit_requests_eligible_tickets_in_stable_order(
 
 
 @pytest.mark.asyncio
+async def test_deployment_drain_covers_tickets_across_runtime_profiles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = _FakeUnitOfWorkFactory(
+        {
+            "ticket:crypto": AggregateStatus.POSITION_PROTECTED,
+            "ticket:tradfi": AggregateStatus.RUNNER_PROTECTED,
+        }
+    )
+    calls: list[str] = []
+
+    async def record_request(_uow, request) -> None:
+        calls.append(request.ticket_id)
+
+    monkeypatch.setattr(controlled_exit_module, "request_exit", record_request)
+
+    result = await request_controlled_exits(factory, _controlled_exit_request())
+
+    assert factory.selection_scopes == [
+        {
+            "venue_id": "binance-usdm",
+            "account_id": "account:tokyo",
+            "limit": 3,
+        }
+    ]
+    assert result.requested_ticket_ids == ("ticket:crypto", "ticket:tradfi")
+    assert calls == ["ticket:crypto", "ticket:tradfi"]
+
+
+@pytest.mark.asyncio
 async def test_controlled_exit_resume_does_not_request_progressing_ticket(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -233,7 +263,7 @@ def _controlled_exit_request() -> ControlledExitRequest:
             authorization_id="deploy-20260804-01",
             target_commit=TARGET_COMMIT,
         ),
-        runtime_profile_id="runtime:tokyo",
+        runtime_profile_id="account-wide",
         venue_id="binance-usdm",
         account_id="account:tokyo",
         max_active_tickets=3,
@@ -250,7 +280,8 @@ class _FakeAggregateRepository:
         self._factory = factory
         self._orientation = orientation
 
-    async def list_active_ticket_ids(self, **_kwargs) -> tuple[str, ...]:
+    async def list_active_ticket_ids(self, **scope) -> tuple[str, ...]:
+        self._factory.selection_scopes.append(scope)
         return tuple(sorted(self._factory.statuses))
 
     async def get(self, ticket_id: str):
@@ -286,6 +317,7 @@ class _FakeUnitOfWorkFactory:
     ) -> None:
         self.statuses = statuses
         self.terminalize_after_orientation = terminalize_after_orientation or set()
+        self.selection_scopes: list[dict[str, object]] = []
         self._calls = 0
 
     def __call__(self) -> _FakeUnitOfWork:

@@ -64,7 +64,7 @@ class ControlMutationRequest(BaseModel):
 class FlattenPreview(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    runtime_profile_id: str
+    runtime_profile_id: Literal["account-wide"] = "account-wide"
     venue_id: str
     account_id: str
     owner_policy_version: int
@@ -76,7 +76,7 @@ class FlattenPreview(BaseModel):
 
 
 class FlattenSubmitRequest(ControlMutationRequest):
-    runtime_profile_id: str
+    runtime_profile_id: Literal["account-wide"] = "account-wide"
     venue_id: str
     account_id: str
     snapshot_digest: str
@@ -158,7 +158,6 @@ async def set_global_entry_state(
     enabled: bool,
     request: ControlMutationRequest,
     authentication_strength: Literal["session", "totp_step_up"],
-    runtime_profile_id: str = "tiny-live-v1",
 ) -> OwnerPolicySnapshot:
     current = await uow.entry_admission.get_owner_policy(owner_policy_id)
     if current is None:
@@ -180,7 +179,7 @@ async def set_global_entry_state(
         return current
     if enabled:
         blocker = await uow.owner_controls.get_global_entry_resume_blocker(
-            runtime_profile_id=runtime_profile_id,
+            owner_policy_id=owner_policy_id,
         )
         if blocker is not None:
             raise OwnerControlBlocked(blocker)
@@ -208,7 +207,6 @@ async def preview_flatten_all(
     uow: KernelUnitOfWork,
     *,
     owner_policy_id: str,
-    runtime_profile_id: str,
     venue_id: str,
     account_id: str,
 ) -> FlattenPreview:
@@ -216,7 +214,6 @@ async def preview_flatten_all(
     if policy is None:
         raise OwnerControlBlocked("owner_policy_missing")
     ticket_ids = await uow.aggregates.list_active_ticket_ids(
-        runtime_profile_id=runtime_profile_id,
         venue_id=venue_id,
         account_id=account_id,
         limit=policy.max_concurrent_tickets,
@@ -233,7 +230,6 @@ async def preview_flatten_all(
         if classification is ControlledExitClassification.BLOCKED and first_blocker is None:
             first_blocker = f"ticket_not_flattenable:{ticket_id}:{aggregate.status.value}"
     digest = _snapshot_digest(
-        runtime_profile_id=runtime_profile_id,
         venue_id=venue_id,
         account_id=account_id,
         policy_version=policy.policy_version,
@@ -241,7 +237,6 @@ async def preview_flatten_all(
         states=states,
     )
     return FlattenPreview(
-        runtime_profile_id=runtime_profile_id,
         venue_id=venue_id,
         account_id=account_id,
         owner_policy_version=policy.policy_version,
@@ -262,7 +257,6 @@ async def begin_flatten_all(
     preview = await preview_flatten_all(
         uow,
         owner_policy_id=owner_policy_id,
-        runtime_profile_id=request.runtime_profile_id,
         venue_id=request.venue_id,
         account_id=request.account_id,
     )
@@ -315,7 +309,7 @@ async def begin_flatten_all(
         authorization_id=authorization.authorization_id,
         state=ControlOperationState.VALIDATING,
         version=1,
-        runtime_profile_id=request.runtime_profile_id,
+        runtime_profile_id="account-wide",
         venue_id=request.venue_id,
         account_id=request.account_id,
         target_ticket_ids=(),
@@ -345,7 +339,6 @@ async def freeze_flatten_targets(
     preview = await preview_flatten_all(
         uow,
         owner_policy_id=owner_policy_id,
-        runtime_profile_id=operation.runtime_profile_id,
         venue_id=operation.venue_id,
         account_id=operation.account_id,
     )
@@ -676,7 +669,6 @@ def _require_matching_authorization(
 
 def _snapshot_digest(
     *,
-    runtime_profile_id: str,
     venue_id: str,
     account_id: str,
     policy_version: int,
@@ -684,7 +676,7 @@ def _snapshot_digest(
     states: dict[str, str],
 ) -> str:
     payload = {
-        "runtime_profile_id": runtime_profile_id,
+        "scope": "account-wide",
         "venue_id": venue_id,
         "account_id": account_id,
         "policy_version": policy_version,

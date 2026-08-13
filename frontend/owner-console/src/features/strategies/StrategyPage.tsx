@@ -1,14 +1,17 @@
-import { useQuery } from "@tanstack/react-query";
+import * as AlertDialog from "@radix-ui/react-alert-dialog";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { ChevronRight, Maximize2, X } from "lucide-react";
 import { lazy, Suspense, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { components } from "../../api/schema";
 import { AppShell } from "../../app/AppShell";
+import { ownerQueryClient } from "../../app/queryClient";
 import type { ChartPriceLevel } from "../../components/charts/CausalityChart";
 import { CursorPagination } from "../../components/tables/CursorPagination";
 import { DenseTable, type DenseTableColumnDef } from "../../components/tables/DenseTable";
 import { DataAge } from "../../components/ui/DataAge";
+import { Button } from "../../components/ui/Button";
 import { ManualRefreshButton } from "../../components/ui/ManualRefreshButton";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { StatusTag, type StatusTone } from "../../components/ui/StatusTag";
@@ -16,6 +19,8 @@ import { TimeRangeFilter } from "../../components/ui/TimeRangeFilter";
 import { UnavailablePanel } from "../../components/ui/UnavailablePanel";
 import { formatMoney, formatTimestamp } from "../../components/ui/presentation";
 import { candlesQueryKey, getCandles } from "../trades/api";
+import { controlsQueryKey, getControls, setStrategyControl } from "../controls/api";
+import { getInstruments, instrumentsQueryKey } from "../instruments/api";
 import {
   getStrategies,
   getStrategyObservations,
@@ -125,12 +130,31 @@ function observationStatusTone(status: Observation["status"]): StatusTone {
   return "neutral";
 }
 
+function requestId(prefix: string): string {
+  return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)}`;
+}
+
 export function StrategyPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseStrategySearchParams(searchParams), [searchParams]);
   const [observationFullscreen, setObservationFullscreen] = useState(false);
   const summaryFilters = useMemo(() => ({ from_ms: filters.from_ms, to_ms: filters.to_ms, view: filters.view ?? "current" }), [filters.from_ms, filters.to_ms, filters.view]);
   const strategies = useQuery({ queryKey: strategiesQueryKey(summaryFilters), queryFn: () => getStrategies(summaryFilters) });
+  const controls = useQuery({ queryKey: controlsQueryKey, queryFn: getControls });
+  const instruments = useQuery({
+    queryKey: instrumentsQueryKey({ product_family: "tradfi_equity_perpetual", limit: 100 }),
+    queryFn: () => getInstruments({ product_family: "tradfi_equity_perpetual", limit: 100 }),
+  });
+  const [pendingStrategyId, setPendingStrategyId] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+  const strategyControlMutation = useMutation({
+    mutationFn: async ({ strategyGroupId, action, version }: { strategyGroupId: string; action: "pause" | "resume"; version: number }) => setStrategyControl(strategyGroupId, action, { expected_version: version, reason: "owner_strategy_workbench_control", idempotency_key: requestId("owner-request-strategy"), totp_code: action === "resume" ? totpCode : null }),
+    onSuccess: async () => {
+      setPendingStrategyId(null);
+      setTotpCode("");
+      await ownerQueryClient.invalidateQueries({ queryKey: controlsQueryKey });
+    },
+  });
   const envelope = strategies.data;
 
   const selectedTicketVersionId = filters.ticket_modal === "1" ? filters.strategy_version_id : undefined;
@@ -175,6 +199,8 @@ export function StrategyPage() {
   };
   const refreshPage = () => {
     void strategies.refetch();
+    void controls.refetch();
+    void instruments.refetch();
     if (selectedTicketVersionId) void tickets.refetch();
     if (selectedObservationVersionId) void observations.refetch();
     if (selectedObservation) void observationCandles.refetch();
@@ -201,6 +227,19 @@ export function StrategyPage() {
     { id: "observations", header: "Observation 路径", cell: ({ row }) => row.original.observation_count === 0 ? <span className="text-[var(--color-text-secondary)]">—</span> : <div className="grid gap-1"><button className="w-fit bg-transparent p-0 text-left text-[11px] text-[var(--color-emphasis)] hover:underline" type="button" onClick={() => openObservationPath(row.original)}>样本 {row.original.completed_observation_count}/{row.original.observation_count} · MFE {formatDecimal(row.original.median_mfe_r, "R")}</button><div className="flex flex-wrap gap-1"><button className="text-[10px] text-[var(--color-success)] hover:underline" type="button" onClick={() => openObservationPath(row.original, "tp1_first")}>TP1 {row.original.tp1_first_count}</button><button className="text-[10px] text-[var(--color-danger)] hover:underline" type="button" onClick={() => openObservationPath(row.original, "initial_stop_first")}>Stop {row.original.initial_stop_first_count}</button><button className="text-[10px] text-[var(--color-text-secondary)] hover:underline" type="button" onClick={() => openObservationPath(row.original, "opening_range_failure")}>OR Fail {row.original.opening_range_failure_count}</button><button className="text-[10px] text-[var(--color-text-secondary)] hover:underline" type="button" onClick={() => openObservationPath(row.original, "ambiguous_same_bar")}>歧义 {row.original.ambiguous_observation_count}</button></div></div> },
   ];
 
+  const tradfiStrategy = data.items.find((item) => item.strategy_group_id === "SOR-US-EQ-PERP-001");
+  const strategyControl = controls.data?.strategies.find((item) => item.strategy_group_id === tradfiStrategy?.strategy_group_id);
+  const globalEntryEnabled = controls.data?.global_entry.effective_state === "enabled";
+  const runtimeReady = controls.data?.runtime_entry_authority.effective_status === "ready";
+  const strategyEnabled = strategyControl?.effective_state === "enabled";
+  const liveReady = globalEntryEnabled && runtimeReady && strategyEnabled;
+  const activeInstrumentIds = new Set(tradfiStrategy?.product_events.flatMap((event) => event.active_exchange_instrument_ids) ?? []);
+  const activeProducts = instruments.data?.data.items.filter((item) => activeInstrumentIds.has(item.exchange_instrument_id)) ?? [];
+  const regularCount = activeProducts.filter((item) => item.session_state === "regular").length;
+  const staleCount = activeProducts.filter((item) => item.valid_until_ms === null || item.valid_until_ms <= Date.now()).length;
+  const productWarningCount = activeProducts.filter((item) => item.product_status !== "active" || item.corporate_event_status !== "clear").length;
+  const pendingControl = controls.data?.strategies.find((item) => item.strategy_group_id === pendingStrategyId);
+
   const ticketItems = tickets.data?.data.items ?? [];
   const ticketDetailQuery = (ticketId: string, fromObservation = false) => {
     const detail = new URLSearchParams();
@@ -226,6 +265,23 @@ export function StrategyPage() {
     <AppShell dataTime={<DataAge generatedAt={envelope.generated_at} />} statusLabel={status.label} statusTone={status.tone}>
       {pageHeader}
       {strategies.isRefetchError ? <div className="refresh-error" role="status">刷新失败<span>继续显示上一次成功快照</span></div> : null}
+      {tradfiStrategy ? <section className="mb-2 border border-[var(--color-divider)] bg-[var(--color-surface)]" aria-label="SOR US Equity Live Control">
+        <div className="flex min-h-10 items-center justify-between gap-3 border-b border-[var(--color-divider)] px-2"><div className="min-w-0"><strong className="block text-[12px]">SOR US Equity · Live Control</strong><span className="block truncate text-[10px] text-[var(--color-text-secondary)]">Policy v4 统一账户 · {tradfiStrategy.product_events[0]?.runtime_profile_id ?? "Runtime 未绑定"}</span></div><div className="flex items-center gap-2"><StatusTag tone={liveReady ? "success" : "attention"}>{liveReady ? "LIVE ENABLED" : strategyControl?.configured_state === "paused" ? "PAUSED" : "ENTRY FENCED"}</StatusTag>{strategyControl ? <Button disabled={strategyControlMutation.isPending} onClick={() => setPendingStrategyId(strategyControl.strategy_group_id)}>{strategyControl.configured_state === "paused" ? "恢复策略" : "暂停策略"}</Button> : null}</div></div>
+        <div className="grid grid-cols-2 border-b border-[var(--color-divider)] md:grid-cols-4 lg:grid-cols-6">
+          <div className="grid min-h-[58px] content-center gap-1 px-2"><span className="text-[10px] text-[var(--color-text-secondary)]">Strategy Control</span><strong className={strategyEnabled ? "text-[var(--color-success)]" : "text-[var(--color-emphasis)]"}>{strategyControl?.effective_state ?? "不可用"}</strong></div>
+          <div className="grid min-h-[58px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[10px] text-[var(--color-text-secondary)]">Policy v4 ENTRY</span><strong className={globalEntryEnabled ? "text-[var(--color-success)]" : "text-[var(--color-emphasis)]"}>{controls.data?.global_entry.effective_state ?? "不可用"}</strong></div>
+          <div className="grid min-h-[58px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[10px] text-[var(--color-text-secondary)]">Runtime / Commands</span><strong className={runtimeReady ? "text-[var(--color-success)]" : "text-[var(--color-danger)]"}>{controls.data?.runtime_entry_authority.effective_status ?? "不可用"}</strong></div>
+          <div className="grid min-h-[58px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[10px] text-[var(--color-text-secondary)]">Ticket Slots</span><strong className="tabular-number">{controls.data ? `${controls.data.account_capacity.remaining_ticket_slots} / ${controls.data.account_capacity.max_concurrent_tickets}` : "—"}</strong></div>
+          <div className="grid min-h-[58px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[10px] text-[var(--color-text-secondary)]">Gross Stop Risk</span><strong className="tabular-number">{controls.data ? `${Number(controls.data.account_capacity.gross_stop_risk).toFixed(2)} / ${controls.data.account_capacity.gross_stop_risk_limit === null ? "—" : Number(controls.data.account_capacity.gross_stop_risk_limit).toFixed(2)}U` : "—"}</strong></div>
+          <div className="grid min-h-[58px] content-center gap-1 border-l border-[var(--color-divider)] px-2"><span className="text-[10px] text-[var(--color-text-secondary)]">Initial Margin</span><strong className="tabular-number">{controls.data ? `${Number(controls.data.account_capacity.reserved_margin).toFixed(2)} / ${controls.data.account_capacity.gross_initial_margin_limit === null ? "—" : Number(controls.data.account_capacity.gross_initial_margin_limit).toFixed(2)}U` : "—"}</strong></div>
+        </div>
+        <div className="grid gap-px bg-[var(--color-divider)] md:grid-cols-[1.15fr_1fr_1fr_auto]">
+          <div className="bg-[var(--color-surface-secondary)] px-2 py-2 text-[11px]"><span className="text-[var(--color-text-secondary)]">Universe</span><strong className="ml-2">Active {activeInstrumentIds.size} · Warming {tradfiStrategy.product_events.reduce((total, event) => total + event.warming_exchange_instrument_ids.length, 0)}</strong><div className="mt-1 truncate text-[10px] text-[var(--color-text-secondary)]" title={[...activeInstrumentIds].join(", ")}>{[...activeInstrumentIds].map((id) => id.split(":")[1]).join(" · ") || "未激活"}</div></div>
+          <div className="bg-[var(--color-surface-secondary)] px-2 py-2 text-[11px]"><span className="text-[var(--color-text-secondary)]">Product Window</span><strong className="ml-2">REGULAR {regularCount}/{activeProducts.length}</strong><div className={`mt-1 text-[10px] ${staleCount ? "text-[var(--color-danger)]" : "text-[var(--color-text-secondary)]"}`}>{staleCount ? `${staleCount} 个事实已过期` : "Product facts 当前有效"}</div></div>
+          <div className="bg-[var(--color-surface-secondary)] px-2 py-2 text-[11px]"><span className="text-[var(--color-text-secondary)]">Entry Warnings</span><strong className={`ml-2 ${productWarningCount ? "text-[var(--color-emphasis)]" : "text-[var(--color-success)]"}`}>{productWarningCount ? `${productWarningCount} 项关注` : "无产品告警"}</strong><div className="mt-1 text-[10px] text-[var(--color-text-secondary)]">{controls.data?.runtime_entry_authority.first_blocker ?? "Session / Spread / Mark-Index 由行动时再次校验"}</div></div>
+          <div className="flex items-center gap-3 bg-[var(--color-surface-secondary)] px-3 py-2 text-[11px]"><Link className="text-[var(--color-emphasis)] hover:underline" to="/instruments">标的中心</Link><Link className="text-[var(--color-emphasis)] hover:underline" to="/controls">完整控制</Link></div>
+        </div>
+      </section> : null}
       <StrategyFilters filters={filters} onChange={updateFilters} />
       <section className="mb-2 grid grid-cols-2 border border-[var(--color-divider)] bg-[var(--color-surface)] md:grid-cols-5" aria-label="策略统计摘要">
         {[["StrategyVersions", String(data.items.length)], ["自然终态", String(naturalCount)], ["已确认 Review", String(confirmedCount)], ["待确认 Review", String(pendingCount)], ["Observation", String(observationCount)]].map(([label, value], index) => <div className={`grid min-h-[48px] content-center gap-1 px-2 ${index > 0 ? "border-l border-[var(--color-divider)]" : ""}`} key={label}><span className="text-[10px] text-[var(--color-text-secondary)]">{label}</span><strong className="tabular-number text-[14px]">{value}</strong></div>)}
@@ -244,6 +300,10 @@ export function StrategyPage() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      <AlertDialog.Root open={pendingStrategyId !== null} onOpenChange={(open) => { if (!open) { setPendingStrategyId(null); setTotpCode(""); } }}>
+        <AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-[80] bg-black/80" /><AlertDialog.Content className="fixed left-1/2 top-1/2 z-[90] w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 border border-[var(--color-divider)] bg-[var(--color-background)] p-3 outline-none"><AlertDialog.Title className="m-0 text-[14px] font-semibold">{pendingControl?.configured_state === "paused" ? "恢复 SOR US Equity" : "暂停 SOR US Equity"}</AlertDialog.Title><AlertDialog.Description className="mt-2 text-[11px] leading-5 text-[var(--color-text-secondary)]">{pendingControl?.configured_state === "paused" ? "恢复后，新鲜 Signal 可重新进入正式准入；不会复活历史拒绝。" : "立即阻止本 StrategyGroup 新 ENTRY；已有 Ticket 继续保护、退出和 Review。"}</AlertDialog.Description>{pendingControl?.configured_state === "paused" ? <label className="mt-3 grid gap-1 text-[11px] text-[var(--color-text-secondary)]">Google Authenticator<input autoComplete="one-time-code" className="h-8 border border-[var(--color-divider)] bg-[var(--color-surface)] px-2 tabular-nums text-[var(--color-text-primary)]" inputMode="numeric" maxLength={8} value={totpCode} onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, ""))} /></label> : null}<div className="mt-4 flex justify-end gap-2"><AlertDialog.Cancel asChild><Button>取消</Button></AlertDialog.Cancel><AlertDialog.Action asChild><Button className={pendingControl?.configured_state === "paused" ? "border-[var(--color-emphasis)] text-[var(--color-emphasis)]" : "owner-button--danger"} disabled={!pendingControl || strategyControlMutation.isPending || (pendingControl.configured_state === "paused" && totpCode.length < 6)} onClick={() => pendingControl && strategyControlMutation.mutate({ strategyGroupId: pendingControl.strategy_group_id, action: pendingControl.configured_state === "paused" ? "resume" : "pause", version: pendingControl.control_version })}>{pendingControl?.configured_state === "paused" ? "确认恢复" : "确认暂停"}</Button></AlertDialog.Action></div></AlertDialog.Content></AlertDialog.Portal>
+      </AlertDialog.Root>
 
       <Dialog.Root open={selectedObservationVersionId !== undefined} onOpenChange={(open) => { if (!open) closeObservationModal(); }}>
         <Dialog.Portal>

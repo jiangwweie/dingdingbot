@@ -165,10 +165,12 @@ publishes only `/api/owner/v1/` and `/trading/`.
 The `0004 -> 0005` Product Authority upgrade also requires a stopped, exact
 flat source. It preserves all existing Crypto StrategyUniverse and Strategy
 Control rows, pauses global new ENTRY during identity rotation, installs the
-new Product Compatibility and Instrument Center projections, and adds the
-independent observation-only TradFi RuntimeProfile, Owner Policy and paused
-`SOR-US-EQ-PERP-001` control. It does not add TradFi Events to `policy-main`,
-activate a TradFi Universe or authorize a real TradFi Ticket.
+new Product Compatibility and Instrument Center projections, adds the neutral
+`tradfi-equity-usdm-v1` RuntimeProfile, expands the sole `policy-main` scope to
+the exact Crypto and TradFi Event/Profile mappings, and seeds paused
+`SOR-US-EQ-PERP-001` control. The migration itself does not resume that
+StrategyGroup or bypass postflight; real TradFi ENTRY becomes eligible only
+after the exact R4 certification and explicit TOTP-protected Strategy resume.
 
 The same revision binds every existing portfolio-rejection Shadow to its exact
 Signal without changing its completed MFE/MAE lineage, and permits new
@@ -223,21 +225,22 @@ The official bounded sequence is:
    preservation proof remains independently intact.
 5. Run the single certified Alembic revision without `DROP SCHEMA`.
 6. Recompute the same frozen `0004` manifest and require an exact digest match.
-7. In one PostgreSQL transaction, preserve the main Crypto Policy scope and
-   existing Strategy Controls, add Product Compatibility and the independent
-   observation-only TradFi authority, pause global new ENTRY, and rotate the
+7. In one PostgreSQL transaction, preserve the existing `policy-main` lineage
+   and Strategy Controls, expand that Policy to exact Crypto and TradFi
+   Event/Profile mappings, add Product Compatibility and the neutral TradFi
+   RuntimeProfile, pause global new ENTRY, and rotate the
    schema/commit/seed capability identity.
 8. Activate the target release and start Observation, Lifecycle and
    Reconciliation while Entry remains fenced.
-9. Revalidate the existing bounded six-Crypto-Event StrategyUniverse bootstrap;
-   no TradFi Universe is activated by migration. PostgreSQL may
-   serialize the Warming slot internally, but the operator does not install
-   Events one at a time.
+9. Bootstrap, certify and activate the approved Crypto and TradFi
+   StrategyUniverses. PostgreSQL may serialize the global Warming slot
+   internally, but the operator does not install members one at a time.
 10. Target verify: repeat database, history, exchange, Universe, worker and
     identity postflight while Entry remains inactive, disabled, and fenced.
 11. Seal: create the immutable production tag and record the directly verified
-    release state only after all postflight evidence passes. Entry is a separate
-    explicit promotion and is never enabled by a schema-changing deployment.
+    release state only after all postflight evidence passes. Global Entry and
+    `SOR-US-EQ-PERP-001` resume remain explicit postflight promotions and are
+    never enabled merely because the schema-changing deployment completed.
 
 The terminal source classifier is exact. `terminal / terminal` denotes an
 exposure lifecycle and requires a current Review. The only terminal pairs that

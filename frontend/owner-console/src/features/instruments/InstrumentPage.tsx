@@ -60,12 +60,35 @@ function exactPrice(value: string | null): string {
 }
 
 function spreadLabel(item: Instrument): string {
-  if (item.best_bid === null || item.best_ask === null) return "—";
+  const current = spreadBps(item);
+  if (current === null) return "—";
+  const threshold = item.max_entry_spread_bps;
+  return threshold === null ? `${current.toFixed(1)} bps` : `${current.toFixed(1)} / ${Number(threshold).toFixed(0)} bps`;
+}
+
+function spreadBps(item: Instrument): number | null {
+  if (item.best_bid === null || item.best_ask === null) return null;
   const bid = Number(item.best_bid);
   const ask = Number(item.best_ask);
   const midpoint = (bid + ask) / 2;
-  if (!Number.isFinite(midpoint) || midpoint <= 0 || ask < bid) return "—";
-  return `${(((ask - bid) / midpoint) * 10_000).toFixed(1)} bp`;
+  if (!Number.isFinite(midpoint) || midpoint <= 0 || ask < bid) return null;
+  return ((ask - bid) / midpoint) * 10_000;
+}
+
+function markIndexDeviationBps(item: Instrument): number | null {
+  if (item.mark_price === null || item.index_price === null) return null;
+  const mark = Number(item.mark_price);
+  const index = Number(item.index_price);
+  if (!Number.isFinite(mark) || !Number.isFinite(index) || index <= 0) return null;
+  return Math.abs(mark - index) / index * 10_000;
+}
+
+function thresholdTone(value: number | null, threshold: string | null): StatusTone {
+  if (value === null || threshold === null) return "neutral";
+  const ratio = value / Number(threshold);
+  if (ratio > 1) return "danger";
+  if (ratio >= 0.8) return "attention";
+  return "success";
 }
 
 function fundingLabel(value: string | null): string {
@@ -206,8 +229,8 @@ export function InstrumentPage() {
   const columns: DenseTableColumnDef<Instrument>[] = [
     { id: "instrument", header: "标的 / Product", cell: ({ row }) => <button className="flex w-full items-center gap-1 text-left" type="button" onClick={() => setExpandedId((current) => current === row.original.exchange_instrument_id ? null : row.original.exchange_instrument_id)}>{expandedId === row.original.exchange_instrument_id ? <ChevronDown className="h-3.5 w-3.5 text-[var(--color-text-secondary)]" /> : <ChevronRight className="h-3.5 w-3.5 text-[var(--color-text-secondary)]" />}<span className="min-w-0"><strong className="block truncate text-[12px]">{row.original.venue_symbol}</strong><small className="block truncate text-[10px] text-[var(--color-text-secondary)]">{productLabel(row.original)} · {row.original.profile_status}</small></span></button> },
     { id: "session", header: "Session", cell: ({ row }) => <div className="grid gap-0.5"><StatusTag tone={statusTone(row.original.session_state)}>{sessionLabel(row.original.session_state)}</StatusTag><small className="text-[10px] text-[var(--color-text-secondary)]">{row.original.entry_session_policy}</small></div> },
-    { id: "price", header: "Mark / Index", cell: ({ row }) => <div className="grid gap-0.5 tabular-number"><strong>{exactPrice(row.original.mark_price)}</strong><small className="text-[10px] text-[var(--color-text-secondary)]">Index {exactPrice(row.original.index_price)}</small></div> },
-    { id: "micro", header: "Spread / Funding", cell: ({ row }) => <div className="grid gap-0.5 tabular-number"><strong>{spreadLabel(row.original)}</strong><small className="text-[10px] text-[var(--color-text-secondary)]">Funding {fundingLabel(row.original.funding_rate)}</small></div> },
+    { id: "price", header: "Mark / Index 门禁", cell: ({ row }) => { const deviation = markIndexDeviationBps(row.original); const threshold = row.original.max_mark_index_deviation_bps; return <div className="grid gap-0.5 tabular-number"><div className="flex items-center gap-1.5"><strong>{exactPrice(row.original.mark_price)}</strong><StatusTag tone={thresholdTone(deviation, threshold)}>{deviation === null || threshold === null ? "—" : `${deviation.toFixed(1)} / ${Number(threshold).toFixed(0)} bps`}</StatusTag></div><small className="text-[10px] text-[var(--color-text-secondary)]">Index {exactPrice(row.original.index_price)}</small></div>; } },
+    { id: "micro", header: "Spread 门禁 / Funding", cell: ({ row }) => <div className="grid gap-0.5 tabular-number"><StatusTag tone={thresholdTone(spreadBps(row.original), row.original.max_entry_spread_bps)}>{spreadLabel(row.original)}</StatusTag><small className="text-[10px] text-[var(--color-text-secondary)]">Funding {fundingLabel(row.original.funding_rate)}</small></div> },
     { id: "product", header: "Product / Event", cell: ({ row }) => <div className="grid gap-0.5"><StatusTag tone={statusTone(row.original.product_status)}>{row.original.product_status ?? "unavailable"}</StatusTag><small className="text-[10px] text-[var(--color-text-secondary)]">Corporate {row.original.corporate_event_status ?? "unavailable"}</small></div> },
     { id: "universe", header: "Universe 归属", cell: ({ row }) => <div className="grid gap-0.5"><strong className="truncate text-[11px]" title={membershipLabel(row.original)}>{membershipLabel(row.original)}</strong><small className="text-[10px] text-[var(--color-text-secondary)]">{row.original.memberships.length} memberships</small></div> },
     { id: "route", header: "路由", cell: () => <Link className="text-[11px] text-[var(--color-emphasis)] hover:underline" to="/strategies">策略页</Link> },

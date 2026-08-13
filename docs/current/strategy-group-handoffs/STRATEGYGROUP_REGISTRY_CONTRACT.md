@@ -33,6 +33,8 @@ runtime authority; this document defines their meaning and seed boundary.
 | `SOR-001` | `SOR-LONG` | long |
 | `SOR-001` | `SOR-SHORT` | short |
 | `BRF2-001` | `BRF2-SHORT` | short |
+| `SOR-US-EQ-PERP-001` | `SOR-US-LONG-15M` | long |
+| `SOR-US-EQ-PERP-001` | `SOR-US-SHORT-15M` | short |
 
 Unsupported opposite sides are rejected. A new side or changed signal meaning
 requires a new versioned event contract and tests; it is never inferred from a

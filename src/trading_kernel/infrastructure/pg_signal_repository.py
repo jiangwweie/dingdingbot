@@ -30,7 +30,10 @@ from src.trading_kernel.application.ports import (
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
-from src.trading_kernel.domain.product import ProductSessionSnapshot
+from src.trading_kernel.domain.product import (
+    InstrumentProductProfile,
+    ProductSessionSnapshot,
+)
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -966,6 +969,24 @@ class PostgresSignalRepository:
             None
             if row is None
             else ProductSessionSnapshot.model_validate(row, extra="ignore")
+        )
+
+    async def get_product_profile(
+        self,
+        exchange_instrument_id: str,
+    ) -> InstrumentProductProfile | None:
+        row = (
+            await self._connection.execute(
+                sa.select(instrument_product_profiles).where(
+                    instrument_product_profiles.c.exchange_instrument_id
+                    == exchange_instrument_id
+                )
+            )
+        ).mappings().one_or_none()
+        return (
+            None
+            if row is None
+            else InstrumentProductProfile.model_validate(row, extra="ignore")
         )
 
     async def upsert_product_sessions(

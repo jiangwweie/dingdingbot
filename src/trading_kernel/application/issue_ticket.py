@@ -45,6 +45,7 @@ class IssueTicketStatus(StrEnum):
     PROTECTION_UNAVAILABLE = "protection_unavailable"
     CAPACITY_CLAIM_MISSING = "capacity_claim_missing"
     ADMISSION_INCIDENT_OPEN = "admission_incident_open"
+    PRODUCT_ENTRY_BLOCKED = "product_entry_blocked"
 
 
 class IssueTicketRequest(BaseModel):
@@ -111,6 +112,14 @@ async def issue_ticket(
     if not policy.enabled or not policy.new_entry_submit_enabled:
         return IssueTicketResult(
             status=IssueTicketStatus.POLICY_DISABLED,
+            ticket_id=None,
+        )
+    if policy.scope is None or not policy.scope.authorizes(
+        event_spec_id=ticket.identity.runtime.event_spec_id,
+        runtime_profile_id=ticket.identity.runtime.runtime_profile_id,
+    ):
+        return IssueTicketResult(
+            status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
             ticket_id=None,
         )
     owner_controls = getattr(uow, "owner_controls", None)

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from src.trading_kernel.application.owner_control import (
     ControlMutationRequest,
@@ -17,6 +18,7 @@ from src.trading_kernel.application.owner_control import (
     set_global_entry_state,
     set_strategy_entry_state,
 )
+from src.trading_kernel.application.ports import RuntimeProfileSnapshot
 from src.trading_kernel.domain.owner_control import (
     OwnerControlOperation,
     StrategyEntryControl,
@@ -62,6 +64,55 @@ class GlobalEntryView(BaseModel):
     first_blocker: str | None = None
 
 
+class AccountCapacityView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    max_concurrent_tickets: int
+    active_ticket_count: int
+    remaining_ticket_slots: int
+    gross_stop_risk: Decimal
+    gross_stop_risk_limit: Decimal | None
+    max_gross_stop_risk_fraction: Decimal
+    long_stop_risk: Decimal
+    short_stop_risk: Decimal
+    directional_stop_risk_limit: Decimal | None
+    directional_stop_risk_limit_fraction: Decimal
+    reserved_margin: Decimal
+    gross_initial_margin_limit: Decimal | None
+    max_gross_initial_margin_utilization: Decimal
+    wallet_balance_basis: Decimal | None
+    margin_balance_basis: Decimal | None
+    family_active_counts: dict[str, int]
+    family_limits: dict[str, int]
+    source: Literal["current_projection", "no_active_exposure"]
+
+    @field_serializer(
+        "gross_stop_risk",
+        "gross_stop_risk_limit",
+        "max_gross_stop_risk_fraction",
+        "long_stop_risk",
+        "short_stop_risk",
+        "directional_stop_risk_limit",
+        "directional_stop_risk_limit_fraction",
+        "reserved_margin",
+        "gross_initial_margin_limit",
+        "max_gross_initial_margin_utilization",
+        "wallet_balance_basis",
+        "margin_balance_basis",
+    )
+    def _serialize_decimal(self, value: Decimal | None) -> str | None:
+        return None if value is None else str(value)
+
+
+class RuntimeEntryAuthorityView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_commands_enabled: bool
+    effective_status: Literal["ready", "fenced"]
+    runtime_profile_ids: tuple[str, ...]
+    first_blocker: str | None = None
+
+
 class StrategyControlView(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -91,6 +142,8 @@ class ControlsResponse(BaseModel):
 
     generated_at_ms: int
     global_entry: GlobalEntryView
+    account_capacity: AccountCapacityView
+    runtime_entry_authority: RuntimeEntryAuthorityView
     strategies: tuple[StrategyControlView, ...]
     current_operation: OwnerControlOperation | None
     recent_operations: tuple[OwnerControlOperation, ...]
@@ -127,7 +180,6 @@ async def read_controls(request: Request) -> ControlsResponse:
             raise RuntimeError("Owner Policy is unavailable")
         strategies = await uow.owner_controls.list_strategy_controls()
         ticket_ids = await uow.aggregates.list_active_ticket_ids(
-            runtime_profile_id=settings.runtime_profile_id,
             venue_id=settings.venue_id,
             account_id=settings.account_id,
             limit=policy.max_concurrent_tickets,
@@ -135,7 +187,80 @@ async def read_controls(request: Request) -> ControlsResponse:
         operation = await uow.owner_controls.get_latest_nonterminal_operation()
         recent_operations = await uow.owner_controls.list_recent_operations(limit=20)
         events = await uow.owner_controls.list_recent_events(limit=20)
+        exposure = await uow.entry_admission.get_account_exposure(
+            settings.venue_id,
+            settings.account_id,
+        )
+        long_risk = await uow.entry_admission.sum_active_directional_stop_risk(
+            venue_id=settings.venue_id,
+            account_id=settings.account_id,
+            position_side="long",
+        )
+        short_risk = await uow.entry_admission.sum_active_directional_stop_risk(
+            venue_id=settings.venue_id,
+            account_id=settings.account_id,
+            position_side="short",
+        )
+        family_names = (
+            "long_continuation",
+            "opening_range",
+            "rally_failure_short",
+        )
+        family_counts = {
+            family: await uow.entry_admission.count_active_family_tickets(
+                venue_id=settings.venue_id,
+                account_id=settings.account_id,
+                exposure_family=family,
+            )
+            for family in family_names
+        }
+        capability = await uow.signals.get_runtime_capability("exchange_commands")
+        runtime_profile_ids = tuple(
+            sorted(
+                {
+                    item.runtime_profile_id
+                    for item in (policy.scope.event_runtime_profiles if policy.scope else ())
+                }
+            )
+        )
+        runtime_profiles: tuple[RuntimeProfileSnapshot | None, ...] = tuple(
+            [
+                await uow.signals.get_runtime_profile(runtime_profile_id)
+                for runtime_profile_id in runtime_profile_ids
+            ]
+        )
+        latest_claim = await uow.capacity_claims.get_latest_for_account(
+            venue_id=settings.venue_id,
+            account_id=settings.account_id,
+        )
+        wallet_basis = (
+            None if latest_claim is None else latest_claim.total_wallet_balance_at_claim
+        )
+        margin_basis = (
+            None if latest_claim is None else latest_claim.total_margin_balance_at_claim
+        )
+        raw_entry_blocker = await uow.owner_controls.get_global_entry_resume_blocker(
+            owner_policy_id=settings.owner_policy_id,
+        )
     global_state = "enabled" if policy.new_entry_submit_enabled else "paused"
+    exposure_ticket_count = 0 if exposure is None else exposure.active_ticket_count
+    gross_stop_risk = Decimal(0) if exposure is None else exposure.gross_risk_at_stop
+    reserved_margin = (
+        Decimal(0) if exposure is None else exposure.current_reserved_margin
+    )
+    runtime_profiles_ready = bool(runtime_profile_ids) and all(
+        profile is not None
+        and profile.status == "active"
+        and profile.position_mode == "independent_sides"
+        for profile in runtime_profiles
+    )
+    capability_ready = capability is not None and capability.enabled
+    entry_blocker = (
+        None
+        if policy.new_entry_submit_enabled
+        and raw_entry_blocker == "exchange_command_unresolved"
+        else raw_entry_blocker
+    )
     return ControlsResponse.model_validate(
         {
             "generated_at_ms": get_clock_ms(request),
@@ -144,7 +269,64 @@ async def read_controls(request: Request) -> ControlsResponse:
                 "effective_state": global_state,
                 "policy_version": policy.policy_version,
                 "active_ticket_count": len(ticket_ids),
-                "first_blocker": None,
+                "first_blocker": entry_blocker,
+            },
+            "account_capacity": {
+                "max_concurrent_tickets": policy.max_concurrent_tickets,
+                "active_ticket_count": exposure_ticket_count,
+                "remaining_ticket_slots": max(
+                    policy.max_concurrent_tickets - exposure_ticket_count,
+                    0,
+                ),
+                "gross_stop_risk": gross_stop_risk,
+                "gross_stop_risk_limit": (
+                    None
+                    if wallet_basis is None
+                    else wallet_basis * policy.max_gross_stop_risk_fraction
+                ),
+                "max_gross_stop_risk_fraction": (
+                    policy.max_gross_stop_risk_fraction
+                ),
+                "long_stop_risk": long_risk,
+                "short_stop_risk": short_risk,
+                "directional_stop_risk_limit": (
+                    None
+                    if wallet_basis is None
+                    else wallet_basis * policy.directional_stop_risk_limit_fraction
+                ),
+                "directional_stop_risk_limit_fraction": (
+                    policy.directional_stop_risk_limit_fraction
+                ),
+                "reserved_margin": reserved_margin,
+                "gross_initial_margin_limit": (
+                    None
+                    if margin_basis is None
+                    else margin_basis * policy.max_gross_initial_margin_utilization
+                ),
+                "max_gross_initial_margin_utilization": (
+                    policy.max_gross_initial_margin_utilization
+                ),
+                "wallet_balance_basis": wallet_basis,
+                "margin_balance_basis": margin_basis,
+                "family_active_counts": family_counts,
+                "family_limits": policy.family_ticket_limits.model_dump(),
+                "source": (
+                    "current_projection"
+                    if exposure is not None
+                    else "no_active_exposure"
+                ),
+            },
+            "runtime_entry_authority": {
+                "exchange_commands_enabled": capability_ready,
+                "effective_status": (
+                    "ready"
+                    if entry_blocker is None
+                    and runtime_profiles_ready
+                    and capability_ready
+                    else "fenced"
+                ),
+                "runtime_profile_ids": runtime_profile_ids,
+                "first_blocker": entry_blocker,
             },
             "strategies": [
                 {
@@ -217,7 +399,6 @@ async def flatten_preview(body: EmptyControlBody, request: Request) -> FlattenPr
         preview = await preview_flatten_all(
             uow,
             owner_policy_id=settings.owner_policy_id,
-            runtime_profile_id=settings.runtime_profile_id,
             venue_id=settings.venue_id,
             account_id=settings.account_id,
         )
@@ -239,7 +420,7 @@ async def flatten_submit(
         idempotency_key=body.idempotency_key,
         owner_identity=settings.auth.username,
         now_ms=now_ms,
-        runtime_profile_id=settings.runtime_profile_id,
+        runtime_profile_id="account-wide",
         venue_id=settings.venue_id,
         account_id=settings.account_id,
         snapshot_digest=body.snapshot_digest,
@@ -318,7 +499,6 @@ async def _set_global(
             enabled=enabled,
             request=_mutation(body, settings.auth.username, now_ms),
             authentication_strength="totp_step_up" if enabled else "session",
-            runtime_profile_id=settings.runtime_profile_id,
         )
     return GlobalMutationResponse(
         configured_state="enabled" if enabled else "paused",

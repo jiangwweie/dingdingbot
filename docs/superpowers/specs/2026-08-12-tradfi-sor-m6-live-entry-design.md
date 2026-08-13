@@ -1,6 +1,6 @@
 ---
 title: TRADFI_SOR_M6_LIVE_ENTRY_DESIGN
-status: OWNER_DIRECTION_ADOPTED_DESIGN_BASELINE
+status: IMPLEMENTED_LOCAL_CANDIDATE_PENDING_RELEASE_CERTIFICATION
 date: 2026-08-12
 ---
 
@@ -29,9 +29,9 @@ date: 2026-08-12
 2. 当前内核已在 Signal 准入、Ticket 签发和 action-time dispatch revalidation 三处读取
    StrategyGroup Control；paused 状态阻止新的 ENTRY，既有 Ticket 生命周期不依赖恢复
    StrategyGroup Entry 权限。
-3. 当前 TradFi 本地候选使用 `policy-tradfi-observe` 和
-   `tradfi-equity-observe-v1`，并以 Policy Entry disabled、StrategyGroup paused 安装；
-   这些身份尚未进入生产，可以在首次 R4 部署前直接替换，不能保留误导性的兼容别名。
+3. M2-M5 曾使用的 `policy-tradfi-observe` 和
+   `tradfi-equity-observe-v1` 已在 M6 本地候选中删除；当前实现使用唯一
+   `policy-main` 和中性 `tradfi-equity-usdm-v1`，没有兼容别名或第二资金 Policy。
 4. Crypto 与 TradFi RuntimeProfile 使用同一个 Binance USDⓈ-M account。当前账户 Exposure
    投影按 `venue_id + account_id` 聚合 Ticket 数、Stop Risk 和 Reserved Margin，因此两类
    产品不是物理隔离资金池。
@@ -203,7 +203,7 @@ M6 后端新增或完善：
 ## 联合部署
 
 M6 完成后，将 **M0.5、M2-M6** 合并为一个精确 R4 候选，不先部署 M5
-observation-only 生产阶段：
+独立观察阶段：
 
 ```text
 current production 0004

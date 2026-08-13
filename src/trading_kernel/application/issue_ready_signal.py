@@ -47,6 +47,11 @@ from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
 )
+from src.trading_kernel.domain.product import (
+    ProductEntryDecision,
+    evaluate_event_product_entry,
+    product_compatibility_for,
+)
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.domain.ticket import EntryOrderType
 
@@ -60,6 +65,7 @@ class IssueReadySignalRequest(BaseModel):
     runtime_commit: str
     schema_revision: str
     now_ms: int
+    action_time_product_decision: ProductEntryDecision | None = None
 
     @field_validator(
         "signal_event_id",
@@ -167,6 +173,12 @@ async def issue_ready_signal(
         )
     profile = await uow.signals.get_runtime_profile(scope.runtime_profile_id)
     policy = await uow.entry_admission.get_owner_policy(scope.owner_policy_id)
+    product_profile = await uow.signals.get_product_profile(
+        signal.exchange_instrument_id
+    )
+    product_session = await uow.signals.get_product_session(
+        signal.exchange_instrument_id
+    )
     owner_controls = getattr(uow, "owner_controls", None)
     strategy_control = (
         None
@@ -192,6 +204,11 @@ async def issue_ready_signal(
         or policy is None
         or not policy.enabled
         or not policy.new_entry_submit_enabled
+        or policy.scope is None
+        or not policy.scope.authorizes(
+            event_spec_id=signal.event_spec_id,
+            runtime_profile_id=scope.runtime_profile_id,
+        )
         or not strategy_entry_is_enabled(strategy_control)
         or event_spec is None
         or event_spec.status != "active"
@@ -209,7 +226,6 @@ async def issue_ready_signal(
             IssueTicketStatus.INSTRUMENT_RULES_INVALID,
             request.now_ms,
         )
-
     ownership = await uow.entry_admission.read_admission_ownership(
         venue_id=profile.venue_id,
         account_id=profile.account_id,
@@ -277,6 +293,30 @@ async def issue_ready_signal(
             exposure_family=contract.exposure_family,
         ),
     )
+    current_product_decision = evaluate_event_product_entry(
+        compatibility=product_compatibility_for(signal.event_spec_id),
+        profile=product_profile,
+        snapshot=product_session,
+        now_ms=request.now_ms,
+    )
+    product_decision = (
+        request.action_time_product_decision
+        if request.action_time_product_decision is not None
+        and not request.action_time_product_decision.allowed
+        else current_product_decision
+    )
+    if not product_decision.allowed:
+        return await _refuse(
+            uow,
+            signal,
+            IssueTicketStatus.PRODUCT_ENTRY_BLOCKED,
+            request.now_ms,
+            admission_context=admission_context,
+            entry_admission_snapshot_digest=(
+                request.admission_snapshot.digest()
+            ),
+            binding_constraint=product_decision.status.value,
+        )
     domain = NettingDomain(
         venue_id=profile.venue_id,
         account_id=profile.account_id,

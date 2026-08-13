@@ -58,10 +58,10 @@ settle, and review concurrently.
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
 | PostgreSQL revision chain | Current tracked head implemented locally | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability -> 0004_owner_control_plane -> 0005_tradfi_instrument_center`; the `0004 -> 0005` release remains undeployed and separately Owner-confirmed |
 | Owner control plane | Complete | Explicit StrategyGroup pause/resume, global new-ENTRY pause/resume, durable flatten-all authorization and progress projection, authenticated Owner API, and `/trading/` console |
-| Six Strategy Events | Complete | CPM/MPG/MI/BRF2 v3 and SOR v4 Registry contracts |
+| Eight Strategy Events | Complete | Six Crypto CPM/MPG/MI/BRF2/SOR Events plus independent TradFi SOR LONG/SHORT Registry contracts |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, rising-edge or session Exposure Episode identity, deterministic Live/Replay parity |
 | Arbitration and CapacityClaim | Complete | Deterministic priority, Policy v4 Family/directional/materialization limits, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
-| Admission evidence and Shadow Outcome | Complete | One Signal-owned Outcome supports eligible portfolio rejection through `fixed_horizon_excursion_v1` and TradFi strategy observation through `sor_path_observation_v1`; observation-only mode creates no `AdmissionDecision`, CapacityClaim, Ticket, or Command, and later real trading still uses the same formal Ticket path |
+| Admission evidence and Shadow Outcome | Complete | One Signal-owned Outcome supports eligible portfolio rejection through `fixed_horizon_excursion_v1` and TradFi strategy observation through `sor_path_observation_v1`; Observation creates no simulated Ticket or PnL, while an eligible live Signal may independently continue through the same formal Ticket path: AdmissionDecision, CapacityClaim, Ticket and Command |
 | Ticket issuance | Complete | Atomic Claim, budget, domain, Ticket, aggregate, event, and ENTRY command |
 | Venue Truth and recovery | Complete | ENTRY, protection, EXIT, flatten, cancel, timeout and unknown resolution |
 | Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |
@@ -80,7 +80,7 @@ readonly facts.
 | Boundary | Required local evidence | Rejected outcome |
 | --- | --- | --- |
 | Revision integrity | Disposable PostgreSQL upgrades from empty base to the single head, historical production-shaped `0002` to `0003`, flat `0003` to `0004`, and exact flat `0004` to `0005`; each source authority remains preserved | A branch, downgrade, schema fallback, old-table reader, dual write, active handover, or changed historical value is accepted |
-| Batch bootstrap | The six Registry Events receive the approved fixed initial member set in one bounded run; no operator configures members one Event at a time | A second Warming Universe is required for every Event or member |
+| Batch bootstrap | The eight Registry Events receive their approved RuntimeProfile-specific initial member sets in one bounded run; no operator configures members one Event at a time | A second Warming Universe is required for every Event or member |
 | Warming and readiness | Warming performs readonly market/account certification, produces zero StrategySignal, preserves observation time separately from certification time, and activates only after every member passes | Warming can submit an order, stale evidence activates, or a failed member becomes eligible |
 | Concurrency and recovery | One global Warming slot is enforced; the official `abandon_strategy_universe.py` CLI permanently abandons one exact Warming Universe with an audited reason so the slot is released | A failed Warming state blocks all later deployment work, is changed by direct SQL, or can be silently reused |
 | Active scope lineage | Only the current Active pointer is eligible; Signal, Claim, and Ticket freeze Universe identity and digest; a replacement does not rewrite exposure already in progress | Registry defaults or a later Universe changes an existing Ticket's scope |
@@ -133,10 +133,12 @@ current source is exact flat `0004_owner_control_plane` and its target is
 order, Reservation, Netting Domain, unresolved Command, unreviewed terminal
 Ticket and open Incident, and requires Entry fenced with all old writers
 stopped. It computes the canonical `0004` source-column preservation digest,
-runs the single Alembic revision, verifies the same digest, preserves the main
-Crypto Policy and Universe authority, installs Product Compatibility plus the
-independent observation-only TradFi Profile/Policy/control, and starts safety
-workers while Entry stays fenced. Historical `0002 -> 0003` and `0003 -> 0004`
+runs the single Alembic revision, verifies the same digest, preserves the sole
+`policy-main` lineage and existing Universe authority, installs Product
+Compatibility plus the neutral `tradfi-equity-usdm-v1` Profile, expands the
+same Policy to exact Crypto and TradFi Event/Profile mappings, installs paused
+`SOR-US-EQ-PERP-001` control, and starts safety workers while Entry stays
+fenced. Historical `0002 -> 0003` and `0003 -> 0004`
 evidence remains intact; none of these transitions is an active-position
 handover or a runtime compatibility reader.
 

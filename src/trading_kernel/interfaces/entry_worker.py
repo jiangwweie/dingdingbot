@@ -28,6 +28,7 @@ from src.trading_kernel.application.runtime_facts import (
     EntryAdmissionSnapshotRequest,
     EntryFactsSource,
     InstrumentRulesRequest,
+    ProductSessionRequest,
 )
 from src.trading_kernel.application.select_entry_candidate import (
     SelectEntryCandidateRequest,
@@ -44,6 +45,11 @@ from src.trading_kernel.domain.arbitration import (
     rank_candidates,
 )
 from src.trading_kernel.domain.commands import ExchangeCommandKind
+from src.trading_kernel.domain.product import (
+    ProductEntryStatus,
+    evaluate_event_product_entry,
+    product_compatibility_for,
+)
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 
 
@@ -162,6 +168,9 @@ async def run_entry_worker_once(
             if scope is None
             else await uow.signals.get_runtime_profile(scope.runtime_profile_id)
         )
+        product_profile = await uow.signals.get_product_profile(
+            signal.exchange_instrument_id
+        )
         if scope is None or profile is None:
             await uow.signals.save_readiness(
                 runtime_scope_id=signal.runtime_scope_id,
@@ -187,11 +196,27 @@ async def run_entry_worker_once(
         observed_at_ms=request.now_ms,
         valid_for_ms=request.admission_snapshot_validity_ms,
     )
+    product_session_request = ProductSessionRequest(
+        venue_id=profile.venue_id,
+        account_id=profile.account_id,
+        exchange_instrument_id=signal.exchange_instrument_id,
+        observed_at_ms=request.now_ms,
+    )
     try:
-        admission_snapshot, instrument_rules = await asyncio.wait_for(
+        product_compatibility = product_compatibility_for(signal.event_spec_id)
+        admission_snapshot, instrument_rules, product_session = await asyncio.wait_for(
             asyncio.gather(
                 facts_source.read_entry_admission_snapshot(snapshot_request),
                 facts_source.read_instrument_rules(rules_request),
+                (
+                    _read_product_session(
+                        facts_source,
+                        product_session_request,
+                    )
+                    if product_compatibility.product_family
+                    == "tradfi_equity_perpetual"
+                    else _no_product_session()
+                ),
             ),
             timeout=request.timeout_seconds,
         )
@@ -205,7 +230,24 @@ async def run_entry_worker_once(
             )
         return EntryWorkerResult(status=EntryWorkerStatus.FACTS_UNAVAILABLE)
 
+    action_time_product_decision = (
+        evaluate_event_product_entry(
+            compatibility=product_compatibility,
+            profile=product_profile,
+            snapshot=product_session,
+            now_ms=request.now_ms,
+        )
+        if product_compatibility.product_family == "tradfi_equity_perpetual"
+        else None
+    )
     async with uow_factory() as uow:
+        if (
+            product_session is not None
+            and action_time_product_decision is not None
+            and action_time_product_decision.status
+            is not ProductEntryStatus.IDENTITY_MISMATCH
+        ):
+            await uow.signals.upsert_product_sessions((product_session,))
         await uow.signals.upsert_instrument_rules(
             venue_id=profile.venue_id,
             exchange_instrument_id=instrument_rules.exchange_instrument_id,
@@ -234,6 +276,7 @@ async def run_entry_worker_once(
                 runtime_commit=request.runtime_commit,
                 schema_revision=request.schema_revision,
                 now_ms=request.now_ms,
+                action_time_product_decision=action_time_product_decision,
             ),
         )
     if issued.status is not IssueTicketStatus.ISSUED or issued.ticket_id is None:
@@ -260,6 +303,17 @@ async def run_entry_worker_once(
         issue_status=issued.status,
         dispatch_status=dispatched.status,
     )
+
+
+async def _no_product_session():
+    return None
+
+
+async def _read_product_session(facts_source, request):
+    reader = getattr(facts_source, "read_product_session", None)
+    if not callable(reader):
+        raise TypeError("TradFi action-time Product source is unavailable")
+    return await reader(request)
 
 
 async def _record_action_facts_unavailable(

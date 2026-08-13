@@ -3,9 +3,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
-import { candleFixture, strategyFixture, strategyObservationFixture, strategyTicketFixture } from "../../api/fixtures";
+import { candleFixture, instrumentFixture, strategyFixture, strategyObservationFixture, strategyTicketFixture } from "../../api/fixtures";
 import { ownerQueryClient } from "../../app/queryClient";
 import { getCandles } from "../trades/api";
+import { getControls } from "../controls/api";
+import { getInstruments } from "../instruments/api";
 import { StrategyPage } from "./StrategyPage";
 import { getStrategies, getStrategyObservations, getStrategyTickets } from "./api";
 
@@ -19,10 +21,26 @@ vi.mock("../trades/api", async (importOriginal) => {
   return { ...actual, getCandles: vi.fn() };
 });
 
+vi.mock("../controls/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../controls/api")>();
+  return { ...actual, getControls: vi.fn(), setStrategyControl: vi.fn() };
+});
+
+vi.mock("../instruments/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../instruments/api")>();
+  return { ...actual, getInstruments: vi.fn() };
+});
+
+vi.mock("../../components/charts/CausalityChart", () => ({
+  default: () => <div data-testid="causality-chart" />,
+}));
+
 const mockedGetStrategies = vi.mocked(getStrategies);
 const mockedGetStrategyObservations = vi.mocked(getStrategyObservations);
 const mockedGetStrategyTickets = vi.mocked(getStrategyTickets);
 const mockedGetCandles = vi.mocked(getCandles);
+const mockedGetControls = vi.mocked(getControls);
+const mockedGetInstruments = vi.mocked(getInstruments);
 
 function LocationProbe() {
   const location = useLocation();
@@ -43,10 +61,34 @@ beforeEach(() => {
   mockedGetStrategyObservations.mockReset();
   mockedGetStrategyTickets.mockReset();
   mockedGetCandles.mockReset();
+  mockedGetControls.mockReset();
+  mockedGetInstruments.mockReset();
   mockedGetStrategies.mockResolvedValue(strategyFixture);
   mockedGetStrategyObservations.mockResolvedValue(strategyObservationFixture);
   mockedGetStrategyTickets.mockResolvedValue(strategyTicketFixture);
   mockedGetCandles.mockResolvedValue(candleFixture);
+  mockedGetControls.mockResolvedValue({
+    generated_at_ms: 1_800_000_000_000,
+    global_entry: { configured_state: "enabled", effective_state: "enabled", policy_version: 10, active_ticket_count: 1, first_blocker: null },
+    account_capacity: { max_concurrent_tickets: 3, active_ticket_count: 1, remaining_ticket_slots: 2, gross_stop_risk: "4.20", gross_stop_risk_limit: "25.80", max_gross_stop_risk_fraction: "0.06", long_stop_risk: "4.20", short_stop_risk: "0", directional_stop_risk_limit: "17.20", directional_stop_risk_limit_fraction: "0.04", reserved_margin: "21.00", gross_initial_margin_limit: "387.00", max_gross_initial_margin_utilization: "0.90", wallet_balance_basis: "430.00", margin_balance_basis: "430.00", family_active_counts: { long_continuation: 0, opening_range: 1, rally_failure_short: 0 }, family_limits: { long_continuation: 1, opening_range: 2, rally_failure_short: 1 }, source: "current_projection" },
+    runtime_entry_authority: { exchange_commands_enabled: true, effective_status: "ready", runtime_profile_ids: ["tiny-live-v1", "tradfi-equity-usdm-v1"], first_blocker: null },
+    strategies: [{ strategy_group_id: "SOR-US-EQ-PERP-001", entry_state: "enabled", control_version: 1, last_event_id: "event:control:1", reason: "seed_enabled", updated_at_ms: 1_800_000_000_000, configured_state: "enabled", effective_state: "enabled" }],
+    current_operation: null,
+    recent_operations: [],
+    events: [],
+  });
+  mockedGetInstruments.mockResolvedValue(instrumentFixture);
+});
+
+it("shows one compact live control with shared Policy capacity and product readiness", async () => {
+  renderStrategies();
+
+  expect(await screen.findByText("SOR US Equity · Live Control")).toBeInTheDocument();
+  expect(screen.getByText("LIVE ENABLED")).toBeInTheDocument();
+  expect(screen.getByText("2 / 3")).toBeInTheDocument();
+  expect(screen.getByText("4.20 / 25.80U")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "暂停策略" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "标的中心" })).toHaveAttribute("href", "/instruments");
 });
 
 it("opens a URL-backed TradFi Observation review with frozen price levels", async () => {

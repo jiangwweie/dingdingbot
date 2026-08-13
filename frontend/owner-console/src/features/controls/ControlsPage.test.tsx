@@ -22,6 +22,8 @@ vi.mock("./api", async (importOriginal) => {
 const controlsFixture = {
   generated_at_ms: 1_800_000_000_000,
   global_entry: { configured_state: "enabled" as const, effective_state: "enabled" as const, policy_version: 5, active_ticket_count: 2, first_blocker: null },
+  account_capacity: { max_concurrent_tickets: 3, active_ticket_count: 2, remaining_ticket_slots: 1, gross_stop_risk: "8.40", gross_stop_risk_limit: "25.80", max_gross_stop_risk_fraction: "0.06", long_stop_risk: "3.20", short_stop_risk: "5.20", directional_stop_risk_limit: "17.20", directional_stop_risk_limit_fraction: "0.04", reserved_margin: "42.00", gross_initial_margin_limit: "387.00", max_gross_initial_margin_utilization: "0.90", wallet_balance_basis: "430.00", margin_balance_basis: "430.00", family_active_counts: { long_continuation: 0, opening_range: 2, rally_failure_short: 0 }, family_limits: { long_continuation: 1, opening_range: 2, rally_failure_short: 1 }, source: "current_projection" as const },
+  runtime_entry_authority: { exchange_commands_enabled: true, effective_status: "ready" as const, runtime_profile_ids: ["tiny-live-v1", "tradfi-equity-usdm-v1"], first_blocker: null },
   strategies: [
     { strategy_group_id: "SOR-001", entry_state: "enabled" as const, control_version: 1, last_event_id: "event:1", reason: "seed_enabled", updated_at_ms: 1_800_000_000_000, configured_state: "enabled" as const, effective_state: "enabled" as const },
   ],
@@ -34,7 +36,7 @@ beforeEach(() => {
   ownerQueryClient.clear();
   vi.mocked(getControls).mockResolvedValue(controlsFixture);
   vi.mocked(getFlattenPreview).mockResolvedValue({
-    runtime_profile_id: "tiny-live-v1",
+    runtime_profile_id: "account-wide",
     venue_id: "binance-usdm",
     account_id: "owner-account",
     owner_policy_version: 5,
@@ -74,7 +76,7 @@ it("shows one readable control operation instead of individual state-machine eve
       operation_kind: "flatten_all" as const,
       state: "completed",
       version: 7,
-      runtime_profile_id: "tiny-live-v1",
+      runtime_profile_id: "account-wide",
       venue_id: "binance-usdm",
       account_id: "owner-account",
       target_ticket_ids: ["ticket:1"],

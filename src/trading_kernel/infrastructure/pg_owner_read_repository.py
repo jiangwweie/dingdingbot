@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, cast
 
 import sqlalchemy as sa
+from pydantic import ValidationError
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
@@ -76,8 +77,8 @@ from src.trading_kernel.application.owner_console.trades import (
     aggregate_stage,
     build_trade_item,
 )
+from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.infrastructure.pg_models import (
-    account_exposure_current,
     admission_decisions,
     capacity_claims,
     event_product_compatibility,
@@ -230,6 +231,12 @@ class PostgresOwnerReadRepository:
                     "margin_asset": str(row["margin_asset"]),
                     "entry_session_policy": str(row["entry_session_policy"]),
                     "profile_status": str(row["status"]),
+                    "max_entry_spread_bps": _optional_decimal_text(
+                        row["max_entry_spread_bps"]
+                    ),
+                    "max_mark_index_deviation_bps": _optional_decimal_text(
+                        row["max_mark_index_deviation_bps"]
+                    ),
                     "product_status": (
                         None
                         if row["product_status"] is None
@@ -453,21 +460,7 @@ class PostgresOwnerReadRepository:
                 .limit(101)
             )
         ).mappings().all()
-        authority: dict[str, tuple[str, str]] = {}
-        for row in policy_rows:
-            scope = row["scope"]
-            if not isinstance(scope, dict):
-                continue
-            runtime_profile_id = scope.get("runtime_profile_id")
-            allowed = scope.get("allowed_event_spec_ids")
-            if not isinstance(runtime_profile_id, str) or not isinstance(allowed, list):
-                continue
-            for event_spec_id in allowed:
-                if isinstance(event_spec_id, str):
-                    authority[event_spec_id] = (
-                        runtime_profile_id,
-                        str(row["owner_policy_id"]),
-                    )
+        authority = _policy_event_authority(policy_rows)
         universe_rows = (
             await self._connection.execute(
                 sa.select(
@@ -586,29 +579,7 @@ class PostgresOwnerReadRepository:
                 .limit(101)
             )
         ).mappings().all()
-        authority: dict[str, tuple[str, str]] = {}
-        for row in policy_rows:
-            scope = row["scope"]
-            if not isinstance(scope, dict):
-                continue
-            runtime_profile_id = scope.get("runtime_profile_id")
-            event_spec_ids = scope.get("allowed_event_spec_ids")
-            if not isinstance(runtime_profile_id, str) or not isinstance(
-                event_spec_ids,
-                list,
-            ):
-                continue
-            for event_spec_id in event_spec_ids:
-                if not isinstance(event_spec_id, str):
-                    continue
-                if event_spec_id in authority:
-                    raise ContradictoryFacts(
-                        "Strategy Event belongs to multiple Owner Policies"
-                    )
-                authority[event_spec_id] = (
-                    runtime_profile_id,
-                    str(row["owner_policy_id"]),
-                )
+        authority = _policy_event_authority(policy_rows)
 
         profile_ids = tuple(sorted({item[0] for item in authority.values()}))
         profile_rows = (
@@ -747,8 +718,10 @@ class PostgresOwnerReadRepository:
         authority = authority_rows[0] if len(authority_rows) == 1 else None
         venue_id = None if authority is None else str(authority["venue_id"])
         account_id = None if authority is None else str(authority["account_id"])
-        runtime_profile_id = (
-            None if authority is None else str(authority["runtime_profile_id"])
+        runtime_profile_ids = (
+            ()
+            if authority is None
+            else tuple(str(value) for value in authority["runtime_profile_ids"])
         )
 
         claim = (
@@ -810,7 +783,7 @@ class PostgresOwnerReadRepository:
                 await self._connection.execute(
                     _today_counts_query(
                         day_start_ms=day_start_ms,
-                        runtime_profile_id=runtime_profile_id,
+                        runtime_profile_ids=runtime_profile_ids,
                         venue_id=venue_id,
                         account_id=account_id,
                     )
@@ -3449,46 +3422,77 @@ def _optional_decimal_text(value: object) -> str | None:
     return str(value)
 
 
-def _overview_authority_query() -> sa.Select[Any]:
-    runtime_profile_id = owner_policy_current.c.scope["runtime_profile_id"].as_string()
-    return (
-        sa.select(
-            owner_policy_current.c.owner_policy_id,
-            owner_policy_current.c.max_concurrent_tickets,
-            owner_policy_current.c.updated_at_ms.label("policy_updated_at_ms"),
-            runtime_profiles.c.runtime_profile_id,
-            runtime_profiles.c.updated_at_ms.label("profile_updated_at_ms"),
-            runtime_profiles.c.venue_id,
-            runtime_profiles.c.account_id,
-            account_exposure_current.c.venue_id.label("exposure_venue_id"),
-            account_exposure_current.c.account_id.label("exposure_account_id"),
-            account_exposure_current.c.active_ticket_count,
-            account_exposure_current.c.updated_at_ms.label("exposure_updated_at_ms"),
-        )
-        .select_from(
-            owner_policy_current.join(
-                runtime_profiles,
-                runtime_profiles.c.runtime_profile_id == runtime_profile_id,
-            ).outerjoin(
-                account_exposure_current,
-                sa.and_(
-                    account_exposure_current.c.venue_id == runtime_profiles.c.venue_id,
-                    account_exposure_current.c.account_id
-                    == runtime_profiles.c.account_id,
-                ),
+def _policy_event_authority(
+    policy_rows: Sequence[RowMapping],
+) -> dict[str, tuple[str, str]]:
+    authority: dict[str, tuple[str, str]] = {}
+    for row in policy_rows:
+        try:
+            scope = OwnerPolicyScope.model_validate(row["scope"])
+        except ValidationError:
+            continue
+        for item in scope.event_runtime_profiles:
+            if item.event_spec_id in authority:
+                raise ContradictoryFacts(
+                    "Strategy Event belongs to multiple Owner Policies"
+                )
+            authority[item.event_spec_id] = (
+                item.runtime_profile_id,
+                str(row["owner_policy_id"]),
             )
+    return authority
+
+
+def _overview_authority_query() -> sa.TextClause:
+    return sa.text(
+        """
+        WITH policy_profiles AS (
+            SELECT policy.owner_policy_id,
+                   policy.priority_rank,
+                   policy.max_concurrent_tickets,
+                   policy.updated_at_ms AS policy_updated_at_ms,
+                   array_agg(DISTINCT profile.runtime_profile_id
+                             ORDER BY profile.runtime_profile_id)
+                       AS runtime_profile_ids,
+                   min(profile.updated_at_ms) AS profile_updated_at_ms,
+                   profile.venue_id,
+                   profile.account_id
+              FROM brc_owner_policy_current policy
+              CROSS JOIN LATERAL jsonb_array_elements(
+                   policy.scope -> 'event_runtime_profiles'
+              ) AS mapping
+              JOIN brc_runtime_profiles profile
+                ON profile.runtime_profile_id =
+                   mapping ->> 'runtime_profile_id'
+             WHERE policy.enabled = true
+               AND profile.status = 'active'
+               AND profile.venue_id = :venue_id
+             GROUP BY policy.owner_policy_id,
+                      policy.priority_rank,
+                      policy.max_concurrent_tickets,
+                      policy.updated_at_ms,
+                      profile.venue_id,
+                      profile.account_id
         )
-        .where(
-            owner_policy_current.c.enabled.is_(True),
-            runtime_profiles.c.status == "active",
-            runtime_profiles.c.venue_id == _VENUE_ID,
-        )
-        .order_by(
-            owner_policy_current.c.priority_rank,
-            owner_policy_current.c.owner_policy_id,
-        )
-        .limit(2)
-    )
+        SELECT authority.owner_policy_id,
+               authority.max_concurrent_tickets,
+               authority.policy_updated_at_ms,
+               authority.runtime_profile_ids,
+               authority.profile_updated_at_ms,
+               authority.venue_id,
+               authority.account_id,
+               exposure.venue_id AS exposure_venue_id,
+               exposure.account_id AS exposure_account_id,
+               exposure.active_ticket_count,
+               exposure.updated_at_ms AS exposure_updated_at_ms
+          FROM policy_profiles authority
+          LEFT JOIN brc_account_exposure_current exposure
+            ON exposure.venue_id = authority.venue_id
+           AND exposure.account_id = authority.account_id
+         ORDER BY authority.priority_rank, authority.owner_policy_id
+         LIMIT 2
+        """
+    ).bindparams(venue_id=_VENUE_ID)
 
 
 def _latest_capacity_claim_query(
@@ -3757,14 +3761,14 @@ def _active_tickets_query(
 def _today_counts_query(
     *,
     day_start_ms: int,
-    runtime_profile_id: str | None,
+    runtime_profile_ids: tuple[str, ...],
     venue_id: str | None,
     account_id: str | None,
 ) -> sa.Select[Any]:
     signal_scope = (
         sa.false()
-        if runtime_profile_id is None
-        else runtime_scopes_current.c.runtime_profile_id == runtime_profile_id
+        if not runtime_profile_ids
+        else runtime_scopes_current.c.runtime_profile_id.in_(runtime_profile_ids)
     )
     admission_scope = _exact_scope(
         venue_column=admission_decisions.c.venue_id,

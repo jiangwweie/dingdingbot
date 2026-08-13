@@ -66,6 +66,7 @@ from src.trading_kernel.domain.instrument_certification import (
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
+from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
     ProductCompatibility,
@@ -185,23 +186,28 @@ class PostgresStrategyUniverseRepository:
                 "RUNTIME_PROFILE_AUTHORITY_CONFLICT"
             )
 
-        policies = (
+        policy_rows = (
             await self._connection.execute(
-                sa.select(owner_policy_current.c.owner_policy_id)
+                sa.select(
+                    owner_policy_current.c.owner_policy_id,
+                    owner_policy_current.c.scope,
+                )
                 .where(
                     owner_policy_current.c.enabled.is_(True),
-                    owner_policy_current.c.scope[
-                        "runtime_profile_id"
-                    ].as_string()
-                    == runtime_profile_id,
-                    owner_policy_current.c.scope[
-                        "allowed_event_spec_ids"
-                    ].contains([event_spec_id]),
                 )
                 .order_by(owner_policy_current.c.owner_policy_id)
-                .limit(2)
+                .limit(101)
             )
-        ).scalars().all()
+        ).mappings().all()
+        policies = tuple(
+            str(row["owner_policy_id"])
+            for row in policy_rows
+            if _policy_scope_authorizes(
+                row["scope"],
+                event_spec_id=event_spec_id,
+                runtime_profile_id=runtime_profile_id,
+            )
+        )
         if len(policies) != 1:
             raise UniverseInstallConflict("OWNER_POLICY_AUTHORITY_CONFLICT")
         return UniverseInstallContext(
@@ -1355,10 +1361,11 @@ class PostgresStrategyUniverseRepository:
         except ValidationError:
             return False
         return (
-            policy_scope.runtime_profile_id == runtime_profile_id
+            policy_scope.authorizes(
+                event_spec_id=str(target["event_spec_id"]),
+                runtime_profile_id=runtime_profile_id,
+            )
             and target["lifecycle_state"] == expected_lifecycle
-            and target["event_spec_id"]
-            in policy_scope.allowed_event_spec_ids
             and all(
                 scope["strategy_group_id"]
                 == target["strategy_group_id"]
@@ -2470,8 +2477,10 @@ class PostgresStrategyUniverseRepository:
                 "OWNER_POLICY_AUTHORITY_CONFLICT"
             ) from exc
         if (
-            scope.runtime_profile_id != request.runtime_profile_id
-            or request.event_spec_id not in scope.allowed_event_spec_ids
+            not scope.authorizes(
+                event_spec_id=request.event_spec_id,
+                runtime_profile_id=request.runtime_profile_id,
+            )
         ):
             raise UniverseInstallConflict("OWNER_POLICY_AUTHORITY_CONFLICT")
         position_side = str(event_row["position_side"])
@@ -2586,6 +2595,8 @@ class PostgresStrategyUniverseRepository:
                     margin_asset="USDT",
                     entry_session_policy="continuous",
                     status="candidate",
+                    max_entry_spread_bps=None,
+                    max_mark_index_deviation_bps=None,
                 )
                 await self._connection.execute(
                     sa.insert(instrument_product_profiles).values(
@@ -2610,6 +2621,12 @@ class PostgresStrategyUniverseRepository:
                                 profile_row["entry_session_policy"]
                             ),
                             "status": str(profile_row["status"]),
+                            "max_entry_spread_bps": profile_row[
+                                "max_entry_spread_bps"
+                            ],
+                            "max_mark_index_deviation_bps": profile_row[
+                                "max_mark_index_deviation_bps"
+                            ],
                         }
                     )
                 except ValidationError as exc:
@@ -2828,6 +2845,21 @@ def _runtime_scope_id(
 ) -> str:
     identity = f"{universe_version_id}:{runtime_profile_id}:{exchange_instrument_id}:{position_side}"
     return f"scope:universe:{sha256(identity.encode('utf-8')).hexdigest()}"
+
+
+def _policy_scope_authorizes(
+    value: object,
+    *,
+    event_spec_id: str,
+    runtime_profile_id: str,
+) -> bool:
+    try:
+        return OwnerPolicyScope.model_validate(value).authorizes(
+            event_spec_id=event_spec_id,
+            runtime_profile_id=runtime_profile_id,
+        )
+    except ValidationError:
+        return False
 
 
 def _warming_scope_values(

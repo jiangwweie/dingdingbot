@@ -7,7 +7,7 @@ from typing import Literal, cast
 from uuid import uuid4
 
 import sqlalchemy as sa
-from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -77,6 +77,7 @@ from src.trading_kernel.domain.owner_control import (
     StrategyEntryControl,
     StrategyEntryState,
 )
+from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
@@ -196,7 +197,15 @@ def _owner_policy_from_row(row: RowMapping | dict[str, object]) -> OwnerPolicySn
         max_post_fill_stop_risk_overrun_fraction=Decimal(
             str(row["max_post_fill_stop_risk_overrun_fraction"])
         ),
+        scope=_owner_policy_scope(row["scope"]),
     )
+
+
+def _owner_policy_scope(value: object) -> OwnerPolicyScope | None:
+    try:
+        return OwnerPolicyScope.model_validate(value)
+    except ValidationError:
+        return None
 
 
 class HistoricalTerminalTicket(BaseModel):
@@ -375,12 +384,11 @@ class PostgresAggregateRepository:
     async def list_active_ticket_ids(
         self,
         *,
-        runtime_profile_id: str,
         venue_id: str,
         account_id: str,
         limit: int,
     ) -> tuple[str, ...]:
-        if not runtime_profile_id.strip() or not venue_id.strip() or not account_id.strip():
+        if not venue_id.strip() or not account_id.strip():
             raise ValueError("active Ticket scope identities must be non-blank")
         if limit <= 0 or limit > 3:
             raise ValueError("active Ticket selection limit must be 1 through 3")
@@ -392,7 +400,6 @@ class PostgresAggregateRepository:
                     trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
                 )
                 .where(
-                    trade_tickets.c.runtime_profile_id == runtime_profile_id,
                     trade_tickets.c.venue_id == venue_id,
                     trade_tickets.c.account_id == account_id,
                     trade_tickets.c.terminal_at_ms.is_(None),
@@ -1200,6 +1207,29 @@ class PostgresCapacityClaimRepository:
     async def get_for_ticket(self, ticket_id: str) -> CapacityClaim | None:
         return await self._get(capacity_claims.c.ticket_id == ticket_id)
 
+    async def get_latest_for_account(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+    ) -> CapacityClaim | None:
+        result = await self._connection.execute(
+            sa.select(capacity_claims)
+            .where(
+                capacity_claims.c.venue_id == venue_id,
+                capacity_claims.c.account_id == account_id,
+            )
+            .order_by(
+                capacity_claims.c.created_at_ms.desc(),
+                capacity_claims.c.capacity_claim_id,
+            )
+            .limit(1)
+        )
+        row = result.mappings().one_or_none()
+        if row is None or row["minimum_stop_risk_budget"] is None:
+            return None
+        return _capacity_claim_from_row(row)
+
     async def get_historical_terminal(
         self,
         capacity_claim_id: str,
@@ -1914,19 +1944,41 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
     async def get_global_entry_resume_blocker(
         self,
         *,
-        runtime_profile_id: str,
+        owner_policy_id: str,
     ) -> str | None:
-        profile = (
+        policy_scope = (
             await self._connection.execute(
-                sa.select(runtime_profiles).where(
-                    runtime_profiles.c.runtime_profile_id == runtime_profile_id
+                sa.select(owner_policy_current.c.scope).where(
+                    owner_policy_current.c.owner_policy_id == owner_policy_id
                 )
             )
-        ).mappings().one_or_none()
+        ).scalar_one_or_none()
+        try:
+            scope = OwnerPolicyScope.model_validate(policy_scope)
+        except ValueError:
+            return "owner_policy_scope_not_ready"
+        runtime_profile_ids = tuple(
+            sorted(
+                {
+                    item.runtime_profile_id
+                    for item in scope.event_runtime_profiles
+                }
+            )
+        )
+        profiles = (
+            await self._connection.execute(
+                sa.select(runtime_profiles).where(
+                    runtime_profiles.c.runtime_profile_id.in_(runtime_profile_ids)
+                )
+            )
+        ).mappings().all()
         if (
-            profile is None
-            or profile["status"] != "active"
-            or profile["position_mode"] != "independent_sides"
+            len(profiles) != len(runtime_profile_ids)
+            or any(
+                profile["status"] != "active"
+                or profile["position_mode"] != "independent_sides"
+                for profile in profiles
+            )
         ):
             return "runtime_profile_not_ready"
         metadata_rows = {
@@ -2248,6 +2300,7 @@ class PostgresEntryAdmissionRepository:
             max_post_fill_stop_risk_overrun_fraction=Decimal(
                 row["max_post_fill_stop_risk_overrun_fraction"]
             ),
+            scope=_owner_policy_scope(row["scope"]),
         )
 
     async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool:

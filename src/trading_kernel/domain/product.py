@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from enum import StrEnum
 from hashlib import sha256
 from typing import Literal
 
@@ -25,6 +26,19 @@ SessionState = Literal[
     "unavailable",
 ]
 CorporateEventStatus = Literal["clear", "blocked", "unavailable"]
+
+
+class ProductEntryStatus(StrEnum):
+    ALLOWED = "allowed"
+    PROFILE_NOT_ENTRY_CAPABLE = "profile_not_entry_capable"
+    IDENTITY_MISMATCH = "identity_mismatch"
+    PRODUCT_UNAVAILABLE = "product_unavailable"
+    SESSION_NOT_REGULAR = "session_not_regular"
+    SNAPSHOT_STALE = "snapshot_stale"
+    MARKET_FACTS_MISSING = "market_facts_missing"
+    SPREAD_TOO_WIDE = "spread_too_wide"
+    MARK_INDEX_DEVIATION_TOO_WIDE = "mark_index_deviation_too_wide"
+    CORPORATE_EVENT_BLOCKED = "corporate_event_blocked"
 
 
 class ProductCompatibilityError(RuntimeError):
@@ -65,6 +79,8 @@ class InstrumentProductProfile(BaseModel):
     margin_asset: Literal["USDT"] = "USDT"
     entry_session_policy: EntrySessionPolicy
     status: ProductProfileStatus
+    max_entry_spread_bps: Decimal | None = None
+    max_mark_index_deviation_bps: Decimal | None = None
 
     @field_validator("exchange_instrument_id", mode="before")
     @classmethod
@@ -73,6 +89,19 @@ class InstrumentProductProfile(BaseModel):
         if not normalized.startswith("binance-usdm:"):
             raise ValueError("product profile requires a canonical instrument identity")
         return normalized
+
+    @field_validator(
+        "max_entry_spread_bps",
+        "max_mark_index_deviation_bps",
+    )
+    @classmethod
+    def _require_optional_positive_bps(
+        cls,
+        value: Decimal | None,
+    ) -> Decimal | None:
+        if value is not None and (not value.is_finite() or value <= 0):
+            raise ValueError("product Entry thresholds must be finite and positive")
+        return value
 
     @property
     def semantic_digest(self) -> str:
@@ -152,6 +181,126 @@ class ProductSessionSnapshot(BaseModel):
             and self.regular_session_open_ms is not None
             and self.regular_session_close_ms is not None
         )
+
+
+class ProductEntryDecision(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: ProductEntryStatus
+    spread_bps: Decimal | None = None
+    mark_index_deviation_bps: Decimal | None = None
+    corporate_event_warning: bool = False
+
+    @property
+    def allowed(self) -> bool:
+        return self.status is ProductEntryStatus.ALLOWED
+
+
+def evaluate_product_entry(
+    *,
+    profile: InstrumentProductProfile,
+    snapshot: ProductSessionSnapshot | None,
+    now_ms: int,
+) -> ProductEntryDecision:
+    """Evaluate current TradFi Product facts without creating trade authority."""
+
+    if now_ms <= 0:
+        raise ValueError("Product Entry evaluation time must be positive")
+    if (
+        profile.product_family != "tradfi_equity_perpetual"
+        or profile.entry_session_policy != "regular_only"
+        or profile.status in {"reference", "retired"}
+        or profile.max_entry_spread_bps is None
+        or profile.max_mark_index_deviation_bps is None
+    ):
+        return ProductEntryDecision(
+            status=ProductEntryStatus.PROFILE_NOT_ENTRY_CAPABLE
+        )
+    if (
+        snapshot is None
+        or snapshot.exchange_instrument_id != profile.exchange_instrument_id
+        or snapshot.product_family != profile.product_family
+    ):
+        return ProductEntryDecision(status=ProductEntryStatus.IDENTITY_MISMATCH)
+    if snapshot.product_status != "active":
+        return ProductEntryDecision(status=ProductEntryStatus.PRODUCT_UNAVAILABLE)
+    if snapshot.session_state != "regular":
+        return ProductEntryDecision(status=ProductEntryStatus.SESSION_NOT_REGULAR)
+    if not snapshot.observed_at_ms <= now_ms < snapshot.valid_until_ms:
+        return ProductEntryDecision(status=ProductEntryStatus.SNAPSHOT_STALE)
+    if (
+        snapshot.regular_session_open_ms is None
+        or snapshot.regular_session_close_ms is None
+        or not snapshot.regular_session_open_ms <= now_ms < snapshot.regular_session_close_ms
+        or snapshot.mark_price is None
+        or snapshot.index_price is None
+        or snapshot.best_bid is None
+        or snapshot.best_ask is None
+        or snapshot.best_bid_quantity is None
+        or snapshot.best_ask_quantity is None
+        or snapshot.best_bid_quantity <= 0
+        or snapshot.best_ask_quantity <= 0
+    ):
+        return ProductEntryDecision(status=ProductEntryStatus.MARKET_FACTS_MISSING)
+    midpoint = (snapshot.best_bid + snapshot.best_ask) / Decimal(2)
+    spread_bps = (
+        (snapshot.best_ask - snapshot.best_bid) / midpoint * Decimal(10_000)
+    )
+    mark_index_deviation_bps = (
+        abs(snapshot.mark_price - snapshot.index_price)
+        / snapshot.index_price
+        * Decimal(10_000)
+    )
+    if spread_bps > profile.max_entry_spread_bps:
+        return ProductEntryDecision(
+            status=ProductEntryStatus.SPREAD_TOO_WIDE,
+            spread_bps=spread_bps,
+            mark_index_deviation_bps=mark_index_deviation_bps,
+        )
+    if mark_index_deviation_bps > profile.max_mark_index_deviation_bps:
+        return ProductEntryDecision(
+            status=ProductEntryStatus.MARK_INDEX_DEVIATION_TOO_WIDE,
+            spread_bps=spread_bps,
+            mark_index_deviation_bps=mark_index_deviation_bps,
+        )
+    if snapshot.corporate_event_status == "blocked":
+        return ProductEntryDecision(
+            status=ProductEntryStatus.CORPORATE_EVENT_BLOCKED,
+            spread_bps=spread_bps,
+            mark_index_deviation_bps=mark_index_deviation_bps,
+        )
+    return ProductEntryDecision(
+        status=ProductEntryStatus.ALLOWED,
+        spread_bps=spread_bps,
+        mark_index_deviation_bps=mark_index_deviation_bps,
+        corporate_event_warning=(
+            snapshot.corporate_event_status == "unavailable"
+        ),
+    )
+
+
+def evaluate_event_product_entry(
+    *,
+    compatibility: ProductCompatibility,
+    profile: InstrumentProductProfile | None,
+    snapshot: ProductSessionSnapshot | None,
+    now_ms: int,
+) -> ProductEntryDecision:
+    """Fail closed on Registry/Profile drift before applying family-specific gates."""
+
+    if profile is None:
+        return ProductEntryDecision(status=ProductEntryStatus.IDENTITY_MISMATCH)
+    try:
+        require_product_compatibility(compatibility, profile)
+    except ProductCompatibilityError:
+        return ProductEntryDecision(status=ProductEntryStatus.IDENTITY_MISMATCH)
+    if compatibility.product_family == "tradfi_equity_perpetual":
+        return evaluate_product_entry(
+            profile=profile,
+            snapshot=snapshot,
+            now_ms=now_ms,
+        )
+    return ProductEntryDecision(status=ProductEntryStatus.ALLOWED)
 
 
 def require_product_compatibility(

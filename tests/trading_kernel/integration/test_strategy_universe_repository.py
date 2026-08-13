@@ -36,7 +36,6 @@ from src.trading_kernel.infrastructure.pg_universe_repository import (
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     OWNER_POLICY_ID,
     RUNTIME_PROFILE_ID,
-    TRADFI_OWNER_POLICY_ID,
     TRADFI_RUNTIME_PROFILE_ID,
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
@@ -509,7 +508,7 @@ async def test_tradfi_sor_installs_equity_member_only_into_warming_scope(
     request = UniverseInstallRequest(
         event_spec_id=contract.event_spec_id,
         runtime_profile_id=TRADFI_RUNTIME_PROFILE_ID,
-        owner_policy_id=TRADFI_OWNER_POLICY_ID,
+        owner_policy_id=OWNER_POLICY_ID,
         exchange_instrument_ids=("binance-usdm:AAPLUSDT:perpetual",),
         installed_at_ms=1_800_000_000_000,
     )

@@ -137,7 +137,6 @@ async def test_strategy_and_global_pause_commit_without_exchange_authority() -> 
                 preview = await preview_flatten_all(
                     uow,
                     owner_policy_id=OWNER_POLICY_ID,
-                    runtime_profile_id="tiny-live-v1",
                     venue_id="binance-usdm",
                     account_id="owner-account",
                 )

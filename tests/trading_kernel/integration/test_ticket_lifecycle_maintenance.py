@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+import sqlalchemy as sa
 
 from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandRequest,
@@ -25,7 +26,9 @@ from src.trading_kernel.domain.commands import ExchangeCommandKind, OrderCommand
 from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts, exit_policy_for
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.infrastructure.pg_models import owner_policy_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
@@ -374,7 +377,7 @@ async def test_flat_cleanup_cancels_tp1_then_active_stop_before_settlement(
 async def test_hard_post_fill_risk_protects_then_flattens_without_tp1(
     lifecycle_engine,
 ) -> None:
-    ticket = _ticket()
+    ticket = _registered_sor_long_ticket()
     await _seed_policy(lifecycle_engine)
     await _issue(lifecycle_engine, ticket)
     venue = KindAwareAcceptingVenue()
@@ -432,7 +435,7 @@ async def test_hard_post_fill_risk_protects_then_flattens_without_tp1(
 async def test_missing_liquidation_observation_does_not_control_post_fill_risk(
     lifecycle_engine,
 ) -> None:
-    ticket = _ticket()
+    ticket = _registered_sor_long_ticket()
     await _seed_policy(lifecycle_engine)
     await _issue(lifecycle_engine, ticket)
     venue = KindAwareAcceptingVenue()
@@ -474,7 +477,7 @@ async def test_missing_liquidation_observation_does_not_control_post_fill_risk(
 async def test_invalid_stop_direction_flattens_immediately_without_stop_or_tp1(
     lifecycle_engine,
 ) -> None:
-    ticket = _ticket()
+    ticket = _registered_sor_long_ticket()
     await _seed_policy(lifecycle_engine)
     await _issue(lifecycle_engine, ticket)
     venue = KindAwareAcceptingVenue()
@@ -512,6 +515,23 @@ async def _reach_position_protected(engine, ticket) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
     await _seed_policy(engine)
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.update(owner_policy_current)
+            .where(owner_policy_current.c.owner_policy_id == ticket.owner_policy_id)
+            .values(
+                scope={
+                    "event_runtime_profiles": [
+                        {
+                            "event_spec_id": ticket.identity.runtime.event_spec_id,
+                            "runtime_profile_id": (
+                                ticket.identity.runtime.runtime_profile_id
+                            ),
+                        }
+                    ]
+                }
+            )
+        )
     await _issue(engine, ticket)
     venue = KindAwareAcceptingVenue()
     await _dispatch(engine, venue, ticket.identity.ticket_id, now_ms=1_100)
@@ -576,7 +596,7 @@ async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0004_owner_control_plane",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

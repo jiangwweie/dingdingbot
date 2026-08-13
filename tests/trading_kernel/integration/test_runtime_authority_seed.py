@@ -21,6 +21,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     budget_reservations,
     entry_lane_current,
+    instrument_product_profiles,
     instruments,
     owner_policy_current,
     owner_policy_events,
@@ -49,14 +50,16 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _TICKET_STRATEGY_GROUP_ID = "CPM-RO-001"
-_TICKET_STRATEGY_VERSION_ID = "sgv:CPM-RO-001:v2"
-_TICKET_EVENT_SPEC_ID = "event_spec:CPM-RO-001:CPM-LONG:v2"
+_TICKET_STRATEGY_VERSION_ID = "sgv:CPM-RO-001:v3"
+_TICKET_EVENT_SPEC_ID = "event_spec:CPM-RO-001:CPM-LONG:v3"
 _TICKET_UNIVERSE_VERSION_ID = "universe:test-cpm:v1"
 _TICKET_UNIVERSE_DIGEST = "sha256:" + "3" * 64
 _TICKET_RUNTIME_SCOPE_ID = "scope:test-cpm"
 _TICKET_EXCHANGE_INSTRUMENT_ID = "binance-usdm:ETHUSDT:perpetual"
 _TICKET_POSITION_SIDE = "long"
-_TICKET_EXIT_POLICY_ID = "exit-policy:CPM-RO-001:CPM-LONG:right-tail-v1"
+_TICKET_EXIT_POLICY_ID = (
+    "exit-policy:CPM-RO-001:CPM-LONG:portfolio-admission-v1"
+)
 _TICKET_EXIT_POLICY_HASH = "sha256:" + "5" * 64
 
 
@@ -225,32 +228,52 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
             policy["max_post_fill_stop_risk_overrun_fraction"]
         ) == Decimal("0.10")
         assert policy["scope"] == {
-            "runtime_profile_id": "tiny-live-v1",
-            "allowed_event_spec_ids": [
-                "event_spec:BRF2-001:BRF2-SHORT:v3",
-                "event_spec:CPM-RO-001:CPM-LONG:v3",
-                "event_spec:MI-001:MI-LONG:v3",
-                "event_spec:MPG-001:MPG-LONG:v3",
-                "event_spec:SOR-001:SOR-LONG:v4",
-                "event_spec:SOR-001:SOR-SHORT:v4",
-            ],
+            "event_runtime_profiles": [
+                {
+                    "event_spec_id": "event_spec:BRF2-001:BRF2-SHORT:v3",
+                    "runtime_profile_id": "tiny-live-v1",
+                },
+                {
+                    "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v3",
+                    "runtime_profile_id": "tiny-live-v1",
+                },
+                {
+                    "event_spec_id": "event_spec:MI-001:MI-LONG:v3",
+                    "runtime_profile_id": "tiny-live-v1",
+                },
+                {
+                    "event_spec_id": "event_spec:MPG-001:MPG-LONG:v3",
+                    "runtime_profile_id": "tiny-live-v1",
+                },
+                {
+                    "event_spec_id": "event_spec:SOR-001:SOR-LONG:v4",
+                    "runtime_profile_id": "tiny-live-v1",
+                },
+                {
+                    "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v4",
+                    "runtime_profile_id": "tiny-live-v1",
+                },
+                {
+                    "event_spec_id": (
+                        "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1"
+                    ),
+                    "runtime_profile_id": "tradfi-equity-usdm-v1",
+                },
+                {
+                    "event_spec_id": (
+                        "event_spec:SOR-US-EQ-PERP-001:SOR-US-SHORT-15M:v1"
+                    ),
+                    "runtime_profile_id": "tradfi-equity-usdm-v1",
+                },
+            ]
         }
 
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(runtime_profiles)
         ) == 2
-        tradfi_policy = (
-            await connection.execute(
-                sa.select(owner_policy_current).where(
-                    owner_policy_current.c.owner_policy_id
-                    == "policy-tradfi-observe"
-                )
-            )
-        ).mappings().one()
-        assert tradfi_policy["new_entry_submit_enabled"] is False
-        assert tradfi_policy["scope"]["runtime_profile_id"] == (
-            "tradfi-equity-observe-v1"
-        )
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(owner_policy_current)
+        ) == 1
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(
                 sa.table("brc_runtime_scopes_current")
@@ -494,7 +517,7 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
         "event_spec:SOR-001:SOR-LONG:v4",
         "event_spec:SOR-001:SOR-SHORT:v4",
     )
-    policy = runtime_seed._policy_values(
+    policy = runtime_seed._legacy_policy_values(
         version=4,
         new_entry_submit_enabled=False,
         allowed_event_spec_ids=allowed_vnext,
@@ -659,7 +682,7 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
                 )
             )
         ).mappings().one()
-    assert current["policy_version"] == 4
+    assert current["policy_version"] == 5
     assert current["new_entry_submit_enabled"] is False
     assert current["max_concurrent_tickets"] == 3
     assert current["max_strategy_group_concurrent_tickets"] is None
@@ -669,15 +692,12 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
     assert current["max_gross_initial_margin_utilization"] == Decimal("0.90")
     assert current["max_leverage"] == 10
     assert current["supported_margin_mode"] == "cross"
-    assert current["scope"]["allowed_event_spec_ids"] == [
-        "event_spec:BRF2-001:BRF2-SHORT:v3",
-        "event_spec:CPM-RO-001:CPM-LONG:v3",
-        "event_spec:MI-001:MI-LONG:v3",
-        "event_spec:MPG-001:MPG-LONG:v3",
-        "event_spec:SOR-001:SOR-LONG:v4",
-        "event_spec:SOR-001:SOR-SHORT:v4",
-    ]
-    assert events == [4]
+    assert len(current["scope"]["event_runtime_profiles"]) == 8
+    assert {
+        item["runtime_profile_id"]
+        for item in current["scope"]["event_runtime_profiles"]
+    } == {"tiny-live-v1", "tradfi-equity-usdm-v1"}
+    assert events == [4, 5]
     assert metadata_rows["runtime_commit"] == "a" * 40
     assert metadata_rows["schema_revision"] == CURRENT_SCHEMA_REVISION
     assert metadata_rows["seed_identity"] == result.runtime_seed_semantic_hash
@@ -888,6 +908,22 @@ async def _insert_ticket_universe(connection: AsyncConnection) -> None:
             venue_symbol="ETHUSDT",
             contract_kind="perpetual",
             status="active",
+        )
+    )
+    await connection.execute(
+        sa.insert(instrument_product_profiles).values(
+            exchange_instrument_id=_TICKET_EXCHANGE_INSTRUMENT_ID,
+            product_family="crypto_perpetual",
+            asset_class="crypto",
+            contract_type="PERPETUAL",
+            underlying_type="CRYPTO",
+            margin_asset="USDT",
+            entry_session_policy="continuous",
+            status="candidate",
+            max_entry_spread_bps=None,
+            max_mark_index_deviation_bps=None,
+            semantic_digest="sha256:" + "6" * 64,
+            updated_at_ms=1_800_000_000_001,
         )
     )
     await connection.execute(

@@ -33,6 +33,8 @@ it("shows product facts and opens the Universe editor without allowing reference
 
   expect(await screen.findByText("AAPLUSDT")).toBeInTheDocument();
   expect(screen.getAllByText("REGULAR").length).toBeGreaterThan(0);
+  expect(screen.getByText("1.8 / 20 bps")).toBeInTheDocument();
+  expect(screen.getByText("1.8 / 50 bps")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "编辑 Universe" }));
 
   expect(screen.getByRole("dialog", { name: /Universe 成员/ })).toBeInTheDocument();
