@@ -517,7 +517,7 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
         "event_spec:SOR-001:SOR-LONG:v4",
         "event_spec:SOR-001:SOR-SHORT:v4",
     )
-    policy = runtime_seed._legacy_policy_values(
+    policy = runtime_seed._crypto_source_policy_values(
         version=4,
         new_entry_submit_enabled=False,
         allowed_event_spec_ids=allowed_vnext,

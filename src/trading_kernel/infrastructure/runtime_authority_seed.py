@@ -555,6 +555,7 @@ async def deploy_compatible_upgrade_identity(
             compatible_registry_hash
             if source_schema_revision
             in {
+                COMPATIBLE_SOURCE_SCHEMA_REVISION,
                 OWNER_CONTROL_SOURCE_SCHEMA_REVISION,
                 TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION,
             }

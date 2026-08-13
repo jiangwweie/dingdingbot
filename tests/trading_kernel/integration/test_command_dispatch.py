@@ -1878,7 +1878,9 @@ async def _seed_policy(
     engine: AsyncEngine,
     *,
     event_spec_id: str = "event_spec:SOR-001:SOR-LONG:v4",
+    event_spec_ids: tuple[str, ...] | None = None,
 ) -> None:
+    authorized_event_spec_ids = event_spec_ids or (event_spec_id,)
     async with engine.begin() as connection:
         await connection.execute(
             sa.insert(owner_policy_current).values(
@@ -1907,9 +1909,10 @@ async def _seed_policy(
                 scope={
                     "event_runtime_profiles": [
                         {
-                            "event_spec_id": event_spec_id,
+                            "event_spec_id": authorized_event_spec_id,
                             "runtime_profile_id": "tiny-live-v1",
                         }
+                        for authorized_event_spec_id in authorized_event_spec_ids
                     ]
                 },
                 updated_at_ms=1_000,

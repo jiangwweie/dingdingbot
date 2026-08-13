@@ -22,13 +22,19 @@ from src.trading_kernel.application.project_comparative_universe import (
     ComparativeMemberWindow,
     build_comparative_universe_projection,
 )
+from src.trading_kernel.domain.product import (
+    InstrumentProductProfile,
+    ProductCompatibility,
+)
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     registered_strategy_contracts,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    event_product_compatibility,
     event_specs,
     instrument_certification_current,
+    instrument_product_profiles,
     instruments,
     runtime_scopes_current,
     strategy_universe_current,
@@ -196,6 +202,25 @@ async def prepare_retired_v2_active_and_v3_warming(
     old_version_id = "universe:legacy-sor-long:v2:1"
     old_event_spec_id = "event_spec:SOR-001:SOR-LONG:v2"
     old_semantic_digest = "sha256:" + "9" * 64
+    old_compatibility = ProductCompatibility(
+        event_spec_id=old_event_spec_id,
+        product_family="crypto_perpetual",
+        asset_class="crypto",
+        contract_type="PERPETUAL",
+        underlying_type="CRYPTO",
+    )
+    old_member_profiles = tuple(
+        InstrumentProductProfile(
+            exchange_instrument_id=instrument_id,
+            product_family="crypto_perpetual",
+            asset_class="crypto",
+            contract_type="PERPETUAL",
+            underlying_type="CRYPTO",
+            entry_session_policy="continuous",
+            status="candidate",
+        )
+        for instrument_id in ACTIVE_MEMBERS
+    )
     async with engine.begin() as connection:
         await connection.execute(
             sa.insert(strategy_versions).values(
@@ -225,6 +250,13 @@ async def prepare_retired_v2_active_and_v3_warming(
             )
         )
         await connection.execute(
+            sa.insert(event_product_compatibility).values(
+                **old_compatibility.model_dump(mode="python"),
+                semantic_digest=old_compatibility.semantic_digest,
+                created_at_ms=NOW_MS - 2_000_000,
+            )
+        )
+        await connection.execute(
             sa.insert(instruments),
             [
                 {
@@ -236,6 +268,17 @@ async def prepare_retired_v2_active_and_v3_warming(
                     "status": "active",
                 }
                 for instrument_id in ACTIVE_MEMBERS
+            ],
+        )
+        await connection.execute(
+            sa.insert(instrument_product_profiles),
+            [
+                {
+                    **profile.model_dump(mode="python"),
+                    "semantic_digest": profile.semantic_digest,
+                    "updated_at_ms": NOW_MS - 2_000_000,
+                }
+                for profile in old_member_profiles
             ],
         )
         await connection.execute(

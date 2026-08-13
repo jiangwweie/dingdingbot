@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
 from uuid import uuid4
 
 import asyncpg
@@ -18,11 +19,21 @@ from scripts.trading_kernel.promote_entry import (
     EntryPromotionBlocked,
     promote_entry,
 )
+from src.trading_kernel.application.strategy_universe_batch_manifest import (
+    APPROVED_UNIVERSE_BATCHES,
+)
+from src.trading_kernel.domain.product import ProductSessionSnapshot
+from src.trading_kernel.infrastructure.pg_models import (
+    owner_policy_current,
+    owner_policy_events,
+    runtime_scopes_current,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RUNTIME_PROFILE_ID,
+    TRADFI_RUNTIME_PROFILE_ID,
     ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
     arm_acceptance_policy,
@@ -30,6 +41,14 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
 )
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
+)
+from src.trading_kernel.interfaces.observation_worker import (
+    ObservationWorkerStatus,
+    run_observation_worker_once,
+)
+from src.trading_kernel.interfaces.reconciliation_worker import (
+    ReconciliationWorkerStatus,
+    run_reconciliation_worker_once,
 )
 from tests.trading_kernel.integration.test_strategy_universe_batch_bootstrap import (
     ADMIN_DSN,
@@ -40,12 +59,79 @@ from tests.trading_kernel.integration.test_strategy_universe_batch_bootstrap imp
     _database_url,
     _drop_database,
     _run_alembic,
-    _worker_driving_sleep,
 )
 from tests.trading_kernel.integration.universe_certification_support import (
+    NoTicketPositionSource,
+    NoTicketVenueTruth,
     RecordingReadonlyCertificationSource,
 )
 from tests.trading_kernel.unit.detectors.fixtures import NOW_MS
+
+
+class PromotionWarmMarket(RecordingWarmMarket):
+    async def fetch_closed_candles(self, request):
+        candles = await super().fetch_closed_candles(request)
+        if request.timeframe != "15m":
+            return candles
+        if not request.exchange_instrument_id.endswith((
+            "AAPLUSDT:perpetual",
+            "AMZNUSDT:perpetual",
+            "GOOGLUSDT:perpetual",
+            "METAUSDT:perpetual",
+            "MSFTUSDT:perpetual",
+            "NVDAUSDT:perpetual",
+            "SNDKUSDT:perpetual",
+            "TSLAUSDT:perpetual",
+        )):
+            return candles
+        delta_ms = request.closed_at_ms - NOW_MS
+        shifted = tuple(
+            candle.model_copy(
+                update={
+                    "open_time_ms": candle.open_time_ms + delta_ms,
+                    "close_time_ms": candle.close_time_ms + delta_ms,
+                }
+            )
+            for candle in candles
+        )
+        latest = shifted[-1]
+        return (
+            *shifted[:-1],
+            latest.model_copy(
+                update={
+                    "high": Decimal("103.2"),
+                    "low": Decimal("100.8"),
+                    "close": Decimal(103),
+                }
+            ),
+        )
+
+    async def fetch_product_sessions(
+        self,
+        exchange_instrument_ids: tuple[str, ...],
+        *,
+        observed_at_ms: int,
+    ) -> tuple[ProductSessionSnapshot, ...]:
+        return tuple(
+            ProductSessionSnapshot(
+                exchange_instrument_id=instrument_id,
+                product_family="tradfi_equity_perpetual",
+                product_status="active",
+                session_state="regular",
+                regular_session_open_ms=observed_at_ms - 8 * 900_000,
+                regular_session_close_ms=observed_at_ms + 2 * 900_000,
+                mark_price=Decimal(100),
+                index_price=Decimal(100),
+                best_bid=Decimal("99.9"),
+                best_ask=Decimal("100.1"),
+                best_bid_quantity=Decimal(1),
+                best_ask_quantity=Decimal(1),
+                observed_at_ms=observed_at_ms,
+                valid_until_ms=observed_at_ms + 60_000,
+                source_ref="promotion-test",
+            )
+            for instrument_id in exchange_instrument_ids
+        )
 
 
 @dataclass
@@ -146,7 +232,7 @@ def test_entry_promotion_rehearses_arm_failure_resume_and_idempotence() -> None:
         armed_capabilities = armed_after_failure["capabilities"]
         assert isinstance(armed_owner_policy, Mapping)
         assert isinstance(armed_capabilities, Mapping)
-        assert armed_owner_policy["policy_version"] == 2
+        assert armed_owner_policy["policy_version"] == 5
         assert armed_owner_policy["new_entry_submit_enabled"] is True
         assert armed_capabilities["exchange_commands"] is True
         assert failed.fenced is True
@@ -173,7 +259,7 @@ def test_entry_promotion_rehearses_arm_failure_resume_and_idempotence() -> None:
         final_capabilities = final["capabilities"]
         assert isinstance(final_owner_policy, Mapping)
         assert isinstance(final_capabilities, Mapping)
-        assert final_owner_policy["policy_version"] == 2
+        assert final_owner_policy["policy_version"] == 5
         assert final_capabilities["exchange_commands"] is True
     finally:
         asyncio.run(_cleanup(database_name))
@@ -196,20 +282,36 @@ async def _seed_and_bootstrap(database_name: str, database_url: str) -> None:
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
             )
+        await _advance_to_r4_certification_authority(engine)
         clock = VirtualClock()
-        market = RecordingWarmMarket()
+        market = PromotionWarmMarket()
         certification = RecordingReadonlyCertificationSource(engine)
+        await bootstrap_strategy_universes(
+            database_url,
+            runtime_profile_id=TRADFI_RUNTIME_PROFILE_ID,
+            now_ms=clock.read,
+            wait_timeout_ms=9_000_000,
+            poll_interval_ms=1,
+            sleep=_worker_driving_sleep_for_profile(
+                engine=engine,
+                clock=clock,
+                market=market,
+                certification=certification,
+                runtime_profile_id=TRADFI_RUNTIME_PROFILE_ID,
+            ),
+        )
         await bootstrap_strategy_universes(
             database_url,
             runtime_profile_id=RUNTIME_PROFILE_ID,
             now_ms=clock.read,
             wait_timeout_ms=60_000,
             poll_interval_ms=1,
-            sleep=_worker_driving_sleep(
+            sleep=_worker_driving_sleep_for_profile(
                 engine=engine,
                 clock=clock,
                 market=market,
                 certification=certification,
+                runtime_profile_id=RUNTIME_PROFILE_ID,
             ),
         )
         async with engine.begin() as connection:
@@ -226,6 +328,39 @@ async def _seed_and_bootstrap(database_name: str, database_url: str) -> None:
         await admin.close()
 
 
+async def _advance_to_r4_certification_authority(engine) -> None:
+    """Model the already-paused R4 authority that production batches certify."""
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(owner_policy_events),
+            [
+                {
+                    "owner_policy_event_id": f"policy-event:policy-main:v{version}",
+                    "owner_policy_id": "policy-main",
+                    "policy_version": version,
+                    "operation": "fixture_pre_certification_authority",
+                    "payload": {"fixture": True},
+                    "created_at_ms": NOW_MS - 10_000 + version,
+                }
+                for version in range(2, 5)
+            ],
+        )
+        updated = await connection.execute(
+            sa.update(owner_policy_current)
+            .where(
+                owner_policy_current.c.owner_policy_id == "policy-main",
+                owner_policy_current.c.policy_version == 1,
+                owner_policy_current.c.new_entry_submit_enabled.is_(False),
+            )
+            .values(
+                policy_version=4,
+                updated_at_ms=NOW_MS - 9_996,
+            )
+        )
+    assert updated.rowcount == 1
+
+
 async def _arm(database_url: str, now_ms: int):
     engine = create_async_engine(database_url)
     try:
@@ -236,6 +371,77 @@ async def _arm(database_url: str, now_ms: int):
             )
     finally:
         await engine.dispose()
+
+
+def _worker_driving_sleep_for_profile(
+    *,
+    engine,
+    clock: VirtualClock,
+    market: RecordingWarmMarket,
+    certification: RecordingReadonlyCertificationSource,
+    runtime_profile_id: str,
+) -> Callable[[float], Awaitable[None]]:
+    _event_specs, members = APPROVED_UNIVERSE_BATCHES[runtime_profile_id]
+
+    async def sleep(_delay_seconds: float) -> None:
+        del _delay_seconds
+        async with engine.connect() as connection:
+            warming_profile_count = int(
+                await connection.scalar(
+                    sa.select(sa.func.count()).select_from(
+                        runtime_scopes_current
+                    ).where(
+                        runtime_scopes_current.c.lifecycle_state == "warming",
+                        runtime_scopes_current.c.runtime_profile_id
+                        == runtime_profile_id,
+                    )
+                )
+                or 0
+            )
+        if warming_profile_count == 0:
+            return
+        for _member in members:
+            certification_result = await run_reconciliation_worker_once(
+                lambda: PostgresKernelUnitOfWork(engine),
+                NoTicketVenueTruth(),
+                NoTicketPositionSource(),
+                _reconciliation_request(clock.advance()),
+                instrument_certification_source=certification,
+            )
+            assert certification_result.status in {
+                ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED,
+                ReconciliationWorkerStatus.NO_WORK,
+            }
+        observations = []
+        for _member in members:
+            observation_result = await run_observation_worker_once(
+                lambda: PostgresKernelUnitOfWork(engine),
+                market,
+                _observation_request(clock.advance()),
+            )
+            observations.append(observation_result.status)
+            if observation_result.status is ObservationWorkerStatus.NO_WORK:
+                continue
+            assert observation_result.status is ObservationWorkerStatus.OBSERVED
+        assert observations.count(ObservationWorkerStatus.OBSERVED) == len(members)
+
+    return sleep
+
+
+def _observation_request(now_ms: int):
+    from tests.trading_kernel.integration.test_strategy_universe_batch_bootstrap import (
+        _observation_request as request,
+    )
+
+    return request(now_ms)
+
+
+def _reconciliation_request(now_ms: int):
+    from tests.trading_kernel.integration.test_strategy_universe_batch_bootstrap import (
+        _reconciliation_request as request,
+    )
+
+    return request(now_ms)
 
 
 async def _cleanup(database_name: str) -> None:

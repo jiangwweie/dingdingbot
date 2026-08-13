@@ -42,6 +42,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     arm_acceptance_policy,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 from src.trading_kernel.interfaces.observation_worker import (
     ObservationWorkerRequest,
     ObservationWorkerStatus,
@@ -61,7 +64,7 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 RUNTIME_COMMIT = "task-13-query-bounds"
-SCHEMA_REVISION = "0004_owner_control_plane"
+SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
 ACTIVE_MEMBERS = tuple(
     f"binance-usdm:{symbol}USDT:perpetual"
     for symbol in (
@@ -138,7 +141,11 @@ async def test_observation_selector_claims_one_from_real_70_scope_lifecycle(
 ) -> None:
     """Official configure/certify/warm/activate creates the bounded shape."""
 
-    contracts = registered_strategy_contracts()
+    contracts = tuple(
+        contract
+        for contract in registered_strategy_contracts()
+        if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
+    )
     assert len(contracts) == 6
     for contract in contracts:
         await _configure_certify_warm_and_activate(

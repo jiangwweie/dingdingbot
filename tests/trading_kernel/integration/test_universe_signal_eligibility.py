@@ -24,6 +24,9 @@ from src.trading_kernel.domain.signal import (
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -58,7 +61,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                 IngestSignalRequest(
                     signal=signal,
                     runtime_commit="commit-test",
-                    schema_revision="0004_owner_control_plane",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
                     now_ms=1_010,
                 ),
             )
@@ -86,7 +89,7 @@ async def test_only_current_active_universe_member_can_remain_entry_ready() -> N
                         update={"signal_event_id": "signal:old-universe-after-switch"}
                     ),
                     runtime_commit="commit-test",
-                    schema_revision="0004_owner_control_plane",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
                     now_ms=1_011,
                 ),
             )
@@ -162,6 +165,13 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             'candle_close', 'market', 'fact:stop-reference:v1',
             'exit-a', '{}'::jsonb, 'active', 1000
         );
+        INSERT INTO brc_event_product_compatibility (
+            event_spec_id, product_family, asset_class, contract_type,
+            underlying_type, margin_asset, semantic_digest, created_at_ms
+        ) VALUES (
+            'event-a', 'crypto_perpetual', 'crypto', 'PERPETUAL', 'CRYPTO',
+            'USDT', $1, 1000
+        );
         INSERT INTO brc_event_required_facts
             (event_spec_id, fact_definition_id, role, required)
         VALUES ('event-a', 'fact:stop-reference:v1', 'protection_reference', true);
@@ -171,6 +181,16 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
         ) VALUES (
             'binance-usdm:BTCUSDT:perpetual', 'binance-usdm',
             'crypto', 'BTCUSDT', 'perpetual', 'active'
+        );
+        INSERT INTO brc_instrument_product_profiles (
+            exchange_instrument_id, product_family, asset_class, contract_type,
+            underlying_type, margin_asset, entry_session_policy, status,
+            max_entry_spread_bps, max_mark_index_deviation_bps,
+            semantic_digest, updated_at_ms
+        ) VALUES (
+            'binance-usdm:BTCUSDT:perpetual', 'crypto_perpetual', 'crypto',
+            'PERPETUAL', 'CRYPTO', 'USDT', 'continuous', 'candidate', NULL,
+            NULL, $2, 1000
         );
         INSERT INTO brc_runtime_profiles (
             runtime_profile_id, venue_id, account_id, environment,
@@ -246,7 +266,7 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             certification, updated_at_ms
         ) VALUES (
             'strategy_signal_ingest', true, 'commit-test',
-            '0004_owner_control_plane', '{}'::jsonb, 1000
+            '0005_tradfi_instrument_center', '{}'::jsonb, 1000
         )
         """
     await conn.execute(

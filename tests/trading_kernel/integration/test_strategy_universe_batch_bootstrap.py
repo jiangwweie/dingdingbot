@@ -7,6 +7,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -25,6 +26,10 @@ from scripts.trading_kernel.certify_readonly import _certify
 from src.trading_kernel.application.market_ports import ClosedCandleRequest
 from src.trading_kernel.application.observe_strategy_scope import ObservationStatus
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.product import (
+    InstrumentProductProfile,
+    ProductSessionSnapshot,
+)
 from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
@@ -32,7 +37,10 @@ from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
     instrument_certification_batch_members,
     instrument_certification_batches,
+    instrument_product_profiles,
     instruments,
+    owner_policy_current,
+    owner_policy_events,
     runtime_scopes_current,
     signal_events,
     strategy_universe_current,
@@ -45,6 +53,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
 )
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RUNTIME_PROFILE_ID,
+    TRADFI_RUNTIME_PROFILE_ID,
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
@@ -99,6 +108,33 @@ class RecordingWarmMarket:
         if request.timeframe == "4h":
             return cpm_long_snapshot().candles_4h
         return cpm_long_snapshot().candles_1h
+
+    async def fetch_product_sessions(
+        self,
+        exchange_instrument_ids: tuple[str, ...],
+        *,
+        observed_at_ms: int,
+    ) -> tuple[ProductSessionSnapshot, ...]:
+        return tuple(
+            ProductSessionSnapshot(
+                exchange_instrument_id=instrument_id,
+                product_family="tradfi_equity_perpetual",
+                product_status="active",
+                session_state="regular",
+                regular_session_open_ms=observed_at_ms - 8 * 900_000,
+                regular_session_close_ms=observed_at_ms + 2 * 900_000,
+                mark_price=Decimal(100),
+                index_price=Decimal(100),
+                best_bid=Decimal("99.9"),
+                best_ask=Decimal("100.1"),
+                best_bid_quantity=Decimal(1),
+                best_ask_quantity=Decimal(1),
+                observed_at_ms=observed_at_ms,
+                valid_until_ms=observed_at_ms + 60_000,
+                source_ref="batch-bootstrap-test",
+            )
+            for instrument_id in exchange_instrument_ids
+        )
 
 
 @dataclass
@@ -332,20 +368,36 @@ async def test_readonly_certification_recomputes_batch_manifest_from_member_rows
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
             )
+        await _advance_to_r4_certification_authority(engine)
         clock = VirtualClock()
         market = RecordingWarmMarket()
         certification = RecordingReadonlyCertificationSource(engine)
+        await bootstrap_strategy_universes(
+            database_url,
+            runtime_profile_id=TRADFI_RUNTIME_PROFILE_ID,
+            now_ms=clock.read,
+            wait_timeout_ms=9_000_000,
+            poll_interval_ms=1,
+            sleep=_worker_driving_sleep_for_profile(
+                engine=engine,
+                clock=clock,
+                market=market,
+                certification=certification,
+                runtime_profile_id=TRADFI_RUNTIME_PROFILE_ID,
+            ),
+        )
         await bootstrap_strategy_universes(
             database_url,
             runtime_profile_id=RUNTIME_PROFILE_ID,
             now_ms=clock.read,
             wait_timeout_ms=60_000,
             poll_interval_ms=1,
-            sleep=_worker_driving_sleep(
+            sleep=_worker_driving_sleep_for_profile(
                 engine=engine,
                 clock=clock,
                 market=market,
                 certification=certification,
+                runtime_profile_id=RUNTIME_PROFILE_ID,
             ),
         )
         certification_now_ms = clock.read()
@@ -372,7 +424,11 @@ async def test_readonly_certification_recomputes_batch_manifest_from_member_rows
                     await connection.execute(
                         sa.select(
                             instrument_certification_batches.c.certification_batch_id
-                        ).where(instrument_certification_batches.c.status == "completed")
+                        ).where(
+                            instrument_certification_batches.c.status == "completed",
+                            instrument_certification_batches.c.runtime_profile_id
+                            == RUNTIME_PROFILE_ID,
+                        )
                     )
                 ).scalar_one()
             )
@@ -624,6 +680,22 @@ async def test_active_manifest_refresh_rejects_member_drift_and_warming_universe
                     status="active",
                 )
             )
+            avax_profile = InstrumentProductProfile(
+                exchange_instrument_id=avax,
+                product_family="crypto_perpetual",
+                asset_class="crypto",
+                contract_type="PERPETUAL",
+                underlying_type="CRYPTO",
+                entry_session_policy="continuous",
+                status="candidate",
+            )
+            await connection.execute(
+                sa.insert(instrument_product_profiles).values(
+                    **avax_profile.model_dump(mode="python"),
+                    semantic_digest=avax_profile.semantic_digest,
+                    updated_at_ms=clock.read(),
+                )
+            )
             cpm_universe_version_id = str(
                 await connection.scalar(
                     sa.select(strategy_universe_current.c.universe_version_id)
@@ -727,6 +799,95 @@ def _worker_driving_sleep(
             warming_rows,
             clock.read(),
         )
+
+    return sleep
+
+
+async def _advance_to_r4_certification_authority(engine: AsyncEngine) -> None:
+    """Model the paused R4 Policy before certifying both RuntimeProfiles."""
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(owner_policy_events),
+            [
+                {
+                    "owner_policy_event_id": f"policy-event:policy-main:v{version}",
+                    "owner_policy_id": "policy-main",
+                    "policy_version": version,
+                    "operation": "fixture_pre_certification_authority",
+                    "payload": {"fixture": True},
+                    "created_at_ms": NOW_MS - 10_000 + version,
+                }
+                for version in range(2, 5)
+            ],
+        )
+        updated = await connection.execute(
+            sa.update(owner_policy_current)
+            .where(
+                owner_policy_current.c.owner_policy_id == "policy-main",
+                owner_policy_current.c.policy_version == 1,
+                owner_policy_current.c.new_entry_submit_enabled.is_(False),
+            )
+            .values(
+                policy_version=4,
+                updated_at_ms=NOW_MS - 9_996,
+            )
+        )
+    assert updated.rowcount == 1
+
+
+def _worker_driving_sleep_for_profile(
+    *,
+    engine: AsyncEngine,
+    clock: VirtualClock,
+    market: RecordingWarmMarket,
+    certification: RecordingReadonlyCertificationSource,
+    runtime_profile_id: str,
+) -> Callable[[float], Awaitable[None]]:
+    _event_specs, members = bootstrap_module.APPROVED_UNIVERSE_BATCHES[
+        runtime_profile_id
+    ]
+
+    async def sleep(_delay_seconds: float) -> None:
+        del _delay_seconds
+        async with engine.connect() as connection:
+            warming_profile_count = int(
+                await connection.scalar(
+                    sa.select(sa.func.count()).select_from(runtime_scopes_current)
+                    .where(
+                        runtime_scopes_current.c.lifecycle_state == "warming",
+                        runtime_scopes_current.c.runtime_profile_id
+                        == runtime_profile_id,
+                    )
+                )
+                or 0
+            )
+        if warming_profile_count == 0:
+            return
+        for _member in members:
+            certification_result = await run_reconciliation_worker_once(
+                lambda: PostgresKernelUnitOfWork(engine),
+                NoTicketVenueTruth(),
+                NoTicketPositionSource(),
+                _reconciliation_request(clock.advance()),
+                instrument_certification_source=certification,
+            )
+            assert certification_result.status in {
+                ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED,
+                ReconciliationWorkerStatus.NO_WORK,
+            }
+        observations = []
+        for _member in members:
+            observation_result = await run_observation_worker_once(
+                lambda: PostgresKernelUnitOfWork(engine),
+                market,
+                _observation_request(clock.advance()),
+            )
+            observations.append(observation_result.status)
+            if observation_result.status is ObservationWorkerStatus.NO_WORK:
+                continue
+            assert observation_result.status is ObservationWorkerStatus.OBSERVED
+        assert observations.count(ObservationWorkerStatus.OBSERVED) == len(members)
 
     return sleep
 

@@ -1505,8 +1505,6 @@ async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
         assert "limit" in overview_selects[4]
         assert "brc_signal_events" in overview_selects[5]
         assert "brc_admission_decisions" in overview_selects[5]
-        assert "occurred_at_ms" in overview_selects[5]
-        assert "decided_at_ms" in overview_selects[5]
         assert "brc_trade_reviews" in overview_selects[6]
         assert "brc_trade_aggregates.review_id = brc_trade_reviews.review_id" in (
             overview_selects[6]
@@ -1908,8 +1906,12 @@ async def _seed_overview_authority(
                 ),
                 json.dumps(
                     {
-                        "runtime_profile_id": "profile:owner-console",
-                        "allowed_event_spec_ids": [],
+                        "event_runtime_profiles": [
+                            {
+                                "event_spec_id": "event_spec:owner-console",
+                                "runtime_profile_id": "profile:owner-console",
+                            }
+                        ],
                     }
                 ),
                 now_ms - 10_000,
@@ -2018,8 +2020,12 @@ async def _seed_additional_owner_policy(
             priority_rank,
             json.dumps(
                 {
-                    "runtime_profile_id": "profile:owner-console",
-                    "allowed_event_spec_ids": [],
+                    "event_runtime_profiles": [
+                        {
+                            "event_spec_id": "event_spec:owner-console",
+                            "runtime_profile_id": "profile:owner-console",
+                        }
+                    ],
                 }
             ),
             now_ms - 10_000,

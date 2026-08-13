@@ -35,6 +35,11 @@ async def test_postgres_enforces_strategy_universe_authority_constraints() -> No
         try:
             new_rejections: dict[str, bool] = {}
             await _seed_instruments(conn, 12)
+            await _seed_product_authority(
+                conn,
+                event_ids=("event-a", "event-b", "event-source"),
+                instrument_count=12,
+            )
             await conn.execute(
                 """
                 INSERT INTO brc_strategy_universe_versions (
@@ -196,7 +201,20 @@ async def test_postgres_enforces_strategy_universe_authority_constraints() -> No
                 ) VALUES ('uni-a', 'binance-usdm:T00USDT:perpetual')
                 """,
             )
-            await _assert_foreign_key_violation(
+            await conn.execute(
+                """
+                INSERT INTO brc_instrument_product_profiles (
+                    exchange_instrument_id, product_family, asset_class, contract_type,
+                    underlying_type, margin_asset, entry_session_policy, status,
+                    max_entry_spread_bps, max_mark_index_deviation_bps,
+                    semantic_digest, updated_at_ms
+                ) VALUES ('binance-usdm:MISSINGUSDT:perpetual',
+                          'crypto_perpetual', 'crypto', 'PERPETUAL', 'CRYPTO',
+                          'USDT', 'continuous', 'candidate', NULL, NULL, $1, 1)
+                """,
+                DIGEST_B,
+            )
+            await _assert_check_violation(
                 conn,
                 """
                 INSERT INTO brc_strategy_universe_members (
@@ -387,6 +405,11 @@ async def test_postgres_enforces_runtime_scope_permissions_and_lineage() -> None
         try:
             lifecycle_rejections: dict[str, bool] = {}
             await _seed_instruments(conn, 1)
+            await _seed_product_authority(
+                conn,
+                event_ids=("event-a",),
+                instrument_count=1,
+            )
             await conn.execute(
                 """
                 INSERT INTO brc_strategy_universe_versions (
@@ -566,6 +589,11 @@ async def test_parallel_member_inserts_cannot_cross_ten_member_limit() -> None:
         first = await asyncpg.connect(asyncpg_url)
         second = await asyncpg.connect(asyncpg_url)
         await _seed_instruments(first, 11)
+        await _seed_product_authority(
+            first,
+            event_ids=("event-a",),
+            instrument_count=11,
+        )
         await first.execute(
             """
             INSERT INTO brc_strategy_universe_versions (
@@ -636,6 +664,75 @@ async def _seed_instruments(conn: asyncpg.Connection, count: int) -> None:
             f"binance-usdm:T{index:02d}USDT:perpetual",
             f"T{index:02d}USDT",
             "pending_certification" if index == 0 else "active",
+        )
+
+
+async def _seed_product_authority(
+    conn: asyncpg.Connection,
+    *,
+    event_ids: tuple[str, ...],
+    instrument_count: int,
+) -> None:
+    """Add the exact 0005 product rows required by synthetic Universe members."""
+
+    for index, event_id in enumerate(event_ids):
+        group_id = f"sg-product-{index}"
+        version_id = f"sv-product-{index}"
+        await conn.execute(
+            """
+            INSERT INTO brc_strategy_groups (
+                strategy_group_id, display_name, active_version_id, status, updated_at_ms
+            ) VALUES ($1, $1, $2, 'active', 1)
+            """,
+            group_id,
+            version_id,
+        )
+        await conn.execute(
+            """
+            INSERT INTO brc_strategy_versions (
+                strategy_version_id, strategy_group_id, version, semantics, status, created_at_ms
+            ) VALUES ($1, $2, 1, '{}', 'active', 1)
+            """,
+            version_id,
+            group_id,
+        )
+        await conn.execute(
+            """
+            INSERT INTO brc_event_specs (
+                event_spec_id, strategy_version_id, event_id, position_side,
+                timeframe, freshness_window_ms, event_time_authority,
+                entry_order_type, protection_reference_fact_definition_id,
+                exit_policy_id, execution_semantics, status, created_at_ms
+            ) VALUES ($1, $2, $1, 'long', '1h', 1, 'close_time', 'market',
+                      'fact:synthetic', 'exit:synthetic', '{}', 'active', 1)
+            """,
+            event_id,
+            version_id,
+        )
+        await conn.execute(
+            """
+            INSERT INTO brc_event_product_compatibility (
+                event_spec_id, product_family, asset_class, contract_type,
+                underlying_type, margin_asset, semantic_digest, created_at_ms
+            ) VALUES ($1, 'crypto_perpetual', 'crypto', 'PERPETUAL', 'CRYPTO',
+                      'USDT', $2, 1)
+            """,
+            event_id,
+            DIGEST_A,
+        )
+    for index in range(instrument_count):
+        await conn.execute(
+            """
+            INSERT INTO brc_instrument_product_profiles (
+                exchange_instrument_id, product_family, asset_class, contract_type,
+                underlying_type, margin_asset, entry_session_policy, status,
+                max_entry_spread_bps, max_mark_index_deviation_bps,
+                semantic_digest, updated_at_ms
+            ) VALUES ($1, 'crypto_perpetual', 'crypto', 'PERPETUAL', 'CRYPTO',
+                      'USDT', 'continuous', 'candidate', NULL, NULL, $2, 1)
+            """,
+            f"binance-usdm:T{index:02d}USDT:perpetual",
+            DIGEST_B,
         )
 
 

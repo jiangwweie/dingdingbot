@@ -39,8 +39,10 @@ from src.trading_kernel.domain.events import (
     InitialStopAbsenceConfirmed,
     TakeProfitFilled,
 )
+from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import reduce_event
+from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.domain.venue_truth import (
     UnknownRecoveryStatus,
     VenueLookupStatus,
@@ -48,6 +50,7 @@ from src.trading_kernel.domain.venue_truth import (
     VenueTruthSnapshot,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import (
     AcceptingVenue,
@@ -56,9 +59,8 @@ from tests.trading_kernel.integration.test_command_dispatch import (
     _issue,
     _reach_cancel_pending,
     _seed_policy,
+    _ticket,
 )
-from tests.trading_kernel.integration.test_issue_ticket import _ticket_for_signal
-from tests.trading_kernel.unit.test_ticket import _ticket
 
 dispatch_engine = dispatch_fixture.dispatch_engine
 
@@ -799,7 +801,7 @@ async def _make_unknown_entry(engine):
             lease_until_ms=1_200,
             timeout_seconds=0.01,
             runtime_commit="kernel-test-head",
-            schema_revision="0004_owner_control_plane",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
@@ -848,6 +850,61 @@ async def _make_unknown_initial_stop(engine):
     return ticket, await _command_of_kind(engine, ticket, ExchangeCommandKind.INITIAL_STOP)
 
 
+def _ticket_for_signal(
+    signal_event_id: str,
+    exposure_episode_id: str,
+    *,
+    position_side: Literal["long", "short"],
+):
+    """Freeze current SOR v4 authority for each independent side domain."""
+
+    base = _ticket()
+    runtime = base.identity.runtime.model_copy(
+        update={
+            "event_spec_id": (
+                "event_spec:SOR-001:SOR-LONG:v4"
+                if position_side == "long"
+                else "event_spec:SOR-001:SOR-SHORT:v4"
+            )
+        }
+    )
+    domain = NettingDomain(
+        venue_id=base.identity.netting_domain.venue_id,
+        account_id=base.identity.netting_domain.account_id,
+        exchange_instrument_id=base.identity.netting_domain.exchange_instrument_id,
+        position_side=position_side,
+    )
+    identity = TicketIdentity(
+        ticket_id=build_ticket_id(
+            signal_event_id=signal_event_id,
+            runtime=runtime,
+            netting_domain=domain,
+        ),
+        exposure_episode_id=exposure_episode_id,
+        signal_event_id=signal_event_id,
+        runtime=runtime,
+        netting_domain=domain,
+    )
+    updates: dict[str, object] = {
+        "identity": identity,
+        "runtime_scope_id": f"scope-sor-btc-{position_side}",
+        "universe_version_id": f"universe:sor-{position_side}:4",
+        "exit_policy_id": (
+            "exit-policy:SOR-001:SOR-LONG:portfolio-admission-v1"
+            if position_side == "long"
+            else "exit-policy:SOR-001:SOR-SHORT:portfolio-admission-v1"
+        ),
+    }
+    if position_side == "short":
+        updates.update(
+            {
+                "initial_stop_price": Decimal(61000),
+                "take_profit_prices": (Decimal(58000),),
+            }
+        )
+    return base.model_copy(update=updates)
+
+
 async def _make_unknown_tp1(
     engine,
     *,
@@ -860,7 +917,13 @@ async def _make_unknown_tp1(
         position_side=position_side,
     )
     if seed_policy:
-        await _seed_policy(engine)
+        await _seed_policy(
+            engine,
+            event_spec_ids=(
+                "event_spec:SOR-001:SOR-LONG:v4",
+                "event_spec:SOR-001:SOR-SHORT:v4",
+            ),
+        )
     await _issue(engine, ticket)
     accepting = AcceptingVenue(engine)
     await _dispatch(
@@ -911,7 +974,13 @@ async def _make_unknown_replacement(
         position_side=position_side,
     )
     if seed_policy:
-        await _seed_policy(engine)
+        await _seed_policy(
+            engine,
+            event_spec_ids=(
+                "event_spec:SOR-001:SOR-LONG:v4",
+                "event_spec:SOR-001:SOR-SHORT:v4",
+            ),
+        )
     await _issue(engine, ticket)
     accepting = AcceptingVenue(engine)
     await _dispatch(
@@ -1080,7 +1149,7 @@ async def _dispatch(
             timeout_seconds=timeout_seconds,
             runtime_commit="kernel-test-head" if entry else None,
             schema_revision=(
-                "0004_owner_control_plane" if entry else None
+                CURRENT_SCHEMA_REVISION if entry else None
             ),
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),

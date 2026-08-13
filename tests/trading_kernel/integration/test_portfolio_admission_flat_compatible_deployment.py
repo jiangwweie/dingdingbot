@@ -26,12 +26,14 @@ from tests.trading_kernel.integration.test_portfolio_admission_observability_mig
     _prepare_production_shaped_0002,
 )
 from tests.trading_kernel.integration.test_sor_v3_compatible_migration import (
-    HEAD_REVISION,
     _run_migration,
     compatible_migration_engine,
 )
 
 __all__ = ["compatible_migration_engine"]
+
+HEAD_REVISION = CURRENT_SCHEMA_REVISION
+HISTORICAL_PRESERVATION_TARGET_REVISION = "0003_portfolio_admission_observability"
 
 
 async def test_mig_007_nonflat_0002_is_blocked_before_migration(
@@ -105,12 +107,12 @@ async def test_mig_008_manifest_covers_every_0002_table_column_and_value(
         entry["table"]: entry["digest"]
         for entry in target["preservation_manifest"]["tables"]
     }
-    assert target["status"] == "pass", {
+    assert target["alembic_revision"] == HEAD_REVISION
+    assert target["preservation_manifest"] == manifest, {
         table_name: (source_digests[table_name], target_digests[table_name])
         for table_name in source_digests
         if source_digests[table_name] != target_digests[table_name]
     }
-    assert target["preservation_manifest"] == manifest
 
 
 @pytest.mark.parametrize(
@@ -128,7 +130,11 @@ async def test_no_exposure_terminal_rejection_needs_no_fabricated_review(
     database_url = _database_url(engine)
 
     source = await _verify_compatible_source(database_url, SOURCE_REVISION)
-    result = _run_migration(database_url, "upgrade", HEAD_REVISION)
+    result = _run_migration(
+        database_url,
+        "upgrade",
+        HISTORICAL_PRESERVATION_TARGET_REVISION,
+    )
 
     assert source["status"] == "pass", source
     assert source["migration_gate"]["active_tickets"] == 0
@@ -152,6 +158,19 @@ async def test_no_exposure_terminal_rejection_allows_target_identity_rotation(
     result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
     assert result.returncode == 0, result.stderr[-4000:]
     async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "INSERT INTO brc_schema_metadata "
+                "(metadata_key, metadata_value, updated_at_ms) VALUES "
+                "('registry_semantic_hash', :value, 9000) "
+                "ON CONFLICT (metadata_key) DO UPDATE "
+                "SET metadata_value = EXCLUDED.metadata_value, "
+                "updated_at_ms = EXCLUDED.updated_at_ms"
+            ),
+            {
+                "value": schema_verifier._CERTIFIED_0002_REGISTRY_MANIFEST_HASH,
+            },
+        )
         await connection.execute(
             sa.text(
                 "INSERT INTO brc_account_exposure_current "
@@ -219,7 +238,11 @@ async def test_exposure_terminal_ticket_without_review_remains_blocked(
 
     database_url = _database_url(engine)
     source = await _verify_compatible_source(database_url, SOURCE_REVISION)
-    result = _run_migration(database_url, "upgrade", HEAD_REVISION)
+    result = _run_migration(
+        database_url,
+        "upgrade",
+        HISTORICAL_PRESERVATION_TARGET_REVISION,
+    )
 
     assert source["status"] == "fail"
     assert source["migration_gate"]["unreviewed_terminal_tickets"] == 1
@@ -308,7 +331,11 @@ async def test_mig_008_one_changed_0002_value_breaks_equivalence(
     database_url = _database_url(engine)
     source = await _verify_compatible_source(database_url, SOURCE_REVISION)
     digest = str(source["preservation_manifest"]["digest"])
-    result = _run_migration(database_url, "upgrade", HEAD_REVISION)
+    result = _run_migration(
+        database_url,
+        "upgrade",
+        HISTORICAL_PRESERVATION_TARGET_REVISION,
+    )
     assert result.returncode == 0, result.stderr[-4000:]
     async with engine.begin() as connection:
         await connection.execute(
@@ -343,6 +370,47 @@ async def test_postflight_recomputes_registry_identity_from_live_rows(
     expected_registry_hash = build_registry_semantic_hash(
         registered_strategy_contracts()
     )
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "INSERT INTO brc_schema_metadata "
+                "(metadata_key, metadata_value, updated_at_ms) VALUES "
+                "('registry_semantic_hash', :value, 9000) "
+                "ON CONFLICT (metadata_key) DO UPDATE "
+                "SET metadata_value = EXCLUDED.metadata_value, "
+                "updated_at_ms = EXCLUDED.updated_at_ms"
+            ),
+            {
+                "value": schema_verifier._CERTIFIED_0002_REGISTRY_MANIFEST_HASH,
+            },
+        )
+        await connection.execute(
+            sa.text(
+                "INSERT INTO brc_account_exposure_current "
+                "(venue_id, account_id, gross_notional, gross_risk_at_stop, "
+                "current_reserved_margin, active_ticket_count, "
+                "projection_version, updated_at_ms) VALUES "
+                "('binance-usdm', 'subaccount-source-test', 0, 0, 0, 0, 0, 9000)"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                "INSERT INTO brc_entry_lane_current "
+                "(lane_id, ticket_id, signal_event_id, status, claimed_at_ms, "
+                "lease_until_ms, claim_owner, version) VALUES "
+                "('global-entry', NULL, NULL, 'idle', NULL, NULL, NULL, 0)"
+            )
+        )
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await deploy_compatible_upgrade_identity(
+            uow,
+            RuntimeAuthoritySeedRequest(
+                account_id="subaccount-source-test",
+                runtime_commit="a" * 40,
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                seeded_at_ms=10_000,
+            ),
+        )
     async with engine.begin() as connection:
         await connection.execute(
             sa.text(
@@ -393,7 +461,11 @@ async def test_preservation_proof_is_persisted_in_postgresql_and_identity_bound(
     database_url = _database_url(engine)
     source = await _verify_compatible_source(database_url, SOURCE_REVISION)
     digest = str(source["preservation_manifest"]["digest"])
-    result = _run_migration(database_url, "upgrade", HEAD_REVISION)
+    result = _run_migration(
+        database_url,
+        "upgrade",
+        HISTORICAL_PRESERVATION_TARGET_REVISION,
+    )
     assert result.returncode == 0, result.stderr[-4000:]
 
     recorded = await schema_verifier._record_preservation_proof(
@@ -443,7 +515,11 @@ async def test_historical_preservation_proof_survives_runtime_projection_change(
     database_url = _database_url(engine)
     source = await _verify_compatible_source(database_url, SOURCE_REVISION)
     digest = str(source["preservation_manifest"]["digest"])
-    result = _run_migration(database_url, "upgrade", HEAD_REVISION)
+    result = _run_migration(
+        database_url,
+        "upgrade",
+        HISTORICAL_PRESERVATION_TARGET_REVISION,
+    )
     assert result.returncode == 0, result.stderr[-4000:]
 
     recorded = await schema_verifier._record_preservation_proof(

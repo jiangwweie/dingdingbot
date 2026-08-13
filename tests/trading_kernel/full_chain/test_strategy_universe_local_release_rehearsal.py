@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from scripts.trading_kernel.certify_readonly import _certify
 from scripts.trading_kernel.promote_entry import promote_entry
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
-    APPROVED_UNIVERSE_EVENT_SPECS,
+    APPROVED_UNIVERSE_BATCHES,
 )
 from tests.trading_kernel.integration.test_entry_promotion_gate import (
     RecordingPromotionBackend,
@@ -24,7 +24,7 @@ from tests.trading_kernel.integration.test_strategy_universe_batch_bootstrap imp
 from tests.trading_kernel.unit.detectors.fixtures import NOW_MS
 
 
-def test_empty_database_rehearsal_reaches_six_active_universes_then_fenced_entry_promotion() -> None:
+def test_empty_database_rehearsal_reaches_all_active_universes_then_fenced_entry_promotion() -> None:
     """Run the production-shaped local release path without Tokyo or exchange writes."""
 
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
@@ -59,15 +59,16 @@ def test_empty_database_rehearsal_reaches_six_active_universes_then_fenced_entry
         assert isinstance(universe, Mapping)
         assert owner_policy["new_entry_submit_enabled"] is True
         assert capabilities["exchange_commands"] is True
-        assert universe["current_count"] == 6
+        assert universe["current_count"] == 8
         assert universe["scope_lifecycle_counts"] == {
-            "active": 42,
+            "active": 58,
             "warming": 0,
             "retired": 0,
         }
         assert universe_identities == {
-            event_spec_id: 7
-            for _event_id, event_spec_id in APPROVED_UNIVERSE_EVENT_SPECS
+            event_spec_id: len(member_ids)
+            for event_specs, member_ids in APPROVED_UNIVERSE_BATCHES.values()
+            for _event_id, event_spec_id in event_specs
         }
         assert backend.exchange_mutations == []
         assert backend.calls == [

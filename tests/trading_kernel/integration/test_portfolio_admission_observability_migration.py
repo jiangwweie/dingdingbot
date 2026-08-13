@@ -11,6 +11,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure import pg_models
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import (
@@ -468,7 +469,7 @@ CERTIFIED_0002_SOURCE_EVENTS = (
 
 
 def test_runtime_identity_points_to_current_schema_head() -> None:
-    assert CURRENT_SCHEMA_REVISION == "0004_owner_control_plane"
+    assert CURRENT_SCHEMA_REVISION == "0005_tradfi_instrument_center"
 
 
 def test_alembic_has_one_exact_current_head() -> None:
@@ -483,7 +484,7 @@ async def test_0003_creates_shadow_table_matching_current_metadata(
     compatible_migration_engine: AsyncEngine,
 ) -> None:
     engine = compatible_migration_engine
-    result = _run_migration(_database_url(engine), "upgrade", "head")
+    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
     assert result.returncode == 0, result.stderr[-4000:]
 
     async with engine.connect() as connection:
@@ -813,7 +814,16 @@ async def test_0003_installs_vnext_registry_and_retires_exact_source_lineage(
     result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
     assert result.returncode == 0, result.stderr[-4000:]
     async with PostgresKernelUnitOfWork(engine) as uow:
-        registry_seed = await seed_strategy_registry(uow, seeded_at_ms=2_000)
+        registry_seed = await seed_strategy_registry(
+            uow,
+            seeded_at_ms=2_000,
+            contracts=tuple(
+                contract
+                for contract in registered_strategy_contracts()
+                if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
+            ),
+            include_product_compatibility=False,
+        )
 
     async with engine.connect() as connection:
         groups = dict(

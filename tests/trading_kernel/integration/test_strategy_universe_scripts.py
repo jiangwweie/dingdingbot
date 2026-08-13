@@ -31,6 +31,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import (
+    CURRENT_SCHEMA_REVISION,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFIGURE_SCRIPT = REPO_ROOT / "scripts/trading_kernel/configure_strategy_universe.py"
@@ -61,7 +64,7 @@ async def script_database_url() -> AsyncGenerator[str, None]:
                 RuntimeAuthoritySeedRequest(
                     account_id="sensitive-account-id",
                     runtime_commit="task-12-local-test",
-                    schema_revision="0004_owner_control_plane",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
                     seeded_at_ms=NOW_MS - 1_000,
                 ),
             )
