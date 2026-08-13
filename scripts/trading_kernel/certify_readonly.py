@@ -105,9 +105,9 @@ def _universe_manifest_matches(
         event_spec_id: strategy_group_id
         for strategy_group_id, event_spec_id in expected_event_specs
     }
-    if tuple(str(row.get("event_spec_id", "")) for row in manifest) != tuple(
-        sorted(expected_group_by_event)
-    ):
+    if tuple(
+        sorted(str(row.get("event_spec_id", "")) for row in manifest)
+    ) != tuple(sorted(expected_group_by_event)):
         return False
     for row in manifest:
         event_spec_id = str(row.get("event_spec_id", ""))

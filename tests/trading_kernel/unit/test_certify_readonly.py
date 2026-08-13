@@ -81,3 +81,35 @@ def test_portfolio_admission_universe_manifest_requires_canonical_digest() -> No
         expected_event_specs=(("CPM-RO-001", event_spec_id),),
         expected_member_ids=members,
     )
+
+
+def test_portfolio_admission_universe_manifest_is_event_order_independent() -> None:
+    members = (
+        "binance-usdm:BTCUSDT:perpetual",
+        "binance-usdm:ETHUSDT:perpetual",
+    )
+    expected_event_specs = (
+        ("MPG-001", "event_spec:MPG-001:MPG-LONG:v3"),
+        ("CPM-RO-001", "event_spec:CPM-RO-001:CPM-LONG:v3"),
+    )
+    manifest = [
+        {
+            "event_spec_id": event_spec_id,
+            "semantic_digest": build_strategy_universe(
+                universe_version_id=f"universe:test:{strategy_group_id}",
+                strategy_group_id=strategy_group_id,
+                event_spec_id=event_spec_id,
+                universe_version=1,
+                exchange_instrument_ids=members,
+                installed_at_ms=1,
+            ).semantic_digest,
+            "member_ids": list(members),
+        }
+        for strategy_group_id, event_spec_id in expected_event_specs
+    ]
+
+    assert _universe_manifest_matches(
+        manifest,
+        expected_event_specs=expected_event_specs,
+        expected_member_ids=members,
+    )
