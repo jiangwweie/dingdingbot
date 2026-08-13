@@ -207,6 +207,11 @@ def _parser() -> argparse.ArgumentParser:
         "--expected-preservation-proof-digest",
         help="Release marker proof digest expected from PostgreSQL metadata.",
     )
+    parser.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="Emit only bounded preservation-manifest metadata for deployment RPC.",
+    )
     return parser
 
 
@@ -1776,8 +1781,26 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("preservation proof requires a source revision")
     else:
         payload = asyncio.run(_verify(database_url))
+    if args.summary_only:
+        payload = _summary_payload(payload)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0 if payload["status"] == "pass" else 1
+
+
+def _summary_payload(payload: dict[str, object]) -> dict[str, object]:
+    """Keep deployment RPC bounded without weakening manifest verification."""
+
+    manifest = payload.get("preservation_manifest")
+    if not isinstance(manifest, dict):
+        return payload
+    return {
+        **payload,
+        "preservation_manifest": {
+            key: manifest[key]
+            for key in ("schema", "source_revision", "table_count", "row_count", "digest")
+            if key in manifest
+        },
+    }
 
 
 if __name__ == "__main__":

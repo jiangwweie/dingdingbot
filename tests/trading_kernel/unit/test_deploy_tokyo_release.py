@@ -319,6 +319,45 @@ def test_default_ssh_timeout_covers_bounded_preservation_scan() -> None:
     assert args.timeout_seconds == 600.0
 
 
+def test_ssh_deployment_requests_only_bounded_preservation_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = SshTokyoReleaseBackend(
+        target="tokyo",
+        repo_root=Path("/repo"),
+        timeout_seconds=600,
+    )
+    commands: list[tuple[str, ...]] = []
+
+    def fake_remote(
+        argv: tuple[str, ...],
+        *,
+        check: bool = True,
+    ) -> object:
+        del check
+        commands.append(argv)
+        return type(
+            "Result",
+            (),
+            {
+                "returncode": 0,
+                "stdout": '{"status":"pass","preservation_manifest":{"digest":"sha256:'
+                + "d" * 64
+                + '"}}',
+                "stderr": "",
+            },
+        )()
+
+    monkeypatch.setattr(backend, "_remote", fake_remote)
+    backend.verify_preservation(
+        TARGET_RELEASE,
+        SOURCE_SCHEMA_REVISION,
+        PRESERVATION_DIGEST,
+    )
+
+    assert "--summary-only" in commands[-1][-1]
+
+
 @pytest.mark.parametrize(
     ("source_gate", "expected_message"),
     [

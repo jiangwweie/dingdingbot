@@ -1306,6 +1306,7 @@ class SshTokyoReleaseBackend:
             "scripts/trading_kernel/verify_schema.py",
             "--compatible-source-revision",
             source_schema_revision,
+            "--summary-only",
         )
 
     def read_release_marker(self, release: str, marker: str) -> str:
@@ -1416,6 +1417,7 @@ class SshTokyoReleaseBackend:
             source_schema_revision,
             "--expected-preservation-digest",
             expected_digest,
+            "--summary-only",
         )
 
     def persist_preservation_digest(self, release: str, digest: str) -> None:
@@ -1472,6 +1474,7 @@ class SshTokyoReleaseBackend:
             COMPATIBLE_SOURCE_SCHEMA_REVISION,
             "--expected-preservation-digest",
             digest,
+            "--summary-only",
             check=False,
         )
         _require_preservation_verification(
