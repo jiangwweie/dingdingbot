@@ -465,9 +465,11 @@ def test_stable_policy_v4_contract_defers_deployed_identity_to_roadmap() -> None
         assert "currently deployed Policy v3" not in source
         assert "MAIN_CONTROL_ROADMAP.md" in source
 
-    assert "| Owner controls | Global new ENTRY is enabled at Policy version `" in roadmap
-    assert "0004_owner_control_plane" in roadmap
+    assert "| Owner controls | Global new ENTRY is disabled at Policy version `" in roadmap
+    assert "Entry write fence is present" in roadmap
+    assert "0005_tradfi_instrument_center" in roadmap
     assert "`SOR-001` is paused" in roadmap
+    assert "`SOR-US-EQ-PERP-001` is paused" in roadmap
 
 
 def test_current_deployment_authority_has_no_active_handover_or_schema_deletion() -> None:

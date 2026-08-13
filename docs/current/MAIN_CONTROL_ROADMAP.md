@@ -30,80 +30,61 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Integration branch | `dev` |
-| Verified at | `2026-08-10 13:35 CST`; direct PostgreSQL, systemd, Nginx, public HTTPS and Binance readonly evidence |
-| Production commit | `1c3063bf520a52c15b144bf613884c7e00147bfc` |
-| Production tag | `tokyo-runtime-2026.08.10.2`; annotated, immutable, and verified on `origin` |
-| Production release | `/opt/brc/releases/brc-trading-kernel-1c3063bf520a` |
-| Production-commit certification | The exact six-command Release Certification passes: unit/architecture, integration, full-chain, Ruff, Mypy and diff checks |
-| Deployment phase | The sealed `0004_owner_control_plane` authority, Owner Console and Strategy Workbench received regular releases; the resumable migration repair, independent static release and reconciled flatten-operation completion repair remain active |
-| PostgreSQL identity | Alembic, runtime metadata, Registry, armed Policy authority, Seed and runtime capabilities agree with the production commit and schema |
-| History preservation | The database-bound `0002` preservation digest and proof remain exact after migration; terminal lineage was retained without downgrade, dual write, old-schema reader or manual lifecycle DML |
-| StrategyUniverse deployment | The six approved vNext Event Universes are exact Active with no Warming Universe; the target-bound seven-member Certification Batch passed during the regular release |
-| Owner controls | Global new ENTRY is enabled at Policy version `9`; `SOR-001` is paused at Strategy Control version `2`, so both SOR 15-minute Events reject new admission while the other registered StrategyGroups remain enabled |
-| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation are active and enabled; the Entry write fence is absent after official promotion |
-| Runtime stability | Observation, Entry, Lifecycle, Reconciliation and Owner API are active/enabled with zero restarts in the post-release samples |
-| 2026-08-10 PostgreSQL postflight | No nonterminal Ticket, non-flat Position, active Budget Reservation, unresolved Exchange Command or open Incident existed at the completed release postflight |
-| 2026-08-10 exchange postflight | Binance was `independent_sides` and `cross`; the seven approved instruments were configured at `5x`, with no non-flat position or open-order domain at the completed release postflight |
-| Controlled flatten acceptance | Natural Ticket `ticket:fb99bed7ca2b28e49b6346d498b8a23c` entered through the official path, was exited by Owner authorization `owner-authorization:3ae1622e6e124ffab141b350f89e3330`, and is terminal, reconciled, settled and reviewed; the durable Operation is `completed` with no blocker |
-| Owner Console | `https://jiaoyingpan.cloud/trading/` is active behind the existing Nginx HTTPS server; the Strategy Workbench static route is deployed from the exact verified build, and its protected API returns `401` before password-plus-TOTP authentication |
-| Nginx isolation | Existing Nginx configuration was not rewritten; syntax passes, the Owner API remains Unix-Socket proxied, and unauthenticated data access returns `401` |
-| Full capability | Natural v4 closure evidence now exists; `promote-full` and the final requirement audit remain explicit follow-up operations and were not bundled into this release |
-| M1 multi-asset planning | Owner adopted the same-Venue Binance USDⓈ-M TradFi Equity Product Family, same-account isolated RuntimeProfile, eight candidates plus QQQ/SPY references, LONG/SHORT Observation and REGULAR-only first Entry boundary; local M2–M4 implementation is authorized without production deployment, real TradFi Entry or capital increase |
-| M2–M4 local candidate | Product Compatibility, Instrument Center, Product-filtered controlled Warming Universe edit, neutral TradFi RuntimeProfile, and `SOR-US-EQ-PERP-001` LONG/SHORT detector and ExitPolicy are implemented on the focused branch. M6 supersedes the earlier observation-only Policy/Profile identities; production remains unchanged |
-| M5 local candidate | Signal-owned TradFi SOR Observation Outcomes, automatic bounded Product/Session refresh, version-isolated Strategy Observation reads and Owner Console path review are implemented locally. Focused acceptance proves no AdmissionDecision, CapacityClaim, Ticket, Exchange Command or venue mutation is created; production remains unchanged and TradFi Entry remains disabled |
-| M6 local candidate | The focused branch implements direct small-capital TradFi live Entry through the official Signal → AdmissionDecision → CapacityClaim → Ticket → durable Command chain, one `policy-main / Policy v4` Event-to-Profile scope, neutral `tradfi-equity-usdm-v1`, Product action-time gates, account-wide Owner flatten/Drain, Strategy Live Control and Instrument threshold display. Focused backend, migration, deployment, document, frontend, Ruff, Mypy and diff verification pass. The candidate remains local and unpushed; no R4 deployment, Entry promotion, Strategy resume or exchange write has occurred |
-| Scope boundary | Funding ownership and broader Incident-quality work were not changed by this release |
+| Verified at | `2026-08-13`; direct PostgreSQL, systemd, release-marker and Binance readonly postflight evidence |
+| Production commit | `3fa2e21ce52bc3c203c721be4b696dc4265fcf96` |
+| Production tag | `tokyo-runtime-2026.08.13.1`; annotated, immutable, verified locally and pushed to `origin` |
+| Production release | `/opt/brc/releases/brc-trading-kernel-3fa2e21ce52b` |
+| Production-commit certification | `6/6 pass`; unit/architecture, integration, full-chain, Ruff, Mypy and diff checks passed for the exact deployed commit |
+| Deployment phase | R4 stopped-and-flat fix-forward deployment completed with `status=pass`; Product Schedule parsing and StrategyUniverse manifest certification defects were repaired before the final successful release |
+| PostgreSQL identity | Alembic and runtime authority identify `0005_tradfi_instrument_center`; Registry, Policy, Seed and runtime capabilities agree with the deployed commit and schema |
+| History preservation | The forward migration retained certified terminal lineage without downgrade, dual write, old-schema reader, active-position handover or manual lifecycle DML |
+| StrategyUniverse deployment | Eight Universes are Active, zero are Warming, 58 scopes are Active and 15 instruments are eligible |
+| Owner controls | Global new ENTRY is disabled at Policy version `11`; Entry write fence is present; Crypto `SOR-001` is paused at Strategy Control version `2`, and TradFi `SOR-US-EQ-PERP-001` is paused at Strategy Control version `1` |
+| Runtime ownership | Observation, Lifecycle and Reconciliation are active and enabled; Entry is inactive and disabled while the Entry write fence remains installed |
+| Runtime stability | Observation, Lifecycle and Reconciliation report zero restarts in the completed postflight sample |
+| Current PostgreSQL activity | No active Ticket, non-flat Position, unresolved Exchange Command or open Incident exists; current certification is flat and portfolio admission postflight passes |
+| Exchange postflight | Binance reports zero non-flat position domains and zero open-order domains; wallet balance is `449.26301574U`, account mode remains compatible and all 15 eligible instruments are configured at `5x` |
+| Product session | Eight traded TradFi Equity instruments resolve to `regular`; the two reference instruments currently resolve to `unavailable` and do not authorize ENTRY |
+| Current live acceptance | The R4 runtime is production-installed and readonly-certified, but no new real ENTRY is currently authorized because Global Entry is disabled, Entry is stopped/fenced and both SOR StrategyGroups are paused |
+| Controlled flatten acceptance | The earlier natural controlled-flatten Ticket remains certified terminal, reconciled, settled and reviewed; no new controlled flatten or lifecycle DML was performed by this deployment |
+| Owner Console | The existing public HTTPS Owner Console and Nginx isolation were preserved; this R4 deployment did not replace or rewrite unrelated Nginx service configuration |
+| Multi-asset capability | Product Compatibility, Instrument Center, bounded Product/Session refresh, independent `SOR-US-EQ-PERP-001` semantics and direct official-chain TradFi ENTRY capability are deployed under the shared `policy-main / Policy v4` capital authority |
+| Full capability | Entry Promotion, TradFi Strategy resume, `promote-full` and the final requirement audit remain explicit follow-up actions and were not bundled into this release |
+| Scope boundary | Crypto `SOR-001` remains paused; funding ownership and broader Incident-quality work were not changed by this release |
 
-## Deferred Release Candidate
+## Deployment Repairs Closed
 
-The Owner reported active production exposure on 2026-08-11 and explicitly
-chose natural lifecycle completion instead of manual or deployment-driven
-flattening. This report supersedes the prior flat postflight only for current
-deployment readiness; exact current PostgreSQL and exchange state has not been
-refreshed by this documentation-only action.
-
-| Area | Deferred state |
-| --- | --- |
-| Candidate commit | `ae2462562245ee236669407d997cbfaff1ca3020` — `feat(deploy): split owner console release paths`; it contains the prior Ticket price-map candidate plus M0.5 R1/R2 release separation |
-| Candidate branch | Exact commit is on focused branch `codex/owner-console-phase1-20260805`; it is not a production tag and has not been pushed or deployed by this work |
-| Classification | Exact `1c3063bf..ae246256` classification is `R2`; affected runtime is only `brc-owner-console-api.service`, with no flatness or Kernel Release Certification requirement |
-| Certification | Exact focused Owner API Certification Manifest is `pass` for Schema `0004_owner_control_plane`; the static frontend exact production build also passes |
-| Previous candidate | `5e902453360f884d2ec2a7d8c6c92568d9459f4a` remains immutable certified provenance but is superseded as the proposed R1/R2 deployment target by `ae246256...` |
-| Production identity | Production remains `1c3063bf520a52c15b144bf613884c7e00147bfc` and `tokyo-runtime-2026.08.10.2`; the new candidate has not changed the current release symlink, PostgreSQL identity or services |
-| Deferral decision | No Controlled Flatten, no deployment, no Owner Policy change, no Entry service/fence change and no StrategyGroup control change are authorized by this record |
-| Pre-M0.5 activation boundary | Under the currently installed combined release path, deployment still requires Entry fencing and exact internal/external flatness; existing Tickets continue naturally and no deployment-driven flattening is authorized |
-| M0.5 classification | The exact `1c3063bf..ae246256` change set classifies as `R2`: Owner API and static presentation only, with no Schema, Registry, Owner Policy, runtime-authority or Exchange Command change |
-| M0.5 local state | The R0-R4 classifier, independent R1/R2 release roots, focused Owner API certification, schema-compatible API startup and removal of Kernel artifact preservation are implemented locally on the focused branch; no production service or symlink has changed |
-| M0.5 activation boundary | After explicit Owner deployment confirmation, exact candidate `ae246256...` may activate through R1/R2 without flatness or Kernel service changes |
-| Supersession | Replacing `ae246256...` with a later candidate requires another explicit record and an exact passing focused certification |
+| Defect | Root cause | Production resolution |
+| --- | --- | --- |
+| TradFi `warm_facts_invalid` | Binance returns the live Equity schedule under `marketSchedules.EQUITY.sessions`, while the parser expected a symbol-keyed schedule | Product Schedule parsing now accepts the production response shape; the production-shaped regression formed seven Warming Facts with zero Signal, Ticket or Command |
+| StrategyUniverse readonly certification failure | Manifest comparison incorrectly depended on Event row ordering | Certification now compares the manifest semantically and independently of Event order; the final readonly postflight passes identity and semantic-digest checks |
+| Initial R4 bootstrap timeout | A pre-fix failed Observation cadence had already scheduled the next attempt at the following closed 15-minute bar | The deployment resumed through the official bounded bootstrap path after the next natural closed bar; no synthetic lifecycle write or exchange mutation was used |
 
 ## Current Performance Snapshot
 
-The 2026-08-10 deployment postflight verifies immediate release stability, not
-a representative host-capacity benchmark.
+The 2026-08-13 postflight verifies immediate release safety and authority
+alignment. It is not a representative strategy-performance or host-capacity
+benchmark.
 
 | Area | Measured state | Contract interpretation |
 | --- | --- | --- |
-| Worker stability | Observation, Entry, Lifecycle, Reconciliation and Owner API are active/enabled; all restart counters are zero | Trading and control-plane cadence is stable after release and promotion |
-| Entry boundary | Entry started while fenced, Global ENTRY resumed through the TOTP-protected Owner API, and the write fence was removed last | Non-SOR admission is restored without reopening SOR-001 |
-| Internal truth | PostgreSQL reports zero active trading residue and the flatten Operation is `completed` | The controlled exit, cleanup, Settlement and Review projection agree |
-| External truth | Binance is flat with no open-order domain; account mode, margin mode and configured leverage remain exact | External postflight agrees with internal flatness |
-| Web isolation | Nginx syntax passes; the public Strategy Workbench static `index.html` matches the locally verified build hash and the Owner Console remains same-origin behind the Unix Socket | The new frontend and API did not replace or reconfigure unrelated services |
-| Release identity | Current symlink, release markers, runtime environment and PostgreSQL metadata identify `1c3063bf` and `0004_owner_control_plane` | No old/new writer identity overlap was observed |
-
-A longer resource-envelope sample remains a separate operational observation;
-it is not a gate retroactively added to this completed deployment.
+| Worker stability | Observation, Lifecycle and Reconciliation are active/enabled with zero restarts; Entry remains inactive/disabled | Readonly observation and safety lifecycle cadence are stable without granting new trade authority |
+| Entry boundary | Policy version `11` has `new_entry_submit_enabled=false`; Entry Fence is present; both SOR controls are paused | Deployed capability cannot create a new real Ticket until separate Owner-controlled promotion and resume actions pass their current gates |
+| Internal truth | Certification reports zero Ticket, Position, Command and Incident residue; eight Universes are Active with zero Warming | PostgreSQL authority is internally clean and ready for a later controlled activation decision |
+| External truth | Binance reports zero positions and open orders; 15 eligible instruments remain at `5x` | External flatness agrees with internal flatness and the approved capital configuration |
+| Release identity | Current release, runtime metadata and PostgreSQL schema identify `3fa2e21c` and `0005_tradfi_instrument_center` | No old/new writer identity overlap remains after the R4 release |
+| Product readiness | Eight traded TradFi instruments are in regular session; two reference instruments are unavailable | Product/session facts are readable without treating unavailable references as executable instruments |
 
 ## Remaining Critical Path
 
 | Order | Work | Exit condition |
 | ---: | --- | --- |
-| 1 | Natural lifecycle continuation | The current production release protects, exits, reconciles, settles and reviews every existing Ticket without deployment-driven flattening |
-| 2 | M0.5 local acceptance | Complete focused code review, Owner API tests, release-classifier checks, frontend build, Ruff, Mypy and document authority checks without production mutation |
-| 3 | M0.5 R1/R2 activation | Owner explicitly confirms deployment; record the exact superseding static/API Commit, install the split release roots and prove Kernel workers and `/opt/brc/current` were untouched |
-| 4 | Full policy promotion | After current exposure is naturally flat, run and certify `promote-full` from current PostgreSQL and Binance facts with exact Kernel identity |
-| 5 | Final requirement audit | Re-run local and Tokyo evidence and close every acceptance item |
-| 6 | M6 combined R4 activation | The local M0.5 + M2–M6 candidate is sealed and remains unpushed. After explicit Owner deployment confirmation, refresh current PostgreSQL, Binance, systemd and Nginx facts; require exact flatness and R4 gates; perform the forward `0005` migration and readonly postflight; then use TOTP Strategy resume to open direct small-capital TradFi ENTRY |
+| 1 | Global Entry Promotion | Revalidate exact commit, schema, flatness, Policy and Binance facts; enable the official Entry path and remove the Entry Fence only through the approved promotion workflow |
+| 2 | TradFi Strategy activation | Explicitly resume `SOR-US-EQ-PERP-001` after Global Entry is promoted; keep Crypto `SOR-001` paused unless the Owner separately changes that strategy control |
+| 3 | First natural TradFi lifecycle | One in-scope signal progresses through AdmissionDecision, CapacityClaim, immutable Ticket, durable Command, protection, exit, Reconciliation, Settlement and Review |
+| 4 | External and internal closure | Exchange has no residual position or order; PostgreSQL has no active Ticket, reservation, unresolved Command or Incident for the completed episode |
+| 5 | Full policy promotion | Run and certify `promote-full` only from current exact production facts and an accepted terminal reviewed Ticket |
+| 6 | Final requirement audit | Re-run local and Tokyo evidence and close every remaining acceptance item |
 
 ## Current Stop Conditions
 
@@ -112,12 +93,9 @@ stale or contradictory facts, same-domain occupancy, missing budget or Initial
 Stop, duplicate or unknown command outcome, schema/code mismatch, old-writer
 overlap, or official-path bypass.
 
-The `0004` production deployment, Owner Console Strategy Workbench, Owner
-control plane, controlled flatten acceptance and official Entry restoration are
-complete and sealed.
-`SOR-001` remains paused by explicit Owner control. The broader rebuild program
-is not final until M0.5 activation, `promote-full` and the final requirement
-audit are certified from current direct evidence. Until an explicit M0.5
-deployment confirmation, production remains on
-`1c3063bf520a52c15b144bf613884c7e00147bfc` and active exposure follows the
-existing certified lifecycle.
+The `0005_tradfi_instrument_center` R4 deployment is complete and sealed at
+`3fa2e21ce52bc3c203c721be4b696dc4265fcf96`. Global Entry remains disabled,
+Entry remains stopped and fenced, and both `SOR-001` and
+`SOR-US-EQ-PERP-001` remain paused. The deployed TradFi capability therefore
+exists without current exchange-write authority. Later Entry Promotion,
+Strategy resume and `promote-full` are separate Owner-controlled operations.
