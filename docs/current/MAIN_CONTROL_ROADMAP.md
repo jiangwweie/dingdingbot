@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-08-13
+last_verified: 2026-08-14
 ---
 
 # Main Control Roadmap
@@ -30,7 +30,7 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Integration branch | `dev` |
-| Verified at | `2026-08-13`; direct PostgreSQL, systemd, release-marker and Binance readonly postflight evidence |
+| Verified at | `2026-08-14 00:18 CST`; direct PostgreSQL, systemd, release-marker, Owner control API and Binance readonly evidence |
 | Production commit | `3fa2e21ce52bc3c203c721be4b696dc4265fcf96` |
 | Production tag | `tokyo-runtime-2026.08.13.1`; annotated, immutable, verified locally and pushed to `origin` |
 | Production release | `/opt/brc/releases/brc-trading-kernel-3fa2e21ce52b` |
@@ -39,18 +39,18 @@ different Netting Domains progress concurrently.
 | PostgreSQL identity | Alembic and runtime authority identify `0005_tradfi_instrument_center`; Registry, Policy, Seed and runtime capabilities agree with the deployed commit and schema |
 | History preservation | The forward migration retained certified terminal lineage without downgrade, dual write, old-schema reader, active-position handover or manual lifecycle DML |
 | StrategyUniverse deployment | Eight Universes are Active, zero are Warming, 58 scopes are Active and 15 instruments are eligible |
-| Owner controls | Global new ENTRY is disabled at Policy version `11`; Entry write fence is present; Crypto `SOR-001` is paused at Strategy Control version `2`, and TradFi `SOR-US-EQ-PERP-001` is paused at Strategy Control version `1` |
-| Runtime ownership | Observation, Lifecycle and Reconciliation are active and enabled; Entry is inactive and disabled while the Entry write fence remains installed |
-| Runtime stability | Observation, Lifecycle and Reconciliation report zero restarts in the completed postflight sample |
-| Current PostgreSQL activity | No active Ticket, non-flat Position, unresolved Exchange Command or open Incident exists; current certification is flat and portfolio admission postflight passes |
+| Owner controls | Global new ENTRY is enabled at Policy version `12`; Entry write fence is absent; Crypto `SOR-001` is paused at Strategy Control version `2`, and TradFi `SOR-US-EQ-PERP-001` is enabled at Strategy Control version `2` |
+| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation are active and enabled; the persistent Entry worker is in its normal arbitration loop |
+| Runtime stability | All four persistent workers report zero restarts; Entry has produced repeated `no_candidate` results after promotion without service error |
+| Current PostgreSQL activity | No active Ticket, non-flat Position, unresolved Exchange Command or open Incident exists; the 16 active TradFi scopes are Entry-ready, all 16 Readiness rows report `signal_absent`, and there is no fresh unadmitted TradFi Signal |
 | Exchange postflight | Binance reports zero non-flat position domains and zero open-order domains; wallet balance is `449.26301574U`, account mode remains compatible and all 15 eligible instruments are configured at `5x` |
-| Product session | Eight traded TradFi Equity instruments resolve to `regular`; the two reference instruments currently resolve to `unavailable` and do not authorize ENTRY |
-| Current live acceptance | The R4 runtime is production-installed and readonly-certified, but no new real ENTRY is currently authorized because Global Entry is disabled, Entry is stopped/fenced and both SOR StrategyGroups are paused |
+| Product session | Eight traded TradFi Equity instruments resolve to `active / regular`; their unavailable corporate-event feed is an explicit warning, not an Entry rejection, while the two reference instruments remain outside executable membership |
+| Current live acceptance | Official Entry Promotion completed with `status=promoted`; `SOR-US-EQ-PERP-001` was resumed through the TOTP-protected Owner API and may now produce a natural real Ticket through the official chain |
 | Controlled flatten acceptance | The earlier natural controlled-flatten Ticket remains certified terminal, reconciled, settled and reviewed; no new controlled flatten or lifecycle DML was performed by this deployment |
 | Owner Console | The existing public HTTPS Owner Console and Nginx isolation were preserved; this R4 deployment did not replace or rewrite unrelated Nginx service configuration |
 | Multi-asset capability | Product Compatibility, Instrument Center, bounded Product/Session refresh, independent `SOR-US-EQ-PERP-001` semantics and direct official-chain TradFi ENTRY capability are deployed under the shared `policy-main / Policy v4` capital authority |
-| Full capability | Entry Promotion, TradFi Strategy resume, `promote-full` and the final requirement audit remain explicit follow-up actions and were not bundled into this release |
-| Scope boundary | Crypto `SOR-001` remains paused; funding ownership and broader Incident-quality work were not changed by this release |
+| Full capability | Entry Promotion and TradFi Strategy resume are complete; the first natural TradFi lifecycle, `promote-full` and the final requirement audit remain explicit follow-up evidence |
+| Scope boundary | Crypto `SOR-001` remains paused; no Crypto SOR Entry authority was restored, and funding ownership and broader Incident-quality work were not changed |
 
 ## Deployment Repairs Closed
 
@@ -62,29 +62,28 @@ different Netting Domains progress concurrently.
 
 ## Current Performance Snapshot
 
-The 2026-08-13 postflight verifies immediate release safety and authority
-alignment. It is not a representative strategy-performance or host-capacity
-benchmark.
+The 2026-08-14 post-promotion snapshot verifies immediate trade authority,
+runtime safety and identity alignment. It is not a representative
+strategy-performance or host-capacity benchmark.
 
 | Area | Measured state | Contract interpretation |
 | --- | --- | --- |
-| Worker stability | Observation, Lifecycle and Reconciliation are active/enabled with zero restarts; Entry remains inactive/disabled | Readonly observation and safety lifecycle cadence are stable without granting new trade authority |
-| Entry boundary | Policy version `11` has `new_entry_submit_enabled=false`; Entry Fence is present; both SOR controls are paused | Deployed capability cannot create a new real Ticket until separate Owner-controlled promotion and resume actions pass their current gates |
-| Internal truth | Certification reports zero Ticket, Position, Command and Incident residue; eight Universes are Active with zero Warming | PostgreSQL authority is internally clean and ready for a later controlled activation decision |
+| Worker stability | Observation, Entry, Lifecycle and Reconciliation are active/enabled with zero restarts | The complete persistent runtime cadence is operating after Entry Promotion |
+| Entry boundary | Policy version `12` has `new_entry_submit_enabled=true`; Entry Fence is absent; TradFi SOR is enabled while Crypto SOR remains paused | A fresh eligible TradFi Signal may proceed through serialized admission, while Crypto SOR remains excluded by its scoped control |
+| Internal truth | Certification reports zero Ticket, Position, Command and Incident residue; eight Universes are Active with zero Warming; 16 TradFi scopes are Entry-ready | PostgreSQL authority is clean and the current first blocker is `signal_absent`, not a policy, identity, service or Product gate |
 | External truth | Binance reports zero positions and open orders; 15 eligible instruments remain at `5x` | External flatness agrees with internal flatness and the approved capital configuration |
 | Release identity | Current release, runtime metadata and PostgreSQL schema identify `3fa2e21c` and `0005_tradfi_instrument_center` | No old/new writer identity overlap remains after the R4 release |
-| Product readiness | Eight traded TradFi instruments are in regular session; two reference instruments are unavailable | Product/session facts are readable without treating unavailable references as executable instruments |
+| Product readiness | Eight traded TradFi instruments are `active / regular` with eight fresh eligible certifications; corporate-event data is unavailable and recorded as a warning | Current Product gates permit Entry when spread, mark/index deviation and all remaining action-time facts pass |
 
 ## Remaining Critical Path
 
 | Order | Work | Exit condition |
 | ---: | --- | --- |
-| 1 | Global Entry Promotion | Revalidate exact commit, schema, flatness, Policy and Binance facts; enable the official Entry path and remove the Entry Fence only through the approved promotion workflow |
-| 2 | TradFi Strategy activation | Explicitly resume `SOR-US-EQ-PERP-001` after Global Entry is promoted; keep Crypto `SOR-001` paused unless the Owner separately changes that strategy control |
-| 3 | First natural TradFi lifecycle | One in-scope signal progresses through AdmissionDecision, CapacityClaim, immutable Ticket, durable Command, protection, exit, Reconciliation, Settlement and Review |
-| 4 | External and internal closure | Exchange has no residual position or order; PostgreSQL has no active Ticket, reservation, unresolved Command or Incident for the completed episode |
-| 5 | Full policy promotion | Run and certify `promote-full` only from current exact production facts and an accepted terminal reviewed Ticket |
-| 6 | Final requirement audit | Re-run local and Tokyo evidence and close every remaining acceptance item |
+| 1 | Natural opportunity | Maintain the current 15-minute readonly monitor until an eligible TradFi SOR Signal appears; `signal_absent` is the normal waiting state |
+| 2 | First natural TradFi lifecycle | One in-scope signal progresses through AdmissionDecision, CapacityClaim, immutable Ticket, durable Command, protection, exit, Reconciliation, Settlement and Review |
+| 3 | External and internal closure | Exchange has no residual position or order; PostgreSQL has no active Ticket, reservation, unresolved Command or Incident for the completed episode |
+| 4 | Full policy promotion | Run and certify `promote-full` only from current exact production facts and an accepted terminal reviewed Ticket |
+| 5 | Final requirement audit | Re-run local and Tokyo evidence and close every remaining acceptance item |
 
 ## Current Stop Conditions
 
@@ -94,8 +93,8 @@ Stop, duplicate or unknown command outcome, schema/code mismatch, old-writer
 overlap, or official-path bypass.
 
 The `0005_tradfi_instrument_center` R4 deployment is complete and sealed at
-`3fa2e21ce52bc3c203c721be4b696dc4265fcf96`. Global Entry remains disabled,
-Entry remains stopped and fenced, and both `SOR-001` and
-`SOR-US-EQ-PERP-001` remain paused. The deployed TradFi capability therefore
-exists without current exchange-write authority. Later Entry Promotion,
-Strategy resume and `promote-full` are separate Owner-controlled operations.
+`3fa2e21ce52bc3c203c721be4b696dc4265fcf96`. Global Entry is enabled at Policy
+version `12`, Entry is active with no write fence, `SOR-US-EQ-PERP-001` is
+enabled and `SOR-001` remains paused. The current TradFi chain is therefore
+waiting only for a natural eligible Signal. A 15-minute readonly heartbeat
+observes chain progress and abnormalities without performing runtime mutation.
