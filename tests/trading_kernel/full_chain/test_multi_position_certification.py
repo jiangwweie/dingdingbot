@@ -46,15 +46,16 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_capabilities_current,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from tests.trading_kernel.integration.test_command_dispatch import (
     PreflightFacts,
     _commit_passed_post_fill_stress_if_pending,
+    _ticket,
 )
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -125,6 +126,9 @@ async def test_two_serial_entries_become_concurrent_protected_long_short_positio
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side="short",
         runtime_scope_id="scope-sor-btc-short",
+        runtime=long_ticket.identity.runtime.model_copy(
+            update={"event_spec_id": "event_spec:SOR-001:SOR-SHORT:v4"}
+        ),
     )
 
     await _issue(certification_engine, long_ticket, "issuer-long", 1_001)
@@ -225,12 +229,15 @@ async def test_three_serial_tickets_protect_independent_domains_and_fence_refusa
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side="short",
         runtime_scope_id="scope-sor-btc-short",
+        runtime=btc_long.identity.runtime.model_copy(
+            update={"event_spec_id": "event_spec:SOR-001:SOR-SHORT:v4"}
+        ),
     )
     cpm_runtime = btc_long.identity.runtime.model_copy(
         update={
             "strategy_group_id": "CPM-RO-001",
-            "strategy_version_id": "sgv:CPM-RO-001:v2",
-            "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
+            "strategy_version_id": "sgv:CPM-RO-001:v3",
+            "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v3",
         }
     )
     eth_long = _ticket_for_domain(
@@ -263,8 +270,8 @@ async def test_three_serial_tickets_protect_independent_domains_and_fence_refusa
     mi_runtime = eth_long.identity.runtime.model_copy(
         update={
             "strategy_group_id": "MI-001",
-            "strategy_version_id": "sgv:MI-001:v2",
-            "event_spec_id": "event_spec:MI-001:MI-LONG:v2",
+            "strategy_version_id": "sgv:MI-001:v3",
+            "event_spec_id": "event_spec:MI-001:MI-LONG:v3",
         }
     )
     same_direction = _ticket_for_domain(
@@ -279,8 +286,8 @@ async def test_three_serial_tickets_protect_independent_domains_and_fence_refusa
     brf_runtime = eth_long.identity.runtime.model_copy(
         update={
             "strategy_group_id": "BRF2-001",
-            "strategy_version_id": "sgv:BRF2-001:v2",
-            "event_spec_id": "event_spec:BRF2-001:BRF2-SHORT:v2",
+            "strategy_version_id": "sgv:BRF2-001:v3",
+            "event_spec_id": "event_spec:BRF2-001:BRF2-SHORT:v3",
         }
     )
     fourth_ticket = _ticket_for_domain(
@@ -459,7 +466,7 @@ async def _dispatch(
             timeout_seconds=1,
             runtime_commit="kernel-test-head" if entry else None,
             schema_revision=(
-                "0004_owner_control_plane" if entry else None
+                CURRENT_SCHEMA_REVISION if entry else None
             ),
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
@@ -553,7 +560,21 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 supported_margin_mode="cross",
                 post_stop_stress_multiple="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
-                scope={},
+                scope={
+                    "event_runtime_profiles": [
+                        {
+                            "event_spec_id": event_spec_id,
+                            "runtime_profile_id": "tiny-live-v1",
+                        }
+                        for event_spec_id in (
+                            "event_spec:BRF2-001:BRF2-SHORT:v3",
+                            "event_spec:CPM-RO-001:CPM-LONG:v3",
+                            "event_spec:MI-001:MI-LONG:v3",
+                            "event_spec:SOR-001:SOR-LONG:v4",
+                            "event_spec:SOR-001:SOR-SHORT:v4",
+                        )
+                    ]
+                },
                 updated_at_ms=1_000,
             )
         )
@@ -562,7 +583,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0004_owner_control_plane",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 certification={},
                 updated_at_ms=1_000,
             )

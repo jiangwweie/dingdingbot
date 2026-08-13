@@ -38,6 +38,7 @@ from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
     ReconciliationWorkerStatus,
@@ -50,12 +51,18 @@ from tests.trading_kernel.integration.test_command_dispatch import (
     _issue,
     _seed_policy,
 )
+from tests.trading_kernel.integration.test_command_dispatch import (
+    _ticket as _registered_sor_ticket,
+)
 from tests.trading_kernel.integration.universe_certification_support import (
     NoTicketVenueTruth,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
 
 stress_engine = dispatch_fixture.dispatch_engine
+
+
+def _ticket(**updates: object):
+    return _registered_sor_ticket().model_copy(update=updates)
 
 
 def _brackets() -> tuple[MaintenanceMarginBracket, ...]:
@@ -576,7 +583,7 @@ async def _reach_post_fill_pending(
             lease_until_ms=6_100,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0004_owner_control_plane",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=TicketPreflightFacts(ticket),
@@ -650,7 +657,7 @@ async def _run_post_fill_worker(
         ReconciliationWorkerRequest(
             worker_id="post-fill-reconciliation",
             runtime_commit="kernel-test-head",
-            schema_revision="0004_owner_control_plane",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             now_ms=now_ms,
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,

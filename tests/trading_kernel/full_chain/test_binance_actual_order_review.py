@@ -27,6 +27,7 @@ from src.trading_kernel.domain.commands import ExchangeCommandKind
 from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
@@ -278,7 +279,7 @@ def _review_worker_request(*, now_ms: int) -> ReconciliationWorkerRequest:
     return ReconciliationWorkerRequest(
         worker_id="reconciliation-full-chain",
         runtime_commit="kernel-test-head",
-        schema_revision="0004_owner_control_plane",
+        schema_revision=CURRENT_SCHEMA_REVISION,
         now_ms=now_ms,
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,

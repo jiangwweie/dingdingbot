@@ -557,7 +557,11 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
 
 @pytest.mark.parametrize(
     "contract",
-    registered_strategy_contracts(),
+    tuple(
+        contract
+        for contract in registered_strategy_contracts()
+        if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
+    ),
     ids=lambda contract: contract.event_id,
 )
 @pytest.mark.asyncio

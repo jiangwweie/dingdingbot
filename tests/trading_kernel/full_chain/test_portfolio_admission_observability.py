@@ -189,7 +189,11 @@ async def replay_engine() -> AsyncGenerator[AsyncEngine, None]:
         assert deployed.refreshed_existing_authority is True
         async with engine.connect() as connection:
             profile = (
-                await connection.execute(sa.select(runtime_profiles))
+                await connection.execute(
+                    sa.select(runtime_profiles).where(
+                        runtime_profiles.c.runtime_profile_id == RUNTIME_PROFILE_ID
+                    )
+                )
             ).mappings().one()
             metadata = dict(
                 (
@@ -628,19 +632,22 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         expected_decision_times[3],
     )
 
-    assert tuple(int(row["policy_version"]) for row in policy_events) == (4, 5)
-    migration_policy_event, armed_policy_event = policy_events
+    assert tuple(int(row["policy_version"]) for row in policy_events) == (4, 5, 6)
+    migration_policy_event, r4_identity_event, armed_policy_event = policy_events
     assert migration_policy_event["owner_policy_event_id"] == (
         "policy-event:policy-main:v4"
     )
     assert migration_policy_event["operation"] == (
         "compatible_upgrade_portfolio_admission_v4"
     )
-    assert armed_policy_event["owner_policy_event_id"] == "policy-event:policy-main:v5"
+    assert r4_identity_event["owner_policy_event_id"] == "policy-event:policy-main:v5"
+    assert r4_identity_event["operation"] == "tradfi_live_policy_scope_expanded"
+    assert armed_policy_event["owner_policy_event_id"] == "policy-event:policy-main:v6"
     assert armed_policy_event["operation"] == "arm_acceptance_ticket"
     for event, version, submit_enabled in (
         (migration_policy_event, 4, False),
-        (armed_policy_event, 5, True),
+        (r4_identity_event, 5, False),
+        (armed_policy_event, 6, True),
     ):
         payload = event["payload"]
         assert payload["policy_version"] == version
@@ -674,10 +681,10 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         assert payload["max_leverage"] == 10
         assert payload["supported_margin_mode"] == "cross"
     assert int(migration_policy_event["created_at_ms"]) < int(
-        armed_policy_event["created_at_ms"]
-    )
+        r4_identity_event["created_at_ms"]
+    ) < int(armed_policy_event["created_at_ms"])
 
-    assert policy["policy_version"] == 5
+    assert policy["policy_version"] == 6
     assert policy["enabled"] is True
     assert policy["new_entry_submit_enabled"] is True
     assert policy["max_concurrent_tickets"] == 3
@@ -763,9 +770,9 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         assert str(claim["signal_event_id"]) == str(ticket_row["signal_event_id"])
         assert str(decision["capacity_claim_id"]) == str(claim["capacity_claim_id"])
         assert str(decision["signal_event_id"]) == str(ticket_row["signal_event_id"])
-        assert decision["owner_policy_version"] == 5
-        assert claim["owner_policy_version"] == 5
-        assert ticket_row["owner_policy_version"] == 5
+        assert decision["owner_policy_version"] == 6
+        assert claim["owner_policy_version"] == 6
+        assert ticket_row["owner_policy_version"] == 6
         assert claim["total_wallet_balance_at_claim"] == REPLAY_WALLET_BALANCE
         assert claim["max_ticket_stop_risk_fraction"] == Decimal("0.02")
         assert claim["max_gross_stop_risk_fraction"] == Decimal("0.06")

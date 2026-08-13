@@ -57,6 +57,7 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     SetLeverageCommandResult,
 )
+from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
@@ -64,15 +65,16 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_capabilities_current,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from tests.trading_kernel.integration.test_command_dispatch import (
     PreflightFacts,
     _commit_passed_post_fill_stress_if_pending,
+    _ticket,
 )
 from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -950,7 +952,18 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 supported_margin_mode="cross",
                 post_stop_stress_multiple="2.0",
                 max_post_fill_stop_risk_overrun_fraction="0.10",
-                scope={},
+                scope={
+                    "event_runtime_profiles": [
+                        {
+                            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v4",
+                            "runtime_profile_id": "tiny-live-v1",
+                        },
+                        {
+                            "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v4",
+                            "runtime_profile_id": "tiny-live-v1",
+                        },
+                    ]
+                },
                 updated_at_ms=1_000,
             )
         )
@@ -963,24 +976,38 @@ def _ticket_for_side(
     signal_event_id: str,
     exposure_episode_id: str,
 ):
+    runtime = base_ticket.identity.runtime.model_copy(
+        update={
+            "event_spec_id": (
+                "event_spec:SOR-001:SOR-LONG:v4"
+                if side == "long"
+                else "event_spec:SOR-001:SOR-SHORT:v4"
+            )
+        }
+    )
     domain = base_ticket.identity.netting_domain.model_copy(
         update={"position_side": side}
     )
-    identity = base_ticket.identity.model_copy(
-        update={
-            "ticket_id": build_ticket_id(
-                signal_event_id=signal_event_id,
-                runtime=base_ticket.identity.runtime,
-                netting_domain=domain,
-            ),
-            "signal_event_id": signal_event_id,
-            "exposure_episode_id": exposure_episode_id,
-            "netting_domain": domain,
-        }
+    identity = TicketIdentity(
+        ticket_id=build_ticket_id(
+            signal_event_id=signal_event_id,
+            runtime=runtime,
+            netting_domain=domain,
+        ),
+        signal_event_id=signal_event_id,
+        exposure_episode_id=exposure_episode_id,
+        runtime=runtime,
+        netting_domain=domain,
     )
     terms = {
         "identity": identity,
         "runtime_scope_id": f"scope-{side}",
+        "universe_version_id": f"universe:sor-{side}:4",
+        "exit_policy_id": (
+            "exit-policy:SOR-001:SOR-LONG:portfolio-admission-v1"
+            if side == "long"
+            else "exit-policy:SOR-001:SOR-SHORT:portfolio-admission-v1"
+        ),
     }
     if side == "short":
         terms.update(
@@ -1142,7 +1169,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 capability_key="exchange_commands",
                 enabled=True,
                 certified_commit="kernel-test-head",
-                schema_revision="0004_owner_control_plane",
+                schema_revision=CURRENT_SCHEMA_REVISION,
                 certification={},
                 updated_at_ms=1_000,
             )
@@ -1151,7 +1178,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 set_={
                     "enabled": True,
                     "certified_commit": "kernel-test-head",
-                    "schema_revision": "0004_owner_control_plane",
+                    "schema_revision": CURRENT_SCHEMA_REVISION,
                     "certification": {},
                     "updated_at_ms": 1_000,
                 },
@@ -1181,7 +1208,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head",
-            schema_revision="0004_owner_control_plane",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),

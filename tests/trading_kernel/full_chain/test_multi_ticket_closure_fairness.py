@@ -300,7 +300,13 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
 ) -> None:
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
-    await _seed_policy(dispatch_engine)
+    await _seed_policy(
+        dispatch_engine,
+        event_spec_ids=(
+            "event_spec:MI-001:MI-LONG:v3",
+            "event_spec:SOR-001:SOR-LONG:v4",
+        ),
+    )
     sol_ticket = _active_ticket(instrument="SOLUSDT", signal_event_id="signal-sol")
     avax_ticket = _active_ticket(instrument="AVAXUSDT", signal_event_id="signal-avax")
     await _reach_position_protected(dispatch_engine, sol_ticket)
