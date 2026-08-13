@@ -33,6 +33,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from tests.trading_kernel.integration.universe_certification_support import (
     ADMIN_DSN,
     SAFE_DATABASE,
@@ -72,7 +73,7 @@ async def projection_engine() -> AsyncGenerator[AsyncEngine, None]:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-projection-test",
                     runtime_commit="task-9-test",
-                    schema_revision="0004_owner_control_plane",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
             )
