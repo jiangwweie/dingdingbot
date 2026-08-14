@@ -13,7 +13,7 @@ from tests.trading_kernel.support.postgres import (
 
 
 @pytest_asyncio.fixture
-async def dispatch_engine() -> AsyncGenerator[AsyncEngine, None]:
+async def head_template_engine() -> AsyncGenerator[AsyncEngine, None]:
     harness = HeadTemplateCloneHarness()
     database_name, database_url = await harness.create_clone()
     engine = create_async_engine(database_url)
@@ -22,6 +22,13 @@ async def dispatch_engine() -> AsyncGenerator[AsyncEngine, None]:
     finally:
         await engine.dispose()
         await harness.drop_clone(database_name)
+
+
+@pytest_asyncio.fixture
+async def dispatch_engine(
+    head_template_engine: AsyncEngine,
+) -> AsyncGenerator[AsyncEngine, None]:
+    yield head_template_engine
 
 
 @pytest_asyncio.fixture

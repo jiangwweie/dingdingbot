@@ -2,20 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import re
-import subprocess
-import sys
 from collections.abc import AsyncGenerator
-from pathlib import Path
-from uuid import uuid4
 
-import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.trading_kernel.application.abandon_strategy_universe import (
     AbandonStrategyUniverseRequest,
@@ -42,12 +35,6 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-ADMIN_DSN = os.getenv(
-    "BRC_TEST_POSTGRES_ADMIN_URL",
-    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
-)
-SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 CONTRACT = registered_strategy_contracts()[0]
 MEMBERS = (
     "binance-usdm:BTCUSDT:perpetual",
@@ -56,37 +43,20 @@ MEMBERS = (
 
 
 @pytest_asyncio.fixture
-async def universe_engine() -> AsyncGenerator[AsyncEngine, None]:
-    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
-    assert SAFE_DATABASE.fullmatch(database_name)
-    admin = await asyncpg.connect(ADMIN_DSN)
-    await admin.execute(f'CREATE DATABASE "{database_name}"')
-    database_url = _database_url(database_name)
-    engine: AsyncEngine | None = None
-    try:
-        _run_alembic(database_url, "upgrade", "head")
-        engine = create_async_engine(database_url)
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            await seed_runtime_authority(
-                uow,
-                RuntimeAuthoritySeedRequest(
-                    account_id="subaccount-universe-test",
-                    runtime_commit="task-5-test",
-                    schema_revision=CURRENT_SCHEMA_REVISION,
-                    seeded_at_ms=1_800_000_000_000,
-                ),
-            )
-        yield engine
-    finally:
-        if engine is not None:
-            await engine.dispose()
-        await admin.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = $1 AND pid <> pg_backend_pid()",
-            database_name,
+async def universe_engine(
+    head_template_engine: AsyncEngine,
+) -> AsyncGenerator[AsyncEngine, None]:
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await seed_runtime_authority(
+            uow,
+            RuntimeAuthoritySeedRequest(
+                account_id="subaccount-universe-test",
+                runtime_commit="task-5-test",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                seeded_at_ms=1_800_000_000_000,
+            ),
         )
-        await admin.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
-        await admin.close()
+    yield head_template_engine
 
 
 @pytest.mark.asyncio
@@ -837,31 +807,3 @@ async def _retire_active(engine: AsyncEngine) -> None:
             ),
             {"event_spec_id": CONTRACT.event_spec_id},
         )
-
-
-def _database_url(database_name: str) -> str:
-    dsn = ADMIN_DSN.replace("/postgres", f"/{database_name}", 1)
-    if dsn.startswith("postgresql://"):
-        return dsn.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return dsn
-
-
-def _run_alembic(database_url: str, *args: str) -> None:
-    env = {**os.environ, "TRADING_KERNEL_DATABASE_URL": database_url}
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "-c",
-            "migrations/trading_kernel/alembic.ini",
-            *args,
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr[-4000:]
