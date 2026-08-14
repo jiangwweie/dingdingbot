@@ -71,6 +71,12 @@ from tests.trading_kernel.support.postgres import (
 from tests.trading_kernel.support.postgres import (
     run_alembic as _run_alembic,
 )
+from tests.trading_kernel.support.us_equity_sor import (
+    AAPL,
+)
+from tests.trading_kernel.support.us_equity_sor import (
+    make_us_equity_sor_snapshot as us_equity_sor_snapshot,
+)
 from tests.trading_kernel.unit.detectors.fixtures import (
     AVAX,
     BTC,
@@ -85,12 +91,6 @@ from tests.trading_kernel.unit.detectors.fixtures import (
     flat_candles,
     mpg_long_snapshot,
     sor_snapshot,
-)
-from tests.trading_kernel.unit.detectors.test_us_equity_sor import (
-    AAPL,
-)
-from tests.trading_kernel.unit.detectors.test_us_equity_sor import (
-    _snapshot as us_equity_sor_snapshot,
 )
 
 

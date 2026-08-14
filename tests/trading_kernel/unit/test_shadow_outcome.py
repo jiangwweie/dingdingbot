@@ -36,8 +36,8 @@ from tests.trading_kernel.integration.test_signal_to_ticket import (
 from tests.trading_kernel.integration.test_signal_to_ticket import (
     _signal as _runtime_signal,
 )
-from tests.trading_kernel.unit.detectors.test_us_equity_sor import (
-    _snapshot as _us_sor_snapshot,
+from tests.trading_kernel.support.us_equity_sor import (
+    make_us_equity_sor_snapshot as _us_sor_snapshot,
 )
 
 
