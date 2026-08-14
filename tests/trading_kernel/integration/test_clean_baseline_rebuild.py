@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
-from tests.trading_kernel.integration.test_schema_baseline import EXPECTED_TABLES
+from tests.trading_kernel.support.schema import EXPECTED_KERNEL_TABLES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -61,7 +61,7 @@ async def test_empty_postgres_upgrades_from_frozen_v4_baseline_to_head() -> None
                         "WHERE entry_state = 'enabled' AND control_version = 1"
                     )
                 )
-            assert table_names == EXPECTED_TABLES | {"alembic_version"}
+            assert table_names == EXPECTED_KERNEL_TABLES | {"alembic_version"}
             assert revision == HEAD_REVISION
             assert strategy_control_count == strategy_group_count == 0
         finally:

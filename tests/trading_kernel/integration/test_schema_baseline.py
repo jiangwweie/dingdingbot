@@ -3,63 +3,11 @@ from __future__ import annotations
 import sqlalchemy as sa
 
 from src.trading_kernel.infrastructure.pg_models import metadata
-
-EXPECTED_TABLES = {
-    "brc_account_exposure_current",
-    "brc_admission_decisions",
-    "brc_budget_reservations",
-    "brc_capacity_claims",
-    "brc_entry_lane_current",
-    "brc_exit_policies",
-    "brc_event_required_facts",
-    "brc_event_product_compatibility",
-    "brc_event_specs",
-    "brc_exchange_commands",
-    "brc_exposure_episode_current",
-    "brc_fact_definitions",
-    "brc_facts_current",
-    "brc_instrument_rules_current",
-    "brc_instrument_product_current",
-    "brc_instrument_product_profiles",
-    "brc_instrument_certification_batch_members",
-    "brc_instrument_certification_batches",
-    "brc_instrument_certification_current",
-    "brc_instruments",
-    "brc_monitor_current",
-    "brc_monitor_events",
-    "brc_owner_policy_current",
-    "brc_owner_policy_events",
-    "brc_owner_authorizations",
-    "brc_owner_control_operation_events",
-    "brc_owner_control_operations_current",
-    "brc_positions_current",
-    "brc_readiness_current",
-    "brc_retention_runs",
-    "brc_runtime_capabilities_current",
-    "brc_runtime_incidents",
-    "brc_runtime_profiles",
-    "brc_runtime_scopes_current",
-    "brc_schema_metadata",
-    "brc_shadow_outcomes_current",
-    "brc_comparative_projection_current",
-    "brc_signal_events",
-    "brc_signal_fact_snapshots",
-    "brc_strategy_groups",
-    "brc_strategy_entry_control_events",
-    "brc_strategy_entry_controls_current",
-    "brc_strategy_universe_current",
-    "brc_strategy_universe_members",
-    "brc_strategy_universe_versions",
-    "brc_strategy_versions",
-    "brc_trade_aggregates",
-    "brc_trade_events",
-    "brc_trade_reviews",
-    "brc_trade_tickets",
-}
+from tests.trading_kernel.support.schema import EXPECTED_KERNEL_TABLES
 
 
 def test_kernel_metadata_has_exact_clean_table_allowlist() -> None:
-    assert set(metadata.tables) == EXPECTED_TABLES
+    assert set(metadata.tables) == EXPECTED_KERNEL_TABLES
 
 
 def test_event_identity_is_unique_within_strategy_version() -> None:

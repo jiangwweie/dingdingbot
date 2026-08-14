@@ -13,7 +13,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.trading_kernel.integration.test_schema_baseline import EXPECTED_TABLES
+from tests.trading_kernel.support.schema import EXPECTED_KERNEL_TABLES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -75,7 +75,7 @@ async def test_bootstrap_schema_creates_only_the_clean_kernel_baseline() -> None
                 revision = await conn.scalar(
                     sa.text("SELECT version_num FROM alembic_version")
                 )
-            assert tables == EXPECTED_TABLES | {"alembic_version"}
+            assert tables == EXPECTED_KERNEL_TABLES | {"alembic_version"}
             assert {"venue_id", "account_id"}.issubset(exposure_columns)
             assert exposure_primary_key == {"venue_id", "account_id"}
             assert revision == "0005_tradfi_instrument_center"
