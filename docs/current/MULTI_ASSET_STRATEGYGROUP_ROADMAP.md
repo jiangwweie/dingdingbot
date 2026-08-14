@@ -2,7 +2,7 @@
 title: MULTI_ASSET_STRATEGYGROUP_ROADMAP
 status: CURRENT_PLAN
 program_id: MASG-P1
-last_verified: 2026-08-12
+last_verified: 2026-08-14
 ---
 
 # Multi-Asset StrategyGroup Roadmap
@@ -270,6 +270,22 @@ Active Universe
 
 前端继续采用手动刷新。只读请求必须有界、分页并优先读取当前投影；页面不得
 通过加载完整历史来推导运行时状态。
+
+## Owner Control Product Backlog
+
+日常 Owner 操作优先收敛为以下四项，不扩展为任意策略编辑平台：
+
+| 能力 | 稳定产品语义 | 状态 |
+| --- | --- | --- |
+| StrategyGroup 暂停/恢复 | 只控制该 StrategyGroup 的新 ENTRY；已有 Ticket 继续保护、退出、结算和 Review | 已实现 |
+| 策略标的调整与热加载 | 全局 Instrument Catalog 提供候选；每个 EventSpec 拥有独立 StrategyUniverse；变更创建 Warming 版本并在认证后原子激活，已有 Ticket 继续冻结旧 Universe | 已实现基础能力，继续产品验收 |
+| 单 Ticket Owner 平仓 | 前端只选择一个当前活动 Ticket，经 Preview、TOTP 和持久化授权后复用正式 `request_exit()`、Lifecycle、Reconciliation、Settlement 和 Review；退出明确标记为 Owner 手动平仓，不自动暂停全局 Entry 或其他 Ticket | 待设计实施 |
+| 策略参数解耦 | 使用类型化、不可变的参数版本；参数变化不得原地改变当前 StrategyVersion 或活动 Ticket，也不得成为任意 JSON 配置入口 | 明确待办，当前暂缓 |
+
+Instrument Catalog 与 StrategyUniverse 保持两层结构：标的先成为全局已知且已认证的
+Product，再通过 EventSpec-to-Instrument 成员关系决定某个策略方向是否使用它。前端的
+“热加载”表示无需重启 Worker 或重新部署代码；它不表示原地修改 Active Universe，
+也不改写已存在的 Signal、Claim 或 Ticket。
 
 ## Runtime And Resource Boundary
 
