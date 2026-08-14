@@ -3,40 +3,25 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from uuid import uuid4
 
-import asyncpg
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from tests.trading_kernel.support.postgres import (
-    SAFE_TEST_DATABASE,
-    TEST_POSTGRES_ADMIN_DSN,
-    async_database_url,
-    run_alembic,
+    HeadTemplateCloneHarness,
 )
 
 
 @pytest_asyncio.fixture
 async def dispatch_engine() -> AsyncGenerator[AsyncEngine, None]:
-    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
-    assert SAFE_TEST_DATABASE.fullmatch(database_name)
-    admin = await asyncpg.connect(TEST_POSTGRES_ADMIN_DSN)
-    await admin.execute(f'CREATE DATABASE "{database_name}"')
-    database_url = async_database_url(database_name)
-    run_alembic(database_url, "upgrade", "head")
+    harness = HeadTemplateCloneHarness()
+    database_name, database_url = await harness.create_clone()
     engine = create_async_engine(database_url)
     try:
         yield engine
     finally:
         await engine.dispose()
-        await admin.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = $1 AND pid <> pg_backend_pid()",
-            database_name,
-        )
-        await admin.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
-        await admin.close()
+        await harness.drop_clone(database_name)
 
 
 @pytest_asyncio.fixture
