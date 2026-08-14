@@ -1,7 +1,7 @@
 ---
 title: TOKYO_RUNTIME_DEPLOYMENT_CONTRACT
 status: CURRENT
-last_verified: 2026-08-11
+last_verified: 2026-08-14
 ---
 
 # Tokyo Runtime Deployment Contract
@@ -100,11 +100,47 @@ a deployment or waiting for flatness on the same SHA reuses that manifest and
 refreshes only PostgreSQL, systemd, release-marker, and exchange facts. A code,
 identity, command-set, or worktree change invalidates reuse.
 
+The candidate is frozen before this complete certification begins. Focused
+tests discover defects during implementation; the deployment command must not
+re-run the complete suite merely because an external fact, a closed bar, or
+flatness is still pending. A fix creates a new exact candidate and therefore
+one new certification, rather than repeatedly certifying an unchanged commit.
+
 After a normal switch, Observation, Lifecycle, and Reconciliation start first.
 Readonly database and exchange certification repeats against the target
 release. Entry starts last only when explicitly requested and every postflight
 gate passes. A failure after service stop writes the Entry fence and restores
 the three safety workers for fix-forward recovery.
+
+## Owner-Facing Release Progress
+
+The deployment implementation may contain many internal checks, but its Owner
+surface reports one current phase, one state, one reason, and one next action.
+
+| Phase | Owner meaning | Completion evidence |
+| --- | --- | --- |
+| Orient | Candidate identity, release class, current exposure, and required authority are known | Exact commit/classification and current PostgreSQL/exchange facts agree |
+| Prepare | Required flatness or explicit Drain is progressing | Entry is fenced when required and every active Ticket remains protected |
+| Switch | Files, schema, authority, and services are changing | Target release/schema activation completes without old-writer overlap |
+| Verify | Target identity, workers, PostgreSQL, exchange, Universe, and controls are checked | Exact postflight passes |
+| Activate | Entry and scoped StrategyGroups receive only the approved authority | Effective Entry scope matches the Owner decision |
+| Seal | Immutable tag and current roadmap record the verified result | Release is reproducible and the next acceptance item is explicit |
+
+Each phase uses exactly one of these progress states:
+
+```text
+running
+waiting_external
+retryable
+blocked
+completed
+```
+
+`waiting_external` includes an active protected Ticket, exchange flatness, a
+market session, or the next closed bar and must show the exact wait condition.
+`retryable` preserves completed evidence and resumes from the failed phase.
+`blocked` identifies the hard stop and keeps exchange writes fail-closed. The
+Owner must not need to read raw test output or infer progress from systemd logs.
 
 ## Controlled Exit And Deployment Drain
 

@@ -1,7 +1,7 @@
 ---
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
-last_verified: 2026-07-31
+last_verified: 2026-08-14
 ---
 
 # AI Agent Constraints
@@ -44,6 +44,30 @@ controlled real-funds terminal acceptance.
   Local certification and warming tests perform zero exchange mutation.
 - A server deployment verifies current external facts; it is not the primary
   environment for discovering deterministic program defects.
+
+## Test Portfolio Lifecycle
+
+Tests are a maintained product asset, not an append-only activity log. Every
+new test must protect one current contract or production-shaped failure class.
+When a behavior, schema generation, fixture path, or deployment branch is
+replaced, the same change deletes or consolidates tests that no longer own a
+distinct current boundary.
+
+Use four verification tiers:
+
+| Tier | Normal use | Required scope |
+| --- | --- | --- |
+| Focused | Red/green development and defect repair | Exact changed boundary and one regression |
+| Fast | Routine local confidence | Unit, architecture, static analysis, and affected integration slice |
+| Release | One frozen exact Kernel candidate | Complete unit, integration, full-chain, architecture, Ruff, Mypy, and diff checks |
+| Periodic audit | Explicit final audit or scheduled maintenance | Cross-version migration, clean rebuild, retired-semantics scan, and other expensive whole-program proofs |
+
+Do not run the Release tier after every small edit. Freeze the candidate first,
+run the complete certification once, and reuse its exact-commit manifest during
+deployment. A material increase in suite duration or fixture volume requires a
+test-portfolio review that identifies overlap, obsolete generation coverage,
+and opportunities to merge or delete tests; test count is not evidence of
+quality.
 
 ## Core Boundaries
 

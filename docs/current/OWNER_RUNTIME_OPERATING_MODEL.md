@@ -1,7 +1,7 @@
 ---
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
-last_verified: 2026-07-31
+last_verified: 2026-08-14
 ---
 
 # Owner Runtime Operating Model
@@ -40,6 +40,27 @@ and settlement are not manual Owner workflow steps.
 - manage existing Ticket lifecycle concurrently;
 - record exchange truth, incidents, settlement, and review;
 - expose one concise current status.
+
+## Runtime Process Topology
+
+The four Kernel workers are four independent, persistent operating-system
+processes managed by `systemd`. They share PostgreSQL authority and coordinate
+through durable current rows, leases, Tickets, Events, and Exchange Commands;
+they do not call one another as an in-memory pipeline.
+
+| Process | Product responsibility | Exchange-write boundary |
+| --- | --- | --- |
+| Observation worker | Refresh market facts, evaluate StrategyGroups, and persist Signals or explicit no-signal outcomes | Read-only |
+| Entry worker | Arbitrate eligible Signals, build CapacityClaims and Tickets, and dispatch the serialized ENTRY command | New ENTRY only |
+| Lifecycle worker | Install and maintain protection, process TP1/Runner behavior, and execute authorized exits | Existing-Ticket protection and exit |
+| Reconciliation worker | Compare PostgreSQL with exchange truth, resolve command outcomes, confirm flatness, release capital, settle, and review | Recovery and bounded cleanup only |
+
+The static Owner Console is served by Nginx and is not a Kernel worker. The
+Owner API is a separate service that reads product state and writes only
+controlled PostgreSQL authority; it does not load exchange credentials or
+dispatch orders. A worker can restart independently, while commit/schema
+identity and PostgreSQL leases prevent a stale process from becoming a second
+writer.
 
 ## Owner-Facing States
 

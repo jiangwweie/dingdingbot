@@ -1,7 +1,7 @@
 ---
 title: STRATEGY_EXPERIMENT_EVALUATION_CONTRACT
 status: CURRENT
-last_verified: 2026-08-11
+last_verified: 2026-08-14
 ---
 
 # Strategy Experiment Evaluation Contract
@@ -49,6 +49,30 @@ No single metric establishes an edge. Review must preserve per-Ticket facts and
 show both the aggregate result and the contribution of tail outcomes. Missing
 funding or execution evidence remains explicit rather than being treated as
 zero.
+
+## Exit And Closure Attribution
+
+Lifecycle completeness and exit attribution are separate facts. A Ticket may
+be terminal, reconciled, settled, and economically complete while its Owner
+projection still lacks a classified exit mechanism. The product must not label
+that condition as a generic technical failure.
+
+Use exact persisted evidence in this precedence order:
+
+1. an explicit `ExitRequested.reason` for strategy exit, Owner controlled
+   flatten, deployment drain, or another commanded exit;
+2. an exit fill attributed to the Ticket's `initial_stop` command;
+3. a `TakeProfitFilled` event followed by an exit fill attributed to the active
+   `replace_protection` command for the Runner;
+4. an exit fill attributed to the Ticket's `take_profit` command;
+5. external flatness without attributable fill evidence, reported explicitly
+   as `external_flat_reason_unavailable`.
+
+K-line shape, candle high/low, or approximate price proximity cannot invent an
+exit reason. Unknown codes remain visible for audit and use an Owner-readable
+"未归类退出原因" label rather than "技术原因待查看". Programmatic review and
+strategy/version statistics consume the same canonical attribution so the
+list, Ticket detail, Review, and aggregate strategy page cannot disagree.
 
 ## Signal-Owned Observation Evidence
 
