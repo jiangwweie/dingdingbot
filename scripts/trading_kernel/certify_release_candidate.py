@@ -21,6 +21,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.trading_kernel.verification_portfolios import (
+    R3_SAME_SCHEMA_KERNEL_COMMANDS,
+)
 from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
     registered_strategy_contracts,
@@ -38,44 +41,7 @@ from src.trading_kernel.infrastructure.runtime_identity import (
 
 SCHEMA = "brc.trading_kernel.release_certification.v1"
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
-CERTIFICATION_COMMANDS: tuple[tuple[str, ...], ...] = (
-    (
-        ".venv/bin/python",
-        "-m",
-        "pytest",
-        "tests/trading_kernel/unit",
-        "tests/trading_kernel/architecture",
-        "-q",
-    ),
-    (
-        ".venv/bin/python",
-        "-m",
-        "pytest",
-        "tests/trading_kernel/integration",
-        "-q",
-    ),
-    (
-        ".venv/bin/python",
-        "-m",
-        "pytest",
-        "tests/trading_kernel/full_chain",
-        "-q",
-    ),
-    (
-        ".venv/bin/ruff",
-        "check",
-        "src/trading_kernel",
-        "scripts/trading_kernel",
-        "tests/trading_kernel",
-        "migrations/trading_kernel",
-    ),
-    (
-        ".venv/bin/mypy",
-        "src/trading_kernel",
-        "scripts/trading_kernel",
-    ),
-    ("git", "diff", "--check"),
-)
+CERTIFICATION_COMMANDS = R3_SAME_SCHEMA_KERNEL_COMMANDS
 
 
 class ReleaseCertificationManifest(BaseModel):
@@ -143,7 +109,9 @@ def validate_manifest_identity(
     actual = manifest.model_dump(mode="python", by_alias=True)
     for key, value in expected.items():
         if actual.get(key) != value:
-            label = "command set" if key == "command_set_digest" else key.replace("_", " ")
+            label = (
+                "command set" if key == "command_set_digest" else key.replace("_", " ")
+            )
             raise ValueError(f"release certification {label} differs")
 
 
@@ -169,7 +137,9 @@ def validate_release_certification(repo_root: Path, commit: str) -> None:
     validate_manifest_identity(manifest, commit)
 
 
-def certify_release_candidate(repo_root: Path, commit: str) -> ReleaseCertificationManifest:
+def certify_release_candidate(
+    repo_root: Path, commit: str
+) -> ReleaseCertificationManifest:
     _require_exact_clean_head(repo_root, commit)
     durations: list[int] = []
     for index, command in enumerate(CERTIFICATION_COMMANDS, start=1):
