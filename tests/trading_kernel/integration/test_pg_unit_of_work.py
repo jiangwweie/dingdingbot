@@ -41,11 +41,11 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
     AggregateVersionConflict,
     PostgresKernelUnitOfWork,
 )
-from tests.trading_kernel.integration.test_issue_ticket import (
-    _seed_ticket_registry,
-)
 from tests.trading_kernel.support.capacity_claims import (
     make_issue_request as _issue_request,
+)
+from tests.trading_kernel.support.runtime_scope import (
+    seed_ticket_registry as _seed_ticket_registry,
 )
 from tests.trading_kernel.support.tickets import (
     make_ticket as _ticket,

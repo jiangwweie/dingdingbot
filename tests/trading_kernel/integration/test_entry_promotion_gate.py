@@ -50,20 +50,36 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerStatus,
     run_reconciliation_worker_once,
 )
-from tests.trading_kernel.integration.test_strategy_universe_batch_bootstrap import (
-    ADMIN_DSN,
-    RUNTIME_COMMIT,
-    SAFE_DATABASE,
-    RecordingWarmMarket,
-    VirtualClock,
-    _database_url,
-    _drop_database,
-    _run_alembic,
-)
 from tests.trading_kernel.integration.universe_certification_support import (
     NoTicketPositionSource,
     NoTicketVenueTruth,
     RecordingReadonlyCertificationSource,
+)
+from tests.trading_kernel.support.postgres import (
+    SAFE_TEST_DATABASE as SAFE_DATABASE,
+)
+from tests.trading_kernel.support.postgres import (
+    TEST_POSTGRES_ADMIN_DSN as ADMIN_DSN,
+)
+from tests.trading_kernel.support.postgres import (
+    async_database_url as _database_url,
+)
+from tests.trading_kernel.support.postgres import (
+    drop_database as _drop_database,
+)
+from tests.trading_kernel.support.postgres import (
+    run_alembic as _run_alembic,
+)
+from tests.trading_kernel.support.universe_bootstrap import (
+    RUNTIME_COMMIT,
+    RecordingWarmMarket,
+    VirtualClock,
+)
+from tests.trading_kernel.support.universe_bootstrap import (
+    observation_request as _shared_observation_request,
+)
+from tests.trading_kernel.support.universe_bootstrap import (
+    reconciliation_request as _shared_reconciliation_request,
 )
 from tests.trading_kernel.unit.detectors.fixtures import NOW_MS
 
@@ -73,16 +89,18 @@ class PromotionWarmMarket(RecordingWarmMarket):
         candles = await super().fetch_closed_candles(request)
         if request.timeframe != "15m":
             return candles
-        if not request.exchange_instrument_id.endswith((
-            "AAPLUSDT:perpetual",
-            "AMZNUSDT:perpetual",
-            "GOOGLUSDT:perpetual",
-            "METAUSDT:perpetual",
-            "MSFTUSDT:perpetual",
-            "NVDAUSDT:perpetual",
-            "SNDKUSDT:perpetual",
-            "TSLAUSDT:perpetual",
-        )):
+        if not request.exchange_instrument_id.endswith(
+            (
+                "AAPLUSDT:perpetual",
+                "AMZNUSDT:perpetual",
+                "GOOGLUSDT:perpetual",
+                "METAUSDT:perpetual",
+                "MSFTUSDT:perpetual",
+                "NVDAUSDT:perpetual",
+                "SNDKUSDT:perpetual",
+                "TSLAUSDT:perpetual",
+            )
+        ):
             return candles
         delta_ms = request.closed_at_ms - NOW_MS
         shifted = tuple(
@@ -388,9 +406,9 @@ def _worker_driving_sleep_for_profile(
         async with engine.connect() as connection:
             warming_profile_count = int(
                 await connection.scalar(
-                    sa.select(sa.func.count()).select_from(
-                        runtime_scopes_current
-                    ).where(
+                    sa.select(sa.func.count())
+                    .select_from(runtime_scopes_current)
+                    .where(
                         runtime_scopes_current.c.lifecycle_state == "warming",
                         runtime_scopes_current.c.runtime_profile_id
                         == runtime_profile_id,
@@ -429,19 +447,11 @@ def _worker_driving_sleep_for_profile(
 
 
 def _observation_request(now_ms: int):
-    from tests.trading_kernel.integration.test_strategy_universe_batch_bootstrap import (
-        _observation_request as request,
-    )
-
-    return request(now_ms)
+    return _shared_observation_request(now_ms)
 
 
 def _reconciliation_request(now_ms: int):
-    from tests.trading_kernel.integration.test_strategy_universe_batch_bootstrap import (
-        _reconciliation_request as request,
-    )
-
-    return request(now_ms)
+    return _shared_reconciliation_request(now_ms)
 
 
 async def _cleanup(database_name: str) -> None:

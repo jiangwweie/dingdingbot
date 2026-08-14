@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import asyncpg
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TEST_POSTGRES_ADMIN_DSN = os.getenv(
     "BRC_TEST_POSTGRES_ADMIN_URL",
@@ -26,6 +28,7 @@ def async_database_url(database_name: str) -> str:
 
 
 def run_alembic(database_url: str, *args: str) -> None:
+    resolved_args = args or ("upgrade", "head")
     env = {**os.environ, "TRADING_KERNEL_DATABASE_URL": database_url}
     result = subprocess.run(
         [
@@ -34,7 +37,7 @@ def run_alembic(database_url: str, *args: str) -> None:
             "alembic",
             "-c",
             "migrations/trading_kernel/alembic.ini",
-            *args,
+            *resolved_args,
         ],
         cwd=REPO_ROOT,
         env=env,
@@ -44,3 +47,14 @@ def run_alembic(database_url: str, *args: str) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr[-4000:]
+
+
+async def drop_database(admin: asyncpg.Connection, database_name: str) -> None:
+    if SAFE_TEST_DATABASE.fullmatch(database_name) is None:
+        raise ValueError("unsafe kernel test database name")
+    await admin.execute(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+        "WHERE datname = $1 AND pid <> pg_backend_pid()",
+        database_name,
+    )
+    await admin.execute(f'DROP DATABASE IF EXISTS "{database_name}"')

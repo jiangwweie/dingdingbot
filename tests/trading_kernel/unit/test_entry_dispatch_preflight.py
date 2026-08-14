@@ -44,11 +44,17 @@ from src.trading_kernel.domain.product import (
     ProductEntryStatus,
 )
 from src.trading_kernel.domain.ticket import EntryOrderType
-from tests.trading_kernel.unit.test_capacity import (
-    _long_signal,
-    _policy,
-    _rules,
-    _snapshot,
+from tests.trading_kernel.support.capacity import (
+    long_signal as _long_signal,
+)
+from tests.trading_kernel.support.capacity import (
+    policy as _policy,
+)
+from tests.trading_kernel.support.capacity import (
+    rules as _rules,
+)
+from tests.trading_kernel.support.capacity import (
+    snapshot as _snapshot,
 )
 
 
