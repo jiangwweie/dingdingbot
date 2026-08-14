@@ -39,11 +39,17 @@ from src.trading_kernel.infrastructure.strategy_registry_seed import (
     RegistrySeedConflict,
     seed_strategy_registry,
 )
-from tests.trading_kernel.integration.test_issue_ticket import (
-    ADMIN_DSN,
-    SAFE_DATABASE,
-    _database_url,
-    _run_alembic,
+from tests.trading_kernel.support.postgres import (
+    SAFE_TEST_DATABASE as SAFE_DATABASE,
+)
+from tests.trading_kernel.support.postgres import (
+    TEST_POSTGRES_ADMIN_DSN as ADMIN_DSN,
+)
+from tests.trading_kernel.support.postgres import (
+    async_database_url as _database_url,
+)
+from tests.trading_kernel.support.postgres import (
+    run_alembic as _run_alembic,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

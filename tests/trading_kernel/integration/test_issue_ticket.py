@@ -1,13 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import re
-import subprocess
-import sys
 from collections.abc import AsyncGenerator
 from decimal import Decimal
-from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
@@ -62,19 +57,24 @@ from src.trading_kernel.infrastructure.pg_models import (
     trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from tests.trading_kernel.support.postgres import (
+    SAFE_TEST_DATABASE as SAFE_DATABASE,
+)
+from tests.trading_kernel.support.postgres import (
+    TEST_POSTGRES_ADMIN_DSN as ADMIN_DSN,
+)
+from tests.trading_kernel.support.postgres import (
+    async_database_url as _database_url,
+)
+from tests.trading_kernel.support.postgres import (
+    run_alembic as _run_alembic,
+)
 from tests.trading_kernel.support.tickets import (
     make_ticket as _ticket,
 )
 from tests.trading_kernel.support.tickets import (
     make_ticket_identity as _identity,
 )
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-ADMIN_DSN = os.getenv(
-    "BRC_TEST_POSTGRES_ADMIN_URL",
-    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
-)
-SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 
 
 @pytest_asyncio.fixture
@@ -188,7 +188,6 @@ async def test_issue_ticket_prepares_only_entry_when_leverage_already_matches(
             ).capacity_claim,
         )
     )
-
 
 @pytest.mark.asyncio
 async def test_scope_drift_after_lane_and_account_lock_leaves_no_durable_entry_state(
@@ -1691,31 +1690,3 @@ async def _seed_ticket_registry(connection, ticket) -> None:
             },
         )
     )
-
-
-def _database_url(database_name: str) -> str:
-    if SAFE_DATABASE.fullmatch(database_name) is None:
-        raise ValueError("unsafe kernel test database name")
-    base = ADMIN_DSN.rsplit("/", 1)[0]
-    return f"{base.replace('postgresql://', 'postgresql+asyncpg://', 1)}/{database_name}"
-
-
-def _run_alembic(database_url: str, *args: str) -> None:
-    env = {**os.environ, "TRADING_KERNEL_DATABASE_URL": database_url}
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "-c",
-            "migrations/trading_kernel/alembic.ini",
-            *args,
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr[-4000:]

@@ -1,13 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import re
-import subprocess
-import sys
 from collections.abc import AsyncGenerator
 from decimal import Decimal
-from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -85,14 +80,19 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _seed_ticket_runtime_scope,
     _stress_evidence,
 )
-from tests.trading_kernel.support.tickets import make_ticket as _retired_ticket
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-ADMIN_DSN = os.getenv(
-    "BRC_TEST_POSTGRES_ADMIN_URL",
-    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
+from tests.trading_kernel.support.postgres import (
+    SAFE_TEST_DATABASE as SAFE_DATABASE,
 )
-SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
+from tests.trading_kernel.support.postgres import (
+    TEST_POSTGRES_ADMIN_DSN as ADMIN_DSN,
+)
+from tests.trading_kernel.support.postgres import (
+    async_database_url as _database_url,
+)
+from tests.trading_kernel.support.postgres import (
+    run_alembic as _run_alembic,
+)
+from tests.trading_kernel.support.tickets import make_ticket as _retired_ticket
 
 
 def _raw_liquidation_observation(ticket, average_fill_price: Decimal) -> Decimal:
@@ -1916,9 +1916,8 @@ async def _seed_policy(
                     ]
                 },
                 updated_at_ms=1_000,
-            )
         )
-
+    )
 
 def _ticket():
     return _registered_sor_ticket()
@@ -2058,31 +2057,3 @@ async def _reach_cancel_pending(
                 ),
             ),
         )
-
-
-def _database_url(database_name: str) -> str:
-    if SAFE_DATABASE.fullmatch(database_name) is None:
-        raise ValueError("unsafe kernel test database name")
-    base = ADMIN_DSN.rsplit("/", 1)[0]
-    return f"{base.replace('postgresql://', 'postgresql+asyncpg://', 1)}/{database_name}"
-
-
-def _run_alembic(database_url: str, *args: str) -> None:
-    env = {**os.environ, "TRADING_KERNEL_DATABASE_URL": database_url}
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "-c",
-            "migrations/trading_kernel/alembic.ini",
-            *args,
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr[-4000:]

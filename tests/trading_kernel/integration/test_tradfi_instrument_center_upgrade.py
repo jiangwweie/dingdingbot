@@ -47,11 +47,17 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
-from tests.trading_kernel.integration.test_issue_ticket import (
-    ADMIN_DSN,
-    SAFE_DATABASE,
-    _database_url,
-    _run_alembic,
+from tests.trading_kernel.support.postgres import (
+    SAFE_TEST_DATABASE as SAFE_DATABASE,
+)
+from tests.trading_kernel.support.postgres import (
+    TEST_POSTGRES_ADMIN_DSN as ADMIN_DSN,
+)
+from tests.trading_kernel.support.postgres import (
+    async_database_url as _database_url,
+)
+from tests.trading_kernel.support.postgres import (
+    run_alembic as _run_alembic,
 )
 
 SOURCE_SCHEMA_REVISION = "0004_owner_control_plane"
