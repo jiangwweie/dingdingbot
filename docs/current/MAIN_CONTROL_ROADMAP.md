@@ -77,6 +77,14 @@ strategy-performance or host-capacity benchmark.
 
 ## Remaining Critical Path
 
+The natural TradFi acceptance below is an independent production-evidence lane.
+It does not block local infrastructure, documentation, or Owner Console work.
+Any later production deployment still refreshes current PostgreSQL, systemd,
+release-marker, and exchange facts and follows the exact release contract.
+The parallel engineering order is owned by
+`MULTI_ASSET_STRATEGYGROUP_ROADMAP.md`: infrastructure foundation first,
+Owner product control second, and strategy-learning expansion last.
+
 | Order | Work | Exit condition |
 | ---: | --- | --- |
 | 1 | Natural opportunity | Maintain the current 15-minute readonly monitor until an eligible TradFi SOR Signal appears; `signal_absent` is the normal waiting state |

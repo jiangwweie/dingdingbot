@@ -273,19 +273,76 @@ Active Universe
 
 ## Owner Control Product Backlog
 
-日常 Owner 操作优先收敛为以下四项，不扩展为任意策略编辑平台：
+StrategyGroup 暂停/恢复、策略标的热加载和单 Ticket Owner 平仓是 Owner
+控制面的起点，不是完整产品边界。后续能力必须服务单 Owner、小资金、可承受亏损的
+右尾实验，不扩展为任意策略编辑或手工下单平台。
 
-| 能力 | 稳定产品语义 | 状态 |
-| --- | --- | --- |
-| StrategyGroup 暂停/恢复 | 只控制该 StrategyGroup 的新 ENTRY；已有 Ticket 继续保护、退出、结算和 Review | 已实现 |
-| 策略标的调整与热加载 | 全局 Instrument Catalog 提供候选；每个 EventSpec 拥有独立 StrategyUniverse；变更创建 Warming 版本并在认证后原子激活，已有 Ticket 继续冻结旧 Universe | 已实现基础能力，继续产品验收 |
-| 单 Ticket Owner 平仓 | 前端只选择一个当前活动 Ticket，经 Preview、TOTP 和持久化授权后复用正式 `request_exit()`、Lifecycle、Reconciliation、Settlement 和 Review；退出明确标记为 Owner 手动平仓，不自动暂停全局 Entry 或其他 Ticket | 待设计实施 |
-| 策略参数解耦 | 使用类型化、不可变的参数版本；参数变化不得原地改变当前 StrategyVersion 或活动 Ticket，也不得成为任意 JSON 配置入口 | 明确待办，当前暂缓 |
+| 能力 | 稳定产品语义 | Owner 价值 | 状态 |
+| --- | --- | --- | --- |
+| StrategyGroup 暂停/恢复 | 只控制该 StrategyGroup 的新 ENTRY；已有 Ticket 继续保护、退出、结算和 Review | 快速隔离一个失效策略而不停止系统 | 已实现 |
+| Effective Entry Scope | 聚合 Global Entry、Strategy Control、StrategyVersion、Active Universe、Product/Session、Readiness、Netting Domain 和 Policy Capacity，返回当前是否可创建 Ticket 及第一阻塞点 | 不再从多个页面和日志拼装“为什么没有交易” | 待设计实施 |
+| 策略运行模式 | 明确区分 `live`、`observe_only`、`entry_paused` 和 `retired`；Worker active 不等于策略允许 ENTRY | 看清策略正在运行、观察、暂停还是已经退出产品线 | 待语义收敛 |
+| Instrument 生命周期与 Universe 热加载 | 全局 Instrument Catalog 管理 Candidate、Certification、Eligible、Suspended、Retired；每个 EventSpec 独立拥有 StrategyUniverse，Warming 认证后原子激活 | 一个 Product 可被多个策略复用，而每个策略独立决定成员 | 已实现 Universe 基础能力；Catalog 新增和生命周期操作待完善 |
+| Strategy-Instrument 临时禁入 | 独立暂停某个 StrategyGroup/EventSpec 与 Instrument 组合的新 ENTRY，不修改全局 Product，也不改写 Active Ticket | 在单一标的异常时避免暂停整个策略 | 待设计实施 |
+| 单 Ticket Owner 平仓 | 前端选择一个活动 Ticket，经 Preview、TOTP 和持久化授权后复用正式 `request_exit()`、Lifecycle、Reconciliation、Settlement 和 Review；退出标记为 Owner 手动平仓 | 处理单笔风险而不影响其他 Ticket 和策略 | 待设计实施 |
+| Owner 操作审计与异常收件箱 | 用 Owner 可读语义展示操作意图、范围、结果、Incident、未知 Command、保护缺失和身份漂移；不要求阅读原始日志 | 每天只处理需要行动的问题 | 待设计实施 |
+| StrategyVersion 生命周期 | 区分候选、认证、当前、历史和退休版本；收益、Ticket 和 Review 按版本隔离，不原地修改活动版本 | 防止历史右尾掩盖当前版本表现 | 待设计实施 |
+| Owner 注释与实验决策 | 机器交易事实保持不可变；Owner 以追加记录保存手动退出原因及 Continue、Observe、Pause、Retire 决策 | 把复盘结论沉淀为可追溯实验决策 | 待设计实施 |
+| 策略参数解耦 | 使用类型化、不可变的参数版本；参数变化不得原地改变当前 StrategyVersion 或活动 Ticket，也不得成为任意 JSON 配置入口 | 后期减少代码部署，同时保留策略身份和证据边界 | 明确待办，当前暂缓 |
 
 Instrument Catalog 与 StrategyUniverse 保持两层结构：标的先成为全局已知且已认证的
 Product，再通过 EventSpec-to-Instrument 成员关系决定某个策略方向是否使用它。前端的
 “热加载”表示无需重启 Worker 或重新部署代码；它不表示原地修改 Active Universe，
 也不改写已存在的 Signal、Claim 或 Ticket。
+
+单 Ticket Owner 平仓与后续 Entry 范围调整保持两个独立 Operation。手动平仓默认
+不暂停 StrategyGroup、Strategy-Instrument 或 Global Entry；如果 Owner 希望避免
+同一策略标的再次进入，应另行提交可审计的临时禁入或 Universe 变更。
+
+## Owner Product Architecture
+
+Owner Console 后续收敛为四个产品中心。页面只是呈现方式，稳定边界由 PostgreSQL
+版本化权威和正式 Kernel 链路拥有。
+
+| 产品中心 | 核心职责 | 明确边界 |
+| --- | --- | --- |
+| **策略中心** | 运行模式、当前版本、StrategyUniverse、Effective Entry Scope、版本隔离表现和实验决策 | 不在前端编写策略代码或任意 JSON 参数 |
+| **标的中心** | Instrument Catalog、Product 认证、生命周期、Venue 事实和策略成员关系 | Product 全局唯一，是否交易由 EventSpec-to-Instrument 关系决定 |
+| **Ticket / Review 中心** | 当前风险、保护状态、单 Ticket 平仓、K 线价格路径、Settlement、Review 和 Owner 注释 | 不直接编辑 Ticket、Command、成交或机器事实 |
+| **运行与控制中心** | Global Entry、Worker/Runtime Identity、Owner Operation、异常收件箱和发布准备度 | 不直接暴露任意 SQL、systemd 或 Exchange 写接口 |
+
+前端负责表达和变更 Owner 意图；PostgreSQL 保存版本化权威与追加事实；四类 Worker
+执行唯一正式链路；Ticket、Command、Settlement 和 Review 事实不得被 UI 原地改写。
+
+## Post-M6 Engineering Priorities
+
+优先级编号沿用阶段性复盘中的 Owner 语义。**P0 在后台等待市场，P2 的基础设施工作
+先于 P1 产品增强实施**；编号不代表串行执行顺序。
+
+| 轨道 | 目标 | 下一批工作 | 完成条件 |
+| --- | --- | --- | --- |
+| **P0：自然市场验收** | 关闭现有 Kernel 与 TradFi SOR 的真实生命周期证据 | 保持只读监控；自然 Signal 出现后观察 Admission、Ticket、保护、退出、Reconciliation、Settlement 和 Review；闭环后执行 `promote-full` 与最终需求审计 | 自然 TradFi Ticket 内外部完整闭环、零残留、零未解决 Incident，`promote-full` 和最终审计通过 |
+| **P2：工程基础设施** | 降低每次开发、测试和部署的固定成本，并统一产品语义 | 测试资产治理；发布流程状态化和精确候选认证复用；Canonical Exit Attribution；Effective Entry Scope 投影/API | 日常开发使用 Focused/Fast 层；完整认证只对冻结候选运行一次；发布显示单一阶段和阻塞点；退出原因和 Entry 能力有唯一权威 |
+| **P1：Owner 产品控制** | 让日常策略、标的和 Ticket 操作主要在前端完成 | 单 Ticket Owner 平仓；可读操作审计；策略运行模式；Instrument 生命周期；Strategy-Instrument 临时禁入；异常收件箱 | Owner 无需 SQL、SSH 或拼装日志即可完成日常范围控制和单笔风险处置 |
+| **P3：实验学习与扩展** | 把交易结果转化为版本隔离的策略决策，再决定新增策略 | StrategyVersion 生命周期；Owner 注释；Continue/Observe/Pause/Retire 决策；类型化参数版本设计；后续 MPG/BRF2/RSRVCB 评估 | 当前版本证据、自然退出与 Owner 干预可区分，新增策略不复用未经验证的历史总收益 |
+
+### Immediate Execution Order
+
+1. **P2.1 测试资产治理**：建立测试到当前合同/故障类的映射，合并重复 Fixture，
+   删除退休 Schema、发布分支和重复全链测试；不以测试数量作为质量目标。
+2. **P2.2 发布流程收敛**：复用冻结 Commit 的完整认证 Manifest，区分 R1/R2/R3/R4，
+   把 Orient、Prepare、Switch、Verify、Activate、Seal 显示为唯一当前阶段；等待市场、
+   空仓或闭合 K 线时不重跑完整测试。
+3. **P2.3 Canonical Exit Attribution**：以持久化 ExitRequested、Command role 和 Fill
+   证据统一列表、Ticket 详情、Review 和策略统计，删除“技术原因待查看”产品文案。
+4. **P2.4 Effective Entry Scope**：先形成有界 PostgreSQL 投影和只读 API，再接入
+   策略中心、标的中心和总览；页面显示当前结论和唯一第一阻塞点。
+5. **P1.1 单 Ticket Owner 平仓**：补齐持久化授权、Operation、正式 `request_exit()`
+   调用、进度投影、Review 归因和前端 Preview/TOTP；不建立第二退出路径。
+6. **P1.2 Owner 控制面补齐**：依次完成运行模式、Instrument 生命周期、
+   Strategy-Instrument 临时禁入、可读审计和异常收件箱。
+7. **P3 实验学习**：在上述权威投影稳定后再实现版本生命周期、Owner 注释、实验决策
+   和类型化参数版本；M7 或其他新策略族继续排在当前 SOR 自然闭环之后。
 
 ## Runtime And Resource Boundary
 
