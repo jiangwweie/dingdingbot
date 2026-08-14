@@ -29,28 +29,13 @@ from src.trading_kernel.application.reconcile_ticket import (
     reconcile_ticket,
     request_exit,
 )
-from src.trading_kernel.application.runtime_facts import (
-    AccountRiskSnapshotRequest,
-    EntryAdmissionSnapshotRequest,
-    InstrumentRulesFacts,
-    InstrumentRulesRequest,
-)
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
-    CancelCommandPayload,
     ExchangeCommandKind,
     ExchangeCommandResult,
     ExchangeCommandStatus,
     OrderCommandPayload,
     SetLeverageCommandResult,
-)
-from src.trading_kernel.domain.cross_margin_stress import (
-    AccountRiskSnapshot,
-    MaintenanceMarginBracket,
-)
-from src.trading_kernel.domain.entry_admission_snapshot import (
-    EntryAdmissionSnapshot,
-    canonical_digest,
 )
 from src.trading_kernel.domain.events import PostFillStressAssessed, TakeProfitFilled
 from src.trading_kernel.domain.identities import TicketIdentity
@@ -164,119 +149,6 @@ class _PreflightExitBarrierUnitOfWork:
             self._barrier.preflight_closed.set()
             await self._barrier.release_dispatch.wait()
         return outcome
-
-
-class _LegacyPreflightFacts:
-    def __init__(self, *, configured_leverage: int = 5) -> None:
-        self._configured_leverage = configured_leverage
-
-    async def read_entry_admission_snapshot(
-        self, request: EntryAdmissionSnapshotRequest
-    ) -> EntryAdmissionSnapshot:
-        return EntryAdmissionSnapshot(
-            account_risk_snapshot=self._account_risk_snapshot(
-                venue_id=request.venue_id,
-                account_id=request.account_id,
-                exchange_instrument_id=request.exchange_instrument_id,
-                observed_at_ms=request.observed_at_ms,
-                valid_for_ms=request.valid_for_ms,
-            ),
-            best_bid_price=Decimal(59999),
-            best_ask_price=Decimal(60000),
-            open_orders=(),
-            observed_at_ms=request.observed_at_ms,
-            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
-        )
-
-    async def read_account_risk_snapshot(
-        self, request: AccountRiskSnapshotRequest
-    ) -> AccountRiskSnapshot:
-        return self._account_risk_snapshot(
-            venue_id=request.venue_id,
-            account_id=request.account_id,
-            exchange_instrument_id=request.exchange_instrument_id,
-            observed_at_ms=request.observed_at_ms,
-            valid_for_ms=request.valid_for_ms,
-        )
-
-    def _account_risk_snapshot(
-        self,
-        *,
-        venue_id: str,
-        account_id: str,
-        exchange_instrument_id: str,
-        observed_at_ms: int,
-        valid_for_ms: int,
-    ) -> AccountRiskSnapshot:
-        return AccountRiskSnapshot.create(
-            venue_id=venue_id,
-            account_id=account_id,
-            account_risk_mode="standard_usdm_single_asset",
-            settlement_asset="USDT",
-            position_mode="independent_sides",
-            margin_mode="cross",
-            exchange_instrument_id=exchange_instrument_id,
-            mark_price=Decimal(60000),
-            configured_leverage=self._configured_leverage,
-            total_wallet_balance=Decimal(300),
-            total_margin_balance=Decimal(300),
-            total_initial_margin=Decimal(10),
-            total_maintenance_margin=Decimal(1),
-            available_margin=Decimal(290),
-            account_positions=(),
-            observed_at_ms=observed_at_ms,
-            valid_until_ms=observed_at_ms + valid_for_ms,
-        )
-
-    async def read_instrument_rules(
-        self, request: InstrumentRulesRequest
-    ) -> InstrumentRulesFacts:
-        brackets = (
-            MaintenanceMarginBracket(
-                bracket_id="test:1",
-                notional_floor=Decimal(0),
-                notional_cap=None,
-                maintenance_margin_rate=Decimal("0.005"),
-                maintenance_amount=Decimal(0),
-            ),
-        )
-        return InstrumentRulesFacts(
-            exchange_instrument_id=request.exchange_instrument_id,
-            quantity_step=Decimal("0.001"),
-            price_tick=Decimal("0.1"),
-            min_quantity=Decimal("0.001"),
-            min_notional=Decimal(5),
-            exchange_max_leverage=10,
-            maintenance_margin_brackets=brackets,
-            maintenance_margin_brackets_digest=canonical_digest(brackets),
-            notional_coefficient=Decimal(1),
-            notional_coefficient_certified=True,
-            observed_at_ms=request.observed_at_ms,
-            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
-        )
-
-
-class _LegacyKindAwareAcceptingVenue:
-    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
-        exchange_order_id = (
-            request.payload.exchange_order_id
-            if isinstance(request.payload, CancelCommandPayload)
-            else f"venue-{request.kind.value}-1"
-        )
-        return ExchangeCommandResult(
-            status=ExchangeCommandStatus.ACCEPTED,
-            observed_at_ms=2_000,
-            exchange_order_id=exchange_order_id,
-        )
-
-    async def set_leverage(
-        self, request: VenueSetLeverageRequest
-    ) -> SetLeverageCommandResult:
-        return SetLeverageCommandResult(
-            exchange_configured_leverage=request.payload.desired_leverage,
-            leverage_verified_at_ms=2_000,
-            leverage_verification_digest="sha256:" + "4" * 64,
-        )
 
 
 class CountingKindAwareAcceptingVenue(KindAwareAcceptingVenue):
