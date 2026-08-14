@@ -69,8 +69,10 @@ from tests.trading_kernel.integration.test_command_dispatch import (
     _seed_policy,
 )
 from tests.trading_kernel.integration.test_issue_ticket import (
-    _issue_request,
     _seed_ticket_runtime_scope,
+)
+from tests.trading_kernel.support.capacity_claims import (
+    make_issue_request as _issue_request,
 )
 from tests.trading_kernel.support.tickets import make_ticket as _ticket
 from tests.trading_kernel.unit.test_venue_adapter import FakeAsyncExchange

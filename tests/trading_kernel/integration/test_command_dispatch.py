@@ -75,10 +75,14 @@ from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
 from tests.trading_kernel.integration.test_issue_ticket import (
-    _issue_request,
     _seed_replacement_universe,
     _seed_ticket_runtime_scope,
-    _stress_evidence,
+)
+from tests.trading_kernel.support.capacity_claims import (
+    make_issue_request as _issue_request,
+)
+from tests.trading_kernel.support.capacity_claims import (
+    make_stress_evidence as _stress_evidence,
 )
 from tests.trading_kernel.support.postgres import (
     SAFE_TEST_DATABASE as SAFE_DATABASE,

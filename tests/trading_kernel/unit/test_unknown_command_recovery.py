@@ -18,7 +18,9 @@ from src.trading_kernel.domain.venue_truth import (
     VenueTruthSnapshot,
     decide_unknown_recovery,
 )
-from tests.trading_kernel.integration.test_issue_ticket import _issue_request
+from tests.trading_kernel.support.capacity_claims import (
+    make_issue_request as _issue_request,
+)
 from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
 

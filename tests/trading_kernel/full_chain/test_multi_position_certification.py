@@ -53,8 +53,10 @@ from tests.trading_kernel.integration.test_command_dispatch import (
     _ticket,
 )
 from tests.trading_kernel.integration.test_issue_ticket import (
-    _issue_request,
     _seed_ticket_runtime_scope,
+)
+from tests.trading_kernel.support.capacity_claims import (
+    make_issue_request as _issue_request,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
