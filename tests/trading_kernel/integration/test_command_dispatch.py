@@ -85,7 +85,7 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _seed_ticket_runtime_scope,
     _stress_evidence,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket as _retired_ticket
+from tests.trading_kernel.support.tickets import make_ticket as _retired_ticket
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(

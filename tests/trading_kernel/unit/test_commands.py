@@ -22,8 +22,8 @@ from src.trading_kernel.domain.commands import (
     build_venue_client_order_id,
     require_next_generation_allowed,
 )
+from tests.trading_kernel.support.tickets import make_ticket_identity as _identity
 from tests.trading_kernel.unit.test_reducer import _reconciliation_pending_aggregate
-from tests.trading_kernel.unit.test_ticket import _identity
 
 
 def _payload(*, reduce_only: bool = False) -> OrderCommandPayload:

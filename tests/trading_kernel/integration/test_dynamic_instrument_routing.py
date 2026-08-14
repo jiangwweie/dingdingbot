@@ -72,7 +72,7 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _issue_request,
     _seed_ticket_runtime_scope,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.support.tickets import make_ticket as _ticket
 from tests.trading_kernel.unit.test_venue_adapter import FakeAsyncExchange
 
 _DYNAMIC_INSTRUMENT_ID = "binance-usdm:OPUSDT:perpetual"

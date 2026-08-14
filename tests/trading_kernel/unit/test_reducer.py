@@ -87,7 +87,7 @@ from src.trading_kernel.domain.post_fill_risk import (
     assess_post_fill_risk,
 )
 from src.trading_kernel.domain.reducer import InvalidLifecycleTransition, reduce_event
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
 
 def _normal_post_fill_risk(ticket, average_fill_price: Decimal):

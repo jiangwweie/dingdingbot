@@ -86,7 +86,7 @@ from tests.trading_kernel.integration.test_signal_to_ticket import (
     _seed_runtime_authority,
     _signal,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
 runtime_fact_worker_engine = dispatch_fixture.dispatch_engine
 

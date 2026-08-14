@@ -19,7 +19,7 @@ from src.trading_kernel.domain.venue_truth import (
     decide_unknown_recovery,
 )
 from tests.trading_kernel.integration.test_issue_ticket import _issue_request
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
 
 def test_visible_matching_order_resolves_unknown_as_submitted() -> None:

@@ -39,7 +39,7 @@ from tests.trading_kernel.integration.test_command_dispatch import (
     _issue,
     _seed_policy,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
 lifecycle_engine = dispatch_fixture.dispatch_engine
 

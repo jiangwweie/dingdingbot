@@ -7,7 +7,7 @@ from src.trading_kernel.domain.arbitration import (
     freeze_candidate_set,
     rank_candidates,
 )
-from tests.trading_kernel.unit.test_signal import _signal
+from tests.trading_kernel.support.signals import make_signal as _signal
 
 
 def test_arbitration_uses_the_complete_owner_accepted_ordering() -> None:

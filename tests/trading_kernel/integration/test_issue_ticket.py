@@ -62,7 +62,12 @@ from src.trading_kernel.infrastructure.pg_models import (
     trade_tickets,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from tests.trading_kernel.unit.test_ticket import _identity, _ticket
+from tests.trading_kernel.support.tickets import (
+    make_ticket as _ticket,
+)
+from tests.trading_kernel.support.tickets import (
+    make_ticket_identity as _identity,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(

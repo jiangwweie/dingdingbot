@@ -12,7 +12,7 @@ from src.trading_kernel.domain.admission_decision import (
     freeze_admission_decision,
 )
 from src.trading_kernel.domain.arbitration import EntryCandidate, freeze_candidate_set
-from tests.trading_kernel.unit.test_signal import _signal
+from tests.trading_kernel.support.signals import make_signal as _signal
 
 
 def test_rejected_decision_forbids_ticket_identity() -> None:

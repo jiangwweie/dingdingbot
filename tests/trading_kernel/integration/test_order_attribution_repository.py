@@ -17,7 +17,7 @@ from tests.trading_kernel.integration import test_command_dispatch as dispatch_f
 from tests.trading_kernel.integration.test_issue_ticket import (
     _seed_ticket_runtime_scope,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
 order_attribution_engine = dispatch_fixture.dispatch_engine
 

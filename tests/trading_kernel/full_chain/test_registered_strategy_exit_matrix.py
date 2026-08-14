@@ -28,8 +28,8 @@ from src.trading_kernel.domain.post_fill_risk import (
 )
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from tests.trading_kernel.support.tickets import make_ticket as _ticket
 from tests.trading_kernel.unit.test_reducer import _post_fill_stress_event
-from tests.trading_kernel.unit.test_ticket import _ticket
 
 
 def _normal_post_fill_risk(ticket, average_fill_price: Decimal):

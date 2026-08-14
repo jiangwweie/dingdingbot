@@ -39,7 +39,7 @@ from tests.trading_kernel.integration.universe_certification_support import (
     NoTicketPositionSource,
     NoTicketVenueTruth,
 )
-from tests.trading_kernel.unit.test_ticket import _ticket
+from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
 
 class _AggregateRepository:
