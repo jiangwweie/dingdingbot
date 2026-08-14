@@ -12,19 +12,23 @@ from scripts.trading_kernel.promote_entry import promote_entry
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_UNIVERSE_BATCHES,
 )
-from tests.trading_kernel.integration.test_entry_promotion_gate import (
+from tests.trading_kernel.support.postgres import (
+    SAFE_TEST_DATABASE as SAFE_DATABASE,
+)
+from tests.trading_kernel.support.postgres import (
+    async_database_url as _database_url,
+)
+from tests.trading_kernel.support.promotion_rehearsal import (
     RecordingPromotionBackend,
     _cleanup,
     _seed_and_bootstrap,
 )
-from tests.trading_kernel.integration.test_strategy_universe_batch_bootstrap import (
-    SAFE_DATABASE,
-    _database_url,
-)
 from tests.trading_kernel.unit.detectors.fixtures import NOW_MS
 
 
-def test_empty_database_rehearsal_reaches_all_active_universes_then_fenced_entry_promotion() -> None:
+def test_empty_database_rehearsal_reaches_all_active_universes_then_fenced_entry_promotion() -> (
+    None
+):
     """Run the production-shaped local release path without Tokyo or exchange writes."""
 
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
@@ -106,6 +110,8 @@ async def _universe_identity_snapshot(database_url: str) -> dict[str, int]:
                     )
                 )
             ).all()
-        return {str(event_spec_id): int(scope_count) for event_spec_id, scope_count in rows}
+        return {
+            str(event_spec_id): int(scope_count) for event_spec_id, scope_count in rows
+        }
     finally:
         await engine.dispose()

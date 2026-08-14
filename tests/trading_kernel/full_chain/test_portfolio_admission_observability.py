@@ -84,24 +84,20 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerStatus,
     run_reconciliation_worker_once,
 )
-from tests.trading_kernel.full_chain.test_six_event_system_certification import (
+from tests.trading_kernel.integration.universe_certification_support import (
+    RecordingReadonlyCertificationSource,
+)
+from tests.trading_kernel.support.certified_boundaries import (
     CertifiedEntryAdmissionFactsSource,
     CertifiedLifecycleFactsSource,
     CertifiedPositionSource,
     CertifiedPostFillFactsSource,
     CertifiedVenue,
 )
-from tests.trading_kernel.integration.test_portfolio_admission_flat_compatible_deployment import (
-    _install_source_runtime_identity,
-)
-from tests.trading_kernel.integration.test_portfolio_admission_observability_migration import (
-    _prepare_production_shaped_0002,
-)
-from tests.trading_kernel.integration.test_sor_v3_compatible_migration import (
+from tests.trading_kernel.support.migrations import (
     V4_REVISION,
-)
-from tests.trading_kernel.integration.universe_certification_support import (
-    RecordingReadonlyCertificationSource,
+    _install_source_runtime_identity,
+    _prepare_production_shaped_0002,
 )
 from tests.trading_kernel.support.postgres import (
     SAFE_TEST_DATABASE as SAFE_DATABASE,
@@ -195,12 +191,16 @@ async def replay_engine() -> AsyncGenerator[AsyncEngine, None]:
         assert deployed.refreshed_existing_authority is True
         async with engine.connect() as connection:
             profile = (
-                await connection.execute(
-                    sa.select(runtime_profiles).where(
-                        runtime_profiles.c.runtime_profile_id == RUNTIME_PROFILE_ID
+                (
+                    await connection.execute(
+                        sa.select(runtime_profiles).where(
+                            runtime_profiles.c.runtime_profile_id == RUNTIME_PROFILE_ID
+                        )
                     )
                 )
-            ).mappings().one()
+                .mappings()
+                .one()
+            )
             metadata = dict(
                 (
                     await connection.execute(
@@ -312,9 +312,7 @@ class ReplayEntryAdmissionFactsSource(CertifiedEntryAdmissionFactsSource):
     ) -> EntryAdmissionSnapshot:
         snapshot = await super().read_entry_admission_snapshot(request)
         account_risk = _with_fixed_leverage(snapshot.account_risk_snapshot)
-        return snapshot.model_copy(
-            update={"account_risk_snapshot": account_risk}
-        )
+        return snapshot.model_copy(update={"account_risk_snapshot": account_risk})
 
     async def read_account_risk_snapshot(
         self,
@@ -491,11 +489,11 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
     )
     assert sor_signal is not None
     sor_session_start_ms = (
-        expected_sor_time := NOW_MS + NINE_HOURS_FIFTEEN_MINUTES_MS
-    ) // 86_400_000 * 86_400_000
-    sor_fact_values = {
-        fact.fact_definition_id: fact.value for fact in sor_signal.facts
-    }
+        (expected_sor_time := NOW_MS + NINE_HOURS_FIFTEEN_MINUTES_MS)
+        // 86_400_000
+        * 86_400_000
+    )
+    sor_fact_values = {fact.fact_definition_id: fact.value for fact in sor_signal.facts}
     assert next(
         value
         for fact_id, value in sor_fact_values.items()
@@ -509,8 +507,8 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
     assert sor_signal.occurred_at_ms == expected_sor_time
     async with replay_engine.connect() as connection:
         policy = (
-            await connection.execute(sa.select(owner_policy_current))
-        ).mappings().one()
+            (await connection.execute(sa.select(owner_policy_current))).mappings().one()
+        )
         policy_events = tuple(
             (
                 await connection.execute(
@@ -574,17 +572,21 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
             (await connection.execute(sa.select(exchange_commands))).mappings().all()
         )
         shadow = (
-            await connection.execute(
-                sa.select(shadow_outcomes_current).where(
-                    shadow_outcomes_current.c.admission_decision_id
-                    == next(
-                        decision.admission_decision_id
-                        for decision in decisions
-                        if decision.signal_event_id == doge[2]
+            (
+                await connection.execute(
+                    sa.select(shadow_outcomes_current).where(
+                        shadow_outcomes_current.c.admission_decision_id
+                        == next(
+                            decision.admission_decision_id
+                            for decision in decisions
+                            if decision.signal_event_id == doge[2]
+                        )
                     )
                 )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         active_ticket_ids = tuple(
             await connection.scalars(
                 sa.select(trade_tickets.c.ticket_id)
@@ -666,29 +668,25 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
             "opening_range": 2,
             "rally_failure_short": 1,
         }
-        assert Decimal(str(payload["max_ticket_stop_risk_fraction"])) == Decimal(
-            "0.02"
-        )
-        assert Decimal(str(payload["max_gross_stop_risk_fraction"])) == Decimal(
-            "0.06"
-        )
+        assert Decimal(str(payload["max_ticket_stop_risk_fraction"])) == Decimal("0.02")
+        assert Decimal(str(payload["max_gross_stop_risk_fraction"])) == Decimal("0.06")
         assert Decimal(str(payload["max_ticket_initial_margin_fraction"])) == (
             Decimal("0.30")
         )
-        assert Decimal(
-            str(payload["max_gross_initial_margin_utilization"])
-        ) == Decimal("0.90")
-        assert Decimal(
-            str(payload["directional_stop_risk_limit_fraction"])
-        ) == Decimal("0.04")
-        assert Decimal(str(payload["min_materialization_ratio"])) == Decimal(
-            "0.50"
+        assert Decimal(str(payload["max_gross_initial_margin_utilization"])) == Decimal(
+            "0.90"
         )
+        assert Decimal(str(payload["directional_stop_risk_limit_fraction"])) == Decimal(
+            "0.04"
+        )
+        assert Decimal(str(payload["min_materialization_ratio"])) == Decimal("0.50")
         assert payload["max_leverage"] == 10
         assert payload["supported_margin_mode"] == "cross"
-    assert int(migration_policy_event["created_at_ms"]) < int(
-        r4_identity_event["created_at_ms"]
-    ) < int(armed_policy_event["created_at_ms"])
+    assert (
+        int(migration_policy_event["created_at_ms"])
+        < int(r4_identity_event["created_at_ms"])
+        < int(armed_policy_event["created_at_ms"])
+    )
 
     assert policy["policy_version"] == 6
     assert policy["enabled"] is True
@@ -734,12 +732,10 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         )
         <= directional_risk_limit
     )
-    assert sum(
-        ticket.exposure_family == "long_continuation" for ticket in tickets
-    ) <= 1
-    assert sum(
-        ticket.exposure_family == "rally_failure_short" for ticket in tickets
-    ) <= 1
+    assert sum(ticket.exposure_family == "long_continuation" for ticket in tickets) <= 1
+    assert (
+        sum(ticket.exposure_family == "rally_failure_short" for ticket in tickets) <= 1
+    )
     assert sum(ticket.exposure_family == "opening_range" for ticket in tickets) <= 2
     assert by_instrument[BNB].decision_status is AdmissionDecisionStatus.ADMITTED
     assert by_instrument[ETH].decision_status is AdmissionDecisionStatus.ADMITTED
@@ -798,28 +794,43 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         assert claim["margin_mode_at_claim"] == "cross"
         assert ticket_row["margin_mode"] == "cross"
         assert claim["exposure_family"] == ticket_row["exposure_family"]
-        assert claim["family_ticket_limit"] == {
-            "long_continuation": 1,
-            "opening_range": 2,
-            "rally_failure_short": 1,
-        }[str(ticket_row["exposure_family"])]
+        assert (
+            claim["family_ticket_limit"]
+            == {
+                "long_continuation": 1,
+                "opening_range": 2,
+                "rally_failure_short": 1,
+            }[str(ticket_row["exposure_family"])]
+        )
     assert shadow is not None
     assert shadow["admission_decision_id"] == by_instrument[DOGE].admission_decision_id
     assert shadow["status"] == "pending"
-    assert all(ticket.identity.netting_domain.exchange_instrument_id != DOGE for ticket in tickets)
+    assert all(
+        ticket.identity.netting_domain.exchange_instrument_id != DOGE
+        for ticket in tickets
+    )
 
     async with replay_engine.connect() as connection:
-        assert await connection.scalar(
-            sa.select(sa.func.count()).select_from(admission_decisions)
-        ) == 4
-        assert await connection.scalar(
-            sa.select(sa.func.count())
-            .select_from(trade_tickets)
-            .where(trade_tickets.c.ticket_id.in_(admitted_decision_ticket_ids))
-        ) == 3
-        assert await connection.scalar(
-            sa.select(sa.func.count()).select_from(shadow_outcomes_current)
-        ) == 1
+        assert (
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(admission_decisions)
+            )
+            == 4
+        )
+        assert (
+            await connection.scalar(
+                sa.select(sa.func.count())
+                .select_from(trade_tickets)
+                .where(trade_tickets.c.ticket_id.in_(admitted_decision_ticket_ids))
+            )
+            == 3
+        )
+        assert (
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(shadow_outcomes_current)
+            )
+            == 1
+        )
 
 
 async def _seed_replay_runtime(
@@ -888,7 +899,9 @@ async def _install_and_activate(
                 certification_owner_action_check_interval_ms=300_000,
                 certification_transient_retry_interval_ms=30_000,
             ),
-            instrument_certification_source=RecordingReadonlyCertificationSource(engine),
+            instrument_certification_source=RecordingReadonlyCertificationSource(
+                engine
+            ),
         )
         assert certified.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
 
@@ -929,7 +942,9 @@ async def _install_and_activate(
                 unknown_visibility_grace_ms=30_000,
                 idle_poll_interval_ms=1_000,
             ),
-            instrument_certification_source=RecordingReadonlyCertificationSource(engine),
+            instrument_certification_source=RecordingReadonlyCertificationSource(
+                engine
+            ),
         )
         assert refreshed.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
 

@@ -24,7 +24,10 @@ from src.trading_kernel.domain.events import (
     TakeProfitConfirmed,
     TicketIssued,
 )
-from src.trading_kernel.domain.post_fill_risk import PostFillRiskRequest, assess_post_fill_risk
+from src.trading_kernel.domain.post_fill_risk import (
+    PostFillRiskRequest,
+    assess_post_fill_risk,
+)
 from src.trading_kernel.domain.reducer import reduce_event
 from tests.trading_kernel.support.tickets import make_ticket
 
@@ -109,26 +112,111 @@ def post_fill_stress_event(aggregate, *, passed: bool = True):
 
 def position_protected_aggregate():
     ticket = make_ticket()
-    aggregate = reduce_event(None, TicketIssued(event_id="event-1", ticket=ticket, sequence=1, occurred_at_ms=1_001)).aggregate
-    post_fill_risk = assess_post_fill_risk(PostFillRiskRequest(
-        position_side=ticket.identity.netting_domain.position_side,
-        filled_quantity=ticket.quantity,
-        average_fill_price=Decimal(60_000),
-        initial_stop_price=ticket.initial_stop_price,
-        planned_stop_risk_budget=ticket.planned_stop_risk_budget,
-        post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
-    ))
-    aggregate = reduce_event(aggregate, EntryFilled(event_id="event-2", ticket_id=ticket.identity.ticket_id, sequence=2, occurred_at_ms=1_100, filled_qty=ticket.quantity, average_fill_price=Decimal(60_000), venue_reported_liquidation_price=None, position_observed_at_ms=1_100, post_fill_risk=post_fill_risk)).aggregate
-    aggregate = reduce_event(aggregate, InitialStopConfirmed(event_id="event-3", ticket_id=ticket.identity.ticket_id, sequence=3, occurred_at_ms=1_200, exchange_order_id="stop-1", protected_qty=ticket.quantity)).aggregate
+    aggregate = reduce_event(
+        None,
+        TicketIssued(
+            event_id="event-1", ticket=ticket, sequence=1, occurred_at_ms=1_001
+        ),
+    ).aggregate
+    post_fill_risk = assess_post_fill_risk(
+        PostFillRiskRequest(
+            position_side=ticket.identity.netting_domain.position_side,
+            filled_quantity=ticket.quantity,
+            average_fill_price=Decimal(60_000),
+            initial_stop_price=ticket.initial_stop_price,
+            planned_stop_risk_budget=ticket.planned_stop_risk_budget,
+            post_fill_stop_risk_limit=ticket.post_fill_stop_risk_limit,
+        )
+    )
+    aggregate = reduce_event(
+        aggregate,
+        EntryFilled(
+            event_id="event-2",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=2,
+            occurred_at_ms=1_100,
+            filled_qty=ticket.quantity,
+            average_fill_price=Decimal(60_000),
+            venue_reported_liquidation_price=None,
+            position_observed_at_ms=1_100,
+            post_fill_risk=post_fill_risk,
+        ),
+    ).aggregate
+    aggregate = reduce_event(
+        aggregate,
+        InitialStopConfirmed(
+            event_id="event-3",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=3,
+            occurred_at_ms=1_200,
+            exchange_order_id="stop-1",
+            protected_qty=ticket.quantity,
+        ),
+    ).aggregate
     aggregate = reduce_event(aggregate, post_fill_stress_event(aggregate)).aggregate
-    return reduce_event(aggregate, TakeProfitConfirmed(event_id="event-5", ticket_id=ticket.identity.ticket_id, sequence=aggregate.last_event_sequence + 1, occurred_at_ms=1_300, exchange_order_id="tp-1", target_qty=ticket.take_profit_quantities[0])).aggregate
+    return reduce_event(
+        aggregate,
+        TakeProfitConfirmed(
+            event_id="event-5",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=1_300,
+            exchange_order_id="tp-1",
+            target_qty=ticket.take_profit_quantities[0],
+        ),
+    ).aggregate
 
 
 def reconciliation_pending_aggregate():
     aggregate = position_protected_aggregate()
     ticket = aggregate.ticket
-    aggregate = reduce_event(aggregate, ExitRequested(event_id="event-4", ticket_id=ticket.identity.ticket_id, sequence=aggregate.last_event_sequence + 1, occurred_at_ms=2_000, reason="strategy_exit")).aggregate
-    aggregate = reduce_event(aggregate, PositionFlatConfirmed(event_id="event-5", ticket_id=ticket.identity.ticket_id, sequence=aggregate.last_event_sequence + 1, occurred_at_ms=2_100)).aggregate
-    aggregate = reduce_event(aggregate, ProtectionCancelConfirmed(event_id="event-6", ticket_id=ticket.identity.ticket_id, sequence=aggregate.last_event_sequence + 1, occurred_at_ms=2_150, exchange_order_id="tp-1")).aggregate
-    aggregate = reduce_event(aggregate, OwnedOrphanOrderDetected(event_id="event-7", ticket_id=ticket.identity.ticket_id, sequence=aggregate.last_event_sequence + 1, occurred_at_ms=2_175, exchange_order_id="stop-1", order_namespace="conditional")).aggregate
-    return reduce_event(aggregate, ProtectionCancelConfirmed(event_id="event-8", ticket_id=ticket.identity.ticket_id, sequence=aggregate.last_event_sequence + 1, occurred_at_ms=2_190, exchange_order_id="stop-1")).aggregate
+    aggregate = reduce_event(
+        aggregate,
+        ExitRequested(
+            event_id="event-4",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_000,
+            reason="strategy_exit",
+        ),
+    ).aggregate
+    aggregate = reduce_event(
+        aggregate,
+        PositionFlatConfirmed(
+            event_id="event-5",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_100,
+        ),
+    ).aggregate
+    aggregate = reduce_event(
+        aggregate,
+        ProtectionCancelConfirmed(
+            event_id="event-6",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_150,
+            exchange_order_id="tp-1",
+        ),
+    ).aggregate
+    aggregate = reduce_event(
+        aggregate,
+        OwnedOrphanOrderDetected(
+            event_id="event-7",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_175,
+            exchange_order_id="stop-1",
+            order_namespace="conditional",
+        ),
+    ).aggregate
+    return reduce_event(
+        aggregate,
+        ProtectionCancelConfirmed(
+            event_id="event-8",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_190,
+            exchange_order_id="stop-1",
+        ),
+    ).aggregate

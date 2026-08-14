@@ -1,37 +1,579 @@
-from __future__ import annotations
+"""Exact-source disposable PostgreSQL migration fixtures for tests only."""
 
-import json
-from collections.abc import Mapping
+import os
+import subprocess
+import sys
+from collections.abc import AsyncGenerator, Mapping
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-import pytest
+import asyncpg
+import pytest_asyncio
 import sqlalchemy as sa
-from alembic.config import Config
-from alembic.script import ScriptDirectory
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from migrations.trading_kernel import v4_schema
 from src.trading_kernel.infrastructure import pg_models
-from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from src.trading_kernel.infrastructure.runtime_identity import (
-    CURRENT_SCHEMA_REVISION,
+from tests.trading_kernel.support.postgres import (
+    SAFE_TEST_DATABASE as SAFE_DATABASE,
 )
-from src.trading_kernel.infrastructure.strategy_registry_seed import (
-    seed_strategy_registry,
+from tests.trading_kernel.support.postgres import (
+    TEST_POSTGRES_ADMIN_DSN as ADMIN_DSN,
 )
-from tests.trading_kernel.support.migrations import (
-    HEAD_REVISION,
-    _claim_values,
-    _run_migration,
-    _seed_v4_history,
-    _ticket_values,
-    compatible_migration_engine,
-)
+from tests.trading_kernel.support.postgres import async_database_url
 
-__all__ = ["compatible_migration_engine"]
+V4_REVISION = "0001_trading_kernel_baseline_v4"
+SOR_V3_REVISION = "0002_sor_v3_strategy_group_capacity"
+HEAD_REVISION = "0003_portfolio_admission_observability"
+SEMANTIC_DIGEST = "sha256:" + "a" * 64
+EXIT_POLICY_HASH = "sha256:" + "b" * 64
+FACT_DIGEST = "sha256:" + "c" * 64
+DECISION_DIGEST_1 = "sha256:" + "d" * 64
+DECISION_DIGEST_2 = "sha256:" + "e" * 64
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest_asyncio.fixture
+async def compatible_migration_engine() -> AsyncGenerator[AsyncEngine, None]:
+    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
+    assert SAFE_DATABASE.fullmatch(database_name)
+    admin = await asyncpg.connect(ADMIN_DSN)
+    await admin.execute(f'CREATE DATABASE "{database_name}"')
+    database_url = async_database_url(database_name)
+    result = _run_migration(database_url, "upgrade", V4_REVISION)
+    assert result.returncode == 0, result.stderr[-4000:]
+    engine = create_async_engine(database_url)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+        await admin.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            database_name,
+        )
+        await admin.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
+        await admin.close()
+
+
+async def _seed_v4_history(engine: AsyncEngine) -> None:
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(v4_schema.strategy_groups).values(
+                strategy_group_id="SOR-001",
+                display_name="SOR-001",
+                active_version_id="sgv:SOR-001:v2",
+                status="active",
+                updated_at_ms=900,
+            )
+        )
+        await connection.execute(
+            sa.insert(v4_schema.strategy_versions).values(
+                strategy_version_id="sgv:SOR-001:v2",
+                strategy_group_id="SOR-001",
+                version=2,
+                semantics={"producer": "persistent-state-v2"},
+                status="active",
+                created_at_ms=900,
+            )
+        )
+        await connection.execute(
+            sa.insert(v4_schema.event_specs).values(
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                strategy_version_id="sgv:SOR-001:v2",
+                event_id="SOR-LONG",
+                position_side="long",
+                timeframe="15m",
+                freshness_window_ms=900_000,
+                event_time_authority="close_time",
+                entry_order_type="market",
+                protection_reference_fact_definition_id="fact:range-low:v1",
+                exit_policy_id="exit-policy:SOR-001:SOR-LONG:right-tail-v1",
+                execution_semantics={},
+                status="active",
+                created_at_ms=900,
+            )
+        )
+        await connection.execute(
+            sa.insert(v4_schema.exit_policies).values(
+                exit_policy_id="exit-policy:SOR-001:SOR-LONG:right-tail-v1",
+                exit_policy_version="right-tail-v1",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                position_side="long",
+                policy={"tp1": "1R"},
+                semantic_hash=EXIT_POLICY_HASH,
+                status="active",
+                created_at_ms=900,
+            )
+        )
+        await connection.execute(
+            sa.insert(v4_schema.instruments).values(
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                venue_id="binance-usdm",
+                asset_class="crypto",
+                venue_symbol="BTCUSDT",
+                contract_kind="perpetual",
+                status="active",
+            )
+        )
+        await connection.execute(
+            sa.insert(v4_schema.strategy_universe_versions).values(
+                universe_version_id="universe:sor-long:v2:1",
+                strategy_group_id="SOR-001",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                universe_version=1,
+                semantic_digest=SEMANTIC_DIGEST,
+                lifecycle_state="active",
+                installed_at_ms=900,
+                activated_at_ms=950,
+                retired_at_ms=None,
+                abandoned_at_ms=None,
+                abandon_reason_code=None,
+            )
+        )
+        await connection.execute(
+            sa.insert(v4_schema.strategy_universe_members).values(
+                universe_version_id="universe:sor-long:v2:1",
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            )
+        )
+        await connection.execute(
+            sa.insert(v4_schema.owner_policy_current).values(
+                owner_policy_id="policy-main",
+                policy_version=7,
+                enabled=True,
+                new_entry_submit_enabled=False,
+                priority_rank=1,
+                max_concurrent_tickets=3,
+                max_ticket_stop_risk_fraction=Decimal("0.03"),
+                max_gross_stop_risk_fraction=Decimal("0.06"),
+                max_ticket_initial_margin_fraction=Decimal("0.45"),
+                max_gross_initial_margin_utilization=Decimal("0.90"),
+                max_leverage=10,
+                supported_margin_mode="cross",
+                post_stop_stress_multiple=Decimal(2),
+                max_post_fill_stop_risk_overrun_fraction=Decimal("0.10"),
+                scope={},
+                updated_at_ms=900,
+            )
+        )
+        for index, created_at_ms in ((1, 1_000), (2, 2_000)):
+            await connection.execute(
+                sa.insert(v4_schema.signal_events).values(
+                    signal_event_id=f"signal-v2-{index}",
+                    runtime_scope_id=f"scope-v2-{index}",
+                    runtime_scope_version=1,
+                    strategy_group_id="SOR-001",
+                    strategy_version_id="sgv:SOR-001:v2",
+                    event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+                    universe_version_id="universe:sor-long:v2:1",
+                    universe_semantic_digest=SEMANTIC_DIGEST,
+                    exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                    position_side="long",
+                    fact_digest=FACT_DIGEST,
+                    occurred_at_ms=created_at_ms - 200,
+                    observed_at_ms=created_at_ms - 100,
+                    expires_at_ms=created_at_ms + 800,
+                )
+            )
+            await connection.execute(
+                sa.insert(v4_schema.capacity_claims).values(
+                    **_claim_values(index=index, created_at_ms=created_at_ms)
+                )
+            )
+            await connection.execute(
+                sa.insert(v4_schema.trade_tickets).values(
+                    **_ticket_values(index=index, created_at_ms=created_at_ms + 100)
+                )
+            )
+        await connection.execute(
+            sa.insert(v4_schema.budget_reservations).values(
+                budget_reservation_id="reservation-v2-2",
+                ticket_id="ticket-v2-2",
+                owner_policy_id="policy-main",
+                venue_id="binance-usdm",
+                account_id="account-main",
+                reserved_notional=Decimal(100),
+                reserved_risk=Decimal(1),
+                reserved_margin=Decimal(20),
+                planned_stop_risk_budget=Decimal(1),
+                risk_reservation_basis="planned_stop_distance",
+                status="active",
+                created_at_ms=2_100,
+                released_at_ms=None,
+            )
+        )
+        await connection.execute(
+            sa.insert(v4_schema.exchange_commands).values(
+                command_id="command-v2-2-entry",
+                ticket_id="ticket-v2-2",
+                command_kind="entry",
+                generation=1,
+                idempotency_key="idempotency-v2-2-entry",
+                venue_client_order_id="client-v2-2-entry",
+                status="outcome_unknown",
+                quantity=Decimal(1),
+                request_payload={},
+                result_payload=None,
+                claim_owner=None,
+                lease_until_ms=None,
+                created_at_ms=2_100,
+                deadline_at_ms=3_000,
+                completed_at_ms=None,
+            )
+        )
+        await connection.execute(
+            sa.insert(v4_schema.runtime_incidents).values(
+                incident_id="incident-v2-2",
+                ticket_id="ticket-v2-2",
+                incident_kind="unknown_entry_outcome",
+                status="open",
+                first_blocker="exchange_truth_unresolved",
+                entry_block_scope="account_capacity",
+                entry_block_key="binance-usdm:account-main",
+                details={},
+                opened_at_ms=2_200,
+                resolved_at_ms=None,
+            )
+        )
+        await connection.execute(
+            sa.insert(v4_schema.trade_reviews).values(
+                review_id="review-v2-1",
+                ticket_id="ticket-v2-1",
+                revision=1,
+                supersedes_review_id=None,
+                outcome="closed",
+                metrics={"net_pnl_quote": "1"},
+                decision_impact={"entry_semantics": "v2"},
+                created_at_ms=3_100,
+            )
+        )
+
+
+def _claim_values(*, index: int, created_at_ms: int) -> dict[str, object]:
+    decision_digest = DECISION_DIGEST_1 if index == 1 else DECISION_DIGEST_2
+    return {
+        "capacity_claim_id": f"claim-v2-{index}",
+        "ticket_id": f"ticket-v2-{index}",
+        "signal_event_id": f"signal-v2-{index}",
+        "exposure_episode_id": f"episode-v2-{index}",
+        "strategy_group_id": "SOR-001",
+        "strategy_version_id": "sgv:SOR-001:v2",
+        "event_spec_id": "event_spec:SOR-001:SOR-LONG:v2",
+        "universe_version_id": "universe:sor-long:v2:1",
+        "universe_semantic_digest": SEMANTIC_DIGEST,
+        "runtime_profile_id": "tiny-live-v1",
+        "owner_policy_id": "policy-main",
+        "owner_policy_version": 7,
+        "runtime_scope_id": f"scope-v2-{index}",
+        "runtime_scope_version": 1,
+        "account_id": "account-main",
+        "venue_id": "binance-usdm",
+        "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
+        "position_side": "long",
+        "netting_domain_key": f"domain-v2-{index}",
+        "fact_digest": FACT_DIGEST,
+        "entry_admission_snapshot_digest": "sha256:" + "1" * 64,
+        "account_entry_health_digest": "sha256:" + "2" * 64,
+        "instrument_entry_health_digest": "sha256:" + "3" * 64,
+        "instrument_rules_projection_version": 1,
+        "account_capacity_domain_key": "binance-usdm:account-main",
+        "leverage_domain_key": (
+            "binance-usdm:account-main:binance-usdm:BTCUSDT:perpetual"
+        ),
+        "total_wallet_balance_at_claim": Decimal(100),
+        "total_margin_balance_at_claim": Decimal(100),
+        "total_initial_margin_at_claim": Decimal(0),
+        "total_maintenance_margin_at_claim": Decimal(0),
+        "available_margin_at_claim": Decimal(100),
+        "mark_price_at_claim": Decimal(100),
+        "position_mode_at_claim": "independent_sides",
+        "margin_mode_at_claim": "cross",
+        "active_ticket_count_at_claim": index - 1,
+        "remaining_slots_at_claim": 4 - index,
+        "gross_risk_at_stop_at_claim": Decimal(index - 1),
+        "current_reserved_margin_at_claim": Decimal(20 * (index - 1)),
+        "max_ticket_stop_risk_fraction": Decimal("0.03"),
+        "max_gross_stop_risk_fraction": Decimal("0.06"),
+        "max_ticket_initial_margin_fraction": Decimal("0.45"),
+        "max_gross_initial_margin_utilization": Decimal("0.90"),
+        "planned_stop_risk_budget": Decimal(1),
+        "max_post_fill_stop_risk_overrun_fraction": Decimal("0.10"),
+        "post_fill_stop_risk_limit": Decimal("1.1"),
+        "post_stop_stress_multiple": Decimal(2),
+        "ticket_margin_budget": Decimal(45),
+        "required_leverage": 5,
+        "selected_leverage": 5,
+        "configured_leverage_at_claim": 5,
+        "leverage_change_required": False,
+        "exchange_max_leverage": 10,
+        "reserved_margin": Decimal(20),
+        "cross_margin_stress_evidence": {},
+        "entry_reference_price": Decimal(100),
+        "quantity": Decimal(1),
+        "notional": Decimal(100),
+        "risk_at_stop": Decimal(1),
+        "entry_order_type": "market",
+        "entry_limit_price": None,
+        "initial_stop_price": Decimal(99),
+        "take_profit_prices": ["101"],
+        "take_profit_quantities": ["0.5"],
+        "decision_digest": decision_digest,
+        "created_at_ms": created_at_ms,
+        "expires_at_ms": created_at_ms + 1_000,
+    }
+
+
+def _ticket_values(*, index: int, created_at_ms: int) -> dict[str, object]:
+    terminal_at_ms = 3_000 if index == 1 else None
+    return {
+        "ticket_id": f"ticket-v2-{index}",
+        "exposure_episode_id": f"episode-v2-{index}",
+        "signal_event_id": f"signal-v2-{index}",
+        "strategy_group_id": "SOR-001",
+        "strategy_version_id": "sgv:SOR-001:v2",
+        "event_spec_id": "event_spec:SOR-001:SOR-LONG:v2",
+        "universe_version_id": "universe:sor-long:v2:1",
+        "universe_semantic_digest": SEMANTIC_DIGEST,
+        "runtime_profile_id": "tiny-live-v1",
+        "owner_policy_id": "policy-main",
+        "owner_policy_version": 7,
+        "runtime_scope_id": f"scope-v2-{index}",
+        "runtime_scope_version": 1,
+        "account_id": "account-main",
+        "venue_id": "binance-usdm",
+        "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
+        "position_side": "long",
+        "netting_domain_key": f"domain-v2-{index}",
+        "active_netting_domain_key": (
+            None if terminal_at_ms is not None else f"domain-v2-{index}"
+        ),
+        "entry_reference_price": Decimal(100),
+        "quantity": Decimal(1),
+        "notional": Decimal(100),
+        "capacity_claim_id": f"claim-v2-{index}",
+        "planned_stop_risk_budget": Decimal(1),
+        "post_fill_stop_risk_limit": Decimal("1.1"),
+        "selected_leverage": 5,
+        "leverage_change_required": False,
+        "reserved_margin": Decimal(20),
+        "risk_reservation_basis": "planned_stop_distance",
+        "margin_mode": "cross",
+        "cross_margin_stress_model_id": "cross-margin-stop-stress-v1",
+        "post_stop_stress_multiple": Decimal(2),
+        "claim_stress_proof_digest": "sha256:" + "4" * 64,
+        "risk_at_stop": Decimal(1),
+        "entry_order_type": "market",
+        "entry_limit_price": None,
+        "initial_stop_price": Decimal(99),
+        "take_profit_prices": ["101"],
+        "take_profit_quantities": ["0.5"],
+        "fact_digest": FACT_DIGEST,
+        "decision_digest": (DECISION_DIGEST_1 if index == 1 else DECISION_DIGEST_2),
+        "status": "terminal" if terminal_at_ms is not None else "issued",
+        "created_at_ms": created_at_ms,
+        "expires_at_ms": created_at_ms + 1_000,
+        "terminal_at_ms": terminal_at_ms,
+    }
+
+
+async def _preservation_manifest(engine: AsyncEngine) -> dict[str, object]:
+    async with engine.connect() as connection:
+        counts = {
+            table: int(
+                await connection.scalar(sa.text(f"SELECT count(*) FROM {table}")) or 0
+            )
+            for table in (
+                "brc_signal_events",
+                "brc_capacity_claims",
+                "brc_trade_tickets",
+                "brc_budget_reservations",
+                "brc_exchange_commands",
+                "brc_runtime_incidents",
+                "brc_trade_reviews",
+            )
+        }
+        ticket_rows = tuple(
+            tuple(row)
+            for row in (
+                await connection.execute(
+                    sa.text(
+                        """
+                        SELECT ticket_id, exposure_episode_id, signal_event_id,
+                               status, terminal_at_ms
+                          FROM brc_trade_tickets
+                      ORDER BY ticket_id
+                        """
+                    )
+                )
+            ).all()
+        )
+    return {"counts": counts, "tickets": ticket_rows}
+
+
+async def _assert_0002_shape_and_backfill(engine: AsyncEngine) -> None:
+    async with engine.connect() as connection:
+        revision = await connection.scalar(
+            sa.text("SELECT version_num FROM alembic_version")
+        )
+        signal_rows = (
+            await connection.execute(
+                sa.text(
+                    """
+                    SELECT signal_event_id, exposure_episode_id
+                      FROM brc_signal_events
+                  ORDER BY signal_event_id
+                    """
+                )
+            )
+        ).all()
+        claim_rows = (
+            (
+                await connection.execute(
+                    sa.text(
+                        """
+                    SELECT capacity_claim_id, exposure_episode_id,
+                           exit_policy_id, exit_policy_semantic_hash,
+                           active_strategy_group_ticket_count_at_claim,
+                           max_strategy_group_concurrent_tickets,
+                           remaining_strategy_group_slots_at_claim
+                      FROM brc_capacity_claims
+                  ORDER BY capacity_claim_id
+                    """
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+        ticket_rows = (
+            (
+                await connection.execute(
+                    sa.text(
+                        """
+                    SELECT ticket_id, exit_policy_id,
+                           exit_policy_semantic_hash, terminal_at_ms
+                      FROM brc_trade_tickets
+                  ORDER BY ticket_id
+                    """
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+        policy_limit = await connection.scalar(
+            sa.text(
+                """
+                SELECT max_strategy_group_concurrent_tickets
+                  FROM brc_owner_policy_current
+                 WHERE owner_policy_id = 'policy-main'
+                """
+            )
+        )
+        ticket_indexes = await connection.run_sync(
+            lambda sync: {
+                index["name"]
+                for index in sa.inspect(sync).get_indexes("brc_trade_tickets")
+            }
+        )
+
+    assert revision == SOR_V3_REVISION
+    assert signal_rows == [
+        ("signal-v2-1", "legacy:signal:signal-v2-1"),
+        ("signal-v2-2", "legacy:signal:signal-v2-2"),
+    ]
+    assert [row["exposure_episode_id"] for row in claim_rows] == [
+        "episode-v2-1",
+        "episode-v2-2",
+    ]
+    assert [
+        row["active_strategy_group_ticket_count_at_claim"] for row in claim_rows
+    ] == [0, 1]
+    assert [row["max_strategy_group_concurrent_tickets"] for row in claim_rows] == [
+        2,
+        2,
+    ]
+    assert [row["remaining_strategy_group_slots_at_claim"] for row in claim_rows] == [
+        2,
+        1,
+    ]
+    assert all(
+        row["exit_policy_id"] == "exit-policy:SOR-001:SOR-LONG:right-tail-v1"
+        for row in claim_rows
+    )
+    assert all(
+        row["exit_policy_semantic_hash"] == EXIT_POLICY_HASH for row in claim_rows
+    )
+    assert all(
+        row["exit_policy_id"] == "exit-policy:SOR-001:SOR-LONG:right-tail-v1"
+        for row in ticket_rows
+    )
+    assert all(
+        row["exit_policy_semantic_hash"] == EXIT_POLICY_HASH for row in ticket_rows
+    )
+    assert ticket_rows[1]["terminal_at_ms"] is None
+    assert policy_limit == 2
+    assert "ix_brc_trade_tickets_active_strategy_group" in ticket_indexes
+
+
+async def _insert_v3_event_with_reused_event_id(engine: AsyncEngine) -> None:
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(pg_models.strategy_versions).values(
+                strategy_version_id="sgv:SOR-001:v3",
+                strategy_group_id="SOR-001",
+                version=3,
+                semantics={"producer": "edge-cross-v3"},
+                status="active",
+                created_at_ms=4_000,
+            )
+        )
+        await connection.execute(
+            sa.insert(pg_models.event_specs).values(
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v3",
+                strategy_version_id="sgv:SOR-001:v3",
+                event_id="SOR-LONG",
+                position_side="long",
+                timeframe="15m",
+                freshness_window_ms=900_000,
+                event_time_authority="close_time",
+                entry_order_type="market",
+                protection_reference_fact_definition_id="fact:range-low:v3",
+                exit_policy_id="exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1",
+                execution_semantics={},
+                status="active",
+                created_at_ms=4_000,
+            )
+        )
+
+
+def _run_migration(
+    database_url: str,
+    *arguments: str,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        (
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            "migrations/trading_kernel/alembic.ini",
+            *arguments,
+        ),
+        cwd=REPO_ROOT,
+        env=os.environ | {"TRADING_KERNEL_DATABASE_URL": database_url},
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+
 
 SOURCE_REVISION = "0002_sor_v3_strategy_group_capacity"
+
 SOURCE_HISTORY_COLUMNS = {
     "brc_signal_events": "signal_event_id runtime_scope_id runtime_scope_version strategy_group_id strategy_version_id event_spec_id universe_version_id universe_semantic_digest exchange_instrument_id position_side fact_digest occurred_at_ms observed_at_ms expires_at_ms exposure_episode_id",
     "brc_capacity_claims": "capacity_claim_id ticket_id signal_event_id exposure_episode_id strategy_group_id strategy_version_id event_spec_id universe_version_id universe_semantic_digest runtime_profile_id owner_policy_id owner_policy_version runtime_scope_id runtime_scope_version account_id venue_id exchange_instrument_id position_side netting_domain_key fact_digest entry_admission_snapshot_digest account_entry_health_digest instrument_entry_health_digest instrument_rules_projection_version account_capacity_domain_key leverage_domain_key total_wallet_balance_at_claim total_margin_balance_at_claim total_initial_margin_at_claim total_maintenance_margin_at_claim available_margin_at_claim mark_price_at_claim position_mode_at_claim margin_mode_at_claim active_ticket_count_at_claim remaining_slots_at_claim gross_risk_at_stop_at_claim current_reserved_margin_at_claim max_ticket_stop_risk_fraction max_gross_stop_risk_fraction max_ticket_initial_margin_fraction max_gross_initial_margin_utilization planned_stop_risk_budget max_post_fill_stop_risk_overrun_fraction post_fill_stop_risk_limit post_stop_stress_multiple ticket_margin_budget required_leverage selected_leverage configured_leverage_at_claim leverage_change_required exchange_max_leverage reserved_margin cross_margin_stress_evidence entry_reference_price quantity notional risk_at_stop entry_order_type entry_limit_price initial_stop_price take_profit_prices take_profit_quantities decision_digest created_at_ms expires_at_ms exit_policy_id exit_policy_semantic_hash active_strategy_group_ticket_count_at_claim max_strategy_group_concurrent_tickets remaining_strategy_group_slots_at_claim pre_tp1_reclaim_price exposure_session_end_ms",
@@ -464,582 +1006,6 @@ CERTIFIED_0002_SOURCE_EVENTS = (
 )
 
 
-def test_runtime_identity_points_to_current_schema_head() -> None:
-    assert CURRENT_SCHEMA_REVISION == "0005_tradfi_instrument_center"
-
-
-def test_alembic_has_one_exact_current_head() -> None:
-    config = Config("migrations/trading_kernel/alembic.ini")
-    heads = ScriptDirectory.from_config(config).get_heads()
-
-    assert heads == [CURRENT_SCHEMA_REVISION]
-
-
-@pytest.mark.asyncio
-async def test_0003_creates_shadow_table_matching_current_metadata(
-    compatible_migration_engine: AsyncEngine,
-) -> None:
-    engine = compatible_migration_engine
-    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
-    assert result.returncode == 0, result.stderr[-4000:]
-
-    async with engine.connect() as connection:
-        tables = await connection.run_sync(
-            lambda sync: set(sa.inspect(sync).get_table_names())
-        )
-        columns = await connection.run_sync(
-            lambda sync: {
-                column["name"]
-                for column in sa.inspect(sync).get_columns(
-                    "brc_shadow_outcomes_current"
-                )
-            }
-        )
-
-    assert "brc_shadow_outcomes_current" in tables
-    assert columns == {
-        "shadow_outcome_id",
-        "admission_decision_id",
-        "status",
-        "evaluation_kind",
-        "exchange_instrument_id",
-        "position_side",
-        "timeframe",
-        "entry_reference_price",
-        "initial_stop_price",
-        "initial_risk_per_unit",
-        "horizon_start_ms",
-        "horizon_end_ms",
-        "claim_owner",
-        "claim_token",
-        "lease_until_ms",
-        "max_favorable_price",
-        "max_adverse_price",
-        "mfe_r",
-        "mae_r",
-        "observed_through_ms",
-        "completion_reason",
-        "projection_version",
-        "created_at_ms",
-        "completed_at_ms",
-    }
-
-
-@pytest.mark.asyncio
-async def test_0003_migrates_exact_policy_v3_to_v4_with_entry_disabled(
-    compatible_migration_engine: AsyncEngine,
-) -> None:
-    engine = compatible_migration_engine
-    result = _run_migration(_database_url(engine), "upgrade", SOURCE_REVISION)
-    assert result.returncode == 0, result.stderr[-4000:]
-    await _insert_source_policy_v3(engine)
-
-    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
-    assert result.returncode == 0, result.stderr[-4000:]
-
-    async with engine.connect() as connection:
-        policy = (
-            (
-                await connection.execute(
-                    sa.text(
-                        "SELECT policy_version, new_entry_submit_enabled, "
-                        "max_concurrent_tickets, max_strategy_group_concurrent_tickets, "
-                        "family_ticket_limits, max_ticket_stop_risk_fraction, "
-                        "max_gross_stop_risk_fraction, "
-                        "max_ticket_initial_margin_fraction, "
-                        "max_gross_initial_margin_utilization, "
-                        "directional_stop_risk_limit_fraction, "
-                        "min_materialization_ratio "
-                        "FROM brc_owner_policy_current "
-                        "WHERE owner_policy_id = 'policy-main'"
-                    )
-                )
-            )
-            .mappings()
-            .one()
-        )
-        defaults = await connection.run_sync(
-            lambda sync: {
-                column["name"]: column["default"]
-                for column in sa.inspect(sync).get_columns("brc_owner_policy_current")
-                if column["name"]
-                in {
-                    "family_ticket_limits",
-                    "directional_stop_risk_limit_fraction",
-                    "min_materialization_ratio",
-                }
-            }
-        )
-
-    assert policy["policy_version"] == 4
-    assert policy["new_entry_submit_enabled"] is False
-    assert policy["max_concurrent_tickets"] == 3
-    assert policy["max_strategy_group_concurrent_tickets"] is None
-    assert policy["family_ticket_limits"] == {
-        "long_continuation": 1,
-        "opening_range": 2,
-        "rally_failure_short": 1,
-    }
-    assert Decimal(policy["max_ticket_stop_risk_fraction"]) == Decimal("0.02")
-    assert Decimal(policy["max_gross_stop_risk_fraction"]) == Decimal("0.06")
-    assert Decimal(policy["max_ticket_initial_margin_fraction"]) == Decimal("0.30")
-    assert Decimal(policy["max_gross_initial_margin_utilization"]) == Decimal("0.90")
-    assert Decimal(policy["directional_stop_risk_limit_fraction"]) == Decimal("0.04")
-    assert Decimal(policy["min_materialization_ratio"]) == Decimal("0.50")
-    assert defaults == {
-        "family_ticket_limits": None,
-        "directional_stop_risk_limit_fraction": None,
-        "min_materialization_ratio": None,
-    }
-
-
-@pytest.mark.asyncio
-async def test_0003_downgrade_to_0002_is_forbidden(
-    compatible_migration_engine: AsyncEngine,
-) -> None:
-    engine = compatible_migration_engine
-    result = _run_migration(_database_url(engine), "upgrade", "head")
-    assert result.returncode == 0, result.stderr[-4000:]
-
-    result = _run_migration(_database_url(engine), "downgrade", SOURCE_REVISION)
-
-    assert result.returncode != 0
-    assert "fix-forward" in result.stderr
-    async with engine.connect() as connection:
-        assert (
-            await connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
-            == CURRENT_SCHEMA_REVISION
-        )
-
-
-@pytest.mark.asyncio
-async def test_0002_terminal_source_columns_are_equal_after_0003(
-    compatible_migration_engine: AsyncEngine,
-) -> None:
-    engine = compatible_migration_engine
-    await _prepare_production_shaped_0002(engine)
-    before = await _source_history_manifest(engine, exact_source_shape=True)
-
-    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
-
-    assert result.returncode == 0, result.stderr[-4000:]
-    assert await _source_history_manifest(engine, exact_source_shape=False) == before
-
-
-@pytest.mark.asyncio
-async def test_0003_refuses_active_ticket_before_any_schema_or_data_mutation(
-    compatible_migration_engine: AsyncEngine,
-) -> None:
-    engine = compatible_migration_engine
-    await _prepare_production_shaped_0002(engine)
-    async with engine.begin() as connection:
-        await connection.execute(
-            sa.text(
-                "UPDATE brc_trade_tickets "
-                "SET status = 'entry_prepared', terminal_at_ms = NULL "
-                "WHERE ticket_id = 'ticket-v3-terminal'"
-            )
-        )
-    before = await _pre_upgrade_authority_state(engine)
-
-    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
-
-    assert result.returncode != 0
-    assert "active Ticket" in result.stderr
-    assert await _pre_upgrade_authority_state(engine) == before
-
-
-@pytest.mark.asyncio
-async def test_0003_refuses_source_event_timeframe_drift_before_any_mutation(
-    compatible_migration_engine: AsyncEngine,
-) -> None:
-    engine = compatible_migration_engine
-    await _prepare_production_shaped_0002(engine)
-    async with engine.begin() as connection:
-        await connection.execute(
-            sa.text(
-                "UPDATE brc_event_specs SET timeframe = '1h' "
-                "WHERE event_spec_id = 'event_spec:SOR-001:SOR-LONG:v3'"
-            )
-        )
-    before = await _pre_upgrade_authority_state(engine)
-
-    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
-
-    assert result.returncode != 0
-    assert "certified Registry source" in result.stderr
-    assert await _pre_upgrade_authority_state(engine) == before
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("blocker", "expected_error"),
-    (
-        ("position", "nonzero internal Position"),
-        ("budget_reservation", "active Budget Reservation"),
-        ("netting_domain", "unreleased Netting Domain"),
-        ("entry_lane_status", "ENTRY lane"),
-        ("entry_lane_owner", "ENTRY lane"),
-        ("exchange_command", "unresolved Exchange Command"),
-        ("incident", "open Incident"),
-        ("aggregate_closure", "nonterminal Aggregate closure"),
-    ),
-)
-async def test_0003_refuses_each_nonflat_source_before_any_mutation(
-    compatible_migration_engine: AsyncEngine,
-    blocker: str,
-    expected_error: str,
-) -> None:
-    engine = compatible_migration_engine
-    await _prepare_production_shaped_0002(engine)
-    await _install_nonflat_blocker(engine, blocker)
-    before = await _pre_upgrade_authority_state(engine)
-
-    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
-
-    assert result.returncode != 0
-    assert expected_error in result.stderr
-    assert await _pre_upgrade_authority_state(engine) == before
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("drift_sql", "parameters"),
-    (
-        (
-            (
-                "UPDATE brc_event_specs "
-                "SET execution_semantics = CAST(:value AS jsonb) "
-                "WHERE event_spec_id = 'event_spec:SOR-001:SOR-LONG:v3'"
-            ),
-            {"value": '{"source":"drifted"}'},
-        ),
-        (
-            (
-                "UPDATE brc_exit_policies SET policy = CAST(:value AS jsonb) "
-                "WHERE exit_policy_id = "
-                "'exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1'"
-            ),
-            {"value": '{"runner":{"timeframe":"1h"}}'},
-        ),
-        (
-            (
-                "UPDATE brc_exit_policies SET semantic_hash = :value "
-                "WHERE exit_policy_id = "
-                "'exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1'"
-            ),
-            {"value": "sha256:" + "0" * 64},
-        ),
-    ),
-    ids=("execution-semantics", "exit-policy-payload", "exit-policy-hash"),
-)
-async def test_0003_refuses_literal_registry_semantic_drift_before_any_mutation(
-    compatible_migration_engine: AsyncEngine,
-    drift_sql: str,
-    parameters: dict[str, str],
-) -> None:
-    engine = compatible_migration_engine
-    await _prepare_production_shaped_0002(engine)
-    async with engine.begin() as connection:
-        await connection.execute(sa.text(drift_sql), parameters)
-    before = await _pre_upgrade_authority_state(engine)
-
-    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
-
-    assert result.returncode != 0
-    assert "certified Registry source" in result.stderr
-    assert await _pre_upgrade_authority_state(engine) == before
-
-
-@pytest.mark.asyncio
-async def test_0003_backfills_only_deterministic_family_for_terminal_sor_v3(
-    compatible_migration_engine: AsyncEngine,
-) -> None:
-    engine = compatible_migration_engine
-    await _prepare_production_shaped_0002(engine)
-    async with engine.connect() as connection:
-        before = (
-            await connection.execute(
-                sa.text(
-                    "SELECT planned_stop_risk_budget, risk_at_stop, reserved_margin "
-                    "FROM brc_capacity_claims "
-                    "WHERE capacity_claim_id = 'claim-v3-terminal'"
-                )
-            )
-        ).one()
-
-    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
-    assert result.returncode == 0, result.stderr[-4000:]
-
-    async with engine.connect() as connection:
-        claim = (
-            await connection.execute(
-                sa.text(
-                    "SELECT exposure_family, active_family_ticket_count_at_claim, "
-                    "family_ticket_limit, directional_risk_at_stop_at_claim, "
-                    "directional_stop_risk_limit_fraction, min_materialization_ratio, "
-                    "minimum_stop_risk_budget, planned_stop_risk_budget, "
-                    "risk_at_stop, reserved_margin FROM brc_capacity_claims "
-                    "WHERE capacity_claim_id = 'claim-v3-terminal'"
-                )
-            )
-        ).one()
-        ticket = (
-            await connection.execute(
-                sa.text(
-                    "SELECT exposure_family, active_family_ticket_count_at_claim, "
-                    "family_ticket_limit, directional_risk_at_stop_at_claim, "
-                    "directional_stop_risk_limit_fraction, min_materialization_ratio, "
-                    "minimum_stop_risk_budget FROM brc_trade_tickets "
-                    "WHERE ticket_id = 'ticket-v3-terminal'"
-                )
-            )
-        ).one()
-
-    assert claim[0] == "opening_range"
-    assert ticket[0] == "opening_range"
-    assert claim[1:7] == (None,) * 6
-    assert ticket[1:7] == (None,) * 6
-    assert claim[7:] == before
-
-
-@pytest.mark.asyncio
-async def test_0003_installs_vnext_registry_and_retires_exact_source_lineage(
-    compatible_migration_engine: AsyncEngine,
-) -> None:
-    engine = compatible_migration_engine
-    await _prepare_production_shaped_0002(engine)
-
-    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
-    assert result.returncode == 0, result.stderr[-4000:]
-    async with PostgresKernelUnitOfWork(engine) as uow:
-        registry_seed = await seed_strategy_registry(
-            uow,
-            seeded_at_ms=2_000,
-            contracts=tuple(
-                contract
-                for contract in registered_strategy_contracts()
-                if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
-            ),
-            include_product_compatibility=False,
-        )
-
-    async with engine.connect() as connection:
-        groups = dict(
-            (
-                await connection.execute(
-                    sa.text(
-                        "SELECT strategy_group_id, active_version_id "
-                        "FROM brc_strategy_groups ORDER BY strategy_group_id"
-                    )
-                )
-            ).all()
-        )
-        versions = (
-            await connection.execute(
-                sa.text(
-                    "SELECT strategy_version_id, status "
-                    "FROM brc_strategy_versions "
-                    "WHERE strategy_group_id IN "
-                    "('BRF2-001','CPM-RO-001','MI-001','MPG-001','SOR-001') "
-                    "AND strategy_version_id NOT IN ('sgv:SOR-001:v2') "
-                    "ORDER BY strategy_version_id"
-                )
-            )
-        ).all()
-        events = (
-            await connection.execute(
-                sa.text(
-                    "SELECT event_spec_id, status FROM brc_event_specs "
-                    "WHERE event_spec_id IN ("
-                    "'event_spec:BRF2-001:BRF2-SHORT:v2',"
-                    "'event_spec:BRF2-001:BRF2-SHORT:v3',"
-                    "'event_spec:CPM-RO-001:CPM-LONG:v2',"
-                    "'event_spec:CPM-RO-001:CPM-LONG:v3',"
-                    "'event_spec:MI-001:MI-LONG:v2',"
-                    "'event_spec:MI-001:MI-LONG:v3',"
-                    "'event_spec:MPG-001:MPG-LONG:v2',"
-                    "'event_spec:MPG-001:MPG-LONG:v3',"
-                    "'event_spec:SOR-001:SOR-LONG:v3',"
-                    "'event_spec:SOR-001:SOR-LONG:v4',"
-                    "'event_spec:SOR-001:SOR-SHORT:v3',"
-                    "'event_spec:SOR-001:SOR-SHORT:v4') "
-                    "ORDER BY event_spec_id"
-                )
-            )
-        ).all()
-        target_policies = (
-            await connection.execute(
-                sa.text(
-                    "SELECT exit_policy_id, event_spec_id, status "
-                    "FROM brc_exit_policies "
-                    "WHERE exit_policy_id LIKE :suffix "
-                    "ORDER BY event_spec_id"
-                ),
-                {"suffix": "%:portfolio-admission-v1"},
-            )
-        ).all()
-        universe_counts = (
-            await connection.execute(
-                sa.text(
-                    "SELECT count(*) FILTER (WHERE right(event_spec_id, 2) "
-                    "IN ('v2','v3')), "
-                    "count(*) FILTER (WHERE right(event_spec_id, 2) = 'v4') "
-                    "FROM brc_strategy_universe_versions"
-                )
-            )
-        ).one()
-
-    assert groups == {
-        "BRF2-001": "sgv:BRF2-001:v3",
-        "CPM-RO-001": "sgv:CPM-RO-001:v3",
-        "MI-001": "sgv:MI-001:v3",
-        "MPG-001": "sgv:MPG-001:v3",
-        "SOR-001": "sgv:SOR-001:v4",
-    }
-    assert registry_seed.total_inserted_count == 0
-    assert versions == [
-        ("sgv:BRF2-001:v2", "retired"),
-        ("sgv:BRF2-001:v3", "active"),
-        ("sgv:CPM-RO-001:v2", "retired"),
-        ("sgv:CPM-RO-001:v3", "active"),
-        ("sgv:MI-001:v2", "retired"),
-        ("sgv:MI-001:v3", "active"),
-        ("sgv:MPG-001:v2", "retired"),
-        ("sgv:MPG-001:v3", "active"),
-        ("sgv:SOR-001:v3", "retired"),
-        ("sgv:SOR-001:v4", "active"),
-    ]
-    assert events == [
-        ("event_spec:BRF2-001:BRF2-SHORT:v2", "retired"),
-        ("event_spec:BRF2-001:BRF2-SHORT:v3", "active"),
-        ("event_spec:CPM-RO-001:CPM-LONG:v2", "retired"),
-        ("event_spec:CPM-RO-001:CPM-LONG:v3", "active"),
-        ("event_spec:MI-001:MI-LONG:v2", "retired"),
-        ("event_spec:MI-001:MI-LONG:v3", "active"),
-        ("event_spec:MPG-001:MPG-LONG:v2", "retired"),
-        ("event_spec:MPG-001:MPG-LONG:v3", "active"),
-        ("event_spec:SOR-001:SOR-LONG:v3", "retired"),
-        ("event_spec:SOR-001:SOR-LONG:v4", "active"),
-        ("event_spec:SOR-001:SOR-SHORT:v3", "retired"),
-        ("event_spec:SOR-001:SOR-SHORT:v4", "active"),
-    ]
-    assert target_policies == [
-        (
-            "exit-policy:BRF2-001:BRF2-SHORT:portfolio-admission-v1",
-            "event_spec:BRF2-001:BRF2-SHORT:v3",
-            "active",
-        ),
-        (
-            "exit-policy:CPM-RO-001:CPM-LONG:portfolio-admission-v1",
-            "event_spec:CPM-RO-001:CPM-LONG:v3",
-            "active",
-        ),
-        (
-            "exit-policy:MI-001:MI-LONG:portfolio-admission-v1",
-            "event_spec:MI-001:MI-LONG:v3",
-            "active",
-        ),
-        (
-            "exit-policy:MPG-001:MPG-LONG:portfolio-admission-v1",
-            "event_spec:MPG-001:MPG-LONG:v3",
-            "active",
-        ),
-        (
-            "exit-policy:SOR-001:SOR-LONG:portfolio-admission-v1",
-            "event_spec:SOR-001:SOR-LONG:v4",
-            "active",
-        ),
-        (
-            "exit-policy:SOR-001:SOR-SHORT:portfolio-admission-v1",
-            "event_spec:SOR-001:SOR-SHORT:v4",
-            "active",
-        ),
-    ]
-    assert universe_counts == (2, 0)
-
-
-@pytest.mark.asyncio
-async def test_0003_migrated_ticket_indexes_exactly_match_current_metadata(
-    compatible_migration_engine: AsyncEngine,
-) -> None:
-    engine = compatible_migration_engine
-    await _prepare_production_shaped_0002(engine)
-
-    result = _run_migration(_database_url(engine), "upgrade", HEAD_REVISION)
-    assert result.returncode == 0, result.stderr[-4000:]
-
-    async with engine.connect() as connection:
-        indexes = await connection.run_sync(
-            lambda sync: {
-                index["name"]: tuple(index["column_names"])
-                for index in sa.inspect(sync).get_indexes("brc_trade_tickets")
-            }
-        )
-
-    assert indexes == {
-        "ix_brc_trade_tickets_active_directional_risk": (
-            "venue_id",
-            "account_id",
-            "position_side",
-            "terminal_at_ms",
-        ),
-        "ix_brc_trade_tickets_active_family": (
-            "venue_id",
-            "account_id",
-            "exposure_family",
-            "terminal_at_ms",
-        ),
-        "ix_brc_trade_tickets_instrument_window": (
-            "venue_id",
-            "account_id",
-            "exchange_instrument_id",
-            "created_at_ms",
-            "terminal_at_ms",
-        ),
-        "uq_brc_trade_tickets_active_netting_domain_key": (
-            "active_netting_domain_key",
-        ),
-        "uq_brc_trade_tickets_signal_event_id": ("signal_event_id",),
-    }
-
-
-async def _insert_source_policy_v3(engine: AsyncEngine) -> None:
-    async with engine.begin() as connection:
-        await connection.execute(
-            sa.text(
-                """
-                INSERT INTO brc_owner_policy_current (
-                    owner_policy_id, policy_version, enabled,
-                    new_entry_submit_enabled, priority_rank,
-                    max_concurrent_tickets,
-                    max_strategy_group_concurrent_tickets,
-                    max_ticket_stop_risk_fraction,
-                    max_gross_stop_risk_fraction,
-                    max_ticket_initial_margin_fraction,
-                    max_gross_initial_margin_utilization,
-                    max_leverage, supported_margin_mode,
-                    post_stop_stress_multiple,
-                    max_post_fill_stop_risk_overrun_fraction,
-                    scope, updated_at_ms
-                ) VALUES (
-                    'policy-main', 3, true, true, 1, 3, 2,
-                    0.03, 0.06, 0.45, 0.90, 10, 'cross', 2.0, 0.10,
-                    '{"runtime_profile_id":"tiny-live-v1",'
-                    '"allowed_event_spec_ids":['
-                    '"event_spec:BRF2-001:BRF2-SHORT:v2",'
-                    '"event_spec:CPM-RO-001:CPM-LONG:v2",'
-                    '"event_spec:MI-001:MI-LONG:v2",'
-                    '"event_spec:MPG-001:MPG-LONG:v2",'
-                    '"event_spec:SOR-001:SOR-LONG:v3",'
-                    '"event_spec:SOR-001:SOR-SHORT:v3"]}'::jsonb,
-                    1000
-                )
-                """
-            )
-        )
-
-
 async def _prepare_production_shaped_0002(engine: AsyncEngine) -> None:
     await _seed_v4_history(engine)
     result = _run_migration(_database_url(engine), "upgrade", SOURCE_REVISION)
@@ -1389,191 +1355,25 @@ async def _insert_terminal_chain_rows(connection: Any) -> None:
         await connection.execute(sa.text(statement))
 
 
-async def _install_nonflat_blocker(engine: AsyncEngine, blocker: str) -> None:
-    statements: dict[str, tuple[str, dict[str, object]]] = {
-        "position": (
-            (
-                "INSERT INTO brc_positions_current ("
-                "netting_domain_key,ticket_id,venue_id,account_id,"
-                "exchange_instrument_id,position_side,quantity,average_entry_price,"
-                "venue_reported_liquidation_price,"
-                "venue_reported_liquidation_observation_status,observed_at_ms,"
-                "projection_version) VALUES ("
-                "'position-domain','ticket-v3-terminal','binance-usdm','account-main',"
-                "'binance-usdm:BTCUSDT:perpetual','long',1,100,NULL,"
-                "'not_reported',5000,1)"
-            ),
-            {},
-        ),
-        "budget_reservation": (
-            (
-                "UPDATE brc_budget_reservations SET status = 'active', "
-                "released_at_ms = NULL "
-                "WHERE budget_reservation_id = 'reservation-v3-terminal'"
-            ),
-            {},
-        ),
-        "netting_domain": (
-            (
-                "UPDATE brc_trade_tickets "
-                "SET active_netting_domain_key = netting_domain_key "
-                "WHERE ticket_id = 'ticket-v3-terminal'"
-            ),
-            {},
-        ),
-        "entry_lane_status": (
-            (
-                "INSERT INTO brc_entry_lane_current VALUES ("
-                "'global-entry','ticket-v3-terminal',NULL,'claimed',"
-                "5000,6000,'migration-test-owner',1)"
-            ),
-            {},
-        ),
-        "entry_lane_owner": (
-            (
-                "INSERT INTO brc_entry_lane_current VALUES ("
-                "'global-entry',NULL,NULL,'idle',NULL,NULL,'stale-owner',1)"
-            ),
-            {},
-        ),
-        "exchange_command": (
-            (
-                "UPDATE brc_exchange_commands SET status = 'outcome_unknown', "
-                "result_payload = NULL, completed_at_ms = NULL "
-                "WHERE command_id = 'command-v3-terminal-entry'"
-            ),
-            {},
-        ),
-        "incident": (
-            (
-                "UPDATE brc_runtime_incidents SET status = 'open', "
-                "resolved_at_ms = NULL WHERE incident_id = 'incident-v2-2'"
-            ),
-            {},
-        ),
-        "aggregate_closure": (
-            (
-                "UPDATE brc_trade_aggregates SET status = 'protected' "
-                "WHERE ticket_id = 'ticket-v3-terminal'"
-            ),
-            {},
-        ),
+async def _install_source_runtime_identity(engine: AsyncEngine) -> None:
+    values = {
+        "runtime_commit": "b" * 40,
+        "schema_revision": SOURCE_REVISION,
+        "seed_identity": "sha256:" + "c" * 64,
     }
-    statement, parameters = statements[blocker]
     async with engine.begin() as connection:
-        await connection.execute(sa.text(statement), parameters)
-
-
-async def _source_history_manifest(
-    engine: AsyncEngine,
-    *,
-    exact_source_shape: bool,
-) -> dict[str, object]:
-    async with engine.connect() as connection:
-        actual_columns = await connection.run_sync(
-            lambda sync: {
-                table_name: tuple(
-                    column["name"]
-                    for column in sa.inspect(sync).get_columns(table_name)
-                )
-                for table_name in SOURCE_HISTORY_COLUMNS
-            }
-        )
-        expected_columns = {
-            table_name: tuple(columns.split())
-            for table_name, columns in SOURCE_HISTORY_COLUMNS.items()
-        }
-        if exact_source_shape:
-            assert actual_columns == expected_columns
-        else:
-            for table_name, columns in expected_columns.items():
-                assert set(columns) <= set(actual_columns[table_name])
-        rows: dict[str, tuple[str, ...]] = {}
-        for table_name, columns in expected_columns.items():
-            result = await connection.execute(
-                sa.text(f"SELECT {','.join(columns)} FROM {table_name}")
+        for key, value in values.items():
+            await connection.execute(
+                sa.text(
+                    "INSERT INTO brc_schema_metadata "
+                    "(metadata_key, metadata_value, updated_at_ms) "
+                    "VALUES (:key, :value, 1000) "
+                    "ON CONFLICT (metadata_key) DO UPDATE "
+                    "SET metadata_value = EXCLUDED.metadata_value, "
+                    "updated_at_ms = EXCLUDED.updated_at_ms"
+                ),
+                {"key": key, "value": value},
             )
-            rows[table_name] = tuple(
-                sorted(
-                    json.dumps(
-                        [_canonical_value(value) for value in row],
-                        ensure_ascii=True,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    )
-                    for row in result.all()
-                )
-            )
-    return {"columns": expected_columns, "rows": rows}
-
-
-async def _pre_upgrade_authority_state(engine: AsyncEngine) -> dict[str, object]:
-    async with engine.connect() as connection:
-        inspector_state = await connection.run_sync(
-            lambda sync: {
-                "tables": tuple(sorted(sa.inspect(sync).get_table_names())),
-                "policy_columns": tuple(
-                    column["name"]
-                    for column in sa.inspect(sync).get_columns(
-                        "brc_owner_policy_current"
-                    )
-                ),
-                "claim_columns": tuple(
-                    column["name"]
-                    for column in sa.inspect(sync).get_columns("brc_capacity_claims")
-                ),
-                "ticket_columns": tuple(
-                    column["name"]
-                    for column in sa.inspect(sync).get_columns("brc_trade_tickets")
-                ),
-            }
-        )
-        revision = await connection.scalar(
-            sa.text("SELECT version_num FROM alembic_version")
-        )
-        groups = tuple(
-            (
-                await connection.execute(
-                    sa.text(
-                        "SELECT strategy_group_id, display_name, "
-                        "active_version_id, status, updated_at_ms "
-                        "FROM brc_strategy_groups ORDER BY strategy_group_id"
-                    )
-                )
-            ).all()
-        )
-        policy = tuple(
-            (
-                await connection.execute(
-                    sa.text(
-                        "SELECT owner_policy_id, policy_version, enabled, "
-                        "new_entry_submit_enabled, scope, updated_at_ms "
-                        "FROM brc_owner_policy_current ORDER BY owner_policy_id"
-                    )
-                )
-            ).all()
-        )
-    return {
-        **inspector_state,
-        "revision": revision,
-        "groups": groups,
-        "policy": policy,
-    }
-
-
-def _canonical_value(value: Any) -> Any:
-    if value is None or isinstance(value, (bool, int, str)):
-        return value
-    if isinstance(value, Decimal):
-        return format(value, "f")
-    if isinstance(value, Mapping):
-        return {
-            str(key): _canonical_value(item)
-            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
-        }
-    if isinstance(value, (list, tuple)):
-        return [_canonical_value(item) for item in value]
-    raise TypeError(f"unsupported source value: {type(value).__name__}")
 
 
 def _database_url(engine: AsyncEngine) -> str:

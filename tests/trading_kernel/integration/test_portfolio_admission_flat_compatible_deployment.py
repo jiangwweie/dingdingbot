@@ -20,12 +20,10 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     deploy_compatible_upgrade_identity,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
-from tests.trading_kernel.integration.test_portfolio_admission_observability_migration import (
+from tests.trading_kernel.support.migrations import (
     SOURCE_REVISION,
     _database_url,
     _prepare_production_shaped_0002,
-)
-from tests.trading_kernel.integration.test_sor_v3_compatible_migration import (
     _run_migration,
     compatible_migration_engine,
 )
@@ -54,9 +52,10 @@ async def test_mig_007_nonflat_0002_is_blocked_before_migration(
     assert source["status"] == "fail"
     assert source["migration_gate"]["active_tickets"] == 1
     async with engine.connect() as connection:
-        assert await connection.scalar(
-            sa.text("SELECT version_num FROM alembic_version")
-        ) == SOURCE_REVISION
+        assert (
+            await connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
+            == SOURCE_REVISION
+        )
 
 
 async def test_mig_008_manifest_covers_every_0002_table_column_and_value(
@@ -87,10 +86,7 @@ async def test_mig_008_manifest_covers_every_0002_table_column_and_value(
     for table_name, columns in source_shape.items():
         entry = table_entries[table_name]
         assert tuple(entry["columns"]) == columns
-        assert all(
-            len(row["value_digests"]) == len(columns)
-            for row in entry["rows"]
-        )
+        assert all(len(row["value_digests"]) == len(columns) for row in entry["rows"])
 
     result = _run_migration(database_url, "upgrade", HEAD_REVISION)
     assert result.returncode == 0, result.stderr[-4000:]
@@ -100,9 +96,7 @@ async def test_mig_008_manifest_covers_every_0002_table_column_and_value(
         expected_digest=str(manifest["digest"]),
     )
 
-    source_digests = {
-        entry["table"]: entry["digest"] for entry in manifest["tables"]
-    }
+    source_digests = {entry["table"]: entry["digest"] for entry in manifest["tables"]}
     target_digests = {
         entry["table"]: entry["digest"]
         for entry in target["preservation_manifest"]["tables"]
@@ -200,11 +194,7 @@ async def test_no_exposure_terminal_rejection_allows_target_identity_rotation(
                 "metadata_value = EXCLUDED.metadata_value, "
                 "updated_at_ms = EXCLUDED.updated_at_ms"
             ),
-            {
-                "registry_hash": (
-                    schema_verifier._CERTIFIED_0002_REGISTRY_MANIFEST_HASH
-                )
-            },
+            {"registry_hash": (schema_verifier._CERTIFIED_0002_REGISTRY_MANIFEST_HASH)},
         )
 
     async with PostgresKernelUnitOfWork(engine) as uow:
@@ -231,8 +221,7 @@ async def test_exposure_terminal_ticket_without_review_remains_blocked(
     async with engine.begin() as connection:
         await connection.execute(
             sa.text(
-                "DELETE FROM brc_trade_reviews "
-                "WHERE ticket_id = 'ticket-v3-terminal'"
+                "DELETE FROM brc_trade_reviews WHERE ticket_id = 'ticket-v3-terminal'"
             )
         )
 
@@ -271,7 +260,9 @@ async def test_no_exposure_terminal_rejection_with_residue_is_blocked(
     assert source["migration_gate"]["nonterminal_aggregates"] == 1
 
 
-@pytest.mark.parametrize("source_drift", ("registry", "policy", "profile", "capability"))
+@pytest.mark.parametrize(
+    "source_drift", ("registry", "policy", "profile", "capability")
+)
 async def test_compatible_source_requires_exact_live_0002_authority(
     compatible_migration_engine: AsyncEngine,
     source_drift: str,
@@ -302,8 +293,7 @@ async def test_compatible_source_requires_exact_live_0002_authority(
             "'event_spec:CPM-RO-001:CPM-LONG:v2'"
         ),
         "policy": (
-            "UPDATE brc_owner_policy_current SET "
-            "new_entry_submit_enabled = false"
+            "UPDATE brc_owner_policy_current SET new_entry_submit_enabled = false"
         ),
         "profile": (
             "UPDATE brc_runtime_profiles SET position_mode = 'one_way' "
@@ -441,12 +431,14 @@ async def test_postflight_recomputes_registry_identity_from_live_rows(
     drifted = await _certify(database_url, require_flat=True, now_ms=10_000)
     drifted_registry = drifted["registry_identity"]
     assert isinstance(drifted_registry, dict)
-    assert drifted_registry["metadata_semantic_hash"] == baseline_registry[
-        "metadata_semantic_hash"
-    ]
-    assert drifted_registry["live_semantic_hash"] != drifted_registry[
-        "expected_live_semantic_hash"
-    ]
+    assert (
+        drifted_registry["metadata_semantic_hash"]
+        == baseline_registry["metadata_semantic_hash"]
+    )
+    assert (
+        drifted_registry["live_semantic_hash"]
+        != drifted_registry["expected_live_semantic_hash"]
+    )
     assert drifted_registry["status"] == "fail"
 
 
@@ -628,7 +620,6 @@ async def _make_no_exposure_terminal_rejection(
         )
         await connection.execute(
             sa.text(
-                "DELETE FROM brc_trade_reviews "
-                "WHERE ticket_id = 'ticket-v3-terminal'"
+                "DELETE FROM brc_trade_reviews WHERE ticket_id = 'ticket-v3-terminal'"
             )
         )
