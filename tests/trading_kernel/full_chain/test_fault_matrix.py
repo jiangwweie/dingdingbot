@@ -51,7 +51,6 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from tests.trading_kernel.integration.test_command_dispatch import (
-    PreflightFacts,
     _ticket,
 )
 from tests.trading_kernel.integration.test_issue_ticket import (
@@ -60,6 +59,7 @@ from tests.trading_kernel.integration.test_issue_ticket import (
 from tests.trading_kernel.support.capacity_claims import (
     make_issue_request as _issue_request,
 )
+from tests.trading_kernel.support.dispatch_venues import PreflightFacts
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(

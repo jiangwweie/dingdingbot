@@ -60,10 +60,7 @@ from tests.trading_kernel.full_chain.lifecycle_support import (
     dispatch_lifecycle_command,
     reach_runner_protected,
 )
-from tests.trading_kernel.integration.test_command_dispatch import (
-    KindAwareAcceptingVenue,
-    _issue,
-)
+from tests.trading_kernel.integration.test_command_dispatch import _issue
 from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
     _registered_sor_long_ticket,
 )
@@ -88,6 +85,7 @@ from tests.trading_kernel.integration.universe_certification_support import (
 from tests.trading_kernel.integration.universe_certification_support import (
     certification_engine as _certification_engine,  # noqa: F401
 )
+from tests.trading_kernel.support.dispatch_venues import KindAwareAcceptingVenue
 
 
 def _certification_unavailable_count(payload: Mapping[str, object]) -> int:

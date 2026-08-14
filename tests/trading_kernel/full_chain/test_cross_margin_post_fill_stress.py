@@ -46,8 +46,6 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
 )
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import (
-    KindAwareAcceptingVenue,
-    PreflightFacts,
     _issue,
     _seed_policy,
 )
@@ -56,6 +54,10 @@ from tests.trading_kernel.integration.test_command_dispatch import (
 )
 from tests.trading_kernel.integration.universe_certification_support import (
     NoTicketVenueTruth,
+)
+from tests.trading_kernel.support.dispatch_venues import (
+    KindAwareAcceptingVenue,
+    PreflightFacts,
 )
 
 stress_engine = dispatch_fixture.dispatch_engine

@@ -53,13 +53,15 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import (
-    AcceptingVenue,
-    PreflightFacts,
-    SlowVenue,
     _issue,
     _reach_cancel_pending,
     _seed_policy,
     _ticket,
+)
+from tests.trading_kernel.support.dispatch_venues import (
+    AcceptingVenue,
+    PreflightFacts,
+    SlowVenue,
 )
 
 dispatch_engine = dispatch_fixture.dispatch_engine

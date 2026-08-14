@@ -39,15 +39,13 @@ from tests.trading_kernel.full_chain.lifecycle_support import (
     reach_runner_protected,
 )
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_command_dispatch import (
-    KindAwareAcceptingVenue,
-)
 from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
     _registered_sor_long_ticket,
 )
 from tests.trading_kernel.integration.universe_certification_support import (
     NoTicketVenueTruth,
 )
+from tests.trading_kernel.support.dispatch_venues import KindAwareAcceptingVenue
 from tests.trading_kernel.unit.test_venue_adapter import FakeAsyncExchange
 
 dispatch_engine = dispatch_fixture.dispatch_engine

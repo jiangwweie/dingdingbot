@@ -39,7 +39,6 @@ from tests.trading_kernel.full_chain.lifecycle_support import (
 )
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import (
-    KindAwareAcceptingVenue,
     _issue,
     _seed_policy,
 )
@@ -49,6 +48,7 @@ from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
 from tests.trading_kernel.integration.universe_certification_support import (
     NoTicketVenueTruth,
 )
+from tests.trading_kernel.support.dispatch_venues import KindAwareAcceptingVenue
 
 dispatch_engine = dispatch_fixture.dispatch_engine
 

@@ -34,10 +34,12 @@ from src.trading_kernel.infrastructure.strategy_registry_seed import (
 )
 from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
 from tests.trading_kernel.integration.test_command_dispatch import (
-    KindAwareAcceptingVenue,
-    PreflightFacts,
     _issue,
     _seed_policy,
+)
+from tests.trading_kernel.support.dispatch_venues import (
+    KindAwareAcceptingVenue,
+    PreflightFacts,
 )
 from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
