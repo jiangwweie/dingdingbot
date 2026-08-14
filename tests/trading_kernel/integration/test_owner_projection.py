@@ -16,10 +16,7 @@ from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.infrastructure.pg_models import monitor_events
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.interfaces.readonly_api import get_owner_projection
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_command_dispatch import _seed_policy
-
-owner_projection_engine = dispatch_fixture.dispatch_engine
+from tests.trading_kernel.support.command_dispatch import seed_policy as _seed_policy
 
 
 @pytest.mark.parametrize(
@@ -93,9 +90,7 @@ def test_owner_projection_uses_all_documented_product_states(
     )
     assert projection.owner_status is expected
     assert projection.intervention == (
-        "需要介入"
-        if expected is MonitorOwnerStatus.NEEDS_INTERVENTION
-        else "无需操作"
+        "需要介入" if expected is MonitorOwnerStatus.NEEDS_INTERVENTION else "无需操作"
     )
 
 
@@ -119,6 +114,7 @@ def test_ticket_owner_projection_request_requires_canonical_key() -> None:
             ticket_id=ticket_id,
             updated_at_ms=2_000,
         )
+
 
 @pytest.mark.asyncio
 async def test_owner_projection_reads_pg_authority_and_saves_only_material_change(

@@ -11,13 +11,12 @@ from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind, OrderCommandPayload
 from src.trading_kernel.domain.events import ExitRequested
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
-    _reach_position_protected,
-    _registered_sor_long_ticket,
+from tests.trading_kernel.support.lifecycle import (
+    reach_position_protected as _reach_position_protected,
 )
-
-controlled_exit_engine = dispatch_fixture.dispatch_engine
+from tests.trading_kernel.support.lifecycle import (
+    registered_sor_long_ticket as _registered_sor_long_ticket,
+)
 
 
 async def test_deployment_drain_persists_one_exit_request_and_reduce_only_command(

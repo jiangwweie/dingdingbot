@@ -38,22 +38,21 @@ from tests.trading_kernel.full_chain.lifecycle_support import (
     dispatch_lifecycle_command,
     reach_runner_protected,
 )
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
-    _registered_sor_long_ticket,
-)
 from tests.trading_kernel.integration.universe_certification_support import (
     NoTicketVenueTruth,
 )
 from tests.trading_kernel.support.dispatch_venues import KindAwareAcceptingVenue
-from tests.trading_kernel.unit.test_venue_adapter import FakeAsyncExchange
-
-dispatch_engine = dispatch_fixture.dispatch_engine
+from tests.trading_kernel.support.lifecycle import (
+    registered_sor_long_ticket as _registered_sor_long_ticket,
+)
+from tests.trading_kernel.support.venue_adapter import FakeAsyncExchange
 
 
 class _FlatPositionSource:
     async def read_position_snapshot(self, request):
-        raise AssertionError(f"closure work must not read position: {request.ticket_id}")
+        raise AssertionError(
+            f"closure work must not read position: {request.ticket_id}"
+        )
 
 
 class _TradeInfo(TypedDict):
@@ -103,7 +102,9 @@ class _RunnerTradesExchange(FakeAsyncExchange):
         assert limit == 100
         self.trade_calls.append(dict(params))
         order_id = str(params["orderId"])
-        references = {item.submitted_exchange_order_id: item for item in self.references}
+        references = {
+            item.submitted_exchange_order_id: item for item in self.references
+        }
         if order_id == "venue-entry-1":
             rows = [self._fill("entry-trade", order_id, "0.001", "60000", 2_200)]
             return self._review_rows(rows)
@@ -120,7 +121,9 @@ class _RunnerTradesExchange(FakeAsyncExchange):
         assert set(params) == {"algoId"}
         submitted_id = str(params["algoId"])
         reference = next(
-            item for item in self.references if item.submitted_exchange_order_id == submitted_id
+            item
+            for item in self.references
+            if item.submitted_exchange_order_id == submitted_id
         )
         expectation = reference.conditional_expectation
         assert expectation is not None
@@ -164,7 +167,11 @@ class _RunnerTradesExchange(FakeAsyncExchange):
     ) -> _TradeRow:
         fee_asset = "USDT"
         fee_amount = "0.010"
-        if self.fee_mode == "bnb" or self.fee_mode == "mixed" and trade_id != "entry-trade":
+        if (
+            self.fee_mode == "bnb"
+            or self.fee_mode == "mixed"
+            and trade_id != "entry-trade"
+        ):
             fee_asset, fee_amount = "BNB", "0.000010"
         return {
             "id": trade_id,
@@ -203,7 +210,9 @@ class _RunnerTradesExchange(FakeAsyncExchange):
 
 
 class _BoundAdapterReviewSource:
-    def __init__(self, adapter: CcxtVenueAdapter, exchange: _RunnerTradesExchange) -> None:
+    def __init__(
+        self, adapter: CcxtVenueAdapter, exchange: _RunnerTradesExchange
+    ) -> None:
         self.adapter = adapter
         self.exchange = exchange
 
@@ -254,7 +263,9 @@ async def _move_runner_to_review_pending(engine, ticket) -> None:
     assert matched.status.value == "matched"
 
 
-def _review_adapter(ticket, exchange: _RunnerTradesExchange) -> _BoundAdapterReviewSource:
+def _review_adapter(
+    ticket, exchange: _RunnerTradesExchange
+) -> _BoundAdapterReviewSource:
     adapter = CcxtVenueAdapter(
         exchanges={
             (
@@ -283,8 +294,6 @@ def _review_worker_request(*, now_ms: int) -> ReconciliationWorkerRequest:
         unknown_visibility_grace_ms=30_000,
         idle_poll_interval_ms=2_000,
     )
-
-
 
 
 @pytest.mark.asyncio
@@ -334,8 +343,11 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
     assert review.metrics["exit_quantity"] == "0.0010"
     fees = Decimal(str(review.metrics["trading_fees_quote"]))
     assert fees == (
-        Decimal("0.030") if fee_mode == "usdt" else Decimal("0.018000")
-        if fee_mode == "bnb" else Decimal("0.022000")
+        Decimal("0.030")
+        if fee_mode == "usdt"
+        else Decimal("0.018000")
+        if fee_mode == "bnb"
+        else Decimal("0.022000")
     )
     gross = Decimal(str(review.metrics["gross_realized_pnl_quote"]))
     funding = Decimal(str(review.metrics["funding_quote"]))
@@ -360,17 +372,21 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
     assert str(review.metrics["order_attribution_digest"]).startswith("sha256:")
     native_assets = {_native_fee_asset(row) for row in attribution_rows}
     assert native_assets == (
-        {"USDT"} if fee_mode == "usdt" else {"BNB"}
-        if fee_mode == "bnb" else {"USDT", "BNB"}
+        {"USDT"}
+        if fee_mode == "usdt"
+        else {"BNB"}
+        if fee_mode == "bnb"
+        else {"USDT", "BNB"}
     )
     assert all(
         _fee_evidence_method(row) == "native_usdt"
         if _native_fee_asset(row) == "USDT"
-        else _fee_evidence_method(row)
-        == "binance_usdm_bnbusdt_review_index_snapshot"
+        else _fee_evidence_method(row) == "binance_usdm_bnbusdt_review_index_snapshot"
         for row in attribution_rows
     )
-    assert exchange.index_calls == ([] if fee_mode == "usdt" else [{"symbol": "BNBUSDT"}])
+    assert exchange.index_calls == (
+        [] if fee_mode == "usdt" else [{"symbol": "BNBUSDT"}]
+    )
 
 
 @pytest.mark.asyncio

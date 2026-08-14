@@ -60,25 +60,30 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
-from tests.trading_kernel.integration.test_command_dispatch import (
-    _commit_passed_post_fill_stress_if_pending,
-    _issue,
-    _registered_sor_ticket,
-    _seed_policy,
-)
-from tests.trading_kernel.integration.test_issue_ticket import (
-    _seed_ticket_runtime_scope,
-)
 from tests.trading_kernel.support.capacity_claims import (
     make_issue_request as _issue_request,
 )
+from tests.trading_kernel.support.command_dispatch import (
+    commit_passed_post_fill_stress_if_pending as _commit_passed_post_fill_stress_if_pending,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    issue as _issue,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    registered_sor_ticket as _registered_sor_ticket,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    seed_policy as _seed_policy,
+)
 from tests.trading_kernel.support.dispatch_venues import CountingVenue, PreflightFacts
+from tests.trading_kernel.support.runtime_scope import (
+    seed_ticket_runtime_scope as _seed_ticket_runtime_scope,
+)
 from tests.trading_kernel.support.tickets import make_ticket as _ticket
-from tests.trading_kernel.unit.test_venue_adapter import FakeAsyncExchange
+from tests.trading_kernel.support.venue_adapter import FakeAsyncExchange
 
 _DYNAMIC_INSTRUMENT_ID = "binance-usdm:OPUSDT:perpetual"
 _DYNAMIC_CCXT_SYMBOL = "OP/USDT:USDT"
-pytest_plugins = ("tests.trading_kernel.integration.test_command_dispatch",)
 
 
 class RecordingBinanceExchange(FakeAsyncExchange):
@@ -166,14 +171,14 @@ class RecordingBinanceExchange(FakeAsyncExchange):
 
 
 @pytest.mark.asyncio
-async def test_registry_independent_instrument_routes_market_and_existing_ticket_safety() -> None:
+async def test_registry_independent_instrument_routes_market_and_existing_ticket_safety() -> (
+    None
+):
     registry_payload = tuple(
-        contract.model_dump(mode="json")
-        for contract in registered_strategy_contracts()
+        contract.model_dump(mode="json") for contract in registered_strategy_contracts()
     )
     assert all(
-        _DYNAMIC_INSTRUMENT_ID not in str(contract)
-        for contract in registry_payload
+        _DYNAMIC_INSTRUMENT_ID not in str(contract) for contract in registry_payload
     )
     replacement = build_strategy_universe(
         universe_version_id="universe:replacement:2",
@@ -290,8 +295,7 @@ async def test_pending_certification_alone_creates_no_ticket_command_or_venue_wr
                     runtime_scopes_current.c.lifecycle_state,
                     runtime_scopes_current.c.entry_enabled,
                 ).where(
-                    runtime_scopes_current.c.runtime_scope_id
-                    == ticket.runtime_scope_id
+                    runtime_scopes_current.c.runtime_scope_id == ticket.runtime_scope_id
                 )
             )
         ).one()
@@ -442,10 +446,7 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
         )
         await connection.execute(
             sa.update(runtime_scopes_current)
-            .where(
-                runtime_scopes_current.c.runtime_scope_id
-                == ticket.runtime_scope_id
-            )
+            .where(runtime_scopes_current.c.runtime_scope_id == ticket.runtime_scope_id)
             .values(
                 lifecycle_state="retired",
                 observation_enabled=False,

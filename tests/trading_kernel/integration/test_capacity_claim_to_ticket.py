@@ -26,13 +26,12 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
-from tests.trading_kernel.integration import test_signal_to_ticket as signal_fixture
-from tests.trading_kernel.integration.test_signal_to_ticket import (
-    _seed_runtime_authority,
-    _signal,
+from tests.trading_kernel.support.signal_ingest import (
+    seed_runtime_authority as _seed_runtime_authority,
 )
-
-issue_engine = signal_fixture.signal_engine
+from tests.trading_kernel.support.signal_ingest import (
+    signal as _signal,
+)
 
 
 @pytest.mark.asyncio

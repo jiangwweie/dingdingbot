@@ -66,17 +66,19 @@ from src.trading_kernel.infrastructure.pg_models import (
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
-from tests.trading_kernel.integration.test_command_dispatch import (
-    _commit_passed_post_fill_stress_if_pending,
-    _ticket,
-)
-from tests.trading_kernel.integration.test_issue_ticket import (
-    _seed_ticket_runtime_scope,
-)
 from tests.trading_kernel.support.capacity_claims import (
     make_issue_request as _issue_request,
 )
+from tests.trading_kernel.support.command_dispatch import (
+    commit_passed_post_fill_stress_if_pending as _commit_passed_post_fill_stress_if_pending,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    ticket as _ticket,
+)
 from tests.trading_kernel.support.dispatch_venues import PreflightFacts
+from tests.trading_kernel.support.runtime_scope import (
+    seed_ticket_runtime_scope as _seed_ticket_runtime_scope,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -276,7 +278,7 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
         )
         exposure_before_match = await uow.entry_admission.get_account_exposure(
             ticket.identity.netting_domain.venue_id,
-            ticket.identity.netting_domain.account_id
+            ticket.identity.netting_domain.account_id,
         )
     assert reservation_before_match is not None
     assert reservation_before_match.status == "active"
@@ -305,12 +307,10 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
         )
         exposure_after_match = await uow.entry_admission.get_account_exposure(
             ticket.identity.netting_domain.venue_id,
-            ticket.identity.netting_domain.account_id
+            ticket.identity.netting_domain.account_id,
         )
-        netting_domain_active = (
-            await uow.entry_admission.has_active_ticket_in_domain(
-                ticket.identity.netting_domain.key()
-            )
+        netting_domain_active = await uow.entry_admission.has_active_ticket_in_domain(
+            ticket.identity.netting_domain.key()
         )
     assert reservation_after_match is not None
     assert reservation_after_match.status == "released"
@@ -341,9 +341,13 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
         )
 
     assert repeated_match.status is ReconcileTicketStatus.NO_CHANGE
-    assert sum(
-        type(event).__name__ == "ReconciliationMatched" for event in events_after_repeat
-    ) == 1
+    assert (
+        sum(
+            type(event).__name__ == "ReconciliationMatched"
+            for event in events_after_repeat
+        )
+        == 1
+    )
     assert exposure_after_repeat is not None
     assert exposure_after_repeat.active_ticket_count == 0
 
@@ -377,7 +381,7 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
         exposure = await uow.entry_admission.get_account_exposure(
             ticket.identity.netting_domain.venue_id,
-            ticket.identity.netting_domain.account_id
+            ticket.identity.netting_domain.account_id,
         )
         review = await uow.reviews.get_for_ticket(ticket.identity.ticket_id)
         owner_projection = await uow.monitors.get(
@@ -423,9 +427,7 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         revised_aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
         initial_review = await uow.reviews.get("review-1")
-        current_review = await uow.reviews.get_for_ticket(
-            ticket.identity.ticket_id
-        )
+        current_review = await uow.reviews.get_for_ticket(ticket.identity.ticket_id)
         revised_owner_projection = await uow.monitors.get(
             owner_ticket_monitor_key(ticket.identity.ticket_id)
         )
@@ -507,7 +509,9 @@ async def test_external_flat_opens_incident_and_enters_owned_protection_cleanup(
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
         incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
-        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.RECONCILIATION_PENDING
@@ -615,7 +619,9 @@ async def test_exit_timeout_is_conserved_as_unknown_and_never_redispatched(
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
         incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
-        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.EXIT_OUTCOME_UNKNOWN
     assert incident is not None and incident.incident_kind == "exit_outcome_unknown"
@@ -662,7 +668,9 @@ async def test_owned_orphan_order_creates_new_exact_cancel_generation(
 
     assert result.status is ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
-        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
     orphan_cancel = commands[-1]
     assert orphan_cancel.kind is ExchangeCommandKind.CANCEL_ORDER
@@ -785,7 +793,9 @@ async def test_unowned_open_order_opens_incident_without_creating_cancel(
     assert repeated.status is ReconcileTicketStatus.UNOWNED_ORDER_INCIDENT
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
-        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
         events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
     assert incident is not None and incident.incident_kind == "unowned_open_order"
@@ -838,7 +848,9 @@ async def test_protection_residue_blocks_match_without_duplicate_cancel(
                 snapshot=snapshot.model_copy(update={"observed_at_ms": 3_260}),
             ),
         )
-        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
 
     assert first.status is ReconcileTicketStatus.PROTECTION_RESIDUE
@@ -897,7 +909,7 @@ async def test_same_instrument_long_and_short_tickets_are_isolated(
         )
         exposure = await uow.entry_admission.get_account_exposure(
             long_ticket.identity.netting_domain.venue_id,
-            long_ticket.identity.netting_domain.account_id
+            long_ticket.identity.netting_domain.account_id,
         )
 
     assert long_aggregate is not None
@@ -905,7 +917,9 @@ async def test_same_instrument_long_and_short_tickets_are_isolated(
     assert short_aggregate is not None
     assert short_aggregate.status is AggregateStatus.POSITION_PROTECTED
     assert long_position is not None and long_position.quantity == long_ticket.quantity
-    assert short_position is not None and short_position.quantity == short_ticket.quantity
+    assert (
+        short_position is not None and short_position.quantity == short_ticket.quantity
+    )
     assert exposure is not None and exposure.active_ticket_count == 2
 
     long_entry, long_stop, long_tp1 = long_commands
@@ -1156,8 +1170,7 @@ async def _reach_reconciliation_pending_after_cancel(
                 ),
             )
         assert (
-            stop_cleanup.status
-            is ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
+            stop_cleanup.status is ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
         )
         await _dispatch(engine, venue, "dispatch-cancel-stop", 3_375)
 
@@ -1237,7 +1250,9 @@ def _database_url(database_name: str) -> str:
     if SAFE_DATABASE.fullmatch(database_name) is None:
         raise ValueError("unsafe kernel test database name")
     base = ADMIN_DSN.rsplit("/", 1)[0]
-    return f"{base.replace('postgresql://', 'postgresql+asyncpg://', 1)}/{database_name}"
+    return (
+        f"{base.replace('postgresql://', 'postgresql+asyncpg://', 1)}/{database_name}"
+    )
 
 
 def _run_alembic(database_url: str, *args: str) -> None:

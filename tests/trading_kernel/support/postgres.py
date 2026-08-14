@@ -20,7 +20,9 @@ def async_database_url(database_name: str) -> str:
     if SAFE_TEST_DATABASE.fullmatch(database_name) is None:
         raise ValueError("unsafe kernel test database name")
     base = TEST_POSTGRES_ADMIN_DSN.rsplit("/", 1)[0]
-    return f"{base.replace('postgresql://', 'postgresql+asyncpg://', 1)}/{database_name}"
+    return (
+        f"{base.replace('postgresql://', 'postgresql+asyncpg://', 1)}/{database_name}"
+    )
 
 
 def run_alembic(database_url: str, *args: str) -> None:

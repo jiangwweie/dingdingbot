@@ -10,9 +10,6 @@ from src.trading_kernel.infrastructure.pg_models import monitor_events
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-
-dispatch_engine = dispatch_fixture.dispatch_engine
 
 
 async def test_unchanged_monitor_state_advances_observed_time_without_new_event(

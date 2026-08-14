@@ -44,23 +44,22 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerStatus,
     run_reconciliation_worker_once,
 )
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_command_dispatch import (
-    _issue,
-    _seed_policy,
-)
-from tests.trading_kernel.integration.test_command_dispatch import (
-    _ticket as _registered_sor_ticket,
-)
 from tests.trading_kernel.integration.universe_certification_support import (
     NoTicketVenueTruth,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    issue as _issue,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    seed_policy as _seed_policy,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    ticket as _registered_sor_ticket,
 )
 from tests.trading_kernel.support.dispatch_venues import (
     KindAwareAcceptingVenue,
     PreflightFacts,
 )
-
-stress_engine = dispatch_fixture.dispatch_engine
 
 
 def _ticket(**updates: object):
@@ -297,12 +296,8 @@ async def test_raw_liquidation_observation_never_controls_post_fill_decision(
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.TP1_PENDING
     assert aggregate.post_fill_stress_status == "passed"
-    assert aggregate.venue_reported_liquidation_price == (
-        raw_liquidation_observation
-    )
-    assessed = [
-        event for event in events if isinstance(event, PostFillStressAssessed)
-    ]
+    assert aggregate.venue_reported_liquidation_price == (raw_liquidation_observation)
+    assessed = [event for event in events if isinstance(event, PostFillStressAssessed)]
     assert len(assessed) == 1
     assert assessed[0].evidence.proof.proof_digest == (
         aggregate.post_fill_stress_proof_digest
@@ -340,15 +335,10 @@ async def test_unavailable_facts_retry_without_event_or_version_then_recover(
             unavailable,
             now_ms=3_000 + attempt * 1_000,
         )
-        assert (
-            unavailable_result.status
-            is ReconciliationWorkerStatus.FACTS_UNAVAILABLE
-        )
+        assert unavailable_result.status is ReconciliationWorkerStatus.FACTS_UNAVAILABLE
     async with PostgresKernelUnitOfWork(stress_engine) as uow:
         waiting = await uow.aggregates.get(ticket.identity.ticket_id)
-        waiting_events = await uow.events.list_for_ticket(
-            ticket.identity.ticket_id
-        )
+        waiting_events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
         incident = await uow.incidents.get_open_for_ticket_kind(
             ticket.identity.ticket_id,
             "post_fill_risk_facts_unavailable",
@@ -507,11 +497,9 @@ async def test_failed_stress_materializes_one_flatten_and_keeps_lane_blocked(
                 ),
             ),
         )
-        incident_before_cleanup = (
-            await uow.incidents.get_open_for_ticket_kind(
-                ticket.identity.ticket_id,
-                "post_fill_stress_failed",
-            )
+        incident_before_cleanup = await uow.incidents.get_open_for_ticket_kind(
+            ticket.identity.ticket_id,
+            "post_fill_stress_failed",
         )
         reservation_before_match = await uow.budgets.get_for_ticket(
             ticket.identity.ticket_id
@@ -600,9 +588,7 @@ async def _reach_post_fill_pending(
                     netting_domain=ticket.identity.netting_domain,
                     quantity=ticket.quantity,
                     average_entry_price=ticket.entry_reference_price,
-                    venue_reported_liquidation_price=(
-                        raw_liquidation_observation
-                    ),
+                    venue_reported_liquidation_price=(raw_liquidation_observation),
                     venue_reported_liquidation_observation_status=(
                         raw_observation_status
                     ),

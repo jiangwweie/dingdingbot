@@ -26,9 +26,7 @@ def make_issue_request(
         if ticket.leverage_change_required
         else ticket.selected_leverage
     )
-    resolved_stress_balance = (
-        Decimal(300) if stress_balance is None else stress_balance
-    )
+    resolved_stress_balance = Decimal(300) if stress_balance is None else stress_balance
     return IssueTicketRequest(
         capacity_claim=freeze_capacity_claim(
             ticket_identity=ticket.identity,
@@ -130,9 +128,7 @@ def make_stress_evidence(ticket, *, stress_balance: Decimal | None = None):
         settlement_asset="USDT",
         position_mode="independent_sides",
         margin_mode="cross",
-        exchange_instrument_id=(
-            ticket.identity.netting_domain.exchange_instrument_id
-        ),
+        exchange_instrument_id=(ticket.identity.netting_domain.exchange_instrument_id),
         mark_price=ticket.entry_reference_price,
         configured_leverage=configured_leverage,
         total_wallet_balance=resolved_stress_balance,

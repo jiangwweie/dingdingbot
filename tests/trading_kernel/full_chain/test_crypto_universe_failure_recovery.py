@@ -60,10 +60,6 @@ from tests.trading_kernel.full_chain.lifecycle_support import (
     dispatch_lifecycle_command,
     reach_runner_protected,
 )
-from tests.trading_kernel.integration.test_command_dispatch import _issue
-from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
-    _registered_sor_long_ticket,
-)
 from tests.trading_kernel.integration.universe_activation_support import (
     NOW_MS as ACTIVATION_NOW_MS,
 )
@@ -85,7 +81,11 @@ from tests.trading_kernel.integration.universe_certification_support import (
 from tests.trading_kernel.integration.universe_certification_support import (
     certification_engine as _certification_engine,  # noqa: F401
 )
+from tests.trading_kernel.support.command_dispatch import issue as _issue
 from tests.trading_kernel.support.dispatch_venues import KindAwareAcceptingVenue
+from tests.trading_kernel.support.lifecycle import (
+    registered_sor_long_ticket as _registered_sor_long_ticket,
+)
 
 
 def _certification_unavailable_count(payload: Mapping[str, object]) -> int:
@@ -181,8 +181,7 @@ async def test_readonly_timeout_count_excludes_retired_and_other_profile_facts(
 
     async with _certification_engine.begin() as connection:
         await connection.execute(
-            sa.update(strategy_universe_versions)
-            .values(
+            sa.update(strategy_universe_versions).values(
                 lifecycle_state="retired",
                 activated_at_ms=NOW_MS,
                 retired_at_ms=NOW_MS + 1,
@@ -323,10 +322,12 @@ async def test_monitor_deduplicates_same_blocker_then_records_resolution(
     )
 
     async with PostgresKernelUnitOfWork(_certification_engine) as uow:
-        resolved_target = await uow.strategy_universes.claim_due_instrument_certification(
-            worker_id="monitor-worker-resolved",
-            now_ms=NOW_MS + 600_000,
-            lease_until_ms=NOW_MS + 660_000,
+        resolved_target = (
+            await uow.strategy_universes.claim_due_instrument_certification(
+                worker_id="monitor-worker-resolved",
+                now_ms=NOW_MS + 600_000,
+                lease_until_ms=NOW_MS + 660_000,
+            )
         )
     assert resolved_target is not None
     assert resolved_target.exchange_instrument_id == target.exchange_instrument_id
@@ -606,22 +607,25 @@ async def _ticket_for_active_universe(
 ):
     async with engine.connect() as connection:
         scope = (
-            await connection.execute(
-                sa.select(runtime_scopes_current)
-                .where(
-                    runtime_scopes_current.c.universe_version_id == old_version_id,
-                    runtime_scopes_current.c.exchange_instrument_id
-                    == "binance-usdm:BTCUSDT:perpetual",
-                    runtime_scopes_current.c.position_side == "long",
+            (
+                await connection.execute(
+                    sa.select(runtime_scopes_current)
+                    .where(
+                        runtime_scopes_current.c.universe_version_id == old_version_id,
+                        runtime_scopes_current.c.exchange_instrument_id
+                        == "binance-usdm:BTCUSDT:perpetual",
+                        runtime_scopes_current.c.position_side == "long",
+                    )
+                    .limit(1)
                 )
-                .limit(1)
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
         account_id = str(
             await connection.scalar(
                 sa.select(runtime_profiles.c.account_id).where(
-                    runtime_profiles.c.runtime_profile_id
-                    == scope["runtime_profile_id"]
+                    runtime_profiles.c.runtime_profile_id == scope["runtime_profile_id"]
                 )
             )
         )

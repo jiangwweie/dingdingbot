@@ -37,20 +37,19 @@ from tests.trading_kernel.full_chain.lifecycle_support import (
     dispatch_lifecycle_command,
     reach_runner_protected,
 )
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_command_dispatch import (
-    _issue,
-    _seed_policy,
-)
-from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
-    _registered_sor_long_ticket,
-)
 from tests.trading_kernel.integration.universe_certification_support import (
     NoTicketVenueTruth,
 )
+from tests.trading_kernel.support.command_dispatch import (
+    issue as _issue,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    seed_policy as _seed_policy,
+)
 from tests.trading_kernel.support.dispatch_venues import KindAwareAcceptingVenue
-
-dispatch_engine = dispatch_fixture.dispatch_engine
+from tests.trading_kernel.support.lifecycle import (
+    registered_sor_long_ticket as _registered_sor_long_ticket,
+)
 
 
 class _ActivePositionSource:
@@ -80,9 +79,7 @@ def _active_ticket(
 ):
     original = _registered_sor_long_ticket()
     contract = next(
-        item
-        for item in registered_strategy_contracts()
-        if item.event_id == event_id
+        item for item in registered_strategy_contracts() if item.event_id == event_id
     )
     policy = exit_policy_for(contract.event_spec_id)
     runtime = original.identity.runtime.model_copy(
@@ -131,7 +128,9 @@ def _active_ticket(
                 original.pre_tp1_reclaim_price if event_id.startswith("SOR-") else None
             ),
             "exposure_session_end_ms": (
-                original.exposure_session_end_ms if event_id.startswith("SOR-") else None
+                original.exposure_session_end_ms
+                if event_id.startswith("SOR-")
+                else None
             ),
         }
     )
@@ -140,9 +139,11 @@ def _active_ticket(
 async def _reach_position_protected(engine, ticket) -> None:
     await _issue(engine, ticket)
     venue = KindAwareAcceptingVenue()
-    assert (await dispatch_lifecycle_command(
-        engine, venue, ticket.identity.ticket_id, now_ms=1_100, entry=True
-    )).status.value == "accepted"
+    assert (
+        await dispatch_lifecycle_command(
+            engine, venue, ticket.identity.ticket_id, now_ms=1_100, entry=True
+        )
+    ).status.value == "accepted"
     async with PostgresKernelUnitOfWork(engine) as uow:
         filled = await reconcile_ticket(
             uow,
@@ -159,12 +160,16 @@ async def _reach_position_protected(engine, ticket) -> None:
             ),
         )
     assert filled.status.value == "entry_fill_recorded"
-    assert (await dispatch_lifecycle_command(
-        engine, venue, ticket.identity.ticket_id, now_ms=2_200
-    )).status.value == "accepted"
-    assert (await dispatch_lifecycle_command(
-        engine, venue, ticket.identity.ticket_id, now_ms=2_300
-    )).status.value == "accepted"
+    assert (
+        await dispatch_lifecycle_command(
+            engine, venue, ticket.identity.ticket_id, now_ms=2_200
+        )
+    ).status.value == "accepted"
+    assert (
+        await dispatch_lifecycle_command(
+            engine, venue, ticket.identity.ticket_id, now_ms=2_300
+        )
+    ).status.value == "accepted"
 
 
 async def _settlement_pending_from_runner(engine, ticket) -> None:
@@ -185,9 +190,11 @@ async def _settlement_pending_from_runner(engine, ticket) -> None:
             ),
         )
     assert external_flat.status.value == "external_flat_incident"
-    assert (await dispatch_lifecycle_command(
-        engine, venue, ticket.identity.ticket_id, now_ms=3_550
-    )).status.value == "accepted"
+    assert (
+        await dispatch_lifecycle_command(
+            engine, venue, ticket.identity.ticket_id, now_ms=3_550
+        )
+    ).status.value == "accepted"
     async with PostgresKernelUnitOfWork(engine) as uow:
         matched = await reconcile_ticket(
             uow,

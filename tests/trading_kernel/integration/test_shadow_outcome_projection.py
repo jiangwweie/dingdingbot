@@ -46,13 +46,6 @@ from src.trading_kernel.interfaces.observation_worker import (
     ObservationWorkerStatus,
     run_observation_worker_once,
 )
-from tests.trading_kernel.integration.test_signal_to_ticket import (
-    _admission_snapshot,
-    _seed_runtime_authority,
-)
-from tests.trading_kernel.integration.test_signal_to_ticket import (
-    _signal as _runtime_signal,
-)
 from tests.trading_kernel.support.postgres import (
     SAFE_TEST_DATABASE as SAFE_DATABASE,
 )
@@ -64,6 +57,15 @@ from tests.trading_kernel.support.postgres import (
 )
 from tests.trading_kernel.support.postgres import (
     run_alembic as _run_alembic,
+)
+from tests.trading_kernel.support.signal_ingest import (
+    admission_snapshot as _admission_snapshot,
+)
+from tests.trading_kernel.support.signal_ingest import (
+    seed_runtime_authority as _seed_runtime_authority,
+)
+from tests.trading_kernel.support.signal_ingest import (
+    signal as _runtime_signal,
 )
 
 
@@ -121,11 +123,14 @@ async def test_pending_shadow_is_idempotent_and_terminal_retry_is_a_noop(
     )
 
     async with PostgresKernelUnitOfWork(shadow_engine) as uow:
-        assert await uow.shadow_outcomes.claim_one_due(
-            worker_id="shadow-worker",
-            now_ms=spec.horizon_end_ms + 2,
-            lease_until_ms=spec.horizon_end_ms + 3,
-        ) is None
+        assert (
+            await uow.shadow_outcomes.claim_one_due(
+                worker_id="shadow-worker",
+                now_ms=spec.horizon_end_ms + 2,
+                lease_until_ms=spec.horizon_end_ms + 3,
+            )
+            is None
+        )
 
 
 @pytest.mark.asyncio
@@ -275,18 +280,20 @@ async def test_expired_same_worker_claim_cannot_mutate_new_claim(
                 completed_at_ms=spec.horizon_end_ms,
             )
         with pytest.raises(RuntimeError, match="lost Shadow claim"):
-            await uow.shadow_outcomes.release_expired_claim(
-                claim=wrong_lease_claim
-            )
+            await uow.shadow_outcomes.release_expired_claim(claim=wrong_lease_claim)
     async with shadow_engine.connect() as connection:
         row = (
-            await connection.execute(
-                sa.select(shadow_outcomes_current).where(
-                    shadow_outcomes_current.c.shadow_outcome_id
-                    == spec.shadow_outcome_id
+            (
+                await connection.execute(
+                    sa.select(shadow_outcomes_current).where(
+                        shadow_outcomes_current.c.shadow_outcome_id
+                        == spec.shadow_outcome_id
+                    )
                 )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
     assert row["status"] == "claimed"
     assert row["claim_owner"] == replacement_claim.claim_owner
     assert row["claim_token"] == replacement_claim.claim_token
@@ -312,13 +319,17 @@ async def test_zero_risk_shadow_is_terminally_unavailable_with_explicit_reason(
     assert source.calls == 0
     async with shadow_engine.connect() as connection:
         row = (
-            await connection.execute(
-                sa.select(shadow_outcomes_current).where(
-                    shadow_outcomes_current.c.shadow_outcome_id
-                    == spec.shadow_outcome_id
+            (
+                await connection.execute(
+                    sa.select(shadow_outcomes_current).where(
+                        shadow_outcomes_current.c.shadow_outcome_id
+                        == spec.shadow_outcome_id
+                    )
                 )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
     assert row["status"] == "unavailable"
     assert row["completion_reason"] == "zero_initial_risk_distance"
     assert row["max_favorable_price"] is None
@@ -397,18 +408,22 @@ async def test_capacity_rejection_creates_only_one_pending_shadow_and_no_trading
 
     assert result.ticket_id is None
     async with shadow_engine.connect() as connection:
-        assert await connection.scalar(
-            sa.select(sa.func.count()).select_from(shadow_outcomes_current)
-        ) == 1
+        assert (
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(shadow_outcomes_current)
+            )
+            == 1
+        )
         for table in (
             capacity_claims,
             trade_tickets,
             budget_reservations,
             exchange_commands,
         ):
-            assert await connection.scalar(
-                sa.select(sa.func.count()).select_from(table)
-            ) == 0
+            assert (
+                await connection.scalar(sa.select(sa.func.count()).select_from(table))
+                == 0
+            )
 
 
 def test_shadow_metadata_closes_claim_and_terminal_shapes() -> None:
@@ -419,9 +434,17 @@ def test_shadow_metadata_closes_claim_and_terminal_shapes() -> None:
     }
 
     assert any("claim_token IS NOT NULL" in check for check in checks)
-    assert any("status = 'completed'" in check and "mfe_r IS NOT NULL" in check for check in checks)
-    assert any("status = 'unavailable'" in check and "mfe_r IS NULL" in check for check in checks)
-    assert any("session_exit_deadline_ms > horizon_start_ms" in check for check in checks)
+    assert any(
+        "status = 'completed'" in check and "mfe_r IS NOT NULL" in check
+        for check in checks
+    )
+    assert any(
+        "status = 'unavailable'" in check and "mfe_r IS NULL" in check
+        for check in checks
+    )
+    assert any(
+        "session_exit_deadline_ms > horizon_start_ms" in check for check in checks
+    )
     assert any("first_path IS NULL OR first_path IN" in check for check in checks)
     assert any(
         "sor_path_observation_v1" in check and "observed_bar_count > 0" in check
@@ -581,15 +604,18 @@ class _RecordingMarketSource:
     async def fetch_closed_candles(self, request):
         self.requests.append(request)
         async with self._engine.connect() as connection:
-            assert int(
-                (
-                    await connection.exec_driver_sql(
-                        "SELECT count(*) FROM pg_stat_activity "
-                        "WHERE datname = current_database() "
-                        "AND state = 'idle in transaction'"
-                    )
-                ).scalar_one()
-            ) == 0
+            assert (
+                int(
+                    (
+                        await connection.exec_driver_sql(
+                            "SELECT count(*) FROM pg_stat_activity "
+                            "WHERE datname = current_database() "
+                            "AND state = 'idle in transaction'"
+                        )
+                    ).scalar_one()
+                )
+                == 0
+            )
         self.checked_transaction_boundary = True
         return _complete_hour_candles(
             ShadowOutcomeSpec(

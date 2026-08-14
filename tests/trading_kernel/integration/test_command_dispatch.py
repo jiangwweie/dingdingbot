@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
 from decimal import Decimal
-from uuid import uuid4
 
-import asyncpg
 import pytest
-import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandRequest,
@@ -74,27 +70,24 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
-from tests.trading_kernel.integration.test_issue_ticket import (
-    _seed_replacement_universe,
-    _seed_ticket_runtime_scope,
-)
 from tests.trading_kernel.support.capacity_claims import (
     make_issue_request as _issue_request,
 )
 from tests.trading_kernel.support.capacity_claims import (
     make_stress_evidence as _stress_evidence,
 )
-from tests.trading_kernel.support.postgres import (
-    SAFE_TEST_DATABASE as SAFE_DATABASE,
+from tests.trading_kernel.support.dispatch_venues import (
+    AcceptingVenue,
+    CountingVenue,
+    KindAwareAcceptingVenue,
+    PreflightFacts,
+    SlowVenue,
 )
-from tests.trading_kernel.support.postgres import (
-    TEST_POSTGRES_ADMIN_DSN as ADMIN_DSN,
+from tests.trading_kernel.support.runtime_scope import (
+    seed_replacement_universe as _seed_replacement_universe,
 )
-from tests.trading_kernel.support.postgres import (
-    async_database_url as _database_url,
-)
-from tests.trading_kernel.support.postgres import (
-    run_alembic as _run_alembic,
+from tests.trading_kernel.support.runtime_scope import (
+    seed_ticket_runtime_scope as _seed_ticket_runtime_scope,
 )
 from tests.trading_kernel.support.tickets import make_ticket as _retired_ticket
 
@@ -102,60 +95,6 @@ from tests.trading_kernel.support.tickets import make_ticket as _retired_ticket
 def _raw_liquidation_observation(ticket, average_fill_price: Decimal) -> Decimal:
     del ticket, average_fill_price
     return Decimal(0)
-
-
-@pytest_asyncio.fixture
-async def dispatch_engine() -> AsyncGenerator[AsyncEngine, None]:
-    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
-    assert SAFE_DATABASE.fullmatch(database_name)
-    admin = await asyncpg.connect(ADMIN_DSN)
-    await admin.execute(f'CREATE DATABASE "{database_name}"')
-    database_url = _database_url(database_name)
-    _run_alembic(database_url, "upgrade", "head")
-    engine = create_async_engine(database_url)
-    try:
-        yield engine
-    finally:
-        await engine.dispose()
-        await admin.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = $1 AND pid <> pg_backend_pid()",
-            database_name,
-        )
-        await admin.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
-        await admin.close()
-
-
-class AcceptingVenue:
-    def __init__(self, engine: AsyncEngine) -> None:
-        self._engine = engine
-        self.saw_committed_claim = False
-
-    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
-        async with PostgresKernelUnitOfWork(self._engine) as uow:
-            command = await uow.exchange_commands.get(request.command_id)
-        self.saw_committed_claim = (
-            command is not None and command.status is ExchangeCommandStatus.CLAIMED
-        )
-        exchange_order_id = (
-            request.payload.exchange_order_id
-            if isinstance(request.payload, CancelCommandPayload)
-            else f"venue-{request.kind.value}-1"
-        )
-        return ExchangeCommandResult(
-            status=ExchangeCommandStatus.ACCEPTED,
-            observed_at_ms=2_000,
-            exchange_order_id=exchange_order_id,
-        )
-
-    async def set_leverage(
-        self, request: VenueSetLeverageRequest
-    ) -> SetLeverageCommandResult:
-        return SetLeverageCommandResult(
-            exchange_configured_leverage=request.payload.desired_leverage,
-            leverage_verified_at_ms=2_000,
-            leverage_verification_digest="sha256:" + "4" * 64,
-        )
 
 
 class RejectingVenue:
@@ -173,46 +112,6 @@ class RejectingVenue:
             exchange_configured_leverage=request.payload.desired_leverage,
             leverage_verified_at_ms=2_000,
             leverage_verification_digest="sha256:" + "4" * 64,
-        )
-
-
-class SlowVenue:
-    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
-        await asyncio.sleep(0.1)
-        return ExchangeCommandResult(
-            status=ExchangeCommandStatus.ACCEPTED,
-            observed_at_ms=2_000,
-            exchange_order_id="late-order",
-        )
-
-    async def set_leverage(
-        self, request: VenueSetLeverageRequest
-    ) -> SetLeverageCommandResult:
-        await asyncio.sleep(0.1)
-        return SetLeverageCommandResult(
-            exchange_configured_leverage=request.payload.desired_leverage,
-            leverage_verified_at_ms=2_000,
-            leverage_verification_digest="sha256:" + "4" * 64,
-        )
-
-
-class CountingVenue:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
-        self.calls += 1
-        return ExchangeCommandResult(
-            status=ExchangeCommandStatus.ACCEPTED,
-            observed_at_ms=2_000,
-            exchange_order_id="unexpected-order",
-        )
-
-    async def set_leverage(
-        self, request: VenueSetLeverageRequest
-    ) -> SetLeverageCommandResult:
-        raise AssertionError(
-            f"unexpected set leverage for {request.exchange_instrument_id}"
         )
 
 
@@ -267,7 +166,7 @@ class _PreflightExitBarrierUnitOfWork:
         return outcome
 
 
-class PreflightFacts:
+class _LegacyPreflightFacts:
     def __init__(self, *, configured_leverage: int = 5) -> None:
         self._configured_leverage = configured_leverage
 
@@ -357,7 +256,7 @@ class PreflightFacts:
         )
 
 
-class KindAwareAcceptingVenue:
+class _LegacyKindAwareAcceptingVenue:
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
         exchange_order_id = (
             request.payload.exchange_order_id
@@ -504,9 +403,7 @@ async def test_action_time_entry_authority_drift_causes_zero_venue_mutations(
                 scope={
                     "event_runtime_profiles": [
                         {
-                            "event_spec_id": (
-                                ticket.identity.runtime.event_spec_id
-                            ),
+                            "event_spec_id": (ticket.identity.runtime.event_spec_id),
                             "runtime_profile_id": (
                                 ticket.identity.runtime.runtime_profile_id
                             ),
@@ -589,12 +486,16 @@ async def test_action_time_entry_authority_drift_causes_zero_venue_mutations(
     assert venue.calls == 0
     async with dispatch_engine.connect() as connection:
         command = (
-            await connection.execute(
-                sa.select(exchange_commands).where(
-                    exchange_commands.c.command_id == result.command_id
+            (
+                await connection.execute(
+                    sa.select(exchange_commands).where(
+                        exchange_commands.c.command_id == result.command_id
+                    )
                 )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
     assert command["status"] == ExchangeCommandStatus.REJECTED.value
     assert command["result_payload"]["reason"] == expected_reason
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
@@ -634,12 +535,16 @@ async def test_unregistered_event_at_dispatch_is_terminally_fenced_before_venue(
     assert venue.calls == 0
     async with dispatch_engine.connect() as connection:
         command = (
-            await connection.execute(
-                sa.select(exchange_commands).where(
-                    exchange_commands.c.command_id == result.command_id
+            (
+                await connection.execute(
+                    sa.select(exchange_commands).where(
+                        exchange_commands.c.command_id == result.command_id
+                    )
                 )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
     assert command["status"] == ExchangeCommandStatus.REJECTED.value
     assert command["result_payload"]["reason"] == (
         "dispatch_preflight:product_entry_blocked"
@@ -1178,10 +1083,7 @@ async def _commit_passed_post_fill_stress_if_pending(
             assert aggregate.average_fill_price is not None
             assert aggregate.initial_stop_exchange_order_id is not None
             event = PostFillStressAssessed(
-                event_id=(
-                    f"event:{ticket_id}:"
-                    f"{aggregate.last_event_sequence + 1}"
-                ),
+                event_id=(f"event:{ticket_id}:{aggregate.last_event_sequence + 1}"),
                 ticket_id=ticket_id,
                 sequence=aggregate.last_event_sequence + 1,
                 occurred_at_ms=2_200,
@@ -1290,7 +1192,7 @@ async def test_authoritative_entry_rejection_releases_lane_and_budget_without_re
         lane = await uow.entry_admission.get_global_lane()
         exposure = await uow.entry_admission.get_account_exposure(
             ticket.identity.netting_domain.venue_id,
-            ticket.identity.netting_domain.account_id
+            ticket.identity.netting_domain.account_id,
         )
         persisted_ticket = await uow.tickets.get(ticket.identity.ticket_id)
 
@@ -1549,9 +1451,7 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
         and aggregate.status is AggregateStatus.INITIAL_STOP_OUTCOME_UNKNOWN
     )
     assert [
-        command.status
-        for command in commands
-        if command.kind.value == "initial_stop"
+        command.status for command in commands if command.kind.value == "initial_stop"
     ] == [ExchangeCommandStatus.OUTCOME_UNKNOWN]
     assert [command.kind.value for command in commands].count("initial_stop") == 1
     assert all(command.kind.value != "exit" for command in commands)
@@ -1653,9 +1553,7 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
         commands = await uow.exchange_commands.list_for_ticket(
             ticket.identity.ticket_id
         )
-    exit_commands = [
-        command for command in commands if command.kind.value == "exit"
-    ]
+    exit_commands = [command for command in commands if command.kind.value == "exit"]
     assert [command.generation for command in exit_commands] == [1, 2]
     assert [command.status for command in exit_commands] == [
         ExchangeCommandStatus.REJECTED,
@@ -1920,8 +1818,9 @@ async def _seed_policy(
                     ]
                 },
                 updated_at_ms=1_000,
+            )
         )
-    )
+
 
 def _ticket():
     return _registered_sor_ticket()

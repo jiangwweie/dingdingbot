@@ -9,13 +9,15 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_command_dispatch import _issue, _seed_policy
-from tests.trading_kernel.integration.test_ticket_lifecycle_maintenance import (
-    _registered_sor_long_ticket,
+from tests.trading_kernel.support.command_dispatch import (
+    issue as _issue,
 )
-
-dispatch_engine = dispatch_fixture.dispatch_engine
+from tests.trading_kernel.support.command_dispatch import (
+    seed_policy as _seed_policy,
+)
+from tests.trading_kernel.support.lifecycle import (
+    registered_sor_long_ticket as _registered_sor_long_ticket,
+)
 
 
 async def test_routine_claim_lease_prevents_duplicate_process_work(

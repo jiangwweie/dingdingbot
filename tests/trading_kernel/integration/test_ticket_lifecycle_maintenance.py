@@ -23,27 +23,30 @@ from src.trading_kernel.application.reconcile_ticket import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind, OrderCommandPayload
-from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts, exit_policy_for
+from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
-from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_models import owner_policy_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_command_dispatch import (
-    _issue,
-    _seed_policy,
+from tests.trading_kernel.support.command_dispatch import (
+    commit_passed_post_fill_stress_if_pending,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    issue as _issue,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    seed_policy as _seed_policy,
 )
 from tests.trading_kernel.support.dispatch_venues import (
     KindAwareAcceptingVenue,
     PreflightFacts,
 )
-from tests.trading_kernel.support.tickets import make_ticket as _ticket
-
-lifecycle_engine = dispatch_fixture.dispatch_engine
+from tests.trading_kernel.support.lifecycle import (
+    registered_sor_long_ticket as _registered_sor_long_ticket,
+)
 
 
 @pytest.mark.asyncio
@@ -85,9 +88,7 @@ async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protect
     assert aggregate.break_even_floor_price == Decimal("60080.3")
     assert aggregate.tp1_exchange_order_id is None
     replacement = next(
-        item
-        for item in commands
-        if item.kind is ExchangeCommandKind.REPLACE_PROTECTION
+        item for item in commands if item.kind is ExchangeCommandKind.REPLACE_PROTECTION
     )
     assert isinstance(replacement.payload, OrderCommandPayload)
     assert replacement.payload.stop_price == Decimal("60080.3")
@@ -272,9 +273,7 @@ async def test_runner_maintenance_requests_monotonic_structural_atr_stop(
     assert aggregate.status is AggregateStatus.RUNNER_REPLACEMENT_PENDING
     assert aggregate.pending_stop_price == Decimal(60450)
     replacements = [
-        item
-        for item in commands
-        if item.kind is ExchangeCommandKind.REPLACE_PROTECTION
+        item for item in commands if item.kind is ExchangeCommandKind.REPLACE_PROTECTION
     ]
     assert [item.generation for item in replacements] == [1, 2]
     assert type(events[-1]).__name__ == "RunnerStopRequested"
@@ -470,9 +469,7 @@ async def test_missing_liquidation_observation_does_not_control_post_fill_risk(
     assert aggregate.venue_reported_liquidation_price is None
     assert aggregate.post_fill_stress_status == "passed"
     assert aggregate.status is AggregateStatus.TP1_PENDING
-    assert ExchangeCommandKind.TAKE_PROFIT in {
-        command.kind for command in commands
-    }
+    assert ExchangeCommandKind.TAKE_PROFIT in {command.kind for command in commands}
 
 
 @pytest.mark.asyncio
@@ -584,7 +581,7 @@ async def _reach_runner_protected(engine, ticket) -> None:
 
 
 async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
-    await dispatch_fixture._commit_passed_post_fill_stress_if_pending(
+    await commit_passed_post_fill_stress_if_pending(
         engine,
         ticket_id,
     )
@@ -604,37 +601,7 @@ async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
         entry_facts_source=PreflightFacts(),
     )
     assert result.command_id is not None
-    await dispatch_fixture._commit_passed_post_fill_stress_if_pending(
+    await commit_passed_post_fill_stress_if_pending(
         engine,
         ticket_id,
-    )
-
-
-def _registered_sor_long_ticket():
-    contract = next(
-        item
-        for item in registered_strategy_contracts()
-        if item.event_id == "SOR-LONG"
-    )
-    ticket = _ticket()
-    identity = ticket.identity.model_copy(
-        update={
-            "runtime": ticket.identity.runtime.model_copy(
-                update={
-                    "strategy_group_id": contract.strategy_group_id,
-                    "strategy_version_id": contract.strategy_version_id,
-                    "event_spec_id": contract.event_spec_id,
-                }
-            )
-        }
-    )
-    policy = exit_policy_for(contract.event_spec_id)
-    return ticket.model_copy(
-        update={
-            "identity": identity,
-            "exit_policy_id": policy.exit_policy_id,
-            "exit_policy_semantic_hash": policy.semantic_hash(),
-            "pre_tp1_reclaim_price": Decimal(60100),
-            "exposure_session_end_ms": 86_400_000,
-        }
     )

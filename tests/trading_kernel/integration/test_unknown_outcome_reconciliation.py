@@ -51,20 +51,26 @@ from src.trading_kernel.domain.venue_truth import (
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_command_dispatch import (
-    _issue,
-    _reach_cancel_pending,
-    _seed_policy,
-    _ticket,
+from tests.trading_kernel.support.command_dispatch import (
+    commit_passed_post_fill_stress_if_pending,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    issue as _issue,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    reach_cancel_pending as _reach_cancel_pending,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    seed_policy as _seed_policy,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    ticket as _ticket,
 )
 from tests.trading_kernel.support.dispatch_venues import (
     AcceptingVenue,
     PreflightFacts,
     SlowVenue,
 )
-
-dispatch_engine = dispatch_fixture.dispatch_engine
 
 
 class StaticTruthPort:
@@ -308,10 +314,7 @@ async def test_visible_unknown_initial_stop_recovers_protection_without_exit(
     assert aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
     assert aggregate.initial_stop_exchange_order_id == "venue-stop-recovered"
     assert all(item.kind is not ExchangeCommandKind.EXIT for item in commands)
-    assert all(
-        item.kind is not ExchangeCommandKind.TAKE_PROFIT
-        for item in commands
-    )
+    assert all(item.kind is not ExchangeCommandKind.TAKE_PROFIT for item in commands)
     assert incident is None
     assert lane is not None and lane.status == "claimed"
 
@@ -348,12 +351,14 @@ async def test_absent_unknown_initial_stop_prepares_one_controlled_exit(
         incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.EXIT_PENDING
-    assert [item.status for item in commands if item.kind is ExchangeCommandKind.INITIAL_STOP] == [
-        ExchangeCommandStatus.RECONCILED_ABSENT
-    ]
-    assert [item.status for item in commands if item.kind is ExchangeCommandKind.EXIT] == [
-        ExchangeCommandStatus.PREPARED
-    ]
+    assert [
+        item.status
+        for item in commands
+        if item.kind is ExchangeCommandKind.INITIAL_STOP
+    ] == [ExchangeCommandStatus.RECONCILED_ABSENT]
+    assert [
+        item.status for item in commands if item.kind is ExchangeCommandKind.EXIT
+    ] == [ExchangeCommandStatus.PREPARED]
     assert isinstance(events[-1], InitialStopAbsenceConfirmed)
     assert incident is not None and incident.incident_kind == "initial_stop_absent"
 
@@ -384,7 +389,9 @@ async def test_visible_unknown_exit_recovers_accepted_without_duplicate_command(
         incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
     assert aggregate is not None and aggregate.status is AggregateStatus.EXIT_ACCEPTED
     assert aggregate.exit_exchange_order_id == "venue-exit-recovered"
-    assert len([item for item in commands if item.kind is ExchangeCommandKind.EXIT]) == 1
+    assert (
+        len([item for item in commands if item.kind is ExchangeCommandKind.EXIT]) == 1
+    )
     assert incident is None
 
 
@@ -625,8 +632,7 @@ async def test_still_open_unknown_cancel_is_marked_absent_and_becomes_retryable(
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.CANCEL_REJECTED
     assert (
-        aggregate.pending_cancel_exchange_order_id
-        == command.payload.exchange_order_id
+        aggregate.pending_cancel_exchange_order_id == command.payload.exchange_order_id
     )
     assert persisted is not None
     assert persisted.status is ExchangeCommandStatus.RECONCILED_ABSENT
@@ -753,8 +759,7 @@ async def test_unknown_replacement_visible_and_absent_paths_preserve_old_stop(
             _absent_truth(
                 observed_at_ms=2_900,
                 position_quantity=(
-                    absent_ticket.quantity
-                    - absent_ticket.take_profit_quantities[0]
+                    absent_ticket.quantity - absent_ticket.take_profit_quantities[0]
                 ),
             )
         ),
@@ -778,9 +783,7 @@ async def test_unknown_replacement_visible_and_absent_paths_preserve_old_stop(
     assert aggregate.status is AggregateStatus.RUNNER_REPLACEMENT_PENDING
     assert aggregate.active_stop_exchange_order_id == "venue-initial_stop-1"
     replacement_commands = [
-        item
-        for item in commands
-        if item.kind is ExchangeCommandKind.REPLACE_PROTECTION
+        item for item in commands if item.kind is ExchangeCommandKind.REPLACE_PROTECTION
     ]
     assert [item.generation for item in replacement_commands] == [1, 2]
     assert [item.status for item in replacement_commands] == [
@@ -849,7 +852,9 @@ async def _make_unknown_initial_stop(engine):
         now_ms=2_200,
         timeout_seconds=0.01,
     )
-    return ticket, await _command_of_kind(engine, ticket, ExchangeCommandKind.INITIAL_STOP)
+    return ticket, await _command_of_kind(
+        engine, ticket, ExchangeCommandKind.INITIAL_STOP
+    )
 
 
 def _ticket_for_signal(
@@ -1041,7 +1046,9 @@ async def _make_unknown_replacement(
 
 async def _make_unknown_exit(engine):
     ticket, _ = await _make_unknown_initial_stop(engine)
-    stop_command = await _command_of_kind(engine, ticket, ExchangeCommandKind.INITIAL_STOP)
+    stop_command = await _command_of_kind(
+        engine, ticket, ExchangeCommandKind.INITIAL_STOP
+    )
     await recover_unknown_command(
         lambda: PostgresKernelUnitOfWork(engine),
         StaticTruthPort(_visible_truth(ticket, stop_command, "venue-stop-1")),
@@ -1128,7 +1135,9 @@ async def _make_unknown_cancel(engine):
         now_ms=3_300,
         timeout_seconds=0.01,
     )
-    return ticket, await _command_of_kind(engine, ticket, ExchangeCommandKind.CANCEL_ORDER)
+    return ticket, await _command_of_kind(
+        engine, ticket, ExchangeCommandKind.CANCEL_ORDER
+    )
 
 
 async def _dispatch(
@@ -1150,9 +1159,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=timeout_seconds,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision=(
-                CURRENT_SCHEMA_REVISION if entry else None
-            ),
+            schema_revision=(CURRENT_SCHEMA_REVISION if entry else None),
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
@@ -1169,7 +1176,7 @@ async def _commit_all_passed_post_fill_stress(engine) -> None:
             )
         if aggregate is None:
             return
-        await dispatch_fixture._commit_passed_post_fill_stress_if_pending(
+        await commit_passed_post_fill_stress_if_pending(
             engine,
             aggregate.identity.ticket_id,
         )

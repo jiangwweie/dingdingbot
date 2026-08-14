@@ -47,17 +47,19 @@ from src.trading_kernel.infrastructure.pg_models import (
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
-from tests.trading_kernel.integration.test_command_dispatch import (
-    _commit_passed_post_fill_stress_if_pending,
-    _ticket,
-)
-from tests.trading_kernel.integration.test_issue_ticket import (
-    _seed_ticket_runtime_scope,
-)
 from tests.trading_kernel.support.capacity_claims import (
     make_issue_request as _issue_request,
 )
+from tests.trading_kernel.support.command_dispatch import (
+    commit_passed_post_fill_stress_if_pending as _commit_passed_post_fill_stress_if_pending,
+)
+from tests.trading_kernel.support.command_dispatch import (
+    ticket as _ticket,
+)
 from tests.trading_kernel.support.dispatch_venues import PreflightFacts
+from tests.trading_kernel.support.runtime_scope import (
+    seed_ticket_runtime_scope as _seed_ticket_runtime_scope,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -167,16 +169,20 @@ async def test_two_serial_entries_become_concurrent_protected_long_short_positio
         lane = await uow.entry_admission.get_global_lane()
         exposure = await uow.entry_admission.get_account_exposure(
             long_ticket.identity.netting_domain.venue_id,
-            long_ticket.identity.netting_domain.account_id
+            long_ticket.identity.netting_domain.account_id,
         )
     async with certification_engine.connect() as connection:
         position_rows = (
-            await connection.execute(
-                sa.select(positions_current).order_by(
-                    positions_current.c.position_side
+            (
+                await connection.execute(
+                    sa.select(positions_current).order_by(
+                        positions_current.c.position_side
+                    )
                 )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
 
     assert long_aggregate is not None
     assert short_aggregate is not None
@@ -467,9 +473,7 @@ async def _dispatch(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
             runtime_commit="kernel-test-head" if entry else None,
-            schema_revision=(
-                CURRENT_SCHEMA_REVISION if entry else None
-            ),
+            schema_revision=(CURRENT_SCHEMA_REVISION if entry else None),
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
@@ -520,9 +524,7 @@ def _ticket_for_domain(
     if runtime.event_spec_id != template.identity.runtime.event_spec_id:
         terms.update(
             {
-                "universe_version_id": (
-                    f"universe:test:{runtime.event_spec_id}"
-                ),
+                "universe_version_id": (f"universe:test:{runtime.event_spec_id}"),
                 "universe_semantic_digest": "sha256:" + "b" * 64,
             }
         )
@@ -596,7 +598,9 @@ def _database_url(database_name: str) -> str:
     if SAFE_DATABASE.fullmatch(database_name) is None:
         raise ValueError("unsafe kernel test database name")
     base = ADMIN_DSN.rsplit("/", 1)[0]
-    return f"{base.replace('postgresql://', 'postgresql+asyncpg://', 1)}/{database_name}"
+    return (
+        f"{base.replace('postgresql://', 'postgresql+asyncpg://', 1)}/{database_name}"
+    )
 
 
 def _run_alembic(database_url: str, *args: str) -> None:

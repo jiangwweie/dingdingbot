@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
 from decimal import Decimal
 from typing import Literal
-from uuid import uuid4
 
-import asyncpg
 import pytest
-import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.trading_kernel.application.issue_ticket import (
     IssueTicketStatus,
@@ -51,46 +47,12 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from tests.trading_kernel.support.capacity_claims import (
     make_issue_request as _issue_request,
 )
-from tests.trading_kernel.support.postgres import (
-    SAFE_TEST_DATABASE as SAFE_DATABASE,
-)
-from tests.trading_kernel.support.postgres import (
-    TEST_POSTGRES_ADMIN_DSN as ADMIN_DSN,
-)
-from tests.trading_kernel.support.postgres import (
-    async_database_url as _database_url,
-)
-from tests.trading_kernel.support.postgres import (
-    run_alembic as _run_alembic,
-)
 from tests.trading_kernel.support.tickets import (
     make_ticket as _ticket,
 )
 from tests.trading_kernel.support.tickets import (
     make_ticket_identity as _identity,
 )
-
-
-@pytest_asyncio.fixture
-async def issue_engine() -> AsyncGenerator[AsyncEngine, None]:
-    database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
-    assert SAFE_DATABASE.fullmatch(database_name)
-    admin = await asyncpg.connect(ADMIN_DSN)
-    await admin.execute(f'CREATE DATABASE "{database_name}"')
-    database_url = _database_url(database_name)
-    _run_alembic(database_url, "upgrade", "head")
-    engine = create_async_engine(database_url)
-    try:
-        yield engine
-    finally:
-        await engine.dispose()
-        await admin.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = $1 AND pid <> pg_backend_pid()",
-            database_name,
-        )
-        await admin.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
-        await admin.close()
 
 
 @pytest.mark.asyncio
@@ -119,7 +81,7 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
         lane = await uow.entry_admission.get_global_lane()
         exposure = await uow.entry_admission.get_account_exposure(
             ticket.identity.netting_domain.venue_id,
-            ticket.identity.netting_domain.account_id
+            ticket.identity.netting_domain.account_id,
         )
         commands = await uow.exchange_commands.list_for_ticket(
             ticket.identity.ticket_id
@@ -142,7 +104,9 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
         (ExchangeCommandKind.ENTRY, 1)
     ]
     assert isinstance(commands[0].payload, OrderCommandPayload)
-    assert commands[0].payload.leverage_verification_digest == _expected_leverage_fact_digest(
+    assert commands[
+        0
+    ].payload.leverage_verification_digest == _expected_leverage_fact_digest(
         claim=_issue_request(
             ticket=ticket,
             now_ms=1_001,
@@ -182,6 +146,7 @@ async def test_issue_ticket_prepares_only_entry_when_leverage_already_matches(
             ).capacity_claim,
         )
     )
+
 
 @pytest.mark.asyncio
 async def test_scope_drift_after_lane_and_account_lock_leaves_no_durable_entry_state(
@@ -459,7 +424,9 @@ async def test_policy_scope_drift_before_ticket_issue_creates_no_durable_state(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         assert await uow.tickets.get(ticket.identity.ticket_id) is None
         assert await uow.budgets.get_for_ticket(ticket.identity.ticket_id) is None
-        assert await uow.capacity_claims.get_for_ticket(ticket.identity.ticket_id) is None
+        assert (
+            await uow.capacity_claims.get_for_ticket(ticket.identity.ticket_id) is None
+        )
 
 
 @pytest.mark.asyncio
@@ -482,7 +449,9 @@ async def test_policy_and_budget_limits_fail_closed(
     await _seed_policy(issue_engine, max_concurrent_tickets=1)
     first = _ticket()
     await _issue_and_release_lane(issue_engine, first)
-    exhausted_ticket = _ticket_for_signal("signal-budget", "episode-budget", position_side="short")
+    exhausted_ticket = _ticket_for_signal(
+        "signal-budget", "episode-budget", position_side="short"
+    )
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         exhausted = await issue_ticket(
             uow,
@@ -540,7 +509,7 @@ async def test_long_and_short_are_independent_default_netting_domains(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         exposure = await uow.entry_admission.get_account_exposure(
             long_ticket.identity.netting_domain.venue_id,
-            long_ticket.identity.netting_domain.account_id
+            long_ticket.identity.netting_domain.account_id,
         )
     assert exposure is not None
     assert exposure.active_ticket_count == 2
@@ -588,10 +557,7 @@ async def test_exposure_family_capacity_merges_long_short_and_rejects_third_with
             ),
         )
 
-    assert (
-        refused.status
-        is IssueTicketStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
-    )
+    assert refused.status is IssueTicketStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
     await _assert_no_durable_entry_state(
         issue_engine,
         third.identity.ticket_id,
@@ -666,19 +632,15 @@ async def test_exposure_family_active_count_is_isolated_by_venue_and_account(
             account_id=ticket.identity.netting_domain.account_id,
             exposure_family=ticket.exposure_family,
         )
-        other_account = (
-            await uow.entry_admission.count_active_family_tickets(
-                venue_id=ticket.identity.netting_domain.venue_id,
-                account_id="other-account",
-                exposure_family=ticket.exposure_family,
-            )
+        other_account = await uow.entry_admission.count_active_family_tickets(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id="other-account",
+            exposure_family=ticket.exposure_family,
         )
-        other_venue = (
-            await uow.entry_admission.count_active_family_tickets(
-                venue_id="other-venue",
-                account_id=ticket.identity.netting_domain.account_id,
-                exposure_family=ticket.exposure_family,
-            )
+        other_venue = await uow.entry_admission.count_active_family_tickets(
+            venue_id="other-venue",
+            account_id=ticket.identity.netting_domain.account_id,
+            exposure_family=ticket.exposure_family,
         )
 
     assert exact == 1
@@ -705,12 +667,10 @@ async def test_exposure_family_active_count_excludes_terminal_tickets(
         )
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        active_count = (
-            await uow.entry_admission.count_active_family_tickets(
-                venue_id=ticket.identity.netting_domain.venue_id,
-                account_id=ticket.identity.netting_domain.account_id,
-                exposure_family=ticket.exposure_family,
-            )
+        active_count = await uow.entry_admission.count_active_family_tickets(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id=ticket.identity.netting_domain.account_id,
+            exposure_family=ticket.exposure_family,
         )
 
     assert active_count == 0
@@ -970,7 +930,9 @@ async def _seed_policy(
         await _seed_ticket_registry(connection, _ticket())
         await _seed_ticket_registry(
             connection,
-            _ticket_for_signal("signal-seed-short", "episode-seed-short", position_side="short"),
+            _ticket_for_signal(
+                "signal-seed-short", "episode-seed-short", position_side="short"
+            ),
         )
         await connection.execute(
             sa.insert(runtime_scopes_current).values(
@@ -980,9 +942,7 @@ async def _seed_policy(
                 event_spec_id=identity.runtime.event_spec_id,
                 runtime_profile_id=identity.runtime.runtime_profile_id,
                 owner_policy_id="policy-main",
-                exchange_instrument_id=(
-                    identity.netting_domain.exchange_instrument_id
-                ),
+                exchange_instrument_id=(identity.netting_domain.exchange_instrument_id),
                 position_side="long",
                 universe_version_id=_ticket().universe_version_id,
                 universe_semantic_digest=_ticket().universe_semantic_digest,
@@ -1005,9 +965,7 @@ async def _seed_policy(
                 event_spec_id="sor-short-v2",
                 runtime_profile_id=identity.runtime.runtime_profile_id,
                 owner_policy_id="policy-main",
-                exchange_instrument_id=(
-                    identity.netting_domain.exchange_instrument_id
-                ),
+                exchange_instrument_id=(identity.netting_domain.exchange_instrument_id),
                 position_side="short",
                 universe_version_id="universe:sor-short:4",
                 universe_semantic_digest=_ticket().universe_semantic_digest,
@@ -1215,9 +1173,7 @@ def _ticket_for_strategy_group(
         "universe_version_id": f"universe:{event_spec_id}:1",
         "exit_policy_id": f"exit-policy:{event_spec_id}",
         "exposure_family": (
-            "opening_range"
-            if strategy_group_id == "SOR-001"
-            else "long_continuation"
+            "opening_range" if strategy_group_id == "SOR-001" else "long_continuation"
         ),
         "family_ticket_limit": 2 if strategy_group_id == "SOR-001" else 1,
         "pre_tp1_reclaim_price": None,
@@ -1230,9 +1186,7 @@ def _ticket_for_strategy_group(
 def _expected_leverage_fact_digest(*, claim) -> str:
     return canonical_digest(
         {
-            "entry_admission_snapshot_digest": (
-                claim.entry_admission_snapshot_digest
-            ),
+            "entry_admission_snapshot_digest": (claim.entry_admission_snapshot_digest),
             "instrument_facts": {
                 "exchange_instrument_id": (
                     claim.ticket_identity.netting_domain.exchange_instrument_id
@@ -1319,9 +1273,7 @@ async def _seed_ticket_registry(connection, ticket) -> None:
             contract_kind="perpetual",
             status="active",
         )
-        .on_conflict_do_nothing(
-            index_elements=[instruments.c.exchange_instrument_id]
-        )
+        .on_conflict_do_nothing(index_elements=[instruments.c.exchange_instrument_id])
     )
     await connection.execute(
         pg_insert(strategy_groups)
@@ -1355,7 +1307,9 @@ async def _seed_ticket_registry(connection, ticket) -> None:
             idempotency_key=f"owner-request:seed:{runtime.strategy_group_id}",
             authorized_at_ms=ticket.created_at_ms,
         )
-        .on_conflict_do_nothing(index_elements=[owner_authorizations.c.authorization_id])
+        .on_conflict_do_nothing(
+            index_elements=[owner_authorizations.c.authorization_id]
+        )
     )
     await connection.execute(
         pg_insert(strategy_entry_control_events)
@@ -1371,7 +1325,9 @@ async def _seed_ticket_registry(connection, ticket) -> None:
             created_at_ms=ticket.created_at_ms,
         )
         .on_conflict_do_nothing(
-            index_elements=[strategy_entry_control_events.c.strategy_entry_control_event_id]
+            index_elements=[
+                strategy_entry_control_events.c.strategy_entry_control_event_id
+            ]
         )
     )
     await connection.execute(
@@ -1452,9 +1408,7 @@ async def _seed_ticket_registry(connection, ticket) -> None:
     await connection.execute(
         pg_insert(instrument_product_profiles)
         .values(
-            exchange_instrument_id=(
-                identity.netting_domain.exchange_instrument_id
-            ),
+            exchange_instrument_id=(identity.netting_domain.exchange_instrument_id),
             product_family="crypto_perpetual",
             asset_class="crypto",
             contract_type="PERPETUAL",

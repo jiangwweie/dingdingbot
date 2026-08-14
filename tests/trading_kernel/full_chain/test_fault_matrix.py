@@ -50,16 +50,14 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
-from tests.trading_kernel.integration.test_command_dispatch import (
-    _ticket,
-)
-from tests.trading_kernel.integration.test_issue_ticket import (
-    _seed_ticket_runtime_scope,
-)
 from tests.trading_kernel.support.capacity_claims import (
     make_issue_request as _issue_request,
 )
+from tests.trading_kernel.support.command_dispatch import ticket as _ticket
 from tests.trading_kernel.support.dispatch_venues import PreflightFacts
+from tests.trading_kernel.support.runtime_scope import (
+    seed_ticket_runtime_scope as _seed_ticket_runtime_scope,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
@@ -406,7 +404,9 @@ def _database_url(database_name: str) -> str:
     if SAFE_DATABASE.fullmatch(database_name) is None:
         raise ValueError("unsafe kernel test database name")
     base = ADMIN_DSN.rsplit("/", 1)[0]
-    return f"{base.replace('postgresql://', 'postgresql+asyncpg://', 1)}/{database_name}"
+    return (
+        f"{base.replace('postgresql://', 'postgresql+asyncpg://', 1)}/{database_name}"
+    )
 
 
 def _run_alembic(database_url: str, *args: str) -> None:

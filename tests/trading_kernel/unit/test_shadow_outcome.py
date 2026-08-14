@@ -30,11 +30,11 @@ from src.trading_kernel.domain.shadow_outcome import (
 )
 from src.trading_kernel.domain.signal import build_signal_fact_digest
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
-from tests.trading_kernel.integration.test_signal_to_ticket import (
-    _admission_snapshot,
+from tests.trading_kernel.support.signal_ingest import (
+    admission_snapshot as _admission_snapshot,
 )
-from tests.trading_kernel.integration.test_signal_to_ticket import (
-    _signal as _runtime_signal,
+from tests.trading_kernel.support.signal_ingest import (
+    signal as _runtime_signal,
 )
 from tests.trading_kernel.support.us_equity_sor import (
     make_us_equity_sor_snapshot as _us_sor_snapshot,
@@ -43,7 +43,11 @@ from tests.trading_kernel.support.us_equity_sor import (
 
 def test_fixed_horizon_excursion_projects_long_mfe_and_mae_in_r() -> None:
     projection = evaluate_fixed_horizon_excursion(
-        _spec(position_side="long", entry_reference_price=Decimal(100), initial_stop_price=Decimal(95)),
+        _spec(
+            position_side="long",
+            entry_reference_price=Decimal(100),
+            initial_stop_price=Decimal(95),
+        ),
         (_candle(close_time_ms=2, high=Decimal(110), low=Decimal(97)),),
     )
 
@@ -56,7 +60,11 @@ def test_fixed_horizon_excursion_projects_long_mfe_and_mae_in_r() -> None:
 
 def test_fixed_horizon_excursion_projects_short_mfe_and_mae_in_r() -> None:
     projection = evaluate_fixed_horizon_excursion(
-        _spec(position_side="short", entry_reference_price=Decimal(100), initial_stop_price=Decimal(105)),
+        _spec(
+            position_side="short",
+            entry_reference_price=Decimal(100),
+            initial_stop_price=Decimal(105),
+        ),
         (_candle(close_time_ms=2, high=Decimal(103), low=Decimal(90)),),
     )
 
@@ -103,16 +111,25 @@ def test_fixed_horizon_excursion_reports_zero_for_unreached_adverse_move() -> No
 def test_sor_path_observation_classifies_first_path() -> None:
     cases = (
         ((_candle(close_time_ms=2, high=Decimal(106), low=Decimal(99)),), "tp1_first"),
-        ((_candle(close_time_ms=2, high=Decimal(104), low=Decimal(94)),), "initial_stop_first"),
-        ((_candle(close_time_ms=2, high=Decimal(106), low=Decimal(94)),), "ambiguous_same_bar"),
-        ((
-            _candle(
-                close_time_ms=2,
-                high=Decimal(104),
-                low=Decimal(98),
-                close_price=Decimal(102),
+        (
+            (_candle(close_time_ms=2, high=Decimal(104), low=Decimal(94)),),
+            "initial_stop_first",
+        ),
+        (
+            (_candle(close_time_ms=2, high=Decimal(106), low=Decimal(94)),),
+            "ambiguous_same_bar",
+        ),
+        (
+            (
+                _candle(
+                    close_time_ms=2,
+                    high=Decimal(104),
+                    low=Decimal(98),
+                    close_price=Decimal(102),
+                ),
             ),
-        ), "opening_range_failure"),
+            "opening_range_failure",
+        ),
     )
 
     for candles, expected_path in cases:

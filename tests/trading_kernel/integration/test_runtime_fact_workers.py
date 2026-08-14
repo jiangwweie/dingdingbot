@@ -78,17 +78,19 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerStatus,
     run_reconciliation_worker_once,
 )
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_issue_ticket import (
-    _seed_ticket_runtime_scope,
+from tests.trading_kernel.support.command_dispatch import (
+    commit_passed_post_fill_stress_if_pending,
 )
-from tests.trading_kernel.integration.test_signal_to_ticket import (
-    _seed_runtime_authority,
-    _signal,
+from tests.trading_kernel.support.runtime_scope import (
+    seed_ticket_runtime_scope as _seed_ticket_runtime_scope,
+)
+from tests.trading_kernel.support.signal_ingest import (
+    seed_runtime_authority as _seed_runtime_authority,
+)
+from tests.trading_kernel.support.signal_ingest import (
+    signal as _signal,
 )
 from tests.trading_kernel.support.tickets import make_ticket as _ticket
-
-runtime_fact_worker_engine = dispatch_fixture.dispatch_engine
 
 
 class FakeEntryAdmissionFactsSource:
@@ -227,6 +229,7 @@ class UnavailableEntryAdmissionFactsSource:
     ) -> InstrumentRulesFacts:
         raise TimeoutError(request.exchange_instrument_id)
 
+
 def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
     return (
         MaintenanceMarginBracket(
@@ -300,9 +303,7 @@ class FakePositionSnapshotSource:
     ) -> None:
         self.quantity = quantity
         self.average_entry_price = average_entry_price
-        self.venue_reported_liquidation_price = (
-            venue_reported_liquidation_price
-        )
+        self.venue_reported_liquidation_price = venue_reported_liquidation_price
         self.requests: list[PositionSnapshotRequest] = []
 
     async def read_position_snapshot(
@@ -314,9 +315,7 @@ class FakePositionSnapshotSource:
             netting_domain=request.netting_domain,
             quantity=self.quantity,
             average_entry_price=self.average_entry_price,
-            venue_reported_liquidation_price=(
-                self.venue_reported_liquidation_price
-            ),
+            venue_reported_liquidation_price=(self.venue_reported_liquidation_price),
             observed_at_ms=request.observed_at_ms,
         )
 
@@ -612,9 +611,7 @@ async def test_entry_action_facts_timeout_records_infrastructure_decision(
 
     assert result.status is EntryWorkerStatus.FACTS_UNAVAILABLE
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
-        decision = await uow.admission_decisions.get_for_signal(
-            signal.signal_event_id
-        )
+        decision = await uow.admission_decisions.get_for_signal(signal.signal_event_id)
         readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
         claim = await uow.capacity_claims.get_for_signal(signal.signal_event_id)
         has_ticket = await uow.entry_admission.has_ticket_for_signal(
@@ -629,9 +626,12 @@ async def test_entry_action_facts_timeout_records_infrastructure_decision(
     assert claim is None
     assert has_ticket is False
     async with runtime_fact_worker_engine.connect() as connection:
-        assert await connection.scalar(
-            sa.select(sa.func.count()).select_from(exchange_commands)
-        ) == 0
+        assert (
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(exchange_commands)
+            )
+            == 0
+        )
 
 
 @pytest.mark.asyncio
@@ -756,9 +756,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         RecordingAcceptingVenue(),
         snapshots,
-        reconciliation_request.model_copy(
-            update={"runtime_commit": "wrong-commit"}
-        ),
+        reconciliation_request.model_copy(update={"runtime_commit": "wrong-commit"}),
     )
 
     assert fenced.status is ReconciliationWorkerStatus.RUNTIME_FENCED
@@ -870,9 +868,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
         no_fill_facts,
-        worker_request.model_copy(
-            update={"runtime_commit": "wrong-commit"}
-        ),
+        worker_request.model_copy(update={"runtime_commit": "wrong-commit"}),
     )
     assert fenced.status is LifecycleWorkerStatus.RUNTIME_FENCED
     assert venue.command_kinds == ["entry"]
@@ -893,7 +889,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         worker_request,
     )
     assert initial_stop.status is LifecycleWorkerStatus.DISPATCHED
-    await dispatch_fixture._commit_passed_post_fill_stress_if_pending(
+    await commit_passed_post_fill_stress_if_pending(
         runtime_fact_worker_engine,
         ticket.identity.ticket_id,
     )
@@ -901,9 +897,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
         no_fill_facts,
-        worker_request.model_copy(
-            update={"now_ms": 1_009, "lease_until_ms": 6_009}
-        ),
+        worker_request.model_copy(update={"now_ms": 1_009, "lease_until_ms": 6_009}),
     )
     assert tp1.status is LifecycleWorkerStatus.DISPATCHED
 
@@ -923,9 +917,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
         mismatched_facts,
-        worker_request.model_copy(
-            update={"now_ms": 1_010, "lease_until_ms": 6_010}
-        ),
+        worker_request.model_copy(update={"now_ms": 1_010, "lease_until_ms": 6_010}),
     )
     assert mismatch.status is LifecycleWorkerStatus.RECONCILIATION_REQUIRED
 
@@ -947,18 +939,13 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
         filled_facts,
-        worker_request.model_copy(
-            update={"now_ms": 3_011, "lease_until_ms": 8_011}
-        ),
+        worker_request.model_copy(update={"now_ms": 3_011, "lease_until_ms": 8_011}),
     )
 
     assert replacement.status is LifecycleWorkerStatus.DISPATCHED
     assert len(filled_facts.requests) == 1
     assert filled_facts.requests[0].tp1_exchange_order_id is not None
-    assert (
-        filled_facts.requests[0].exposure_started_at_ms
-        == ticket.created_at_ms
-    )
+    assert filled_facts.requests[0].exposure_started_at_ms == ticket.created_at_ms
     assert venue.command_kinds == [
         "entry",
         "initial_stop",
@@ -974,9 +961,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
         filled_facts,
-        worker_request.model_copy(
-            update={"now_ms": 3_012, "lease_until_ms": 8_012}
-        ),
+        worker_request.model_copy(update={"now_ms": 3_012, "lease_until_ms": 8_012}),
     )
     assert old_stop_cancel.status is LifecycleWorkerStatus.DISPATCHED
 

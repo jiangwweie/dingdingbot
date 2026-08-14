@@ -13,13 +13,10 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.domain.order_attribution import OrderNamespace, OrderRole
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from tests.trading_kernel.integration import test_command_dispatch as dispatch_fixture
-from tests.trading_kernel.integration.test_issue_ticket import (
-    _seed_ticket_runtime_scope,
+from tests.trading_kernel.support.runtime_scope import (
+    seed_ticket_runtime_scope as _seed_ticket_runtime_scope,
 )
 from tests.trading_kernel.support.tickets import make_ticket as _ticket
-
-order_attribution_engine = dispatch_fixture.dispatch_engine
 
 
 @pytest.mark.asyncio
@@ -87,7 +84,9 @@ async def test_repository_builds_exact_regular_and_conditional_order_references(
     assert [item.submitted_exchange_order_id for item in references] == ["1001", "9001"]
 
 
-def _command(*, ticket, command_id: str, kind: ExchangeCommandKind, payload) -> ExchangeCommand:
+def _command(
+    *, ticket, command_id: str, kind: ExchangeCommandKind, payload
+) -> ExchangeCommand:
     return ExchangeCommand(
         command_id=command_id,
         ticket_identity=ticket.identity,
