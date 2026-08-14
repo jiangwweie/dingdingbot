@@ -33,8 +33,12 @@ from tests.trading_kernel.integration.universe_certification_support import (
     NoTicketPositionSource,
     NoTicketVenueTruth,
 )
-from tests.trading_kernel.support.reducer_states import reconciliation_pending_aggregate as _reconciliation_pending_aggregate
-from tests.trading_kernel.support.unknown_commands import cancel_command as _cancel_command
+from tests.trading_kernel.support.reducer_states import (
+    reconciliation_pending_aggregate as _reconciliation_pending_aggregate,
+)
+from tests.trading_kernel.support.unknown_commands import (
+    cancel_command as _cancel_command,
+)
 
 
 class _CommandRepository:
