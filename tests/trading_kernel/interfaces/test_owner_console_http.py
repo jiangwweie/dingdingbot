@@ -17,6 +17,8 @@ from src.trading_kernel.application.owner_console.models import (
     CandleQuery,
     CandleSeries,
     CandleView,
+    EffectiveEntryScopeFacts,
+    EntryScopeFacts,
     EvidenceRef,
     Freshness,
     InstrumentCenterPage,
@@ -180,6 +182,7 @@ class _RepositorySpy:
         self.strategy_ticket_queries: list[StrategyTicketQuery] = []
         self.strategy_observation_queries: list[StrategyObservationQuery] = []
         self.instrument_queries: list[InstrumentCenterQuery] = []
+        self.entry_scope_policy_ids: list[str] = []
         self.overview_facts_override: OverviewFacts | None = None
 
     async def read_overview_facts(
@@ -280,6 +283,46 @@ class _RepositorySpy:
             source_watermark_ms=None,
         )
 
+    async def read_effective_entry_scope_facts(
+        self,
+        owner_policy_id: str,
+    ) -> EffectiveEntryScopeFacts:
+        self.entry_scope_policy_ids.append(owner_policy_id)
+        return EffectiveEntryScopeFacts(
+            owner_policy_id=owner_policy_id,
+            policy_version=12,
+            policy_enabled=True,
+            new_entry_submit_enabled=True,
+            runtime_capability_enabled=True,
+            max_concurrent_tickets=3,
+            active_ticket_count=0,
+            scopes=(
+                EntryScopeFacts(
+                    runtime_scope_id="scope:1",
+                    strategy_group_id="SOR-US-EQ-PERP-001",
+                    strategy_version_id="strategy-version:1",
+                    event_spec_id="event-spec:1",
+                    timeframe="15m",
+                    exchange_instrument_id="binance-usdm:AAPLUSDT",
+                    position_side="long",
+                    lifecycle_state="active",
+                    entry_enabled=True,
+                    strategy_entry_state="enabled",
+                    runtime_profile_status="active",
+                    readiness_state="signal_absent",
+                    readiness_first_blocker=None,
+                    product_profile_status="active",
+                    entry_session_policy="regular_only",
+                    product_status="active",
+                    session_state="regular",
+                    product_valid_until_ms=BASE_MS + 60_000,
+                    scope_updated_at_ms=BASE_MS - 1_000,
+                    readiness_updated_at_ms=BASE_MS - 500,
+                    product_observed_at_ms=BASE_MS - 200,
+                ),
+            ),
+        )
+
 
 @pytest.fixture
 def repository_spy(monkeypatch: pytest.MonkeyPatch) -> _RepositorySpy:
@@ -363,6 +406,21 @@ async def test_overview_uses_one_read_transaction_and_envelope(
     assert response.json()["snapshot_id"].startswith("snap:")
     assert response.json()["generated_at"] == "2027-01-15T08:00:00.000Z"
     assert response.json()["source_watermark"] == "2027-01-15T08:00:00.000Z"
+    engine = cast(_ReadOnlyEngine, owner_console_app.state.owner_console_engine)
+    assert engine.transaction_count == 1
+
+
+async def test_effective_entry_scope_uses_one_read_transaction_and_never_claims_admission(
+    owner_console_client: AsyncClient,
+    owner_console_app: FastAPI,
+    repository_spy: _RepositorySpy,
+) -> None:
+    response = await owner_console_client.get("/api/owner/v1/entry-scope")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["can_issue_ticket_now"] is False
+    assert response.json()["data"]["first_blocker"] == "signal_absent"
+    assert repository_spy.entry_scope_policy_ids == ["policy-main"]
     engine = cast(_ReadOnlyEngine, owner_console_app.state.owner_console_engine)
     assert engine.transaction_count == 1
 
@@ -481,6 +539,7 @@ async def test_list_limit_above_hard_cap_returns_422(
 @pytest.mark.parametrize(
     "path",
     (
+        "/api/owner/v1/entry-scope",
         "/api/owner/v1/signals",
         "/api/owner/v1/signals/signal:1",
         "/api/owner/v1/tickets",
@@ -646,6 +705,7 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "/api/owner/v1/auth/logout",
         "/api/owner/v1/auth/session",
         "/api/owner/v1/overview",
+        "/api/owner/v1/entry-scope",
         "/api/owner/v1/signals",
         "/api/owner/v1/signals/{signal_event_id}",
         "/api/owner/v1/tickets",

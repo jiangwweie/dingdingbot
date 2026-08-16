@@ -27,6 +27,9 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.owner_console.certify_release_candidate import (
     validate_owner_api_release_certification,
 )
+from scripts.owner_console.certify_static_release_candidate import (
+    validate_owner_static_release_certification,
+)
 
 STATIC_RELEASE_ROOT = "/opt/brc/owner-console/releases"
 STATIC_CURRENT_RELEASE = "/opt/brc/owner-console/current"
@@ -597,7 +600,9 @@ def main(argv: list[str] | None = None) -> int:
     kind = OwnerConsoleReleaseKind(args.kind)
     commit = _resolve_commit(args.commit)
     _require_clean_control_worktree()
-    if kind is OwnerConsoleReleaseKind.API:
+    if kind is OwnerConsoleReleaseKind.STATIC:
+        validate_owner_static_release_certification(REPO_ROOT, commit)
+    else:
         validate_owner_api_release_certification(REPO_ROOT, commit)
     root = STATIC_RELEASE_ROOT if kind is OwnerConsoleReleaseKind.STATIC else API_RELEASE_ROOT
     backend = SshOwnerConsoleReleaseBackend(

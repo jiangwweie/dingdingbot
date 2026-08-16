@@ -17,6 +17,7 @@ const approvedPaths = [
   "/api/owner/v1/controls/exposure/flatten-all/preview",
   "/api/owner/v1/controls/strategies/{strategy_group_id}/pause",
   "/api/owner/v1/controls/strategies/{strategy_group_id}/resume",
+  "/api/owner/v1/entry-scope",
   "/api/owner/v1/instruments",
   "/api/owner/v1/instruments/refresh",
   "/api/owner/v1/instruments/universes/apply",

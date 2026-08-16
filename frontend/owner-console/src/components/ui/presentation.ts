@@ -70,6 +70,20 @@ export function formatOwnerStatus(value: string): string {
 export function formatOwnerReason(raw: string): OwnerReason {
   if (raw.startsWith("owner_flatten_all")) return { label: "Owner 受控平仓", raw };
   if (raw.startsWith("deployment_drain")) return { label: "部署前安全退出", raw };
+  if (raw === "initial_stop_triggered" || raw === "Initial Stop") return { label: "初始止损触发", raw };
+  if (raw === "take_profit_triggered") return { label: "止盈成交触发", raw };
+  if (raw === "failed_breakout_reclaimed") return { label: "假突破回收退出", raw };
+  if (raw === "failed_breakdown_reclaimed") return { label: "假跌破回收退出", raw };
+  if (raw === "sor_session_expired" || raw === "exposure_session_expired") return { label: "交易时段到期退出", raw };
+  if (raw === "time_stop_hit") return { label: "持仓时间到期退出", raw };
+  if (raw === "strategy_exit") return { label: "策略条件退出", raw };
+  if (raw === "recover_exit_rejection") return { label: "退出恢复处理", raw };
+  if (raw === "initial_stop_rejected") return { label: "初始止损异常后受控退出", raw };
+  if (raw === "initial_stop_absent") return { label: "初始止损缺失后受控退出", raw };
+  if (raw === "runner_stop") return { label: "Runner 止损退出", raw };
+  if (raw === "runner_exit" || raw === "TP1 + Runner Exit") return { label: "TP1 后 Runner 退出", raw };
+  if (raw === "Controlled Exit") return { label: "受控退出", raw };
+  if (raw === "External Flat / Exit Fills Unavailable" || raw === "external_flat_exit_fills_unavailable") return { label: "外部平仓已确认，成交明细不可得", raw };
   if (raw.startsWith("ticket_incident")) return { label: "交易执行需要核对", raw };
   if (raw.startsWith("exposure_family_cap")) return { label: "同类风险额度已占用", raw };
   if (raw === "budget_exhausted") return { label: "可用预算不足", raw };
@@ -80,7 +94,7 @@ export function formatOwnerReason(raw: string): OwnerReason {
   if (raw === "seed_deployment_paused") return { label: "部署后等待 Owner 恢复", raw };
   if (raw === "owner_manual_control") return { label: "Owner 手动操作", raw };
   if (raw === "hard_safety_stop") return { label: "安全保护已阻断", raw };
-  return { label: "技术原因待查看", raw };
+  return { label: `系统记录：${raw}`, raw };
 }
 
 export function formatTimestamp(value: number | null | undefined, options: Intl.DateTimeFormatOptions = {}): string {

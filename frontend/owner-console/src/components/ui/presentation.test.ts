@@ -13,4 +13,12 @@ it("uses Owner language while retaining the raw reason for technical detail", ()
     label: "Owner 受控平仓",
     raw: "owner_flatten_all:owner-authorization:1",
   });
+  expect(formatOwnerReason("runner_stop")).toEqual({
+    label: "Runner 止损退出",
+    raw: "runner_stop",
+  });
+  expect(formatOwnerReason("venue_truth_timeout")).toEqual({
+    label: "系统记录：venue_truth_timeout",
+    raw: "venue_truth_timeout",
+  });
 });

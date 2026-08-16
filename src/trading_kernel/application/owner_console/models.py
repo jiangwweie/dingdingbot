@@ -403,6 +403,68 @@ class InstrumentCenterPage(FrozenModel):
     source_watermark_ms: int | None
 
 
+class EntryScopeFacts(FrozenModel):
+    """One bounded current scope before effective Entry gates are evaluated."""
+
+    runtime_scope_id: str
+    strategy_group_id: str
+    strategy_version_id: str
+    event_spec_id: str
+    timeframe: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
+    lifecycle_state: str
+    entry_enabled: bool
+    strategy_entry_state: str | None
+    runtime_profile_status: str
+    readiness_state: str | None
+    readiness_first_blocker: str | None
+    product_profile_status: str | None
+    entry_session_policy: str | None
+    product_status: str | None
+    session_state: str | None
+    product_valid_until_ms: int | None
+    scope_updated_at_ms: int
+    readiness_updated_at_ms: int | None
+    product_observed_at_ms: int | None
+
+
+class EffectiveEntryScopeItem(FrozenModel):
+    runtime_scope_id: str
+    strategy_group_id: str
+    strategy_version_id: str
+    event_spec_id: str
+    timeframe: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
+    readiness_state: str | None
+    can_issue_ticket_now: bool
+    first_blocker: str | None
+    evidence: tuple[EvidenceRef, ...]
+
+
+class EffectiveEntryScopeFacts(FrozenModel):
+    owner_policy_id: str
+    policy_version: int
+    policy_enabled: bool
+    new_entry_submit_enabled: bool
+    runtime_capability_enabled: bool
+    max_concurrent_tickets: int
+    active_ticket_count: int
+    scopes: tuple[EntryScopeFacts, ...] = Field(max_length=100)
+
+
+class EffectiveEntryScope(FrozenModel):
+    owner_policy_id: str
+    policy_version: int
+    can_issue_ticket_now: bool
+    first_blocker: str | None
+    remaining_ticket_slots: int = Field(ge=0)
+    eligible_scope_count: int = Field(ge=0)
+    scopes: tuple[EffectiveEntryScopeItem, ...] = Field(max_length=100)
+    evidence: tuple[EvidenceRef, ...]
+
+
 class AdmissionAccountSnapshot(FrozenModel):
     label: Literal["Latest Admission Snapshot"]
     is_realtime: Literal[False] = False

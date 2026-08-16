@@ -6,6 +6,9 @@ from collections.abc import Iterable
 from decimal import Decimal
 from typing import Literal
 
+from src.trading_kernel.application.owner_console.exit_attribution import (
+    is_controlled_exit,
+)
 from src.trading_kernel.application.owner_console.models import (
     ChartAnnotation,
     EvidenceRef,
@@ -31,12 +34,6 @@ from src.trading_kernel.application.owner_console.trades import build_trade_item
 
 class StrategyFactsContradiction(RuntimeError):
     """The version-isolated read facts cannot support an Owner conclusion."""
-
-
-_CONTROLLED_EXIT_PREFIXES = (
-    "owner_flatten_all:",
-    "deployment_drain:",
-)
 
 
 def build_strategy_page(facts: StrategyPageFacts) -> StrategySummaryPage:
@@ -271,9 +268,7 @@ def _strategy_observation_item(
 
 
 def _is_controlled_exit(ticket: StrategyTicketFacts) -> bool:
-    return ticket.exit_reason is not None and ticket.exit_reason.startswith(
-        _CONTROLLED_EXIT_PREFIXES
-    )
+    return is_controlled_exit(ticket.exit_reason)
 
 
 def _is_natural_terminal(ticket: StrategyTicketFacts) -> bool:
@@ -321,9 +316,7 @@ def _strategy_ticket_list_item(facts: TradeItemFacts) -> StrategyTicketListItem:
         and facts.terminal_at_ms is not None
     ):
         path = "not_terminal"
-    elif trade.exit_reason is not None and trade.exit_reason.startswith(
-        _CONTROLLED_EXIT_PREFIXES
-    ):
+    elif is_controlled_exit(trade.exit_reason):
         path = "controlled_exit"
     else:
         path = "tp1_reached" if facts.tp1_reached else "tp1_not_reached"

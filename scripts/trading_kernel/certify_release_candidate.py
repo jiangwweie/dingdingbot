@@ -11,6 +11,7 @@ import sys
 import time
 from dataclasses import asdict, is_dataclass
 from decimal import Decimal
+from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal
@@ -23,6 +24,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.trading_kernel.verification_portfolios import (
     R3_SAME_SCHEMA_KERNEL_COMMANDS,
+    R4_SCHEMA_AUTHORITY_COMMANDS,
 )
 from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
@@ -39,20 +41,37 @@ from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
 
-SCHEMA = "brc.trading_kernel.release_certification.v1"
+SCHEMA = "brc.trading_kernel.release_certification.v2"
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
-CERTIFICATION_COMMANDS = R3_SAME_SCHEMA_KERNEL_COMMANDS
+
+
+class ReleaseCertificationLevel(StrEnum):
+    R3 = "R3"
+    R4 = "R4"
+
+
+def certification_commands_for(
+    level: ReleaseCertificationLevel,
+) -> tuple[tuple[str, ...], ...]:
+    return {
+        ReleaseCertificationLevel.R3: R3_SAME_SCHEMA_KERNEL_COMMANDS,
+        ReleaseCertificationLevel.R4: R4_SCHEMA_AUTHORITY_COMMANDS,
+    }[level]
+
+
+CERTIFICATION_COMMANDS = certification_commands_for(ReleaseCertificationLevel.R3)
 
 
 class ReleaseCertificationManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
-    manifest_schema: Literal["brc.trading_kernel.release_certification.v1"] = Field(
+    manifest_schema: Literal["brc.trading_kernel.release_certification.v2"] = Field(
         alias="schema",
         serialization_alias="schema",
     )
     status: Literal["pass"]
     release_commit: str
+    release_level: ReleaseCertificationLevel
     schema_revision: str
     registry_semantic_hash: str
     owner_policy_semantic_digest: str
@@ -67,14 +86,19 @@ class ReleaseCertificationManifest(BaseModel):
             raise ValueError("certified release commit must be exact")
         if self.certified_at_ms <= 0:
             raise ValueError("certification time must be positive")
-        if len(self.command_durations_ms) != len(CERTIFICATION_COMMANDS):
+        if len(self.command_durations_ms) != len(
+            certification_commands_for(self.release_level)
+        ):
             raise ValueError("certification duration count differs from command set")
         if any(duration < 0 for duration in self.command_durations_ms):
             raise ValueError("certification durations cannot be negative")
         return self
 
 
-def build_certification_identity(commit: str) -> dict[str, str]:
+def build_certification_identity(
+    commit: str,
+    release_level: ReleaseCertificationLevel = ReleaseCertificationLevel.R3,
+) -> dict[str, str]:
     if _COMMIT.fullmatch(commit) is None:
         raise ValueError("release commit must be an exact lowercase 40-hex SHA")
     registry_hash = build_registry_semantic_hash(registered_strategy_contracts())
@@ -93,19 +117,21 @@ def build_certification_identity(commit: str) -> dict[str, str]:
     return {
         "schema": SCHEMA,
         "release_commit": commit,
+        "release_level": release_level.value,
         "schema_revision": CURRENT_SCHEMA_REVISION,
         "registry_semantic_hash": registry_hash,
         "owner_policy_semantic_digest": policy_digest,
         "runtime_authority_semantic_digest": authority_digest,
-        "command_set_digest": _digest(CERTIFICATION_COMMANDS),
+        "command_set_digest": _digest(certification_commands_for(release_level)),
     }
 
 
 def validate_manifest_identity(
     manifest: ReleaseCertificationManifest,
     commit: str,
+    release_level: ReleaseCertificationLevel = ReleaseCertificationLevel.R3,
 ) -> None:
-    expected = build_certification_identity(commit)
+    expected = build_certification_identity(commit, release_level)
     actual = manifest.model_dump(mode="python", by_alias=True)
     for key, value in expected.items():
         if actual.get(key) != value:
@@ -127,6 +153,18 @@ def certification_manifest_path(repo_root: Path, commit: str) -> Path:
 
 
 def validate_release_certification(repo_root: Path, commit: str) -> None:
+    validate_release_certification_for_level(
+        repo_root,
+        commit,
+        ReleaseCertificationLevel.R3,
+    )
+
+
+def validate_release_certification_for_level(
+    repo_root: Path,
+    commit: str,
+    release_level: ReleaseCertificationLevel,
+) -> None:
     _require_exact_clean_head(repo_root, commit)
     path = certification_manifest_path(repo_root, commit)
     if not path.is_file():
@@ -134,17 +172,20 @@ def validate_release_certification(repo_root: Path, commit: str) -> None:
     manifest = ReleaseCertificationManifest.model_validate_json(
         path.read_text(encoding="utf-8")
     )
-    validate_manifest_identity(manifest, commit)
+    validate_manifest_identity(manifest, commit, release_level)
 
 
 def certify_release_candidate(
-    repo_root: Path, commit: str
+    repo_root: Path,
+    commit: str,
+    release_level: ReleaseCertificationLevel = ReleaseCertificationLevel.R3,
 ) -> ReleaseCertificationManifest:
     _require_exact_clean_head(repo_root, commit)
+    commands = certification_commands_for(release_level)
     durations: list[int] = []
-    for index, command in enumerate(CERTIFICATION_COMMANDS, start=1):
+    for index, command in enumerate(commands, start=1):
         print(
-            f"certification_step={index}/{len(CERTIFICATION_COMMANDS)} "
+            f"certification_step={index}/{len(commands)} "
             f"command={json.dumps(command)}",
             flush=True,
         )
@@ -164,7 +205,7 @@ def certify_release_candidate(
     _require_exact_clean_head(repo_root, commit)
     manifest = ReleaseCertificationManifest.model_validate(
         {
-            **build_certification_identity(commit),
+            **build_certification_identity(commit, release_level),
             "status": "pass",
             "certified_at_ms": int(time.time() * 1_000),
             "command_durations_ms": tuple(durations),
@@ -224,6 +265,11 @@ def _jsonable(value: object) -> object:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--commit", default="HEAD")
+    parser.add_argument(
+        "--release-level",
+        choices=tuple(level.value for level in ReleaseCertificationLevel),
+        default=ReleaseCertificationLevel.R3.value,
+    )
     return parser
 
 
@@ -237,7 +283,11 @@ def _resolve_commit(reference: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     commit = _resolve_commit(args.commit)
-    manifest = certify_release_candidate(REPO_ROOT, commit)
+    manifest = certify_release_candidate(
+        REPO_ROOT,
+        commit,
+        ReleaseCertificationLevel(args.release_level),
+    )
     print(manifest.model_dump_json(by_alias=True))
     return 0
 

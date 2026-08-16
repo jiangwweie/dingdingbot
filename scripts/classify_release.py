@@ -59,8 +59,12 @@ _LOCAL_RELEASE_TOOLS = frozenset(
     {
         "scripts/classify_release.py",
         "scripts/owner_console/certify_release_candidate.py",
+        "scripts/owner_console/certify_static_release_candidate.py",
         "scripts/owner_console/deploy_release.py",
+        "scripts/release_control.py",
+        "scripts/trading_kernel/certify_release_candidate.py",
         "scripts/trading_kernel/deploy_tokyo_release.py",
+        "scripts/trading_kernel/verification_portfolios.py",
     }
 )
 _R0_ROOT_FILES = frozenset(
@@ -114,9 +118,9 @@ def changed_paths_between(base: str, target: str) -> tuple[str, ...]:
 def _classify_path(path: str) -> ReleaseLevel:
     if _is_authority_path(path):
         return ReleaseLevel.R4
-    if _is_owner_api_path(path):
+    if is_owner_api_path(path):
         return ReleaseLevel.R2
-    if path.startswith("frontend/owner-console/"):
+    if is_owner_static_path(path):
         return ReleaseLevel.R1
     if _is_non_runtime_path(path):
         return ReleaseLevel.R0
@@ -132,7 +136,11 @@ def _is_authority_path(path: str) -> bool:
     )
 
 
-def _is_owner_api_path(path: str) -> bool:
+def is_owner_static_path(path: str) -> bool:
+    return path.startswith("frontend/owner-console/")
+
+
+def is_owner_api_path(path: str) -> bool:
     return (
         path.startswith(
             (

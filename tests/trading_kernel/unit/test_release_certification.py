@@ -4,6 +4,7 @@ import pytest
 
 from scripts.trading_kernel.certify_release_candidate import (
     CERTIFICATION_COMMANDS,
+    ReleaseCertificationLevel,
     ReleaseCertificationManifest,
     build_certification_identity,
     validate_manifest_identity,
@@ -31,7 +32,7 @@ def test_release_certification_command_set_has_no_pytest_overlap() -> None:
 
 
 def test_exact_release_certification_identity_is_reusable() -> None:
-    identity = build_certification_identity(COMMIT)
+    identity = build_certification_identity(COMMIT, ReleaseCertificationLevel.R3)
     manifest = ReleaseCertificationManifest(
         **identity,
         status="pass",
@@ -39,11 +40,11 @@ def test_exact_release_certification_identity_is_reusable() -> None:
         command_durations_ms=(1, 2, 3, 4, 5, 6),
     )
 
-    validate_manifest_identity(manifest, COMMIT)
+    validate_manifest_identity(manifest, COMMIT, ReleaseCertificationLevel.R3)
 
 
 def test_release_certification_rejects_a_different_commit() -> None:
-    identity = build_certification_identity(COMMIT)
+    identity = build_certification_identity(COMMIT, ReleaseCertificationLevel.R3)
     manifest = ReleaseCertificationManifest(
         **identity,
         status="pass",
@@ -52,11 +53,11 @@ def test_release_certification_rejects_a_different_commit() -> None:
     )
 
     with pytest.raises(ValueError, match="commit"):
-        validate_manifest_identity(manifest, "b" * 40)
+        validate_manifest_identity(manifest, "b" * 40, ReleaseCertificationLevel.R3)
 
 
 def test_release_certification_rejects_command_set_drift() -> None:
-    identity = build_certification_identity(COMMIT)
+    identity = build_certification_identity(COMMIT, ReleaseCertificationLevel.R3)
     manifest = ReleaseCertificationManifest(
         **{**identity, "command_set_digest": "sha256:" + "0" * 64},
         status="pass",
@@ -65,4 +66,17 @@ def test_release_certification_rejects_command_set_drift() -> None:
     )
 
     with pytest.raises(ValueError, match="command set"):
-        validate_manifest_identity(manifest, COMMIT)
+        validate_manifest_identity(manifest, COMMIT, ReleaseCertificationLevel.R3)
+
+
+def test_r4_manifest_cannot_satisfy_an_r3_certification_requirement() -> None:
+    identity = build_certification_identity(COMMIT, ReleaseCertificationLevel.R4)
+    manifest = ReleaseCertificationManifest(
+        **identity,
+        status="pass",
+        certified_at_ms=2_000,
+        command_durations_ms=(1, 2, 3, 4, 5, 6, 7),
+    )
+
+    with pytest.raises(ValueError, match="release level differs"):
+        validate_manifest_identity(manifest, COMMIT, ReleaseCertificationLevel.R3)

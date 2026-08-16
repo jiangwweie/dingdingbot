@@ -217,6 +217,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/entry-scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Effective Entry Scope
+         * @description Explain current scope-level Entry eligibility; this never grants admission.
+         */
+        get: operations["effective_entry_scope_api_owner_v1_entry_scope_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/instruments": {
         parameters: {
             query?: never;
@@ -581,6 +601,17 @@ export interface components {
             /** Source Watermark */
             source_watermark: string | null;
         };
+        /** ApiEnvelope[EffectiveEntryScope] */
+        ApiEnvelope_EffectiveEntryScope_: {
+            data: components["schemas"]["EffectiveEntryScope"];
+            freshness: components["schemas"]["Freshness"];
+            /** Generated At */
+            generated_at: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Source Watermark */
+            source_watermark: string | null;
+        };
         /** ApiEnvelope[InstrumentCenterPage] */
         ApiEnvelope_InstrumentCenterPage_: {
             data: components["schemas"]["InstrumentCenterPage"];
@@ -788,6 +819,53 @@ export interface components {
             runtime_entry_authority: components["schemas"]["RuntimeEntryAuthorityView"];
             /** Strategies */
             strategies: components["schemas"]["StrategyControlView"][];
+        };
+        /** EffectiveEntryScope */
+        EffectiveEntryScope: {
+            /** Can Issue Ticket Now */
+            can_issue_ticket_now: boolean;
+            /** Eligible Scope Count */
+            eligible_scope_count: number;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /** First Blocker */
+            first_blocker: string | null;
+            /** Owner Policy Id */
+            owner_policy_id: string;
+            /** Policy Version */
+            policy_version: number;
+            /** Remaining Ticket Slots */
+            remaining_ticket_slots: number;
+            /** Scopes */
+            scopes: components["schemas"]["EffectiveEntryScopeItem"][];
+        };
+        /** EffectiveEntryScopeItem */
+        EffectiveEntryScopeItem: {
+            /** Can Issue Ticket Now */
+            can_issue_ticket_now: boolean;
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /** Exchange Instrument Id */
+            exchange_instrument_id: string;
+            /** First Blocker */
+            first_blocker: string | null;
+            /**
+             * Position Side
+             * @enum {string}
+             */
+            position_side: "long" | "short";
+            /** Readiness State */
+            readiness_state: string | null;
+            /** Runtime Scope Id */
+            runtime_scope_id: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Strategy Version Id */
+            strategy_version_id: string;
+            /** Timeframe */
+            timeframe: string;
         };
         /** EmptyControlBody */
         EmptyControlBody: Record<string, never>;
@@ -2427,6 +2505,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    effective_entry_scope_api_owner_v1_entry_scope_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiEnvelope_EffectiveEntryScope_"];
                 };
             };
         };

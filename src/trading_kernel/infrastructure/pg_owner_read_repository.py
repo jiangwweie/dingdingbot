@@ -20,6 +20,8 @@ from src.trading_kernel.application.owner_console.causality import (
     ContradictoryFacts,
 )
 from src.trading_kernel.application.owner_console.models import (
+    EffectiveEntryScopeFacts,
+    EntryScopeFacts,
     EvidenceRef,
     Freshness,
     InstrumentCenterItem,
@@ -79,6 +81,7 @@ from src.trading_kernel.application.owner_console.trades import (
 )
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.infrastructure.pg_models import (
+    account_exposure_current,
     admission_decisions,
     capacity_claims,
     event_product_compatibility,
@@ -89,12 +92,15 @@ from src.trading_kernel.infrastructure.pg_models import (
     instruments,
     monitor_current,
     owner_policy_current,
+    readiness_current,
+    runtime_capabilities_current,
     runtime_incidents,
     runtime_profiles,
     runtime_scopes_current,
     shadow_outcomes_current,
     signal_events,
     signal_fact_snapshots,
+    strategy_entry_controls_current,
     strategy_groups,
     strategy_universe_members,
     strategy_universe_versions,
@@ -305,6 +311,146 @@ class PostgresOwnerReadRepository:
             source_watermark_ms=max(
                 (item.observed_at_ms for item in items if item.observed_at_ms is not None),
                 default=None,
+            ),
+        )
+
+    async def read_effective_entry_scope_facts(
+        self,
+        owner_policy_id: str,
+    ) -> EffectiveEntryScopeFacts:
+        """Read bounded current Entry scope facts without exchange I/O."""
+
+        policy_row = (
+            await self._connection.execute(
+                sa.select(owner_policy_current).where(
+                    owner_policy_current.c.owner_policy_id == owner_policy_id
+                )
+            )
+        ).mappings().one_or_none()
+        if policy_row is None:
+            raise TradeFactsContradiction("configured Owner Policy is missing")
+        capability_row = (
+            await self._connection.execute(
+                sa.select(runtime_capabilities_current.c.enabled).where(
+                    runtime_capabilities_current.c.capability_key
+                    == "exchange_commands"
+                )
+            )
+        ).mappings().one_or_none()
+        rows = (
+            await self._connection.execute(
+                sa.select(
+                    runtime_scopes_current.c.runtime_scope_id,
+                    runtime_scopes_current.c.strategy_group_id,
+                    runtime_scopes_current.c.strategy_version_id,
+                    runtime_scopes_current.c.event_spec_id,
+                    event_specs.c.timeframe,
+                    runtime_scopes_current.c.exchange_instrument_id,
+                    runtime_scopes_current.c.position_side,
+                    runtime_scopes_current.c.lifecycle_state,
+                    runtime_scopes_current.c.entry_enabled,
+                    strategy_entry_controls_current.c.entry_state.label(
+                        "strategy_entry_state"
+                    ),
+                    runtime_profiles.c.status.label("runtime_profile_status"),
+                    readiness_current.c.readiness_state,
+                    readiness_current.c.first_blocker.label(
+                        "readiness_first_blocker"
+                    ),
+                    readiness_current.c.updated_at_ms.label(
+                        "readiness_updated_at_ms"
+                    ),
+                    instrument_product_profiles.c.status.label(
+                        "product_profile_status"
+                    ),
+                    instrument_product_profiles.c.entry_session_policy,
+                    instrument_product_current.c.product_status,
+                    instrument_product_current.c.session_state,
+                    instrument_product_current.c.valid_until_ms.label(
+                        "product_valid_until_ms"
+                    ),
+                    instrument_product_current.c.observed_at_ms.label(
+                        "product_observed_at_ms"
+                    ),
+                    runtime_scopes_current.c.updated_at_ms.label(
+                        "scope_updated_at_ms"
+                    ),
+                    account_exposure_current.c.active_ticket_count,
+                )
+                .join(
+                    runtime_profiles,
+                    runtime_profiles.c.runtime_profile_id
+                    == runtime_scopes_current.c.runtime_profile_id,
+                )
+                .join(
+                    event_specs,
+                    event_specs.c.event_spec_id
+                    == runtime_scopes_current.c.event_spec_id,
+                )
+                .outerjoin(
+                    strategy_entry_controls_current,
+                    strategy_entry_controls_current.c.strategy_group_id
+                    == runtime_scopes_current.c.strategy_group_id,
+                )
+                .outerjoin(
+                    readiness_current,
+                    readiness_current.c.runtime_scope_id
+                    == runtime_scopes_current.c.runtime_scope_id,
+                )
+                .outerjoin(
+                    instrument_product_profiles,
+                    instrument_product_profiles.c.exchange_instrument_id
+                    == runtime_scopes_current.c.exchange_instrument_id,
+                )
+                .outerjoin(
+                    instrument_product_current,
+                    instrument_product_current.c.exchange_instrument_id
+                    == runtime_scopes_current.c.exchange_instrument_id,
+                )
+                .outerjoin(
+                    account_exposure_current,
+                    sa.and_(
+                        account_exposure_current.c.venue_id == runtime_profiles.c.venue_id,
+                        account_exposure_current.c.account_id
+                        == runtime_profiles.c.account_id,
+                    ),
+                )
+                .where(runtime_scopes_current.c.owner_policy_id == owner_policy_id)
+                .order_by(
+                    runtime_scopes_current.c.strategy_group_id,
+                    runtime_scopes_current.c.exchange_instrument_id,
+                    runtime_scopes_current.c.position_side,
+                    runtime_scopes_current.c.runtime_scope_id,
+                )
+                .limit(101)
+            )
+        ).mappings().all()
+        if len(rows) > 100:
+            raise TradeFactsContradiction("effective Entry scope exceeds hard maximum 100")
+        counts = {
+            int(row["active_ticket_count"])
+            for row in rows
+            if row["active_ticket_count"] is not None
+        }
+        if len(counts) > 1:
+            raise TradeFactsContradiction("Entry scope has contradictory account exposure")
+        return EffectiveEntryScopeFacts(
+            owner_policy_id=str(policy_row["owner_policy_id"]),
+            policy_version=int(policy_row["policy_version"]),
+            policy_enabled=bool(policy_row["enabled"]),
+            new_entry_submit_enabled=bool(
+                policy_row["new_entry_submit_enabled"]
+            ),
+            runtime_capability_enabled=(
+                False if capability_row is None else bool(capability_row["enabled"])
+            ),
+            max_concurrent_tickets=int(policy_row["max_concurrent_tickets"]),
+            active_ticket_count=next(iter(counts), 0),
+            scopes=tuple(
+                EntryScopeFacts.model_validate(
+                    {key: row[key] for key in EntryScopeFacts.model_fields}
+                )
+                for row in rows
             ),
         )
 

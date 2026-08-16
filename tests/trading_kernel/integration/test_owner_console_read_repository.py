@@ -415,7 +415,7 @@ async def test_causality_reads_exact_bounded_histories_and_current_review(
             "1.727272727272727272727272727"
         )
         assert detail.exit_reason is not None
-        assert detail.exit_reason.label == "Initial Stop"
+        assert detail.exit_reason.label == "初始止损触发"
         assert detail.annotations[-1].model_dump(mode="json") == {
             "kind": "exit",
             "occurred_at_ms": 1_800_000_090_000,

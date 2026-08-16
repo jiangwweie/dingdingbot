@@ -76,6 +76,9 @@ from src.trading_kernel.interfaces.owner_console_http.routes.auth import (
 from src.trading_kernel.interfaces.owner_console_http.routes.controls import (
     router as controls_router,
 )
+from src.trading_kernel.interfaces.owner_console_http.routes.entry_scope import (
+    router as entry_scope_router,
+)
 from src.trading_kernel.interfaces.owner_console_http.routes.instruments import (
     router as instruments_router,
 )
@@ -163,6 +166,7 @@ def create_owner_console_app(
     app.include_router(auth_router)
     app.include_router(controls_router)
     app.include_router(overview_router)
+    app.include_router(entry_scope_router)
     app.include_router(signals_router)
     app.include_router(tickets_router)
     app.include_router(strategies_router)

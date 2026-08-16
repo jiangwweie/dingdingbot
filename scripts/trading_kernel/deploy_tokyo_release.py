@@ -23,7 +23,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.trading_kernel.certify_release_candidate import (
-    validate_release_certification,
+    ReleaseCertificationLevel,
+    validate_release_certification_for_level,
 )
 from scripts.trading_kernel.deployment_control import (
     DeploymentDrainBlocked,
@@ -1885,7 +1886,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         commit = _resolve_commit(args.commit)
-        validate_release_certification(REPO_ROOT, commit)
+        validate_release_certification_for_level(
+            REPO_ROOT,
+            commit,
+            ReleaseCertificationLevel.R4
+            if DeploymentMode(args.mode) is DeploymentMode.COMPATIBLE_UPGRADE
+            else ReleaseCertificationLevel.R3,
+        )
         plan = DeploymentPlan(
             target_commit=commit,
             target_release=f"{RELEASE_ROOT}/brc-trading-kernel-{commit[:12]}",

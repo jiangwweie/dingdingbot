@@ -8,6 +8,9 @@ from typing import Literal
 
 from pydantic import ValidationError
 
+from src.trading_kernel.application.owner_console.exit_attribution import (
+    canonical_exit_attribution,
+)
 from src.trading_kernel.application.owner_console.models import (
     CausalityExitReason,
     ChartAnnotation,
@@ -150,14 +153,6 @@ if set(EVENT_STAGE) != _PERSISTED_EVENT_TYPES:
         f"Trade Event stage mapping mismatch; missing={missing}, extra={extra}"
     )
 
-_EXIT_REASON_LABELS = {
-    "initial_stop_triggered": "Initial Stop",
-    "take_profit_triggered": "Take Profit",
-    "failed_breakout_reclaimed": "Failed Breakout Reclaimed",
-    "exposure_session_expired": "Session End",
-    "strategy_exit": "Strategy Exit",
-    "recover_exit_rejection": "Exit Recovery",
-}
 _TERMINAL_REJECTION_STATUSES = {
     TicketStatus.LEVERAGE_REJECTED.value,
     TicketStatus.ENTRY_REJECTED.value,
@@ -609,10 +604,10 @@ def _exit_reason(
     reason = event.payload.get("reason")
     if not isinstance(reason, str) or not reason.strip():
         raise ContradictoryFacts("ExitRequested reason is missing")
-    code = reason.strip()
+    attribution = canonical_exit_attribution(reason)
     return CausalityExitReason(
-        code=code,
-        label=_EXIT_REASON_LABELS.get(code, _humanize(code)),
+        code=attribution.code,
+        label=attribution.label,
         evidence=(
             EvidenceRef(
                 kind="event",
@@ -935,10 +930,6 @@ def _stage_summary(
     ],
 ) -> str:
     return f"{_STAGE_LABELS[key]}: {status}"
-
-
-def _humanize(value: str) -> str:
-    return " ".join(part.capitalize() for part in value.split("_") if part)
 
 
 def _deduplicate_evidence(

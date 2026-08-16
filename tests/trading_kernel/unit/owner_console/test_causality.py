@@ -54,7 +54,7 @@ def test_exit_reason_comes_from_exit_event_not_candle_shape() -> None:
     )
 
     assert detail.exit_reason is not None
-    assert detail.exit_reason.label == "Initial Stop"
+    assert detail.exit_reason.label == "初始止损触发"
     assert all(ref.kind == "event" for ref in detail.exit_reason.evidence)
 
 

@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Run one focused certification for an exact Owner API release commit."""
+"""Certify one exact R1 Owner Console static release candidate once."""
 
 from __future__ import annotations
 
@@ -19,96 +18,91 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.trading_kernel.verification_portfolios import R2_OWNER_API_COMMANDS
-from src.trading_kernel.infrastructure.runtime_identity import (
-    CURRENT_SCHEMA_REVISION,
-)
+from scripts.trading_kernel.verification_portfolios import R1_STATIC_COMMANDS
 
-SCHEMA = "brc.owner_console.release_certification.v1"
+SCHEMA = "brc.owner_console.static_release_certification.v1"
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
-OWNER_API_CERTIFICATION_COMMANDS = R2_OWNER_API_COMMANDS
+STATIC_CERTIFICATION_COMMANDS = R1_STATIC_COMMANDS
 
 
-class OwnerApiReleaseCertificationManifest(BaseModel):
+class OwnerStaticReleaseCertificationManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
-    manifest_schema: Literal["brc.owner_console.release_certification.v1"] = Field(
-        alias="schema",
-        serialization_alias="schema",
-    )
+    manifest_schema: Literal[
+        "brc.owner_console.static_release_certification.v1"
+    ] = Field(alias="schema", serialization_alias="schema")
     status: Literal["pass"]
     release_commit: str
-    schema_revision: str
     command_set_digest: str
     certified_at_ms: int
     command_durations_ms: tuple[int, ...]
 
     @model_validator(mode="after")
-    def _validate_manifest(self) -> OwnerApiReleaseCertificationManifest:
+    def _validate_manifest(self) -> OwnerStaticReleaseCertificationManifest:
         if _COMMIT.fullmatch(self.release_commit) is None:
-            raise ValueError("Owner API release commit must be exact")
+            raise ValueError("Owner static release commit must be exact")
         if self.certified_at_ms <= 0:
-            raise ValueError("Owner API certification time must be positive")
-        if len(self.command_durations_ms) != len(OWNER_API_CERTIFICATION_COMMANDS):
-            raise ValueError("Owner API certification duration count differs")
+            raise ValueError("Owner static certification time must be positive")
+        if len(self.command_durations_ms) != len(STATIC_CERTIFICATION_COMMANDS):
+            raise ValueError("Owner static certification duration count differs")
         if any(duration < 0 for duration in self.command_durations_ms):
-            raise ValueError("Owner API certification durations cannot be negative")
+            raise ValueError("Owner static certification durations cannot be negative")
         return self
 
 
-def build_owner_api_certification_identity(commit: str) -> dict[str, object]:
+def build_owner_static_certification_identity(commit: str) -> dict[str, str]:
     if _COMMIT.fullmatch(commit) is None:
-        raise ValueError("Owner API release commit must be exact")
+        raise ValueError("Owner static release commit must be exact")
     return {
         "schema": SCHEMA,
         "release_commit": commit,
-        "schema_revision": CURRENT_SCHEMA_REVISION,
-        "command_set_digest": _digest(OWNER_API_CERTIFICATION_COMMANDS),
+        "command_set_digest": _digest(STATIC_CERTIFICATION_COMMANDS),
     }
 
 
-def validate_owner_api_manifest_identity(
-    manifest: OwnerApiReleaseCertificationManifest,
+def validate_owner_static_manifest_identity(
+    manifest: OwnerStaticReleaseCertificationManifest,
     commit: str,
 ) -> None:
-    expected = build_owner_api_certification_identity(commit)
+    expected = build_owner_static_certification_identity(commit)
     actual = manifest.model_dump(mode="python", by_alias=True)
     for key, value in expected.items():
         if actual.get(key) != value:
             label = "release commit" if key == "release_commit" else key.replace("_", " ")
-            raise ValueError(f"Owner API certification {label} differs")
+            raise ValueError(f"Owner static certification {label} differs")
 
 
-def owner_api_certification_manifest_path(repo_root: Path, commit: str) -> Path:
+def owner_static_certification_manifest_path(repo_root: Path, commit: str) -> Path:
     relative = _git(
         repo_root,
         "rev-parse",
         "--git-path",
-        f"brc-owner-api-certifications/{commit}.json",
+        f"brc-owner-static-certifications/{commit}.json",
     )
     path = Path(relative)
     return path if path.is_absolute() else repo_root / path
 
 
-def validate_owner_api_release_certification(repo_root: Path, commit: str) -> None:
-    path = owner_api_certification_manifest_path(repo_root, commit)
+def validate_owner_static_release_certification(repo_root: Path, commit: str) -> None:
+    _require_exact_clean_head(repo_root, commit)
+    path = owner_static_certification_manifest_path(repo_root, commit)
     if not path.is_file():
-        raise ValueError("exact Owner API Release Commit lacks certification")
-    manifest = OwnerApiReleaseCertificationManifest.model_validate_json(
+        raise ValueError("exact Owner static Release Commit lacks certification")
+    manifest = OwnerStaticReleaseCertificationManifest.model_validate_json(
         path.read_text(encoding="utf-8")
     )
-    validate_owner_api_manifest_identity(manifest, commit)
+    validate_owner_static_manifest_identity(manifest, commit)
 
 
-def certify_owner_api_release_candidate(
+def certify_owner_static_release_candidate(
     repo_root: Path,
     commit: str,
-) -> OwnerApiReleaseCertificationManifest:
+) -> OwnerStaticReleaseCertificationManifest:
     _require_exact_clean_head(repo_root, commit)
     durations: list[int] = []
-    for index, command in enumerate(OWNER_API_CERTIFICATION_COMMANDS, start=1):
+    for index, command in enumerate(STATIC_CERTIFICATION_COMMANDS, start=1):
         print(
-            f"owner_api_certification_step={index}/{len(OWNER_API_CERTIFICATION_COMMANDS)} "
+            f"owner_static_certification_step={index}/{len(STATIC_CERTIFICATION_COMMANDS)} "
             f"command={json.dumps(command)}",
             flush=True,
         )
@@ -124,18 +118,18 @@ def certify_owner_api_release_candidate(
         if completed.returncode != 0:
             output = (completed.stdout + "\n" + completed.stderr)[-8_000:]
             raise RuntimeError(
-                f"Owner API certification command {index} failed:\n{output}"
+                f"Owner static certification command {index} failed:\n{output}"
             )
     _require_exact_clean_head(repo_root, commit)
-    manifest = OwnerApiReleaseCertificationManifest.model_validate(
+    manifest = OwnerStaticReleaseCertificationManifest.model_validate(
         {
-            **build_owner_api_certification_identity(commit),
+            **build_owner_static_certification_identity(commit),
             "status": "pass",
             "certified_at_ms": int(time.time() * 1_000),
             "command_durations_ms": tuple(durations),
         }
     )
-    path = owner_api_certification_manifest_path(repo_root, commit)
+    path = owner_static_certification_manifest_path(repo_root, commit)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         manifest.model_dump_json(indent=2, by_alias=True) + "\n",
@@ -146,9 +140,9 @@ def certify_owner_api_release_candidate(
 
 def _require_exact_clean_head(repo_root: Path, commit: str) -> None:
     if _git(repo_root, "rev-parse", "HEAD") != commit:
-        raise ValueError("Owner API certification commit must equal current HEAD")
+        raise ValueError("Owner static certification commit must equal current HEAD")
     if _git(repo_root, "status", "--porcelain"):
-        raise ValueError("Owner API certification requires a clean worktree")
+        raise ValueError("Owner static certification requires a clean worktree")
 
 
 def _git(repo_root: Path, *args: str) -> str:
@@ -180,14 +174,14 @@ def _parser() -> argparse.ArgumentParser:
 def _resolve_commit(reference: str) -> str:
     commit = _git(REPO_ROOT, "rev-parse", "--verify", f"{reference}^{{commit}}")
     if _COMMIT.fullmatch(commit) is None:
-        raise ValueError("resolved Owner API release commit is invalid")
+        raise ValueError("resolved Owner static release commit is invalid")
     return commit
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     commit = _resolve_commit(args.commit)
-    manifest = certify_owner_api_release_candidate(REPO_ROOT, commit)
+    manifest = certify_owner_static_release_candidate(REPO_ROOT, commit)
     print(manifest.model_dump_json(by_alias=True))
     return 0
 
