@@ -52,6 +52,16 @@ different Netting Domains progress concurrently.
 | Full capability | Entry Promotion and TradFi Strategy resume are complete; the first natural TradFi lifecycle, `promote-full` and the final requirement audit remain explicit follow-up evidence |
 | Scope boundary | Crypto `SOR-001` remains paused; no Crypto SOR Entry authority was restored, and funding ownership and broader Incident-quality work were not changed |
 
+## Owner Console R1/R2 Release
+
+| Area | Verified state |
+| --- | --- |
+| Verified at | `2026-08-17`; direct Tokyo release marker, systemd, Unix-Socket health and public HTTPS evidence |
+| Release commit and tag | Static Owner Console and Owner API both run `92b7b222cd3392e96cc61d23ceeb4887bbca080b`, tagged `tokyo-runtime-2026.08.17.1` and pushed with `dev` |
+| Scope | R2: only `/opt/brc/owner-console/current`, `/opt/brc/owner-console-api/current` and `brc-owner-console-api.service` changed; no schema, Policy, Registry, Nginx configuration or Kernel Worker action occurred |
+| Postflight | Static and API release markers match; API Unix-Socket `/healthz` returns `{"status":"ok"}`; public HTTPS succeeds; all four Kernel Workers remain `active`, `enabled` and at zero restarts |
+| Recovery observation | The independent API deployment fallback selected system Python `3.10`, while current API imports require Python `3.11+`; the first target startup failed and the API was recovered with the server's existing Python `3.12` Kernel environment. The target API is healthy, but the automated R2 fallback/rollback path requires a focused P2.2 fix before the next Owner API release |
+
 ## Deployment Repairs Closed
 
 | Defect | Root cause | Production resolution |
