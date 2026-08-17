@@ -2,7 +2,7 @@
 title: MULTI_ASSET_STRATEGYGROUP_ROADMAP
 status: CURRENT_PLAN
 program_id: MASG-P1
-last_verified: 2026-08-14
+last_verified: 2026-08-17
 ---
 
 # Multi-Asset StrategyGroup Roadmap
@@ -43,6 +43,13 @@ last_verified: 2026-08-14
     共同使用 `policy-main / Policy v4` 的 Ticket、风险、方向、保证金、杠杆和
     Exposure Family 约束；产品差异仅由 RuntimeProfile、Product Compatibility、
     Universe、Event 和 StrategyGroup Control 表达。
+12. Owner 的主观市场判断将以未来的 **Owner Regime Gate** 表达：它只限制新 ENTRY
+    的方向与允许参与的 StrategyGroup，不创建指定订单，也不改写任何 Ticket 的
+    Initial Stop、TP1、Runner、退出或对账语义；每一次判断必须留下不可事后改写的
+    Journal。
+13. 风险阶梯、回撤降档和本金提取属于后续 **资本治理** 轨道。它们不构成当前
+    `policy-main / Policy v4` 的变更，不自动提高风险、并发、杠杆或资本，也不授权
+    交易所提现或转账。
 
 ## Authority Boundary
 
@@ -55,6 +62,7 @@ last_verified: 2026-08-14
 | 当前 StrategyGroup、Event 和版本语义 | Strategy Registry |
 | 当前 Universe 成员、Warming、Certification 和 Active 指针 | PostgreSQL StrategyUniverse |
 | 当前资本、容量、风险和允许范围 | Owner Policy 与实验 Profile |
+| Owner Regime Journal、有效方向范围和 Owner 操作审计 | PostgreSQL 的追加事实与当前 Owner Control 投影 |
 | 当前账户、产品、订单、仓位和成交事实 | Venue 只读事实 |
 | 具体页面、API、Schema 和 Adapter 设计 | 后续逐项批准的设计规格 |
 
@@ -92,6 +100,32 @@ Observation
 
 策略代码在 `StrategySignal` 结束。任何跨资产扩展都不得增加美股专用执行器、
 第二套订单系统、并行数据库权威或 Venue 私有生命周期。
+
+## Planned Owner Regime Boundary
+
+Owner 的市场判断是对既有范围的**附加限制**，不是另一条下单路径。未来实现时，
+每个新 ENTRY 必须同时通过下列范围；既有 Ticket 不重新受 Gate 约束，仍按冻结的
+生命周期继续保护、退出、对账、结算和 Review：
+
+```text
+Global Entry
+AND Owner Regime Gate
+AND StrategyGroup Control
+AND Strategy × Instrument Scope
+AND normal Readiness / Capacity / Netting Domain admission
+```
+
+| Regime 状态 | 新 ENTRY 范围 | 既有 Ticket |
+| --- | --- | --- |
+| `BOTH` 或无有效 Gate | 不因方向额外收缩当前已允许范围 | 不变 |
+| `LONG_ONLY` | 仅 Long 方向且在允许 StrategyGroup 范围内 | 不变 |
+| `SHORT_ONLY` | 仅 Short 方向且在允许 StrategyGroup 范围内 | 不变 |
+| `FLAT` | 禁止全部新 ENTRY；可由 Global Entry freeze 表达 | 不变 |
+
+Regime Journal 至少冻结决策时间、生效和到期时间、方向、允许 StrategyGroup、参考
+市场事实与价格、失效条件、简短理由和 Owner 操作身份。理由是审计证据，不是策略
+信号、价格预测或订单授权。具体 Schema、TOTP、事务与失败恢复在 P1.2 设计阶段确定；
+在实现前，系统不推定存在有效 Regime Gate。
 
 ## Planned Strategy Identity
 
@@ -281,6 +315,7 @@ StrategyGroup 暂停/恢复、策略标的热加载和单 Ticket Owner 平仓是
 | --- | --- | --- | --- |
 | StrategyGroup 暂停/恢复 | 只控制该 StrategyGroup 的新 ENTRY；已有 Ticket 继续保护、退出、结算和 Review | 快速隔离一个失效策略而不停止系统 | 已实现 |
 | Effective Entry Scope | 聚合 Global Entry、Strategy Control、StrategyVersion、Active Universe、Product/Session、Readiness、Netting Domain 和 Policy Capacity，返回当前是否可创建 Ticket 及第一阻塞点 | 不再从多个页面和日志拼装“为什么没有交易” | 待设计实施 |
+| Owner Regime Gate + Journal | 以 `BOTH`、`LONG_ONLY`、`SHORT_ONLY`、`FLAT` 限制新 ENTRY 的方向和允许 StrategyGroup；每次变更追加审计记录并带明确到期 | Owner 可以表达市场参与边界，而不指定一笔订单或破坏既有 Ticket 纪律 | 待设计实施 |
 | 策略运行模式 | 明确区分 `live`、`observe_only`、`entry_paused` 和 `retired`；Worker active 不等于策略允许 ENTRY | 看清策略正在运行、观察、暂停还是已经退出产品线 | 待语义收敛 |
 | Instrument 生命周期与 Universe 热加载 | 全局 Instrument Catalog 管理 Candidate、Certification、Eligible、Suspended、Retired；每个 EventSpec 独立拥有 StrategyUniverse，Warming 认证后原子激活 | 一个 Product 可被多个策略复用，而每个策略独立决定成员 | 已实现 Universe 基础能力；Catalog 新增和生命周期操作待完善 |
 | Strategy-Instrument 临时禁入 | 独立暂停某个 StrategyGroup/EventSpec 与 Instrument 组合的新 ENTRY，不修改全局 Product，也不改写 Active Ticket | 在单一标的异常时避免暂停整个策略 | 待设计实施 |
@@ -309,7 +344,7 @@ Owner Console 后续收敛为四个产品中心。页面只是呈现方式，稳
 | **策略中心** | 运行模式、当前版本、StrategyUniverse、Effective Entry Scope、版本隔离表现和实验决策 | 不在前端编写策略代码或任意 JSON 参数 |
 | **标的中心** | Instrument Catalog、Product 认证、生命周期、Venue 事实和策略成员关系 | Product 全局唯一，是否交易由 EventSpec-to-Instrument 关系决定 |
 | **Ticket / Review 中心** | 当前风险、保护状态、单 Ticket 平仓、K 线价格路径、Settlement、Review 和 Owner 注释 | 不直接编辑 Ticket、Command、成交或机器事实 |
-| **运行与控制中心** | Global Entry、Worker/Runtime Identity、Owner Operation、异常收件箱和发布准备度 | 不直接暴露任意 SQL、systemd 或 Exchange 写接口 |
+| **运行与控制中心** | Global Entry、Owner Regime、Worker/Runtime Identity、Owner Operation、异常收件箱和发布准备度 | 不直接暴露任意 SQL、systemd 或 Exchange 写接口 |
 
 前端负责表达和变更 Owner 意图；PostgreSQL 保存版本化权威与追加事实；四类 Worker
 执行唯一正式链路；Ticket、Command、Settlement 和 Review 事实不得被 UI 原地改写。
@@ -323,8 +358,24 @@ Owner Console 后续收敛为四个产品中心。页面只是呈现方式，稳
 | --- | --- | --- | --- |
 | **P0：自然市场验收** | 关闭现有 Kernel 与 TradFi SOR 的真实生命周期证据 | 保持只读监控；自然 Signal 出现后观察 Admission、Ticket、保护、退出、Reconciliation、Settlement 和 Review；闭环后执行 `promote-full` 与最终需求审计 | 自然 TradFi Ticket 内外部完整闭环、零残留、零未解决 Incident，`promote-full` 和最终审计通过 |
 | **P2：工程基础设施** | 降低每次开发、测试和部署的固定成本，并统一产品语义 | 测试资产治理；发布流程状态化和精确候选认证复用；Canonical Exit Attribution；Effective Entry Scope 投影/API | 日常开发使用 Focused/Fast 层；完整认证只对冻结候选运行一次；发布显示单一阶段和阻塞点；退出原因和 Entry 能力有唯一权威 |
-| **P1：Owner 产品控制** | 让日常策略、标的和 Ticket 操作主要在前端完成 | 单 Ticket Owner 平仓；可读操作审计；策略运行模式；Instrument 生命周期；Strategy-Instrument 临时禁入；异常收件箱 | Owner 无需 SQL、SSH 或拼装日志即可完成日常范围控制和单笔风险处置 |
-| **P3：实验学习与扩展** | 把交易结果转化为版本隔离的策略决策，再决定新增策略 | StrategyVersion 生命周期；Owner 注释；Continue/Observe/Pause/Retire 决策；类型化参数版本设计；后续 MPG/BRF2/RSRVCB 评估 | 当前版本证据、自然退出与 Owner 干预可区分，新增策略不复用未经验证的历史总收益 |
+| **P1：Owner 产品控制** | 让日常策略、标的和 Ticket 操作主要在前端完成 | 单 Ticket Owner 平仓；Owner Regime Gate + Journal；可读操作审计；策略运行模式；Instrument 生命周期；Strategy-Instrument 临时禁入；异常收件箱 | Owner 无需 SQL、SSH 或拼装日志即可完成日常范围控制、市场参与门控和单笔风险处置 |
+| **P3：实验学习与扩展** | 把交易结果与 Owner 门控证据转化为版本隔离的策略决策，再决定新增策略 | 标准化 Performance Review Query；StrategyVersion 生命周期；Runner/右尾统计；Owner Regime 归因；Owner 注释；Continue/Observe/Pause/Retire 决策；类型化参数版本设计；后续 MPG/BRF2/RSRVCB 评估 | 当前版本证据、自然退出、Owner 干预和被 Gate 排除的机会路径可区分，新增策略不复用未经验证的历史总收益 |
+| **P4：资本治理** | 在充分证据后将实验收益转化为可控资本制度 | 风险档位资格、回撤降档建议、资本高水位和提款账本 | 仅输出资格与建议；每次风险档位变更仍须 Owner 明确授权的 Policy 发布，提款/转账仍不由系统执行 |
+
+### Owner Regime And Performance Attribution
+
+P1.2 先建立 Owner 对市场参与范围的可审计控制，P3 再评价它是否有价值。两者不能
+倒置：没有事前 Journal，就无法可靠地区分 Owner 判断、策略本身和偶然市场路径。
+
+| 结果类别 | 证据语义 | 是否计入真实净收益 |
+| --- | --- | --- |
+| Gate 内自然 Ticket | 真实成交、费用、资金费、退出和 Review 完整链路 | 是，按完整经济字段统计 |
+| Gate 外 Signal 的 Shadow Outcome | 已冻结信号的有界 MFE/MAE 或路径证据 | 否，不是模拟成交或 PnL |
+| “若未 Gate 会怎样”分析 | 依赖明确价格、成本和退出假设的模型估算 | 否，必须与真实结果分列 |
+
+因此，P3 不把“全策略持续运行的收益”伪装为已知事实；它同时呈现 Gate 后实际收益、
+Gate 外机会路径和明确标注假设的反事实模拟。Owner 判断的边际价值只能在这三类证据
+分开的前提下评价。
 
 ### Immediate Execution Order
 
@@ -339,10 +390,16 @@ Owner Console 后续收敛为四个产品中心。页面只是呈现方式，稳
    策略中心、标的中心和总览；页面显示当前结论和唯一第一阻塞点。
 5. **P1.1 单 Ticket Owner 平仓**：补齐持久化授权、Operation、正式 `request_exit()`
    调用、进度投影、Review 归因和前端 Preview/TOTP；不建立第二退出路径。
-6. **P1.2 Owner 控制面补齐**：依次完成运行模式、Instrument 生命周期、
+6. **P1.2 Owner Regime Gate + Journal**：在 Global Entry 之下、正式 Admission 之前
+   增加方向和 StrategyGroup 范围的 Gate；冻结 Journal、到期语义、审计投影和
+   Admission blocker，不引入手工下单或 Ticket 参数修改。
+7. **P1.3 Owner 控制面补齐**：依次完成运行模式、Instrument 生命周期、
    Strategy-Instrument 临时禁入、可读审计和异常收件箱。
-7. **P3 实验学习**：在上述权威投影稳定后再实现版本生命周期、Owner 注释、实验决策
-   和类型化参数版本；M7 或其他新策略族继续排在当前 SOR 自然闭环之后。
+8. **P3 实验学习**：先实现标准化 Performance Review Query 和版本隔离的
+   Runner/右尾统计，再实现 Owner Regime 归因、Owner 注释、实验决策和类型化参数版本；
+   M7 或其他新策略族继续排在当前 SOR 自然闭环之后。
+9. **P4 资本治理**：只在 P3 的版本隔离经济证据充分后设计风险阶梯、回撤降档和
+   资本提取账本；不自动加风险，不执行提现或转账。
 
 ## Runtime And Resource Boundary
 
@@ -363,6 +420,7 @@ Owner Console 后续收敛为四个产品中心。页面只是呈现方式，稳
 
 - 建设独立因子库产品；
 - 自动扩大资本、止损风险、杠杆或并发容量；
+- 自动执行风险档位提升、回撤降档、提现或转账；
 - 立即恢复加密 `SOR-001`；
 - 将多个 StrategyVersion 合并后决定当前版本能力；
 - 直接合并旧 US-equity 分支；
@@ -391,6 +449,12 @@ Owner Console 后续收敛为四个产品中心。页面只是呈现方式，稳
 7. M6：`docs/superpowers/specs/2026-08-12-tradfi-sor-m6-live-entry-design.md`
    记录上线即小额实盘、StrategyGroup pause、统一 Policy 账户容量和联合 R4 部署边界；
 8. M7：旧 RSRVCB 设计的可移植模块审计与当前内核重写计划。
+9. P1.2：Owner Regime Gate、Journal、有效范围投影、Admission blocker、TOTP 与
+   失败恢复设计；不包含手工下单、Ticket 参数编辑或 Policy 风险扩张。
+10. P3：统一绩效查询契约、版本隔离、Runner/右尾指标、Owner Gate 实际归因与
+    假设性反事实呈现边界。
+11. P4：风险阶梯资格、回撤降档、资本高水位和提款账本设计；任何 Policy 修改或
+    资金划转均保持独立 Owner 授权与发布边界。
 
 任何阶段的实现、迁移和部署状态仍由当前代码、PostgreSQL、Venue 事实和
 `MAIN_CONTROL_ROADMAP.md` 记录，本路线图不自行宣告阶段完成。

@@ -1,7 +1,7 @@
 ---
 title: STRATEGY_EXPERIMENT_EVALUATION_CONTRACT
 status: CURRENT
-last_verified: 2026-08-14
+last_verified: 2026-08-17
 ---
 
 # Strategy Experiment Evaluation Contract
@@ -44,6 +44,7 @@ kernel chain.
 | Execution cost | Fee, funding, spread, slippage, and rejected or flattened execution cost |
 | Tail dependence | How much total result depends on the largest winners and whether that dependence matches the thesis |
 | Survival evidence | Observation count, losing streak, drawdown, incident count, and remaining experiment-capital capacity |
+| Owner Regime attribution | When an effective Owner Regime Gate exists, separate Gate-inside realized Tickets, Gate-excluded opportunity evidence, and explicitly hypothetical counterfactual estimates |
 
 No single metric establishes an edge. Review must preserve per-Ticket facts and
 show both the aggregate result and the contribution of tail outcomes. Missing
@@ -88,6 +89,28 @@ fee, funding, or real slippage estimate. It never creates CapacityClaim,
 Reservation, Ticket, Exchange Command, or venue mutation. If real Entry is
 later authorized, the formal Ticket lifecycle remains the only source of
 execution economics and may coexist with the Signal-owned observation.
+
+## Owner Regime Attribution Boundary
+
+An Owner Regime Gate is a prospective scope restriction on new ENTRY, not a
+source of strategy signals or a substitute execution path. When that product
+capability is active, its Journal freezes the effective direction and
+StrategyGroup range before an AdmissionDecision is made. Existing Tickets keep
+their frozen lifecycle and are not reclassified when the Gate later changes.
+
+Performance review must keep the following evidence classes separate:
+
+| Evidence class | Permitted conclusion | Forbidden conclusion |
+| --- | --- | --- |
+| Natural Ticket admitted inside the Gate | Actual net economics and actual strategy/Owner-scope outcome | That the same result would occur under another Gate |
+| Gate-excluded Signal-owned observation | Bounded market-path evidence such as MFE/MAE | Realized PnL, exact fees/funding/slippage, or a simulated fill |
+| Counterfactual model | A conditional estimate with frozen disclosed assumptions | Historical fact or Owner alpha proved by an unfilled opportunity |
+
+No Gate is equivalent to no additional scope overlay; it is not evidence that
+the Owner selected `BOTH`. Review must label absent Gate, effective Gate and
+expired Gate states explicitly. Owner attribution never changes Review
+economics, Exit Attribution, StrategyVersion identity or the underlying
+immutable Ticket lineage.
 
 ## Outcomes
 
