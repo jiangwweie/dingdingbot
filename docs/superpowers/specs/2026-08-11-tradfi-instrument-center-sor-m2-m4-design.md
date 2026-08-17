@@ -152,4 +152,3 @@ instrument tick 在 Capacity/Ticket 阶段执行既有规范化。
 | CPM | `CPM-US-EQ-PERP-001` | Session 化回调和 Stop distance | 暂缓 |
 | MI | `MI-US-EQ-PERP-001` | 12h impulse 重定义和追价控制 | 暂缓 |
 | RSRVCB | `RSRVCB-001` | 多周期排名、VCB、Regime | M7 |
-

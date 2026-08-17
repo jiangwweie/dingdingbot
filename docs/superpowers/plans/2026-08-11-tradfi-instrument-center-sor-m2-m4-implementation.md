@@ -44,4 +44,3 @@ versioned instrument/strategy decoupling, and observation-only
 - Design acceptance items pass.
 - Existing Crypto semantics remain unchanged.
 - Worktree contains a reviewed local candidate and remains undeployed.
-

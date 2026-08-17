@@ -55,4 +55,3 @@ def test_equity_sor_accepts_only_exact_tradfi_equity_profile() -> None:
     )
 
     require_product_compatibility(compatibility, profile)
-
