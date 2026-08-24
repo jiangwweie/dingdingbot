@@ -78,6 +78,7 @@ from src.trading_kernel.domain.product import (
     ProductSessionSnapshot,
 )
 from src.trading_kernel.domain.reducer import Reduction
+from src.trading_kernel.domain.selection_authority import SelectionSessionAuthority
 from src.trading_kernel.domain.shadow_outcome import (
     ShadowOutcomeClaim,
     ShadowOutcomeProjection,
@@ -1350,6 +1351,26 @@ class StrategyUniverseRepository(Protocol):
     ) -> CertificationBatchSnapshot: ...
 
 
+class InstrumentSelectionRepository(Protocol):
+    @classmethod
+    def lease_namespace(
+        cls,
+        lease_kind: Literal["selection", "materialization", "observation"],
+    ) -> str: ...
+
+    async def add_authority_and_set_current(
+        self,
+        authority: SelectionSessionAuthority,
+        *,
+        expected_current_version: int | None,
+    ) -> None: ...
+
+    async def get_current_authority(
+        self,
+        selection_spec_id: str,
+    ) -> SelectionSessionAuthority | None: ...
+
+
 class InstrumentCertificationTarget(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1520,6 +1541,7 @@ class KernelUnitOfWork(Protocol):
     signals: SignalRepository
     strategy_registry: StrategyRegistryRepository
     strategy_universes: StrategyUniverseRepository
+    instrument_selection: InstrumentSelectionRepository
 
     async def __aenter__(self) -> Self: ...
 

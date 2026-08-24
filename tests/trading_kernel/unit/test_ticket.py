@@ -103,3 +103,12 @@ def test_ticket_id_is_deterministic_and_causal() -> None:
 
     assert identity.ticket_id == same
     assert identity.ticket_id != different_signal
+
+
+def test_ticket_digest_binds_optional_selection_authority() -> None:
+    static = make_ticket()
+    dynamic = make_ticket(selection_authority_id="authority:test:1")
+
+    assert static.selection_authority_id is None
+    assert dynamic.selection_authority_id == "authority:test:1"
+    assert dynamic.decision_digest() != static.decision_digest()

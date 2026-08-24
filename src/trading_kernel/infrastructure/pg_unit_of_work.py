@@ -18,6 +18,7 @@ from src.trading_kernel.application.ports import (
     EventRepository,
     ExchangeCommandRepository,
     IncidentRepository,
+    InstrumentSelectionRepository,
     MonitorRepository,
     OwnerControlRepository,
     PositionRepository,
@@ -74,6 +75,9 @@ from src.trading_kernel.domain.incident_blocking import (
 )
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
+from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+    PostgresInstrumentSelectionRepository,
+)
 from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresAdmissionDecisionRepository,
     PostgresAggregateRepository,
@@ -121,6 +125,7 @@ class PostgresKernelUnitOfWork:
     signals: SignalRepository
     strategy_registry: StrategyRegistryRepository
     strategy_universes: StrategyUniverseRepository
+    instrument_selection: InstrumentSelectionRepository
 
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
@@ -151,6 +156,9 @@ class PostgresKernelUnitOfWork:
         self.signals = PostgresSignalRepository(self._connection)
         self.strategy_registry = PostgresStrategyRegistryRepository(self._connection)
         self.strategy_universes = PostgresStrategyUniverseRepository(self._connection)
+        self.instrument_selection = PostgresInstrumentSelectionRepository(
+            self._connection
+        )
         return self
 
     async def __aexit__(

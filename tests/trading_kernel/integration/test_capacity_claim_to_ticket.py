@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+import sqlalchemy as sa
 
 from src.trading_kernel.application.ingest_signal import (
     IngestSignalRequest,
@@ -22,6 +23,16 @@ from src.trading_kernel.application.select_entry_candidate import (
 from src.trading_kernel.domain.commands import ExchangeCommandKind
 from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
+from src.trading_kernel.domain.selection_authority import (
+    AuthorityOutcome,
+    ContinuitySourceKind,
+    SelectionMode,
+    SelectionSessionAuthority,
+)
+from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+    PostgresInstrumentSelectionRepository,
+)
+from src.trading_kernel.infrastructure.pg_models import instrument_selection_specs
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
@@ -39,7 +50,11 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
     issue_engine,
 ) -> None:
     await _seed_runtime_authority(issue_engine)
-    signal = _signal(signal_event_id="signal-capacity-integration")
+    await _seed_selection_authority(issue_engine)
+    signal = _signal(
+        signal_event_id="signal-capacity-integration",
+        selection_authority_id="authority:persistence:1",
+    )
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         ingested = await ingest_signal(
             uow,
@@ -82,6 +97,10 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
         reservation = await uow.budgets.get_for_ticket(result.ticket_id)
         commands = await uow.exchange_commands.list_for_ticket(result.ticket_id)
         readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+        persisted_signal = await uow.signals.get(signal.signal_event_id)
+        admission = await uow.admission_decisions.get_for_signal(
+            signal.signal_event_id
+        )
 
     assert claim is not None
     assert ticket == claim.to_ticket()
@@ -95,6 +114,58 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
     assert commands[0].kind is ExchangeCommandKind.ENTRY
     assert readiness is not None
     assert readiness.readiness_state == "processing"
+    assert persisted_signal is not None
+    assert admission is not None
+    assert (
+        persisted_signal.selection_authority_id
+        == claim.selection_authority_id
+        == admission.selection_authority_id
+        == ticket.selection_authority_id
+        == "authority:persistence:1"
+    )
+
+
+async def _seed_selection_authority(engine) -> None:
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.insert(instrument_selection_specs).values(
+                selection_spec_id="selection-spec:SOR-001:v0",
+                strategy_group_id="SOR-001",
+                strategy_version_id="sgv:SOR-001:v4",
+                selection_version=1,
+                selection_kind="sor_dynamic_v0",
+                algorithm_semantic_digest="sha256:" + "f" * 64,
+                status="active",
+                installed_at_ms=1_000,
+            )
+        )
+        await PostgresInstrumentSelectionRepository(
+            connection
+        ).add_authority_and_set_current(
+            SelectionSessionAuthority(
+                selection_authority_id="authority:persistence:1",
+                selection_spec_id="selection-spec:SOR-001:v0",
+                session_start_ms=1_704_067_200_000,
+                decision_boundary_ms=1_704_070_800_000,
+                authority_sequence=1,
+                selection_mode=SelectionMode.DISABLED,
+                selection_snapshot_id=None,
+                continued_from_selection_authority_id=None,
+                continuity_source_kind=ContinuitySourceKind.NONE,
+                authority_gap_audit_id=None,
+                materialization_generation_id=None,
+                owner_control_version=1,
+                authority_outcome=AuthorityOutcome.OWNER_PAUSED_NOT_MATERIALIZED,
+                authorized_pair=None,
+                grant_proof=None,
+                effective_from_ms=1_704_070_800_000,
+                first_eligible_close_time_ms=None,
+                expires_at_ms=1_704_157_200_000,
+                reason_code="PERSISTENCE_ONLY",
+                created_at_ms=1_704_070_800_000,
+            ),
+            expected_current_version=None,
+        )
 
 
 @pytest.mark.asyncio

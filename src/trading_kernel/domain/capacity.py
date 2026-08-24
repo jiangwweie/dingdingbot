@@ -283,6 +283,7 @@ class CapacityClaim(BaseModel):
     take_profit_prices: tuple[Decimal, ...]
     take_profit_quantities: tuple[Decimal, ...]
     decision_digest: str
+    selection_authority_id: str | None = None
 
     @field_validator(
         "capacity_claim_id",
@@ -298,6 +299,12 @@ class CapacityClaim(BaseModel):
         if not normalized:
             raise ValueError("CapacityClaim identities must be non-blank")
         return normalized
+
+    @field_validator("selection_authority_id", mode="before")
+    @classmethod
+    def _normalize_optional_selection_authority(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
 
     @field_validator(
         "fact_digest",
@@ -555,6 +562,7 @@ class CapacityClaim(BaseModel):
             runtime_scope_version=self.runtime_scope_version,
             universe_version_id=self.universe_version_id,
             universe_semantic_digest=self.universe_semantic_digest,
+            selection_authority_id=self.selection_authority_id,
             fact_digest=self.fact_digest,
             exposure_family=self.exposure_family,
             active_family_ticket_count_at_claim=(
@@ -682,6 +690,7 @@ def freeze_capacity_claim(
     exposure_session_end_ms: int | None,
     take_profit_prices: tuple[Decimal, ...],
     take_profit_quantities: tuple[Decimal, ...],
+    selection_authority_id: str | None = None,
 ) -> CapacityClaim:
     payload: dict[str, Any] = {
         "capacity_claim_id": "claim:pending",
@@ -692,6 +701,7 @@ def freeze_capacity_claim(
         "runtime_scope_version": runtime_scope_version,
         "universe_version_id": universe_version_id,
         "universe_semantic_digest": universe_semantic_digest,
+        "selection_authority_id": selection_authority_id,
         "fact_digest": fact_digest,
         "exit_policy_id": exit_policy_id,
         "exit_policy_semantic_hash": exit_policy_semantic_hash,
@@ -779,12 +789,13 @@ def freeze_capacity_claim(
 
 
 def build_capacity_claim_digest(claim: CapacityClaim) -> str:
-    return _digest(
-        claim.model_dump(
-            mode="python",
-            exclude={"capacity_claim_id", "decision_digest"},
-        )
+    payload = claim.model_dump(
+        mode="python",
+        exclude={"capacity_claim_id", "decision_digest"},
     )
+    if payload["selection_authority_id"] is None:
+        payload.pop("selection_authority_id")
+    return _digest(payload)
 
 
 def _digest(payload: object) -> str:

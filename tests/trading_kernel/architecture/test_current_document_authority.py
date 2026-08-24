@@ -108,6 +108,9 @@ RETIRED_CAPACITY_SCAN_EXCLUSIONS = {
     "tests/trading_kernel/architecture/test_current_document_authority.py",
     "tests/trading_kernel/integration/test_schema_baseline.py",
 }
+RETIRED_CAPACITY_SCAN_TEXT_SUFFIXES = frozenset(
+    {".ini", ".md", ".py", ".service", ".sh", ".toml", ".txt", ".yaml", ".yml"}
+)
 
 
 def _current_authority_and_execution_text() -> str:
@@ -122,7 +125,7 @@ def _current_authority_and_execution_text() -> str:
         if not raw_path or raw_path in RETIRED_CAPACITY_SCAN_EXCLUSIONS:
             continue
         path = REPO_ROOT / raw_path
-        if path.is_file():
+        if path.is_file() and path.suffix in RETIRED_CAPACITY_SCAN_TEXT_SUFFIXES:
             sources.append(path.read_text(encoding="utf-8"))
     return "\n".join(sources)
 

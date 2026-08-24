@@ -13,6 +13,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from tests.trading_kernel.support.schema import EXPECTED_KERNEL_TABLES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -78,7 +79,7 @@ async def test_bootstrap_schema_creates_only_the_clean_kernel_baseline() -> None
             assert tables == EXPECTED_KERNEL_TABLES | {"alembic_version"}
             assert {"venue_id", "account_id"}.issubset(exposure_columns)
             assert exposure_primary_key == {"venue_id", "account_id"}
-            assert revision == "0005_tradfi_instrument_center"
+            assert revision == CURRENT_SCHEMA_REVISION
         finally:
             await engine.dispose()
     finally:

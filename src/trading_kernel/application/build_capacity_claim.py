@@ -285,6 +285,7 @@ def build_capacity_claim(
         runtime_scope_version=signal.runtime_scope_version,
         universe_version_id=signal.universe_version_id,
         universe_semantic_digest=signal.universe_semantic_digest,
+        selection_authority_id=signal.selection_authority_id,
         fact_digest=signal.fact_digest,
         exit_policy_id=exit_policy.exit_policy_id,
         exit_policy_semantic_hash=exit_policy.semantic_hash(),

@@ -185,6 +185,7 @@ class AdmissionDecision(BaseModel):
     entry_admission_snapshot_digest: str | None
     decision_digest: str
     decided_at_ms: int
+    selection_authority_id: str | None = None
 
     @field_validator(
         "admission_decision_id",
@@ -214,6 +215,7 @@ class AdmissionDecision(BaseModel):
         "ticket_id",
         "first_blocker",
         "binding_constraint",
+        "selection_authority_id",
         mode="before",
     )
     @classmethod
@@ -319,7 +321,7 @@ def freeze_admission_decision(
         )
     except ValueError as exc:
         raise ValueError("Signal is absent from the candidate set") from exc
-    payload = {
+    payload: dict[str, object] = {
         "admission_decision_id": "admission:pending",
         "signal_event_id": signal.signal_event_id,
         "exposure_episode_id": signal.exposure_episode_id,
@@ -328,6 +330,7 @@ def freeze_admission_decision(
         "event_spec_id": signal.event_spec_id,
         "universe_version_id": signal.universe_version_id,
         "universe_semantic_digest": signal.universe_semantic_digest,
+        "selection_authority_id": signal.selection_authority_id,
         "runtime_profile_id": runtime_profile_id,
         "runtime_scope_id": signal.runtime_scope_id,
         "runtime_scope_version": signal.runtime_scope_version,
@@ -369,4 +372,5 @@ def _decision_digest_payload(payload: dict[str, object]) -> dict[str, object]:
         key: value
         for key, value in payload.items()
         if key not in {"admission_decision_id", "decision_digest"}
+        and not (key == "selection_authority_id" and value is None)
     }

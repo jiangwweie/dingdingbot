@@ -7,6 +7,7 @@ from scripts.trading_kernel.deploy_tokyo_release import (
     SCHEMA_REVISION,
 )
 from scripts.trading_kernel.verify_schema import COMPATIBLE_SOURCE_REVISION
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_ROOTS = (
@@ -83,7 +84,7 @@ def test_flat_upgrade_keeps_historical_preservation_and_current_0004_source() ->
         "0004_owner_control_plane"
     )
     assert COMPATIBLE_SOURCE_REVISION == "0002_sor_v3_strategy_group_capacity"
-    assert SCHEMA_REVISION == "0005_tradfi_instrument_center"
+    assert SCHEMA_REVISION == CURRENT_SCHEMA_REVISION
 
 
 def test_retired_0001_source_is_not_a_regular_deployment_compatibility_path() -> None:

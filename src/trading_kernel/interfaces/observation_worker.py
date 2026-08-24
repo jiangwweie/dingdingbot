@@ -197,7 +197,10 @@ async def _run_one_due_shadow(
 
     try:
         candles: tuple[ClosedCandle, ...]
-        if claim.spec.initial_risk_per_unit <= 0:
+        if (
+            claim.spec.initial_risk_per_unit is None
+            or claim.spec.initial_risk_per_unit <= 0
+        ):
             candles = ()
         else:
             limit = _shadow_candle_limit(claim.spec.timeframe)

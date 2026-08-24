@@ -149,11 +149,20 @@ def test_capacity_claim_rejects_action_time_leverage_drift_from_fixed_profile() 
     assert decision.claim is None
 
 
+def test_capacity_claim_and_ticket_freeze_signal_selection_authority() -> None:
+    _, decision = _build_decision(selection_authority_id="authority:test:1")
+
+    assert decision.claim is not None
+    assert decision.claim.selection_authority_id == "authority:test:1"
+    assert decision.claim.to_ticket().selection_authority_id == "authority:test:1"
+
+
 def _build_decision(
     *,
     active_family_ticket_count: int = 0,
     directional_risk_at_stop: Decimal = Decimal(0),
     configured_leverage: int = 5,
+    selection_authority_id: str | None = None,
 ):
     snapshot = _snapshot()
     risk_values = snapshot.account_risk_snapshot.model_dump(
@@ -166,7 +175,7 @@ def _build_decision(
     )
     ownership = AdmissionOwnership()
     decision = build_capacity_claim(
-        signal=_long_signal(),
+        signal=_long_signal(selection_authority_id=selection_authority_id),
         runtime_profile_id="tiny-live-v1",
         venue_id="binance-usdm",
         account_id="experiment-1",
@@ -196,7 +205,7 @@ def _build_decision(
     return snapshot, decision
 
 
-def _long_signal():
+def _long_signal(selection_authority_id: str | None = None):
     contract = next(
         item
         for item in registered_strategy_contracts()
@@ -239,6 +248,7 @@ def _long_signal():
         observed_at_ms=1_005,
         expires_at_ms=2_000,
         facts=facts,
+        selection_authority_id=selection_authority_id,
     )
 
 

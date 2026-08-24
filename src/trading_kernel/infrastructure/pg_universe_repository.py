@@ -284,6 +284,8 @@ class PostgresStrategyUniverseRepository:
                 universe_version=universe.universe_version,
                 semantic_digest=universe.semantic_digest,
                 lifecycle_state="warming",
+                source_kind="manual",
+                materialization_generation_id=None,
                 installed_at_ms=universe.installed_at_ms,
                 activated_at_ms=None,
                 retired_at_ms=None,

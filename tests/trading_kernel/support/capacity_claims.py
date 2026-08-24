@@ -36,6 +36,7 @@ def make_issue_request(
             runtime_scope_version=ticket.runtime_scope_version,
             universe_version_id=ticket.universe_version_id,
             universe_semantic_digest=ticket.universe_semantic_digest,
+            selection_authority_id=ticket.selection_authority_id,
             fact_digest=ticket.fact_digest,
             exit_policy_id=ticket.exit_policy_id,
             exit_policy_semantic_hash=ticket.exit_policy_semantic_hash,

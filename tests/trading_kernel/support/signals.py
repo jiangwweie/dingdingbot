@@ -19,6 +19,7 @@ def make_signal(
     universe_version_id: str = "universe:SOR-SHORT:3",
     universe_semantic_digest: str = "sha256:" + "a" * 64,
     exposure_episode_id: str = "episode:" + "b" * 64,
+    selection_authority_id: str | None = None,
 ) -> StrategySignal:
     selected_facts = make_signal_facts() if facts is None else facts
     return StrategySignal(
@@ -31,6 +32,7 @@ def make_signal(
         event_spec_id="event_spec:SOR-001:SOR-SHORT:v3",
         universe_version_id=universe_version_id,
         universe_semantic_digest=universe_semantic_digest,
+        selection_authority_id=selection_authority_id,
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
         position_side="short",
         fact_digest=fact_digest or build_signal_fact_digest(selected_facts),

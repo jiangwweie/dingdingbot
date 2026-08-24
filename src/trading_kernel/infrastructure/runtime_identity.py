@@ -7,7 +7,8 @@ from typing import Final, Literal
 TradingKernelSchemaRevision = Literal[
     "0004_owner_control_plane",
     "0005_tradfi_instrument_center",
+    "0006_sor_dynamic_selection_v0",
 ]
 CURRENT_SCHEMA_REVISION: Final[TradingKernelSchemaRevision] = (
-    "0005_tradfi_instrument_center"
+    "0006_sor_dynamic_selection_v0"
 )

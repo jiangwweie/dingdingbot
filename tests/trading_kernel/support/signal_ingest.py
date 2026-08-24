@@ -51,6 +51,7 @@ def signal(
     position_side: Literal["long", "short"] = "long",
     exchange_instrument_id: str = "binance-usdm:BTCUSDT:perpetual",
     occurred_at_ms: int = 1_000,
+    selection_authority_id: str | None = None,
 ) -> StrategySignal:
     event_spec_id = (
         "event_spec:SOR-001:SOR-LONG:v4"
@@ -75,6 +76,7 @@ def signal(
         observed_at_ms=occurred_at_ms + 1,
         expires_at_ms=10_000,
         facts=facts,
+        selection_authority_id=selection_authority_id,
     )
 
 

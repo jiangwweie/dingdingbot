@@ -60,6 +60,34 @@ def test_adm_011_decision_digest_binds_exposure_family() -> None:
     assert opening_range.decision_digest != long_continuation.decision_digest
 
 
+def test_admission_decision_freezes_signal_selection_authority() -> None:
+    signal = _signal(selection_authority_id="authority:test:1")
+    candidate_set = freeze_candidate_set(
+        (EntryCandidate(signal=signal, owner_policy_priority=1),)
+    )
+
+    decision = freeze_admission_decision(
+        signal=signal,
+        candidate_set=candidate_set,
+        exposure_family="opening_range",
+        runtime_profile_id="tiny-live-v1",
+        owner_policy_id="policy-live-v3",
+        owner_policy_version=3,
+        venue_id="binance-usdm",
+        account_id="acct-live",
+        portfolio_usage=_usage(),
+        decision_status=AdmissionDecisionStatus.REJECTED,
+        first_blocker="budget_exhausted",
+        binding_constraint="gross_stop_risk",
+        capacity_claim_id=None,
+        ticket_id=None,
+        entry_admission_snapshot_digest="sha256:" + "d" * 64,
+        decided_at_ms=1_100,
+    )
+
+    assert decision.selection_authority_id == signal.selection_authority_id
+
+
 def test_adm_012_decision_rejects_untyped_extra_fields() -> None:
     decision = _rejected_decision()
 

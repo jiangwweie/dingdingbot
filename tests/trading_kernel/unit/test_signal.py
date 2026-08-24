@@ -72,6 +72,13 @@ def test_strategy_signal_requires_an_immutable_exposure_episode() -> None:
         make_signal(exposure_episode_id=" ")
 
 
+def test_strategy_signal_accepts_optional_selection_authority_lineage() -> None:
+    signal = make_signal(selection_authority_id="authority:test:1")
+
+    assert signal.selection_authority_id == "authority:test:1"
+    assert make_signal(selection_authority_id=" ").selection_authority_id is None
+
+
 def test_strategy_signal_requires_exact_nonduplicate_fact_bundle() -> None:
     facts = make_signal_facts()
     signal = make_signal(facts=facts)

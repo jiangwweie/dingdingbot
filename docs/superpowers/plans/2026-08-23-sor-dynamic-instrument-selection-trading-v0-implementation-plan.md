@@ -5,8 +5,8 @@ date: 2026-08-23
 phase: P3-X.3A
 design_authority: ../specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: DS-02
-next_execution_gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_03_TO_DS_10
+active_execution_scope: DS-03
+next_execution_gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_04_TO_DS_10
 production_authority: NONE
 ---
 
@@ -31,8 +31,8 @@ decision）
 design status: DESIGN_APPROVED
 plan status: PLAN_APPROVED
 implementation_authority: CODE_AND_TEST_ONLY
-active execution scope: DS-02
-next execution gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_03_TO_DS_10
+active execution scope: DS-03
+next execution gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_04_TO_DS_10
 production_authority: NONE
 ```
 
@@ -488,6 +488,16 @@ pytest -q \
 **Done**
 
 Disposable PostgreSQL证明empty/`0005` forward升级、preservation、constraints、query bounds和无副作用。
+
+2026-08-24 Codex完成本卡RED/GREEN与定向Reviewer复核。Disposable PostgreSQL直接证明empty与
+production-shaped `0005 -> 0006`、non-flat rollback、fix-forward downgrade拒绝、exact 24-member
+SelectionSpec seed、immutable Static rollback pair、零Snapshot/Generation/Authority/Vacuum/Command
+副作用、exact-two Generation target cardinality、append-only mutation拒绝、三lease namespace与
+Authority current pointer。Signal、CapacityClaim、AdmissionDecision、Ticket的nullable birth
+`selection_authority_id`已完成同值round-trip，Static `None`不改变既有digest。Focused/affected
+验证为Migration **3 passed**、Schema rebuild **26 passed**、Domain/Repository **41 passed**、
+Universe/Seed/Entry链 **60 passed**，Ruff、Mypy、`git diff --check`通过。因此本卡冻结为
+**`DS02_APPROVED`**，active scope自动推进至 **DS-03**。
 
 ### DS-03 — Selection Runner And Immutable Snapshot
 

@@ -82,6 +82,7 @@ class TradeTicket(BaseModel):
     take_profit_prices: tuple[Decimal, ...] = ()
     take_profit_quantities: tuple[Decimal, ...] = ()
     status: TicketStatus = TicketStatus.ISSUED
+    selection_authority_id: str | None = None
 
     @field_validator(
         "owner_policy_id",
@@ -97,6 +98,12 @@ class TradeTicket(BaseModel):
         if not isinstance(value, str) or not value.strip():
             raise ValueError("ticket references must be non-blank strings")
         return value.strip()
+
+    @field_validator("selection_authority_id", mode="before")
+    @classmethod
+    def _normalize_optional_selection_authority(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
 
     @field_validator(
         "fact_digest",
@@ -232,6 +239,8 @@ class TradeTicket(BaseModel):
 
     def decision_digest(self) -> str:
         payload = self.model_dump(mode="json", exclude={"status"})
+        if payload["selection_authority_id"] is None:
+            payload.pop("selection_authority_id")
         encoded = json.dumps(
             payload,
             sort_keys=True,

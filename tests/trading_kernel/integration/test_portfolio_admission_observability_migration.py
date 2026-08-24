@@ -465,7 +465,7 @@ CERTIFIED_0002_SOURCE_EVENTS = (
 
 
 def test_runtime_identity_points_to_current_schema_head() -> None:
-    assert CURRENT_SCHEMA_REVISION == "0005_tradfi_instrument_center"
+    assert CURRENT_SCHEMA_REVISION == "0006_sor_dynamic_selection_v0"
 
 
 def test_alembic_has_one_exact_current_head() -> None:

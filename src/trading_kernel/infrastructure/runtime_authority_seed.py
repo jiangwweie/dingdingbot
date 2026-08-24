@@ -243,7 +243,7 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
     """Compute the exact seed identity before touching PostgreSQL."""
 
     contracts = _contracts_for_schema(request.schema_revision)
-    include_tradfi = request.schema_revision == "0005_tradfi_instrument_center"
+    include_tradfi = _schema_includes_tradfi(request.schema_revision)
     return _seed_identity(
         account_id=request.account_id,
         schema_revision=request.schema_revision,
@@ -260,7 +260,7 @@ async def seed_runtime_authority(
     """Install the exact observation-only authority in one transaction."""
 
     contracts = _contracts_for_schema(request.schema_revision)
-    include_tradfi = request.schema_revision == "0005_tradfi_instrument_center"
+    include_tradfi = _schema_includes_tradfi(request.schema_revision)
     registry = await seed_strategy_registry(
         uow,
         seeded_at_ms=request.seeded_at_ms,
@@ -272,6 +272,7 @@ async def seed_runtime_authority(
     if request.schema_revision in {
         "0004_owner_control_plane",
         "0005_tradfi_instrument_center",
+        "0006_sor_dynamic_selection_v0",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -989,7 +990,7 @@ async def _transition_policy(
             schema_metadata.c.metadata_key == "schema_revision"
         )
     )
-    include_tradfi = schema_revision == "0005_tradfi_instrument_center"
+    include_tradfi = _schema_includes_tradfi(str(schema_revision))
     allowed_event_spec_ids = _allowed_event_spec_ids(
         registered_strategy_contracts()
         if include_tradfi
@@ -1082,9 +1083,16 @@ def _crypto_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
 def _contracts_for_schema(
     schema_revision: TradingKernelSchemaRevision,
 ) -> tuple[RegisteredStrategyContract, ...]:
-    if schema_revision == "0005_tradfi_instrument_center":
+    if _schema_includes_tradfi(schema_revision):
         return registered_strategy_contracts()
     return _crypto_strategy_contracts()
+
+
+def _schema_includes_tradfi(schema_revision: str) -> bool:
+    return schema_revision in {
+        "0005_tradfi_instrument_center",
+        "0006_sor_dynamic_selection_v0",
+    }
 
 
 def _tradfi_event_spec_ids() -> tuple[str, ...]:

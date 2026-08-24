@@ -122,6 +122,7 @@ def test_universe_authority_has_no_legacy_compatibility_or_dual_write_surface() 
             "compatibility",
             "compatibility_row",
             "require_product_compatibility",
+            "runtime_release_compatibility_facts",
         }
         if "brc_strategy_candidate_scopes" in source:
             markers.add("retired candidate-scope table")

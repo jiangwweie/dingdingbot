@@ -98,6 +98,7 @@ class StrategySignal(BaseModel):
     observed_at_ms: int
     expires_at_ms: int
     facts: tuple[SignalFactSnapshot, ...]
+    selection_authority_id: str | None = None
 
     @field_validator(
         "signal_event_id",
@@ -124,6 +125,12 @@ class StrategySignal(BaseModel):
         if _SHA256_DIGEST.fullmatch(normalized) is None:
             raise ValueError("signal digests must be exact sha256 identities")
         return normalized
+
+    @field_validator("selection_authority_id", mode="before")
+    @classmethod
+    def _normalize_optional_selection_authority(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
 
     @field_validator("runtime_scope_version")
     @classmethod

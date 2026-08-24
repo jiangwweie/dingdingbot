@@ -72,6 +72,7 @@ is one unbranched forward Alembic chain:
 -> 0003_portfolio_admission_observability
 -> 0004_owner_control_plane
 -> 0005_tradfi_instrument_center
+-> 0006_sor_dynamic_selection_v0
 ```
 
 `0001` is a frozen historical schema snapshot. `0002 -> 0003` is a stopped,
@@ -94,6 +95,13 @@ Compatibility, the bounded Instrument Center projections and the independent
 Event-to-RuntimeProfile mapping. The neutral TradFi RuntimeProfile is
 `tradfi-equity-usdm-v1`; its Strategy Control starts paused, and only an
 explicit postflight Owner resume permits later new ENTRY.
+
+`0005 -> 0006` is the stopped, flat, forward-only Dynamic Selection authority
+upgrade. It preserves terminal lineage and the existing Static StrategyUniverse
+pair while adding immutable Selection facts, Materialization Generation,
+time-bounded SelectionSessionAuthority, Entry Vacuum, Authority Gap Audit and
+nullable birth-authority lineage. The migration creates no active Snapshot,
+Generation, Authority, Vacuum, Ticket or Exchange Command.
 
 Strategy semantics live in the Registry, while concrete instrument membership,
 certification, warming, current activation, and frozen Signal/Ticket lineage

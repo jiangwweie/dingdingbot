@@ -260,6 +260,13 @@ strategy_universe_versions = sa.Table(
     sa.Column("universe_version", sa.Integer, nullable=False),
     sa.Column("semantic_digest", LONG_TEXT, nullable=False),
     sa.Column("lifecycle_state", SHORT_TEXT, nullable=False),
+    sa.Column(
+        "source_kind",
+        SHORT_TEXT,
+        nullable=False,
+        server_default=sa.text("'manual'"),
+    ),
+    _id("materialization_generation_id", nullable=True),
     _time("installed_at_ms"),
     _time("activated_at_ms", nullable=True),
     _time("retired_at_ms", nullable=True),
@@ -283,11 +290,21 @@ strategy_universe_versions = sa.Table(
         name="semantic_digest_valid",
     ),
     sa.CheckConstraint(
-        "lifecycle_state IN ('warming', 'active', 'retired', 'abandoned')",
+        "lifecycle_state IN ('warming', 'staged', 'active', 'retired', 'abandoned')",
         name="lifecycle_state_valid",
     ),
     sa.CheckConstraint(
-        "(lifecycle_state = 'warming' "
+        "source_kind IN ('manual', 'dynamic_selection', 'static_baseline')",
+        name="source_kind_valid",
+    ),
+    sa.CheckConstraint(
+        "(source_kind = 'manual' AND materialization_generation_id IS NULL) OR "
+        "(source_kind IN ('dynamic_selection', 'static_baseline') "
+        "AND materialization_generation_id IS NOT NULL)",
+        name="source_generation_shape_valid",
+    ),
+    sa.CheckConstraint(
+        "(lifecycle_state IN ('warming', 'staged') "
         "AND activated_at_ms IS NULL AND retired_at_ms IS NULL "
         "AND abandoned_at_ms IS NULL AND abandon_reason_code IS NULL) OR "
         "(lifecycle_state = 'active' "
@@ -302,6 +319,17 @@ strategy_universe_versions = sa.Table(
         "AND abandoned_at_ms IS NOT NULL AND abandon_reason_code IS NOT NULL)",
         name="lifecycle_timestamps_valid",
     ),
+    sa.ForeignKeyConstraint(
+        ["materialization_generation_id"],
+        [
+            "brc_strategy_universe_materialization_generations.materialization_generation_id"
+        ],
+    ),
+    sa.UniqueConstraint(
+        "materialization_generation_id",
+        "event_spec_id",
+        name="generation_event",
+    ),
 )
 
 sa.Index(
@@ -310,7 +338,7 @@ sa.Index(
     strategy_universe_versions.c.semantic_digest,
     unique=True,
     postgresql_where=strategy_universe_versions.c.lifecycle_state.in_(
-        ("warming", "active")
+        ("warming", "staged", "active")
     ),
 )
 sa.Index(
@@ -318,6 +346,11 @@ sa.Index(
     strategy_universe_versions.c.lifecycle_state,
     unique=True,
     postgresql_where=strategy_universe_versions.c.lifecycle_state == "warming",
+)
+sa.Index(
+    "ix_brc_strategy_universe_versions_generation",
+    strategy_universe_versions.c.materialization_generation_id,
+    strategy_universe_versions.c.event_spec_id,
 )
 
 strategy_universe_members = sa.Table(
@@ -379,6 +412,620 @@ strategy_universe_current = sa.Table(
     sa.CheckConstraint(
         "lifecycle_state = 'active'",
         name="active_only",
+    ),
+)
+
+instrument_selection_specs = sa.Table(
+    "brc_instrument_selection_specs",
+    metadata,
+    _id("selection_spec_id", primary_key=True),
+    _id("strategy_group_id"),
+    _id("strategy_version_id"),
+    sa.Column("selection_version", sa.Integer, nullable=False),
+    sa.Column("selection_kind", SHORT_TEXT, nullable=False),
+    sa.Column("algorithm_semantic_digest", LONG_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("installed_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["strategy_group_id"], ["brc_strategy_groups.strategy_group_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["strategy_version_id"], ["brc_strategy_versions.strategy_version_id"]
+    ),
+    sa.UniqueConstraint("strategy_group_id", "selection_version"),
+    sa.CheckConstraint("selection_version > 0", name="selection_version_positive"),
+    sa.CheckConstraint("selection_kind = 'sor_dynamic_v0'", name="selection_kind_valid"),
+    sa.CheckConstraint("status IN ('active', 'retired')", name="status_valid"),
+    sa.CheckConstraint(
+        "algorithm_semantic_digest ~ '^sha256:[0-9a-f]{64}$'",
+        name="algorithm_digest_valid",
+    ),
+)
+
+sor_dynamic_selection_specs_v0 = sa.Table(
+    "brc_sor_dynamic_selection_specs_v0",
+    metadata,
+    _id("selection_spec_id", primary_key=True),
+    sa.Column("decision_offset_utc_seconds", sa.Integer, nullable=False),
+    sa.Column("feature_cutoff_offset_utc_seconds", sa.Integer, nullable=False),
+    sa.Column("eligibility_not_before_offset_utc_seconds", sa.Integer, nullable=False),
+    sa.Column("valid_until_next_decision_offset_seconds", sa.Integer, nullable=False),
+    sa.Column("candidate_count", sa.Integer, nullable=False),
+    sa.Column("selected_count_max", sa.Integer, nullable=False),
+    sa.Column("near_count_max", sa.Integer, nullable=False),
+    sa.Column("activity_floor_quote_usdt", MONEY, nullable=False),
+    sa.Column("materialization_timeout_seconds", sa.Integer, nullable=False),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.CheckConstraint(
+        "decision_offset_utc_seconds = 3600 "
+        "AND feature_cutoff_offset_utc_seconds = 3600 "
+        "AND eligibility_not_before_offset_utc_seconds = 4500 "
+        "AND valid_until_next_decision_offset_seconds = 86400 "
+        "AND candidate_count = 24 AND selected_count_max = 7 "
+        "AND near_count_max = 7 AND activity_floor_quote_usdt = 20000000 "
+        "AND materialization_timeout_seconds = 1800",
+        name="frozen_v0",
+    ),
+)
+
+instrument_selection_spec_events = sa.Table(
+    "brc_instrument_selection_spec_events",
+    metadata,
+    _id("selection_spec_id"),
+    _id("event_spec_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.PrimaryKeyConstraint("selection_spec_id", "event_spec_id"),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.ForeignKeyConstraint(["event_spec_id"], ["brc_event_specs.event_spec_id"]),
+    sa.UniqueConstraint("selection_spec_id", "position_side"),
+    sa.CheckConstraint("position_side IN ('long', 'short')", name="side_valid"),
+)
+
+instrument_selection_spec_members = sa.Table(
+    "brc_instrument_selection_spec_members",
+    metadata,
+    _id("selection_spec_id"),
+    _id("exchange_instrument_id"),
+    sa.PrimaryKeyConstraint("selection_spec_id", "exchange_instrument_id"),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["exchange_instrument_id"], ["brc_instruments.exchange_instrument_id"]
+    ),
+)
+
+strategy_selection_rollback_baselines = sa.Table(
+    "brc_strategy_selection_rollback_baselines",
+    metadata,
+    _id("rollback_baseline_id", primary_key=True),
+    _id("strategy_group_id"),
+    _id("strategy_version_id"),
+    _id("source_long_universe_version_id"),
+    _id("source_short_universe_version_id"),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False),
+    _time("captured_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["strategy_group_id"], ["brc_strategy_groups.strategy_group_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["strategy_version_id"], ["brc_strategy_versions.strategy_version_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["source_long_universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["source_short_universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+    ),
+    sa.UniqueConstraint("strategy_group_id", "strategy_version_id"),
+    sa.CheckConstraint(
+        "source_long_universe_version_id <> source_short_universe_version_id",
+        name="pair_distinct",
+    ),
+    sa.CheckConstraint(
+        "semantic_digest ~ '^sha256:[0-9a-f]{64}$'", name="semantic_digest_valid"
+    ),
+)
+
+strategy_selection_control_current = sa.Table(
+    "brc_strategy_selection_control_current",
+    metadata,
+    _id("strategy_group_id", primary_key=True),
+    _id("selection_spec_id"),
+    sa.Column("selection_mode", SHORT_TEXT, nullable=False),
+    sa.Column("pending_selection_mode", SHORT_TEXT, nullable=True),
+    _time("pending_effective_session_start_ms", nullable=True),
+    _id("pending_authorization_id", nullable=True),
+    sa.Column("control_version", sa.BigInteger, nullable=False),
+    _id("rollback_baseline_id", nullable=True),
+    _time("updated_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["strategy_group_id"], ["brc_strategy_groups.strategy_group_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["pending_authorization_id"], ["brc_owner_authorizations.authorization_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["rollback_baseline_id"],
+        ["brc_strategy_selection_rollback_baselines.rollback_baseline_id"],
+    ),
+    sa.CheckConstraint(
+        "selection_mode IN ('disabled', 'static_baseline', 'dynamic_selection')",
+        name="mode_valid",
+    ),
+    sa.CheckConstraint("control_version > 0", name="version_positive"),
+)
+
+instrument_selection_jobs_current = sa.Table(
+    "brc_instrument_selection_jobs_current",
+    metadata,
+    _id("selection_job_id", primary_key=True),
+    _id("selection_spec_id"),
+    _time("session_start_ms"),
+    _time("scheduled_at_ms"),
+    _time("feature_cutoff_at_ms"),
+    sa.Column("state", SHORT_TEXT, nullable=False),
+    _id("selection_snapshot_id", nullable=True),
+    sa.Column("first_blocker", LONG_TEXT, nullable=True),
+    sa.Column("attempt_count", sa.Integer, nullable=False),
+    _time("next_retry_at_ms", nullable=True),
+    sa.Column("lease_owner", SHORT_TEXT, nullable=True),
+    _time("lease_expires_at_ms", nullable=True),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    _time("updated_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["selection_snapshot_id"],
+        ["brc_instrument_selection_snapshots.selection_snapshot_id"],
+    ),
+    sa.UniqueConstraint("selection_spec_id", "session_start_ms"),
+    sa.CheckConstraint(
+        "state IN ('DUE', 'CLAIMED', 'SNAPSHOT_READY', 'SOURCE_FAILED', "
+        "'COMPUTE_FAILED')",
+        name="state_valid",
+    ),
+)
+sa.Index(
+    "ix_brc_instrument_selection_jobs_claim",
+    instrument_selection_jobs_current.c.state,
+    instrument_selection_jobs_current.c.scheduled_at_ms,
+    instrument_selection_jobs_current.c.next_retry_at_ms,
+    instrument_selection_jobs_current.c.lease_expires_at_ms,
+    postgresql_where=instrument_selection_jobs_current.c.state.in_(
+        ("DUE", "CLAIMED", "SOURCE_FAILED", "COMPUTE_FAILED")
+    ),
+)
+
+instrument_selection_attempts = sa.Table(
+    "brc_instrument_selection_attempts",
+    metadata,
+    _id("selection_attempt_id", primary_key=True),
+    _id("selection_job_id"),
+    _id("selection_spec_id"),
+    _time("session_start_ms"),
+    sa.Column("worker_id", SHORT_TEXT, nullable=False),
+    sa.Column("attempt_number", sa.Integer, nullable=False),
+    _time("started_at_ms"),
+    _time("completed_at_ms"),
+    sa.Column("outcome", SHORT_TEXT, nullable=False),
+    sa.Column("reason_code", LONG_TEXT, nullable=True),
+    sa.Column("source_member_count", sa.Integer, nullable=False),
+    sa.Column("source_digest", LONG_TEXT, nullable=True),
+    sa.ForeignKeyConstraint(
+        ["selection_job_id"], ["brc_instrument_selection_jobs_current.selection_job_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.UniqueConstraint("selection_spec_id", "session_start_ms", "attempt_number"),
+)
+
+instrument_selection_snapshots = sa.Table(
+    "brc_instrument_selection_snapshots",
+    metadata,
+    _id("selection_snapshot_id", primary_key=True),
+    _id("selection_spec_id"),
+    _id("strategy_group_id"),
+    _id("strategy_version_id"),
+    _time("session_start_ms"),
+    _time("decision_at_ms"),
+    _time("feature_cutoff_at_ms"),
+    _time("eligibility_not_before_ms"),
+    _time("expires_at_ms"),
+    sa.Column("candidate_count", sa.Integer, nullable=False),
+    sa.Column("ready_count", sa.Integer, nullable=False),
+    sa.Column("selected_count", sa.Integer, nullable=False),
+    _time("source_observed_at_ms"),
+    sa.Column("source_semantic_digest", LONG_TEXT, nullable=False),
+    sa.Column("selection_semantic_digest", LONG_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["strategy_group_id"], ["brc_strategy_groups.strategy_group_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["strategy_version_id"], ["brc_strategy_versions.strategy_version_id"]
+    ),
+    sa.UniqueConstraint("selection_spec_id", "session_start_ms"),
+    sa.UniqueConstraint("selection_snapshot_id", "selection_semantic_digest"),
+)
+
+instrument_selection_member_decisions = sa.Table(
+    "brc_instrument_selection_member_decisions",
+    metadata,
+    _id("selection_snapshot_id"),
+    _id("member_decision_id"),
+    _id("selection_spec_id"),
+    _time("session_start_ms"),
+    _time("feature_cutoff_at_ms"),
+    _time("input_window_start_ms"),
+    _time("input_window_end_ms"),
+    _id("exchange_instrument_id"),
+    sa.Column("input_window_digest", LONG_TEXT, nullable=False),
+    sa.Column("source_status", SHORT_TEXT, nullable=False),
+    sa.Column("or_high", MONEY, nullable=False),
+    sa.Column("or_low", MONEY, nullable=False),
+    sa.Column("or_width", MONEY, nullable=False),
+    sa.Column("pre_or_atr14", MONEY, nullable=False),
+    sa.Column("pre_or_width_atr14", MONEY, nullable=False),
+    sa.Column("trailing_24h_quote_volume", MONEY, nullable=False),
+    sa.Column("or_geometry_valid", sa.Boolean, nullable=False),
+    sa.Column("atr_valid", sa.Boolean, nullable=False),
+    sa.Column("activity_valid", sa.Boolean, nullable=False),
+    sa.Column("selection_ready", sa.Boolean, nullable=False),
+    sa.Column("primary_reason", SHORT_TEXT, nullable=True),
+    _json("secondary_reasons"),
+    sa.Column("stable_rank", sa.Integer, nullable=True),
+    sa.Column("member_state", SHORT_TEXT, nullable=False),
+    sa.Column("selected", sa.Boolean, nullable=False),
+    sa.Column("member_semantic_digest", LONG_TEXT, nullable=False),
+    sa.PrimaryKeyConstraint("selection_snapshot_id", "exchange_instrument_id"),
+    sa.UniqueConstraint("member_decision_id"),
+    sa.ForeignKeyConstraint(
+        ["selection_snapshot_id"],
+        ["brc_instrument_selection_snapshots.selection_snapshot_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id", "exchange_instrument_id"],
+        [
+            "brc_instrument_selection_spec_members.selection_spec_id",
+            "brc_instrument_selection_spec_members.exchange_instrument_id",
+        ],
+    ),
+)
+sa.Index(
+    "ix_brc_instrument_selection_member_decisions_rank",
+    instrument_selection_member_decisions.c.selection_snapshot_id,
+    instrument_selection_member_decisions.c.stable_rank,
+)
+
+strategy_universe_materialization_generations = sa.Table(
+    "brc_strategy_universe_materialization_generations",
+    metadata,
+    _id("materialization_generation_id", primary_key=True),
+    _id("selection_spec_id"),
+    _id("strategy_group_id"),
+    _id("strategy_version_id"),
+    sa.Column("selection_mode", SHORT_TEXT, nullable=False),
+    _id("selection_snapshot_id", nullable=True),
+    _id("rollback_baseline_id", nullable=True),
+    _time("session_start_ms", nullable=True),
+    _id("previous_long_universe_version_id"),
+    _id("previous_short_universe_version_id"),
+    sa.Column("desired_member_count", sa.Integer, nullable=False),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False),
+    sa.Column("lifecycle_state", SHORT_TEXT, nullable=False),
+    sa.Column("fallback_reason_code", LONG_TEXT, nullable=True),
+    sa.Column("lease_owner", SHORT_TEXT, nullable=True),
+    _time("lease_expires_at_ms", nullable=True),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    _time("created_at_ms"),
+    _time("desired_at_ms", nullable=True),
+    _time("fenced_at_ms", nullable=True),
+    _time("activated_at_ms", nullable=True),
+    _time("fallback_at_ms", nullable=True),
+    _time("terminal_at_ms", nullable=True),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["selection_snapshot_id"],
+        ["brc_instrument_selection_snapshots.selection_snapshot_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["rollback_baseline_id"],
+        ["brc_strategy_selection_rollback_baselines.rollback_baseline_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["previous_long_universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["previous_short_universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+    ),
+    sa.UniqueConstraint("selection_spec_id", "session_start_ms", "selection_mode"),
+    sa.UniqueConstraint("selection_snapshot_id"),
+)
+sa.Index(
+    "ix_brc_strategy_universe_materialization_generation_claim",
+    strategy_universe_materialization_generations.c.lifecycle_state,
+    strategy_universe_materialization_generations.c.lease_expires_at_ms,
+    postgresql_where=strategy_universe_materialization_generations.c.lifecycle_state.in_(
+        ("PENDING", "DESIRED", "DRAINING_ENTRY", "MATERIALIZING", "STAGED")
+    ),
+)
+
+strategy_universe_materialization_targets = sa.Table(
+    "brc_strategy_universe_materialization_targets",
+    metadata,
+    _id("materialization_generation_id"),
+    _id("event_spec_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("expected_member_set_digest", LONG_TEXT, nullable=False),
+    sa.Column("materialization_order", sa.Integer, nullable=False),
+    sa.PrimaryKeyConstraint("materialization_generation_id", "event_spec_id"),
+    sa.ForeignKeyConstraint(
+        ["materialization_generation_id"],
+        ["brc_strategy_universe_materialization_generations.materialization_generation_id"],
+    ),
+    sa.ForeignKeyConstraint(["event_spec_id"], ["brc_event_specs.event_spec_id"]),
+    sa.UniqueConstraint("materialization_generation_id", "position_side"),
+    sa.UniqueConstraint("materialization_generation_id", "materialization_order"),
+)
+
+strategy_universe_materialization_events = sa.Table(
+    "brc_strategy_universe_materialization_events",
+    metadata,
+    _id("materialization_event_id", primary_key=True),
+    _id("materialization_generation_id"),
+    sa.Column("event_sequence", sa.BigInteger, nullable=False),
+    sa.Column("event_type", SHORT_TEXT, nullable=False),
+    _json("payload"),
+    _time("occurred_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["materialization_generation_id"],
+        ["brc_strategy_universe_materialization_generations.materialization_generation_id"],
+    ),
+    sa.UniqueConstraint("materialization_generation_id", "event_sequence"),
+)
+
+strategy_entry_vacuums_current = sa.Table(
+    "brc_strategy_entry_vacuums_current",
+    metadata,
+    _id("entry_vacuum_id", primary_key=True),
+    _id("strategy_group_id"),
+    _id("selection_spec_id"),
+    _time("session_start_ms"),
+    _id("source_generation_id", nullable=True),
+    sa.Column("state", SHORT_TEXT, nullable=False),
+    _time("fenced_at_ms"),
+    _time("drained_at_ms", nullable=True),
+    _time("resolved_at_ms", nullable=True),
+    sa.Column("first_blocker", LONG_TEXT, nullable=False),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.ForeignKeyConstraint(
+        ["strategy_group_id"], ["brc_strategy_groups.strategy_group_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["source_generation_id"],
+        ["brc_strategy_universe_materialization_generations.materialization_generation_id"],
+    ),
+    sa.UniqueConstraint("strategy_group_id", "selection_spec_id"),
+)
+
+strategy_entry_vacuum_events = sa.Table(
+    "brc_strategy_entry_vacuum_events",
+    metadata,
+    _id("entry_vacuum_event_id", primary_key=True),
+    _id("entry_vacuum_id"),
+    sa.Column("event_sequence", sa.BigInteger, nullable=False),
+    sa.Column("event_type", SHORT_TEXT, nullable=False),
+    _json("payload"),
+    _time("occurred_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["entry_vacuum_id"], ["brc_strategy_entry_vacuums_current.entry_vacuum_id"]
+    ),
+    sa.UniqueConstraint("entry_vacuum_id", "event_sequence"),
+)
+
+selection_authority_gap_audits_current = sa.Table(
+    "brc_selection_authority_gap_audits_current",
+    metadata,
+    _id("authority_gap_audit_id", primary_key=True),
+    _id("selection_spec_id"),
+    _time("session_start_ms"),
+    sa.Column("gap_kind", SHORT_TEXT, nullable=False),
+    _id("source_entry_vacuum_id", nullable=True),
+    _id("source_generation_id", nullable=True),
+    sa.Column("proposed_authority_outcome", SHORT_TEXT, nullable=False),
+    _time("unauthorized_from_close_time_ms"),
+    _time("audited_through_close_time_ms", nullable=True),
+    _time("first_eligible_close_time_ms", nullable=True),
+    sa.Column("audit_scope_digest", LONG_TEXT, nullable=True),
+    sa.Column("audit_result_digest", LONG_TEXT, nullable=True),
+    sa.Column("detector_semantic_digest", LONG_TEXT, nullable=False),
+    sa.Column("state", SHORT_TEXT, nullable=False),
+    sa.Column("first_blocker", LONG_TEXT, nullable=True),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["source_entry_vacuum_id"],
+        ["brc_strategy_entry_vacuums_current.entry_vacuum_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["source_generation_id"],
+        ["brc_strategy_universe_materialization_generations.materialization_generation_id"],
+    ),
+)
+
+selection_authority_gap_audit_events = sa.Table(
+    "brc_selection_authority_gap_audit_events",
+    metadata,
+    _id("authority_gap_audit_event_id", primary_key=True),
+    _id("authority_gap_audit_id"),
+    sa.Column("event_sequence", sa.BigInteger, nullable=False),
+    sa.Column("event_type", SHORT_TEXT, nullable=False),
+    _json("payload"),
+    _time("occurred_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["authority_gap_audit_id"],
+        ["brc_selection_authority_gap_audits_current.authority_gap_audit_id"],
+    ),
+    sa.UniqueConstraint("authority_gap_audit_id", "event_sequence"),
+)
+
+selection_session_authorities = sa.Table(
+    "brc_selection_session_authorities",
+    metadata,
+    _id("selection_authority_id", primary_key=True),
+    _id("selection_spec_id"),
+    _time("session_start_ms"),
+    _time("decision_boundary_ms"),
+    sa.Column("authority_sequence", sa.BigInteger, nullable=False),
+    sa.Column("selection_mode", SHORT_TEXT, nullable=False),
+    _id("selection_job_id", nullable=True),
+    _id("selection_attempt_id", nullable=True),
+    _id("selection_snapshot_id", nullable=True),
+    _id("continued_from_selection_authority_id", nullable=True),
+    sa.Column("continuity_source_kind", SHORT_TEXT, nullable=False),
+    _id("authority_gap_audit_id", nullable=True),
+    _id("materialization_generation_id", nullable=True),
+    sa.Column("owner_control_version", sa.BigInteger, nullable=False),
+    sa.Column("authority_outcome", SHORT_TEXT, nullable=False),
+    _id("authorized_long_universe_version_id", nullable=True),
+    _id("authorized_short_universe_version_id", nullable=True),
+    sa.Column("grant_proof_kind", SHORT_TEXT, nullable=True),
+    _id("grant_predecessor_authority_id", nullable=True),
+    _time("effective_from_ms"),
+    _time("first_eligible_close_time_ms", nullable=True),
+    _time("expires_at_ms"),
+    sa.Column("reason_code", LONG_TEXT, nullable=False),
+    sa.Column("semantic_digest", LONG_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["selection_job_id"], ["brc_instrument_selection_jobs_current.selection_job_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["selection_attempt_id"], ["brc_instrument_selection_attempts.selection_attempt_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["selection_snapshot_id"],
+        ["brc_instrument_selection_snapshots.selection_snapshot_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["continued_from_selection_authority_id"],
+        ["brc_selection_session_authorities.selection_authority_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["authority_gap_audit_id"],
+        ["brc_selection_authority_gap_audits_current.authority_gap_audit_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["materialization_generation_id"],
+        ["brc_strategy_universe_materialization_generations.materialization_generation_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["authorized_long_universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["authorized_short_universe_version_id"],
+        ["brc_strategy_universe_versions.universe_version_id"],
+    ),
+    sa.UniqueConstraint("selection_spec_id", "session_start_ms", "authority_sequence"),
+)
+sa.Index(
+    "ix_brc_selection_session_authorities_period",
+    selection_session_authorities.c.selection_spec_id,
+    selection_session_authorities.c.session_start_ms,
+    selection_session_authorities.c.authority_sequence,
+)
+
+selection_authority_current = sa.Table(
+    "brc_selection_authority_current",
+    metadata,
+    _id("selection_spec_id", primary_key=True),
+    _id("selection_authority_id"),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    _time("updated_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["selection_authority_id"],
+        ["brc_selection_session_authorities.selection_authority_id"],
+    ),
+)
+
+strategy_trigger_suppressions = sa.Table(
+    "brc_strategy_trigger_suppressions",
+    metadata,
+    _id("trigger_suppression_id", primary_key=True),
+    _id("authority_gap_audit_id"),
+    _id("entry_vacuum_id", nullable=True),
+    _id("materialization_generation_id", nullable=True),
+    _id("event_spec_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("session_reference", LONG_TEXT, nullable=False),
+    _time("first_natural_trigger_at_ms"),
+    sa.Column("reason_code", SHORT_TEXT, nullable=False),
+    sa.Column("detector_semantic_digest", LONG_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["authority_gap_audit_id"],
+        ["brc_selection_authority_gap_audits_current.authority_gap_audit_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["entry_vacuum_id"], ["brc_strategy_entry_vacuums_current.entry_vacuum_id"]
+    ),
+    sa.ForeignKeyConstraint(
+        ["materialization_generation_id"],
+        ["brc_strategy_universe_materialization_generations.materialization_generation_id"],
+    ),
+    sa.ForeignKeyConstraint(["event_spec_id"], ["brc_event_specs.event_spec_id"]),
+    sa.ForeignKeyConstraint(
+        ["exchange_instrument_id"], ["brc_instruments.exchange_instrument_id"]
+    ),
+    sa.UniqueConstraint("event_spec_id", "exchange_instrument_id", "session_reference"),
+)
+
+runtime_release_compatibility_facts = sa.Table(
+    "brc_runtime_release_compatibility_facts",
+    metadata,
+    _id("release_compatibility_id", primary_key=True),
+    sa.Column("from_commit", SHORT_TEXT, nullable=False),
+    sa.Column("to_commit", SHORT_TEXT, nullable=False),
+    sa.Column("from_schema_revision", SHORT_TEXT, nullable=False),
+    sa.Column("to_schema_revision", SHORT_TEXT, nullable=False),
+    sa.Column("classification", SHORT_TEXT, nullable=False),
+    sa.Column("compatibility_basis_digest", LONG_TEXT, nullable=False),
+    _json("reason_codes"),
+    sa.Column("certification_manifest_digest", LONG_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.UniqueConstraint(
+        "from_commit", "to_commit", "from_schema_revision", "to_schema_revision"
     ),
 )
 
@@ -932,6 +1579,7 @@ signal_events = sa.Table(
     _id("strategy_version_id"),
     _id("event_spec_id"),
     _id("universe_version_id"),
+    _id("selection_authority_id", nullable=True),
     sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
     _id("exchange_instrument_id"),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
@@ -972,6 +1620,14 @@ signal_events = sa.Table(
             "brc_strategy_universe_versions.semantic_digest",
         ],
     ),
+    sa.ForeignKeyConstraint(
+        ["selection_authority_id"],
+        ["brc_selection_session_authorities.selection_authority_id"],
+    ),
+)
+sa.Index(
+    "ix_brc_signal_events_selection_authority_id",
+    signal_events.c.selection_authority_id,
 )
 
 signal_fact_snapshots = sa.Table(
@@ -1023,6 +1679,7 @@ admission_decisions = sa.Table(
     _id("strategy_version_id"),
     _id("event_spec_id"),
     _id("universe_version_id"),
+    _id("selection_authority_id", nullable=True),
     sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
     _id("runtime_profile_id"),
     _id("runtime_scope_id"),
@@ -1094,6 +1751,14 @@ admission_decisions = sa.Table(
         ["ticket_id"],
         ["brc_trade_tickets.ticket_id"],
     ),
+    sa.ForeignKeyConstraint(
+        ["selection_authority_id"],
+        ["brc_selection_session_authorities.selection_authority_id"],
+    ),
+)
+sa.Index(
+    "ix_brc_admission_decisions_selection_authority_id",
+    admission_decisions.c.selection_authority_id,
 )
 
 shadow_outcomes_current = sa.Table(
@@ -1292,6 +1957,7 @@ capacity_claims = sa.Table(
     _id("strategy_version_id"),
     _id("event_spec_id"),
     _id("universe_version_id"),
+    _id("selection_authority_id", nullable=True),
     sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
     _id("runtime_profile_id"),
     _id("owner_policy_id"),
@@ -1413,6 +2079,14 @@ capacity_claims = sa.Table(
             "brc_strategy_universe_versions.semantic_digest",
         ],
     ),
+    sa.ForeignKeyConstraint(
+        ["selection_authority_id"],
+        ["brc_selection_session_authorities.selection_authority_id"],
+    ),
+)
+sa.Index(
+    "ix_brc_capacity_claims_selection_authority_id",
+    capacity_claims.c.selection_authority_id,
 )
 
 trade_tickets = sa.Table(
@@ -1425,6 +2099,7 @@ trade_tickets = sa.Table(
     _id("strategy_version_id"),
     _id("event_spec_id"),
     _id("universe_version_id"),
+    _id("selection_authority_id", nullable=True),
     sa.Column("universe_semantic_digest", LONG_TEXT, nullable=False),
     _id("runtime_profile_id"),
     _id("owner_policy_id"),
@@ -1496,6 +2171,14 @@ trade_tickets = sa.Table(
             "brc_strategy_universe_versions.semantic_digest",
         ],
     ),
+    sa.ForeignKeyConstraint(
+        ["selection_authority_id"],
+        ["brc_selection_session_authorities.selection_authority_id"],
+    ),
+)
+sa.Index(
+    "ix_brc_trade_tickets_selection_authority_id",
+    trade_tickets.c.selection_authority_id,
 )
 sa.Index(
     "ix_brc_trade_tickets_instrument_window",
