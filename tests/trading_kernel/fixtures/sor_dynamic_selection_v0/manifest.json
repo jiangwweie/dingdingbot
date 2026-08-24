@@ -1,0 +1,557 @@
+{
+  "artifact_set_digest": "sha256:5d8c701d2738daebc506921038b2afb5a8feeda4a25d9652866c9b41743d4e45",
+  "artifacts": {
+    "member_decisions": {
+      "path": "member_decisions.csv.gz",
+      "rows": 23064,
+      "sha256": "e7aefa1727184c867eb9fe67901210ae943340743c6bf7bc4f4cf6f1f1530448",
+      "uncompressed_content_sha256": "94fa341ea2a9f089a6ac5a4f936d58b05858b74cff61af872f34d0c06e3517a8"
+    },
+    "selection_snapshots": {
+      "path": "selection_snapshots.csv.gz",
+      "rows": 961,
+      "sha256": "ebe22391c5b73f532a71bd1ff08a51d3f2851118c7dadbfb826d56638807972b",
+      "uncompressed_content_sha256": "301b491958463473c2801c430e6b3a7ee8e5a40d38d6fa3dd0f0dd26b2daadfc"
+    }
+  },
+  "expected_member_rows": 23064,
+  "expected_members_per_session": 24,
+  "expected_sessions": 961,
+  "generator": {
+    "path": "scripts/trading_kernel/verify_sor_dynamic_selection_golden.py",
+    "python": "3.14.2 (main, Dec  5 2025, 16:49:16) [Clang 16.0.0 (clang-1600.0.26.6)]",
+    "sha256": "319d976e771f70a50663856bb1d86f25cfa5a7df8365ac06b14ad991b51d2119"
+  },
+  "independent_replay_parity": {
+    "computed_policy_metrics": {
+      "dynamic": {
+        "direction_tail3": {
+          "long": 625,
+          "short": 698
+        },
+        "directional_slot_days": 13454,
+        "member_days": 6727,
+        "reclaim": 7732,
+        "tail3": 1323,
+        "tp1": 2989,
+        "triggers": 11259
+      },
+      "near": {
+        "direction_tail3": {
+          "long": 508,
+          "short": 608
+        },
+        "directional_slot_days": 13454,
+        "member_days": 6727,
+        "reclaim": 7873,
+        "tail3": 1116,
+        "tp1": 2728,
+        "triggers": 10980
+      },
+      "not_selected": {
+        "direction_tail3": {
+          "long": 535,
+          "short": 543
+        },
+        "directional_slot_days": 17436,
+        "member_days": 8718,
+        "reclaim": 10250,
+        "tail3": 1078,
+        "tp1": 2928,
+        "triggers": 13603
+      },
+      "static": {
+        "direction_tail3": {
+          "long": 525,
+          "short": 542
+        },
+        "directional_slot_days": 13454,
+        "member_days": 6727,
+        "reclaim": 7873,
+        "tail3": 1067,
+        "tp1": 2601,
+        "triggers": 10905
+      }
+    },
+    "expected_counts": {
+      "dynamic": {
+        "reclaim": 7732,
+        "tail3": 1323,
+        "tp1": 2989,
+        "triggers": 11259
+      },
+      "member_rows": 23064,
+      "near": {
+        "tail3": 1116,
+        "triggers": 10980
+      },
+      "not_selected": {
+        "tail3": 1078,
+        "triggers": 13603
+      },
+      "ready_max": 24,
+      "ready_min": 14,
+      "selected_direction_tail3": {
+        "long": 625,
+        "short": 698
+      },
+      "sessions": 961,
+      "state_counts": {
+        "INELIGIBLE": 892,
+        "NEAR_THRESHOLD": 6727,
+        "NOT_SELECTED": 8718,
+        "SELECTED": 6727
+      },
+      "static": {
+        "reclaim": 7873,
+        "tail3": 1067,
+        "tp1": 2601,
+        "triggers": 10905
+      }
+    }
+  },
+  "input_files": [
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:ADAUSDT:perpetual",
+      "filename": "ADAUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "d297576e811644023e38356a3c0b3c72b01d4fce75f998dc30caa10943c6240c",
+      "size_bytes": 3708474,
+      "symbol": "ADAUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:APTUSDT:perpetual",
+      "filename": "APTUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "e4368d555c9f3fbd3b3b55401eea590f7c14c1f5737f483d40773125002defc8",
+      "size_bytes": 3867575,
+      "symbol": "APTUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:ARBUSDT:perpetual",
+      "filename": "ARBUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "ffb39ebeaa882a4b02726627f16f0cc0ed8cb1db73723d8e53f4c30f1f1c0098",
+      "size_bytes": 3894715,
+      "symbol": "ARBUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:ATOMUSDT:perpetual",
+      "filename": "ATOMUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "ab05b18a89e992fd4f58cd5c39c8c92b2a072371e6b33343e1599ac6ae319ed0",
+      "size_bytes": 3714546,
+      "symbol": "ATOMUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:AVAXUSDT:perpetual",
+      "filename": "AVAXUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "bdb9ae9c10f439da8f7ab5dd4da8a4984f32c2569b650da831518be1a198dfc3",
+      "size_bytes": 3515189,
+      "symbol": "AVAXUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:BCHUSDT:perpetual",
+      "filename": "BCHUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "ee4dd4abb6551c7c7e43caa312a705d8fb8cad67feaa6a595a691ed299e93221",
+      "size_bytes": 3955407,
+      "symbol": "BCHUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:BNBUSDT:perpetual",
+      "filename": "BNBUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "01ea393a05aca9ade8bbdd562794cc080a285453f77ba52433a03a327181a696",
+      "size_bytes": 3847282,
+      "symbol": "BNBUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:BTCUSDT:perpetual",
+      "filename": "BTCUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "07296f20ba3211204c392906c30eccb5abbe604d957fa8b30a1e05fa4daa3aea",
+      "size_bytes": 4317043,
+      "symbol": "BTCUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:DOGEUSDT:perpetual",
+      "filename": "DOGEUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "bfda5e89d0192cb10c145856a1be2ae418ca0fd4f055569b6a856f6306da06c3",
+      "size_bytes": 4118487,
+      "symbol": "DOGEUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:DOTUSDT:perpetual",
+      "filename": "DOTUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "e17cda26cb1707401e7eba5e546854c222c01183f26411302c49de383ea49532",
+      "size_bytes": 3602480,
+      "symbol": "DOTUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:ETCUSDT:perpetual",
+      "filename": "ETCUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "9214603abae6b47cce9d7fd6bfe3cd33f7bd9a609fa54a25ec9a0bb2a77beb13",
+      "size_bytes": 3848525,
+      "symbol": "ETCUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:ETHUSDT:perpetual",
+      "filename": "ETHUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "48a314808613cba33e3e40de8c6c1e1a613016765ebcf12433a3a82f2b97dfbf",
+      "size_bytes": 4464015,
+      "symbol": "ETHUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:FILUSDT:perpetual",
+      "filename": "FILUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "dd41d6cc53d0c3356a0c610e7309e5ec7d06dd897aa3d2940f3b5326a9424148",
+      "size_bytes": 3612104,
+      "symbol": "FILUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:INJUSDT:perpetual",
+      "filename": "INJUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "5264916858df4f27a1c36c97f9cd6e80ec916575c0c60c980317e718ccdfb9cf",
+      "size_bytes": 3688670,
+      "symbol": "INJUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:LINKUSDT:perpetual",
+      "filename": "LINKUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "3b76ff4211b07acb9fd540dc044d49a5e2dd9d562e8a195169ae1dbff9299891",
+      "size_bytes": 3974707,
+      "symbol": "LINKUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:LTCUSDT:perpetual",
+      "filename": "LTCUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "eaab1ba400f3ab1695411faad2426ff2a2bdedc1c0f27f5a738a804252bab3f8",
+      "size_bytes": 3854079,
+      "symbol": "LTCUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:NEARUSDT:perpetual",
+      "filename": "NEARUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "4646e2d1b672f001cbdb3fe8b5d9ba7fc8ca937b230fb35806a4db3efaafe0b5",
+      "size_bytes": 3369229,
+      "symbol": "NEARUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:OPUSDT:perpetual",
+      "filename": "OPUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "4aa72ec71c3293f61dfbbaa49ddd5a9e241fe2cdea20c32dd9abbace04f83423",
+      "size_bytes": 3902887,
+      "symbol": "OPUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:RUNEUSDT:perpetual",
+      "filename": "RUNEUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "84c8966c6d676b328cb37690e5d942bd931552d8ee87faa155c3ec7be7a8dd67",
+      "size_bytes": 3243274,
+      "symbol": "RUNEUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:SOLUSDT:perpetual",
+      "filename": "SOLUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "b370554b02ee17ef9ad56f897ae299aefea30d1964c2181e9825252f6335c30c",
+      "size_bytes": 3891520,
+      "symbol": "SOLUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:SUIUSDT:perpetual",
+      "filename": "SUIUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "99076fd696faa97f34a464eca5f4097ad06e0f32089695d9a97dae5f79c7aa38",
+      "size_bytes": 4088129,
+      "symbol": "SUIUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:TRXUSDT:perpetual",
+      "filename": "TRXUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "b7f1d677080b2196afdc26419fb1b899dce0c53202b5182dbd0f9ff768f52247",
+      "size_bytes": 3782380,
+      "symbol": "TRXUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:UNIUSDT:perpetual",
+      "filename": "UNIUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "cf06f1675dde6f0e362b811f054b550ba7d3b21277b31c776af80822466bf296",
+      "size_bytes": 3374773,
+      "symbol": "UNIUSDT"
+    },
+    {
+      "duplicate_count": 0,
+      "exchange_instrument_id": "binance-usdm:XRPUSDT:perpetual",
+      "filename": "XRPUSDT_15m_1703808000000_1787184000000.csv.gz",
+      "first_open_time_ms": 1703808000000,
+      "irregular_step_count": 0,
+      "last_open_time_ms": 1787184000000,
+      "row_count": 92641,
+      "sha256": "4c6b0d1f155cfeb58083385de90f700811a4665d52d0aaaf2de2e86698dc91fc",
+      "size_bytes": 4103397,
+      "symbol": "XRPUSDT"
+    }
+  ],
+  "numeric_representation_resolution": {
+    "approved_decimal_context": {
+      "precision": 38,
+      "rounding": "ROUND_HALF_EVEN"
+    },
+    "approved_golden_numeric_type": "decimal.Decimal",
+    "cohort_boundary_sessions_changed_by_decimal": 7,
+    "external_report_counts": {
+      "dynamic": {
+        "reclaim": 7729,
+        "tail3": 1324,
+        "tp1": 2992,
+        "triggers": 11259
+      },
+      "near": {
+        "tail3": 1116,
+        "triggers": 10982
+      },
+      "not_selected": {
+        "tail3": 1077,
+        "triggers": 13601
+      },
+      "selected_direction_tail3": {
+        "long": 625,
+        "short": 699
+      },
+      "static": {
+        "reclaim": 7873,
+        "tail3": 1067,
+        "tp1": 2601,
+        "triggers": 10905
+      }
+    },
+    "external_report_numeric_type": "binary64 float",
+    "resolution": "The independent REPORT.md counts are exactly reproducible with binary64 feature arithmetic. The approved research and production contracts require Decimal price geometry, so this Golden freezes the deterministic Decimal result instead of preserving float rounding noise at equal-ratio ranking boundaries."
+  },
+  "provenance_files": {
+    "events_csv": {
+      "path_label": "events.csv.gz",
+      "sha256": "abfcf09b1973b610ed70ceb58648f4719a9721f117be5d312704f8fd5cc422c9"
+    },
+    "independent_replay_report": {
+      "path_label": "REPORT.md",
+      "sha256": "de8edc672552097ad6f9e3988e08254f75b46d33433ad2cd12fd1e56de59a298"
+    },
+    "instrument_effect_results_archive": {
+      "path_label": "sor_instrument_effect_v1_results.tgz",
+      "sha256": "d5947191abe392553ba8bccddc6ba0d5c691af511d663100cfbbecd0866f0ea2"
+    }
+  },
+  "research_spec_id": "sor-dynamic-selection-v0",
+  "runtime_authority": "TEST_ONLY_NEVER_PRODUCTION_INPUT",
+  "schema_version": "sor-dynamic-selection-golden-v1",
+  "selection_spec": {
+    "activity_floor_quote_usdt": "20000000",
+    "candidate_exchange_instrument_ids": [
+      "binance-usdm:BTCUSDT:perpetual",
+      "binance-usdm:ETHUSDT:perpetual",
+      "binance-usdm:BNBUSDT:perpetual",
+      "binance-usdm:SOLUSDT:perpetual",
+      "binance-usdm:XRPUSDT:perpetual",
+      "binance-usdm:DOGEUSDT:perpetual",
+      "binance-usdm:ADAUSDT:perpetual",
+      "binance-usdm:AVAXUSDT:perpetual",
+      "binance-usdm:LINKUSDT:perpetual",
+      "binance-usdm:LTCUSDT:perpetual",
+      "binance-usdm:BCHUSDT:perpetual",
+      "binance-usdm:DOTUSDT:perpetual",
+      "binance-usdm:NEARUSDT:perpetual",
+      "binance-usdm:ATOMUSDT:perpetual",
+      "binance-usdm:FILUSDT:perpetual",
+      "binance-usdm:ETCUSDT:perpetual",
+      "binance-usdm:APTUSDT:perpetual",
+      "binance-usdm:OPUSDT:perpetual",
+      "binance-usdm:ARBUSDT:perpetual",
+      "binance-usdm:INJUSDT:perpetual",
+      "binance-usdm:SUIUSDT:perpetual",
+      "binance-usdm:TRXUSDT:perpetual",
+      "binance-usdm:UNIUSDT:perpetual",
+      "binance-usdm:RUNEUSDT:perpetual"
+    ],
+    "canonical_decimal": "normalize; zero='0'; fixed-point; no exponent",
+    "decimal_context": {
+      "precision": 38,
+      "rounding": "ROUND_HALF_EVEN"
+    },
+    "digest_serialization": "utf8-json; sort_keys=true; separators=(',', ':')",
+    "eligibility_not_before_offset_ms": 4500000,
+    "event_spec_ids": [
+      "event_spec:SOR-001:SOR-LONG:v4",
+      "event_spec:SOR-001:SOR-SHORT:v4"
+    ],
+    "expires_offset_ms": 90000000,
+    "feature_cutoff_offset_ms": 3600000,
+    "feature_numeric_type": "decimal.Decimal",
+    "input_window_bars": 96,
+    "near_rank_end": 14,
+    "near_rank_start": 8,
+    "or_bars": 4,
+    "pre_or_atr_bars": 14,
+    "ranking": [
+      "pre_or_width_atr14:asc",
+      "trailing_24h_quote_volume:desc",
+      "exchange_instrument_id:asc"
+    ],
+    "research_spec_id": "sor-dynamic-selection-v0",
+    "selected_cap": 7,
+    "selection_time": "01:00:00",
+    "selection_timezone": "UTC",
+    "strategy_group_id": "SOR-001",
+    "strategy_version_id": "sgv:SOR-001:v4"
+  },
+  "selection_spec_digest": "sha256:a2c0d5d809a54b90564086f4eab230726a16fdb5524a1ce8f29f48ad659cfb10",
+  "session_end_ms_inclusive": 1787011200000,
+  "session_start_ms": 1704067200000,
+  "source_semantic_identity": {
+    "src/trading_kernel/domain/detectors/sor.py": "62841a063b1d0b9cc8d9f41d51befa6117953117c8c3adb38c371441539feba8",
+    "src/trading_kernel/domain/exit_policy.py": "25511f11e2b930d0572321b8989fe1cf63c87c941e615ca7b6b4f5266810348e",
+    "src/trading_kernel/domain/strategy_registry.py": "db44ea2f39dbab3671d5bed8e63963248b86f1316fc29fbc6f10dded1c168049"
+  },
+  "source_set_digest": "sha256:05f1e3dcfc469aaf3022ca897b1efb3f5704cf85b9155a261a09170832e8d6da",
+  "test_portfolio": {
+    "fast": [
+      "focused verifier",
+      "production import boundary scan",
+      "current document authority tests",
+      "project Skill authority tests",
+      "Ruff for the verifier",
+      "Mypy for the verifier",
+      "git diff --check"
+    ],
+    "fixture_review": {
+      "deleted_or_merged": [],
+      "new": [
+        "member_decisions.csv.gz",
+        "selection_snapshots.csv.gz",
+        "manifest.json"
+      ],
+      "reason": "no existing Kernel fixture owns member-level Dynamic Selection decisions",
+      "reused": [
+        "existing frozen 24-symbol Binance 15m cache",
+        "existing Instrument Effect v1 events.csv.gz"
+      ]
+    },
+    "focused": [
+      "artifact verifier: manifest/cardinality/digest/snapshot-member invariants",
+      "negative verification: missing artifact, corrupted digest, wrong cardinality"
+    ],
+    "release": [
+      "rebuild Golden from frozen cache",
+      "byte-deterministic artifact comparison",
+      "DS-03 SelectionCore parity against all 961x24 decisions"
+    ]
+  }
+}

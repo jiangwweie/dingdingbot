@@ -2,7 +2,7 @@
 title: MULTI_ASSET_STRATEGYGROUP_ROADMAP
 status: CURRENT_PLAN
 program_id: MASG-P1
-last_verified: 2026-08-17
+last_verified: 2026-08-23
 ---
 
 # Multi-Asset StrategyGroup Roadmap
@@ -50,10 +50,62 @@ last_verified: 2026-08-17
 13. 风险阶梯、回撤降档和本金提取属于后续 **资本治理** 轨道。它们不构成当前
     `policy-main / Policy v4` 的变更，不自动提高风险、并发、杠杆或资本，也不授权
     交易所提现或转账。
+14. **`SOR-INSTRUMENT-EFFECT-v1`** 已完成第一轮 Instrument Effect 研究。结果支持
+    “历史横截面差异存在”，但不支持静态“好币名单”：固定 Symbol 排名未形成稳定的
+    滚动样本外优势。因此静态 Universe 排名路线停止，研究对象转为
+    **Strategy × Instrument × Current State**。（来源：冻结研究包 `decision.json`、
+    `headline.json`、`rolling_oos_bootstrap.json`）
+15. 当前进入 **P3-X：SOR Dynamic Selection & Trading V0**。第一版不是 AI 选币、综合 Fit Score
+    或机器学习，而是从 SOR 的 **Compression → Expansion** 语义推导少量可解释状态，
+    以 `UTC 01:00` 可知的 Pre-trigger `OR Width / ATR` 为 Primary Feature，Activity 为
+    最低选择前提，Pre-session Extension 等只作 Shadow Diagnostic。
+16. P3-X 明确区分 **Source Integrity、Qualification、Selection 与 Dynamic Universe**：
+    Source Integrity要求固定24-member输入全部完整，否则whole-attempt `SOURCE_FAILED`；资格
+    回答source完整后标的是否具备最低产品/Activity/几何条件，选择回答有限名额下谁更符合
+    当前EventSpec，Dynamic Universe是承载已批准Selection结果的运行方式。相对排名靠后不
+    等于不具备交易资格。
+17. Historical Replay 已完成并通过全部冻结 Gate：Dynamic 7 相对 Static 7 的
+    Tail3/directional slot-day 提升 **24.1%**，高于全部 100 个 Random controls，且形成
+    `Selected > Near > Not Selected`、`9/10` 正向 90-day blocks 与 LONG/SHORT 双向改善。
+    原始 Replay decision 为 `ADVANCE_TO_FORWARD_SHADOW`；Owner 后续明确淘汰独立 Forward
+    Shadow，把下一阶段改为生产详细设计。（来源：`/Users/jiangwei/Downloads/REPORT.md`，
+    SHA-256 `de8edc672552097ad6f9e3988e08254f75b46d33433ad2cd12fd1e56de59a298`）
+    DS-00进一步确认该外部报告使用binary64 Feature arithmetic；批准的Decimal Golden在7个
+    相等OR/ATR cohort边界冻结`Tail3=1,323`而非`1,324`。这只修正数值表示与稳定tie-break，
+    不修改Feature、Activity floor、Top N、Candidate Panel或Outcome。（来源：DS-00 manifest）
+18. 生产语义已冻结为：Candidate 直接读取 Binance public market data；任一Candidate缺Kline/
+    窗口或source integrity失败时whole-attempt=`SOURCE_FAILED`且不得Rank补位；`Ready=1..7`形成
+    同等数量 Desired members，`Ready=0` 是不 fallback 的 **`VALID_EMPTY`**；相同成员走
+    **`NO_CHANGE`**；变化时先建立 **Strategy Entry Vacuum**，停止新交易并撤销unfinished
+    ENTRY，真空归因的部分成交只有在实际数量形成合法TP1+Runner双腿时才保留，否则
+    controlled flatten；任何未连续覆盖eligible close的SOR Authority都必须在grant前完成durable
+    Authority Gap Audit，Vacuum activation/fallback使用`previous ∪ desired`，late continuity和
+    late普通`NO_CHANGE`只审计current pair，checked-negative与positive suppression均可证明；
+    LONG/SHORT串行warming、最终原子切换。每个已经处于dynamic mode的Session在Selection结果
+    出现前建立`PRE_FENCE_CONTINUITY`，并一直延续exact current pair到普通`NO_CHANGE`替换或
+    Vacuum commit原子切断；Selection失败只追加reason，不决定continuity。post-fence运行失败仅在
+    Owner Enabled、previous pair operationally valid、ENTRY已drain且union audit完整新鲜时显式
+    `FALLBACK_PREVIOUS`。Owner Pause优先级最高；Resume同成员也必须drain/audit/resolve Pause
+    Vacuum后提交新`NO_CHANGE`。每个Authority冻结`first_eligible_close_time_ms`，跨close提交必须
+    rollback、扩展audit并顺延。Generation Desired facts不预分配Universe ID、不复制Dynamic
+    target members；actual Universe创建transaction直接写唯一Generation FK，不创建第二linkage
+    table、direct Snapshot FK或rollback member副本；新合法Selection可`SUPERSEDED`尚未生效的旧Desired。
+    首次Static-to-Dynamic尝试保留Static authority直到首个Dynamic outcome；post-fence失败复用
+    `FALLBACK_PREVIOUS + STATIC_BASELINE`冻结Gap Audit/suppression/first eligible close并保持Static
+    mode。`session_start_ms=D 00:00`只标识SOR Session，Authority Period从`D 01:00`decision boundary
+    开始。`VALID_EMPTY`只向前阻止new ENTRY，不追溯撤销合法Ticket/fill或protected lifecycle。
+    Release compatibility只复用现有Release Certification manifest的薄投影，不建立第二发布
+    系统。（来源：Owner active-task decision）
+19. 防止 **Researcher Overfitting** 的边界保持不变：Selection Clock、候选集、
+    Point-in-Time 输入、Feature 定义、排序、名额、Baseline、Random seed、Path 口径和
+    判定规则在读取 V0 Replay 结果前冻结。已用于提出 OR/ATR 假设的历史结果只能作为
+    Development Evidence；Owner 选择在不提高风险的正式小资金运行中取得下一层证据，
+    不把 Historical Tail3 lift 重新描述为真实 Net PnL 或未来稳定性证明。
 
 ## Authority Boundary
 
-本文件只拥有 **M0–M7（含 M0.5）的稳定阶段顺序、目标、依赖、工作量区间和阶段门**。
+本文件只拥有 **M0–M7（含 M0.5）与 Post-M6 P0–P4 的稳定阶段顺序、目标、依赖、
+工作量区间和阶段门**。
 它不拥有以下易变或运行时事实：
 
 | 信息 | 唯一权威 |
@@ -358,8 +410,9 @@ Owner Console 后续收敛为四个产品中心。页面只是呈现方式，稳
 | --- | --- | --- | --- |
 | **P0：自然市场验收** | 关闭现有 Kernel 与 TradFi SOR 的真实生命周期证据 | 保持只读监控；自然 Signal 出现后观察 Admission、Ticket、保护、退出、Reconciliation、Settlement 和 Review；闭环后执行 `promote-full` 与最终需求审计 | 自然 TradFi Ticket 内外部完整闭环、零残留、零未解决 Incident，`promote-full` 和最终审计通过 |
 | **P2：工程基础设施** | 降低每次开发、测试和部署的固定成本，并统一产品语义 | 测试资产治理；发布流程状态化和精确候选认证复用；Canonical Exit Attribution；Effective Entry Scope 投影/API | 日常开发使用 Focused/Fast 层；完整认证只对冻结候选运行一次；发布显示单一阶段和阻塞点；退出原因和 Entry 能力有唯一权威 |
+| **P3-X：动态标的生产实验** | 把已通过 Replay 的 SOR 选择规则接入唯一 Instrument membership 与 time-bounded ENTRY authority，并以原风险小资金取得真实证据 | 已批准三 Plane设计与P3-X.3A Implementation Plan；DS-00 Golden与DS-01纯Domain合同已经完成，后续才是`0006` Schema、独立Selection/Materialization/Observation leases、Selection-Period`PRE_FENCE_CONTINUITY`、SelectionSessionAuthority、Entry Vacuum、通用Authority Gap Audit、`first_eligible_close_time_ms`、`VALID_EMPTY/NO_CHANGE/SUPERSEDED`、unfinished ENTRY drain、合法双腿partial protection、LONG/SHORT串行warming+原子切换、post-fence fallback、唯一Generation→Universe linkage和thin release compatibility projection | 设计状态`DESIGN_APPROVED`；计划状态`PLAN_APPROVED / CODE_AND_TEST_ONLY / DS-02`；Owner已授权DS-02至DS-10本地顺序实施，首次Dynamic Session仍须独立授权，且不提高风险或绕过Strategy Control |
 | **P1：Owner 产品控制** | 让日常策略、标的和 Ticket 操作主要在前端完成 | 单 Ticket Owner 平仓；Owner Regime Gate + Journal；可读操作审计；策略运行模式；Instrument 生命周期；Strategy-Instrument 临时禁入；异常收件箱 | Owner 无需 SQL、SSH 或拼装日志即可完成日常范围控制、市场参与门控和单笔风险处置 |
-| **P3：实验学习与扩展** | 把交易结果与 Owner 门控证据转化为版本隔离的策略决策，再决定新增策略 | 标准化 Performance Review Query；StrategyVersion 生命周期；Runner/右尾统计；Owner Regime 归因；Owner 注释；Continue/Observe/Pause/Retire 决策；类型化参数版本设计；后续 MPG/BRF2/RSRVCB 评估 | 当前版本证据、自然退出、Owner 干预和被 Gate 排除的机会路径可区分，新增策略不复用未经验证的历史总收益 |
+| **P3：实验学习与扩展** | 把交易结果和 Owner 门控证据转化为版本隔离的策略决策，再决定新增策略 | 标准化 Performance Review Query；StrategyVersion 生命周期；Runner/右尾统计；P3-X 结论；Owner Regime 归因；Owner 注释；Continue/Observe/Pause/Retire 决策；类型化参数版本待办；后续 MPG/BRF2/RSRVCB 评估 | 当前版本证据、自然退出、Owner 干预和实验结果可区分，新增策略不复用未经验证的历史总收益 |
 | **P4：资本治理** | 在充分证据后将实验收益转化为可控资本制度 | 风险档位资格、回撤降档建议、资本高水位和提款账本 | 仅输出资格与建议；每次风险档位变更仍须 Owner 明确授权的 Policy 发布，提款/转账仍不由系统执行 |
 
 ### Owner Regime And Performance Attribution
@@ -377,34 +430,108 @@ P1.2 先建立 Owner 对市场参与范围的可审计控制，P3 再评价它�
 Gate 外机会路径和明确标注假设的反事实模拟。Owner 判断的边际价值只能在这三类证据
 分开的前提下评价。
 
+### SOR Dynamic Selection Experiment
+
+P3-X 已完成前两层研究，并把下一步收敛为生产实验链：
+
+1. **Instrument Effect v1**：相同 Crypto SOR v4 在不同 Instrument 上存在历史差异，
+   但静态 Symbol 排名无法样本外持续；
+2. **Dynamic Selection V0 Replay**：`UTC 01:00` 事前 Selection 已通过全部冻结定量 Gate；
+3. **Production design / Implementation Plan / certification**：生产设计与Implementation Plan
+   已经批准；DS-00 Golden与DS-01纯Domain合同已经完成并通过Focused/Fast验证，当前没有Active
+   Execution Scope。后续实现为三个经PostgreSQL durable handoff解耦的Plane：Selection只提交
+   Snapshot；Materializer独立拥有time-bounded Authority、Entry
+   Vacuum、unfinished ENTRY drain、Desired generation、串行warming、通用Authority Gap Audit、
+   双边原子切换和受限post-fence fallback；每个已处于Dynamic mode的Session都在Selection结果前
+   建立`PRE_FENCE_CONTINUITY`并持续到Vacuum，late continuity/`NO_CHANGE`也必须审计Authority
+   gap；Deployment独立恢复权威且不等待materialization；
+4. **Small-capital activation**：Owner 单独授权，以当前 SOR 风险边界获取真实交易结果。
+
+```text
+Instrument Effect v1
+-> reject static good-symbol list
+-> Selection Thesis: Compression -> Expansion
+-> Pre-trigger qualification + OR/ATR ranking
+-> Historical Replay: Dynamic vs Static vs Random vs All Selection-ready / All Panel
+-> Production detailed design
+-> Golden parity + Migration/Release certification
+-> separately approved small-capital Dynamic activation
+```
+
+V0 的 **Source Integrity** 要求24个Candidate的Point-in-Time窗口全部完整；任一Candidate
+缺Kline或窗口不完整时整个attempt=`SOURCE_FAILED`，不允许Rank补位。Source完整后，
+**Qualification** 才排除Activity不足、几何无效或产品不合格的标的，**Selection** 再按冻结
+规则分配有限名额。Primary Feature 是 Opening Range 完成后、任何
+Trigger 之前可知的 `OR Width / pre-session ATR14`。原研究中的 Trigger-time OR/ATR 只
+作为支持假设的 Development Evidence，不能直接成为未来信息输入。
+
+第一阶段使用固定 24-symbol Research Panel，但按每个 Session 的实际数据可用性形成
+Point-in-Time Eligible Set。它是固定面板动态状态回放，不冒充历史全市场 Universe
+Backtest。Current Static 7 是生产配置基线，Random Selection-ready 7 判断“选 7 个”本身是否
+足够，All Selection-ready 表达通过最低资格后的机会供给，All Panel Diagnostic 记录固定
+面板的完整机会供给，Near/Not Selected 用于衡量梯度与 Opportunity Loss。零 Trigger
+Session 必须进入分母。
+
+Historical Replay 只产生研究证据；当前生产设计新增 PostgreSQL Schema、new-ENTRY
+authority和FinalGate验证，但不强制新增第五个systemd Worker、不改变Alpha或资本边界，也不
+自行恢复Crypto `SOR-001`。Selection Runner、Materialization Coordinator和Observation Runner
+必须具有独立application entry point和DB lease，即使V0暂时托管于现有进程。Owner冻结的
+unfinished ENTRY撤销和真空partial-retained规则会窄幅扩展Ticket lineage、durable cancel
+Command和Lifecycle reducer；actual quantity只有能形成正数量TP1+Runner时才保留，否则
+controlled flatten。所有未连续覆盖eligible close的Authority都必须在grant前完成durable Gap
+Audit；Vacuum activation/fallback审计`previous ∪ desired`，late continuity/普通`NO_CHANGE`
+审计current pair。没有suppression row只有在audit COMPLETE时才表示已检查无trigger；Authority
+以`first_eligible_close_time_ms`形成不相交的audit/Observation close边界。
+固定 24-member Candidate Panel 直接读取 Binance public market data，不进入
+StrategyUniverse；Snapshot 的 `Ready=1..7` 全部成为Desired members，`Ready=0`记录
+`VALID_EMPTY`并保持无新增交易。相同集合走`NO_CHANGE`；变化集合先打开Entry Vacuum并
+drain旧ENTRY。LONG/SHORT复用global queue串行warming，在两侧staged后原子切换；每个已处于
+Dynamic mode的Selection Period在`D 01:00`先建立`PRE_FENCE_CONTINUITY`，previous pair持续到普通`NO_CHANGE`替换
+或Vacuum commit，Selection失败只追加reason且不记fallback。Vacuum后失败只有完成drain与union
+audit并通过其余fallback gates才恢复previous pair。Pause Resume同成员必须解析Pause Vacuum后
+写新`NO_CHANGE`。Desired target不包含Universe ID且不复制Dynamic selected members；actual
+Universe创建transaction直接写唯一Generation FK。Universe digest保持membership-only；首次
+Static-to-Dynamic失败保持Static authority/mode；release compatibility只是既有
+certification manifest的薄投影，发布仍区分`COMPATIBLE_RESTART`与
+`REQUIRES_RUNTIME_REMATERIALIZATION`。CPM/BRF2只在SOR V0
+证明通用 Selection primitive 值得复制后进入研究；MPG/MI 仍需先分离 ComparisonUniverse。
+
 ### Immediate Execution Order
 
-1. **P2.1 测试资产治理**：建立测试到当前合同/故障类的映射，合并重复 Fixture，
-   删除退休 Schema、发布分支和重复全链测试；不以测试数量作为质量目标。
-2. **P2.2 发布流程收敛**：复用冻结 Commit 的完整认证 Manifest，区分 R1/R2/R3/R4，
-   把 Orient、Prepare、Switch、Verify、Activate、Seal 显示为唯一当前阶段；等待市场、
-   空仓或闭合 K 线时不重跑完整测试。
-3. **P2.3 Canonical Exit Attribution**：以持久化 ExitRequested、Command role 和 Fill
-   证据统一列表、Ticket 详情、Review 和策略统计，删除“技术原因待查看”产品文案。
-4. **P2.4 Effective Entry Scope**：先形成有界 PostgreSQL 投影和只读 API，再接入
-   策略中心、标的中心和总览；页面显示当前结论和唯一第一阻塞点。
-5. **P1.1 单 Ticket Owner 平仓**：补齐持久化授权、Operation、正式 `request_exit()`
+P2.1–P2.4 的工程基础设施能力已经完成。本节从当前第一个未完成事项开始排序：
+
+1. **P3-X.3A DS-00 Golden/Evidence/Test Portfolio**：**已完成**。已冻结961×24 member-level
+   Decimal Golden、输入/源码/规则digest和Focused/Fast/Release测试组合；Artifact仅用于测试，
+   `src/trading_kernel/**`零依赖。Decimal Golden已批准为DS-03/DS-09唯一Selection parity baseline；
+   DS-01已完成并通过Codex定向审查。Owner已授权DS-02至DS-10整个本地开发、测试和认证流程，
+   当前Active Execution Scope为`DS-02`；生产Migration、部署和首次Dynamic activation仍无授权。
+2. **P1.1 单 Ticket Owner 平仓**：补齐持久化授权、Operation、正式 `request_exit()`
    调用、进度投影、Review 归因和前端 Preview/TOTP；不建立第二退出路径。
-6. **P1.2 Owner Regime Gate + Journal**：在 Global Entry 之下、正式 Admission 之前
+3. **P1.2 Owner Regime Gate + Journal**：在 Global Entry 之下、正式 Admission 之前
    增加方向和 StrategyGroup 范围的 Gate；冻结 Journal、到期语义、审计投影和
    Admission blocker，不引入手工下单或 Ticket 参数修改。
-7. **P1.3 Owner 控制面补齐**：依次完成运行模式、Instrument 生命周期、
+4. **P1.3 Owner 控制面补齐**：依次完成运行模式、Instrument 生命周期、
    Strategy-Instrument 临时禁入、可读审计和异常收件箱。
-8. **P3 实验学习**：先实现标准化 Performance Review Query 和版本隔离的
-   Runner/右尾统计，再实现 Owner Regime 归因、Owner 注释、实验决策和类型化参数版本；
-   M7 或其他新策略族继续排在当前 SOR 自然闭环之后。
-9. **P4 资本治理**：只在 P3 的版本隔离经济证据充分后设计风险阶梯、回撤降档和
+5. **P3-X.3B Implementation/Certification**：DS-00与DS-01已经完成；当前从DS-02开始顺序执行`0006`
+   forward Migration、961×24 Golden parity、三组件独立lease、source integrity、Vacuum/ENTRY
+   cancel/partial-retained、通用Authority Gap Audit/first eligible close、Session continuity、Pause
+   Resume、唯一Generation→Universe linkage、串行warming/双边原子切换、thin release classification projection/
+   full-chain fault certification；规则修改创建V1，不原地重写V0。
+6. **P3-X.4 Small-capital Activation**：仅在 exact release、Schema、24 Candidate operational
+   audit、Owner Strategy Control 和 exchange readonly gates 全部通过后，由 Owner 单独授权
+   首个 Dynamic Session；不提高 Policy v4 风险。
+7. **P3 实验学习**：并行完善标准化 Performance Review Query、版本隔离的 Runner/
+    右尾统计、Owner Regime 归因、Owner 注释、实验决策和类型化参数版本。
+8. **P4 资本治理**：只在 P3 的版本隔离经济证据充分后设计风险阶梯、回撤降档和
    资本提取账本；不自动加风险，不执行提现或转账。
 
 ## Runtime And Resource Boundary
 
-1. 当前 **2C4G** 服务器仍使用四类常驻 Worker，不新增每个资产或策略一套服务；
-2. 首期 Universe 限制为 5–8 个标的，保持在当前 1–10 成员边界内；
+1. 当前 **2C4G** 服务器仍使用四类常驻 Worker，不新增每个资产或策略一套服务；SOR Dynamic
+   V0 的Selection/Materialization/Observation是三个独立逻辑组件和lease，但不强制第五个
+   systemd Worker；
+2. 一般首期 Universe 维持有界小集合；SOR Dynamic V0 明确为 `1..7` 个标的，保持在当前
+   1–10 成员边界内；
 3. 15m 策略按闭合 K 线增量运行，不在每次 cadence 重拉完整历史窗口；
 4. Depth、Mark/Index 和高成本事实只在有界候选范围获取；
 5. 新 RuntimeProfile 在 M1–M5 本地候选保持 ENTRY 禁用；M6 首次生产 R4 认证后不等待
@@ -413,12 +540,35 @@ Gate 外机会路径和明确标注假设的反事实模拟。Owner 判断的边
 7. 新 Venue 必须复用 durable Exchange Command、unknown outcome、partial fill、
    reconciliation 和 controlled exit 语义；
 8. 任意新 ENTRY 冻结不得停止既有 Ticket 的保护、退出、对账、结算和 Review。
+9. P3-X 的Selection Runner、Materialization Coordinator、Observation Runner分别拥有独立
+   application entry point和DB lease；V0可托管于现有Observation/Reconciliation process，但
+   禁止同一call stack跨组件保存进度。Reconciliation Worker仍拥有Desired Universe
+   certification；不强制第五个Worker、不新增全市场扫描服务或文件型Runtime authority。每
+   Session只处理固定24 members × 96 closed 15m bars。
+10. P3-X 的 Strategy Entry Vacuum 只阻断新 Admission/Ticket/ENTRY dispatch；已有Position的
+    Stop、TP1、Runner、Exit、Settlement和Review继续。真空partial-retained仅允许合法TP1+
+    Runner双腿，普通partial fill和无法双腿物化的actual fill仍执行既有controlled flatten。
+11. P3-X发布区分`COMPATIBLE_RESTART`与`REQUIRES_RUNTIME_REMATERIALIZATION`；Software
+    Deployment完成不等待Dynamic Universe materialization，pending Generation由后台恢复；
+    compatibility fact仅为现有Release Certification manifest的薄投影，不建设第二release
+    engine、classifier或deployment orchestrator。
 
 ## Explicit Non-Goals
 
 当前路线图不包含：
 
 - 建设独立因子库产品；
+- 建设综合 Fit Score、AI 选币、机器学习平台、通用因子编辑器或完整 Selector；
+- 把 Minimal Historical SOR Replay 扩张为历史数据平台、Point-in-time Universe、
+  全市场常驻 Collector、Research Service、复杂特征 ETL 或 Research Registry 系统；
+- 同时铺开 SOR、CPM、BRF2、MPG 和 MI 的标的研究；
+- 把单次历史结果、主观解释或 Owner 点击确认冒充未来统计证明或真实净收益；
+- 让本地 Parquet、CSV、缓存、Notebook 输出或研究报告成为生产运行时权威；
+- 把研究 Path R、MFE/MAE 或反事实模型称为真实 PnL；
+- 把主观先验概率、固定 Event 数或单次历史回放设为生产解锁门槛；
+- 由 AI、文件产物或绕过 PostgreSQL Generation/StrategyUniverse 的路径修改 Active
+  Universe、恢复 StrategyGroup 或获得 ENTRY 权限；
+- 仅凭 Selector 历史结果恢复加密 `SOR-001`；
 - 自动扩大资本、止损风险、杠杆或并发容量；
 - 自动执行风险档位提升、回撤降档、提现或转账；
 - 立即恢复加密 `SOR-001`；
@@ -451,9 +601,34 @@ Gate 外机会路径和明确标注假设的反事实模拟。Owner 判断的边
 8. M7：旧 RSRVCB 设计的可移植模块审计与当前内核重写计划。
 9. P1.2：Owner Regime Gate、Journal、有效范围投影、Admission blocker、TOTP 与
    失败恢复设计；不包含手工下单、Ticket 参数编辑或 Policy 风险扩张。
-10. P3：统一绩效查询契约、版本隔离、Runner/右尾指标、Owner Gate 实际归因与
+10. P3-X 概览：
+    `docs/superpowers/specs/2026-08-18-eventspec-instrument-fit-research-overview.md`
+    记录 Instrument Effect v1 结论、Dynamic Selection 阶段边界与后续分叉。
+11. P3-X 详细设计：
+    `docs/superpowers/specs/2026-08-20-sor-dynamic-selection-research-v0-design.md`
+    冻结 Selection Clock、Candidate Panel、Feature、资格、排名、对照、指标、判定规则、
+    输出和必要测试；该 Historical Replay 已完成，原 `ADVANCE_TO_FORWARD_SHADOW` 只保留
+    为研究原始判定。
+12. P3-X 被淘汰路线：
+    `docs/superpowers/specs/2026-08-20-sor-dynamic-selection-forward-shadow-design.md`
+    已标记 `SUPERSEDED`，不授权 W30/W60、外部 evidence store 或实现。
+13. P3-X 生产详细设计：
+    `docs/superpowers/specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md`
+    记录Selection/Runtime Materialization/Deployment三Plane、独立DB handoff/lease、generic
+    Selection facts、SelectionSessionAuthority、`1..7` Desired members、
+    `PRE_FENCE_CONTINUITY/VALID_EMPTY/NO_CHANGE/SUPERSEDED`、Strategy Entry Vacuum、
+    unfinished ENTRY drain、通用Authority Gap Audit与`first_eligible_close_time_ms`、Pause Resume、
+    双腿partial-retained保护、serial warming、atomic pair switch、唯一Generation→Universe linkage、
+    first Static-to-Dynamic特例、post-fence`FALLBACK_PREVIOUS`、thin release compatibility projection、Migration、
+    rollback和测试矩阵。
+14. P3-X 实施计划：
+    `docs/superpowers/plans/2026-08-23-sor-dynamic-instrument-selection-trading-v0-implementation-plan.md`
+    将批准设计拆成DS-00至DS-10顺序Task、RED测试、文件边界、认证和生产硬停止；计划已批准，
+    DS-00与DS-01已完成；Owner已授权DS-02至DS-10按Task Card验收顺序自动推进。该授权不包含
+    生产Migration执行、Tokyo部署、Crypto SOR resume或首次Dynamic activation。
+15. P3：统一绩效查询契约、版本隔离、Runner/右尾指标、Owner Gate 实际归因与
     假设性反事实呈现边界。
-11. P4：风险阶梯资格、回撤降档、资本高水位和提款账本设计；任何 Policy 修改或
+16. P4：风险阶梯资格、回撤降档、资本高水位和提款账本设计；任何 Policy 修改或
     资金划转均保持独立 Owner 授权与发布边界。
 
 任何阶段的实现、迁移和部署状态仍由当前代码、PostgreSQL、Venue 事实和

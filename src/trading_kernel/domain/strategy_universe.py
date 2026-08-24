@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from enum import StrEnum
 from hashlib import sha256
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -13,6 +14,51 @@ from src.trading_kernel.domain.instrument_identity import (
 )
 
 MAX_UNIVERSE_MEMBERS = 10
+
+
+class StrategyUniverseLifecycleState(StrEnum):
+    WARMING = "warming"
+    STAGED = "staged"
+    ACTIVE = "active"
+    RETIRED = "retired"
+    ABANDONED = "abandoned"
+
+
+class StrategyUniverseSourceKind(StrEnum):
+    MANUAL = "manual"
+    DYNAMIC_SELECTION = "dynamic_selection"
+    STATIC_BASELINE = "static_baseline"
+
+
+_GENERATION_OWNED_TRANSITIONS = {
+    StrategyUniverseLifecycleState.WARMING: frozenset(
+        {
+            StrategyUniverseLifecycleState.STAGED,
+            StrategyUniverseLifecycleState.ABANDONED,
+        }
+    ),
+    StrategyUniverseLifecycleState.STAGED: frozenset(
+        {
+            StrategyUniverseLifecycleState.ACTIVE,
+            StrategyUniverseLifecycleState.ABANDONED,
+        }
+    ),
+    StrategyUniverseLifecycleState.ACTIVE: frozenset(
+        {StrategyUniverseLifecycleState.RETIRED}
+    ),
+}
+
+_MANUAL_TRANSITIONS = {
+    StrategyUniverseLifecycleState.WARMING: frozenset(
+        {
+            StrategyUniverseLifecycleState.ACTIVE,
+            StrategyUniverseLifecycleState.ABANDONED,
+        }
+    ),
+    StrategyUniverseLifecycleState.ACTIVE: frozenset(
+        {StrategyUniverseLifecycleState.RETIRED}
+    ),
+}
 
 
 class StrategyUniverseVersion(BaseModel):
@@ -95,6 +141,37 @@ def build_strategy_universe(
         ),
         installed_at_ms=installed_at_ms,
     )
+
+
+def advance_strategy_universe_lifecycle(
+    *,
+    source_kind: StrategyUniverseSourceKind,
+    current: StrategyUniverseLifecycleState,
+    target: StrategyUniverseLifecycleState,
+) -> StrategyUniverseLifecycleState:
+    """Validate one pure lifecycle edge without granting current-pointer authority."""
+
+    if current is target:
+        return current
+    transitions = (
+        _MANUAL_TRANSITIONS
+        if source_kind is StrategyUniverseSourceKind.MANUAL
+        else _GENERATION_OWNED_TRANSITIONS
+    )
+    if target not in transitions.get(current, frozenset()):
+        raise ValueError(
+            f"invalid {source_kind.value} Universe transition: "
+            f"{current.value} -> {target.value}"
+        )
+    return target
+
+
+def strategy_universe_allows_signal(
+    lifecycle_state: StrategyUniverseLifecycleState,
+) -> bool:
+    """Only an exact Active Universe may produce StrategySignal."""
+
+    return lifecycle_state is StrategyUniverseLifecycleState.ACTIVE
 
 
 def _semantic_digest(

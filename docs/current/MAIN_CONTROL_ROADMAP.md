@@ -92,8 +92,83 @@ It does not block local infrastructure, documentation, or Owner Console work.
 Any later production deployment still refreshes current PostgreSQL, systemd,
 release-marker, and exchange facts and follows the exact release contract.
 The parallel engineering order is owned by
-`MULTI_ASSET_STRATEGYGROUP_ROADMAP.md`: infrastructure foundation first,
-Owner product control second, and strategy-learning expansion last.
+`MULTI_ASSET_STRATEGYGROUP_ROADMAP.md`. The first local/read-only **P3-X** study
+does not support static Symbol ranking as the current path: historical
+Instrument outcomes differ, but fixed ranks do not persist out of sample. The
+current research lane therefore moves to a frozen, theory-driven **SOR Dynamic
+Selection V0** based on point-in-time market state and EventSpec geometry. The
+local Historical Replay has now passed all frozen quantitative gates: Dynamic 7
+improved Tail3 / directional slot-day by **24.1%** versus Static 7, exceeded all
+100 deterministic Random 7 controls, preserved `Selected > Near > Not Selected`,
+and improved both LONG and SHORT. Owner has therefore superseded the independent
+Forward Shadow route. The production detailed design has completed targeted review
+and is approved only for an Implementation Plan handoff.
+DS-00 subsequently proved that the external Replay headline used binary64 feature
+arithmetic. The approved Decimal Golden removes seven equal-ratio boundary artifacts
+and freezes Dynamic Tail3 `1,323` instead of `1,324`; this is a representation
+correction, not a Feature、threshold、Top-N or Candidate change, and the external
+report remains research provenance rather than production arithmetic authority.
+The proposed design keeps generic PostgreSQL Selection facts and StrategyUniverse
+as the single Instrument-membership authority, adds immutable time-bounded
+SelectionSessionAuthority, and uses a scoped Strategy Entry Vacuum at Admission,
+Ticket issuance and ENTRY dispatch. The architecture is now explicitly split into
+three durable planes: Selection ends after `SNAPSHOT_READY`; an independently leased
+Materialization Coordinator owns `VALID_EMPTY/NO_CHANGE/DESIRED`, Vacuum, drain,
+warming, atomic activation and post-fence fallback; Deployment restores durable
+authority and completes without waiting for Dynamic materialization. Owner has
+frozen public Binance Candidate data, whole-attempt `SOURCE_FAILED` for any Candidate
+source-integrity gap, `VALID_EMPTY` for zero eligible members, `NO_CHANGE` for an
+unchanged operational pair, unfinished-ENTRY cancellation during reconfiguration,
+retained vacuum-attributed partial fills only when a positive TP1+Runner split is
+legal, first-trigger suppression across any audited Authority gap, serial LONG/SHORT
+warming, an atomic final pair switch, newest-valid-selection supersession, Owner Pause
+precedence, and
+gated post-fence `FALLBACK_PREVIOUS` to the exact pre-switch Active pair. Every
+Selection Period already operating in `dynamic_selection` receives a Selection-Period
+`PRE_FENCE_CONTINUITY` Authority from its exact current pair before the Selection
+outcome exists; it continues through Selection success, source/compute failure and
+materialization waiting, and ends only when ordinary `NO_CHANGE` replaces it or the
+Vacuum commit atomically cuts it off. Selection failure only appends the continuity
+reason and never decides whether previous instruments may trade. Any SOR Authority
+whose eligible-close coverage is not continuous requires a durable Authority Gap
+Audit before grant: Vacuum activation/fallback audits exact `previous ∪ desired`,
+while late continuity and late ordinary `NO_CHANGE` audit only the current pair. The
+Authority freezes `first_eligible_close_time_ms`; positive suppression and
+checked-negative proof are both durable, and a transaction crossing the canonical
+close boundary rolls back, extends the audit and advances to the next close. Pause
+Resume with unchanged members must drain, audit and resolve its Pause Vacuum before a
+new `NO_CHANGE` revision. Generation Desired facts do not pre-allocate Universe IDs or
+copy Dynamic target members; each actual immutable Universe writes the sole Generation
+FK in its creation transaction. No second materialization-link table, direct Universe
+Snapshot FK or copied rollback-member fact is created. Universe digests remain
+membership-only. First `static_baseline -> pending dynamic_selection` activation is a
+special case: existing Static authority remains authoritative until the first Dynamic
+outcome. If its post-fence materialization fails, transition-scoped
+`FALLBACK_PREVIOUS` freezes the exact Static pair, failed Generation, Gap Audit,
+suppression and first eligible close while `selection_mode` remains `static_baseline`.
+Selection/Authority periods begin at the `D 01:00` decision boundary, while
+`session_start_ms=D 00:00` remains only SOR identity. `VALID_EMPTY` is forward-only:
+unfinished ENTRY drains, but earlier legal Tickets/fills and protected lifecycle are
+not rewritten or flattened. Release compatibility
+is a thin projection of the existing Release Certification manifest, not a second release
+engine; releases remain classified as `COMPATIBLE_RESTART` or
+`REQUIRES_RUNTIME_REMATERIALIZATION`. The design changes no capital, leverage or
+Alpha rule, but it necessarily extends Ticket lineage, durable cancel commands and
+Lifecycle reduction for the narrow retained-partial branch. The final targeted
+architecture review requirements are incorporated and the design status is
+`DESIGN_APPROVED`. The P3-X.3A Implementation Plan has passed independent review with
+status `PLAN_APPROVED / CODE_AND_TEST_ONLY / production_authority=NONE`. Owner-authorized
+**DS-00 Golden/Evidence/Test Portfolio** execution is complete with a reproducible
+961×24 Decimal Golden and zero production dependency. Independent review approved that
+Golden as the sole DS-03/DS-09 Selection parity baseline. The active implementation scope
+then completed **DS-01 Pure Domain Contracts** with 25 focused tests, 946 Fast Unit/Architecture
+tests, full tracked Ruff/Mypy, and exact 23,064-member Golden digest parity. A targeted Codex
+review subsequently froze `DS01_APPROVED`. Owner has now authorized the complete local
+code/test/certification sequence: active implementation scope is `DS-02`, and later cards may
+advance automatically only after their own acceptance passes. Production Migration execution,
+deployment and first Dynamic activation remain separately gated.（来源：Owner active-task decision；
+`docs/superpowers/specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md`；
+`docs/superpowers/plans/2026-08-23-sor-dynamic-instrument-selection-trading-v0-implementation-plan.md`）
 
 | Order | Work | Exit condition |
 | ---: | --- | --- |
