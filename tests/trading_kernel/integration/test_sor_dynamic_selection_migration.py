@@ -88,6 +88,14 @@ async def test_empty_and_flat_0005_upgrade_create_schema_without_runtime_side_ef
                     "brc_exchange_commands",
                 )
             }
+            staged_scope_constraint = await connection.scalar(
+                sa.text(
+                    "SELECT pg_get_constraintdef(oid) "
+                    "FROM pg_constraint "
+                    "WHERE conname = "
+                    "'ck_brc_runtime_scopes_current_lifecycle_permissions_valid'"
+                )
+            )
 
         assert revision == TARGET_REVISION
         assert NEW_TABLES <= tables
@@ -103,6 +111,8 @@ async def test_empty_and_flat_0005_upgrade_create_schema_without_runtime_side_ef
             "materialization_generation_id",
         } <= columns["brc_strategy_universe_versions"]
         assert counts == {table: 0 for table in counts}
+        assert staged_scope_constraint is not None
+        assert "staged" in staged_scope_constraint
 
         result = _run_alembic(database_url, "downgrade", SOURCE_REVISION)
         assert result.returncode != 0

@@ -12,6 +12,7 @@ from uuid import uuid4
 import asyncpg
 import pytest_asyncio
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.install_strategy_universe import (
@@ -380,7 +381,8 @@ async def make_warming_ready(
                 "exchange_instrument_id": scope["exchange_instrument_id"],
             }
             await connection.execute(
-                sa.insert(instrument_certification_current).values(
+                pg_insert(instrument_certification_current)
+                .values(
                     **key,
                     status="eligible",
                     blocker_code=None,
@@ -395,6 +397,30 @@ async def make_warming_ready(
                     lease_owner=None,
                     lease_expires_at_ms=None,
                     projection_version=1,
+                )
+                .on_conflict_do_update(
+                    index_elements=[
+                        instrument_certification_current.c.runtime_profile_id,
+                        instrument_certification_current.c.exchange_instrument_id,
+                    ],
+                    set_={
+                        "status": "eligible",
+                        "blocker_code": None,
+                        "facts_digest": _FACTS_DIGEST,
+                        "product_rules_digest": _RULES_DIGEST,
+                        "configured_leverage": 5,
+                        "margin_mode": "cross",
+                        "position_mode": "independent_sides",
+                        "observed_at_ms": warm_closed_bar_time_ms,
+                        "valid_until_ms": valid_until_ms,
+                        "next_check_at_ms": valid_until_ms,
+                        "lease_owner": None,
+                        "lease_expires_at_ms": None,
+                        "projection_version": (
+                            instrument_certification_current.c.projection_version
+                            + 1
+                        ),
+                    },
                 )
             )
             await connection.execute(

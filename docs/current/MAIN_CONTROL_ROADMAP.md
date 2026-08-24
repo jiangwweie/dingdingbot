@@ -169,8 +169,11 @@ Snapshot disposition、`VALID_EMPTY` intent fencing、durable `PENDING -> DESIRE
 Authority Gap Audit、trigger suppression and canonical first-eligible-close recovery. DS-05 has now completed
 Admission/Ticket/dispatch Vacuum enforcement、durable ENTRY cancel、unknown recovery、zero/full/partial quantity
 resolution、retained-partial protection and atomic `VALID_EMPTY`/Generation drain finalization with **228 focused**
-and **916 Fast Unit/Architecture** tests. The active implementation scope is `DS-06` for serial LONG/SHORT
-warming、staged pair、atomic activation and gated fallback; later cards may advance automatically
+and **916 Fast Unit/Architecture** tests. DS-06 has now completed serial LONG/SHORT warming、no-authority staged
+scopes、atomic pair activation、exact post-fence fallback、newest-Snapshot supersession and Owner Pause precedence.
+It also closes superseding `VALID_EMPTY` on the existing Vacuum、preserves the concrete fallback cause、terminates
+invalidated pending Gap Audits and makes committed terminal Authorities idempotent coordinator results. The active
+implementation scope is `DS-07` for Observation/Signal/Admission/Ticket/dispatch Authority lineage; later cards may advance automatically
 only after their own acceptance passes. Production Migration execution,
 deployment and first Dynamic activation remain separately gated.（来源：Owner active-task decision；
 `docs/superpowers/specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md`；

@@ -826,6 +826,593 @@ class PostgresInstrumentSelectionRepository:
         )
         return abandoned
 
+    async def supersede_generation_and_retarget_vacuum(
+        self,
+        *,
+        previous_generation: MaterializationGeneration,
+        replacement_generation: MaterializationGeneration,
+        replacement_targets: tuple[MaterializationTarget, ...],
+        vacuum: StrategyEntryVacuum,
+        superseded_at_ms: int,
+    ) -> MaterializationGeneration:
+        if (
+            previous_generation.lifecycle_state
+            not in {
+                MaterializationGenerationState.MATERIALIZING,
+                MaterializationGenerationState.STAGED,
+            }
+            or replacement_generation.lifecycle_state
+            is not MaterializationGenerationState.PENDING
+            or replacement_generation.session_start_ms is None
+            or previous_generation.session_start_ms is None
+            or replacement_generation.session_start_ms
+            <= previous_generation.session_start_ms
+            or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING
+            or vacuum.source_generation_id
+            != previous_generation.materialization_generation_id
+            or vacuum.drained_at_ms is None
+            or vacuum.resolved_at_ms is not None
+        ):
+            raise ValueError("supersession requires a newer exact drained Generation")
+        locked_previous = await self.get_materialization_generation(
+            previous_generation.materialization_generation_id,
+            for_update=True,
+        )
+        locked_vacuum = await self.get_current_entry_vacuum(
+            strategy_group_id=vacuum.strategy_group_id,
+            selection_spec_id=vacuum.selection_spec_id,
+            for_update=True,
+        )
+        if locked_previous != previous_generation or locked_vacuum != vacuum:
+            raise SelectionJobConflict("supersession authority changed")
+        await self._fail_pending_generation_gap_audits(
+            materialization_generation_id=(
+                previous_generation.materialization_generation_id
+            ),
+            first_blocker="SUPERSEDED_BY_NEWER_SELECTION",
+            failed_at_ms=superseded_at_ms,
+        )
+        await self.add_pending_materialization_generation(
+            replacement_generation,
+            targets=replacement_targets,
+        )
+        previous_next_version = previous_generation.projection_version + 1
+        previous_update = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == previous_generation.materialization_generation_id,
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == previous_generation.lifecycle_state.value,
+                strategy_universe_materialization_generations.c.projection_version
+                == previous_generation.projection_version,
+            )
+            .values(
+                lifecycle_state="SUPERSEDED",
+                terminal_at_ms=superseded_at_ms,
+                lease_owner=None,
+                lease_expires_at_ms=None,
+                projection_version=previous_next_version,
+            )
+        )
+        if previous_update.rowcount != 1:
+            raise SelectionJobConflict("previous Generation changed during supersession")
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=(
+                    "materialization-event:"
+                    f"{previous_generation.materialization_generation_id}:"
+                    f"{previous_next_version}"
+                ),
+                materialization_generation_id=(
+                    previous_generation.materialization_generation_id
+                ),
+                event_sequence=previous_next_version,
+                event_type="SUPERSEDED",
+                payload={
+                    "replacement_generation_id": (
+                        replacement_generation.materialization_generation_id
+                    )
+                },
+                occurred_at_ms=superseded_at_ms,
+            )
+        )
+        replacement_materializing = MaterializationGeneration.model_validate(
+            replacement_generation.model_copy(
+                update={
+                    "lifecycle_state": MaterializationGenerationState.MATERIALIZING,
+                    "desired_at_ms": superseded_at_ms,
+                    "projection_version": 4,
+                }
+            ).model_dump()
+        )
+        replacement_update = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == replacement_generation.materialization_generation_id,
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == "PENDING",
+                strategy_universe_materialization_generations.c.projection_version
+                == 1,
+            )
+            .values(
+                lifecycle_state="MATERIALIZING",
+                desired_at_ms=superseded_at_ms,
+                fenced_at_ms=vacuum.fenced_at_ms,
+                projection_version=4,
+            )
+        )
+        if replacement_update.rowcount != 1:
+            raise SelectionJobConflict("replacement Generation changed during handoff")
+        for sequence, event_type in (
+            (2, "DESIRED"),
+            (3, "DRAINING_ENTRY"),
+            (4, "MATERIALIZING"),
+        ):
+            await self._connection.execute(
+                sa.insert(strategy_universe_materialization_events).values(
+                    materialization_event_id=(
+                        "materialization-event:"
+                        f"{replacement_generation.materialization_generation_id}:"
+                        f"{sequence}"
+                    ),
+                    materialization_generation_id=(
+                        replacement_generation.materialization_generation_id
+                    ),
+                    event_sequence=sequence,
+                    event_type=event_type,
+                    payload={
+                        "supersedes_generation_id": (
+                            previous_generation.materialization_generation_id
+                        ),
+                        "entry_vacuum_id": vacuum.entry_vacuum_id,
+                    },
+                    occurred_at_ms=superseded_at_ms,
+                )
+            )
+        superseded_vacuum_version = vacuum.projection_version + 1
+        retargeted_vacuum_version = vacuum.projection_version + 2
+        superseded_vacuum = await self._connection.execute(
+            sa.update(strategy_entry_vacuums_current)
+            .where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.state == "RECONFIGURING",
+                strategy_entry_vacuums_current.c.projection_version
+                == vacuum.projection_version,
+            )
+            .values(
+                state="SUPERSEDED",
+                first_blocker="SUPERSEDED_BY_NEWER_SELECTION",
+                projection_version=superseded_vacuum_version,
+            )
+        )
+        if superseded_vacuum.rowcount != 1:
+            raise SelectionJobConflict("Vacuum changed during supersession")
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=(
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:"
+                    f"{superseded_vacuum_version}"
+                ),
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=superseded_vacuum_version,
+                event_type="SUPERSEDED",
+                payload={
+                    "previous_generation_id": (
+                        previous_generation.materialization_generation_id
+                    ),
+                    "replacement_generation_id": (
+                        replacement_generation.materialization_generation_id
+                    ),
+                },
+                occurred_at_ms=superseded_at_ms,
+            )
+        )
+        retargeted_vacuum = await self._connection.execute(
+            sa.update(strategy_entry_vacuums_current)
+            .where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.state == "SUPERSEDED",
+                strategy_entry_vacuums_current.c.projection_version
+                == superseded_vacuum_version,
+            )
+            .values(
+                source_generation_id=(
+                    replacement_generation.materialization_generation_id
+                ),
+                state="RECONFIGURING",
+                first_blocker="LATEST_VALID_SELECTION",
+                projection_version=retargeted_vacuum_version,
+            )
+        )
+        if retargeted_vacuum.rowcount != 1:
+            raise SelectionJobConflict("Vacuum retarget failed")
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=(
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:"
+                    f"{retargeted_vacuum_version}"
+                ),
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=retargeted_vacuum_version,
+                event_type="RECONFIGURING",
+                payload={
+                    "source_generation_id": (
+                        replacement_generation.materialization_generation_id
+                    )
+                },
+                occurred_at_ms=superseded_at_ms,
+            )
+        )
+        return replacement_materializing
+
+    async def supersede_generation_and_resolve_valid_empty(
+        self,
+        *,
+        previous_generation: MaterializationGeneration,
+        snapshot: SelectionSnapshot,
+        vacuum: StrategyEntryVacuum,
+        superseded_at_ms: int,
+    ) -> None:
+        if (
+            previous_generation.lifecycle_state
+            not in {
+                MaterializationGenerationState.MATERIALIZING,
+                MaterializationGenerationState.STAGED,
+            }
+            or snapshot.selected_count != 0
+            or snapshot.session_start_ms is None
+            or previous_generation.session_start_ms is None
+            or snapshot.session_start_ms <= previous_generation.session_start_ms
+            or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING
+            or vacuum.source_generation_id
+            != previous_generation.materialization_generation_id
+            or vacuum.drained_at_ms is None
+            or vacuum.resolved_at_ms is not None
+        ):
+            raise ValueError(
+                "VALID_EMPTY supersession requires a newer zero-member Snapshot "
+                "and exact drained Generation Vacuum"
+            )
+        locked_previous = await self.get_materialization_generation(
+            previous_generation.materialization_generation_id,
+            for_update=True,
+        )
+        locked_vacuum = await self.get_current_entry_vacuum(
+            strategy_group_id=vacuum.strategy_group_id,
+            selection_spec_id=vacuum.selection_spec_id,
+            for_update=True,
+        )
+        if locked_previous != previous_generation or locked_vacuum != vacuum:
+            raise SelectionJobConflict("VALID_EMPTY supersession authority changed")
+        await self._fail_pending_generation_gap_audits(
+            materialization_generation_id=(
+                previous_generation.materialization_generation_id
+            ),
+            first_blocker="SUPERSEDED_BY_NEWER_SELECTION",
+            failed_at_ms=superseded_at_ms,
+        )
+
+        next_generation_version = previous_generation.projection_version + 1
+        generation_update = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == previous_generation.materialization_generation_id,
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == previous_generation.lifecycle_state.value,
+                strategy_universe_materialization_generations.c.projection_version
+                == previous_generation.projection_version,
+            )
+            .values(
+                lifecycle_state="SUPERSEDED",
+                terminal_at_ms=superseded_at_ms,
+                lease_owner=None,
+                lease_expires_at_ms=None,
+                projection_version=next_generation_version,
+            )
+        )
+        if generation_update.rowcount != 1:
+            raise SelectionJobConflict(
+                "previous Generation changed during VALID_EMPTY supersession"
+            )
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=(
+                    "materialization-event:"
+                    f"{previous_generation.materialization_generation_id}:"
+                    f"{next_generation_version}"
+                ),
+                materialization_generation_id=(
+                    previous_generation.materialization_generation_id
+                ),
+                event_sequence=next_generation_version,
+                event_type="SUPERSEDED",
+                payload={
+                    "replacement_selection_snapshot_id": (
+                        snapshot.selection_snapshot_id
+                    ),
+                    "replacement_outcome": AuthorityOutcome.VALID_EMPTY.value,
+                },
+                occurred_at_ms=superseded_at_ms,
+            )
+        )
+
+        superseded_vacuum_version = vacuum.projection_version + 1
+        resolved_vacuum_version = vacuum.projection_version + 2
+        superseded_vacuum = await self._connection.execute(
+            sa.update(strategy_entry_vacuums_current)
+            .where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.state == "RECONFIGURING",
+                strategy_entry_vacuums_current.c.projection_version
+                == vacuum.projection_version,
+            )
+            .values(
+                state="SUPERSEDED",
+                first_blocker="SUPERSEDED_BY_NEWER_VALID_EMPTY",
+                projection_version=superseded_vacuum_version,
+            )
+        )
+        if superseded_vacuum.rowcount != 1:
+            raise SelectionJobConflict(
+                "Vacuum changed during VALID_EMPTY supersession"
+            )
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=(
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:"
+                    f"{superseded_vacuum_version}"
+                ),
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=superseded_vacuum_version,
+                event_type="SUPERSEDED",
+                payload={
+                    "previous_generation_id": (
+                        previous_generation.materialization_generation_id
+                    ),
+                    "replacement_selection_snapshot_id": (
+                        snapshot.selection_snapshot_id
+                    ),
+                    "replacement_outcome": AuthorityOutcome.VALID_EMPTY.value,
+                },
+                occurred_at_ms=superseded_at_ms,
+            )
+        )
+        resolved_vacuum = await self._connection.execute(
+            sa.update(strategy_entry_vacuums_current)
+            .where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.state == "SUPERSEDED",
+                strategy_entry_vacuums_current.c.projection_version
+                == superseded_vacuum_version,
+            )
+            .values(
+                source_generation_id=None,
+                state="VALID_EMPTY",
+                first_blocker="NO_SELECTION_READY_MEMBERS",
+                resolved_at_ms=superseded_at_ms,
+                projection_version=resolved_vacuum_version,
+            )
+        )
+        if resolved_vacuum.rowcount != 1:
+            raise SelectionJobConflict("Vacuum VALID_EMPTY resolution failed")
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=(
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:"
+                    f"{resolved_vacuum_version}"
+                ),
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=resolved_vacuum_version,
+                event_type="VALID_EMPTY",
+                payload={
+                    "selection_snapshot_id": snapshot.selection_snapshot_id,
+                    "superseded_generation_id": (
+                        previous_generation.materialization_generation_id
+                    ),
+                },
+                occurred_at_ms=superseded_at_ms,
+            )
+        )
+
+    async def mark_generation_fallback_previous_pending(
+        self,
+        *,
+        generation: MaterializationGeneration,
+        vacuum: StrategyEntryVacuum,
+        reason_code: str,
+        marked_at_ms: int,
+    ) -> StrategyEntryVacuum:
+        normalized_reason = reason_code.strip().lower()
+        if not normalized_reason:
+            raise ValueError("fallback pending reason must be non-blank")
+        if (
+            generation.lifecycle_state
+            not in {
+                MaterializationGenerationState.MATERIALIZING,
+                MaterializationGenerationState.STAGED,
+            }
+            or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING
+            or vacuum.source_generation_id
+            != generation.materialization_generation_id
+            or vacuum.resolved_at_ms is not None
+        ):
+            raise ValueError("fallback pending requires exact open materialization")
+        if vacuum.first_blocker == normalized_reason:
+            return vacuum
+        locked_generation = await self.get_materialization_generation(
+            generation.materialization_generation_id,
+            for_update=True,
+        )
+        locked_vacuum = await self.get_current_entry_vacuum(
+            strategy_group_id=vacuum.strategy_group_id,
+            selection_spec_id=vacuum.selection_spec_id,
+            for_update=True,
+        )
+        if locked_generation != generation or locked_vacuum != vacuum:
+            raise SelectionJobConflict("fallback pending authority changed")
+        next_version = vacuum.projection_version + 1
+        updated = await self._connection.execute(
+            sa.update(strategy_entry_vacuums_current)
+            .where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.state == "RECONFIGURING",
+                strategy_entry_vacuums_current.c.projection_version
+                == vacuum.projection_version,
+            )
+            .values(
+                first_blocker=normalized_reason,
+                projection_version=next_version,
+            )
+        )
+        if updated.rowcount != 1:
+            raise SelectionJobConflict("Vacuum changed before fallback audit")
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=(
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:{next_version}"
+                ),
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=next_version,
+                event_type="FALLBACK_PREVIOUS_PENDING",
+                payload={
+                    "materialization_generation_id": (
+                        generation.materialization_generation_id
+                    ),
+                    "reason_code": normalized_reason,
+                },
+                occurred_at_ms=marked_at_ms,
+            )
+        )
+        return StrategyEntryVacuum.model_validate(
+            vacuum.model_copy(
+                update={
+                    "first_blocker": normalized_reason,
+                    "projection_version": next_version,
+                }
+            ).model_dump()
+        )
+
+    async def abandon_generation_for_owner_pause(
+        self,
+        *,
+        generation: MaterializationGeneration,
+        vacuum: StrategyEntryVacuum,
+        paused_at_ms: int,
+    ) -> MaterializationGeneration:
+        if (
+            generation.lifecycle_state
+            not in {
+                MaterializationGenerationState.MATERIALIZING,
+                MaterializationGenerationState.STAGED,
+            }
+            or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING
+            or vacuum.source_generation_id
+            != generation.materialization_generation_id
+            or vacuum.resolved_at_ms is not None
+        ):
+            raise ValueError("Owner Pause requires exact open materialization")
+        locked_generation = await self.get_materialization_generation(
+            generation.materialization_generation_id,
+            for_update=True,
+        )
+        locked_vacuum = await self.get_current_entry_vacuum(
+            strategy_group_id=vacuum.strategy_group_id,
+            selection_spec_id=vacuum.selection_spec_id,
+            for_update=True,
+        )
+        if locked_generation != generation or locked_vacuum != vacuum:
+            raise SelectionJobConflict("Owner Pause materialization authority changed")
+        await self._fail_pending_generation_gap_audits(
+            materialization_generation_id=generation.materialization_generation_id,
+            first_blocker="OWNER_PAUSED",
+            failed_at_ms=paused_at_ms,
+        )
+        abandoned = MaterializationGeneration.model_validate(
+            generation.model_copy(
+                update={
+                    "lifecycle_state": MaterializationGenerationState.ABANDONED,
+                    "projection_version": generation.projection_version + 1,
+                }
+            ).model_dump()
+        )
+        generation_update = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == generation.materialization_generation_id,
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == generation.lifecycle_state.value,
+                strategy_universe_materialization_generations.c.projection_version
+                == generation.projection_version,
+            )
+            .values(
+                lifecycle_state="ABANDONED",
+                terminal_at_ms=paused_at_ms,
+                lease_owner=None,
+                lease_expires_at_ms=None,
+                projection_version=abandoned.projection_version,
+            )
+        )
+        if generation_update.rowcount != 1:
+            raise SelectionJobConflict("Generation changed during Owner Pause")
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=(
+                    "materialization-event:"
+                    f"{generation.materialization_generation_id}:"
+                    f"{abandoned.projection_version}"
+                ),
+                materialization_generation_id=generation.materialization_generation_id,
+                event_sequence=abandoned.projection_version,
+                event_type="ABANDONED",
+                payload={"reason_code": "owner_paused"},
+                occurred_at_ms=paused_at_ms,
+            )
+        )
+        vacuum_version = vacuum.projection_version + 1
+        vacuum_update = await self._connection.execute(
+            sa.update(strategy_entry_vacuums_current)
+            .where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.state == "RECONFIGURING",
+                strategy_entry_vacuums_current.c.projection_version
+                == vacuum.projection_version,
+            )
+            .values(
+                state="OWNER_PAUSED",
+                first_blocker="OWNER_PAUSED",
+                projection_version=vacuum_version,
+            )
+        )
+        if vacuum_update.rowcount != 1:
+            raise SelectionJobConflict("Vacuum changed during Owner Pause")
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=(
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum_version}"
+                ),
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=vacuum_version,
+                event_type="OWNER_PAUSED",
+                payload={
+                    "materialization_generation_id": (
+                        generation.materialization_generation_id
+                    )
+                },
+                occurred_at_ms=paused_at_ms,
+            )
+        )
+        return abandoned
+
     async def get_current_entry_vacuum(
         self,
         *,
@@ -1360,6 +1947,67 @@ class PostgresInstrumentSelectionRepository:
                 occurred_at_ms=failed_at_ms,
             )
         )
+
+    async def _fail_pending_generation_gap_audits(
+        self,
+        *,
+        materialization_generation_id: str,
+        first_blocker: str,
+        failed_at_ms: int,
+    ) -> None:
+        rows = (
+            await self._connection.execute(
+                sa.select(selection_authority_gap_audits_current)
+                .where(
+                    selection_authority_gap_audits_current.c.source_generation_id
+                    == materialization_generation_id,
+                    selection_authority_gap_audits_current.c.state == "PENDING",
+                )
+                .order_by(
+                    selection_authority_gap_audits_current.c.authority_gap_audit_id
+                )
+                .limit(3)
+                .with_for_update(of=selection_authority_gap_audits_current)
+            )
+        ).mappings().all()
+        if len(rows) > 2:
+            raise SelectionJobConflict(
+                "Generation owns more pending Gap Audits than approved outcomes"
+            )
+        for row in rows:
+            next_version = int(row["projection_version"]) + 1
+            updated = await self._connection.execute(
+                sa.update(selection_authority_gap_audits_current)
+                .where(
+                    selection_authority_gap_audits_current.c.authority_gap_audit_id
+                    == row["authority_gap_audit_id"],
+                    selection_authority_gap_audits_current.c.state == "PENDING",
+                    selection_authority_gap_audits_current.c.projection_version
+                    == row["projection_version"],
+                )
+                .values(
+                    state="FAILED",
+                    first_blocker=first_blocker,
+                    projection_version=next_version,
+                )
+            )
+            if updated.rowcount != 1:
+                raise SelectionJobConflict(
+                    "Generation Gap Audit changed during terminal transition"
+                )
+            await self._connection.execute(
+                sa.insert(selection_authority_gap_audit_events).values(
+                    authority_gap_audit_event_id=(
+                        "gap-audit-event:"
+                        f"{row['authority_gap_audit_id']}:{next_version}"
+                    ),
+                    authority_gap_audit_id=row["authority_gap_audit_id"],
+                    event_sequence=next_version,
+                    event_type="FAILED",
+                    payload={"first_blocker": first_blocker},
+                    occurred_at_ms=failed_at_ms,
+                )
+            )
 
     async def add_authority_and_set_current(
         self,

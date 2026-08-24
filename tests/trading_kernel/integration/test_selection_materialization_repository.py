@@ -5,7 +5,18 @@ from decimal import Decimal
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError
 
+from src.trading_kernel.application.abandon_strategy_universe import (
+    AbandonStrategyUniverseRequest,
+    abandon_strategy_universe,
+)
+from src.trading_kernel.application.advance_strategy_universe import (
+    UniverseActivationOperation,
+    UniverseActivationRequest,
+    UniverseActivationStatus,
+    advance_strategy_universe,
+)
 from src.trading_kernel.application.coordinate_selection_materialization import (
     AuthorityGapAuditEvaluationRequest,
     CoordinateSelectionMaterializationRequest,
@@ -18,11 +29,17 @@ from src.trading_kernel.application.drain_strategy_entry_vacuum import (
     VacuumDrainStatus,
     drain_strategy_entry_vacuum_once,
 )
+from src.trading_kernel.application.install_strategy_universe import (
+    UniverseInstallRequest,
+    UniverseInstallStatus,
+    install_strategy_universe,
+)
 from src.trading_kernel.domain.instrument_selection import (
     CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS,
     SOR_LONG_EVENT_SPEC_ID,
     SOR_SHORT_EVENT_SPEC_ID,
 )
+from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.domain.selection_authority import (
     AuthorityGapAuditKind,
     AuthorityGapScope,
@@ -55,6 +72,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     instrument_selection_specs,
     instruments,
     owner_authorizations,
+    runtime_scopes_current,
     selection_authority_current,
     selection_authority_gap_audit_events,
     selection_authority_gap_audits_current,
@@ -78,6 +96,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
+from tests.trading_kernel.integration.universe_activation_support import (
+    make_warming_ready,
+)
 from tests.trading_kernel.support.lifecycle import (
     reach_position_protected,
     registered_sor_long_ticket,
@@ -593,9 +614,16 @@ async def test_coordinator_creates_continuity_then_no_change_from_durable_snapsh
         request=request,
         clock_ms=clock,
     )
+    repeated = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=clock,
+    )
 
     assert continuity.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY
     assert no_change.disposition is MaterializationDisposition.NO_CHANGE
+    assert repeated.disposition is MaterializationDisposition.NO_CHANGE
+    assert repeated.selection_authority_id == no_change.selection_authority_id
     async with head_template_engine.connect() as connection:
         rows = (
             await connection.execute(
@@ -807,6 +835,1631 @@ async def test_changed_snapshot_advances_pending_then_desired_from_db_only(
         )
     assert generation_state == "MATERIALIZING"
     assert vacuum_state == "RECONFIGURING"
+
+
+@pytest.mark.asyncio
+async def test_generation_owned_long_install_freezes_dynamic_source_and_generation(
+    head_template_engine,
+) -> None:
+    generation_id, changed_members, installed = (
+        await _prepare_generation_owned_long(head_template_engine)
+    )
+    install_request = UniverseInstallRequest(
+        event_spec_id=SOR_LONG_EVENT_SPEC_ID,
+        runtime_profile_id="tiny-live-v1",
+        owner_policy_id="policy-main",
+        exchange_instrument_ids=changed_members,
+        source_kind="dynamic_selection",
+        materialization_generation_id=generation_id,
+        expected_member_set_digest=selected_member_set_digest(changed_members),
+        installed_at_ms=SESSION_START_MS + 3_600_020,
+    )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        repeated = await install_strategy_universe(uow, install_request)
+
+    assert installed.status is UniverseInstallStatus.INSTALLED
+    assert installed.universe is not None
+    assert repeated.status is UniverseInstallStatus.ALREADY_WARMING
+    assert repeated.universe == installed.universe
+    async with head_template_engine.connect() as connection:
+        row = (
+            await connection.execute(
+                sa.select(
+                    strategy_universe_versions.c.source_kind,
+                    strategy_universe_versions.c.materialization_generation_id,
+                    strategy_universe_versions.c.lifecycle_state,
+                ).where(
+                    strategy_universe_versions.c.universe_version_id
+                    == installed.universe.universe_version_id
+                )
+            )
+        ).one()
+    assert row == (
+        "dynamic_selection",
+        generation_id,
+        "warming",
+    )
+
+
+@pytest.mark.asyncio
+async def test_ready_dynamic_long_stages_without_signal_authority_and_releases_slot(
+    head_template_engine,
+) -> None:
+    generation_id, _, installed = await _prepare_generation_owned_long(
+        head_template_engine
+    )
+    assert installed.universe is not None
+    await make_warming_ready(
+        head_template_engine,
+        universe_version_id=installed.universe.universe_version_id,
+        warm_closed_bar_time_ms=SESSION_START_MS + 3_600_021,
+        valid_until_ms=SESSION_START_MS + 7_200_000,
+    )
+
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        staged = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=installed.universe.universe_version_id,
+                attempted_at_ms=SESSION_START_MS + 3_600_030,
+                operation=UniverseActivationOperation.STAGE_DYNAMIC,
+                materialization_generation_id=generation_id,
+            ),
+        )
+
+    assert staged.status is UniverseActivationStatus.STAGED
+    async with head_template_engine.connect() as connection:
+        version_state = await connection.scalar(
+            sa.select(strategy_universe_versions.c.lifecycle_state).where(
+                strategy_universe_versions.c.universe_version_id
+                == installed.universe.universe_version_id
+            )
+        )
+        scopes = (
+            await connection.execute(
+                sa.select(
+                    strategy_universe_versions.c.universe_version_id,
+                    strategy_universe_versions.c.lifecycle_state,
+                ).where(strategy_universe_versions.c.lifecycle_state == "warming")
+            )
+        ).all()
+        runtime_scope_states = (
+            await connection.execute(
+                sa.text(
+                    "SELECT lifecycle_state, observation_enabled, entry_enabled "
+                    "FROM brc_runtime_scopes_current "
+                    "WHERE universe_version_id = :universe_version_id"
+                ),
+                {"universe_version_id": installed.universe.universe_version_id},
+            )
+        ).all()
+    assert version_state == "staged"
+    assert scopes == []
+    assert runtime_scope_states == [("staged", False, False)] * 2
+
+
+@pytest.mark.asyncio
+async def test_dynamic_pair_warms_serially_and_generation_stages_only_after_short(
+    head_template_engine,
+) -> None:
+    generation_id, changed_members, long_install = (
+        await _prepare_generation_owned_long(head_template_engine)
+    )
+    assert long_install.universe is not None
+    short_request = UniverseInstallRequest(
+        event_spec_id=SOR_SHORT_EVENT_SPEC_ID,
+        runtime_profile_id="tiny-live-v1",
+        owner_policy_id="policy-main",
+        exchange_instrument_ids=changed_members,
+        source_kind="dynamic_selection",
+        materialization_generation_id=generation_id,
+        expected_member_set_digest=selected_member_set_digest(changed_members),
+        installed_at_ms=SESSION_START_MS + 3_600_021,
+    )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        blocked_short = await install_strategy_universe(uow, short_request)
+    assert (
+        blocked_short.status
+        is UniverseInstallStatus.WARMING_UNIVERSE_ALREADY_EXISTS
+    )
+
+    await make_warming_ready(
+        head_template_engine,
+        universe_version_id=long_install.universe.universe_version_id,
+        warm_closed_bar_time_ms=SESSION_START_MS + 3_600_022,
+        valid_until_ms=SESSION_START_MS + 7_200_000,
+    )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=long_install.universe.universe_version_id,
+                attempted_at_ms=SESSION_START_MS + 3_600_030,
+                operation=UniverseActivationOperation.STAGE_DYNAMIC,
+                materialization_generation_id=generation_id,
+            ),
+        )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        short_install = await install_strategy_universe(uow, short_request)
+    assert short_install.status is UniverseInstallStatus.INSTALLED
+    assert short_install.universe is not None
+
+    await make_warming_ready(
+        head_template_engine,
+        universe_version_id=short_install.universe.universe_version_id,
+        warm_closed_bar_time_ms=SESSION_START_MS + 3_600_031,
+        valid_until_ms=SESSION_START_MS + 7_200_000,
+    )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        short_stage = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=short_install.universe.universe_version_id,
+                attempted_at_ms=SESSION_START_MS + 3_600_040,
+                operation=UniverseActivationOperation.STAGE_DYNAMIC,
+                materialization_generation_id=generation_id,
+            ),
+        )
+
+    assert short_stage.status is UniverseActivationStatus.STAGED
+    async with head_template_engine.connect() as connection:
+        generation_state = await connection.scalar(
+            sa.select(
+                strategy_universe_materialization_generations.c.lifecycle_state
+            ).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == generation_id
+            )
+        )
+        target_states = tuple(
+            await connection.scalars(
+                sa.select(strategy_universe_versions.c.lifecycle_state)
+                .where(
+                    strategy_universe_versions.c.materialization_generation_id
+                    == generation_id
+                )
+                .order_by(strategy_universe_versions.c.event_spec_id)
+            )
+        )
+    assert generation_state == "STAGED"
+    assert target_states == ("staged", "staged")
+
+
+@pytest.mark.asyncio
+async def test_formal_abandonment_accepts_staged_dynamic_target(
+    head_template_engine,
+) -> None:
+    generation_id, _, long_install = await _prepare_generation_owned_long(
+        head_template_engine
+    )
+    assert long_install.universe is not None
+    await make_warming_ready(
+        head_template_engine,
+        universe_version_id=long_install.universe.universe_version_id,
+        warm_closed_bar_time_ms=SESSION_START_MS + 3_600_021,
+        valid_until_ms=SESSION_START_MS + 7_200_000,
+    )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=long_install.universe.universe_version_id,
+                attempted_at_ms=SESSION_START_MS + 3_600_030,
+                operation=UniverseActivationOperation.STAGE_DYNAMIC,
+                materialization_generation_id=generation_id,
+            ),
+        )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await abandon_strategy_universe(
+            uow,
+            AbandonStrategyUniverseRequest(
+                universe_version_id=long_install.universe.universe_version_id,
+                reason_code="dynamic_short_warming_failed",
+                attempted_at_ms=SESSION_START_MS + 3_600_040,
+            ),
+        )
+
+    async with head_template_engine.connect() as connection:
+        version = (
+            await connection.execute(
+                sa.select(
+                    strategy_universe_versions.c.lifecycle_state,
+                    strategy_universe_versions.c.abandon_reason_code,
+                ).where(
+                    strategy_universe_versions.c.universe_version_id
+                    == long_install.universe.universe_version_id
+                )
+            )
+        ).one()
+    assert version == ("abandoned", "dynamic_short_warming_failed")
+
+
+@pytest.mark.asyncio
+async def test_staged_pair_activation_atomically_switches_both_sides_and_authority(
+    head_template_engine,
+) -> None:
+    generation_id, long_target_id, short_target_id = await _prepare_staged_pair(
+        head_template_engine
+    )
+    audit = build_pending_authority_gap_audit(
+        authority_gap_audit_id="gap-audit:dynamic-pair:active-new",
+        selection_spec_id=SELECTION_SPEC_ID,
+        session_start_ms=SESSION_START_MS,
+        gap_kind=AuthorityGapAuditKind.ENTRY_VACUUM,
+        proposed_authority_outcome=AuthorityOutcome.ACTIVE_NEW,
+        unauthorized_from_close_time_ms=SESSION_START_MS + 4_500_000,
+        detector_semantic_digest="sha256:" + "4" * 64,
+        created_at_ms=SESSION_START_MS + 4_500_001,
+        source_entry_vacuum_id=(
+            f"vacuum:SOR-001:{SESSION_START_MS}:generation"
+        ),
+        source_generation_id=generation_id,
+    )
+    selected_scopes = tuple(
+        AuthorityGapScope(
+            event_spec_id=event_spec_id,
+            exchange_instrument_id=instrument_id,
+        )
+        for event_spec_id in (SOR_LONG_EVENT_SPEC_ID, SOR_SHORT_EVENT_SPEC_ID)
+        for instrument_id in tuple(
+            sorted(
+                set(SELECTED_MEMBERS)
+                | {
+                    CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[0],
+                    CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[2],
+                }
+            )
+        )
+    )
+    results = tuple(
+        AuthorityGapScopeResult(
+            scope=scope,
+            session_reference=str(SESSION_START_MS),
+            first_natural_trigger_at_ms=None,
+        )
+        for scope in selected_scopes
+    )
+    complete = complete_authority_gap_audit(
+        audit,
+        audited_through_close_time_ms=SESSION_START_MS + 4_500_000,
+        scopes=selected_scopes,
+        results=results,
+    )
+    async with head_template_engine.begin() as connection:
+        repository = PostgresInstrumentSelectionRepository(connection)
+        await repository.add_pending_authority_gap_audit(audit)
+        await repository.complete_authority_gap_audit(
+            complete,
+            results=results,
+            completed_at_ms=SESSION_START_MS + 4_500_001,
+        )
+        current_authority = await repository.get_current_authority_projection(
+            SELECTION_SPEC_ID
+        )
+    assert current_authority is not None
+    authority = SelectionSessionAuthority(
+        selection_authority_id=(
+            f"selection-authority:{SELECTION_SPEC_ID}:{SESSION_START_MS}:2"
+        ),
+        selection_spec_id=SELECTION_SPEC_ID,
+        session_start_ms=SESSION_START_MS,
+        decision_boundary_ms=SESSION_START_MS + 3_600_000,
+        authority_sequence=2,
+        selection_mode=SelectionMode.DYNAMIC_SELECTION,
+        selection_snapshot_id=f"selection:{SELECTION_SPEC_ID}:{SESSION_START_MS}",
+        continued_from_selection_authority_id=(
+            current_authority.authority.selection_authority_id
+        ),
+        continuity_source_kind=ContinuitySourceKind.AUTHORITY_GAP_AUDIT,
+        authority_gap_audit_id=complete.authority_gap_audit_id,
+        materialization_generation_id=generation_id,
+        owner_control_version=1,
+        authority_outcome=AuthorityOutcome.ACTIVE_NEW,
+        authorized_pair=UniverseAuthorityPair(
+            long_universe_version_id=long_target_id,
+            short_universe_version_id=short_target_id,
+        ),
+        grant_proof=AuthorityGrantProof(
+            kind=AuthorityGrantProofKind.AUDITED_AUTHORITY_GAP,
+            predecessor_authority_id=None,
+            authority_gap_audit_id=complete.authority_gap_audit_id,
+        ),
+        effective_from_ms=SESSION_START_MS + 4_500_001,
+        first_eligible_close_time_ms=SESSION_START_MS + 5_400_000,
+        expires_at_ms=SESSION_START_MS + 90_000_000,
+        reason_code="DYNAMIC_PAIR_ACTIVATED",
+        created_at_ms=SESSION_START_MS + 4_500_001,
+    )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        activated = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=long_target_id,
+                paired_universe_version_id=short_target_id,
+                attempted_at_ms=SESSION_START_MS + 4_500_001,
+                operation=UniverseActivationOperation.ACTIVATE_DYNAMIC_PAIR,
+                materialization_generation_id=generation_id,
+                selection_authority=authority,
+            ),
+        )
+
+    assert activated.status is UniverseActivationStatus.ACTIVATED
+    async with head_template_engine.connect() as connection:
+        pointers = tuple(
+            (
+                await connection.execute(
+                    sa.select(
+                        strategy_universe_current.c.event_spec_id,
+                        strategy_universe_current.c.universe_version_id,
+                    )
+                    .where(
+                        strategy_universe_current.c.event_spec_id.in_(
+                            (SOR_LONG_EVENT_SPEC_ID, SOR_SHORT_EVENT_SPEC_ID)
+                        )
+                    )
+                    .order_by(strategy_universe_current.c.event_spec_id)
+                )
+            ).all()
+        )
+        generation_state = await connection.scalar(
+            sa.select(
+                strategy_universe_materialization_generations.c.lifecycle_state
+            ).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == generation_id
+            )
+        )
+        vacuum_state = await connection.scalar(
+            sa.select(strategy_entry_vacuums_current.c.state).where(
+                strategy_entry_vacuums_current.c.source_generation_id
+                == generation_id
+            )
+        )
+        authority_outcome = await connection.scalar(
+            sa.select(selection_session_authorities.c.authority_outcome).where(
+                selection_session_authorities.c.selection_authority_id
+                == authority.selection_authority_id
+            )
+        )
+    assert pointers == (
+        (SOR_LONG_EVENT_SPEC_ID, long_target_id),
+        (SOR_SHORT_EVENT_SPEC_ID, short_target_id),
+    )
+    assert generation_state == "ACTIVE"
+    assert vacuum_state == "RESOLVED_ACTIVE"
+    assert authority_outcome == "ACTIVE_NEW"
+
+
+@pytest.mark.parametrize(
+    "failure_stage",
+    (
+        "retire_previous_scopes",
+        "activate_target_scopes",
+        "long_pointer",
+        "short_pointer",
+        "authority_insert",
+        "authority_pointer",
+        "generation_terminal",
+        "vacuum_resolution",
+    ),
+)
+@pytest.mark.asyncio
+async def test_atomic_pair_activation_failure_rolls_back_all_visible_state(
+    head_template_engine,
+    failure_stage: str,
+) -> None:
+    generation_id, long_target_id, short_target_id = await _prepare_staged_pair(
+        head_template_engine
+    )
+    audit_pending = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=_materialization_request(f"materializer:fault:{failure_stage}"),
+        clock_ms=_Clock(SESSION_START_MS + 3_600_050),
+    )
+    assert audit_pending.authority_gap_audit_id is not None
+    function_name = f"fail_ds06_{failure_stage}"
+    trigger_name = f"trg_ds06_{failure_stage}"
+    if failure_stage == "retire_previous_scopes":
+        table_name = "brc_runtime_scopes_current"
+        operation = "UPDATE"
+        condition = (
+            f"OLD.universe_version_id IN ('{LONG_UNIVERSE_ID}', "
+            f"'{SHORT_UNIVERSE_ID}') AND NEW.lifecycle_state = 'retired'"
+        )
+    elif failure_stage == "activate_target_scopes":
+        table_name = "brc_runtime_scopes_current"
+        operation = "UPDATE"
+        condition = (
+            f"OLD.universe_version_id IN ('{long_target_id}', "
+            f"'{short_target_id}') AND NEW.lifecycle_state = 'active'"
+        )
+    elif failure_stage in {"long_pointer", "short_pointer"}:
+        table_name = "brc_strategy_universe_current"
+        operation = "UPDATE"
+        event_spec_id = (
+            SOR_LONG_EVENT_SPEC_ID
+            if failure_stage == "long_pointer"
+            else SOR_SHORT_EVENT_SPEC_ID
+        )
+        condition = f"NEW.event_spec_id = '{event_spec_id}'"
+    elif failure_stage == "authority_insert":
+        table_name = "brc_selection_session_authorities"
+        operation = "INSERT"
+        condition = "NEW.authority_outcome = 'ACTIVE_NEW'"
+    elif failure_stage == "authority_pointer":
+        table_name = "brc_selection_authority_current"
+        operation = "UPDATE"
+        condition = f"NEW.selection_spec_id = '{SELECTION_SPEC_ID}'"
+    elif failure_stage == "generation_terminal":
+        table_name = "brc_strategy_universe_materialization_generations"
+        operation = "UPDATE"
+        condition = "NEW.lifecycle_state = 'ACTIVE'"
+    else:
+        table_name = "brc_strategy_entry_vacuums_current"
+        operation = "UPDATE"
+        condition = "NEW.state = 'RESOLVED_ACTIVE'"
+    async with head_template_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                f"""
+                CREATE FUNCTION {function_name}()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    IF {condition} THEN
+                        RAISE EXCEPTION 'ds06 injected {failure_stage} failure';
+                    END IF;
+                    RETURN NEW;
+                END
+                $$
+                """
+            )
+        )
+        await connection.execute(
+            sa.text(
+                f"""
+                CREATE TRIGGER {trigger_name}
+                BEFORE {operation} ON {table_name}
+                FOR EACH ROW EXECUTE FUNCTION {function_name}()
+                """
+            )
+        )
+
+    with pytest.raises(DBAPIError, match=f"ds06 injected {failure_stage} failure"):
+        await complete_pending_authority_gap_audit(
+            uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+            audit_source=_CheckedNegativeAuditSource(),
+            authority_gap_audit_id=audit_pending.authority_gap_audit_id,
+            clock_ms=_Clock(SESSION_START_MS + 4_500_000),
+        )
+
+    async with head_template_engine.connect() as connection:
+        pointers = tuple(
+            (
+                await connection.execute(
+                    sa.select(
+                        strategy_universe_current.c.event_spec_id,
+                        strategy_universe_current.c.universe_version_id,
+                    )
+                    .where(
+                        strategy_universe_current.c.event_spec_id.in_(
+                            (SOR_LONG_EVENT_SPEC_ID, SOR_SHORT_EVENT_SPEC_ID)
+                        )
+                    )
+                    .order_by(strategy_universe_current.c.event_spec_id)
+                )
+            ).all()
+        )
+        target_states = tuple(
+            await connection.scalars(
+                sa.select(strategy_universe_versions.c.lifecycle_state)
+                .where(
+                    strategy_universe_versions.c.universe_version_id.in_(
+                        (long_target_id, short_target_id)
+                    )
+                )
+                .order_by(strategy_universe_versions.c.event_spec_id)
+            )
+        )
+        generation_state = await connection.scalar(
+            sa.select(
+                strategy_universe_materialization_generations.c.lifecycle_state
+            ).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == generation_id
+            )
+        )
+        vacuum_state = await connection.scalar(
+            sa.select(strategy_entry_vacuums_current.c.state).where(
+                strategy_entry_vacuums_current.c.source_generation_id
+                == generation_id
+            )
+        )
+        audit_state = await connection.scalar(
+            sa.select(selection_authority_gap_audits_current.c.state).where(
+                selection_authority_gap_audits_current.c.authority_gap_audit_id
+                == audit_pending.authority_gap_audit_id
+            )
+        )
+        active_new_count = await connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(selection_session_authorities)
+            .where(selection_session_authorities.c.authority_outcome == "ACTIVE_NEW")
+        )
+    assert pointers == (
+        (SOR_LONG_EVENT_SPEC_ID, LONG_UNIVERSE_ID),
+        (SOR_SHORT_EVENT_SPEC_ID, SHORT_UNIVERSE_ID),
+    )
+    assert target_states == ("staged", "staged")
+    assert generation_state == "STAGED"
+    assert vacuum_state == "RECONFIGURING"
+    assert audit_state == "PENDING"
+    assert active_new_count == 0
+
+
+@pytest.mark.asyncio
+async def test_coordinator_runs_serial_warming_audit_and_atomic_pair_activation(
+    head_template_engine,
+) -> None:
+    changed_members = tuple(
+        sorted(
+            (
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[0],
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[2],
+            )
+        )
+    )
+    await _seed_materialization_context(
+        head_template_engine,
+        selected_members=changed_members,
+    )
+    await _seed_previous_dynamic_authority(head_template_engine)
+    request = _materialization_request("materializer:serial-pair")
+    clock = _Clock(SESSION_START_MS + 3_600_000)
+    for _ in range(4):
+        await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+            request=request,
+            clock_ms=clock,
+        )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await drain_strategy_entry_vacuum_once(
+            uow,
+            DrainStrategyEntryVacuumRequest(
+                strategy_group_id="SOR-001",
+                selection_spec_id=SELECTION_SPEC_ID,
+                now_ms=SESSION_START_MS + 3_600_010,
+            ),
+        )
+
+    long_wait = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=clock,
+    )
+    assert long_wait.disposition is MaterializationDisposition.LONG_WARMING
+    async with head_template_engine.connect() as connection:
+        long_target_id = await connection.scalar(
+            sa.select(strategy_universe_versions.c.universe_version_id).where(
+                strategy_universe_versions.c.materialization_generation_id
+                == long_wait.materialization_generation_id,
+                strategy_universe_versions.c.event_spec_id
+                == SOR_LONG_EVENT_SPEC_ID,
+            )
+        )
+    assert long_target_id is not None
+    await make_warming_ready(
+        head_template_engine,
+        universe_version_id=str(long_target_id),
+        warm_closed_bar_time_ms=SESSION_START_MS + 3_600_005,
+        valid_until_ms=SESSION_START_MS + 7_200_000,
+    )
+    short_wait = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=clock,
+    )
+    assert short_wait.disposition is MaterializationDisposition.SHORT_WARMING
+    async with head_template_engine.connect() as connection:
+        short_target_id = await connection.scalar(
+            sa.select(strategy_universe_versions.c.universe_version_id).where(
+                strategy_universe_versions.c.materialization_generation_id
+                == short_wait.materialization_generation_id,
+                strategy_universe_versions.c.event_spec_id
+                == SOR_SHORT_EVENT_SPEC_ID,
+            )
+        )
+    assert short_target_id is not None
+    await make_warming_ready(
+        head_template_engine,
+        universe_version_id=str(short_target_id),
+        warm_closed_bar_time_ms=SESSION_START_MS + 3_600_006,
+        valid_until_ms=SESSION_START_MS + 7_200_000,
+    )
+    audit_pending = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=clock,
+    )
+    assert audit_pending.disposition is MaterializationDisposition.GAP_AUDIT_PENDING
+    assert audit_pending.authority_gap_audit_id is not None
+
+    activated = await complete_pending_authority_gap_audit(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        audit_source=_CheckedNegativeAuditSource(),
+        authority_gap_audit_id=audit_pending.authority_gap_audit_id,
+        clock_ms=_Clock(SESSION_START_MS + 4_500_000),
+    )
+    assert activated.disposition is MaterializationDisposition.ACTIVE_NEW
+    repeated = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=_Clock(SESSION_START_MS + 4_500_010),
+    )
+    assert repeated.disposition is MaterializationDisposition.ACTIVE_NEW
+    assert repeated.selection_authority_id == activated.selection_authority_id
+    async with head_template_engine.connect() as connection:
+        current_ids = tuple(
+            await connection.scalars(
+                sa.select(strategy_universe_current.c.universe_version_id)
+                .where(
+                    strategy_universe_current.c.event_spec_id.in_(
+                        (SOR_LONG_EVENT_SPEC_ID, SOR_SHORT_EVENT_SPEC_ID)
+                    )
+                )
+                .order_by(strategy_universe_current.c.event_spec_id)
+            )
+        )
+    assert current_ids == (str(long_target_id), str(short_target_id))
+
+
+@pytest.mark.parametrize(
+    ("selection_mode", "pending_selection_mode", "expected_authority_mode"),
+    (
+        ("dynamic_selection", None, "dynamic_selection"),
+        ("static_baseline", "dynamic_selection", "static_baseline"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_materialization_timeout_falls_back_to_exact_previous_pair(
+    head_template_engine,
+    selection_mode: str,
+    pending_selection_mode: str | None,
+    expected_authority_mode: str,
+) -> None:
+    generation_id, long_target_id, short_target_id = await _prepare_staged_pair(
+        head_template_engine,
+        selection_mode=selection_mode,
+        pending_selection_mode=pending_selection_mode,
+    )
+    request = _materialization_request("materializer:timeout-fallback")
+    timeout_clock = _Clock(SESSION_START_MS + 5_400_020)
+
+    audit_pending = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=timeout_clock,
+    )
+
+    assert audit_pending.disposition is MaterializationDisposition.GAP_AUDIT_PENDING
+    assert audit_pending.authority_gap_audit_id is not None
+    assert audit_pending.reason_code is not None
+    assert "ENTRY_VACUUM" in audit_pending.reason_code
+    async with head_template_engine.connect() as connection:
+        target_states = tuple(
+            await connection.scalars(
+                sa.select(strategy_universe_versions.c.lifecycle_state)
+                .where(
+                    strategy_universe_versions.c.universe_version_id.in_(
+                        (long_target_id, short_target_id)
+                    )
+                )
+                .order_by(strategy_universe_versions.c.event_spec_id)
+            )
+        )
+    assert target_states == ("abandoned", "abandoned")
+
+    fallback = await complete_pending_authority_gap_audit(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        audit_source=_CheckedNegativeAuditSource(),
+        authority_gap_audit_id=audit_pending.authority_gap_audit_id,
+        clock_ms=_Clock(SESSION_START_MS + 5_400_030),
+    )
+    repeated = await complete_pending_authority_gap_audit(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        audit_source=_CheckedNegativeAuditSource(),
+        authority_gap_audit_id=audit_pending.authority_gap_audit_id,
+        clock_ms=_Clock(SESSION_START_MS + 5_400_040),
+    )
+
+    assert fallback.disposition is MaterializationDisposition.FALLBACK_PREVIOUS
+    assert repeated.disposition is MaterializationDisposition.FALLBACK_PREVIOUS
+    assert repeated.selection_authority_id == fallback.selection_authority_id
+    coordinator_retry = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=_Clock(SESSION_START_MS + 5_400_050),
+    )
+    assert (
+        coordinator_retry.disposition
+        is MaterializationDisposition.FALLBACK_PREVIOUS
+    )
+    assert coordinator_retry.selection_authority_id == fallback.selection_authority_id
+    async with head_template_engine.connect() as connection:
+        pointers = tuple(
+            (
+                await connection.execute(
+                    sa.select(
+                        strategy_universe_current.c.event_spec_id,
+                        strategy_universe_current.c.universe_version_id,
+                    )
+                    .where(
+                        strategy_universe_current.c.event_spec_id.in_(
+                            (SOR_LONG_EVENT_SPEC_ID, SOR_SHORT_EVENT_SPEC_ID)
+                        )
+                    )
+                    .order_by(strategy_universe_current.c.event_spec_id)
+                )
+            ).all()
+        )
+        generation_row = (
+            await connection.execute(
+                sa.select(
+                    strategy_universe_materialization_generations.c.lifecycle_state,
+                    strategy_universe_materialization_generations.c.fallback_reason_code,
+                ).where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id
+                    == generation_id
+                )
+            )
+        ).one()
+        vacuum_state = await connection.scalar(
+            sa.select(strategy_entry_vacuums_current.c.state).where(
+                strategy_entry_vacuums_current.c.source_generation_id
+                == generation_id
+            )
+        )
+        authority_row = (
+            await connection.execute(
+                sa.select(
+                    selection_session_authorities.c.authority_outcome,
+                    selection_session_authorities.c.selection_mode,
+                    selection_session_authorities.c.authorized_long_universe_version_id,
+                    selection_session_authorities.c.authorized_short_universe_version_id,
+                ).where(
+                    selection_session_authorities.c.selection_authority_id
+                    == fallback.selection_authority_id
+                )
+            )
+        ).one()
+        control_row = (
+            await connection.execute(
+                sa.select(strategy_selection_control_current).where(
+                    strategy_selection_control_current.c.strategy_group_id
+                    == "SOR-001"
+                )
+            )
+        ).mappings().one()
+    assert pointers == (
+        (SOR_LONG_EVENT_SPEC_ID, LONG_UNIVERSE_ID),
+        (SOR_SHORT_EVENT_SPEC_ID, SHORT_UNIVERSE_ID),
+    )
+    assert generation_row == ("FALLBACK_PREVIOUS", "materialization_timeout")
+    assert vacuum_state == "RESOLVED_FALLBACK"
+    assert authority_row == (
+        "FALLBACK_PREVIOUS",
+        expected_authority_mode,
+        LONG_UNIVERSE_ID,
+        SHORT_UNIVERSE_ID,
+    )
+    assert control_row["selection_mode"] == expected_authority_mode
+    assert control_row["pending_selection_mode"] is None
+    assert control_row["pending_effective_session_start_ms"] is None
+    assert control_row["pending_authorization_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_long_staged_short_terminal_failure_abandons_pair_before_fallback(
+    head_template_engine,
+) -> None:
+    changed_members = tuple(
+        sorted(
+            (
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[0],
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[2],
+            )
+        )
+    )
+    await _seed_materialization_context(
+        head_template_engine,
+        selected_members=changed_members,
+    )
+    await _seed_previous_dynamic_authority(head_template_engine)
+    request = _materialization_request("materializer:short-terminal-failure")
+    clock = _Clock(SESSION_START_MS + 3_600_000)
+    for _ in range(4):
+        await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+            request=request,
+            clock_ms=clock,
+        )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await drain_strategy_entry_vacuum_once(
+            uow,
+            DrainStrategyEntryVacuumRequest(
+                strategy_group_id="SOR-001",
+                selection_spec_id=SELECTION_SPEC_ID,
+                now_ms=SESSION_START_MS + 3_600_010,
+            ),
+        )
+    long_wait = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=clock,
+    )
+    assert long_wait.materialization_generation_id is not None
+    async with head_template_engine.connect() as connection:
+        long_target_id = await connection.scalar(
+            sa.select(strategy_universe_versions.c.universe_version_id).where(
+                strategy_universe_versions.c.materialization_generation_id
+                == long_wait.materialization_generation_id,
+                strategy_universe_versions.c.event_spec_id
+                == SOR_LONG_EVENT_SPEC_ID,
+            )
+        )
+    assert long_target_id is not None
+    await make_warming_ready(
+        head_template_engine,
+        universe_version_id=str(long_target_id),
+        warm_closed_bar_time_ms=SESSION_START_MS + 3_600_005,
+        valid_until_ms=SESSION_START_MS + 7_200_000,
+    )
+    short_wait = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=clock,
+    )
+    async with head_template_engine.connect() as connection:
+        short_target_id = await connection.scalar(
+            sa.select(strategy_universe_versions.c.universe_version_id).where(
+                strategy_universe_versions.c.materialization_generation_id
+                == short_wait.materialization_generation_id,
+                strategy_universe_versions.c.event_spec_id
+                == SOR_SHORT_EVENT_SPEC_ID,
+            )
+        )
+    assert short_target_id is not None
+    await make_warming_ready(
+        head_template_engine,
+        universe_version_id=str(short_target_id),
+        warm_closed_bar_time_ms=SESSION_START_MS + 3_600_006,
+        valid_until_ms=SESSION_START_MS + 7_200_000,
+    )
+    async with head_template_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_instrument_certification_current "
+                "SET status = 'owner_action_required', "
+                "blocker_code = 'instrument_not_tradeable' "
+                "WHERE exchange_instrument_id = :instrument_id"
+            ),
+            {"instrument_id": changed_members[0]},
+        )
+
+    fallback_pending = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=clock,
+    )
+
+    assert fallback_pending.disposition is MaterializationDisposition.GAP_AUDIT_PENDING
+    assert fallback_pending.authority_gap_audit_id is not None
+    async with head_template_engine.connect() as connection:
+        target_states = tuple(
+            await connection.scalars(
+                sa.select(strategy_universe_versions.c.lifecycle_state)
+                .where(
+                    strategy_universe_versions.c.universe_version_id.in_(
+                        (long_target_id, short_target_id)
+                    )
+                )
+                .order_by(strategy_universe_versions.c.event_spec_id)
+            )
+        )
+        pointers = tuple(
+            await connection.scalars(
+                sa.select(strategy_universe_current.c.universe_version_id)
+                .where(
+                    strategy_universe_current.c.event_spec_id.in_(
+                        (SOR_LONG_EVENT_SPEC_ID, SOR_SHORT_EVENT_SPEC_ID)
+                    )
+                )
+                .order_by(strategy_universe_current.c.event_spec_id)
+            )
+        )
+    assert target_states == ("abandoned", "abandoned")
+    assert pointers == (LONG_UNIVERSE_ID, SHORT_UNIVERSE_ID)
+
+
+@pytest.mark.asyncio
+async def test_owner_pause_during_fallback_audit_never_restores_entry_authority(
+    head_template_engine,
+) -> None:
+    generation_id, _, _ = await _prepare_staged_pair(head_template_engine)
+    audit_pending = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=_materialization_request("materializer:paused-fallback"),
+        clock_ms=_Clock(SESSION_START_MS + 5_400_020),
+    )
+    assert audit_pending.authority_gap_audit_id is not None
+    async with head_template_engine.begin() as connection:
+        await connection.execute(
+            sa.update(strategy_entry_controls_current)
+            .where(strategy_entry_controls_current.c.strategy_group_id == "SOR-001")
+            .values(
+                entry_state="paused",
+                control_version=2,
+                reason="owner_paused_during_fallback",
+                updated_at_ms=SESSION_START_MS + 5_400_025,
+            )
+        )
+
+    result = await complete_pending_authority_gap_audit(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        audit_source=_CheckedNegativeAuditSource(),
+        authority_gap_audit_id=audit_pending.authority_gap_audit_id,
+        clock_ms=_Clock(SESSION_START_MS + 5_400_030),
+    )
+
+    assert result.disposition is MaterializationDisposition.BLOCKED
+    assert result.reason_code == "AUTHORITY_GAP_AUDIT_RUNTIME_DRIFT"
+    async with head_template_engine.connect() as connection:
+        generation_state = await connection.scalar(
+            sa.select(
+                strategy_universe_materialization_generations.c.lifecycle_state
+            ).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == generation_id
+            )
+        )
+        vacuum_state = await connection.scalar(
+            sa.select(strategy_entry_vacuums_current.c.state).where(
+                strategy_entry_vacuums_current.c.source_generation_id
+                == generation_id
+            )
+        )
+        fallback_count = await connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(selection_session_authorities)
+            .where(
+                selection_session_authorities.c.authority_outcome
+                == "FALLBACK_PREVIOUS"
+            )
+        )
+    assert generation_state == "STAGED"
+    assert vacuum_state == "RECONFIGURING"
+    assert fallback_count == 0
+
+    abandoned = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=_materialization_request("materializer:paused-fallback-abandon"),
+        clock_ms=_Clock(SESSION_START_MS + 5_400_040),
+    )
+    assert abandoned.disposition is MaterializationDisposition.OWNER_PAUSED
+    async with head_template_engine.connect() as connection:
+        audit_row = (
+            await connection.execute(
+                sa.select(
+                    selection_authority_gap_audits_current.c.state,
+                    selection_authority_gap_audits_current.c.first_blocker,
+                ).where(
+                    selection_authority_gap_audits_current.c.authority_gap_audit_id
+                    == audit_pending.authority_gap_audit_id
+                )
+            )
+        ).one()
+    assert audit_row == ("FAILED", "OWNER_PAUSED")
+
+
+@pytest.mark.asyncio
+async def test_owner_pause_abandons_staged_generation_and_keeps_vacuum_closed(
+    head_template_engine,
+) -> None:
+    generation_id, long_target_id, short_target_id = await _prepare_staged_pair(
+        head_template_engine
+    )
+    async with head_template_engine.begin() as connection:
+        await connection.execute(
+            sa.update(strategy_entry_controls_current)
+            .where(strategy_entry_controls_current.c.strategy_group_id == "SOR-001")
+            .values(
+                entry_state="paused",
+                control_version=2,
+                reason="owner_paused_materialization",
+                updated_at_ms=SESSION_START_MS + 5_000_000,
+            )
+        )
+
+    paused = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=_materialization_request("materializer:owner-pause"),
+        clock_ms=_Clock(SESSION_START_MS + 5_000_000),
+    )
+
+    assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
+    async with head_template_engine.connect() as connection:
+        generation_state = await connection.scalar(
+            sa.select(
+                strategy_universe_materialization_generations.c.lifecycle_state
+            ).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == generation_id
+            )
+        )
+        target_states = tuple(
+            await connection.scalars(
+                sa.select(strategy_universe_versions.c.lifecycle_state)
+                .where(
+                    strategy_universe_versions.c.universe_version_id.in_(
+                        (long_target_id, short_target_id)
+                    )
+                )
+                .order_by(strategy_universe_versions.c.event_spec_id)
+            )
+        )
+        vacuum_state = await connection.scalar(
+            sa.select(strategy_entry_vacuums_current.c.state).where(
+                strategy_entry_vacuums_current.c.source_generation_id
+                == generation_id
+            )
+        )
+        fallback_count = await connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(selection_session_authorities)
+            .where(
+                selection_session_authorities.c.authority_outcome
+                == "FALLBACK_PREVIOUS"
+            )
+        )
+    assert generation_state == "ABANDONED"
+    assert target_states == ("abandoned", "abandoned")
+    assert vacuum_state == "OWNER_PAUSED"
+    assert fallback_count == 0
+
+
+@pytest.mark.asyncio
+async def test_newer_valid_snapshot_supersedes_unactivated_generation_without_fallback(
+    head_template_engine,
+) -> None:
+    old_generation_id, old_long_target_id, old_short_target_id = (
+        await _prepare_staged_pair(head_template_engine)
+    )
+    next_session_start_ms = SESSION_START_MS + 86_400_000
+    next_members = tuple(
+        sorted(
+            (
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[1],
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[3],
+            )
+        )
+    )
+    async with head_template_engine.begin() as connection:
+        await _seed_snapshot(
+            connection,
+            session_start_ms=next_session_start_ms,
+            selected_members=next_members,
+        )
+
+    superseded = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=CoordinateSelectionMaterializationRequest(
+            selection_spec_id=SELECTION_SPEC_ID,
+            strategy_group_id="SOR-001",
+            session_start_ms=next_session_start_ms,
+            worker_id="materializer:newest-valid-wins",
+        ),
+        clock_ms=_Clock(next_session_start_ms + 3_600_000),
+    )
+
+    assert superseded.disposition is MaterializationDisposition.GENERATION_DESIRED
+    assert superseded.materialization_generation_id is not None
+    assert superseded.materialization_generation_id != old_generation_id
+    assert superseded.entry_vacuum_id is not None
+    async with head_template_engine.connect() as connection:
+        generation_rows = tuple(
+            (
+                await connection.execute(
+                    sa.select(
+                        strategy_universe_materialization_generations.c.materialization_generation_id,
+                        strategy_universe_materialization_generations.c.lifecycle_state,
+                    ).order_by(
+                        strategy_universe_materialization_generations.c.session_start_ms
+                    )
+                )
+            ).all()
+        )
+        target_states = tuple(
+            await connection.scalars(
+                sa.select(strategy_universe_versions.c.lifecycle_state)
+                .where(
+                    strategy_universe_versions.c.universe_version_id.in_(
+                        (old_long_target_id, old_short_target_id)
+                    )
+                )
+                .order_by(strategy_universe_versions.c.event_spec_id)
+            )
+        )
+        vacuum_row = (
+            await connection.execute(
+                sa.select(
+                    strategy_entry_vacuums_current.c.state,
+                    strategy_entry_vacuums_current.c.source_generation_id,
+                    strategy_entry_vacuums_current.c.resolved_at_ms,
+                ).where(
+                    strategy_entry_vacuums_current.c.entry_vacuum_id
+                    == superseded.entry_vacuum_id
+                )
+            )
+        ).one()
+        fallback_count = await connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(selection_session_authorities)
+            .where(
+                selection_session_authorities.c.authority_outcome
+                == "FALLBACK_PREVIOUS"
+            )
+        )
+    assert generation_rows == (
+        (old_generation_id, "SUPERSEDED"),
+        (superseded.materialization_generation_id, "MATERIALIZING"),
+    )
+    assert target_states == ("abandoned", "abandoned")
+    assert vacuum_row == (
+        "RECONFIGURING",
+        superseded.materialization_generation_id,
+        None,
+    )
+    assert fallback_count == 0
+
+
+@pytest.mark.asyncio
+async def test_newer_snapshot_supersession_fails_old_pending_gap_audit(
+    head_template_engine,
+) -> None:
+    old_generation_id, _, _ = await _prepare_staged_pair(head_template_engine)
+    old_audit = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=_materialization_request("materializer:old-audit"),
+        clock_ms=_Clock(SESSION_START_MS + 4_500_000),
+    )
+    assert old_audit.disposition is MaterializationDisposition.GAP_AUDIT_PENDING
+    assert old_audit.authority_gap_audit_id is not None
+    next_session_start_ms = SESSION_START_MS + 86_400_000
+    next_members = tuple(
+        sorted(
+            (
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[1],
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[3],
+            )
+        )
+    )
+    async with head_template_engine.begin() as connection:
+        await _seed_snapshot(
+            connection,
+            session_start_ms=next_session_start_ms,
+            selected_members=next_members,
+        )
+
+    superseded = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=CoordinateSelectionMaterializationRequest(
+            selection_spec_id=SELECTION_SPEC_ID,
+            strategy_group_id="SOR-001",
+            session_start_ms=next_session_start_ms,
+            worker_id="materializer:fail-old-audit",
+        ),
+        clock_ms=_Clock(next_session_start_ms + 3_600_000),
+    )
+
+    assert superseded.disposition is MaterializationDisposition.GENERATION_DESIRED
+    async with head_template_engine.connect() as connection:
+        audit_row = (
+            await connection.execute(
+                sa.select(
+                    selection_authority_gap_audits_current.c.state,
+                    selection_authority_gap_audits_current.c.first_blocker,
+                ).where(
+                    selection_authority_gap_audits_current.c.authority_gap_audit_id
+                    == old_audit.authority_gap_audit_id
+                )
+            )
+        ).one()
+        generation_state = await connection.scalar(
+            sa.select(
+                strategy_universe_materialization_generations.c.lifecycle_state
+            ).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == old_generation_id
+            )
+        )
+    assert audit_row == ("FAILED", "SUPERSEDED_BY_NEWER_SELECTION")
+    assert generation_state == "SUPERSEDED"
+
+
+@pytest.mark.parametrize(
+    ("selection_mode", "pending_selection_mode"),
+    (
+        ("dynamic_selection", None),
+        ("static_baseline", "dynamic_selection"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_newer_valid_empty_supersedes_generation_and_resolves_existing_vacuum(
+    head_template_engine,
+    selection_mode: str,
+    pending_selection_mode: str | None,
+) -> None:
+    old_generation_id, old_long_target_id, old_short_target_id = (
+        await _prepare_staged_pair(
+            head_template_engine,
+            selection_mode=selection_mode,
+            pending_selection_mode=pending_selection_mode,
+        )
+    )
+    next_session_start_ms = SESSION_START_MS + 86_400_000
+    async with head_template_engine.begin() as connection:
+        await _seed_snapshot(
+            connection,
+            session_start_ms=next_session_start_ms,
+            selected_members=(),
+        )
+    request = CoordinateSelectionMaterializationRequest(
+        selection_spec_id=SELECTION_SPEC_ID,
+        strategy_group_id="SOR-001",
+        session_start_ms=next_session_start_ms,
+        worker_id="materializer:newest-valid-empty",
+    )
+
+    resolved = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=_Clock(next_session_start_ms + 3_600_000),
+    )
+    repeated = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=_Clock(next_session_start_ms + 3_600_010),
+    )
+
+    assert resolved.disposition is MaterializationDisposition.VALID_EMPTY
+    assert repeated.disposition is MaterializationDisposition.VALID_EMPTY
+    assert repeated.selection_authority_id == resolved.selection_authority_id
+    async with head_template_engine.connect() as connection:
+        generation_state = await connection.scalar(
+            sa.select(
+                strategy_universe_materialization_generations.c.lifecycle_state
+            ).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == old_generation_id
+            )
+        )
+        target_states = tuple(
+            await connection.scalars(
+                sa.select(strategy_universe_versions.c.lifecycle_state)
+                .where(
+                    strategy_universe_versions.c.universe_version_id.in_(
+                        (old_long_target_id, old_short_target_id)
+                    )
+                )
+                .order_by(strategy_universe_versions.c.event_spec_id)
+            )
+        )
+        vacuum_rows = tuple(
+            (
+                await connection.execute(
+                    sa.select(
+                        strategy_entry_vacuums_current.c.entry_vacuum_id,
+                        strategy_entry_vacuums_current.c.state,
+                        strategy_entry_vacuums_current.c.source_generation_id,
+                        strategy_entry_vacuums_current.c.resolved_at_ms,
+                    )
+                )
+            ).all()
+        )
+        authority_row = (
+            await connection.execute(
+                sa.select(
+                    selection_session_authorities.c.authority_outcome,
+                    selection_session_authorities.c.selection_mode,
+                    selection_session_authorities.c.selection_snapshot_id,
+                    selection_session_authorities.c.materialization_generation_id,
+                ).where(
+                    selection_session_authorities.c.selection_authority_id
+                    == resolved.selection_authority_id
+                )
+            )
+        ).one()
+        control_row = (
+            await connection.execute(
+                sa.select(strategy_selection_control_current).where(
+                    strategy_selection_control_current.c.strategy_group_id
+                    == "SOR-001"
+                )
+            )
+        ).mappings().one()
+        fallback_count = await connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(selection_session_authorities)
+            .where(
+                selection_session_authorities.c.authority_outcome
+                == "FALLBACK_PREVIOUS"
+            )
+        )
+    assert generation_state == "SUPERSEDED"
+    assert target_states == ("abandoned", "abandoned")
+    assert len(vacuum_rows) == 1
+    assert vacuum_rows[0][1:3] == ("VALID_EMPTY", None)
+    assert vacuum_rows[0][3] is not None
+    assert authority_row == (
+        "VALID_EMPTY",
+        "dynamic_selection",
+        f"selection:{SELECTION_SPEC_ID}:{next_session_start_ms}",
+        None,
+    )
+    assert control_row["selection_mode"] == "dynamic_selection"
+    assert control_row["pending_selection_mode"] is None
+    assert fallback_count == 0
+
+
+@pytest.mark.asyncio
+async def test_newer_valid_empty_commit_failure_rolls_back_entire_supersession(
+    head_template_engine,
+) -> None:
+    old_generation_id, old_long_target_id, old_short_target_id = (
+        await _prepare_staged_pair(head_template_engine)
+    )
+    next_session_start_ms = SESSION_START_MS + 86_400_000
+    async with head_template_engine.begin() as connection:
+        await _seed_snapshot(
+            connection,
+            session_start_ms=next_session_start_ms,
+            selected_members=(),
+        )
+        await connection.execute(
+            sa.text(
+                """
+                CREATE FUNCTION fail_ds06_valid_empty_authority()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    IF NEW.authority_outcome = 'VALID_EMPTY' THEN
+                        RAISE EXCEPTION 'ds06 injected valid empty failure';
+                    END IF;
+                    RETURN NEW;
+                END
+                $$
+                """
+            )
+        )
+        await connection.execute(
+            sa.text(
+                """
+                CREATE TRIGGER trg_ds06_valid_empty_authority
+                BEFORE INSERT ON brc_selection_session_authorities
+                FOR EACH ROW EXECUTE FUNCTION fail_ds06_valid_empty_authority()
+                """
+            )
+        )
+    request = CoordinateSelectionMaterializationRequest(
+        selection_spec_id=SELECTION_SPEC_ID,
+        strategy_group_id="SOR-001",
+        session_start_ms=next_session_start_ms,
+        worker_id="materializer:valid-empty-fault",
+    )
+
+    with pytest.raises(DBAPIError, match="ds06 injected valid empty failure"):
+        await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+            request=request,
+            clock_ms=_Clock(next_session_start_ms + 3_600_000),
+        )
+
+    async with head_template_engine.connect() as connection:
+        generation_state = await connection.scalar(
+            sa.select(
+                strategy_universe_materialization_generations.c.lifecycle_state
+            ).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == old_generation_id
+            )
+        )
+        target_states = tuple(
+            await connection.scalars(
+                sa.select(strategy_universe_versions.c.lifecycle_state)
+                .where(
+                    strategy_universe_versions.c.universe_version_id.in_(
+                        (old_long_target_id, old_short_target_id)
+                    )
+                )
+                .order_by(strategy_universe_versions.c.event_spec_id)
+            )
+        )
+        vacuum_state = await connection.scalar(
+            sa.select(strategy_entry_vacuums_current.c.state).where(
+                strategy_entry_vacuums_current.c.source_generation_id
+                == old_generation_id
+            )
+        )
+        valid_empty_count = await connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(selection_session_authorities)
+            .where(
+                selection_session_authorities.c.authority_outcome
+                == "VALID_EMPTY"
+            )
+        )
+    assert generation_state == "STAGED"
+    assert target_states == ("staged", "staged")
+    assert vacuum_state == "RECONFIGURING"
+    assert valid_empty_count == 0
+
+    async with head_template_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "DROP TRIGGER trg_ds06_valid_empty_authority "
+                "ON brc_selection_session_authorities"
+            )
+        )
+        await connection.execute(
+            sa.text("DROP FUNCTION fail_ds06_valid_empty_authority()")
+        )
+    retried = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=_Clock(next_session_start_ms + 3_600_010),
+    )
+    assert retried.disposition is MaterializationDisposition.VALID_EMPTY
+
+
+@pytest.mark.asyncio
+async def test_fallback_commit_failure_rolls_back_and_retry_is_idempotent(
+    head_template_engine,
+) -> None:
+    generation_id, _, _ = await _prepare_staged_pair(head_template_engine)
+    audit_pending = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=_materialization_request("materializer:fallback-crash"),
+        clock_ms=_Clock(SESSION_START_MS + 5_400_020),
+    )
+    assert audit_pending.authority_gap_audit_id is not None
+    async with head_template_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                """
+                CREATE FUNCTION fail_ds06_fallback_commit()
+                RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    IF NEW.authority_outcome = 'FALLBACK_PREVIOUS' THEN
+                        RAISE EXCEPTION 'ds06 injected fallback commit failure';
+                    END IF;
+                    RETURN NEW;
+                END
+                $$
+                """
+            )
+        )
+        await connection.execute(
+            sa.text(
+                """
+                CREATE TRIGGER trg_ds06_fallback_commit
+                BEFORE INSERT ON brc_selection_session_authorities
+                FOR EACH ROW EXECUTE FUNCTION fail_ds06_fallback_commit()
+                """
+            )
+        )
+
+    with pytest.raises(DBAPIError, match="ds06 injected fallback commit failure"):
+        await complete_pending_authority_gap_audit(
+            uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+            audit_source=_CheckedNegativeAuditSource(),
+            authority_gap_audit_id=audit_pending.authority_gap_audit_id,
+            clock_ms=_Clock(SESSION_START_MS + 5_400_030),
+        )
+    async with head_template_engine.connect() as connection:
+        before_retry = (
+            await connection.scalar(
+                sa.select(
+                    strategy_universe_materialization_generations.c.lifecycle_state
+                ).where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id
+                    == generation_id
+                )
+            ),
+            await connection.scalar(
+                sa.select(strategy_entry_vacuums_current.c.state).where(
+                    strategy_entry_vacuums_current.c.source_generation_id
+                    == generation_id
+                )
+            ),
+            await connection.scalar(
+                sa.select(selection_authority_gap_audits_current.c.state).where(
+                    selection_authority_gap_audits_current.c.authority_gap_audit_id
+                    == audit_pending.authority_gap_audit_id
+                )
+            ),
+        )
+    assert before_retry == ("STAGED", "RECONFIGURING", "PENDING")
+    async with head_template_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "DROP TRIGGER trg_ds06_fallback_commit "
+                "ON brc_selection_session_authorities"
+            )
+        )
+        await connection.execute(sa.text("DROP FUNCTION fail_ds06_fallback_commit()"))
+
+    committed = await complete_pending_authority_gap_audit(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        audit_source=_CheckedNegativeAuditSource(),
+        authority_gap_audit_id=audit_pending.authority_gap_audit_id,
+        clock_ms=_Clock(SESSION_START_MS + 5_400_040),
+    )
+    repeated = await complete_pending_authority_gap_audit(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        audit_source=_CheckedNegativeAuditSource(),
+        authority_gap_audit_id=audit_pending.authority_gap_audit_id,
+        clock_ms=_Clock(SESSION_START_MS + 5_400_050),
+    )
+    assert committed.disposition is MaterializationDisposition.FALLBACK_PREVIOUS
+    assert repeated.selection_authority_id == committed.selection_authority_id
+
+
+@pytest.mark.asyncio
+async def test_fallback_transaction_crossing_first_close_rolls_back_grant(
+    head_template_engine,
+) -> None:
+    generation_id, _, _ = await _prepare_staged_pair(head_template_engine)
+    audit_pending = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=_materialization_request("materializer:fallback-close-cross"),
+        clock_ms=_Clock(SESSION_START_MS + 5_400_020),
+    )
+    assert audit_pending.authority_gap_audit_id is not None
+
+    result = await complete_pending_authority_gap_audit(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        audit_source=_CheckedNegativeAuditSource(),
+        authority_gap_audit_id=audit_pending.authority_gap_audit_id,
+        clock_ms=_SequenceClock(
+            SESSION_START_MS + 5_400_030,
+            SESSION_START_MS + 6_299_999,
+            SESSION_START_MS + 6_300_000,
+        ),
+    )
+
+    assert result.disposition is MaterializationDisposition.GAP_AUDIT_WINDOW_EXPIRED
+    async with head_template_engine.connect() as connection:
+        state = (
+            await connection.scalar(
+                sa.select(
+                    strategy_universe_materialization_generations.c.lifecycle_state
+                ).where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id
+                    == generation_id
+                )
+            ),
+            await connection.scalar(
+                sa.select(strategy_entry_vacuums_current.c.state).where(
+                    strategy_entry_vacuums_current.c.source_generation_id
+                    == generation_id
+                )
+            ),
+            await connection.scalar(
+                sa.select(selection_authority_gap_audits_current.c.state).where(
+                    selection_authority_gap_audits_current.c.authority_gap_audit_id
+                    == audit_pending.authority_gap_audit_id
+                )
+            ),
+        )
+    assert state == ("STAGED", "RECONFIGURING", "PENDING")
 
 
 @pytest.mark.asyncio
@@ -1202,6 +2855,136 @@ async def test_gap_audit_detector_identity_drift_is_persisted_failed(
     assert row == ("FAILED", "AUTHORITY_GAP_DETECTOR_IDENTITY_DRIFT")
 
 
+async def _prepare_generation_owned_long(
+    engine,
+    *,
+    selection_mode: str = "dynamic_selection",
+    pending_selection_mode: str | None = None,
+):
+    changed_members = tuple(
+        sorted(
+            (
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[0],
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[2],
+            )
+        )
+    )
+    await _seed_materialization_context(
+        engine,
+        selected_members=changed_members,
+        selection_mode=selection_mode,
+        pending_selection_mode=pending_selection_mode,
+    )
+    if selection_mode == "dynamic_selection":
+        await _seed_previous_dynamic_authority(engine)
+    request = _materialization_request("materializer:generation-owned-install")
+    clock = _Clock(SESSION_START_MS + 3_600_000)
+    generation_id = None
+    for _ in range(4):
+        result = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+            request=request,
+            clock_ms=clock,
+        )
+        generation_id = result.materialization_generation_id or generation_id
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await drain_strategy_entry_vacuum_once(
+            uow,
+            DrainStrategyEntryVacuumRequest(
+                strategy_group_id="SOR-001",
+                selection_spec_id=SELECTION_SPEC_ID,
+                now_ms=SESSION_START_MS + 3_600_010,
+            ),
+        )
+    assert generation_id is not None
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        installed = await install_strategy_universe(
+            uow,
+            UniverseInstallRequest(
+                event_spec_id=SOR_LONG_EVENT_SPEC_ID,
+                runtime_profile_id="tiny-live-v1",
+                owner_policy_id="policy-main",
+                exchange_instrument_ids=changed_members,
+                source_kind="dynamic_selection",
+                materialization_generation_id=generation_id,
+                expected_member_set_digest=selected_member_set_digest(
+                    changed_members
+                ),
+                installed_at_ms=SESSION_START_MS + 3_600_020,
+            ),
+        )
+    return generation_id, changed_members, installed
+
+
+async def _prepare_staged_pair(
+    engine,
+    *,
+    selection_mode: str = "dynamic_selection",
+    pending_selection_mode: str | None = None,
+):
+    generation_id, changed_members, long_install = (
+        await _prepare_generation_owned_long(
+            engine,
+            selection_mode=selection_mode,
+            pending_selection_mode=pending_selection_mode,
+        )
+    )
+    assert long_install.universe is not None
+    await make_warming_ready(
+        engine,
+        universe_version_id=long_install.universe.universe_version_id,
+        warm_closed_bar_time_ms=SESSION_START_MS + 3_600_021,
+        valid_until_ms=SESSION_START_MS + 7_200_000,
+    )
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=long_install.universe.universe_version_id,
+                attempted_at_ms=SESSION_START_MS + 3_600_030,
+                operation=UniverseActivationOperation.STAGE_DYNAMIC,
+                materialization_generation_id=generation_id,
+            ),
+        )
+        short_install = await install_strategy_universe(
+            uow,
+            UniverseInstallRequest(
+                event_spec_id=SOR_SHORT_EVENT_SPEC_ID,
+                runtime_profile_id="tiny-live-v1",
+                owner_policy_id="policy-main",
+                exchange_instrument_ids=changed_members,
+                source_kind="dynamic_selection",
+                materialization_generation_id=generation_id,
+                expected_member_set_digest=selected_member_set_digest(
+                    changed_members
+                ),
+                installed_at_ms=SESSION_START_MS + 3_600_031,
+            ),
+        )
+    assert short_install.universe is not None
+    await make_warming_ready(
+        engine,
+        universe_version_id=short_install.universe.universe_version_id,
+        warm_closed_bar_time_ms=SESSION_START_MS + 3_600_032,
+        valid_until_ms=SESSION_START_MS + 7_200_000,
+    )
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=short_install.universe.universe_version_id,
+                attempted_at_ms=SESSION_START_MS + 3_600_040,
+                operation=UniverseActivationOperation.STAGE_DYNAMIC,
+                materialization_generation_id=generation_id,
+            ),
+        )
+    return (
+        generation_id,
+        long_install.universe.universe_version_id,
+        short_install.universe.universe_version_id,
+    )
+
+
 async def _seed_materialization_context(
     engine,
     *,
@@ -1238,24 +3021,28 @@ async def _seed_materialization_context(
                 for instrument_id in CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
             ],
         )
+        product_profiles = tuple(
+            InstrumentProductProfile(
+                exchange_instrument_id=instrument_id,
+                product_family="crypto_perpetual",
+                asset_class="crypto",
+                contract_type="PERPETUAL",
+                underlying_type="CRYPTO",
+                margin_asset="USDT",
+                entry_session_policy="continuous",
+                status="candidate",
+            )
+            for instrument_id in CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
+        )
         await connection.execute(
             pg_insert(instrument_product_profiles).on_conflict_do_nothing(),
             [
                 {
-                    "exchange_instrument_id": instrument_id,
-                    "product_family": "crypto_perpetual",
-                    "asset_class": "crypto",
-                    "contract_type": "PERPETUAL",
-                    "underlying_type": "CRYPTO",
-                    "margin_asset": "USDT",
-                    "entry_session_policy": "continuous",
-                    "status": "candidate",
-                    "max_entry_spread_bps": None,
-                    "max_mark_index_deviation_bps": None,
-                    "semantic_digest": "sha256:" + "9" * 64,
+                    **profile.model_dump(mode="python"),
+                    "semantic_digest": profile.semantic_digest,
                     "updated_at_ms": SESSION_START_MS,
                 }
-                for instrument_id in CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
+                for profile in product_profiles
             ],
         )
         await connection.execute(
@@ -1430,14 +3217,52 @@ async def _seed_current_universe_pair(connection) -> None:
             },
         ],
     )
+    await connection.execute(
+        sa.insert(runtime_scopes_current),
+        [
+            {
+                "runtime_scope_id": (
+                    f"scope:materialization:{position_side}:{instrument_id}"
+                ),
+                "strategy_group_id": "SOR-001",
+                "strategy_version_id": "sgv:SOR-001:v4",
+                "event_spec_id": event_spec_id,
+                "runtime_profile_id": "tiny-live-v1",
+                "owner_policy_id": "policy-main",
+                "exchange_instrument_id": instrument_id,
+                "position_side": position_side,
+                "universe_version_id": universe_id,
+                "universe_semantic_digest": digest,
+                "lifecycle_state": "active",
+                "observation_enabled": True,
+                "entry_enabled": True,
+                "scope_version": 1,
+                "warm_closed_bar_time_ms": SESSION_START_MS,
+                "warm_completed_at_ms": SESSION_START_MS,
+                "warm_readiness_digest": "sha256:" + "a" * 64,
+                "warm_valid_until_ms": SESSION_START_MS + 90_000_000,
+                "next_observation_due_at_ms": SESSION_START_MS + 900_000,
+                "lease_expires_at_ms": None,
+                "lease_owner": None,
+                "observation_generation": 1,
+                "updated_at_ms": SESSION_START_MS,
+            }
+            for universe_id, event_spec_id, position_side in (
+                (LONG_UNIVERSE_ID, SOR_LONG_EVENT_SPEC_ID, "long"),
+                (SHORT_UNIVERSE_ID, SOR_SHORT_EVENT_SPEC_ID, "short"),
+            )
+            for instrument_id in SELECTED_MEMBERS
+        ],
+    )
 
 
 async def _seed_snapshot(
     connection,
     *,
+    session_start_ms: int = SESSION_START_MS,
     selected_members: tuple[str, ...] = SELECTED_MEMBERS,
 ) -> None:
-    snapshot_id = f"selection:{SELECTION_SPEC_ID}:{SESSION_START_MS}"
+    snapshot_id = f"selection:{SELECTION_SPEC_ID}:{session_start_ms}"
     ranks = {instrument_id: index + 1 for index, instrument_id in enumerate(selected_members)}
     await connection.execute(
         sa.insert(instrument_selection_snapshots).values(
@@ -1445,18 +3270,18 @@ async def _seed_snapshot(
             selection_spec_id=SELECTION_SPEC_ID,
             strategy_group_id="SOR-001",
             strategy_version_id="sgv:SOR-001:v4",
-            session_start_ms=SESSION_START_MS,
-            decision_at_ms=SESSION_START_MS + 3_600_000,
-            feature_cutoff_at_ms=SESSION_START_MS + 3_600_000,
-            eligibility_not_before_ms=SESSION_START_MS + 4_500_000,
-            expires_at_ms=SESSION_START_MS + 90_000_000,
+            session_start_ms=session_start_ms,
+            decision_at_ms=session_start_ms + 3_600_000,
+            feature_cutoff_at_ms=session_start_ms + 3_600_000,
+            eligibility_not_before_ms=session_start_ms + 4_500_000,
+            expires_at_ms=session_start_ms + 90_000_000,
             candidate_count=24,
             ready_count=len(selected_members),
             selected_count=len(selected_members),
-            source_observed_at_ms=SESSION_START_MS + 3_600_000,
+            source_observed_at_ms=session_start_ms + 3_600_000,
             source_semantic_digest="sha256:" + "1" * 64,
             selection_semantic_digest="sha256:" + "2" * 64,
-            created_at_ms=SESSION_START_MS + 3_600_000,
+            created_at_ms=session_start_ms + 3_600_000,
         )
     )
     await connection.execute(
@@ -1464,12 +3289,12 @@ async def _seed_snapshot(
         [
             {
                 "selection_snapshot_id": snapshot_id,
-                "member_decision_id": f"member:{index}",
+                "member_decision_id": f"member:{session_start_ms}:{index}",
                 "selection_spec_id": SELECTION_SPEC_ID,
-                "session_start_ms": SESSION_START_MS,
-                "feature_cutoff_at_ms": SESSION_START_MS + 3_600_000,
-                "input_window_start_ms": SESSION_START_MS - 82_800_000,
-                "input_window_end_ms": SESSION_START_MS + 3_600_000,
+                "session_start_ms": session_start_ms,
+                "feature_cutoff_at_ms": session_start_ms + 3_600_000,
+                "input_window_start_ms": session_start_ms - 82_800_000,
+                "input_window_end_ms": session_start_ms + 3_600_000,
                 "exchange_instrument_id": instrument_id,
                 "input_window_digest": "sha256:" + "3" * 64,
                 "source_status": "READY",

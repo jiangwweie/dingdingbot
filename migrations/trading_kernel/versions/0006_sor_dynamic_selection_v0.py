@@ -944,6 +944,25 @@ def _upgrade_strategy_universe() -> None:
         "brc_strategy_universe_versions",
         ["materialization_generation_id", "event_spec_id"],
     )
+    op.drop_constraint(
+        "ck_brc_runtime_scopes_current_lifecycle_permissions_valid",
+        "brc_runtime_scopes_current",
+        type_="check",
+    )
+    op.create_check_constraint(
+        "ck_brc_runtime_scopes_current_lifecycle_permissions_valid",
+        "brc_runtime_scopes_current",
+        "(lifecycle_state = 'warming' AND observation_enabled "
+        "AND NOT entry_enabled) OR "
+        "(lifecycle_state = 'staged' AND NOT observation_enabled "
+        "AND NOT entry_enabled) OR "
+        "(lifecycle_state = 'active' AND observation_enabled "
+        "AND entry_enabled) OR "
+        "(lifecycle_state = 'retired' AND NOT observation_enabled "
+        "AND NOT entry_enabled) OR "
+        "(lifecycle_state = 'abandoned' AND NOT observation_enabled "
+        "AND NOT entry_enabled)",
+    )
 
 
 def _create_vacuum_and_gap_tables() -> None:

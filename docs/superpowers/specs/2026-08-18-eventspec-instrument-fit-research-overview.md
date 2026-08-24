@@ -255,7 +255,7 @@ ENTRY，不追溯撤销此前合法Ticket/fill或protected lifecycle。
 | **P3-X.0 — Instrument Effect** | 已完成固定面板敏感度研究 | None |
 | **P3-X.1 — Dynamic Selection V0 Replay** | 已完成；全部冻结定量 Gate 通过 | None |
 | **P3-X.2 — Production design** | 三Plane ownership/DB handoff、generic Selection facts、独立leases、Selection-Period continuity Authority、SelectionSessionAuthority、Entry Vacuum、source failure、通用Authority Gap Audit、`first_eligible_close_time_ms`、`VALID_EMPTY/NO_CHANGE/SUPERSEDED`、Pause Resume、unfinished ENTRY drain、双腿partial-retained、唯一Generation→Universe linkage、serial warming、atomic switch、first Dynamic activation特例、post-fence fallback、thin release compatibility projection | **DESIGN_APPROVED**；Production Design已完成，不单独授权实现；`production_authority=NONE` |
-| **P3-X.3 — Implementation/certification** | Implementation Plan已独立复核通过；DS-00至DS-05已经完成；Decimal Golden是DS-03/DS-09唯一Selection parity baseline，当前进入serial warming、atomic pair activation与fallback | `PLAN_APPROVED / CODE_AND_TEST_ONLY / production_authority=NONE`；active execution scope=`DS-06`；Owner已授权DS-06至DS-10本地顺序实施 |
+| **P3-X.3 — Implementation/certification** | Implementation Plan已独立复核通过；DS-00至DS-06已经完成；Decimal Golden是DS-03/DS-09唯一Selection parity baseline，serial warming、atomic pair activation、supersession与fallback已经闭合，当前进入四个new-ENTRY边界Authority lineage | `PLAN_APPROVED / CODE_AND_TEST_ONLY / production_authority=NONE`；active execution scope=`DS-07`；Owner已授权DS-07至DS-10本地顺序实施 |
 | **P3-X.4 — Small-capital activation** | Owner 单独授权 Dynamic mode；原风险边界 | Production Instrument eligibility changes |
 | **P3-X.5 — Productization** | API、前端、版本治理和后续策略复用 | Deferred |
 
@@ -289,6 +289,6 @@ docs/superpowers/plans/
 
 它把Schema、test-first批次、Migration、三个独立lease、continuity/Gap Audit close边界、Vacuum/
 ENTRY drain、warming/activation/fallback、release classification和rollback拆成DS-00至DS-10可验收
-Task，当前状态`PLAN_APPROVED / CODE_AND_TEST_ONLY / production_authority=NONE`。DS-00至DS-05已完成，
-当前Active Execution Scope为`DS-06`；Owner已授权DS-06至DS-10本地代码、测试与认证顺序实施。
+Task，当前状态`PLAN_APPROVED / CODE_AND_TEST_ONLY / production_authority=NONE`。DS-00至DS-06已完成，
+当前Active Execution Scope为`DS-07`；Owner已授权DS-07至DS-10本地代码、测试与认证顺序实施。
 生产Migration执行、部署、生产Selection、Strategy Control、Policy与首次Dynamic activation仍无授权。

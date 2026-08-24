@@ -8,7 +8,7 @@ from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
 
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
@@ -17,6 +17,7 @@ from src.trading_kernel.domain.owner_control import OwnerAuthorization
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.strategy_universe import (
     MAX_UNIVERSE_MEMBERS,
+    StrategyUniverseLifecycleState,
     StrategyUniverseVersion,
 )
 
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 class UniverseInstallStatus(StrEnum):
     INSTALLED = "installed"
     ALREADY_WARMING = "already_warming"
+    ALREADY_STAGED = "already_staged"
     ALREADY_ACTIVE = "already_active"
     WARMING_UNIVERSE_ALREADY_EXISTS = "WARMING_UNIVERSE_ALREADY_EXISTS"
 
@@ -42,6 +44,11 @@ class UniverseInstallRequest(BaseModel):
     runtime_profile_id: str
     owner_policy_id: str
     exchange_instrument_ids: tuple[str, ...]
+    source_kind: Literal["manual", "dynamic_selection", "static_baseline"] = (
+        "manual"
+    )
+    materialization_generation_id: str | None = None
+    expected_member_set_digest: str | None = None
     installed_at_ms: int
 
     @field_validator(
@@ -86,6 +93,46 @@ class UniverseInstallRequest(BaseModel):
         if value <= 0:
             raise ValueError("Universe install time must be positive")
         return value
+
+    @field_validator(
+        "materialization_generation_id",
+        "expected_member_set_digest",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_materialization_identity(
+        cls,
+        value: object,
+    ) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
+    @field_validator("expected_member_set_digest")
+    @classmethod
+    def _require_optional_sha256(cls, value: str | None) -> str | None:
+        if value is not None and (
+            not value.startswith("sha256:")
+            or len(value) != 71
+            or any(character not in "0123456789abcdef" for character in value[7:])
+        ):
+            raise ValueError("expected member-set digest must be canonical SHA-256")
+        return value
+
+    @model_validator(mode="after")
+    def _require_materialization_shape(self) -> UniverseInstallRequest:
+        generation_values = (
+            self.materialization_generation_id,
+            self.expected_member_set_digest,
+        )
+        if self.source_kind == "manual" and any(
+            item is not None for item in generation_values
+        ):
+            raise ValueError("manual Universe install forbids Generation authority")
+        if self.source_kind != "manual" and any(
+            item is None for item in generation_values
+        ):
+            raise ValueError("generation-owned Universe install requires exact authority")
+        return self
 
 
 class UniverseConfigurationRequest(BaseModel):
@@ -165,7 +212,7 @@ class UniverseInstallResult(BaseModel):
 
     status: UniverseInstallStatus
     universe: StrategyUniverseVersion | None
-    lifecycle_state: Literal["warming", "active"] | None
+    lifecycle_state: Literal["warming", "staged", "active"] | None
     inserted_instrument_count: int
     inserted_version_count: int
     inserted_member_count: int
@@ -189,6 +236,24 @@ class UniverseCurrent(BaseModel):
     semantic_digest: str
     activation_generation: int
     activated_at_ms: int
+
+
+class GenerationUniverseTarget(BaseModel):
+    """One exact Universe already materialized for a durable Generation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    universe_version_id: str
+    event_spec_id: str
+    lifecycle_state: StrategyUniverseLifecycleState
+
+    @field_validator("universe_version_id", "event_spec_id", mode="before")
+    @classmethod
+    def _require_target_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("Generation Universe target identity must be non-blank")
+        return normalized
 
 
 async def install_strategy_universe(

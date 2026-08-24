@@ -27,6 +27,7 @@ from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationResult,
 )
 from src.trading_kernel.application.install_strategy_universe import (
+    GenerationUniverseTarget,
     UniverseCurrent,
     UniverseInstallContext,
     UniverseInstallRequest,
@@ -1320,6 +1321,13 @@ class StrategyUniverseRepository(Protocol):
         request: UniverseActivationRequest,
     ) -> UniverseActivationResult: ...
 
+    async def get_generation_universe_targets(
+        self,
+        materialization_generation_id: str,
+        *,
+        for_update: bool = False,
+    ) -> tuple[GenerationUniverseTarget, ...]: ...
+
     async def abandon(
         self,
         request: AbandonStrategyUniverseRequest,
@@ -1490,6 +1498,42 @@ class InstrumentSelectionRepository(Protocol):
         expected_projection_version: int,
         reason_code: str,
         abandoned_at_ms: int,
+    ) -> MaterializationGeneration: ...
+
+    async def supersede_generation_and_retarget_vacuum(
+        self,
+        *,
+        previous_generation: MaterializationGeneration,
+        replacement_generation: MaterializationGeneration,
+        replacement_targets: tuple[MaterializationTarget, ...],
+        vacuum: StrategyEntryVacuum,
+        superseded_at_ms: int,
+    ) -> MaterializationGeneration: ...
+
+    async def supersede_generation_and_resolve_valid_empty(
+        self,
+        *,
+        previous_generation: MaterializationGeneration,
+        snapshot: SelectionSnapshot,
+        vacuum: StrategyEntryVacuum,
+        superseded_at_ms: int,
+    ) -> None: ...
+
+    async def mark_generation_fallback_previous_pending(
+        self,
+        *,
+        generation: MaterializationGeneration,
+        vacuum: StrategyEntryVacuum,
+        reason_code: str,
+        marked_at_ms: int,
+    ) -> StrategyEntryVacuum: ...
+
+    async def abandon_generation_for_owner_pause(
+        self,
+        *,
+        generation: MaterializationGeneration,
+        vacuum: StrategyEntryVacuum,
+        paused_at_ms: int,
     ) -> MaterializationGeneration: ...
 
     async def get_materialization_generation(

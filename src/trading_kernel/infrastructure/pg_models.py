@@ -1474,6 +1474,8 @@ runtime_scopes_current = sa.Table(
     sa.CheckConstraint(
         "(lifecycle_state = 'warming' "
         "AND observation_enabled AND NOT entry_enabled) OR "
+        "(lifecycle_state = 'staged' "
+        "AND NOT observation_enabled AND NOT entry_enabled) OR "
         "(lifecycle_state = 'active' "
         "AND observation_enabled AND entry_enabled) OR "
         "(lifecycle_state = 'retired' "

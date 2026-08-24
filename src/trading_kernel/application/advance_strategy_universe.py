@@ -7,14 +7,26 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.selection_authority import SelectionSessionAuthority
+
 if TYPE_CHECKING:
     from src.trading_kernel.application.ports import KernelUnitOfWork
 
 
 class UniverseActivationStatus(StrEnum):
     ACTIVATED = "activated"
+    STAGED = "staged"
+    FALLBACK_PREVIOUS = "fallback_previous"
     NOT_READY = "not_ready"
     ALREADY_ACTIVE = "already_active"
+
+
+class UniverseActivationOperation(StrEnum):
+    AUTO = "auto"
+    ACTIVATE_MANUAL = "activate_manual"
+    STAGE_DYNAMIC = "stage_dynamic"
+    ACTIVATE_DYNAMIC_PAIR = "activate_dynamic_pair"
+    FALLBACK_PREVIOUS = "fallback_previous"
 
 
 class UniverseActivationReadiness(BaseModel):
@@ -96,6 +108,10 @@ class UniverseActivationRequest(BaseModel):
 
     universe_version_id: str
     attempted_at_ms: int
+    operation: UniverseActivationOperation = UniverseActivationOperation.AUTO
+    materialization_generation_id: str | None = None
+    paired_universe_version_id: str | None = None
+    selection_authority: SelectionSessionAuthority | None = None
 
     @field_validator("universe_version_id", mode="before")
     @classmethod
@@ -112,6 +128,48 @@ class UniverseActivationRequest(BaseModel):
             raise ValueError("activation attempt time must be positive")
         return value
 
+    @field_validator(
+        "materialization_generation_id",
+        "paired_universe_version_id",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_generation(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _validate_operation_shape(self) -> UniverseActivationRequest:
+        if (
+            self.operation is UniverseActivationOperation.STAGE_DYNAMIC
+            and self.materialization_generation_id is None
+        ):
+            raise ValueError("Dynamic staging requires exact Generation identity")
+        if (
+            self.operation is UniverseActivationOperation.ACTIVATE_MANUAL
+            and self.materialization_generation_id is not None
+        ):
+            raise ValueError("manual activation forbids Generation identity")
+        pair_operation = self.operation in {
+            UniverseActivationOperation.ACTIVATE_DYNAMIC_PAIR,
+            UniverseActivationOperation.FALLBACK_PREVIOUS,
+        }
+        if pair_operation and any(
+            value is None
+            for value in (
+                self.materialization_generation_id,
+                self.paired_universe_version_id,
+                self.selection_authority,
+            )
+        ):
+            raise ValueError("pair transition requires exact Generation and Authority")
+        if not pair_operation and (
+            self.paired_universe_version_id is not None
+            or self.selection_authority is not None
+        ):
+            raise ValueError("single-Universe transition forbids pair Authority")
+        return self
+
 
 class UniverseActivationResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -123,6 +181,7 @@ class UniverseActivationResult(BaseModel):
     previous_universe_version_id: str | None
     activation_generation: int | None
     activated_at_ms: int | None
+    paired_universe_version_id: str | None = None
 
     @model_validator(mode="after")
     def _validate_result_shape(self) -> UniverseActivationResult:
@@ -136,6 +195,23 @@ class UniverseActivationResult(BaseModel):
                 or self.activated_at_ms is not None
             ):
                 raise ValueError("not-ready activation result shape is invalid")
+            return self
+        if self.status is UniverseActivationStatus.STAGED:
+            if (
+                self.reason_code is not None
+                or self.activation_generation is not None
+                or self.activated_at_ms is not None
+            ):
+                raise ValueError("staged activation result shape is invalid")
+            return self
+        if self.status is UniverseActivationStatus.FALLBACK_PREVIOUS:
+            if (
+                self.reason_code is not None
+                or self.activation_generation is None
+                or self.activated_at_ms is None
+                or self.paired_universe_version_id is None
+            ):
+                raise ValueError("fallback activation result shape is invalid")
             return self
         if (
             self.reason_code is not None

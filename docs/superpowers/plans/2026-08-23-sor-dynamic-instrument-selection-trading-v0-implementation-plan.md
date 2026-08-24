@@ -5,7 +5,7 @@ date: 2026-08-23
 phase: P3-X.3A
 design_authority: ../specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: DS-06
+active_execution_scope: DS-07
 next_execution_gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_06_TO_DS_10
 production_authority: NONE
 ---
@@ -31,7 +31,7 @@ decision）
 design status: DESIGN_APPROVED
 plan status: PLAN_APPROVED
 implementation_authority: CODE_AND_TEST_ONLY
-active execution scope: DS-06
+active execution scope: DS-07
 next execution gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_06_TO_DS_10
 production_authority: NONE
 ```
@@ -805,6 +805,37 @@ pair或按exact gates fallback previous。
 **Done**
 
 Active pair、Authority和Vacuum终态始终原子一致，首次Static恢复也受Gap Audit保护。
+
+#### DS-06 Execution Evidence — 2026-08-24
+
+**状态：`DS06_COMPLETE / FOCUSED_AND_FAST_ACCEPTANCE_PASSED`。** Active Execution Scope自动推进至
+**DS-07**；`implementation_authority=CODE_AND_TEST_ONLY`，`production_authority=NONE`。
+
+本卡复用唯一global warming queue完成LONG→SHORT串行materialization，并把两侧staged、最终
+Authority和Vacuum终态收敛为一个原子状态机：
+
+| Boundary | Implemented contract | Direct evidence |
+| --- | --- | --- |
+| Serial warming | LONG `warming -> staged`后释放global slot，SHORT随后warming；staged scope关闭Observation/ENTRY authority | PostgreSQL integration + Migration constraint |
+| Atomic activation | 同一transaction retire previous pair、activate targets、切两个current pointers、提交`ACTIVE_NEW`、终结Generation和Vacuum | PostgreSQL integration + 8-point fault injection |
+| Exact fallback | 1800秒timeout或terminal certification blocker先正式abandon targets，再完成union Gap Audit并恢复exact previous pair；具体失败原因永久写入Generation | Dynamic/first-Static integration |
+| First Static failure | `FALLBACK_PREVIOUS + STATIC_BASELINE`保留Static mode并原子清空pending mode/effective session/authorization | PostgreSQL integration |
+| Supersession | 新合法Snapshot使旧Generation=`SUPERSEDED`、旧targets abandoned；Vacuum直接重绑定新Generation，或对最新零成员Snapshot原子终结为`VALID_EMPTY` | PostgreSQL integration + commit-fault rollback |
+| Pause precedence | RECONFIGURING阶段Owner Pause终结targets/Generation、Vacuum=`OWNER_PAUSED`，且zero fallback Authority；DRAINING_ENTRY阶段的继续drain由DS-08 runtime card统一托管 | PostgreSQL integration + scoped plan boundary |
+| Recovery hygiene | supersession/Pause原子终结旧PENDING Gap Audit；`ACTIVE_NEW/NO_CHANGE/FALLBACK_PREVIOUS/VALID_EMPTY`由Coordinator幂等读取，不重复创建Authority或Audit | crash/retry integration |
+| Architecture | Materialization Coordinator纳入Universe authority扫描，只放行精确相邻词`FALLBACK_PREVIOUS`，不放宽legacy/schema/runtime compatibility禁令 | Architecture audit |
+
+验证结果：
+
+| Verification | Result |
+| --- | ---: |
+| DS-06 focused unit/integration/migration/architecture | **146 passed** |
+| Fast Unit + Architecture（继续排除DS-08拥有的`test_deploy_tokyo_release.py`） | **916 passed** |
+| Ruff | **passed** |
+| Mypy | **169 source files，zero issues** |
+| `git diff --check` | **passed** |
+
+本卡没有运行生产Migration、Tokyo部署、Dynamic activation、Crypto SOR resume或exchange mutation。
 
 ### DS-07 — Observation, Signal, Ticket And Dispatch Authority Enforcement
 

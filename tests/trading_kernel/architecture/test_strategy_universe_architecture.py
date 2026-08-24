@@ -12,6 +12,7 @@ from src.trading_kernel.infrastructure.pg_models import metadata
 REPO_ROOT = Path(__file__).resolve().parents[3]
 KERNEL_ROOT = REPO_ROOT / "src/trading_kernel"
 UNIVERSE_APPLICATION_SOURCES = (
+    KERNEL_ROOT / "application/coordinate_selection_materialization.py",
     KERNEL_ROOT / "application/install_strategy_universe.py",
     KERNEL_ROOT / "application/advance_strategy_universe.py",
     KERNEL_ROOT / "application/certify_universe_instrument.py",
@@ -106,7 +107,9 @@ def test_universe_authority_has_no_legacy_compatibility_or_dual_write_surface() 
 
     ProductCompatibility is an explicit 0005 Product Authority projection, not a
     compatibility adapter.  The migration's exact Crypto-source policy matcher
-    is likewise a one-time source validation, not a runtime fallback.
+    is likewise a one-time source validation.  The approved business outcome
+    FALLBACK_PREVIOUS restores the exact pre-fence pair; it is not a schema,
+    reader, release, or legacy-runtime fallback.
     """
 
     violations: list[str] = []
@@ -124,6 +127,11 @@ def test_universe_authority_has_no_legacy_compatibility_or_dual_write_surface() 
             "require_product_compatibility",
             "runtime_release_compatibility_facts",
         }
+        markers = {
+            marker
+            for marker in markers
+            if not _is_approved_fallback_previous_marker(marker)
+        }
         if "brc_strategy_candidate_scopes" in source:
             markers.add("retired candidate-scope table")
         if markers:
@@ -131,8 +139,8 @@ def test_universe_authority_has_no_legacy_compatibility_or_dual_write_surface() 
                 f"{path.relative_to(REPO_ROOT)}: {', '.join(sorted(markers))}"
             )
     assert not violations, (
-        "Universe authority must not retain a legacy/compatibility/fallback/"
-        "dual-write surface: "
+        "Universe authority must not retain a legacy/compatibility/dual-write "
+        "surface outside exact FALLBACK_PREVIOUS semantics: "
         + ", ".join(violations)
     )
 
@@ -266,3 +274,16 @@ def _identifier_words(name: str) -> list[str]:
         word.lower()
         for word in re.findall(r"[A-Z]+(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+", name)
     ]
+
+
+def _is_approved_fallback_previous_marker(name: str) -> bool:
+    words = _identifier_words(name)
+    if any(
+        word in {"legacy", "compat", "compatibility", "dual", "schema", "reader"}
+        for word in words
+    ):
+        return False
+    return any(
+        words[index : index + 2] == ["fallback", "previous"]
+        for index in range(len(words) - 1)
+    )
