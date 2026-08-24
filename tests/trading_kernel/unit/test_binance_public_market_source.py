@@ -7,7 +7,10 @@ from typing import cast
 
 import pytest
 
-from src.trading_kernel.application.market_ports import ClosedCandleRequest
+from src.trading_kernel.application.market_ports import (
+    ClosedCandleRequest,
+    SelectionKlineRequest,
+)
 from src.trading_kernel.infrastructure.binance_public_market_source import (
     CcxtBinancePublicMarketSource,
 )
@@ -67,6 +70,17 @@ class ProductExchange(FakeExchange):
     def fapiPublicGetDepth(self, params=None):
         self.product_calls += 1
         return {"bids": [["99.9", "10"]], "asks": [["100", "9"]]}
+
+
+class RawKlineExchange(FakeExchange):
+    def __init__(self, rows: list[list[object]]) -> None:
+        super().__init__([])
+        self.raw_rows = rows
+        self.raw_calls: list[dict[str, object]] = []
+
+    def fapiPublicGetKlines(self, params=None):
+        self.raw_calls.append(dict(params or {}))
+        return self.raw_rows
 
 
 def test_public_market_source_rejects_retired_venue_symbol_map() -> None:
@@ -154,6 +168,47 @@ async def test_public_source_bounds_exchange_timeout() -> None:
                 closed_at_ms=10_000_000,
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_selection_source_uses_raw_quote_volume_not_base_volume() -> None:
+    start_ms = 1_704_067_200_000
+    rows = [
+        [
+            start_ms + index * 900_000,
+            "100",
+            "101",
+            "99",
+            "100",
+            "999999999",  # base volume must not enter Selection activity
+            start_ms + (index + 1) * 900_000 - 1,
+            str(index + 1),  # quote asset volume
+        ]
+        for index in range(96)
+    ]
+    exchange = RawKlineExchange(rows)
+    source = CcxtBinancePublicMarketSource(exchange=exchange, timeout_seconds=1)
+
+    klines = await source.fetch_selection_klines(
+        SelectionKlineRequest(
+            exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+            input_window_start_ms=start_ms,
+            feature_cutoff_at_ms=start_ms + 96 * 900_000,
+        )
+    )
+
+    assert len(klines) == 96
+    assert klines[0].quote_volume == 1
+    assert klines[-1].quote_volume == 96
+    assert exchange.raw_calls == [
+        {
+            "symbol": "ETHUSDT",
+            "interval": "15m",
+            "startTime": start_ms,
+            "endTime": start_ms + 96 * 900_000 - 1,
+            "limit": 96,
+        }
+    ]
 
 
 @pytest.mark.asyncio

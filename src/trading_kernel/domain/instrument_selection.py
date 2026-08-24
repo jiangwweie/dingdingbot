@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Context, Decimal, localcontext
 from enum import StrEnum
 from hashlib import sha256
@@ -73,6 +74,208 @@ class SelectionMemberReason(StrEnum):
     INVALID_OR_GEOMETRY = "INVALID_OR_GEOMETRY"
     INVALID_ATR = "INVALID_ATR"
     LOW_ACTIVITY = "LOW_ACTIVITY"
+
+
+class SelectionAttemptOutcome(StrEnum):
+    SNAPSHOT_READY = "SNAPSHOT_READY"
+    SOURCE_FAILED = "SOURCE_FAILED"
+    COMPUTE_FAILED = "COMPUTE_FAILED"
+
+
+class SelectionSourceIntegrityError(RuntimeError):
+    """The full fixed Candidate Panel cannot be proven from closed source data."""
+
+
+class SelectionKline(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    open_time_ms: int
+    close_time_ms: int
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    quote_volume: Decimal
+
+    @field_validator(
+        "open",
+        "high",
+        "low",
+        "close",
+        "quote_volume",
+        mode="before",
+    )
+    @classmethod
+    def _reject_float_market_value(cls, value: object) -> object:
+        if isinstance(value, float):
+            raise TypeError("Selection market values cannot enter through float")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_kline(self) -> SelectionKline:
+        if self.open_time_ms <= 0 or self.open_time_ms % INTERVAL_MS != 0:
+            raise ValueError("Selection Kline open time must be an exact 15m boundary")
+        if self.close_time_ms != self.open_time_ms + INTERVAL_MS:
+            raise ValueError("Selection Kline close time must use the exclusive boundary")
+        prices = (self.open, self.high, self.low, self.close)
+        if not all(value.is_finite() and value > 0 for value in prices):
+            raise ValueError("Selection Kline OHLC must be finite and positive")
+        if not self.quote_volume.is_finite() or self.quote_volume < 0:
+            raise ValueError("Selection Kline quote volume must be finite and nonnegative")
+        if self.high < max(self.open, self.close, self.low):
+            raise ValueError("Selection Kline high is inconsistent with OHLC")
+        if self.low > min(self.open, self.close, self.high):
+            raise ValueError("Selection Kline low is inconsistent with OHLC")
+        return self
+
+
+class SelectionSourceWindow(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_instrument_id: str
+    input_window_start_ms: int
+    feature_cutoff_at_ms: int
+    klines: tuple[SelectionKline, ...]
+
+    @field_validator("exchange_instrument_id", mode="before")
+    @classmethod
+    def _require_source_instrument(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        parse_binance_usdm_instrument_id(normalized)
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_window(self) -> SelectionSourceWindow:
+        if len(self.klines) != 96:
+            raise SelectionSourceIntegrityError(
+                "Selection source requires exact 96 closed 15m Klines"
+            )
+        expected_times = tuple(
+            self.input_window_start_ms + index * INTERVAL_MS for index in range(96)
+        )
+        actual_times = tuple(item.open_time_ms for item in self.klines)
+        if any(item.close_time_ms > self.feature_cutoff_at_ms for item in self.klines):
+            raise SelectionSourceIntegrityError(
+                "Selection source contains a future or open Kline"
+            )
+        if actual_times != expected_times or len(set(actual_times)) != 96:
+            raise SelectionSourceIntegrityError(
+                "Selection source Klines must be unique and continuous"
+            )
+        if self.klines[-1].close_time_ms != self.feature_cutoff_at_ms:
+            raise SelectionSourceIntegrityError(
+                "Selection source requires exact closed Klines at feature cutoff"
+            )
+        return self
+
+    @property
+    def input_window_digest(self) -> str:
+        return _semantic_digest(
+            [
+                [
+                    item.open_time_ms,
+                    _canonical_decimal(item.open),
+                    _canonical_decimal(item.high),
+                    _canonical_decimal(item.low),
+                    _canonical_decimal(item.close),
+                    _canonical_decimal(item.quote_volume),
+                ]
+                for item in self.klines
+            ]
+        )
+
+
+class SelectionSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    selection_snapshot_id: str
+    selection_spec_id: str
+    strategy_group_id: str
+    strategy_version_id: str
+    session_start_ms: int
+    decision_at_ms: int
+    feature_cutoff_at_ms: int
+    eligibility_not_before_ms: int
+    expires_at_ms: int
+    candidate_count: int
+    ready_count: int
+    selected_count: int
+    source_observed_at_ms: int
+    source_semantic_digest: str
+    selection_semantic_digest: str
+    created_at_ms: int
+
+    @field_validator("source_semantic_digest", "selection_semantic_digest")
+    @classmethod
+    def _validate_snapshot_digest(cls, value: str) -> str:
+        return _require_sha256(value)
+
+    @model_validator(mode="after")
+    def _validate_snapshot(self) -> SelectionSnapshot:
+        expected_id = f"selection:{self.selection_spec_id}:{self.session_start_ms}"
+        if self.selection_snapshot_id != expected_id:
+            raise ValueError("Selection Snapshot identity is not canonical")
+        if self.candidate_count != 24:
+            raise ValueError("Selection Snapshot requires exact 24 candidates")
+        if not 0 <= self.ready_count <= 24:
+            raise ValueError("Selection Snapshot ready count is invalid")
+        if self.selected_count != min(7, self.ready_count):
+            raise ValueError("Selection Snapshot selected count is not canonical")
+        if self.feature_cutoff_at_ms != self.session_start_ms + HOUR_MS:
+            raise ValueError("Selection Snapshot feature cutoff is invalid")
+        if self.eligibility_not_before_ms != self.session_start_ms + 5 * INTERVAL_MS:
+            raise ValueError("Selection Snapshot eligibility time is invalid")
+        if self.expires_at_ms != self.session_start_ms + DAY_MS + HOUR_MS:
+            raise ValueError("Selection Snapshot expiry is invalid")
+        if min(
+            self.decision_at_ms,
+            self.source_observed_at_ms,
+            self.created_at_ms,
+        ) < self.feature_cutoff_at_ms:
+            raise ValueError("Selection Snapshot cannot precede the feature cutoff")
+        return self
+
+
+class SelectionJobClaim(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    selection_job_id: str
+    selection_spec_id: str
+    session_start_ms: int
+    worker_id: str
+    attempt_number: int
+    projection_version: int
+    started_at_ms: int
+    lease_expires_at_ms: int
+
+    @model_validator(mode="after")
+    def _validate_claim(self) -> SelectionJobClaim:
+        expected_id = f"selection-job:{self.selection_spec_id}:{self.session_start_ms}"
+        if self.selection_job_id != expected_id:
+            raise ValueError("Selection Job identity is not canonical")
+        if not self.worker_id.strip():
+            raise ValueError("Selection Job worker identity must be non-blank")
+        if self.attempt_number <= 0 or self.projection_version <= 0:
+            raise ValueError("Selection Job versions must be positive")
+        if self.lease_expires_at_ms <= self.started_at_ms:
+            raise ValueError("Selection Job lease must expire after claim")
+        return self
+
+
+class SelectionJobFailure(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    selection_job_id: str
+    outcome: Literal["SOURCE_FAILED", "COMPUTE_FAILED"]
+    reason_code: str
+
+    @field_validator("selection_job_id", "reason_code", mode="before")
+    @classmethod
+    def _require_failure_fact(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("Selection terminal failure facts must be non-blank")
+        return normalized
 
 
 class _MemberDigestPayload(TypedDict):
@@ -380,6 +583,43 @@ class SelectionMemberDecision(BaseModel):
             raise ValueError("non-selected rank state requires selected=false")
 
 
+class SelectionComputation(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    snapshot: SelectionSnapshot
+    member_decisions: tuple[SelectionMemberDecision, ...]
+
+    @model_validator(mode="after")
+    def _validate_computation(self) -> SelectionComputation:
+        if len(self.member_decisions) != self.snapshot.candidate_count:
+            raise ValueError("Selection computation requires exact member cardinality")
+        if tuple(
+            item.exchange_instrument_id for item in self.member_decisions
+        ) != tuple(
+            sorted(item.exchange_instrument_id for item in self.member_decisions)
+        ):
+            raise ValueError("Selection member decisions must use canonical order")
+        if any(
+            item.selection_snapshot_id != self.snapshot.selection_snapshot_id
+            or item.selection_spec_id != self.snapshot.selection_spec_id
+            or item.session_start_ms != self.snapshot.session_start_ms
+            for item in self.member_decisions
+        ):
+            raise ValueError("Selection member lineage differs from Snapshot")
+        return self
+
+
+@dataclass(frozen=True)
+class _SelectionFeatures:
+    window: SelectionSourceWindow
+    or_high: Decimal
+    or_low: Decimal
+    pre_or_atr14: Decimal
+    ratio: Decimal
+    trailing_volume: Decimal
+    reason: SelectionMemberReason | None
+
+
 def build_sor_dynamic_selection_period(*, session_start_ms: int) -> SelectionPeriod:
     return SelectionPeriod(
         session_start_ms=session_start_ms,
@@ -411,6 +651,180 @@ def build_sor_dynamic_selection_spec_v0(
         ),
         algorithm_semantic_digest=_algorithm_semantic_digest(),
         installed_at_ms=installed_at_ms,
+    )
+
+
+def run_sor_dynamic_selection_v0(
+    *,
+    spec: SorDynamicSelectionSpecV0,
+    period: SelectionPeriod,
+    source_windows: tuple[SelectionSourceWindow, ...],
+    decision_at_ms: int,
+    source_observed_at_ms: int,
+    created_at_ms: int,
+) -> SelectionComputation:
+    """Compute one immutable V0 Snapshot from the exact fixed Candidate Panel."""
+
+    expected_candidates = spec.candidate_exchange_instrument_ids
+    actual_candidates = tuple(
+        sorted(window.exchange_instrument_id for window in source_windows)
+    )
+    if len(source_windows) != 24 or actual_candidates != expected_candidates:
+        raise SelectionSourceIntegrityError(
+            "Selection source requires exact 24 canonical Candidate windows"
+        )
+    if len(set(actual_candidates)) != 24:
+        raise SelectionSourceIntegrityError(
+            "Selection source requires exact 24 unique Candidate windows"
+        )
+    expected_start_ms = period.session_start_ms - 23 * HOUR_MS
+    for window in source_windows:
+        if (
+            window.input_window_start_ms != expected_start_ms
+            or window.feature_cutoff_at_ms != period.feature_cutoff_at_ms
+        ):
+            raise SelectionSourceIntegrityError(
+                "Selection source window identity differs from Selection Period"
+            )
+
+    snapshot_id = f"selection:{spec.selection_spec_id}:{period.session_start_ms}"
+    features: dict[str, _SelectionFeatures] = {}
+    with localcontext(DECIMAL_CONTEXT):
+        for window in source_windows:
+            previous_close = window.klines[77].close
+            true_ranges: list[Decimal] = []
+            for bar in window.klines[78:92]:
+                true_ranges.append(
+                    max(
+                        bar.high - bar.low,
+                        abs(bar.high - previous_close),
+                        abs(bar.low - previous_close),
+                    )
+                )
+                previous_close = bar.close
+            or_bars = window.klines[92:96]
+            or_high = max(bar.high for bar in or_bars)
+            or_low = min(bar.low for bar in or_bars)
+            or_width = or_high - or_low
+            pre_or_atr14 = sum(true_ranges, Decimal(0)) / Decimal(14)
+            trailing_volume = sum(
+                (bar.quote_volume for bar in window.klines), Decimal(0)
+            )
+            reason = _primary_reason(
+                or_geometry_valid=or_high > or_low,
+                atr_valid=pre_or_atr14 > 0,
+                activity_valid=trailing_volume >= spec.activity_floor_quote_usdt,
+            )
+            features[window.exchange_instrument_id] = _SelectionFeatures(
+                window=window,
+                or_high=or_high,
+                or_low=or_low,
+                pre_or_atr14=pre_or_atr14,
+                ratio=(
+                    Decimal(0)
+                    if pre_or_atr14 <= 0
+                    else or_width / pre_or_atr14
+                ),
+                trailing_volume=trailing_volume,
+                reason=reason,
+            )
+
+        ready_ids = sorted(
+            (
+                instrument_id
+                for instrument_id, feature in features.items()
+                if feature.reason is None
+            ),
+            key=lambda instrument_id: (
+                features[instrument_id].ratio,
+                -features[instrument_id].trailing_volume,
+                instrument_id,
+            ),
+        )
+    rank_by_instrument = {
+        instrument_id: rank for rank, instrument_id in enumerate(ready_ids, start=1)
+    }
+
+    decisions: list[SelectionMemberDecision] = []
+    for instrument_id in expected_candidates:
+        feature = features[instrument_id]
+        reason = feature.reason
+        rank = rank_by_instrument.get(instrument_id)
+        if reason is not None:
+            state = SelectionMemberState.INELIGIBLE
+        elif rank is not None and rank <= spec.selected_count_max:
+            state = SelectionMemberState.SELECTED
+        elif rank is not None and rank <= spec.selected_count_max + spec.near_count_max:
+            state = SelectionMemberState.NEAR_THRESHOLD
+        else:
+            state = SelectionMemberState.NOT_SELECTED
+        decisions.append(
+            build_selection_member_decision(
+                selection_snapshot_id=snapshot_id,
+                selection_spec_id=spec.selection_spec_id,
+                session_start_ms=period.session_start_ms,
+                feature_cutoff_at_ms=period.feature_cutoff_at_ms,
+                input_window_start_ms=feature.window.input_window_start_ms,
+                exchange_instrument_id=instrument_id,
+                input_window_digest=feature.window.input_window_digest,
+                or_high=feature.or_high,
+                or_low=feature.or_low,
+                pre_or_atr14=feature.pre_or_atr14,
+                trailing_24h_quote_volume=feature.trailing_volume,
+                stable_rank=rank,
+                member_state=state,
+                primary_reason=(
+                    reason
+                ),
+            )
+        )
+
+    source_digest = _semantic_digest(
+        [
+            [decision.exchange_instrument_id, decision.input_window_digest]
+            for decision in decisions
+        ]
+    )
+    ready_count = len(ready_ids)
+    selected_count = min(spec.selected_count_max, ready_count)
+    selection_digest = _semantic_digest(
+        {
+            "selection_spec_digest": spec.algorithm_semantic_digest,
+            "selection_spec_id": spec.selection_spec_id,
+            "session_start_ms": period.session_start_ms,
+            "feature_cutoff_at_ms": period.feature_cutoff_at_ms,
+            "eligibility_not_before_ms": period.eligibility_not_before_ms,
+            "expires_at_ms": period.expires_at_ms,
+            "candidate_count": len(decisions),
+            "ready_count": ready_count,
+            "selected_count": selected_count,
+            "source_semantic_digest": source_digest,
+            "member_semantic_digests": [
+                decision.member_semantic_digest for decision in decisions
+            ],
+        }
+    )
+    snapshot = SelectionSnapshot(
+        selection_snapshot_id=snapshot_id,
+        selection_spec_id=spec.selection_spec_id,
+        strategy_group_id=spec.strategy_group_id,
+        strategy_version_id=spec.strategy_version_id,
+        session_start_ms=period.session_start_ms,
+        decision_at_ms=decision_at_ms,
+        feature_cutoff_at_ms=period.feature_cutoff_at_ms,
+        eligibility_not_before_ms=period.eligibility_not_before_ms,
+        expires_at_ms=period.expires_at_ms,
+        candidate_count=len(decisions),
+        ready_count=ready_count,
+        selected_count=selected_count,
+        source_observed_at_ms=source_observed_at_ms,
+        source_semantic_digest=source_digest,
+        selection_semantic_digest=selection_digest,
+        created_at_ms=created_at_ms,
+    )
+    return SelectionComputation(
+        snapshot=snapshot,
+        member_decisions=tuple(decisions),
     )
 
 

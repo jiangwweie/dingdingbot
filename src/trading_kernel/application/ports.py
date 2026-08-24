@@ -65,6 +65,15 @@ from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertification,
 )
+from src.trading_kernel.domain.instrument_selection import (
+    SelectionAttemptOutcome,
+    SelectionComputation,
+    SelectionJobClaim,
+    SelectionJobFailure,
+    SelectionPeriod,
+    SelectionSnapshot,
+    SorDynamicSelectionSpecV0,
+)
 from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.owner_control import (
     OwnerAuthorization,
@@ -1357,6 +1366,40 @@ class InstrumentSelectionRepository(Protocol):
         cls,
         lease_kind: Literal["selection", "materialization", "observation"],
     ) -> str: ...
+
+    async def get_active_spec(
+        self,
+        selection_spec_id: str,
+    ) -> SorDynamicSelectionSpecV0: ...
+
+    async def claim_selection_job(
+        self,
+        *,
+        spec: SorDynamicSelectionSpecV0,
+        period: SelectionPeriod,
+        worker_id: str,
+        now_ms: int,
+        lease_duration_ms: int,
+    ) -> SelectionJobClaim | SelectionJobFailure | SelectionSnapshot: ...
+
+    async def complete_selection_snapshot(
+        self,
+        *,
+        claim: SelectionJobClaim,
+        computation: SelectionComputation,
+        completed_at_ms: int,
+    ) -> None: ...
+
+    async def complete_selection_failure(
+        self,
+        *,
+        claim: SelectionJobClaim,
+        outcome: SelectionAttemptOutcome,
+        reason_code: str,
+        source_member_count: int,
+        source_digest: str | None,
+        completed_at_ms: int,
+    ) -> None: ...
 
     async def add_authority_and_set_current(
         self,

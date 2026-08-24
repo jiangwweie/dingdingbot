@@ -6,6 +6,10 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.instrument_selection import (
+    INTERVAL_MS,
+    SelectionKline,
+)
 from src.trading_kernel.domain.market import ClosedCandle, Timeframe
 from src.trading_kernel.domain.product import ProductSessionSnapshot
 
@@ -55,6 +59,35 @@ class ClosedCandleRequest(BaseModel):
         return self
 
 
+class SelectionKlineRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_instrument_id: str
+    input_window_start_ms: int
+    feature_cutoff_at_ms: int
+    expected_bars: int = 96
+
+    @field_validator("exchange_instrument_id", mode="before")
+    @classmethod
+    def _require_selection_instrument(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("Selection Kline request instrument must be non-blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_selection_window(self) -> SelectionKlineRequest:
+        if self.expected_bars != 96:
+            raise ValueError("Selection V0 requires exact 96 Klines")
+        if (
+            self.input_window_start_ms <= 0
+            or self.feature_cutoff_at_ms
+            != self.input_window_start_ms + self.expected_bars * INTERVAL_MS
+        ):
+            raise ValueError("Selection Kline request requires exact 96-bar window")
+        return self
+
+
 class PublicMarketSource(Protocol):
     async def fetch_closed_candles(
         self,
@@ -67,3 +100,11 @@ class PublicMarketSource(Protocol):
         *,
         observed_at_ms: int,
     ) -> tuple[ProductSessionSnapshot, ...]: ...
+
+
+class InstrumentSelectionMarketSource(Protocol):
+
+    async def fetch_selection_klines(
+        self,
+        request: SelectionKlineRequest,
+    ) -> tuple[SelectionKline, ...]: ...

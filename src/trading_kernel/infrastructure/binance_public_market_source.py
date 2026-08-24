@@ -8,10 +8,18 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Protocol
 
-from src.trading_kernel.application.market_ports import ClosedCandleRequest
+from src.trading_kernel.application.market_ports import (
+    ClosedCandleRequest,
+    SelectionKlineRequest,
+)
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
     to_ccxt_symbol,
+)
+from src.trading_kernel.domain.instrument_selection import (
+    INTERVAL_MS,
+    SelectionKline,
+    SelectionSourceIntegrityError,
 )
 from src.trading_kernel.domain.market import ClosedCandle, Timeframe
 from src.trading_kernel.domain.product import ProductSessionSnapshot
@@ -38,6 +46,8 @@ class _CcxtPublicExchange(Protocol):
     def fapiPublicGetPremiumIndex(self, params: object = None) -> object: ...
 
     def fapiPublicGetDepth(self, params: object = None) -> object: ...
+
+    def fapiPublicGetKlines(self, params: object = None) -> object: ...
 
 
 _TIMEFRAME_MS: Mapping[Timeframe, int] = {
@@ -103,6 +113,42 @@ class CcxtBinancePublicMarketSource:
         response = await asyncio.to_thread(operation)
         if inspect.isawaitable(response):
             await response
+
+    async def fetch_selection_klines(
+        self,
+        request: SelectionKlineRequest,
+    ) -> tuple[SelectionKline, ...]:
+        identity = parse_binance_usdm_instrument_id(
+            request.exchange_instrument_id
+        )
+        response = await self._raw_public(
+            self._exchange.fapiPublicGetKlines,
+            {
+                "symbol": identity.symbol,
+                "interval": "15m",
+                "startTime": request.input_window_start_ms,
+                "endTime": request.feature_cutoff_at_ms - 1,
+                "limit": request.expected_bars,
+            },
+        )
+        if not isinstance(response, list) or len(response) != request.expected_bars:
+            raise SelectionSourceIntegrityError(
+                "Binance Selection source returned an incomplete Kline window"
+            )
+        klines = tuple(_parse_selection_row(row) for row in response)
+        expected_times = tuple(
+            request.input_window_start_ms + index * INTERVAL_MS
+            for index in range(request.expected_bars)
+        )
+        if tuple(item.open_time_ms for item in klines) != expected_times:
+            raise SelectionSourceIntegrityError(
+                "Binance Selection source returned duplicate or irregular Klines"
+            )
+        if klines[-1].close_time_ms != request.feature_cutoff_at_ms:
+            raise SelectionSourceIntegrityError(
+                "Binance Selection source returned a future or open Kline"
+            )
+        return klines
 
     async def fetch_product_sessions(
         self,
@@ -189,4 +235,30 @@ def _parse_row(row: object, duration_ms: int) -> ClosedCandle:
         low=Decimal(str(row[3])),
         close=Decimal(str(row[4])),
         volume=Decimal(str(row[5])),
+    )
+
+
+def _parse_selection_row(row: object) -> SelectionKline:
+    if not isinstance(row, (list, tuple)) or len(row) < 8:
+        raise SelectionSourceIntegrityError(
+            "Binance raw Selection Kline row is malformed"
+        )
+    if any(isinstance(row[index], float) for index in (1, 2, 3, 4, 7)):
+        raise SelectionSourceIntegrityError(
+            "Binance raw Selection numeric values cannot enter through float"
+        )
+    open_time_ms = int(row[0])
+    raw_close_time_ms = int(row[6])
+    if raw_close_time_ms != open_time_ms + INTERVAL_MS - 1:
+        raise SelectionSourceIntegrityError(
+            "Binance raw Selection Kline close boundary is invalid"
+        )
+    return SelectionKline(
+        open_time_ms=open_time_ms,
+        close_time_ms=open_time_ms + INTERVAL_MS,
+        open=Decimal(row[1]),
+        high=Decimal(row[2]),
+        low=Decimal(row[3]),
+        close=Decimal(row[4]),
+        quote_volume=Decimal(row[7]),
     )

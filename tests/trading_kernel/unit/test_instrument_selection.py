@@ -58,7 +58,7 @@ def test_selection_spec_rejects_candidate_or_event_cardinality_drift() -> None:
         _selection_spec(_candidate_ids()[:-1])
     with pytest.raises(ValueError, match="LONG and SHORT EventSpecs"):
         build_sor_dynamic_selection_spec_v0(
-            selection_spec_id="selection-spec:SOR-001:v0",
+            selection_spec_id="sor-dynamic-selection-v0",
             strategy_group_id="SOR-001",
             strategy_version_id="sgv:SOR-001:v4",
             event_spec_ids=("event_spec:SOR-001:SOR-LONG:v4",),
@@ -70,7 +70,7 @@ def test_selection_spec_rejects_candidate_or_event_cardinality_drift() -> None:
 def test_member_decision_enforces_decimal_rank_state_and_reason_contract() -> None:
     selected = build_selection_member_decision(
         selection_snapshot_id="selection:sor-dynamic-selection-v0:1704067200000",
-        selection_spec_id="selection-spec:SOR-001:v0",
+        selection_spec_id="sor-dynamic-selection-v0",
         session_start_ms=SESSION_START_MS,
         feature_cutoff_at_ms=SESSION_START_MS + 60 * 60 * 1000,
         input_window_start_ms=SESSION_START_MS - 23 * 60 * 60 * 1000,
@@ -192,7 +192,7 @@ def _selection_spec(
     candidates: tuple[str, ...],
 ) -> SorDynamicSelectionSpecV0:
     return build_sor_dynamic_selection_spec_v0(
-        selection_spec_id="selection-spec:SOR-001:v0",
+        selection_spec_id="sor-dynamic-selection-v0",
         strategy_group_id="SOR-001",
         strategy_version_id="sgv:SOR-001:v4",
         event_spec_ids=(

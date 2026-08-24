@@ -50,7 +50,7 @@ def test_valid_empty_may_preserve_prior_generation_provenance() -> None:
     vacuum = StrategyEntryVacuum(
         entry_vacuum_id="vacuum:SOR-001:1704067200000",
         strategy_group_id="SOR-001",
-        selection_spec_id="selection-spec:SOR-001:v0",
+        selection_spec_id="sor-dynamic-selection-v0",
         session_start_ms=1_704_067_200_000,
         source_generation_id="generation:superseded-before-empty",
         state=StrategyEntryVacuumState.VALID_EMPTY,
@@ -109,7 +109,7 @@ def _vacuum(
     return StrategyEntryVacuum(
         entry_vacuum_id="vacuum:SOR-001:1704067200000",
         strategy_group_id="SOR-001",
-        selection_spec_id="selection-spec:SOR-001:v0",
+        selection_spec_id="sor-dynamic-selection-v0",
         session_start_ms=1_704_067_200_000,
         source_generation_id=None,
         state=state,

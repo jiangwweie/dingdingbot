@@ -18,6 +18,7 @@ ID = sa.String(160)
 SHORT_TEXT = sa.String(96)
 LONG_TEXT = sa.String(512)
 MONEY = sa.Numeric(38, 18)
+SELECTION_DECIMAL = sa.Numeric()
 
 
 def _id(name: str, *, primary_key: bool = False, nullable: bool = False) -> sa.Column:
@@ -676,12 +677,12 @@ instrument_selection_member_decisions = sa.Table(
     _id("exchange_instrument_id"),
     sa.Column("input_window_digest", LONG_TEXT, nullable=False),
     sa.Column("source_status", SHORT_TEXT, nullable=False),
-    sa.Column("or_high", MONEY, nullable=False),
-    sa.Column("or_low", MONEY, nullable=False),
-    sa.Column("or_width", MONEY, nullable=False),
-    sa.Column("pre_or_atr14", MONEY, nullable=False),
-    sa.Column("pre_or_width_atr14", MONEY, nullable=False),
-    sa.Column("trailing_24h_quote_volume", MONEY, nullable=False),
+    sa.Column("or_high", SELECTION_DECIMAL, nullable=False),
+    sa.Column("or_low", SELECTION_DECIMAL, nullable=False),
+    sa.Column("or_width", SELECTION_DECIMAL, nullable=False),
+    sa.Column("pre_or_atr14", SELECTION_DECIMAL, nullable=False),
+    sa.Column("pre_or_width_atr14", SELECTION_DECIMAL, nullable=False),
+    sa.Column("trailing_24h_quote_volume", SELECTION_DECIMAL, nullable=False),
     sa.Column("or_geometry_valid", sa.Boolean, nullable=False),
     sa.Column("atr_valid", sa.Boolean, nullable=False),
     sa.Column("activity_valid", sa.Boolean, nullable=False),

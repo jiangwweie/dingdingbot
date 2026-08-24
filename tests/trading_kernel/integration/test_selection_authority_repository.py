@@ -38,7 +38,7 @@ async def test_authority_and_current_pointer_round_trip_atomically(
     async with head_template_engine.begin() as connection:
         await connection.execute(
             sa.insert(instrument_selection_specs).values(
-                selection_spec_id="selection-spec:SOR-001:v0",
+                selection_spec_id="sor-dynamic-selection-v0",
                 strategy_group_id="SOR-001",
                 strategy_version_id="sgv:SOR-001:v4",
                 selection_version=1,
@@ -50,7 +50,7 @@ async def test_authority_and_current_pointer_round_trip_atomically(
         )
     authority = SelectionSessionAuthority(
         selection_authority_id="authority:test:1",
-        selection_spec_id="selection-spec:SOR-001:v0",
+        selection_spec_id="sor-dynamic-selection-v0",
         session_start_ms=1_704_067_200_000,
         decision_boundary_ms=1_704_070_800_000,
         authority_sequence=1,
@@ -81,7 +81,7 @@ async def test_authority_and_current_pointer_round_trip_atomically(
     async with head_template_engine.connect() as connection:
         repository = PostgresInstrumentSelectionRepository(connection)
         persisted = await repository.get_current_authority(
-            "selection-spec:SOR-001:v0"
+            "sor-dynamic-selection-v0"
         )
 
     assert persisted == authority

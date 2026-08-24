@@ -129,7 +129,7 @@ async def _seed_selection_authority(engine) -> None:
     async with engine.begin() as connection:
         await connection.execute(
             sa.insert(instrument_selection_specs).values(
-                selection_spec_id="selection-spec:SOR-001:v0",
+                selection_spec_id="sor-dynamic-selection-v0",
                 strategy_group_id="SOR-001",
                 strategy_version_id="sgv:SOR-001:v4",
                 selection_version=1,
@@ -144,7 +144,7 @@ async def _seed_selection_authority(engine) -> None:
         ).add_authority_and_set_current(
             SelectionSessionAuthority(
                 selection_authority_id="authority:persistence:1",
-                selection_spec_id="selection-spec:SOR-001:v0",
+                selection_spec_id="sor-dynamic-selection-v0",
                 session_start_ms=1_704_067_200_000,
                 decision_boundary_ms=1_704_070_800_000,
                 authority_sequence=1,

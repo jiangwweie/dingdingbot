@@ -177,6 +177,35 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
             revision = await connection.scalar(
                 sa.text("SELECT version_num FROM alembic_version")
             )
+            selection_spec = (
+                await connection.execute(
+                    sa.text(
+                        "SELECT selection_spec_id, algorithm_semantic_digest "
+                        "FROM brc_instrument_selection_specs"
+                    )
+                )
+            ).one()
+            feature_numeric_types = {
+                str(row.column_name): (
+                    row.numeric_precision,
+                    row.numeric_scale,
+                )
+                for row in (
+                    await connection.execute(
+                        sa.text(
+                            "SELECT column_name, numeric_precision, numeric_scale "
+                            "FROM information_schema.columns "
+                            "WHERE table_schema = current_schema() "
+                            "AND table_name = "
+                            "'brc_instrument_selection_member_decisions' "
+                            "AND column_name IN ("
+                            "'or_high', 'or_low', 'or_width', 'pre_or_atr14', "
+                            "'pre_or_width_atr14', "
+                            "'trailing_24h_quote_volume')"
+                        )
+                    )
+                ).all()
+            }
             seeded_counts = {
                 table: int(
                     await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))
@@ -215,6 +244,18 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
             }
 
         assert revision == TARGET_REVISION
+        assert selection_spec == (
+            "sor-dynamic-selection-v0",
+            "sha256:a2c0d5d809a54b90564086f4eab230726a16fdb5524a1ce8f29f48ad659cfb10",
+        )
+        assert feature_numeric_types == {
+            "or_high": (None, None),
+            "or_low": (None, None),
+            "or_width": (None, None),
+            "pre_or_atr14": (None, None),
+            "pre_or_width_atr14": (None, None),
+            "trailing_24h_quote_volume": (None, None),
+        }
         assert seeded_counts == {
             "brc_instrument_selection_specs": 1,
             "brc_instrument_selection_spec_members": 24,
@@ -268,7 +309,7 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
                     sa.text(
                         "UPDATE brc_instrument_selection_specs "
                         "SET status = 'retired' "
-                        "WHERE selection_spec_id = 'selection-spec:SOR-001:v0'"
+                        "WHERE selection_spec_id = 'sor-dynamic-selection-v0'"
                     )
                 )
     finally:
@@ -329,7 +370,7 @@ async def _insert_static_generation(connection, *, generation_id: str) -> None:
                 created_at_ms, desired_at_ms, fenced_at_ms, activated_at_ms,
                 fallback_at_ms, terminal_at_ms
             ) VALUES (
-                :generation_id, 'selection-spec:SOR-001:v0', 'SOR-001',
+                :generation_id, 'sor-dynamic-selection-v0', 'SOR-001',
                 'sgv:SOR-001:v4', 'static_baseline', NULL,
                 'rollback-baseline:SOR-001:pre-dynamic-v0', NULL,
                 'universe:static:long', 'universe:static:short', 1,

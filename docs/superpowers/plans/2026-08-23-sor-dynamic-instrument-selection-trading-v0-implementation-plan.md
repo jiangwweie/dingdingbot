@@ -5,7 +5,7 @@ date: 2026-08-23
 phase: P3-X.3A
 design_authority: ../specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: DS-03
+active_execution_scope: DS-04
 next_execution_gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_04_TO_DS_10
 production_authority: NONE
 ---
@@ -31,7 +31,7 @@ decision）
 design status: DESIGN_APPROVED
 plan status: PLAN_APPROVED
 implementation_authority: CODE_AND_TEST_ONLY
-active execution scope: DS-03
+active execution scope: DS-04
 next execution gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_04_TO_DS_10
 production_authority: NONE
 ```
@@ -540,6 +540,41 @@ Snapshot和exact 24 MemberDecisions，然后结束。
 **Done**
 
 同一输入确定性产生exact Snapshot/24 decisions；failure只产生bounded attempt事实。
+
+#### DS-03 Execution Evidence — 2026-08-24
+
+**状态：`DS03_APPROVED`。** Active Execution Scope自动推进至 **DS-04**；生产权限仍为`NONE`。
+
+本卡完成了唯一Selection Plane生产路径：
+
+| Boundary | Implemented contract | Direct evidence |
+| --- | --- | --- |
+| Public source | Binance raw `fapiPublicGetKlines` exact 96 closed 15m bars；Quote Activity读取`quote_asset_volume`，拒绝float、缺失、重复、irregular和future/open bar | source/unit tests |
+| SelectionCore | Decimal precision 38 / `ROUND_HALF_EVEN`；exact OR/ATR/Activity；stable rank；Ready `0..24`与Selected `min(7, ready)` | focused domain tests + full Golden parity |
+| Runner | 默认bounded concurrency=`6`；claim transaction提交后才网络读取；Snapshot/Attempt使用独立短transaction提交 | transaction-boundary and concurrency tests |
+| PostgreSQL | exact Job lease、append-only Attempt、Snapshot+24 Decision deferred-cardinality commit、same-digest idempotency、conflicting digest fail closed | disposable PostgreSQL integration |
+| Isolation | Runner不import Materializer、Universe、Vacuum或Authority；runtime不读取Golden/cache | architecture tests |
+
+DS-03 RED先证明缺失`SelectionKlineRequest`、SelectionCore、Runner和typed source导致collection失败；
+随后GREEN完成。实施中还由Golden暴露并修正尚未部署的`0006`表示边界：Selection identity统一为
+`sor-dynamic-selection-v0`，Selection几何列改为unbounded PostgreSQL `NUMERIC`，避免
+`NUMERIC(38,18)`截断precision-38 canonical values。该修正没有改变Feature、Activity floor、Top N、
+Candidate Panel或Outcome。
+
+验证结果：
+
+| Verification | Result |
+| --- | ---: |
+| Focused DS-03 unit/integration/architecture | **25 passed** |
+| Production SelectionCore vs frozen raw cache + Golden | **961 Snapshot / 23,064 MemberDecision matched** |
+| Fast portfolio（排除DS-08明确拥有的deployment classification文件） | **901 passed** |
+| Ruff | **passed** |
+| Mypy | **167 source files，zero issues** |
+| `git diff --check` | **passed** |
+
+完整Unit中的`test_deploy_tokyo_release.py`仍以旧`0004 -> 0005`compatible source冻结，当前产生
+64个预期RED；它们不属于DS-03允许文件，按计划由 **DS-08 release classification**统一修复，未通过
+删除/弱化测试绕开。完整Release tier仍只在DS-09 frozen exact candidate执行一次。
 
 ### DS-04 — Selection-Period Authority, Disposition And Gap Audit
 

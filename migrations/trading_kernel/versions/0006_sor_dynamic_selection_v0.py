@@ -19,8 +19,9 @@ ID = sa.String(160)
 SHORT_TEXT = sa.String(96)
 LONG_TEXT = sa.String(512)
 MONEY = sa.Numeric(38, 18)
+SELECTION_DECIMAL = sa.Numeric()
 
-_SELECTION_SPEC_ID = "selection-spec:SOR-001:v0"
+_SELECTION_SPEC_ID = "sor-dynamic-selection-v0"
 _SELECTION_SPEC_DIGEST = (
     "sha256:a2c0d5d809a54b90564086f4eab230726a16fdb5524a1ce8f29f48ad659cfb10"
 )
@@ -485,12 +486,12 @@ def _create_selection_plane_tables() -> None:
         sa.Column("exchange_instrument_id", ID, nullable=False),
         sa.Column("input_window_digest", LONG_TEXT, nullable=False),
         sa.Column("source_status", SHORT_TEXT, nullable=False),
-        sa.Column("or_high", MONEY, nullable=False),
-        sa.Column("or_low", MONEY, nullable=False),
-        sa.Column("or_width", MONEY, nullable=False),
-        sa.Column("pre_or_atr14", MONEY, nullable=False),
-        sa.Column("pre_or_width_atr14", MONEY, nullable=False),
-        sa.Column("trailing_24h_quote_volume", MONEY, nullable=False),
+        sa.Column("or_high", SELECTION_DECIMAL, nullable=False),
+        sa.Column("or_low", SELECTION_DECIMAL, nullable=False),
+        sa.Column("or_width", SELECTION_DECIMAL, nullable=False),
+        sa.Column("pre_or_atr14", SELECTION_DECIMAL, nullable=False),
+        sa.Column("pre_or_width_atr14", SELECTION_DECIMAL, nullable=False),
+        sa.Column("trailing_24h_quote_volume", SELECTION_DECIMAL, nullable=False),
         sa.Column("or_geometry_valid", sa.Boolean(), nullable=False),
         sa.Column("atr_valid", sa.Boolean(), nullable=False),
         sa.Column("activity_valid", sa.Boolean(), nullable=False),

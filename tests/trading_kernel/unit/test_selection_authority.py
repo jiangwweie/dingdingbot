@@ -254,7 +254,7 @@ def _authority(
 ) -> SelectionSessionAuthority:
     return SelectionSessionAuthority(
         selection_authority_id=authority_id,
-        selection_spec_id="selection-spec:SOR-001:v0",
+        selection_spec_id="sor-dynamic-selection-v0",
         session_start_ms=SESSION_START_MS,
         decision_boundary_ms=DECISION_BOUNDARY_MS,
         authority_sequence=sequence,
