@@ -1527,13 +1527,16 @@ def _seed_frozen_sor_v0_if_registry_exists() -> None:
             {"instrument_id": instrument_id, "symbol": symbol},
         )
         profile_payload = {
-            "asset_class": "crypto",
-            "contract_type": "perpetual",
-            "entry_session_policy": "continuous",
-            "margin_asset": "USDT",
+            "exchange_instrument_id": instrument_id,
             "product_family": "crypto_perpetual",
+            "asset_class": "crypto",
+            "contract_type": "PERPETUAL",
+            "underlying_type": "CRYPTO",
+            "margin_asset": "USDT",
+            "entry_session_policy": "continuous",
             "status": "candidate",
-            "underlying_type": "crypto_asset",
+            "max_entry_spread_bps": None,
+            "max_mark_index_deviation_bps": None,
         }
         profile_digest = "sha256:" + hashlib.sha256(
             json.dumps(
@@ -1551,8 +1554,8 @@ def _seed_frozen_sor_v0_if_registry_exists() -> None:
                     entry_session_policy, status, max_entry_spread_bps,
                     max_mark_index_deviation_bps, semantic_digest, updated_at_ms
                 ) VALUES (
-                    :instrument_id, 'crypto_perpetual', 'crypto', 'perpetual',
-                    'crypto_asset', 'USDT', 'continuous', 'candidate', NULL,
+                    :instrument_id, 'crypto_perpetual', 'crypto', 'PERPETUAL',
+                    'CRYPTO', 'USDT', 'continuous', 'candidate', NULL,
                     NULL, :semantic_digest, :updated_at_ms
                 )
                 ON CONFLICT (exchange_instrument_id) DO NOTHING

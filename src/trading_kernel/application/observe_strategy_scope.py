@@ -11,6 +11,7 @@ from src.trading_kernel.application.ingest_signal import (
     IngestSignalRequest,
     IngestSignalStatus,
     ingest_signal,
+    resolve_selection_entry_authority,
 )
 from src.trading_kernel.application.market_ports import (
     ClosedCandleRequest,
@@ -310,6 +311,30 @@ async def observe_strategy_scope(
                 event_spec_id=scope.event_spec_id,
                 reason="registry_scope_mismatch",
             )
+        selection_authority_id = None
+        if scope.lifecycle_state == "active":
+            selection = await resolve_selection_entry_authority(
+                uow,
+                runtime_scope=scope,
+                birth_selection_authority_id=None,
+                observed_close_time_ms=request.trigger_candle_close_time_ms,
+                now_ms=attempted_at_ms,
+                allow_current_as_birth=True,
+            )
+            if not selection.allowed:
+                await _save_observation_blocker(
+                    uow,
+                    scope=scope,
+                    blocker=selection.reason_code,
+                    detector_reason=selection.reason_code,
+                    updated_at_ms=projection_updated_at_ms,
+                )
+                return _invalid_observation(
+                    request,
+                    event_spec_id=scope.event_spec_id,
+                    reason=selection.reason_code,
+                )
+            selection_authority_id = selection.selection_authority_id
         product_session: ProductSessionSnapshot | None = None
         comparative_lookback_bars = _comparative_lookback_bars(contract)
         comparative_projection: ComparativeUniverseProjection | None = None
@@ -584,6 +609,7 @@ async def observe_strategy_scope(
             detector_result=detector_result,
             persisted_facts=persisted_facts,
             exposure_episode_id=exposure_episode_id,
+            selection_authority_id=selection_authority_id,
         )
         ingest_result = await ingest_signal(
             uow,

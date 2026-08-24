@@ -1217,6 +1217,41 @@ class SignalRepository(Protocol):
         event_spec_id: str,
     ) -> tuple[SignalFactSnapshot, ...] | None: ...
 
+    async def get_selection_authority_chain(
+        self,
+        *,
+        selection_spec_id: str,
+        birth_selection_authority_id: str,
+        current_selection_authority_id: str,
+        max_depth: int,
+    ) -> tuple[SelectionSessionAuthority, ...]: ...
+
+    async def selection_authority_was_interrupted(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        owner_policy_id: str,
+        after_ms: int,
+        through_ms: int,
+    ) -> bool: ...
+
+    async def is_strategy_trigger_suppressed(
+        self,
+        *,
+        event_spec_id: str,
+        exchange_instrument_id: str,
+        session_reference: str,
+    ) -> bool: ...
+
+    async def selection_generation_matches_pair(
+        self,
+        *,
+        materialization_generation_id: str,
+        long_universe_version_id: str,
+        short_universe_version_id: str,
+    ) -> bool: ...
+
 
 class AdmissionDecisionRepository(Protocol):
     async def add(self, decision: AdmissionDecision) -> None: ...
@@ -1438,11 +1473,15 @@ class InstrumentSelectionRepository(Protocol):
     async def get_current_authority(
         self,
         selection_spec_id: str,
+        *,
+        for_update: bool = False,
     ) -> SelectionSessionAuthority | None: ...
 
     async def get_current_authority_projection(
         self,
         selection_spec_id: str,
+        *,
+        for_update: bool = False,
     ) -> CurrentSelectionAuthority | None: ...
 
     async def get_selection_control(

@@ -5,7 +5,7 @@ date: 2026-08-23
 phase: P3-X.3A
 design_authority: ../specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: DS-07
+active_execution_scope: DS-08
 next_execution_gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_06_TO_DS_10
 production_authority: NONE
 ---
@@ -31,7 +31,7 @@ decision）
 design status: DESIGN_APPROVED
 plan status: PLAN_APPROVED
 implementation_authority: CODE_AND_TEST_ONLY
-active execution scope: DS-07
+active execution scope: DS-08
 next execution gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_06_TO_DS_10
 production_authority: NONE
 ```
@@ -892,6 +892,52 @@ Signal/CapacityClaim/AdmissionDecision/Ticket lineage。
 **Done**
 
 任一new ENTRY无法绕过正式Authority链，已有exposure仍由Ticket冻结事实管理。
+
+#### DS-07 Execution Evidence — 2026-08-24
+
+**Status：COMPLETE**。四个new-ENTRY边界现在共用同一个bounded Selection Authority evaluator：
+
+- Observation在读取网络行情前验证current pair、Authority period、Vacuum、first eligible close和
+  trigger suppression，并冻结birth `selection_authority_id`；
+- Signal ingestion接受exact current Authority或同period、same pair、无Vacuum/Owner/Policy中断的
+  `PRE_FENCE_CONTINUITY -> PRE_FENCE_CONTINUITY -> NO_CHANGE` successor chain；
+- Admission在Signal出生后出现Vacuum时形成terminal `AdmissionDecision(REJECTED)`，不创建Claim、
+  Ticket或Command；
+- Ticket issuance在同一transaction锁定Selection Control与current Authority pointer，并校验
+  Signal/Claim/Ticket birth lineage；
+- ENTRY dispatch在venue mutation前重新读取action-time facts；Selection drift或Vacuum导致zero venue
+  mutation，Initial Stop/TP1/Runner/Exit等已有Ticket lifecycle不读取current Selection membership。
+
+本卡还通过回归RED关闭两个既有资产缺口：旧Universe eligibility fixture仍冻结`0005`Schema identity；
+以及`0006`为新增Candidate写入退休的`perpetual / crypto_asset`Product Profile。前者已对齐current
+Schema，后者已改为current `PERPETUAL / CRYPTO`合同并冻结完整canonical Product Profile digest；
+Migration测试逐个验证24个Candidate Profile可被正式Domain模型读取。该修复不改变Candidate、Alpha、
+Top-N、风险或Universe成员语义。
+
+Task Card外的必要依赖闭合如下，均未扩展业务范围：
+
+| File | Necessity |
+| --- | --- |
+| `src/trading_kernel/application/ports.py` | 正式暴露bounded Authority chain、interruption、suppression、Generation pair和current-pointer lock接口 |
+| `src/trading_kernel/application/dispatch_exchange_command.py` | 真正action-time ENTRY facts assembly与zero-mutation拒绝边界位于该调用端 |
+| `src/trading_kernel/infrastructure/pg_instrument_selection_repository.py` | Ticket transaction必须对current Authority pointer执行`FOR UPDATE` |
+| `src/trading_kernel/application/issue_ready_signal.py` | Vacuum后existing Signal的terminal AdmissionDecision只能在正式Admission边界形成 |
+| `migrations/trading_kernel/versions/0006_sor_dynamic_selection_v0.py` | Full-chain暴露的Candidate Product Profile seed与current Product合同冲突必须在未部署Revision内修正 |
+
+| Verification | Result |
+| --- | ---: |
+| Core Authority focused | **82 passed** |
+| Affected Observation/Signal/Admission/Ticket/Dispatch/Vacuum/Lifecycle integration | **169 passed** |
+| Fast Unit + Architecture（继续排除DS-08拥有的`test_deploy_tokyo_release.py`） | **932 passed** |
+| Migration + affected full-chain | **30 passed** |
+| Ticket type-fix regression | **29 passed** |
+| Ruff | **passed** |
+| Mypy | **169 source files，zero issues** |
+| `git diff --check` | **passed** |
+
+本卡没有执行生产Migration、Tokyo部署、Dynamic activation、Crypto SOR resume或exchange mutation。
+Active Execution Scope自动推进至**DS-08**；`implementation_authority=CODE_AND_TEST_ONLY`，
+`production_authority=NONE`。
 
 ### DS-08 — Runtime Hosting, Recovery, Owner Control And Release Classification
 

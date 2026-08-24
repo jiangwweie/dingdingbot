@@ -266,7 +266,7 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             certification, updated_at_ms
         ) VALUES (
             'strategy_signal_ingest', true, 'commit-test',
-            '0005_tradfi_instrument_center', '{}'::jsonb, 1000
+            '0006_sor_dynamic_selection_v0', '{}'::jsonb, 1000
         )
         """
     await conn.execute(

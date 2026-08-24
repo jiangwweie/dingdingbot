@@ -8,6 +8,9 @@ from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.application.ingest_signal import (
+    resolve_selection_entry_authority,
+)
 from src.trading_kernel.application.owner_control import strategy_entry_is_enabled
 from src.trading_kernel.application.ports import (
     UnitOfWorkFactory,
@@ -533,6 +536,31 @@ async def _preflight_new_entry_mutation(
                 selection_spec_id=selection_control.selection_spec_id,
             )
         )
+        selection_authority_valid = True
+        if selection_control is not None:
+            source_signal = await uow.signals.get(
+                aggregate.ticket.identity.signal_event_id
+            )
+            if (
+                source_signal is None
+                or source_signal.selection_authority_id
+                != aggregate.ticket.selection_authority_id
+                or source_signal.selection_authority_id
+                != claim.selection_authority_id
+            ) or scope is None:
+                selection_authority_valid = False
+            else:
+                selection = await resolve_selection_entry_authority(
+                    uow,
+                    runtime_scope=scope,
+                    birth_selection_authority_id=(
+                        source_signal.selection_authority_id
+                    ),
+                    observed_close_time_ms=source_signal.occurred_at_ms,
+                    now_ms=request.now_ms,
+                    allow_current_as_birth=False,
+                )
+                selection_authority_valid = selection.allowed
         strategy_version = await uow.signals.get_strategy_version(
             aggregate.ticket.identity.runtime.strategy_version_id
         )
@@ -602,6 +630,7 @@ async def _preflight_new_entry_mutation(
             selection_entry_vacuum_open=bool(
                 selection_vacuum and selection_vacuum.blocks_new_entry
             ),
+            selection_authority_valid=selection_authority_valid,
         )
     )
     return decision.status

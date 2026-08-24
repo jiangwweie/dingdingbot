@@ -173,7 +173,7 @@ and **916 Fast Unit/Architecture** tests. DS-06 has now completed serial LONG/SH
 scopes、atomic pair activation、exact post-fence fallback、newest-Snapshot supersession and Owner Pause precedence.
 It also closes superseding `VALID_EMPTY` on the existing Vacuum、preserves the concrete fallback cause、terminates
 invalidated pending Gap Audits and makes committed terminal Authorities idempotent coordinator results. The active
-implementation scope is `DS-07` for Observation/Signal/Admission/Ticket/dispatch Authority lineage; later cards may advance automatically
+implementation scope has completed `DS-07` Observation/Signal/Admission/Ticket/dispatch Authority lineage and is now `DS-08` for independent runtime hosting、recovery、Owner controls and thin release compatibility projection; later cards may advance automatically
 only after their own acceptance passes. Production Migration execution,
 deployment and first Dynamic activation remain separately gated.（来源：Owner active-task decision；
 `docs/superpowers/specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md`；

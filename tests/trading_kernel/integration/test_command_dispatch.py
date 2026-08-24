@@ -526,6 +526,73 @@ async def test_selection_vacuum_opened_during_preflight_supersedes_before_venue(
 
 
 @pytest.mark.asyncio
+async def test_selection_vacuum_does_not_block_initial_stop_for_existing_ticket(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    venue = AcceptingVenue(dispatch_engine)
+    entry = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            admission_snapshot_validity_ms=1_000,
+        ),
+        entry_facts_source=PreflightFacts(),
+    )
+    assert entry.status is DispatchCommandStatus.ACCEPTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    venue_reported_liquidation_price=_raw_liquidation_observation(
+                        ticket,
+                        ticket.entry_reference_price,
+                    ),
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    await open_entry_vacuum(dispatch_engine, ticket)
+
+    protection = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="lifecycle-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=2_200,
+            lease_until_ms=7_200,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert protection.status is DispatchCommandStatus.ACCEPTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert any(
+        command.kind is ExchangeCommandKind.INITIAL_STOP
+        and command.status is ExchangeCommandStatus.ACCEPTED
+        for command in commands
+    )
+
+
+@pytest.mark.asyncio
 async def test_universe_pointer_switch_after_preflight_is_fenced_by_claimed_entry_lane(
     dispatch_engine: AsyncEngine,
 ) -> None:

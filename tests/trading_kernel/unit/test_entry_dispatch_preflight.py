@@ -239,6 +239,16 @@ def test_entry_preflight_refuses_open_selection_entry_vacuum() -> None:
     assert decision.status is EntryDispatchPreflightStatus.SELECTION_ENTRY_VACUUM
 
 
+def test_entry_preflight_refuses_invalid_birth_selection_authority() -> None:
+    request = _preflight_request(snapshot=_snapshot()).model_copy(
+        update={"selection_authority_valid": False}
+    )
+
+    decision = revalidate_entry_dispatch(request)
+
+    assert decision.status is EntryDispatchPreflightStatus.SELECTION_AUTHORITY_INVALID
+
+
 def test_entry_preflight_refuses_blocked_product() -> None:
     request = _preflight_request(snapshot=_snapshot()).model_copy(
         update={

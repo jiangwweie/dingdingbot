@@ -34,6 +34,15 @@ from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
     ProductSessionSnapshot,
 )
+from src.trading_kernel.domain.selection_authority import (
+    AuthorityGrantProof,
+    AuthorityGrantProofKind,
+    AuthorityOutcome,
+    ContinuitySourceKind,
+    SelectionMode,
+    SelectionSessionAuthority,
+    UniverseAuthorityPair,
+)
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
@@ -50,13 +59,18 @@ from src.trading_kernel.infrastructure.pg_models import (
     instrument_rules_current,
     instruments,
     owner_policy_current,
+    owner_policy_events,
     readiness_current,
     runtime_capabilities_current,
     runtime_profiles,
     runtime_scopes_current,
+    selection_session_authorities,
     signal_events,
     signal_fact_snapshots,
+    strategy_entry_control_events,
+    strategy_entry_vacuums_current,
     strategy_groups,
+    strategy_trigger_suppressions,
     strategy_universe_current,
     strategy_universe_members,
     strategy_universe_versions,
@@ -1148,6 +1162,184 @@ class PostgresSignalRepository:
             for row in rows
         )
 
+    async def get_selection_authority_chain(
+        self,
+        *,
+        selection_spec_id: str,
+        birth_selection_authority_id: str,
+        current_selection_authority_id: str,
+        max_depth: int,
+    ) -> tuple[SelectionSessionAuthority, ...]:
+        if not 1 <= max_depth <= 64:
+            raise ValueError("Selection Authority chain depth must be in [1, 64]")
+        endpoints = (
+            await self._connection.execute(
+                sa.select(selection_session_authorities).where(
+                    selection_session_authorities.c.selection_spec_id
+                    == selection_spec_id,
+                    selection_session_authorities.c.selection_authority_id.in_(
+                        (
+                            birth_selection_authority_id,
+                            current_selection_authority_id,
+                        )
+                    ),
+                )
+            )
+        ).mappings().all()
+        endpoint_map = {
+            str(row["selection_authority_id"]): row for row in endpoints
+        }
+        birth = endpoint_map.get(birth_selection_authority_id)
+        current = endpoint_map.get(current_selection_authority_id)
+        if birth is None or current is None:
+            return ()
+        if (
+            int(birth["session_start_ms"]) != int(current["session_start_ms"])
+            or int(birth["authority_sequence"]) > int(current["authority_sequence"])
+        ):
+            return ()
+        rows = (
+            await self._connection.execute(
+                sa.select(selection_session_authorities)
+                .where(
+                    selection_session_authorities.c.selection_spec_id
+                    == selection_spec_id,
+                    selection_session_authorities.c.session_start_ms
+                    == int(birth["session_start_ms"]),
+                    selection_session_authorities.c.authority_sequence.between(
+                        int(birth["authority_sequence"]),
+                        int(current["authority_sequence"]),
+                    ),
+                )
+                .order_by(selection_session_authorities.c.authority_sequence)
+                .limit(max_depth + 1)
+            )
+        ).mappings().all()
+        expected_count = (
+            int(current["authority_sequence"])
+            - int(birth["authority_sequence"])
+            + 1
+        )
+        if len(rows) != expected_count or len(rows) > max_depth:
+            return ()
+        authorities = tuple(_selection_authority_from_row(row) for row in rows)
+        if (
+            authorities[0].selection_authority_id
+            != birth_selection_authority_id
+            or authorities[-1].selection_authority_id
+            != current_selection_authority_id
+        ):
+            return ()
+        return authorities
+
+    async def selection_authority_was_interrupted(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        owner_policy_id: str,
+        after_ms: int,
+        through_ms: int,
+    ) -> bool:
+        if after_ms <= 0 or through_ms < after_ms:
+            raise ValueError("Selection Authority interruption window is invalid")
+        vacuum = await self._connection.scalar(
+            sa.select(sa.literal(True))
+            .select_from(strategy_entry_vacuums_current)
+            .where(
+                strategy_entry_vacuums_current.c.strategy_group_id
+                == strategy_group_id,
+                strategy_entry_vacuums_current.c.selection_spec_id
+                == selection_spec_id,
+                strategy_entry_vacuums_current.c.fenced_at_ms > after_ms,
+                strategy_entry_vacuums_current.c.fenced_at_ms <= through_ms,
+            )
+            .limit(1)
+        )
+        if vacuum is True:
+            return True
+        owner_pause = await self._connection.scalar(
+            sa.select(sa.literal(True))
+            .select_from(strategy_entry_control_events)
+            .where(
+                strategy_entry_control_events.c.strategy_group_id
+                == strategy_group_id,
+                strategy_entry_control_events.c.target_state == "paused",
+                strategy_entry_control_events.c.created_at_ms > after_ms,
+                strategy_entry_control_events.c.created_at_ms <= through_ms,
+            )
+            .limit(1)
+        )
+        if owner_pause is True:
+            return True
+        policy_pause = await self._connection.scalar(
+            sa.select(sa.literal(True))
+            .select_from(owner_policy_events)
+            .where(
+                owner_policy_events.c.owner_policy_id == owner_policy_id,
+                owner_policy_events.c.operation == "owner_control_entry_pause",
+                owner_policy_events.c.created_at_ms > after_ms,
+                owner_policy_events.c.created_at_ms <= through_ms,
+            )
+            .limit(1)
+        )
+        return policy_pause is True
+
+    async def is_strategy_trigger_suppressed(
+        self,
+        *,
+        event_spec_id: str,
+        exchange_instrument_id: str,
+        session_reference: str,
+    ) -> bool:
+        return bool(
+            await self._connection.scalar(
+                sa.select(sa.literal(True))
+                .select_from(strategy_trigger_suppressions)
+                .where(
+                    strategy_trigger_suppressions.c.event_spec_id
+                    == event_spec_id,
+                    strategy_trigger_suppressions.c.exchange_instrument_id
+                    == exchange_instrument_id,
+                    strategy_trigger_suppressions.c.session_reference
+                    == session_reference,
+                )
+                .limit(1)
+            )
+        )
+
+    async def selection_generation_matches_pair(
+        self,
+        *,
+        materialization_generation_id: str,
+        long_universe_version_id: str,
+        short_universe_version_id: str,
+    ) -> bool:
+        rows = (
+            await self._connection.execute(
+                sa.select(
+                    strategy_universe_versions.c.universe_version_id,
+                    strategy_universe_versions.c.materialization_generation_id,
+                    strategy_universe_versions.c.lifecycle_state,
+                ).where(
+                    strategy_universe_versions.c.universe_version_id.in_(
+                        (long_universe_version_id, short_universe_version_id)
+                    )
+                )
+            )
+        ).mappings().all()
+        return bool(
+            len(rows) == 2
+            and {str(row["universe_version_id"]) for row in rows}
+            == {long_universe_version_id, short_universe_version_id}
+            and all(
+                row["materialization_generation_id"]
+                == materialization_generation_id
+                and row["lifecycle_state"] == "active"
+                for row in rows
+            )
+        )
+
 
 def _signal_values(signal: StrategySignal) -> dict[str, object]:
     return {
@@ -1168,6 +1360,59 @@ def _signal_values(signal: StrategySignal) -> dict[str, object]:
         "observed_at_ms": signal.observed_at_ms,
         "expires_at_ms": signal.expires_at_ms,
     }
+
+
+def _selection_authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
+    long_id = row["authorized_long_universe_version_id"]
+    short_id = row["authorized_short_universe_version_id"]
+    pair = (
+        None
+        if long_id is None or short_id is None
+        else UniverseAuthorityPair(
+            long_universe_version_id=str(long_id),
+            short_universe_version_id=str(short_id),
+        )
+    )
+    proof_kind = row["grant_proof_kind"]
+    proof = (
+        None
+        if proof_kind is None
+        else AuthorityGrantProof(
+            kind=AuthorityGrantProofKind(str(proof_kind)),
+            predecessor_authority_id=row["grant_predecessor_authority_id"],
+            authority_gap_audit_id=row["authority_gap_audit_id"],
+        )
+    )
+    return SelectionSessionAuthority(
+        selection_authority_id=str(row["selection_authority_id"]),
+        selection_spec_id=str(row["selection_spec_id"]),
+        session_start_ms=int(row["session_start_ms"]),
+        decision_boundary_ms=int(row["decision_boundary_ms"]),
+        authority_sequence=int(row["authority_sequence"]),
+        selection_mode=SelectionMode(str(row["selection_mode"])),
+        selection_snapshot_id=row["selection_snapshot_id"],
+        continued_from_selection_authority_id=row[
+            "continued_from_selection_authority_id"
+        ],
+        continuity_source_kind=ContinuitySourceKind(
+            str(row["continuity_source_kind"])
+        ),
+        authority_gap_audit_id=row["authority_gap_audit_id"],
+        materialization_generation_id=row["materialization_generation_id"],
+        owner_control_version=int(row["owner_control_version"]),
+        authority_outcome=AuthorityOutcome(str(row["authority_outcome"])),
+        authorized_pair=pair,
+        grant_proof=proof,
+        effective_from_ms=int(row["effective_from_ms"]),
+        first_eligible_close_time_ms=(
+            None
+            if row["first_eligible_close_time_ms"] is None
+            else int(row["first_eligible_close_time_ms"])
+        ),
+        expires_at_ms=int(row["expires_at_ms"]),
+        reason_code=str(row["reason_code"]),
+        created_at_ms=int(row["created_at_ms"]),
+    )
 
 
 def _fact_snapshot_values(

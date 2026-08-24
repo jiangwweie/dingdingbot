@@ -58,7 +58,11 @@ def signal(
         if position_side == "long"
         else "event_spec:SOR-001:SOR-SHORT:v4"
     )
-    facts = signal_facts(position_side=position_side)
+    facts = signal_facts(
+        position_side=position_side,
+        observed_at_ms=occurred_at_ms,
+        valid_until_ms=occurred_at_ms + 9_000,
+    )
     return StrategySignal(
         signal_event_id=signal_event_id,
         exposure_episode_id=f"episode:{signal_event_id}",
@@ -74,14 +78,17 @@ def signal(
         fact_digest=build_signal_fact_digest(facts),
         occurred_at_ms=occurred_at_ms,
         observed_at_ms=occurred_at_ms + 1,
-        expires_at_ms=10_000,
+        expires_at_ms=occurred_at_ms + 9_000,
         facts=facts,
         selection_authority_id=selection_authority_id,
     )
 
 
 def signal_facts(
-    *, position_side: Literal["long", "short"]
+    *,
+    position_side: Literal["long", "short"],
+    observed_at_ms: int = 1_000,
+    valid_until_ms: int = 10_000,
 ) -> tuple[SignalFactSnapshot, ...]:
     values: tuple[tuple[str, str, JsonValue, bool], ...]
     if position_side == "long":
@@ -128,15 +135,20 @@ def signal_facts(
             role=role,  # type: ignore[arg-type]
             value=value,
             satisfied=satisfied,
-            observed_at_ms=1_000,
-            valid_until_ms=10_000,
+            observed_at_ms=observed_at_ms,
+            valid_until_ms=valid_until_ms,
             projection_version=1,
         )
         for fact_definition_id, role, value, satisfied in values
     )
 
 
-def admission_snapshot() -> EntryAdmissionSnapshot:
+def admission_snapshot(
+    *,
+    observed_at_ms: int = 1_001,
+    valid_for_ms: int = 8_999,
+    configured_leverage: int = 1,
+) -> EntryAdmissionSnapshot:
     return EntryAdmissionSnapshot(
         account_risk_snapshot=AccountRiskSnapshot.create(
             venue_id="binance-usdm",
@@ -147,21 +159,21 @@ def admission_snapshot() -> EntryAdmissionSnapshot:
             margin_mode="cross",
             exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
             mark_price=Decimal(10000),
-            configured_leverage=1,
+            configured_leverage=configured_leverage,
             total_wallet_balance=Decimal(1000),
             total_margin_balance=Decimal(1000),
             total_initial_margin=Decimal(0),
             total_maintenance_margin=Decimal(0),
             available_margin=Decimal(1000),
             account_positions=(),
-            observed_at_ms=1_001,
-            valid_until_ms=10_000,
+            observed_at_ms=observed_at_ms,
+            valid_until_ms=observed_at_ms + valid_for_ms,
         ),
         best_bid_price=Decimal("9999.9"),
         best_ask_price=Decimal(10000),
         open_orders=(),
-        observed_at_ms=1_001,
-        valid_until_ms=10_000,
+        observed_at_ms=observed_at_ms,
+        valid_until_ms=observed_at_ms + valid_for_ms,
     )
 
 

@@ -152,7 +152,20 @@ async def issue_ready_signal(
         schema_revision=request.schema_revision,
         now_ms=request.now_ms,
     )
-    if authority is not SignalAuthorityStatus.VALID:
+    delayed_selection_refusal = (
+        authority
+        if authority
+        in {
+            SignalAuthorityStatus.SELECTION_ENTRY_VACUUM,
+            SignalAuthorityStatus.SELECTION_AUTHORITY_INVALID,
+            SignalAuthorityStatus.SELECTION_TRIGGER_SUPPRESSED,
+        }
+        else None
+    )
+    if (
+        authority is not SignalAuthorityStatus.VALID
+        and delayed_selection_refusal is None
+    ):
         await _block_signal(uow, signal, authority.value, request.now_ms)
         return IssueTicketResult(
             status=IssueTicketStatus(authority.value),
@@ -305,6 +318,25 @@ async def issue_ready_signal(
             exposure_family=contract.exposure_family,
         ),
     )
+    if delayed_selection_refusal is not None:
+        status = IssueTicketStatus(delayed_selection_refusal.value)
+        return await _refuse(
+            uow,
+            signal,
+            status,
+            request.now_ms,
+            admission_context=admission_context,
+            entry_admission_snapshot_digest=request.admission_snapshot.digest(),
+            binding_constraint=(
+                vacuum.entry_vacuum_id
+                if delayed_selection_refusal
+                is SignalAuthorityStatus.SELECTION_ENTRY_VACUUM
+                and vacuum is not None
+                and vacuum.blocks_new_entry
+                else delayed_selection_refusal.value
+            ),
+            admission_snapshot=request.admission_snapshot,
+        )
     if vacuum is not None and vacuum.blocks_new_entry:
         return await _refuse(
             uow,

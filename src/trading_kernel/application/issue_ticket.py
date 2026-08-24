@@ -7,6 +7,10 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from src.trading_kernel.application.ingest_signal import (
+    SelectionEntryAuthorityStatus,
+    resolve_selection_entry_authority,
+)
 from src.trading_kernel.application.owner_control import strategy_entry_is_enabled
 from src.trading_kernel.application.ports import (
     BudgetReservationRecord,
@@ -47,6 +51,8 @@ class IssueTicketStatus(StrEnum):
     ADMISSION_INCIDENT_OPEN = "admission_incident_open"
     PRODUCT_ENTRY_BLOCKED = "product_entry_blocked"
     SELECTION_ENTRY_VACUUM = "selection_entry_vacuum"
+    SELECTION_AUTHORITY_INVALID = "selection_authority_invalid"
+    SELECTION_TRIGGER_SUPPRESSED = "selection_trigger_suppressed"
 
 
 class IssueTicketRequest(BaseModel):
@@ -134,7 +140,8 @@ async def issue_ticket(
                 ticket_id=None,
             )
     selection_control = await uow.instrument_selection.get_selection_control(
-        ticket.identity.runtime.strategy_group_id
+        ticket.identity.runtime.strategy_group_id,
+        for_update=True,
     )
     if selection_control is not None:
         vacuum = await uow.instrument_selection.get_current_entry_vacuum(
@@ -194,6 +201,32 @@ async def issue_ticket(
             status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
             ticket_id=None,
         )
+    assert scope is not None
+    if selection_control is not None:
+        signal = await uow.signals.get(ticket.identity.signal_event_id)
+        if (
+            signal is None
+            or signal.selection_authority_id != claim.selection_authority_id
+            or signal.selection_authority_id != ticket.selection_authority_id
+        ):
+            return IssueTicketResult(
+                status=IssueTicketStatus.SELECTION_AUTHORITY_INVALID,
+                ticket_id=None,
+            )
+        selection = await resolve_selection_entry_authority(
+            uow,
+            runtime_scope=scope,
+            birth_selection_authority_id=signal.selection_authority_id,
+            observed_close_time_ms=signal.occurred_at_ms,
+            now_ms=request.now_ms,
+            allow_current_as_birth=False,
+            lock_current=True,
+        )
+        if not selection.allowed:
+            return IssueTicketResult(
+                status=_selection_issue_status(selection.status),
+                ticket_id=None,
+            )
     strategy_group = await uow.signals.get_strategy_group(
         ticket.identity.runtime.strategy_group_id
     )
@@ -385,3 +418,15 @@ def _scope_matches_ticket(
         == identity.netting_domain.exchange_instrument_id
         and scope.position_side == identity.netting_domain.position_side
     )
+
+
+def _selection_issue_status(
+    status: SelectionEntryAuthorityStatus,
+) -> IssueTicketStatus:
+    if status is SelectionEntryAuthorityStatus.VACUUM_OPEN:
+        return IssueTicketStatus.SELECTION_ENTRY_VACUUM
+    if status is SelectionEntryAuthorityStatus.TRIGGER_SUPPRESSED:
+        return IssueTicketStatus.SELECTION_TRIGGER_SUPPRESSED
+    if status is SelectionEntryAuthorityStatus.OWNER_OR_POLICY_BLOCKED:
+        return IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH
+    return IssueTicketStatus.SELECTION_AUTHORITY_INVALID

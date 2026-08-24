@@ -2058,34 +2058,42 @@ class PostgresInstrumentSelectionRepository:
     async def get_current_authority(
         self,
         selection_spec_id: str,
+        *,
+        for_update: bool = False,
     ) -> SelectionSessionAuthority | None:
-        projection = await self.get_current_authority_projection(selection_spec_id)
+        projection = await self.get_current_authority_projection(
+            selection_spec_id,
+            for_update=for_update,
+        )
         return None if projection is None else projection.authority
 
     async def get_current_authority_projection(
         self,
         selection_spec_id: str,
+        *,
+        for_update: bool = False,
     ) -> CurrentSelectionAuthority | None:
-        row = (
-            await self._connection.execute(
-                sa.select(
-                    selection_session_authorities,
-                    selection_authority_current.c.projection_version.label(
-                        "current_projection_version"
-                    ),
-                )
-                .join(
-                    selection_authority_current,
-                    selection_authority_current.c.selection_authority_id
-                    == selection_session_authorities.c.selection_authority_id,
-                )
-                .where(
-                    selection_authority_current.c.selection_spec_id
-                    == selection_spec_id
-                )
-                .limit(1)
+        statement = (
+            sa.select(
+                selection_session_authorities,
+                selection_authority_current.c.projection_version.label(
+                    "current_projection_version"
+                ),
             )
-        ).mappings().one_or_none()
+            .join(
+                selection_authority_current,
+                selection_authority_current.c.selection_authority_id
+                == selection_session_authorities.c.selection_authority_id,
+            )
+            .where(
+                selection_authority_current.c.selection_spec_id
+                == selection_spec_id
+            )
+            .limit(1)
+        )
+        if for_update:
+            statement = statement.with_for_update(of=selection_authority_current)
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
         if row is None:
             return None
         return CurrentSelectionAuthority(

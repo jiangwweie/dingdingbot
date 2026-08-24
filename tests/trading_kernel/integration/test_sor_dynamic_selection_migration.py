@@ -13,6 +13,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
@@ -252,6 +253,23 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
                     "brc_exchange_commands",
                 )
             }
+            candidate_profiles = tuple(
+                (
+                    await connection.execute(
+                        sa.text(
+                            "SELECT p.* "
+                            "FROM brc_instrument_product_profiles p "
+                            "JOIN brc_instrument_selection_spec_members m "
+                            "ON m.exchange_instrument_id = p.exchange_instrument_id "
+                            "WHERE m.selection_spec_id = "
+                            "'sor-dynamic-selection-v0' "
+                            "ORDER BY p.exchange_instrument_id"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
 
         assert revision == TARGET_REVISION
         assert selection_spec == (
@@ -277,6 +295,25 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
             ("universe:static:short", "manual"),
         )
         assert runtime_counts == {table: 0 for table in runtime_counts}
+        assert len(candidate_profiles) == 24
+        for row in candidate_profiles:
+            profile = InstrumentProductProfile.model_validate(
+                {
+                    "exchange_instrument_id": row["exchange_instrument_id"],
+                    "product_family": row["product_family"],
+                    "asset_class": row["asset_class"],
+                    "contract_type": row["contract_type"],
+                    "underlying_type": row["underlying_type"],
+                    "margin_asset": row["margin_asset"],
+                    "entry_session_policy": row["entry_session_policy"],
+                    "status": row["status"],
+                    "max_entry_spread_bps": row["max_entry_spread_bps"],
+                    "max_mark_index_deviation_bps": row[
+                        "max_mark_index_deviation_bps"
+                    ],
+                }
+            )
+            assert row["semantic_digest"] == profile.semantic_digest
 
         async with engine.begin() as connection:
             await connection.execute(

@@ -31,6 +31,7 @@ def produce_strategy_signal(
     detector_result: DetectorResult,
     persisted_facts: tuple[SignalFactSnapshot, ...],
     exposure_episode_id: str | None = None,
+    selection_authority_id: str | None = None,
 ) -> StrategySignal:
     if not detector_result.triggered or detector_result.occurred_at_ms is None:
         raise ValueError("StrategySignal requires a triggered detector result")
@@ -113,6 +114,7 @@ def produce_strategy_signal(
         observed_at_ms=max(item.observed_at_ms for item in facts),
         expires_at_ms=expires_at_ms,
         facts=facts,
+        selection_authority_id=selection_authority_id,
     )
 
 

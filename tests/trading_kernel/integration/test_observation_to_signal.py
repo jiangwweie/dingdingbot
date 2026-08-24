@@ -44,6 +44,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     shadow_outcomes_current,
     signal_events,
     signal_fact_snapshots,
+    strategy_trigger_suppressions,
     strategy_universe_current,
     strategy_universe_members,
     strategy_universe_versions,
@@ -70,6 +71,15 @@ from tests.trading_kernel.support.postgres import (
 )
 from tests.trading_kernel.support.postgres import (
     run_alembic as _run_alembic,
+)
+from tests.trading_kernel.support.selection_authority import (
+    DECISION_BOUNDARY_MS,
+    FIRST_ELIGIBLE_CLOSE_MS,
+    SESSION_START_MS,
+    install_dynamic_pre_fence_authority,
+)
+from tests.trading_kernel.support.signal_ingest import (
+    seed_runtime_authority as seed_dynamic_runtime_authority,
 )
 from tests.trading_kernel.support.us_equity_sor import (
     AAPL,
@@ -136,6 +146,122 @@ class TimeoutMarketSource:
         request: ClosedCandleRequest,
     ) -> tuple[ClosedCandle, ...]:
         raise TimeoutError(f"timed out: {request.exchange_instrument_id}")
+
+
+@pytest.mark.asyncio
+async def test_dynamic_observation_rejects_early_close_before_market_read(
+    observation_engine: AsyncEngine,
+) -> None:
+    await seed_dynamic_runtime_authority(observation_engine)
+    await _normalize_seeded_btc_universe_digest(observation_engine)
+    await install_dynamic_pre_fence_authority(observation_engine)
+    source = FakeMarketSource({})
+
+    result = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        source,
+        ObservationRequest(
+            runtime_scope_id="scope-sor-btc-long",
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            trigger_candle_close_time_ms=DECISION_BOUNDARY_MS,
+            attempted_at_ms=DECISION_BOUNDARY_MS + 2,
+        ),
+    )
+
+    assert result.status is ObservationStatus.INVALID
+    assert result.detector_reason == "selection_close_before_first_eligible"
+    assert result.signal_event_id is None
+    assert source.calls == []
+    async with observation_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(signal_events)
+        ) == 0
+
+
+@pytest.mark.asyncio
+async def test_dynamic_observation_suppresses_later_cross_before_market_read(
+    observation_engine: AsyncEngine,
+) -> None:
+    await seed_dynamic_runtime_authority(observation_engine)
+    await _normalize_seeded_btc_universe_digest(observation_engine)
+    authority = await install_dynamic_pre_fence_authority(observation_engine)
+    async with observation_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(strategy_trigger_suppressions).values(
+                trigger_suppression_id="trigger-suppression:observation:test",
+                authority_gap_audit_id=authority.authority_gap_audit_id,
+                entry_vacuum_id=None,
+                materialization_generation_id=None,
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
+                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                session_reference=str(SESSION_START_MS),
+                first_natural_trigger_at_ms=FIRST_ELIGIBLE_CLOSE_MS,
+                reason_code="TRIGGER_DURING_AUTHORITY_GAP",
+                detector_semantic_digest="sha256:" + "4" * 64,
+                created_at_ms=FIRST_ELIGIBLE_CLOSE_MS - 1,
+            )
+        )
+    source = FakeMarketSource({})
+
+    result = await observe_strategy_scope(
+        lambda: PostgresKernelUnitOfWork(observation_engine),
+        source,
+        ObservationRequest(
+            runtime_scope_id="scope-sor-btc-long",
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            trigger_candle_close_time_ms=FIRST_ELIGIBLE_CLOSE_MS,
+        ),
+    )
+
+    assert result.status is ObservationStatus.INVALID
+    assert result.detector_reason == "selection_first_trigger_already_consumed"
+    assert result.signal_event_id is None
+    assert source.calls == []
+    async with observation_engine.connect() as connection:
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(signal_events)
+        ) == 0
+
+
+async def _normalize_seeded_btc_universe_digest(engine: AsyncEngine) -> None:
+    universe = build_strategy_universe(
+        universe_version_id="universe:sor-long:4",
+        strategy_group_id="SOR-001",
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
+        universe_version=4,
+        exchange_instrument_ids=("binance-usdm:BTCUSDT:perpetual",),
+        installed_at_ms=900,
+    )
+    async with engine.begin() as connection:
+        await connection.execute(
+            sa.update(strategy_universe_versions)
+            .where(
+                strategy_universe_versions.c.universe_version_id
+                == universe.universe_version_id
+            )
+            .values(semantic_digest=universe.semantic_digest)
+        )
+        await connection.execute(
+            sa.update(strategy_universe_current)
+            .where(
+                strategy_universe_current.c.event_spec_id
+                == universe.event_spec_id
+            )
+            .values(semantic_digest=universe.semantic_digest)
+        )
+        await connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(
+                runtime_scopes_current.c.runtime_scope_id
+                == "scope-sor-btc-long"
+            )
+            .values(
+                universe_semantic_digest=universe.semantic_digest,
+                warm_readiness_digest=universe.semantic_digest,
+            )
+        )
 
 
 @pytest.mark.asyncio
