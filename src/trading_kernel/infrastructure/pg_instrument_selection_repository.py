@@ -9,6 +9,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from src.trading_kernel.application.ports import SelectionJobRecord
+from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
 from src.trading_kernel.domain.instrument_selection import (
     SelectionAttemptOutcome,
     SelectionComputation,
@@ -30,6 +32,8 @@ from src.trading_kernel.domain.selection_authority import (
     ContinuitySourceKind,
     CurrentSelectionAuthority,
     MaterializationGeneration,
+    MaterializationGenerationClaimStatus,
+    MaterializationGenerationLeaseClaim,
     MaterializationGenerationState,
     MaterializationTarget,
     SelectionControl,
@@ -52,6 +56,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     instrument_selection_spec_events,
     instrument_selection_spec_members,
     instrument_selection_specs,
+    runtime_release_compatibility_facts,
     selection_authority_current,
     selection_authority_gap_audit_events,
     selection_authority_gap_audits_current,
@@ -445,6 +450,26 @@ class PostgresInstrumentSelectionRepository:
         if result.rowcount != 1:
             raise SelectionJobConflict("Selection failure completion lost its lease")
 
+    async def get_selection_job(
+        self,
+        *,
+        selection_spec_id: str,
+        session_start_ms: int,
+    ) -> SelectionJobRecord | None:
+        row = (
+            await self._connection.execute(
+                sa.select(instrument_selection_jobs_current)
+                .where(
+                    instrument_selection_jobs_current.c.selection_spec_id
+                    == selection_spec_id,
+                    instrument_selection_jobs_current.c.session_start_ms
+                    == session_start_ms,
+                )
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        return None if row is None else SelectionJobRecord.model_validate(dict(row))
+
     async def _locked_job(self, claim: SelectionJobClaim) -> RowMapping:
         row = (
             await self._connection.execute(
@@ -672,6 +697,29 @@ class PostgresInstrumentSelectionRepository:
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         return None if row is None else _materialization_generation_from_row(row)
 
+    async def get_materialization_generation_for_period(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        session_start_ms: int,
+    ) -> MaterializationGeneration | None:
+        row = (
+            await self._connection.execute(
+                sa.select(strategy_universe_materialization_generations)
+                .where(
+                    strategy_universe_materialization_generations.c.strategy_group_id
+                    == strategy_group_id,
+                    strategy_universe_materialization_generations.c.selection_spec_id
+                    == selection_spec_id,
+                    strategy_universe_materialization_generations.c.session_start_ms
+                    == session_start_ms,
+                )
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        return None if row is None else _materialization_generation_from_row(row)
+
     async def get_materialization_generation(
         self,
         materialization_generation_id: str,
@@ -688,6 +736,150 @@ class PostgresInstrumentSelectionRepository:
             )
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         return None if row is None else _materialization_generation_from_row(row)
+
+    async def get_current_nonterminal_materialization_generation(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        for_update: bool = False,
+    ) -> MaterializationGeneration | None:
+        statement = (
+            sa.select(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.strategy_group_id
+                == strategy_group_id,
+                strategy_universe_materialization_generations.c.selection_spec_id
+                == selection_spec_id,
+                strategy_universe_materialization_generations.c.lifecycle_state.in_(
+                    (
+                        "PENDING",
+                        "DESIRED",
+                        "DRAINING_ENTRY",
+                        "MATERIALIZING",
+                        "STAGED",
+                    )
+                ),
+            )
+            .order_by(
+                strategy_universe_materialization_generations.c.session_start_ms.desc(),
+                strategy_universe_materialization_generations.c.created_at_ms.desc(),
+            )
+            .limit(2)
+        )
+        if for_update:
+            statement = statement.with_for_update(
+                of=strategy_universe_materialization_generations
+            )
+        rows = (await self._connection.execute(statement)).mappings().all()
+        if len(rows) > 1:
+            raise SelectionJobConflict(
+                "multiple nonterminal Materialization Generations exist"
+            )
+        return (
+            None
+            if not rows
+            else _materialization_generation_from_row(rows[0])
+        )
+
+    async def claim_materialization_generation(
+        self,
+        *,
+        selection_spec_id: str,
+        session_start_ms: int,
+        worker_id: str,
+        now_ms: int,
+        lease_duration_ms: int,
+    ) -> MaterializationGenerationLeaseClaim:
+        normalized_worker_id = str(worker_id or "").strip()
+        if not normalized_worker_id:
+            raise ValueError("Materialization worker identity must be non-blank")
+        if now_ms <= 0 or lease_duration_ms <= 0:
+            raise ValueError("Materialization lease timing must be positive")
+        row = (
+            await self._connection.execute(
+                sa.select(strategy_universe_materialization_generations)
+                .where(
+                    strategy_universe_materialization_generations.c.selection_spec_id
+                    == selection_spec_id,
+                    strategy_universe_materialization_generations.c.session_start_ms
+                    == session_start_ms,
+                    strategy_universe_materialization_generations.c.lifecycle_state.in_(
+                        (
+                            "PENDING",
+                            "DESIRED",
+                            "DRAINING_ENTRY",
+                            "MATERIALIZING",
+                            "STAGED",
+                        )
+                    ),
+                )
+                .with_for_update(of=strategy_universe_materialization_generations)
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return MaterializationGenerationLeaseClaim(
+                status=MaterializationGenerationClaimStatus.NO_GENERATION
+            )
+        generation = _materialization_generation_from_row(row)
+        existing_owner = row["lease_owner"]
+        existing_expiry = row["lease_expires_at_ms"]
+        if (
+            existing_owner is not None
+            and str(existing_owner) != normalized_worker_id
+            and existing_expiry is not None
+            and int(existing_expiry) > now_ms
+        ):
+            return MaterializationGenerationLeaseClaim(
+                status=MaterializationGenerationClaimStatus.LEASE_HELD,
+                generation=generation,
+                lease_owner=str(existing_owner),
+                lease_expires_at_ms=int(existing_expiry),
+            )
+        lease_expires_at_ms = now_ms + lease_duration_ms
+        updated = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == generation.materialization_generation_id,
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == generation.lifecycle_state.value,
+                strategy_universe_materialization_generations.c.projection_version
+                == generation.projection_version,
+            )
+            .values(
+                lease_owner=normalized_worker_id,
+                lease_expires_at_ms=lease_expires_at_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            raise SelectionJobConflict("Materialization Generation lease changed")
+        return MaterializationGenerationLeaseClaim(
+            status=MaterializationGenerationClaimStatus.CLAIMED,
+            generation=generation,
+            lease_owner=normalized_worker_id,
+            lease_expires_at_ms=lease_expires_at_ms,
+        )
+
+    async def release_materialization_generation_lease(
+        self,
+        *,
+        materialization_generation_id: str,
+        worker_id: str,
+    ) -> None:
+        normalized_worker_id = str(worker_id or "").strip()
+        if not normalized_worker_id:
+            raise ValueError("Materialization worker identity must be non-blank")
+        await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == materialization_generation_id,
+                strategy_universe_materialization_generations.c.lease_owner
+                == normalized_worker_id,
+            )
+            .values(lease_owner=None, lease_expires_at_ms=None)
+        )
 
     async def mark_materialization_generation_desired(
         self,
@@ -1307,18 +1499,47 @@ class PostgresInstrumentSelectionRepository:
         vacuum: StrategyEntryVacuum,
         paused_at_ms: int,
     ) -> MaterializationGeneration:
+        if generation.lifecycle_state not in {
+            MaterializationGenerationState.PENDING,
+            MaterializationGenerationState.DESIRED,
+            MaterializationGenerationState.DRAINING_ENTRY,
+            MaterializationGenerationState.MATERIALIZING,
+            MaterializationGenerationState.STAGED,
+        }:
+            raise ValueError("Owner Pause requires a nonterminal Generation")
         if (
-            generation.lifecycle_state
-            not in {
-                MaterializationGenerationState.MATERIALIZING,
-                MaterializationGenerationState.STAGED,
-            }
-            or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING
-            or vacuum.source_generation_id
-            != generation.materialization_generation_id
+            generation.strategy_group_id != vacuum.strategy_group_id
+            or generation.selection_spec_id != vacuum.selection_spec_id
             or vacuum.resolved_at_ms is not None
         ):
-            raise ValueError("Owner Pause requires exact open materialization")
+            raise ValueError("Owner Pause Generation and Vacuum identity differ")
+        if generation.lifecycle_state in {
+            MaterializationGenerationState.PENDING,
+            MaterializationGenerationState.DESIRED,
+        }:
+            valid_vacuum = bool(
+                vacuum.source_generation_id is None
+                and vacuum.state
+                in {
+                    StrategyEntryVacuumState.OPEN,
+                    StrategyEntryVacuumState.DRAINING_ENTRY,
+                }
+                and vacuum.first_blocker == "OWNER_PAUSED"
+            )
+        elif generation.lifecycle_state is MaterializationGenerationState.DRAINING_ENTRY:
+            valid_vacuum = bool(
+                vacuum.source_generation_id
+                == generation.materialization_generation_id
+                and vacuum.state is StrategyEntryVacuumState.DRAINING_ENTRY
+            )
+        else:
+            valid_vacuum = bool(
+                vacuum.source_generation_id
+                == generation.materialization_generation_id
+                and vacuum.state is StrategyEntryVacuumState.RECONFIGURING
+            )
+        if not valid_vacuum:
+            raise ValueError("Owner Pause requires the exact open Generation fence")
         locked_generation = await self.get_materialization_generation(
             generation.materialization_generation_id,
             for_update=True,
@@ -1377,40 +1598,51 @@ class PostgresInstrumentSelectionRepository:
                 occurred_at_ms=paused_at_ms,
             )
         )
-        vacuum_version = vacuum.projection_version + 1
-        vacuum_update = await self._connection.execute(
-            sa.update(strategy_entry_vacuums_current)
-            .where(
-                strategy_entry_vacuums_current.c.entry_vacuum_id
-                == vacuum.entry_vacuum_id,
-                strategy_entry_vacuums_current.c.state == "RECONFIGURING",
-                strategy_entry_vacuums_current.c.projection_version
-                == vacuum.projection_version,
+        if vacuum.source_generation_id is not None:
+            vacuum_version = vacuum.projection_version + 1
+            target_state = (
+                "OWNER_PAUSED"
+                if vacuum.state is StrategyEntryVacuumState.RECONFIGURING
+                else "DRAINING_ENTRY"
             )
-            .values(
-                state="OWNER_PAUSED",
-                first_blocker="OWNER_PAUSED",
-                projection_version=vacuum_version,
+            vacuum_update = await self._connection.execute(
+                sa.update(strategy_entry_vacuums_current)
+                .where(
+                    strategy_entry_vacuums_current.c.entry_vacuum_id
+                    == vacuum.entry_vacuum_id,
+                    strategy_entry_vacuums_current.c.state == vacuum.state.value,
+                    strategy_entry_vacuums_current.c.projection_version
+                    == vacuum.projection_version,
+                )
+                .values(
+                    state=target_state,
+                    first_blocker="OWNER_PAUSED",
+                    projection_version=vacuum_version,
+                )
             )
-        )
-        if vacuum_update.rowcount != 1:
-            raise SelectionJobConflict("Vacuum changed during Owner Pause")
-        await self._connection.execute(
-            sa.insert(strategy_entry_vacuum_events).values(
-                entry_vacuum_event_id=(
-                    f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum_version}"
-                ),
-                entry_vacuum_id=vacuum.entry_vacuum_id,
-                event_sequence=vacuum_version,
-                event_type="OWNER_PAUSED",
-                payload={
-                    "materialization_generation_id": (
-                        generation.materialization_generation_id
-                    )
-                },
-                occurred_at_ms=paused_at_ms,
+            if vacuum_update.rowcount != 1:
+                raise SelectionJobConflict("Vacuum changed during Owner Pause")
+            await self._connection.execute(
+                sa.insert(strategy_entry_vacuum_events).values(
+                    entry_vacuum_event_id=(
+                        f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum_version}"
+                    ),
+                    entry_vacuum_id=vacuum.entry_vacuum_id,
+                    event_sequence=vacuum_version,
+                    event_type=(
+                        "OWNER_PAUSED"
+                        if target_state == "OWNER_PAUSED"
+                        else "OWNER_PAUSE_REQUESTED"
+                    ),
+                    payload={
+                        "materialization_generation_id": (
+                            generation.materialization_generation_id
+                        ),
+                        "entry_drain_continues": target_state == "DRAINING_ENTRY",
+                    },
+                    occurred_at_ms=paused_at_ms,
+                )
             )
-        )
         return abandoned
 
     async def get_current_entry_vacuum(
@@ -1429,6 +1661,38 @@ class PostgresInstrumentSelectionRepository:
             statement = statement.with_for_update(of=strategy_entry_vacuums_current)
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         return None if row is None else _entry_vacuum_from_row(row)
+
+    async def list_entry_vacuums_for_period(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        session_start_ms: int,
+        limit: int,
+    ) -> tuple[StrategyEntryVacuum, ...]:
+        if not 1 <= limit <= 8:
+            raise ValueError("Entry Vacuum readonly limit must be between 1 and 8")
+        rows = (
+            await self._connection.execute(
+                sa.select(strategy_entry_vacuums_current)
+                .where(
+                    strategy_entry_vacuums_current.c.strategy_group_id
+                    == strategy_group_id,
+                    strategy_entry_vacuums_current.c.selection_spec_id
+                    == selection_spec_id,
+                    strategy_entry_vacuums_current.c.session_start_ms
+                    == session_start_ms,
+                )
+                .order_by(
+                    strategy_entry_vacuums_current.c.fenced_at_ms,
+                    strategy_entry_vacuums_current.c.entry_vacuum_id,
+                )
+                .limit(limit + 1)
+            )
+        ).mappings().all()
+        if len(rows) > limit:
+            raise SelectionJobConflict("Entry Vacuum period exceeds readonly bound")
+        return tuple(_entry_vacuum_from_row(row) for row in rows)
 
     async def open_generation_entry_vacuum(
         self,
@@ -1541,6 +1805,40 @@ class PostgresInstrumentSelectionRepository:
             )
         )
 
+    async def open_owner_paused_entry_vacuum(
+        self,
+        vacuum: StrategyEntryVacuum,
+    ) -> StrategyEntryVacuum:
+        if (
+            vacuum.state is not StrategyEntryVacuumState.OPEN
+            or vacuum.source_generation_id is not None
+            or vacuum.first_blocker != "OWNER_PAUSED"
+        ):
+            raise ValueError("Owner Pause requires an open generation-free Vacuum")
+        existing = await self.get_current_entry_vacuum(
+            strategy_group_id=vacuum.strategy_group_id,
+            selection_spec_id=vacuum.selection_spec_id,
+            for_update=True,
+        )
+        if existing is not None:
+            return existing
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuums_current).values(
+                **vacuum.model_dump(mode="json")
+            )
+        )
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:1",
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=1,
+                event_type="OPEN",
+                payload={"intended_outcome": "OWNER_PAUSED"},
+                occurred_at_ms=vacuum.fenced_at_ms,
+            )
+        )
+        return vacuum
+
     async def mark_entry_vacuum_draining(
         self,
         vacuum: StrategyEntryVacuum,
@@ -1587,6 +1885,73 @@ class PostgresInstrumentSelectionRepository:
             )
         )
         return draining
+
+    async def mark_owner_pause_vacuum_drained(
+        self,
+        vacuum: StrategyEntryVacuum,
+        *,
+        drained_at_ms: int,
+    ) -> StrategyEntryVacuum:
+        if (
+            vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY
+            or vacuum.first_blocker != "OWNER_PAUSED"
+        ):
+            raise ValueError("Owner Pause drain requires its exact Vacuum")
+        if vacuum.source_generation_id is not None:
+            generation = await self.get_materialization_generation(
+                vacuum.source_generation_id,
+                for_update=True,
+            )
+            if (
+                generation is None
+                or generation.lifecycle_state
+                is not MaterializationGenerationState.ABANDONED
+                or generation.strategy_group_id != vacuum.strategy_group_id
+                or generation.selection_spec_id != vacuum.selection_spec_id
+            ):
+                raise SelectionJobConflict(
+                    "Owner Pause source Generation is not abandoned"
+                )
+        paused = StrategyEntryVacuum.model_validate(
+            vacuum.model_copy(
+                update={
+                    "state": StrategyEntryVacuumState.OWNER_PAUSED,
+                    "drained_at_ms": drained_at_ms,
+                    "projection_version": vacuum.projection_version + 1,
+                }
+            ).model_dump()
+        )
+        updated = await self._connection.execute(
+            sa.update(strategy_entry_vacuums_current)
+            .where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.state == "DRAINING_ENTRY",
+                strategy_entry_vacuums_current.c.projection_version
+                == vacuum.projection_version,
+            )
+            .values(
+                state=paused.state.value,
+                drained_at_ms=paused.drained_at_ms,
+                projection_version=paused.projection_version,
+            )
+        )
+        if updated.rowcount != 1:
+            raise SelectionJobConflict("Owner Pause Vacuum changed during drain")
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=(
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:"
+                    f"{paused.projection_version}"
+                ),
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=paused.projection_version,
+                event_type="OWNER_PAUSED",
+                payload={"entry_drain_complete": True},
+                occurred_at_ms=drained_at_ms,
+            )
+        )
+        return paused
 
     async def get_next_entry_vacuum_ticket(
         self,
@@ -1817,6 +2182,76 @@ class PostgresInstrumentSelectionRepository:
             )
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         return None if row is None else _authority_gap_audit_from_row(row)
+
+    async def list_authority_gap_audits_for_period(
+        self,
+        *,
+        selection_spec_id: str,
+        session_start_ms: int,
+        limit: int,
+    ) -> tuple[AuthorityGapAudit, ...]:
+        if not 1 <= limit <= 8:
+            raise ValueError("Authority Gap Audit readonly limit must be between 1 and 8")
+        rows = (
+            await self._connection.execute(
+                sa.select(selection_authority_gap_audits_current)
+                .where(
+                    selection_authority_gap_audits_current.c.selection_spec_id
+                    == selection_spec_id,
+                    selection_authority_gap_audits_current.c.session_start_ms
+                    == session_start_ms,
+                )
+                .order_by(
+                    selection_authority_gap_audits_current.c.gap_kind,
+                    selection_authority_gap_audits_current.c.proposed_authority_outcome,
+                    selection_authority_gap_audits_current.c.authority_gap_audit_id,
+                )
+                .limit(limit + 1)
+            )
+        ).mappings().all()
+        if len(rows) > limit:
+            raise SelectionJobConflict("Authority Gap Audit period exceeds readonly bound")
+        return tuple(_authority_gap_audit_from_row(row) for row in rows)
+
+    async def add_runtime_release_compatibility_fact(
+        self,
+        fact: RuntimeReleaseCompatibilityFact,
+    ) -> None:
+        result = await self._connection.execute(
+            pg_insert(runtime_release_compatibility_facts)
+            .values(**fact.model_dump(mode="json"))
+            .on_conflict_do_nothing()
+            .returning(
+                runtime_release_compatibility_facts.c.release_compatibility_id
+            )
+        )
+        if result.scalar_one_or_none() is not None:
+            return
+        existing = await self.get_runtime_release_compatibility_fact(
+            fact.release_compatibility_id
+        )
+        if existing != fact:
+            raise SelectionJobConflict("release compatibility fact conflicts")
+
+    async def get_runtime_release_compatibility_fact(
+        self,
+        release_compatibility_id: str,
+    ) -> RuntimeReleaseCompatibilityFact | None:
+        row = (
+            await self._connection.execute(
+                sa.select(runtime_release_compatibility_facts)
+                .where(
+                    runtime_release_compatibility_facts.c.release_compatibility_id
+                    == release_compatibility_id
+                )
+                .limit(1)
+            )
+        ).mappings().one_or_none()
+        return (
+            None
+            if row is None
+            else RuntimeReleaseCompatibilityFact.model_validate(dict(row))
+        )
 
     async def complete_authority_gap_audit(
         self,

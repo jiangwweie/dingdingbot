@@ -162,18 +162,18 @@ def test_cross_margin_stress_domain_is_pure_and_decimal_only() -> None:
     ]
 
 
-def test_stop_stress_uses_existing_reconciliation_topology() -> None:
-    """No fifth worker, post-fill queue, or parallel selector is allowed."""
+def test_stop_stress_uses_existing_four_service_reconciliation_topology() -> None:
+    """Logical component modules cannot create a fifth persistent OS worker."""
 
-    worker_files = {
+    service_files = {
         path.name
-        for path in (KERNEL_ROOT / "interfaces").glob("*_worker.py")
+        for path in (REPO_ROOT / "deploy/systemd").glob("*-worker.service")
     }
-    assert worker_files == {
-        "entry_worker.py",
-        "lifecycle_worker.py",
-        "observation_worker.py",
-        "reconciliation_worker.py",
+    assert service_files == {
+        "brc-trading-kernel-entry-worker.service",
+        "brc-trading-kernel-lifecycle-worker.service",
+        "brc-trading-kernel-observation-worker.service",
+        "brc-trading-kernel-reconciliation-worker.service",
     }
     reconciliation_source = (
         KERNEL_ROOT / "interfaces/reconciliation_worker.py"

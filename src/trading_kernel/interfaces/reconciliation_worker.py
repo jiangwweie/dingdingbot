@@ -17,6 +17,12 @@ from src.trading_kernel.application.certify_universe_instrument import (
     InstrumentCertificationSource,
     certify_universe_instrument,
 )
+from src.trading_kernel.application.drain_strategy_entry_vacuum import (
+    DrainStrategyEntryVacuumRequest,
+    DrainStrategyEntryVacuumResult,
+    VacuumDrainStatus,
+    drain_strategy_entry_vacuum_once,
+)
 from src.trading_kernel.application.owner_control import advance_flatten_operation_once
 from src.trading_kernel.application.ports import (
     MonitorOwnerStatus,
@@ -86,6 +92,9 @@ from src.trading_kernel.domain.review import (
     ReviewEconomicsUnavailable,
     calculate_review_economics,
 )
+from src.trading_kernel.domain.strategy_entry_vacuum import (
+    StrategyEntryVacuumState,
+)
 
 _POSITION_RECONCILIATION_STATUSES = RECONCILIATION_POSITION_STATUSES
 
@@ -100,6 +109,8 @@ class ReconciliationWorkerStatus(StrEnum):
     REVIEWED = "reviewed"
     INSTRUMENT_CERTIFIED = "instrument_certified"
     FEE_CAPABILITY_OBSERVED = "fee_capability_observed"
+    VACUUM_DRAIN_ADVANCED = "vacuum_drain_advanced"
+    VACUUM_DRAIN_WAITING = "vacuum_drain_waiting"
 
 
 class ReconciliationWorkerRequest(BaseModel):
@@ -123,6 +134,8 @@ class ReconciliationWorkerRequest(BaseModel):
     fee_capability_monitor_interval_ms: int = 300_000
     fee_capability_max_wait_ms: int = 600_000
     housekeeping_lease_ms: int = 60_000
+    entry_vacuum_strategy_group_id: str | None = None
+    entry_vacuum_selection_spec_id: str | None = None
 
     @field_validator("worker_id", "runtime_commit", "schema_revision", mode="before")
     @classmethod
@@ -131,6 +144,16 @@ class ReconciliationWorkerRequest(BaseModel):
         if not normalized:
             raise ValueError("reconciliation worker identities must be non-blank")
         return normalized
+
+    @field_validator(
+        "entry_vacuum_strategy_group_id",
+        "entry_vacuum_selection_spec_id",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_vacuum_identity(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
 
     @model_validator(mode="after")
     def _validate_window(self) -> ReconciliationWorkerRequest:
@@ -152,6 +175,12 @@ class ReconciliationWorkerRequest(BaseModel):
             or self.housekeeping_lease_ms <= 0
         ):
             raise ValueError("reconciliation worker windows must be positive")
+        if (self.entry_vacuum_strategy_group_id is None) != (
+            self.entry_vacuum_selection_spec_id is None
+        ):
+            raise ValueError(
+                "reconciliation Vacuum scope requires StrategyGroup and SelectionSpec"
+            )
         return self
 
 
@@ -200,25 +229,31 @@ async def run_reconciliation_worker_once(
             review_economics_source=review_economics_source,
         )
     else:
-        async with uow_factory() as uow:
-            critical = await uow.aggregates.claim_next_critical_reconciliation_work(
-                now_ms=request.now_ms,
-            )
-        safety = (
-            None
-            if critical is None
-            else await _run_reconciliation_worker_once_core(
-                uow_factory,
-                venue_truth,
-                position_source,
-                request,
-                unknown=None,
-                aggregate=critical,
-                account_risk_source=account_risk_source,
-                instrument_rules_source=instrument_rules_source,
-                review_economics_source=review_economics_source,
-            )
+        safety = await _run_entry_vacuum_position_fact_drain_once(
+            uow_factory,
+            position_source,
+            request,
         )
+        if safety is None:
+            async with uow_factory() as uow:
+                critical = await uow.aggregates.claim_next_critical_reconciliation_work(
+                    now_ms=request.now_ms,
+                )
+            safety = (
+                None
+                if critical is None
+                else await _run_reconciliation_worker_once_core(
+                    uow_factory,
+                    venue_truth,
+                    position_source,
+                    request,
+                    unknown=None,
+                    aggregate=critical,
+                    account_risk_source=account_risk_source,
+                    instrument_rules_source=instrument_rules_source,
+                    review_economics_source=review_economics_source,
+                )
+            )
 
     housekeeping = await _run_housekeeping_once(
         uow_factory,
@@ -248,6 +283,135 @@ async def run_reconciliation_worker_once(
                 housekeeping.exchange_instrument_id
             ),
         }
+    )
+
+
+async def _run_entry_vacuum_position_fact_drain_once(
+    uow_factory: UnitOfWorkFactory,
+    position_source: PositionSnapshotSource,
+    request: ReconciliationWorkerRequest,
+) -> ReconciliationWorkerResult | None:
+    strategy_group_id = request.entry_vacuum_strategy_group_id
+    selection_spec_id = request.entry_vacuum_selection_spec_id
+    if strategy_group_id is None or selection_spec_id is None:
+        return None
+    async with uow_factory() as uow:
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=strategy_group_id,
+            selection_spec_id=selection_spec_id,
+        )
+        ticket_id = (
+            None
+            if vacuum is None
+            or vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY
+            else await uow.instrument_selection.get_next_entry_vacuum_ticket(
+                strategy_group_id=strategy_group_id
+            )
+        )
+        candidate = (
+            None if ticket_id is None else await uow.aggregates.get(ticket_id)
+        )
+    if (
+        vacuum is None
+        or ticket_id is None
+        or candidate is None
+        or candidate.status
+        not in {
+            AggregateStatus.ENTRY_ACCEPTED,
+            AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
+            AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED,
+        }
+    ):
+        return None
+    if not await _runtime_writer_is_certified(uow_factory, request):
+        return _runtime_fenced_result()
+
+    async with uow_factory() as uow:
+        drain = await drain_strategy_entry_vacuum_once(
+            uow,
+            DrainStrategyEntryVacuumRequest(
+                strategy_group_id=strategy_group_id,
+                selection_spec_id=selection_spec_id,
+                now_ms=request.now_ms,
+            ),
+        )
+        aggregate = (
+            None
+            if drain.ticket_id is None
+            else await uow.aggregates.get(drain.ticket_id)
+        )
+    if drain.status is VacuumDrainStatus.NO_VACUUM or (
+        drain.status is VacuumDrainStatus.WAITING_LIFECYCLE
+        and str(drain.reason_code or "").startswith("VACUUM_STATE:")
+    ):
+        return None
+    if drain.status is not VacuumDrainStatus.POSITION_FACTS_REQUIRED:
+        return _vacuum_drain_worker_result(drain)
+    if aggregate is None or drain.ticket_id is None:
+        return ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+            ticket_id=drain.ticket_id,
+            detail="vacuum_position_snapshot:aggregate_missing",
+        )
+
+    try:
+        snapshot = await asyncio.wait_for(
+            position_source.read_position_snapshot(
+                PositionSnapshotRequest(
+                    ticket_id=drain.ticket_id,
+                    netting_domain=aggregate.identity.netting_domain,
+                    observed_at_ms=request.now_ms,
+                )
+            ),
+            timeout=request.timeout_seconds,
+        )
+    except Exception as exc:  # noqa: BLE001 - readonly facts retry on the next tick.
+        return ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+            ticket_id=drain.ticket_id,
+            detail=f"vacuum_position_snapshot:{type(exc).__name__}",
+        )
+    if not await _runtime_writer_is_certified(uow_factory, request):
+        return _runtime_fenced_result(ticket_id=drain.ticket_id)
+    try:
+        async with uow_factory() as uow:
+            advanced = await drain_strategy_entry_vacuum_once(
+                uow,
+                DrainStrategyEntryVacuumRequest(
+                    strategy_group_id=strategy_group_id,
+                    selection_spec_id=selection_spec_id,
+                    now_ms=request.now_ms,
+                    ticket_id=drain.ticket_id,
+                    position_snapshot=snapshot,
+                ),
+            )
+    except ValueError as exc:
+        return ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+            ticket_id=drain.ticket_id,
+            detail=f"vacuum_position_snapshot:{type(exc).__name__}",
+        )
+    return _vacuum_drain_worker_result(advanced)
+
+
+def _vacuum_drain_worker_result(
+    drain: DrainStrategyEntryVacuumResult,
+) -> ReconciliationWorkerResult:
+    waiting = drain.status in {
+        VacuumDrainStatus.POSITION_FACTS_REQUIRED,
+        VacuumDrainStatus.WAITING_COMMAND,
+        VacuumDrainStatus.WAITING_UNKNOWN_OUTCOME,
+        VacuumDrainStatus.WAITING_LIFECYCLE,
+        VacuumDrainStatus.BLOCKED,
+    }
+    return ReconciliationWorkerResult(
+        status=(
+            ReconciliationWorkerStatus.VACUUM_DRAIN_WAITING
+            if waiting
+            else ReconciliationWorkerStatus.VACUUM_DRAIN_ADVANCED
+        ),
+        ticket_id=drain.ticket_id,
+        detail=drain.status.value,
     )
 
 

@@ -19,14 +19,21 @@ from scripts.trading_kernel.deploy_tokyo_release import (
     CURRENT_RELEASE as CURRENT_RELEASE_SYMLINK,
 )
 from scripts.trading_kernel.deploy_tokyo_release import _parser as deployment_parser
+from src.trading_kernel.application.runtime import (
+    RuntimeCompatibilityClassification,
+    RuntimeReleaseCompatibilityFact,
+)
 
 TARGET_COMMIT = "a" * 40
 CURRENT_COMMIT = "b" * 40
 CURRENT_RELEASE = "/opt/brc/releases/brc-trading-kernel-bbbbbbbbbbbb"
 TARGET_RELEASE = "/opt/brc/releases/brc-trading-kernel-aaaaaaaaaaaa"
 RECOVERY_RELEASE = "/opt/brc/releases/brc-trading-kernel-cccccccccccc"
-SOURCE_SCHEMA_REVISION = "0004_owner_control_plane"
-TARGET_SCHEMA_REVISION = "0005_tradfi_instrument_center"
+SOURCE_SCHEMA_REVISION = "0005_tradfi_instrument_center"
+TARGET_SCHEMA_REVISION = "0006_sor_dynamic_selection_v0"
+RELEASE_COMPATIBILITY_ID = (
+    f"release-compatibility:{CURRENT_COMMIT}:{TARGET_COMMIT}"
+)
 SEED_IDENTITY = "sha256:" + "c" * 64
 PRESERVATION_DIGEST = "sha256:" + "d" * 64
 REGISTRY_DIGEST = "sha256:" + "f" * 64
@@ -67,7 +74,7 @@ def test_regular_plan_rejects_a_schema_change() -> None:
         )
 
 
-def test_dep_002_compatible_upgrade_accepts_only_exact_0004_to_0005() -> None:
+def test_dep_002_compatible_upgrade_accepts_only_exact_0005_to_0006() -> None:
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
@@ -76,12 +83,13 @@ def test_dep_002_compatible_upgrade_accepts_only_exact_0004_to_0005() -> None:
         mode=DeploymentMode.COMPATIBLE_UPGRADE,
         expected_configured_leverage=5,
         enable_entry=False,
+        runtime_release_compatibility_fact=_compatible_fact(),
     )
 
     assert plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
     assert plan.source_schema_revision == SOURCE_SCHEMA_REVISION
 
-    with pytest.raises(ValueError, match="exact 0004 source"):
+    with pytest.raises(ValueError, match="exact 0005 source"):
         DeploymentPlan(
             target_commit=TARGET_COMMIT,
             target_release=TARGET_RELEASE,
@@ -90,7 +98,86 @@ def test_dep_002_compatible_upgrade_accepts_only_exact_0004_to_0005() -> None:
             mode=DeploymentMode.COMPATIBLE_UPGRADE,
             expected_configured_leverage=5,
             enable_entry=False,
+            runtime_release_compatibility_fact=_compatible_fact(),
         )
+
+
+def test_compatible_upgrade_requires_one_exact_release_compatibility_fact() -> None:
+    with pytest.raises(ValueError, match="release compatibility fact"):
+        DeploymentPlan(
+            target_commit=TARGET_COMMIT,
+            target_release=TARGET_RELEASE,
+            schema_revision=TARGET_SCHEMA_REVISION,
+            source_schema_revision=SOURCE_SCHEMA_REVISION,
+            mode=DeploymentMode.COMPATIBLE_UPGRADE,
+            expected_configured_leverage=5,
+            enable_entry=False,
+        )
+
+
+def test_release_compatibility_fact_must_match_the_exact_upgrade_identity() -> None:
+    with pytest.raises(ValueError, match="target commit"):
+        _compatible_plan(
+            enable_entry=False,
+            runtime_release_compatibility_fact=_compatible_fact(
+                to_commit="c" * 40,
+            ),
+        )
+
+
+def test_runtime_rematerialization_classification_fails_closed_without_release_fence() -> None:
+    with pytest.raises(ValueError, match="durable release fence"):
+        _compatible_plan(
+            enable_entry=False,
+            runtime_release_compatibility_fact=_compatible_fact(
+                classification=(
+                    RuntimeCompatibilityClassification.REQUIRES_RUNTIME_REMATERIALIZATION
+                ),
+                reason_codes=("STRATEGY_SEMANTICS_CHANGED",),
+            ),
+        )
+
+
+def test_release_compatibility_persistence_failure_keeps_target_workers_stopped() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        fail_at="persist_runtime_release_compatibility_fact",
+    )
+
+    with pytest.raises(RuntimeError, match="compatibility persistence"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert backend.active_services == set()
+    assert backend.entry_is_inactive_disabled_and_fenced()
+    assert not any(call[0] == "activate_release" for call in backend.calls)
+
+
+def test_unknown_release_compatibility_write_is_resolved_by_exact_read() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        fail_at="persist_runtime_release_compatibility_fact_unknown_committed",
+    )
+
+    result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert result.status == "pass"
+    assert backend.active_services == set(SAFETY_SERVICES)
+    assert sum(
+        call[0] == "persist_runtime_release_compatibility_fact"
+        for call in backend.calls
+    ) == 1
+
+
+def test_release_compatibility_postflight_requires_the_exact_persisted_fact() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        postflight_drift="release_compatibility",
+    )
+
+    with pytest.raises(DeploymentBlocked, match="exact release compatibility"):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert backend.entry_is_inactive_disabled_and_fenced()
 
 
 def test_dep_003_portfolio_admission_upgrade_rejects_enable_entry() -> None:
@@ -240,16 +327,37 @@ def test_mig_007_compatible_upgrade_migrates_only_after_final_flat_recheck() -> 
         "sha256:830ed497a82630805504e9f34ba72dcafcad9164a6fc65aa2a70ae1e3c21ec34",
     ) in backend.calls
     assert sum(call[0] == "certify_r4_recovery" for call in backend.calls) == 1
-    bootstrap_index = backend.calls.index(
-        ("bootstrap_strategy_universes", TARGET_RELEASE)
+    preservation_index = backend.calls.index(
+        (
+            "verify_preservation",
+            TARGET_RELEASE,
+            SOURCE_SCHEMA_REVISION,
+            PRESERVATION_DIGEST,
+        )
     )
     target_postflight_index = max(
         index
-        for index, call in enumerate(backend.calls[: bootstrap_index + 2])
+        for index, call in enumerate(backend.calls)
         if call == ("certify_flat", TARGET_RELEASE)
     )
     safety_start_index = backend.calls.index(("start_services", SAFETY_SERVICES))
-    assert safety_start_index < bootstrap_index < target_postflight_index
+    persist_compatibility_index = backend.calls.index(
+        ("persist_runtime_release_compatibility_fact", TARGET_RELEASE, RELEASE_COMPATIBILITY_ID)
+    )
+    migration_index = backend.calls.index(
+        ("migrate_schema", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, TARGET_SCHEMA_REVISION)
+    )
+    exact_postflight_index = backend.calls.index(
+        ("read_runtime_release_compatibility_fact", TARGET_RELEASE, RELEASE_COMPATIBILITY_ID)
+    )
+    assert (
+        migration_index
+        < preservation_index
+        < persist_compatibility_index
+        < safety_start_index
+        < exact_postflight_index
+        < target_postflight_index
+    )
     assert ("start_services", (ENTRY_SERVICE,)) not in backend.calls
     assert backend.active_services == set(SAFETY_SERVICES)
     assert backend.entry_is_inactive_disabled_and_fenced()
@@ -391,7 +499,7 @@ def test_mig_008_preservation_mismatch_keeps_entry_fenced() -> None:
         preservation_matches=False,
     )
 
-    with pytest.raises(DeploymentBlocked, match="R4 recovery certification"):
+    with pytest.raises(DeploymentBlocked, match="history preservation digest"):
         deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
 
     assert backend.entry_fenced is True
@@ -588,39 +696,6 @@ def test_migration_inspection_failure_preserves_original_unknown_outcome() -> No
     assert str(exc_info.value.__cause__) == "simulated schema inspection failure"
 
 
-def test_post_activation_bootstrap_failure_restores_target_safety_workers() -> None:
-    """Catches leaving protection/reconciliation down after target activation."""
-
-    backend = FakeDeploymentBackend(
-        source_schema_revision=SOURCE_SCHEMA_REVISION,
-        fail_at="bootstrap_strategy_universes",
-    )
-
-    with pytest.raises(RuntimeError, match="simulated bootstrap failure"):
-        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
-
-    activation = backend.calls.index(
-        (
-            "activate_release",
-            TARGET_RELEASE,
-            TARGET_COMMIT,
-            TARGET_SCHEMA_REVISION,
-            SEED_IDENTITY,
-        )
-    )
-    bootstrap = backend.calls.index(
-        ("bootstrap_strategy_universes", TARGET_RELEASE)
-    )
-    recovery_start = max(
-        index
-        for index, call in enumerate(backend.calls)
-        if call == ("start_services", SAFETY_SERVICES)
-    )
-    assert activation < bootstrap < recovery_start
-    assert backend.active_services == set(SAFETY_SERVICES)
-    assert backend.entry_is_inactive_disabled_and_fenced()
-
-
 def test_post_migration_recovery_certification_failure_enters_fenced_target_fix_forward() -> None:
     """Catches leaving the target without safety or restarting source workers."""
 
@@ -766,7 +841,6 @@ def test_dep_004_missing_target_safety_worker_fails_with_entry_fenced() -> None:
         ("registry", "Registry identity"),
         ("universe", "Universe identity"),
         ("universe_digest", "Universe identity"),
-        ("batch", "Certification Batch"),
         ("schema", "schema revision"),
         ("seed", "Seed identity"),
     ],
@@ -1058,7 +1132,7 @@ def test_ssh_probe_exchange_has_no_operator_instrument_arguments(
     assert calls == [(TARGET_RELEASE, "scripts/trading_kernel/probe_production_runtime.py")]
 
 
-def test_compatible_upgrade_bootstraps_crypto_and_tradfi_active_universes(
+def test_compatible_upgrade_verifies_0005_preservation_without_bootstrap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = SshTokyoReleaseBackend(
@@ -1068,28 +1142,75 @@ def test_compatible_upgrade_bootstraps_crypto_and_tradfi_active_universes(
     )
     calls: list[tuple[object, ...]] = []
 
-    def release_command(release: str, *args: str) -> object:
+    def release_json(release: str, *args: str, **_kwargs: object) -> Mapping[str, object]:
         calls.append((release, *args))
-        return object()
+        return {"status": "pass"}
 
-    monkeypatch.setattr(backend, "_release_command", release_command)
+    monkeypatch.setattr(backend, "_release_json", release_json)
 
-    backend.bootstrap_strategy_universes(TARGET_RELEASE)
+    backend.verify_preservation(
+        TARGET_RELEASE,
+        SOURCE_SCHEMA_REVISION,
+        PRESERVATION_DIGEST,
+    )
 
     assert calls == [
         (
             TARGET_RELEASE,
-            "scripts/trading_kernel/bootstrap_strategy_universes.py",
-            "--runtime-profile-id",
-            "tiny-live-v1",
-        ),
-        (
-            TARGET_RELEASE,
-            "scripts/trading_kernel/bootstrap_strategy_universes.py",
-            "--runtime-profile-id",
-            "tradfi-equity-usdm-v1",
+            "scripts/trading_kernel/verify_schema.py",
+            "--preserve-source-revision",
+            SOURCE_SCHEMA_REVISION,
+            "--expected-preservation-digest",
+            PRESERVATION_DIGEST,
+            "--summary-only",
         ),
     ]
+
+
+def test_ssh_release_compatibility_backend_uses_the_formal_kernel_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = SshTokyoReleaseBackend(
+        target="tokyo",
+        repo_root=Path("/repo"),
+        timeout_seconds=60,
+    )
+    fact = _compatible_fact()
+    calls: list[tuple[object, ...]] = []
+
+    def release_json(
+        release: str,
+        script: str,
+        *args: str,
+        **_kwargs: object,
+    ) -> Mapping[str, object]:
+        calls.append((release, script, *args))
+        return {"status": "pass", "created": True, "fact": fact.model_dump(mode="json")}
+
+    monkeypatch.setattr(backend, "_release_json", release_json)
+
+    backend.persist_runtime_release_compatibility_fact(TARGET_RELEASE, fact)
+    assert (
+        backend.read_runtime_release_compatibility_fact(
+            TARGET_RELEASE,
+            fact.release_compatibility_id,
+        )
+        == fact
+    )
+
+    assert calls[0][:3] == (
+        TARGET_RELEASE,
+        "scripts/trading_kernel/persist_runtime_release_fact.py",
+        "write",
+    )
+    assert "--certification-manifest-digest" in calls[0]
+    assert calls[1] == (
+        TARGET_RELEASE,
+        "scripts/trading_kernel/persist_runtime_release_fact.py",
+        "read",
+        "--release-compatibility-id",
+        fact.release_compatibility_id,
+    )
 
     deployment_backend = FakeDeploymentBackend(
         source_schema_revision=SOURCE_SCHEMA_REVISION,
@@ -1107,15 +1228,35 @@ def test_compatible_upgrade_bootstraps_crypto_and_tradfi_active_universes(
     safety_start = deployment_backend.calls.index(
         ("start_services", SAFETY_SERVICES)
     )
-    bootstrap = deployment_backend.calls.index(
-        ("bootstrap_strategy_universes", TARGET_RELEASE)
-    )
     postflight = max(
         index
         for index, call in enumerate(deployment_backend.calls)
         if call == ("certify_flat", TARGET_RELEASE)
     )
-    assert safety_start < bootstrap < postflight
+    assert safety_start < postflight
+    assert not any(
+        call[0] == "bootstrap_strategy_universes"
+        for call in deployment_backend.calls
+    )
+
+
+def test_compatible_restart_deployment_does_not_wait_for_universe_warming() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=SOURCE_SCHEMA_REVISION,
+        universe_stage="active",
+        active_universe_count=8,
+        warming_universe_count=1,
+    )
+
+    result = deploy_tokyo_release(
+        backend,
+        _compatible_plan(enable_entry=False),
+    )
+
+    assert result.status == "pass"
+    assert not any(
+        call[0] == "bootstrap_strategy_universes" for call in backend.calls
+    )
 
 
 def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
@@ -1286,6 +1427,7 @@ def _compatible_plan(
     enable_entry: bool,
     drain_active_tickets: bool = False,
     drain_authorization_id: str | None = None,
+    runtime_release_compatibility_fact: RuntimeReleaseCompatibilityFact | None = None,
 ) -> DeploymentPlan:
     return DeploymentPlan(
         target_commit=TARGET_COMMIT,
@@ -1297,6 +1439,36 @@ def _compatible_plan(
         enable_entry=enable_entry,
         drain_active_tickets=drain_active_tickets,
         drain_authorization_id=drain_authorization_id,
+        runtime_release_compatibility_fact=(
+            _compatible_fact()
+            if runtime_release_compatibility_fact is None
+            else runtime_release_compatibility_fact
+        ),
+    )
+
+
+def _compatible_fact(
+    *,
+    from_commit: str = CURRENT_COMMIT,
+    to_commit: str = TARGET_COMMIT,
+    classification: RuntimeCompatibilityClassification = (
+        RuntimeCompatibilityClassification.COMPATIBLE_RESTART
+    ),
+    reason_codes: tuple[str, ...] = (
+        "PERSISTED_ACTIVE_UNIVERSE_CONTRACT_UNCHANGED",
+    ),
+) -> RuntimeReleaseCompatibilityFact:
+    return RuntimeReleaseCompatibilityFact(
+        release_compatibility_id=f"release-compatibility:{from_commit}:{to_commit}",
+        from_commit=from_commit,
+        to_commit=to_commit,
+        from_schema_revision=SOURCE_SCHEMA_REVISION,
+        to_schema_revision=TARGET_SCHEMA_REVISION,
+        classification=classification,
+        compatibility_basis_digest="sha256:" + "8" * 64,
+        reason_codes=reason_codes,
+        certification_manifest_digest="sha256:" + "9" * 64,
+        created_at_ms=1_775_000_000_000,
     )
 
 
@@ -1391,6 +1563,7 @@ class FakeDeploymentBackend:
         self.entry_enabled = not entry_gate_ready
         self.certification_call_count = 0
         self.probe_call_count = 0
+        self.runtime_release_compatibility_fact: RuntimeReleaseCompatibilityFact | None = None
 
     def read_current_release(self) -> str:
         self.calls.append(("read_current_release",))
@@ -1896,6 +2069,43 @@ class FakeDeploymentBackend:
             "runtime_seed_semantic_hash": SEED_IDENTITY,
             "refreshed_existing_authority": True,
         }
+
+    def persist_runtime_release_compatibility_fact(
+        self,
+        release: str,
+        fact: RuntimeReleaseCompatibilityFact,
+    ) -> None:
+        self.calls.append(
+            (
+                "persist_runtime_release_compatibility_fact",
+                release,
+                fact.release_compatibility_id,
+            )
+        )
+        if self.fail_at == "persist_runtime_release_compatibility_fact":
+            raise RuntimeError("simulated release compatibility persistence failure")
+        self.runtime_release_compatibility_fact = fact
+        if (
+            self.fail_at
+            == "persist_runtime_release_compatibility_fact_unknown_committed"
+        ):
+            raise RuntimeError("simulated release compatibility unknown outcome")
+
+    def read_runtime_release_compatibility_fact(
+        self,
+        release: str,
+        release_compatibility_id: str,
+    ) -> RuntimeReleaseCompatibilityFact | None:
+        self.calls.append(
+            (
+                "read_runtime_release_compatibility_fact",
+                release,
+                release_compatibility_id,
+            )
+        )
+        if self.postflight_drift == "release_compatibility":
+            return None
+        return self.runtime_release_compatibility_fact
 
     def deploy_closure_identity(
         self,

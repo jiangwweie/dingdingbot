@@ -64,6 +64,7 @@ class VacuumDrainStatus(StrEnum):
     WAITING_LIFECYCLE = "WAITING_LIFECYCLE"
     ENTRY_DRAINED = "ENTRY_DRAINED"
     VALID_EMPTY_COMMITTED = "VALID_EMPTY_COMMITTED"
+    OWNER_PAUSED = "OWNER_PAUSED"
     BLOCKED = "BLOCKED"
 
 
@@ -486,6 +487,29 @@ async def _complete_entry_drain(
     vacuum,
     request: DrainStrategyEntryVacuumRequest,
 ) -> DrainStrategyEntryVacuumResult:
+    if vacuum.first_blocker == "OWNER_PAUSED":
+        owner_control = await uow.owner_controls.get_strategy_control(
+            request.strategy_group_id,
+            for_update=True,
+        )
+        if (
+            owner_control is None
+            or owner_control.entry_state.value != "paused"
+        ):
+            return DrainStrategyEntryVacuumResult(
+                status=VacuumDrainStatus.BLOCKED,
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                reason_code="OWNER_PAUSE_VACUUM_FACTS_INVALID",
+            )
+        paused = await uow.instrument_selection.mark_owner_pause_vacuum_drained(
+            vacuum,
+            drained_at_ms=request.now_ms,
+        )
+        return DrainStrategyEntryVacuumResult(
+            status=VacuumDrainStatus.OWNER_PAUSED,
+            entry_vacuum_id=paused.entry_vacuum_id,
+            reason_code="OWNER_PAUSE_ENTRY_DRAINED",
+        )
     if vacuum.source_generation_id is not None:
         drained = await uow.instrument_selection.mark_entry_vacuum_drained(
             vacuum,

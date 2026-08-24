@@ -79,9 +79,9 @@ def test_kernel_has_no_legacy_or_compatibility_module_surface() -> None:
     )
 
 
-def test_flat_upgrade_keeps_historical_preservation_and_current_0004_source() -> None:
+def test_flat_upgrade_keeps_historical_preservation_and_current_0005_source() -> None:
     assert COMPATIBLE_SOURCE_SCHEMA_REVISION == (
-        "0004_owner_control_plane"
+        "0005_tradfi_instrument_center"
     )
     assert COMPATIBLE_SOURCE_REVISION == "0002_sor_v3_strategy_group_capacity"
     assert SCHEMA_REVISION == CURRENT_SCHEMA_REVISION

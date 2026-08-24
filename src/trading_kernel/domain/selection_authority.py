@@ -341,6 +341,12 @@ class MaterializationGenerationState(StrEnum):
     FAILED_CLOSED = "FAILED_CLOSED"
 
 
+class MaterializationGenerationClaimStatus(StrEnum):
+    NO_GENERATION = "NO_GENERATION"
+    CLAIMED = "CLAIMED"
+    LEASE_HELD = "LEASE_HELD"
+
+
 class MaterializationTarget(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -453,6 +459,49 @@ class MaterializationGeneration(BaseModel):
             )
         ):
             raise ValueError("desired Generation requires valid desired time")
+        return self
+
+
+class MaterializationGenerationLeaseClaim(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: MaterializationGenerationClaimStatus
+    generation: MaterializationGeneration | None = None
+    lease_owner: str | None = None
+    lease_expires_at_ms: int | None = None
+
+    @field_validator("lease_owner", mode="before")
+    @classmethod
+    def _normalize_claim_owner(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _validate_claim(self) -> MaterializationGenerationLeaseClaim:
+        claimed = self.status is MaterializationGenerationClaimStatus.CLAIMED
+        if claimed and (
+            self.generation is None
+            or self.lease_owner is None
+            or self.lease_expires_at_ms is None
+        ):
+            raise ValueError("claimed materialization lease requires exact ownership")
+        if self.status is MaterializationGenerationClaimStatus.NO_GENERATION and any(
+            value is not None
+            for value in (
+                self.generation,
+                self.lease_owner,
+                self.lease_expires_at_ms,
+            )
+        ):
+            raise ValueError("absent materialization generation cannot claim lease facts")
+        if self.status is MaterializationGenerationClaimStatus.LEASE_HELD and (
+            self.generation is None
+            or self.lease_owner is None
+            or self.lease_expires_at_ms is None
+        ):
+            raise ValueError("held materialization lease requires current ownership")
+        if self.lease_expires_at_ms is not None and self.lease_expires_at_ms <= 0:
+            raise ValueError("materialization lease expiry must be positive")
         return self
 
 

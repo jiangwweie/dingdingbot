@@ -24,6 +24,7 @@ from src.trading_kernel.application.reconcile_ticket import (
     request_exit,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.instrument_selection import DAY_MS
 from src.trading_kernel.domain.owner_control import (
     ControlOperationState,
     OwnerAuthorization,
@@ -32,6 +33,10 @@ from src.trading_kernel.domain.owner_control import (
     StrategyEntryState,
     advance_control_operation,
     transition_strategy_entry_control,
+)
+from src.trading_kernel.domain.strategy_entry_vacuum import (
+    StrategyEntryVacuum,
+    StrategyEntryVacuumState,
 )
 
 
@@ -148,6 +153,31 @@ async def set_strategy_entry_state(
         operation=operation,
         payload={"owner_identity": request.owner_identity},
     )
+    if target_state is StrategyEntryState.PAUSED:
+        selection_control = await uow.instrument_selection.get_selection_control(
+            strategy_group_id,
+            for_update=True,
+        )
+        if selection_control is not None:
+            session_start_ms = (request.now_ms // DAY_MS) * DAY_MS
+            await uow.instrument_selection.open_owner_paused_entry_vacuum(
+                StrategyEntryVacuum(
+                    entry_vacuum_id=(
+                        f"vacuum:{strategy_group_id}:{session_start_ms}:"
+                        f"owner-pause:{next_control.control_version}"
+                    ),
+                    strategy_group_id=strategy_group_id,
+                    selection_spec_id=selection_control.selection_spec_id,
+                    session_start_ms=session_start_ms,
+                    source_generation_id=None,
+                    state=StrategyEntryVacuumState.OPEN,
+                    fenced_at_ms=request.now_ms,
+                    drained_at_ms=None,
+                    resolved_at_ms=None,
+                    first_blocker="OWNER_PAUSED",
+                    projection_version=1,
+                )
+            )
     return next_control
 
 

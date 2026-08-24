@@ -45,6 +45,7 @@ from src.trading_kernel.application.read_strategy_universe_status import (
 from src.trading_kernel.application.reconciliation_scheduler import (
     ReconciliationActionCandidate,
 )
+from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
 from src.trading_kernel.domain.admission_decision import AdmissionDecision
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
@@ -93,6 +94,7 @@ from src.trading_kernel.domain.selection_authority import (
     AuthorityGapScopeResult,
     CurrentSelectionAuthority,
     MaterializationGeneration,
+    MaterializationGenerationLeaseClaim,
     MaterializationTarget,
     SelectionControl,
     SelectionMode,
@@ -1422,6 +1424,55 @@ class StrategyUniverseRepository(Protocol):
     ) -> CertificationBatchSnapshot: ...
 
 
+class SelectionJobRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    selection_job_id: str
+    selection_spec_id: str
+    session_start_ms: int
+    scheduled_at_ms: int
+    feature_cutoff_at_ms: int
+    state: Literal[
+        "DUE",
+        "CLAIMED",
+        "SNAPSHOT_READY",
+        "SOURCE_FAILED",
+        "COMPUTE_FAILED",
+    ]
+    selection_snapshot_id: str | None
+    first_blocker: str | None
+    attempt_count: int
+    next_retry_at_ms: int | None
+    lease_owner: str | None
+    lease_expires_at_ms: int | None
+    projection_version: int
+    updated_at_ms: int
+
+    @model_validator(mode="after")
+    def _validate_job(self) -> SelectionJobRecord:
+        expected_id = f"selection-job:{self.selection_spec_id}:{self.session_start_ms}"
+        if self.selection_job_id != expected_id:
+            raise ValueError("Selection Job identity is not canonical")
+        if self.attempt_count < 0 or self.projection_version <= 0:
+            raise ValueError("Selection Job counters are invalid")
+        if self.state == "CLAIMED":
+            if self.lease_owner is None or self.lease_expires_at_ms is None:
+                raise ValueError("claimed Selection Job requires lease ownership")
+        elif self.lease_owner is not None or self.lease_expires_at_ms is not None:
+            raise ValueError("unclaimed Selection Job cannot retain a lease")
+        if self.state == "SNAPSHOT_READY":
+            if self.selection_snapshot_id is None or self.first_blocker is not None:
+                raise ValueError("ready Selection Job requires only its Snapshot")
+        elif self.selection_snapshot_id is not None:
+            raise ValueError("non-ready Selection Job cannot reference a Snapshot")
+        if self.state in {"SOURCE_FAILED", "COMPUTE_FAILED"}:
+            if self.first_blocker is None:
+                raise ValueError("failed Selection Job requires its first blocker")
+        elif self.first_blocker is not None:
+            raise ValueError("non-failed Selection Job cannot claim a blocker")
+        return self
+
+
 class InstrumentSelectionRepository(Protocol):
     @classmethod
     def lease_namespace(
@@ -1462,6 +1513,13 @@ class InstrumentSelectionRepository(Protocol):
         source_digest: str | None,
         completed_at_ms: int,
     ) -> None: ...
+
+    async def get_selection_job(
+        self,
+        *,
+        selection_spec_id: str,
+        session_start_ms: int,
+    ) -> SelectionJobRecord | None: ...
 
     async def add_authority_and_set_current(
         self,
@@ -1520,6 +1578,14 @@ class InstrumentSelectionRepository(Protocol):
         selection_snapshot_id: str,
         *,
         for_update: bool = False,
+    ) -> MaterializationGeneration | None: ...
+
+    async def get_materialization_generation_for_period(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        session_start_ms: int,
     ) -> MaterializationGeneration | None: ...
 
     async def mark_materialization_generation_desired(
@@ -1582,6 +1648,31 @@ class InstrumentSelectionRepository(Protocol):
         for_update: bool = False,
     ) -> MaterializationGeneration | None: ...
 
+    async def get_current_nonterminal_materialization_generation(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        for_update: bool = False,
+    ) -> MaterializationGeneration | None: ...
+
+    async def claim_materialization_generation(
+        self,
+        *,
+        selection_spec_id: str,
+        session_start_ms: int,
+        worker_id: str,
+        now_ms: int,
+        lease_duration_ms: int,
+    ) -> MaterializationGenerationLeaseClaim: ...
+
+    async def release_materialization_generation_lease(
+        self,
+        *,
+        materialization_generation_id: str,
+        worker_id: str,
+    ) -> None: ...
+
     async def open_generation_entry_vacuum(
         self,
         vacuum: StrategyEntryVacuum,
@@ -1597,12 +1688,26 @@ class InstrumentSelectionRepository(Protocol):
         for_update: bool = False,
     ) -> StrategyEntryVacuum | None: ...
 
+    async def list_entry_vacuums_for_period(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        session_start_ms: int,
+        limit: int,
+    ) -> tuple[StrategyEntryVacuum, ...]: ...
+
     async def open_valid_empty_intent_vacuum(
         self,
         vacuum: StrategyEntryVacuum,
         *,
         selection_snapshot_id: str,
     ) -> None: ...
+
+    async def open_owner_paused_entry_vacuum(
+        self,
+        vacuum: StrategyEntryVacuum,
+    ) -> StrategyEntryVacuum: ...
 
     async def mark_entry_vacuum_draining(
         self,
@@ -1631,6 +1736,13 @@ class InstrumentSelectionRepository(Protocol):
         drained_at_ms: int,
     ) -> StrategyEntryVacuum: ...
 
+    async def mark_owner_pause_vacuum_drained(
+        self,
+        vacuum: StrategyEntryVacuum,
+        *,
+        drained_at_ms: int,
+    ) -> StrategyEntryVacuum: ...
+
     async def add_pending_authority_gap_audit(
         self,
         audit: AuthorityGapAudit,
@@ -1642,6 +1754,24 @@ class InstrumentSelectionRepository(Protocol):
         *,
         for_update: bool = False,
     ) -> AuthorityGapAudit | None: ...
+
+    async def list_authority_gap_audits_for_period(
+        self,
+        *,
+        selection_spec_id: str,
+        session_start_ms: int,
+        limit: int,
+    ) -> tuple[AuthorityGapAudit, ...]: ...
+
+    async def add_runtime_release_compatibility_fact(
+        self,
+        fact: RuntimeReleaseCompatibilityFact,
+    ) -> None: ...
+
+    async def get_runtime_release_compatibility_fact(
+        self,
+        release_compatibility_id: str,
+    ) -> RuntimeReleaseCompatibilityFact | None: ...
 
     async def complete_authority_gap_audit(
         self,

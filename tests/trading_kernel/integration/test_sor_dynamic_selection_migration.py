@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -13,10 +14,16 @@ import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from scripts.trading_kernel.verify_schema import (
+    _verify_compatible_source,
+    _verify_preservation,
+)
 from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
+    ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
+    arm_acceptance_policy,
     seed_runtime_authority,
 )
 from tests.trading_kernel.support.postgres import TEST_POSTGRES_ADMIN_DSN
@@ -173,16 +180,36 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
                 uow,
                 RuntimeAuthoritySeedRequest(
                     account_id="selection-migration-test",
-                    runtime_commit="selection-migration-test",
+                    runtime_commit="5" * 40,
                     schema_revision=SOURCE_REVISION,
                     seeded_at_ms=1_800_000_000_000,
                 ),
             )
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await arm_acceptance_policy(
+                uow,
+                ArmAcceptancePolicyRequest(armed_at_ms=1_800_000_000_100),
+            )
         async with engine.begin() as connection:
+            await connection.execute(
+                sa.text(
+                    "UPDATE brc_owner_policy_current SET policy_version = 4 "
+                    "WHERE owner_policy_id = 'policy-main'"
+                )
+            )
             await _seed_static_sor_pair(connection)
 
+        source = await _verify_compatible_source(database_url, SOURCE_REVISION)
+        assert source["status"] == "pass", json.dumps(source, default=str)
+        preservation_digest = str(source["preservation_manifest"]["digest"])
         result = _run_alembic(database_url, "upgrade", TARGET_REVISION)
         assert result.returncode == 0, result.stderr[-4000:]
+        preserved = await _verify_preservation(
+            database_url,
+            source_revision=SOURCE_REVISION,
+            expected_digest=preservation_digest,
+        )
+        assert preserved["status"] == "pass", preserved
 
         async with engine.connect() as connection:
             revision = await connection.scalar(

@@ -25,6 +25,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from migrations.trading_kernel import v4_schema
 from src.trading_kernel.domain.exit_policy import registered_exit_policies
+from src.trading_kernel.domain.instrument_selection import (
+    CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS,
+)
 from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
     registered_strategy_contracts,
@@ -46,6 +49,7 @@ EXPECTED_ALEMBIC_REVISION = CURRENT_SCHEMA_REVISION
 COMPATIBLE_SOURCE_REVISION = "0002_sor_v3_strategy_group_capacity"
 OWNER_CONTROL_SOURCE_REVISION = "0003_portfolio_admission_observability"
 TRADFI_INSTRUMENT_SOURCE_REVISION = "0004_owner_control_plane"
+DYNAMIC_SELECTION_SOURCE_REVISION = "0005_tradfi_instrument_center"
 HISTORICAL_PRESERVATION_TARGET_REVISION = (
     "0003_portfolio_admission_observability"
 )
@@ -84,6 +88,51 @@ _TRADFI_SHADOW_COLUMNS = frozenset(
         "first_path",
         "first_path_at_ms",
         "observed_bar_count",
+    }
+)
+_DYNAMIC_SELECTION_TABLES = frozenset(
+    {
+        "brc_instrument_selection_specs",
+        "brc_sor_dynamic_selection_specs_v0",
+        "brc_instrument_selection_spec_events",
+        "brc_instrument_selection_spec_members",
+        "brc_strategy_selection_control_current",
+        "brc_strategy_selection_rollback_baselines",
+        "brc_instrument_selection_jobs_current",
+        "brc_instrument_selection_attempts",
+        "brc_instrument_selection_snapshots",
+        "brc_instrument_selection_member_decisions",
+        "brc_strategy_universe_materialization_generations",
+        "brc_strategy_universe_materialization_targets",
+        "brc_strategy_universe_materialization_events",
+        "brc_selection_session_authorities",
+        "brc_selection_authority_current",
+        "brc_strategy_entry_vacuums_current",
+        "brc_strategy_entry_vacuum_events",
+        "brc_selection_authority_gap_audits_current",
+        "brc_selection_authority_gap_audit_events",
+        "brc_strategy_trigger_suppressions",
+        "brc_runtime_release_compatibility_facts",
+    }
+)
+_DYNAMIC_SELECTION_ADDED_COLUMNS = {
+    "brc_strategy_universe_versions": (
+        "source_kind",
+        "materialization_generation_id",
+    ),
+    "brc_signal_events": ("selection_authority_id",),
+    "brc_capacity_claims": ("selection_authority_id",),
+    "brc_admission_decisions": ("selection_authority_id",),
+    "brc_trade_tickets": ("selection_authority_id",),
+    "brc_trade_aggregates": (
+        "entry_vacuum_id",
+        "entry_materialization_kind",
+    ),
+}
+_DYNAMIC_SELECTION_ADDITIVE_EXISTING_TABLES = frozenset(
+    {
+        "brc_instruments",
+        "brc_instrument_product_profiles",
     }
 )
 _R4_TERMINAL_LINEAGE_TABLES = frozenset(
@@ -303,6 +352,11 @@ async def _verify_compatible_source(
     database_url: str,
     source_revision: str,
 ) -> dict[str, object]:
+    if source_revision == DYNAMIC_SELECTION_SOURCE_REVISION:
+        return await _verify_dynamic_selection_source(
+            database_url,
+            source_revision,
+        )
     if source_revision == TRADFI_INSTRUMENT_SOURCE_REVISION:
         return await _verify_tradfi_instrument_source(
             database_url,
@@ -387,6 +441,7 @@ async def _verify_preservation(
         COMPATIBLE_SOURCE_REVISION,
         OWNER_CONTROL_SOURCE_REVISION,
         TRADFI_INSTRUMENT_SOURCE_REVISION,
+        DYNAMIC_SELECTION_SOURCE_REVISION,
     }:
         raise ValueError("preservation source revision is unsupported")
     if not _is_sha256_identity(expected_digest):
@@ -396,7 +451,9 @@ async def _verify_preservation(
         async with engine.connect() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
-            if source_revision == TRADFI_INSTRUMENT_SOURCE_REVISION:
+            if source_revision == DYNAMIC_SELECTION_SOURCE_REVISION:
+                manifest = await _dynamic_selection_preservation_manifest(connection)
+            elif source_revision == TRADFI_INSTRUMENT_SOURCE_REVISION:
                 manifest = await _tradfi_instrument_preservation_manifest(connection)
             elif source_revision == OWNER_CONTROL_SOURCE_REVISION:
                 manifest = await _owner_control_preservation_manifest(connection)
@@ -450,7 +507,10 @@ async def _certify_r4_recovery(
                 connection,
                 expected_columns={
                     table.name: tuple(table.c.keys())
-                    for table in metadata.sorted_tables
+                    for table in sorted(
+                        metadata.tables.values(),
+                        key=lambda item: item.name,
+                    )
                 },
             )
             migration_gate = await _migration_gate(connection)
@@ -562,6 +622,76 @@ async def _verify_tradfi_instrument_source(
             owner_policy = await _current_owner_policy(connection)
             runtime_profile = await _current_runtime_profile(connection)
             controls = await _current_strategy_controls(connection)
+            capabilities = await _current_capabilities(
+                connection,
+                runtime_identity=runtime_identity,
+            )
+            account_mode = {
+                "status": (
+                    "pass"
+                    if runtime_profile["status"] == "pass"
+                    and runtime_profile["position_mode"] == "independent_sides"
+                    and owner_policy["status"] == "pass"
+                    and owner_policy["supported_margin_mode"] == "cross"
+                    else "fail"
+                ),
+                "position_mode": runtime_profile["position_mode"],
+                "margin_mode": owner_policy["supported_margin_mode"],
+            }
+            await connection.rollback()
+    finally:
+        await engine.dispose()
+    passed = bool(
+        revision == source_revision
+        and shape["status"] == "pass"
+        and all(int(value) == 0 for value in migration_gate.values())
+        and runtime_identity["schema_revision"] == source_revision
+        and registry_identity["status"] == "pass"
+        and owner_policy["status"] == "pass"
+        and runtime_profile["status"] == "pass"
+        and controls["status"] == "pass"
+        and capabilities["status"] == "pass"
+        and account_mode["status"] == "pass"
+    )
+    return {
+        "schema": SCHEMA,
+        "status": "pass" if passed else "fail",
+        "alembic_revision": revision,
+        "source_shape": shape,
+        "runtime_identity": runtime_identity,
+        "registry_identity": registry_identity,
+        "owner_policy": owner_policy,
+        "runtime_profile": runtime_profile,
+        "strategy_controls": controls,
+        "capabilities": capabilities,
+        "account_mode": account_mode,
+        "migration_gate": migration_gate,
+        "preservation_manifest": manifest,
+    }
+
+
+async def _verify_dynamic_selection_source(
+    database_url: str,
+    source_revision: str,
+) -> dict[str, object]:
+    """Verify the exact flat 0005 source before the 0006 authority upgrade."""
+
+    engine = _create_engine(database_url)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            revision = await _alembic_revision(connection)
+            shape = await _verify_exact_metadata_shape(
+                connection,
+                expected_columns=_source_0005_table_columns(),
+            )
+            migration_gate = await _migration_gate(connection)
+            manifest = await _dynamic_selection_preservation_manifest(connection)
+            runtime_identity = await _runtime_identity(connection)
+            registry_identity = await _target_registry_identity(connection)
+            owner_policy = await _current_owner_policy(connection)
+            runtime_profile = await _current_runtime_profile(connection)
+            controls = await _target_strategy_controls(connection)
             capabilities = await _current_capabilities(
                 connection,
                 runtime_identity=runtime_identity,
@@ -1224,17 +1354,34 @@ def _source_0002_table_columns() -> dict[str, tuple[str, ...]]:
 
 def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
     return {
-        table.name: _source_columns_before_tradfi(table)
-        for table in metadata.sorted_tables
-        if table.name not in _OWNER_CONTROL_TABLES | _TRADFI_INSTRUMENT_TABLES
+        table.name: _source_columns_before_dynamic_selection(table)
+        for table in sorted(metadata.tables.values(), key=lambda item: item.name)
+        if table.name
+        not in _OWNER_CONTROL_TABLES
+        | _TRADFI_INSTRUMENT_TABLES
+        | _DYNAMIC_SELECTION_TABLES
     }
 
 
 def _source_0004_table_columns() -> dict[str, tuple[str, ...]]:
     return {
-        table.name: _source_columns_before_tradfi(table)
-        for table in metadata.sorted_tables
-        if table.name not in _TRADFI_INSTRUMENT_TABLES
+        table.name: _source_columns_before_dynamic_selection(table)
+        for table in sorted(metadata.tables.values(), key=lambda item: item.name)
+        if table.name
+        not in _TRADFI_INSTRUMENT_TABLES | _DYNAMIC_SELECTION_TABLES
+    }
+
+
+def _source_0005_table_columns() -> dict[str, tuple[str, ...]]:
+    return {
+        table.name: tuple(
+            column.name
+            for column in table.c
+            if column.name
+            not in _DYNAMIC_SELECTION_ADDED_COLUMNS.get(table.name, ())
+        )
+        for table in sorted(metadata.tables.values(), key=lambda item: item.name)
+        if table.name not in _DYNAMIC_SELECTION_TABLES
     }
 
 
@@ -1243,6 +1390,14 @@ def _source_columns_before_tradfi(table: sa.Table) -> tuple[str, ...]:
     if table.name != "brc_shadow_outcomes_current":
         return columns
     return tuple(name for name in columns if name not in _TRADFI_SHADOW_COLUMNS)
+
+
+def _source_columns_before_dynamic_selection(table: sa.Table) -> tuple[str, ...]:
+    return tuple(
+        name
+        for name in _source_columns_before_tradfi(table)
+        if name not in _DYNAMIC_SELECTION_ADDED_COLUMNS.get(table.name, ())
+    )
 
 
 async def _owner_control_preservation_manifest(
@@ -1258,7 +1413,17 @@ async def _owner_control_preservation_manifest(
             )
         ).mappings().all()
         canonical_rows = sorted(
-            (_row_manifest(column_names, dict(row)) for row in rows),
+            (
+                _row_manifest(column_names, projected)
+                for row in rows
+                if (
+                    projected := _project_pre_dynamic_selection_row(
+                        table_name,
+                        dict(row),
+                    )
+                )
+                is not None
+            ),
             key=lambda row: str(row["digest"]),
         )
         table_payload = {
@@ -1297,7 +1462,17 @@ async def _tradfi_instrument_preservation_manifest(
             )
         ).mappings().all()
         canonical_rows = sorted(
-            (_row_manifest(column_names, dict(row)) for row in rows),
+            (
+                _row_manifest(column_names, projected)
+                for row in rows
+                if (
+                    projected := _project_pre_dynamic_selection_row(
+                        table_name,
+                        dict(row),
+                    )
+                )
+                is not None
+            ),
             key=lambda row: str(row["digest"]),
         )
         table_payload = {
@@ -1316,6 +1491,48 @@ async def _tradfi_instrument_preservation_manifest(
     payload = {
         "schema": "brc.trading_kernel.0004_preservation.v1",
         "source_revision": TRADFI_INSTRUMENT_SOURCE_REVISION,
+        "tables": table_entries,
+        "table_count": len(table_entries),
+        "row_count": total_rows,
+    }
+    return {**payload, "digest": _sha256_json(payload)}
+
+
+async def _dynamic_selection_preservation_manifest(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    table_entries: list[dict[str, object]] = []
+    total_rows = 0
+    source_columns = _source_0005_table_columns()
+    for table_name, column_names in sorted(source_columns.items()):
+        if table_name in _DYNAMIC_SELECTION_ADDITIVE_EXISTING_TABLES:
+            continue
+        table = sa.table(table_name, *(sa.column(name) for name in column_names))
+        rows = (
+            await connection.execute(
+                sa.select(*(table.c[name] for name in column_names))
+            )
+        ).mappings().all()
+        canonical_rows = sorted(
+            (_row_manifest(column_names, dict(row)) for row in rows),
+            key=lambda row: str(row["digest"]),
+        )
+        table_payload = {
+            "table": table_name,
+            "columns": list(column_names),
+            "row_count": len(canonical_rows),
+            "rows": canonical_rows,
+        }
+        table_entries.append(
+            {
+                **table_payload,
+                "digest": _sha256_json(table_payload),
+            }
+        )
+        total_rows += len(canonical_rows)
+    payload = {
+        "schema": "brc.trading_kernel.0005_preservation.v1",
+        "source_revision": DYNAMIC_SELECTION_SOURCE_REVISION,
         "tables": table_entries,
         "table_count": len(table_entries),
         "row_count": total_rows,
@@ -1782,6 +1999,13 @@ def _project_source_row(
     if revision == COMPATIBLE_SOURCE_REVISION:
         return row
     if (
+        table_name == "brc_instruments"
+        and str(row["exchange_instrument_id"])
+        in CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
+        and row["status"] == "pending_certification"
+    ):
+        return None
+    if (
         table_name == "brc_schema_metadata"
         and str(row["metadata_key"]) in _PRESERVATION_PROOF_METADATA_KEYS
     ):
@@ -1838,6 +2062,20 @@ def _project_source_row(
     return row
 
 
+def _project_pre_dynamic_selection_row(
+    table_name: str,
+    row: dict[str, Any],
+) -> dict[str, Any] | None:
+    if (
+        table_name == "brc_instruments"
+        and str(row["exchange_instrument_id"])
+        in CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
+        and row["status"] == "pending_certification"
+    ):
+        return None
+    return row
+
+
 def _row_manifest(
     column_names: tuple[str, ...],
     row: Mapping[str, Any],
@@ -1880,6 +2118,7 @@ async def _inspect_deployment_revision(database_url: str) -> dict[str, object]:
                 COMPATIBLE_SOURCE_REVISION,
                 OWNER_CONTROL_SOURCE_REVISION,
                 TRADFI_INSTRUMENT_SOURCE_REVISION,
+                DYNAMIC_SELECTION_SOURCE_REVISION,
                 EXPECTED_ALEMBIC_REVISION,
             }
             else "fail"

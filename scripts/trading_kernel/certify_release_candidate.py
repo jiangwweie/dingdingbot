@@ -26,6 +26,10 @@ from scripts.trading_kernel.verification_portfolios import (
     R3_SAME_SCHEMA_KERNEL_COMMANDS,
     R4_SCHEMA_AUTHORITY_COMMANDS,
 )
+from src.trading_kernel.application.runtime import (
+    RuntimeCompatibilityClassification,
+    RuntimeReleaseCompatibilityFact,
+)
 from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
     registered_strategy_contracts,
@@ -93,6 +97,47 @@ class ReleaseCertificationManifest(BaseModel):
         if any(duration < 0 for duration in self.command_durations_ms):
             raise ValueError("certification durations cannot be negative")
         return self
+
+
+def build_runtime_release_compatibility_fact(
+    *,
+    manifest: ReleaseCertificationManifest,
+    from_commit: str,
+    from_schema_revision: str,
+    classification: RuntimeCompatibilityClassification,
+    reason_codes: tuple[str, ...],
+    created_at_ms: int,
+) -> RuntimeReleaseCompatibilityFact:
+    """Project a reviewed decision without creating a second classifier."""
+
+    if manifest.release_level is not ReleaseCertificationLevel.R4:
+        raise ValueError("runtime compatibility requires an exact R4 certification")
+    canonical_reasons = tuple(sorted(set(reason_codes)))
+    manifest_digest = _digest(manifest.model_dump(mode="json", by_alias=True))
+    basis = {
+        "certification_manifest_digest": manifest_digest,
+        "from_commit": from_commit,
+        "to_commit": manifest.release_commit,
+        "from_schema_revision": from_schema_revision,
+        "to_schema_revision": manifest.schema_revision,
+        "classification": classification.value,
+        "reason_codes": canonical_reasons,
+    }
+    basis_digest = _digest(basis)
+    return RuntimeReleaseCompatibilityFact(
+        release_compatibility_id=(
+            f"release-compatibility:{from_commit}:{manifest.release_commit}"
+        ),
+        from_commit=from_commit,
+        to_commit=manifest.release_commit,
+        from_schema_revision=from_schema_revision,
+        to_schema_revision=manifest.schema_revision,
+        classification=classification,
+        compatibility_basis_digest=basis_digest,
+        reason_codes=canonical_reasons,
+        certification_manifest_digest=manifest_digest,
+        created_at_ms=created_at_ms,
+    )
 
 
 def build_certification_identity(
@@ -165,6 +210,16 @@ def validate_release_certification_for_level(
     commit: str,
     release_level: ReleaseCertificationLevel,
 ) -> None:
+    load_release_certification_manifest(repo_root, commit, release_level)
+
+
+def load_release_certification_manifest(
+    repo_root: Path,
+    commit: str,
+    release_level: ReleaseCertificationLevel,
+) -> ReleaseCertificationManifest:
+    """Load one exact local manifest after clean-candidate identity validation."""
+
     _require_exact_clean_head(repo_root, commit)
     path = certification_manifest_path(repo_root, commit)
     if not path.is_file():
@@ -173,6 +228,7 @@ def validate_release_certification_for_level(
         path.read_text(encoding="utf-8")
     )
     validate_manifest_identity(manifest, commit, release_level)
+    return manifest
 
 
 def certify_release_candidate(

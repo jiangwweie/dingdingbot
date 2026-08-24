@@ -5,8 +5,8 @@ date: 2026-08-23
 phase: P3-X.3A
 design_authority: ../specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: DS-08
-next_execution_gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_06_TO_DS_10
+active_execution_scope: DS-09
+next_execution_gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_09_TO_DS_10
 production_authority: NONE
 ---
 
@@ -31,8 +31,8 @@ decision）
 design status: DESIGN_APPROVED
 plan status: PLAN_APPROVED
 implementation_authority: CODE_AND_TEST_ONLY
-active execution scope: DS-08
-next execution gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_06_TO_DS_10
+active execution scope: DS-09
+next execution gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_09_TO_DS_10
 production_authority: NONE
 ```
 
@@ -986,6 +986,40 @@ Owner dynamic/static/disabled控制以及thin release compatibility projection�
 **Done**
 
 四Worker模型保持不变，业务warming与软件部署关键路径彻底分离。
+
+**执行记录：`DS-08 COMPLETE`。**
+
+实现保持Observation、Selection、Materialization三个独立逻辑loop、component identity、poll
+interval、lease和async call stack，并继续托管于既有Observation systemd进程；四Worker OS topology
+没有增加。Materialization lease支持排他claim、过期接管、显式释放和PostgreSQL exact-state恢复。
+Reconciliation Worker接管`POSITION_FACTS_REQUIRED`，网络读取位于事务外；timeout、Netting Domain
+漂移和并发推进均fail closed且不重复创建Cancel Command。Owner Pause覆盖
+`PENDING/DESIRED/DRAINING_ENTRY/MATERIALIZING/STAGED`并继续Vacuum drain，禁止fallback恢复new ENTRY。
+
+bounded readonly projection按`strategy_group_id + selection_spec_id + session_start_ms` exact key读取
+Job、Snapshot、Generation、Vacuum、Gap Audit、Authority与`first_eligible_close_time_ms`，每类最多8条，
+不扫描历史、不写数据库、不调用交易所。Authority Gap Audit通过Binance public closed Kline恢复exact
+SOR path；source integrity、detector drift和source unavailable均写入durable FAILED blocker。
+
+Release Classification继续只使用existing exact R4 certification manifest。`0005 -> 0006`
+`COMPATIBLE_RESTART`在Migration后、任何Worker启动前通过正式Kernel CLI幂等写入
+`brc_runtime_release_compatibility_facts`，postflight按exact ID回读；Fact缺失、冲突、身份漂移或未知
+写入未获exact read证明时保持fail closed。由于当前尚无durable release fence，
+`REQUIRES_RUNTIME_REMATERIALIZATION`被显式拒绝，不能伪装为已支持。Compatible deployment不bootstrap、
+不等待pending Generation或warming。
+
+| DS-08 verification | Result |
+| --- | ---: |
+| Affected runtime/deployment/PostgreSQL suite | **169 passed** |
+| Fast Unit + Architecture | **1,021 passed** |
+| Full Integration + Full-chain | **615 passed** |
+| Ruff | **passed** |
+| Mypy | **172 source files，zero issues** |
+| `git diff --check` | **passed** |
+
+本卡没有执行生产Migration、Tokyo部署、Dynamic activation、Crypto SOR resume或exchange mutation。
+Active Execution Scope自动推进至**DS-09**；`implementation_authority=CODE_AND_TEST_ONLY`，
+`production_authority=NONE`。
 
 ### DS-09 — Golden, Full-Chain And Release Certification
 

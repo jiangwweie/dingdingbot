@@ -24,18 +24,24 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.trading_kernel.certify_release_candidate import (
     ReleaseCertificationLevel,
-    validate_release_certification_for_level,
+    build_runtime_release_compatibility_fact,
+    load_release_certification_manifest,
 )
 from scripts.trading_kernel.deployment_control import (
     DeploymentDrainBlocked,
     run_deployment_drain,
+)
+from src.trading_kernel.application.runtime import (
+    RUNTIME_COMPATIBILITY_REASONS,
+    RuntimeCompatibilityClassification,
+    RuntimeReleaseCompatibilityFact,
 )
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
 
 SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
-COMPATIBLE_SOURCE_SCHEMA_REVISION = "0004_owner_control_plane"
+COMPATIBLE_SOURCE_SCHEMA_REVISION = "0005_tradfi_instrument_center"
 R4_LEGACY_PRESERVATION_DIGEST = (
     "sha256:830ed497a82630805504e9f34ba72dcafcad9164a6fc65aa2a70ae1e3c21ec34"
 )
@@ -88,6 +94,7 @@ class DeploymentPlan:
     drain_active_tickets: bool = False
     drain_authorization_id: str | None = None
     drain_timeout_seconds: float = 1_800.0
+    runtime_release_compatibility_fact: RuntimeReleaseCompatibilityFact | None = None
 
     def __post_init__(self) -> None:
         if not _COMMIT.fullmatch(self.target_commit):
@@ -98,19 +105,41 @@ class DeploymentPlan:
         if self.target_release != expected_release:
             raise ValueError("target release path differs from target commit")
         if self.mode is DeploymentMode.REGULAR:
+            if self.runtime_release_compatibility_fact is not None:
+                raise ValueError(
+                    "regular deployment cannot carry a release compatibility fact"
+                )
             if self.source_schema_revision is not None:
                 raise ValueError("regular deployment cannot change schema revision")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("regular deployment cannot change schema revision")
         elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
             if self.source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
-                raise ValueError("compatible upgrade requires the exact 0004 source")
+                raise ValueError("compatible upgrade requires the exact 0005 source")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("compatible upgrade requires the current schema head")
             if self.closure_ticket_id is not None:
                 raise ValueError("compatible upgrade requires fully terminal history")
             if self.enable_entry:
                 raise ValueError("compatible upgrade must keep ENTRY disabled")
+            compatibility = self.runtime_release_compatibility_fact
+            if compatibility is None:
+                raise ValueError(
+                    "compatible upgrade requires one release compatibility fact"
+                )
+            if compatibility.to_commit != self.target_commit:
+                raise ValueError("release compatibility target commit differs")
+            if compatibility.from_schema_revision != self.source_schema_revision:
+                raise ValueError("release compatibility source schema differs")
+            if compatibility.to_schema_revision != self.schema_revision:
+                raise ValueError("release compatibility target schema differs")
+            if (
+                compatibility.classification
+                is RuntimeCompatibilityClassification.REQUIRES_RUNTIME_REMATERIALIZATION
+            ):
+                raise ValueError(
+                    "runtime rematerialization requires a durable release fence"
+                )
         else:
             raise ValueError("unsupported deployment mode")
         if self.expected_configured_leverage != EXPECTED_CONFIGURED_LEVERAGE:
@@ -128,7 +157,7 @@ class DeploymentPlan:
                 != COMPATIBLE_SOURCE_SCHEMA_REVISION
             ):
                 raise ValueError(
-                    "Deployment Drain integration currently requires exact 0004 compatible upgrade"
+                    "Deployment Drain integration currently requires exact 0005 compatible upgrade"
                 )
             if self.enable_entry:
                 raise ValueError("Deployment Drain must keep ENTRY disabled")
@@ -210,12 +239,31 @@ class TokyoReleaseBackend(Protocol):
         legacy_preservation_digest: str,
     ) -> Mapping[str, object]: ...
 
+    def verify_preservation(
+        self,
+        release: str,
+        source_schema_revision: str,
+        expected_digest: str,
+    ) -> Mapping[str, object]: ...
+
     def deploy_compatible_identity(
         self,
         release: str,
         commit: str,
         schema_revision: str,
     ) -> Mapping[str, object]: ...
+
+    def persist_runtime_release_compatibility_fact(
+        self,
+        release: str,
+        fact: RuntimeReleaseCompatibilityFact,
+    ) -> None: ...
+
+    def read_runtime_release_compatibility_fact(
+        self,
+        release: str,
+        release_compatibility_id: str,
+    ) -> RuntimeReleaseCompatibilityFact | None: ...
 
     def deploy_closure_identity(
         self,
@@ -234,8 +282,6 @@ class TokyoReleaseBackend(Protocol):
     ) -> None: ...
 
     def start_services(self, services: tuple[str, ...]) -> None: ...
-
-    def bootstrap_strategy_universes(self, release: str) -> None: ...
 
     def refresh_active_certification_batch(self, release: str) -> None: ...
 
@@ -466,6 +512,9 @@ def _deploy_compatible_upgrade(
     backend: TokyoReleaseBackend,
     plan: DeploymentPlan,
 ) -> DeploymentResult:
+    compatibility_fact = plan.runtime_release_compatibility_fact
+    if compatibility_fact is None:
+        raise DeploymentBlocked("release compatibility fact is missing")
     current_release = backend.read_current_release()
     if not backend.entry_is_inactive_disabled_and_fenced():
         raise DeploymentBlocked(
@@ -483,6 +532,7 @@ def _deploy_compatible_upgrade(
         raise DeploymentBlocked("compatible source schema revision differs")
 
     recovery_seed_identity: str
+    source_certification: Mapping[str, object] | None = None
     source_identity: dict[str, str] | None = None
     if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
         source_certification, _, source_identity = _read_compatible_source_facts(
@@ -491,6 +541,10 @@ def _deploy_compatible_upgrade(
             exchange_probe_release=current_release,
         )
         _require_preservation_digest(source_certification)
+        if compatibility_fact.from_commit != source_identity["runtime_commit"]:
+            raise DeploymentBlocked(
+                "release compatibility source commit differs from runtime"
+            )
         _require_marker(
             backend,
             current_release,
@@ -525,6 +579,8 @@ def _deploy_compatible_upgrade(
     schema_migrated = database_revision == plan.schema_revision
     target_activated = current_release == plan.target_release
     target_safety_started = False
+    compatibility_persisted = False
+    compatibility_persistence_attempted = False
     try:
         backend.fence_entry()
         transition_started = True
@@ -565,6 +621,29 @@ def _deploy_compatible_upgrade(
                 raise
             else:
                 schema_migrated = True
+        if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
+            if source_certification is None:
+                raise DeploymentBlocked("compatible source certification is missing")
+            source_preservation_digest = _require_preservation_digest(
+                source_certification
+            )
+            preservation = backend.verify_preservation(
+                plan.target_release,
+                COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                source_preservation_digest,
+            )
+            _require_preservation_verification(
+                preservation,
+                target_schema_revision=plan.schema_revision,
+                expected_digest=source_preservation_digest,
+            )
+        compatibility_persistence_attempted = True
+        _persist_release_compatibility_exact(
+            backend,
+            plan.target_release,
+            compatibility_fact,
+        )
+        compatibility_persisted = True
         recovery_certification = backend.certify_r4_recovery(
             plan.target_release,
             R4_LEGACY_PRESERVATION_DIGEST,
@@ -603,7 +682,6 @@ def _deploy_compatible_upgrade(
         active_safety = backend.services_active(ALL_SERVICES)
         if active_safety != frozenset(SAFETY_SERVICES):
             raise DeploymentBlocked("target safety services are not all active")
-        backend.bootstrap_strategy_universes(plan.target_release)
         _require_target_postflight(
             backend,
             plan,
@@ -633,20 +711,44 @@ def _deploy_compatible_upgrade(
                     )
                     backend.start_services(SAFETY_SERVICES)
                 if schema_migrated:
-                    target_activated = (
-                        backend.read_current_release() == plan.target_release
-                    )
-                    if not target_activated:
-                        backend.activate_release(
+                    if (
+                        not compatibility_persisted
+                        and not compatibility_persistence_attempted
+                    ):
+                        recovery_certification = backend.certify_r4_recovery(
                             plan.target_release,
-                            plan.target_commit,
-                            plan.schema_revision,
-                            recovery_seed_identity,
+                            R4_LEGACY_PRESERVATION_DIGEST,
                         )
+                        _require_r4_recovery_certification(
+                            recovery_certification,
+                            target_schema_revision=plan.schema_revision,
+                            legacy_preservation_digest=(
+                                R4_LEGACY_PRESERVATION_DIGEST
+                            ),
+                        )
+                        compatibility_persistence_attempted = True
+                        _persist_release_compatibility_exact(
+                            backend,
+                            plan.target_release,
+                            compatibility_fact,
+                        )
+                        compatibility_persisted = True
+                    if compatibility_persisted:
                         target_activated = (
                             backend.read_current_release() == plan.target_release
                         )
-                if schema_migrated and target_activated:
+                        if not target_activated:
+                            backend.activate_release(
+                                plan.target_release,
+                                plan.target_commit,
+                                plan.schema_revision,
+                                recovery_seed_identity,
+                            )
+                            target_activated = (
+                                backend.read_current_release()
+                                == plan.target_release
+                            )
+                if schema_migrated and compatibility_persisted and target_activated:
                     active_target_safety = backend.services_active(ALL_SERVICES)
                     if (
                         not target_safety_started
@@ -667,6 +769,22 @@ def _deploy_compatible_upgrade(
         entry_enabled=False,
         mode=plan.mode,
     )
+
+
+def _persist_release_compatibility_exact(
+    backend: TokyoReleaseBackend,
+    release: str,
+    fact: RuntimeReleaseCompatibilityFact,
+) -> None:
+    try:
+        backend.persist_runtime_release_compatibility_fact(release, fact)
+    except Exception:
+        actual = backend.read_runtime_release_compatibility_fact(
+            release,
+            fact.release_compatibility_id,
+        )
+        if actual != fact:
+            raise
 
 
 def _read_release_facts(
@@ -735,6 +853,16 @@ def _require_target_postflight(
     *,
     seed_identity: str,
 ) -> None:
+    if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
+        expected_compatibility = plan.runtime_release_compatibility_fact
+        if expected_compatibility is None:
+            raise DeploymentBlocked("release compatibility fact is missing")
+        actual_compatibility = backend.read_runtime_release_compatibility_fact(
+            plan.target_release,
+            expected_compatibility.release_compatibility_id,
+        )
+        if actual_compatibility != expected_compatibility:
+            raise DeploymentBlocked("exact release compatibility fact differs")
     certification, _, target_identity = _read_release_facts(backend, plan)
     if target_identity != {
         "runtime_commit": plan.target_commit,
@@ -743,13 +871,13 @@ def _require_target_postflight(
     }:
         raise DeploymentBlocked("deployed runtime identity differs from target")
     if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
-        _require_portfolio_admission_postflight(
+        _require_dynamic_selection_postflight(
             certification,
             seed_identity=seed_identity,
         )
 
 
-def _require_portfolio_admission_postflight(
+def _require_dynamic_selection_postflight(
     certification: Mapping[str, object],
     *,
     seed_identity: str,
@@ -778,17 +906,8 @@ def _require_portfolio_admission_postflight(
         or strategy_universe.get("semantic_digest_status") != "pass"
     ):
         raise DeploymentBlocked("exact Universe identity differs")
-    if strategy_universe.get("deployment_stage") != "active":
+    if int(str(strategy_universe.get("active_current_count", -1))) != 8:
         raise DeploymentBlocked("exact eight Active Universes are missing")
-    if (
-        int(str(strategy_universe.get("active_current_count", -1))) != 8
-        or int(str(strategy_universe.get("warming_count", -1))) != 0
-    ):
-        raise DeploymentBlocked("exact eight Active Universes are missing")
-    if certification.get("universe_bootstrap_pass") is not True:
-        raise DeploymentBlocked("exact eight Active Universes are missing")
-    if certification.get("certification_batch_pass") is not True:
-        raise DeploymentBlocked("exact Certification Batch identity differs")
     runtime_identity = certification.get("runtime_identity")
     if (
         not isinstance(runtime_identity, Mapping)
@@ -1227,6 +1346,34 @@ class _CommandResult:
     stderr: str
 
 
+def _release_compatibility_fact_args(
+    fact: RuntimeReleaseCompatibilityFact,
+) -> tuple[str, ...]:
+    args = [
+        "--release-compatibility-id",
+        fact.release_compatibility_id,
+        "--from-commit",
+        fact.from_commit,
+        "--to-commit",
+        fact.to_commit,
+        "--from-schema-revision",
+        fact.from_schema_revision,
+        "--to-schema-revision",
+        fact.to_schema_revision,
+        "--classification",
+        fact.classification.value,
+        "--compatibility-basis-digest",
+        fact.compatibility_basis_digest,
+        "--certification-manifest-digest",
+        fact.certification_manifest_digest,
+        "--created-at-ms",
+        str(fact.created_at_ms),
+    ]
+    for reason_code in fact.reason_codes:
+        args.extend(("--reason-code", reason_code))
+    return tuple(args)
+
+
 class SshTokyoReleaseBackend:
     def __init__(
         self,
@@ -1298,6 +1445,22 @@ class SshTokyoReleaseBackend:
             "scripts/trading_kernel/verify_schema.py",
             "--compatible-source-revision",
             source_schema_revision,
+            "--summary-only",
+        )
+
+    def verify_preservation(
+        self,
+        release: str,
+        source_schema_revision: str,
+        expected_digest: str,
+    ) -> Mapping[str, object]:
+        return self._release_json(
+            release,
+            "scripts/trading_kernel/verify_schema.py",
+            "--preserve-source-revision",
+            source_schema_revision,
+            "--expected-preservation-digest",
+            expected_digest,
             "--summary-only",
         )
 
@@ -1426,6 +1589,41 @@ class SshTokyoReleaseBackend:
             schema_revision,
         )
 
+    def persist_runtime_release_compatibility_fact(
+        self,
+        release: str,
+        fact: RuntimeReleaseCompatibilityFact,
+    ) -> None:
+        payload = self._release_json(
+            release,
+            "scripts/trading_kernel/persist_runtime_release_fact.py",
+            "write",
+            *_release_compatibility_fact_args(fact),
+        )
+        persisted = RuntimeReleaseCompatibilityFact.model_validate(
+            payload.get("fact")
+        )
+        if payload.get("status") != "pass" or persisted != fact:
+            raise DeploymentBlocked("release compatibility persistence differs")
+
+    def read_runtime_release_compatibility_fact(
+        self,
+        release: str,
+        release_compatibility_id: str,
+    ) -> RuntimeReleaseCompatibilityFact | None:
+        payload = self._release_json(
+            release,
+            "scripts/trading_kernel/persist_runtime_release_fact.py",
+            "read",
+            "--release-compatibility-id",
+            release_compatibility_id,
+        )
+        if payload.get("status") == "not_found":
+            return None
+        if payload.get("status") != "pass":
+            raise DeploymentBlocked("release compatibility read failed")
+        return RuntimeReleaseCompatibilityFact.model_validate(payload.get("fact"))
+
     def deploy_closure_identity(
         self,
         release: str,
@@ -1492,18 +1690,6 @@ class SshTokyoReleaseBackend:
         if ENTRY_SERVICE in services and services != (ENTRY_SERVICE,):
             raise ValueError("ENTRY must be started as the final isolated phase")
         self._remote(("sudo", "systemctl", "enable", "--now", *services))
-
-    def bootstrap_strategy_universes(self, release: str) -> None:
-        for runtime_profile_id in (
-            "tiny-live-v1",
-            "tradfi-equity-usdm-v1",
-        ):
-            self._release_command(
-                release,
-                "scripts/trading_kernel/bootstrap_strategy_universes.py",
-                "--runtime-profile-id",
-                runtime_profile_id,
-            )
 
     def refresh_active_certification_batch(self, release: str) -> None:
         for runtime_profile_id in (
@@ -1837,6 +2023,20 @@ def _parser() -> argparse.ArgumentParser:
         help="Exact source revision for compatible_upgrade mode.",
     )
     parser.add_argument(
+        "--from-commit",
+        help="Exact deployed source commit for compatible_upgrade mode.",
+    )
+    parser.add_argument(
+        "--runtime-compatibility-classification",
+        choices=tuple(item.value for item in RuntimeCompatibilityClassification),
+    )
+    parser.add_argument(
+        "--runtime-compatibility-reason-code",
+        action="append",
+        choices=tuple(sorted(RUNTIME_COMPATIBILITY_REASONS)),
+    )
+    parser.add_argument("--runtime-compatibility-created-at-ms", type=int)
+    parser.add_argument(
         "--closure-ticket-id",
         help="Exact zero-exposure pending Ticket allowed across one closure-only handover.",
     )
@@ -1886,13 +2086,34 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         commit = _resolve_commit(args.commit)
-        validate_release_certification_for_level(
+        certification_manifest = load_release_certification_manifest(
             REPO_ROOT,
             commit,
             ReleaseCertificationLevel.R4
             if DeploymentMode(args.mode) is DeploymentMode.COMPATIBLE_UPGRADE
             else ReleaseCertificationLevel.R3,
         )
+        compatibility_fact = None
+        if DeploymentMode(args.mode) is DeploymentMode.COMPATIBLE_UPGRADE:
+            if (
+                args.from_commit is None
+                or args.runtime_compatibility_classification is None
+                or not args.runtime_compatibility_reason_code
+                or args.runtime_compatibility_created_at_ms is None
+            ):
+                raise ValueError(
+                    "compatible upgrade requires frozen release compatibility inputs"
+                )
+            compatibility_fact = build_runtime_release_compatibility_fact(
+                manifest=certification_manifest,
+                from_commit=args.from_commit,
+                from_schema_revision=str(args.source_schema_revision or ""),
+                classification=RuntimeCompatibilityClassification(
+                    args.runtime_compatibility_classification
+                ),
+                reason_codes=tuple(args.runtime_compatibility_reason_code),
+                created_at_ms=args.runtime_compatibility_created_at_ms,
+            )
         plan = DeploymentPlan(
             target_commit=commit,
             target_release=f"{RELEASE_ROOT}/brc-trading-kernel-{commit[:12]}",
@@ -1905,6 +2126,7 @@ def main(argv: list[str] | None = None) -> int:
             drain_active_tickets=args.drain_active_tickets,
             drain_authorization_id=args.drain_authorization_id,
             drain_timeout_seconds=args.drain_timeout_seconds,
+            runtime_release_compatibility_fact=compatibility_fact,
         )
         backend = SshTokyoReleaseBackend(
             target=args.target,

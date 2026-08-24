@@ -25,7 +25,10 @@ from src.trading_kernel.application.recover_unknown_command import (
     RecoverUnknownCommandRequest,
     recover_unknown_command,
 )
-from src.trading_kernel.application.runtime_facts import InstrumentRulesRequest
+from src.trading_kernel.application.runtime_facts import (
+    InstrumentRulesRequest,
+    PositionSnapshotRequest,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
@@ -44,8 +47,14 @@ from src.trading_kernel.domain.venue_truth import (
     VenueTruthSnapshot,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
+)
+from src.trading_kernel.interfaces.reconciliation_worker import (
+    ReconciliationWorkerRequest,
+    ReconciliationWorkerStatus,
+    run_reconciliation_worker_once,
 )
 from tests.trading_kernel.support.command_dispatch import (
     dispatch_for_ticket,
@@ -124,6 +133,62 @@ class StaticTruthPort:
     ) -> LeverageTruthSnapshot:
         del request
         raise AssertionError("Vacuum cancel recovery must not read leverage")
+
+
+class NoVenueTruth:
+    async def lookup_command_truth(self, request):
+        del request
+        raise AssertionError("Vacuum position-fact drain must not read command truth")
+
+    async def read_configured_leverage(self, request):
+        del request
+        raise AssertionError("Vacuum position-fact drain must not read leverage")
+
+
+class RecordingVacuumPositionSource:
+    def __init__(self, snapshot: PositionSnapshot) -> None:
+        self.snapshot = snapshot
+        self.requests: list[PositionSnapshotRequest] = []
+
+    async def read_position_snapshot(
+        self,
+        request: PositionSnapshotRequest,
+    ) -> PositionSnapshot:
+        self.requests.append(request)
+        return self.snapshot
+
+
+class FailingVacuumPositionSource:
+    async def read_position_snapshot(
+        self,
+        request: PositionSnapshotRequest,
+    ) -> PositionSnapshot:
+        del request
+        raise TimeoutError("test_position_snapshot_timeout")
+
+
+class ConcurrentVacuumPositionSource(RecordingVacuumPositionSource):
+    def __init__(self, engine, ticket, snapshot: PositionSnapshot) -> None:
+        super().__init__(snapshot)
+        self._engine = engine
+        self._ticket = ticket
+
+    async def read_position_snapshot(
+        self,
+        request: PositionSnapshotRequest,
+    ) -> PositionSnapshot:
+        snapshot = await super().read_position_snapshot(request)
+        async with PostgresKernelUnitOfWork(self._engine) as uow:
+            advanced = await drain_strategy_entry_vacuum_once(
+                uow,
+                _request(
+                    self._ticket,
+                    now_ms=snapshot.observed_at_ms,
+                    position_snapshot=snapshot,
+                ),
+            )
+        assert advanced.status is VacuumDrainStatus.CANCEL_REQUESTED
+        return snapshot
 
 
 @pytest.mark.asyncio
@@ -270,6 +335,202 @@ async def test_zero_fill_cancel_waits_for_durable_dispatch_and_order_absence(
     assert aggregate.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
     assert reservation is not None and reservation.status == "released"
     assert domain_active is False
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_worker_supplies_position_facts_to_vacuum_reducer(
+    dispatch_engine,
+) -> None:
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(
+        dispatch_engine,
+        AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id,
+        now_ms=1_100,
+    )
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    source = RecordingVacuumPositionSource(
+        _position_snapshot(
+            ticket,
+            quantity=Decimal(0),
+            average_entry_price=None,
+            open_entry_order=True,
+            observed_at_ms=vacuum.fenced_at_ms + 1,
+        )
+    )
+
+    result = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        NoVenueTruth(),
+        source,
+        ReconciliationWorkerRequest(
+            worker_id="reconciliation-worker:vacuum",
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            now_ms=vacuum.fenced_at_ms + 1,
+            timeout_seconds=1,
+            unknown_visibility_grace_ms=30_000,
+            idle_poll_interval_ms=2_000,
+            entry_vacuum_strategy_group_id="SOR-001",
+            entry_vacuum_selection_spec_id=SELECTION_SPEC_ID,
+        ),
+    )
+
+    assert result.status is ReconciliationWorkerStatus.VACUUM_DRAIN_ADVANCED
+    assert result.ticket_id == ticket.identity.ticket_id
+    assert result.detail == VacuumDrainStatus.CANCEL_REQUESTED.value
+    assert len(source.requests) == 1
+    assert source.requests[0].ticket_id == ticket.identity.ticket_id
+    assert source.requests[0].netting_domain == ticket.identity.netting_domain
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING
+    assert [command.kind for command in commands] == [
+        ExchangeCommandKind.ENTRY,
+        ExchangeCommandKind.CANCEL_ORDER,
+    ]
+    assert commands[-1].status is ExchangeCommandStatus.PREPARED
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_vacuum_position_source_failure_is_retryable_and_mutates_nothing(
+    dispatch_engine,
+) -> None:
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(
+        dispatch_engine,
+        AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id,
+        now_ms=1_100,
+    )
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+
+    result = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        NoVenueTruth(),
+        FailingVacuumPositionSource(),
+        _reconciliation_request(vacuum.fenced_at_ms + 1),
+    )
+
+    assert result.status is ReconciliationWorkerStatus.FACTS_UNAVAILABLE
+    assert result.ticket_id == ticket.identity.ticket_id
+    assert result.detail == "vacuum_position_snapshot:TimeoutError"
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        position = await uow.positions.get(ticket.identity.netting_domain.key())
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.ENTRY_ACCEPTED
+    assert [command.kind for command in commands] == [ExchangeCommandKind.ENTRY]
+    assert position is None
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_vacuum_rejects_position_netting_domain_drift_without_mutation(
+    dispatch_engine,
+) -> None:
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(
+        dispatch_engine,
+        AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id,
+        now_ms=1_100,
+    )
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    drifted = _position_snapshot(
+        ticket,
+        quantity=Decimal(0),
+        average_entry_price=None,
+        open_entry_order=True,
+        observed_at_ms=vacuum.fenced_at_ms + 1,
+    ).model_copy(
+        update={
+            "netting_domain": ticket.identity.netting_domain.model_copy(
+                update={"position_side": "short"}
+            )
+        }
+    )
+
+    result = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        NoVenueTruth(),
+        RecordingVacuumPositionSource(drifted),
+        _reconciliation_request(vacuum.fenced_at_ms + 1),
+    )
+
+    assert result.status is ReconciliationWorkerStatus.FACTS_UNAVAILABLE
+    assert result.ticket_id == ticket.identity.ticket_id
+    assert result.detail == "vacuum_position_snapshot:ValueError"
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        correct_position = await uow.positions.get(
+            ticket.identity.netting_domain.key()
+        )
+        drifted_position = await uow.positions.get(drifted.netting_domain.key())
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.ENTRY_ACCEPTED
+    assert [command.kind for command in commands] == [ExchangeCommandKind.ENTRY]
+    assert correct_position is None
+    assert drifted_position is None
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_vacuum_relocks_after_network_and_does_not_duplicate_cancel(
+    dispatch_engine,
+) -> None:
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(
+        dispatch_engine,
+        AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id,
+        now_ms=1_100,
+    )
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    snapshot = _position_snapshot(
+        ticket,
+        quantity=Decimal(0),
+        average_entry_price=None,
+        open_entry_order=True,
+        observed_at_ms=vacuum.fenced_at_ms + 1,
+    )
+
+    result = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        NoVenueTruth(),
+        ConcurrentVacuumPositionSource(dispatch_engine, ticket, snapshot),
+        _reconciliation_request(vacuum.fenced_at_ms + 1),
+    )
+
+    assert result.status is ReconciliationWorkerStatus.VACUUM_DRAIN_WAITING
+    assert result.detail == VacuumDrainStatus.WAITING_COMMAND.value
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING
+    assert [command.kind for command in commands] == [
+        ExchangeCommandKind.ENTRY,
+        ExchangeCommandKind.CANCEL_ORDER,
+    ]
 
 
 @pytest.mark.asyncio
@@ -527,6 +788,20 @@ def _request(
         now_ms=now_ms,
         ticket_id=ticket.identity.ticket_id,
         position_snapshot=position_snapshot,
+    )
+
+
+def _reconciliation_request(now_ms: int) -> ReconciliationWorkerRequest:
+    return ReconciliationWorkerRequest(
+        worker_id="reconciliation-worker:vacuum",
+        runtime_commit="kernel-test-head",
+        schema_revision=CURRENT_SCHEMA_REVISION,
+        now_ms=now_ms,
+        timeout_seconds=1,
+        unknown_visibility_grace_ms=30_000,
+        idle_poll_interval_ms=2_000,
+        entry_vacuum_strategy_group_id="SOR-001",
+        entry_vacuum_selection_spec_id=SELECTION_SPEC_ID,
     )
 
 

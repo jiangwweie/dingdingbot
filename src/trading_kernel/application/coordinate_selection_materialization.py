@@ -201,6 +201,14 @@ class AuthorityGapAuditSource(Protocol):
     ) -> tuple[AuthorityGapScopeResult, ...]: ...
 
 
+class AuthorityGapAuditSourceIntegrityError(RuntimeError):
+    """Public market path cannot prove the exact bounded audit window."""
+
+
+class AuthorityGapAuditDetectorDriftError(RuntimeError):
+    """The certified detector rejects an otherwise canonical audit path."""
+
+
 _TRANSIENT_WARMING_BLOCKERS = frozenset(
     {
         "CERTIFICATION_MISSING",
@@ -352,19 +360,45 @@ async def coordinate_selection_materialization_once(
             short_universe_version_id=short_current.universe_version_id,
         )
         if owner_control.entry_state is StrategyEntryState.PAUSED:
-            if (
-                vacuum is not None
-                and vacuum.state is StrategyEntryVacuumState.RECONFIGURING
-                and vacuum.source_generation_id is not None
-            ):
-                generation = (
-                    await uow.instrument_selection.get_materialization_generation(
-                        vacuum.source_generation_id,
-                        for_update=True,
+            if vacuum is None:
+                vacuum = await uow.instrument_selection.open_owner_paused_entry_vacuum(
+                    StrategyEntryVacuum(
+                        entry_vacuum_id=(
+                            f"vacuum:{request.strategy_group_id}:"
+                            f"{request.session_start_ms}:owner-pause:"
+                            f"{owner_control.control_version}"
+                        ),
+                        strategy_group_id=request.strategy_group_id,
+                        selection_spec_id=spec.selection_spec_id,
+                        session_start_ms=request.session_start_ms,
+                        source_generation_id=None,
+                        state=StrategyEntryVacuumState.OPEN,
+                        fenced_at_ms=now_ms,
+                        drained_at_ms=None,
+                        resolved_at_ms=None,
+                        first_blocker="OWNER_PAUSED",
+                        projection_version=1,
                     )
+                )
+            generation = None
+            if vacuum is not None and vacuum.source_generation_id is not None:
+                generation = await uow.instrument_selection.get_materialization_generation(
+                    vacuum.source_generation_id,
+                    for_update=True,
                 )
                 if generation is None:
                     return _blocked("OWNER_PAUSED_GENERATION_MISSING")
+            else:
+                generation = (
+                    await uow.instrument_selection.get_current_nonterminal_materialization_generation(
+                        strategy_group_id=request.strategy_group_id,
+                        selection_spec_id=spec.selection_spec_id,
+                        for_update=True,
+                    )
+                )
+            if generation is not None:
+                if vacuum is None:
+                    return _blocked("OWNER_PAUSED_VACUUM_MISSING")
                 await _abandon_generation_targets(
                     uow=uow,
                     generation_id=generation.materialization_generation_id,
@@ -376,8 +410,41 @@ async def coordinate_selection_materialization_once(
                     vacuum=vacuum,
                     paused_at_ms=now_ms,
                 )
+            if (
+                current_authority is not None
+                and current_authority.authority.session_start_ms
+                == request.session_start_ms
+                and current_authority.authority.authority_outcome
+                is AuthorityOutcome.OWNER_PAUSED_NOT_MATERIALIZED
+                and current_authority.authority.owner_control_version
+                == owner_control.control_version
+            ):
+                pause_authority = current_authority.authority
+            else:
+                pause_authority = _build_owner_paused_authority(
+                    selection_spec_id=spec.selection_spec_id,
+                    session_start_ms=request.session_start_ms,
+                    selection_mode=selection_control.selection_mode,
+                    selection_snapshot_id=(
+                        None
+                        if snapshot is None
+                        else snapshot.snapshot.selection_snapshot_id
+                    ),
+                    current_authority=current_authority,
+                    owner_control_version=owner_control.control_version,
+                    created_at_ms=now_ms,
+                )
+                await uow.instrument_selection.add_authority_and_set_current(
+                    pause_authority,
+                    expected_current_version=(
+                        None
+                        if current_authority is None
+                        else current_authority.projection_version
+                    ),
+                )
             return CoordinateSelectionMaterializationResult(
                 disposition=MaterializationDisposition.OWNER_PAUSED,
+                selection_authority_id=pause_authority.selection_authority_id,
                 selection_snapshot_id=(
                     None if snapshot is None else snapshot.snapshot.selection_snapshot_id
                 ),
@@ -899,6 +966,10 @@ async def _complete_pending_authority_gap_audit(
                     authority_gap_audit_id=audit.authority_gap_audit_id,
                     reason_code="AUTHORITY_GAP_AUDIT_ALREADY_COMMITTED",
                 )
+            if audit.state.value == "FAILED":
+                return _blocked(
+                    audit.first_blocker or "AUTHORITY_GAP_AUDIT_FAILED"
+                )
             return CoordinateSelectionMaterializationResult(
                 disposition=MaterializationDisposition.GAP_AUDIT_PENDING,
                 authority_gap_audit_id=audit.authority_gap_audit_id,
@@ -983,13 +1054,35 @@ async def _complete_pending_authority_gap_audit(
         now_ms=clock_ms(),
     )
     audited_through = first_eligible_close - INTERVAL_MS
-    results = await audit_source.evaluate_authority_gap(
-        AuthorityGapAuditEvaluationRequest(
-            audit=audit,
-            scopes=scopes,
-            audited_through_close_time_ms=audited_through,
+    try:
+        results = await audit_source.evaluate_authority_gap(
+            AuthorityGapAuditEvaluationRequest(
+                audit=audit,
+                scopes=scopes,
+                audited_through_close_time_ms=audited_through,
+            )
         )
-    )
+    except AuthorityGapAuditSourceIntegrityError:
+        return await _persist_gap_audit_failure(
+            uow_factory=uow_factory,
+            audit=audit,
+            first_blocker="AUTHORITY_GAP_SOURCE_INTEGRITY_FAILED",
+            failed_at_ms=clock_ms(),
+        )
+    except AuthorityGapAuditDetectorDriftError:
+        return await _persist_gap_audit_failure(
+            uow_factory=uow_factory,
+            audit=audit,
+            first_blocker="AUTHORITY_GAP_DETECTOR_DRIFT",
+            failed_at_ms=clock_ms(),
+        )
+    except Exception:  # noqa: BLE001 - persist source failure before retry/monitor.
+        return await _persist_gap_audit_failure(
+            uow_factory=uow_factory,
+            audit=audit,
+            first_blocker="AUTHORITY_GAP_SOURCE_UNAVAILABLE",
+            failed_at_ms=clock_ms(),
+        )
     completed_at_ms = clock_ms()
     if completed_at_ms >= first_eligible_close:
         return CoordinateSelectionMaterializationResult(
@@ -1182,6 +1275,22 @@ async def _complete_pending_authority_gap_audit(
         authority_gap_audit_id=audit.authority_gap_audit_id,
         reason_code="AUTHORITY_GAP_AUDIT_COMPLETE",
     )
+
+
+async def _persist_gap_audit_failure(
+    *,
+    uow_factory: UnitOfWorkFactory,
+    audit: AuthorityGapAudit,
+    first_blocker: str,
+    failed_at_ms: int,
+) -> CoordinateSelectionMaterializationResult:
+    failed = fail_authority_gap_audit(audit, first_blocker=first_blocker)
+    async with uow_factory() as uow:
+        await uow.instrument_selection.fail_authority_gap_audit(
+            failed,
+            failed_at_ms=failed_at_ms,
+        )
+    return _blocked(first_blocker)
 
 
 async def _prepare_gap_audit(
@@ -2032,6 +2141,52 @@ def _sor_detector_semantic_digest() -> str:
             strategy_contract_for(SOR_LONG_EVENT_SPEC_ID),
             strategy_contract_for(SOR_SHORT_EVENT_SPEC_ID),
         )
+    )
+
+
+def _build_owner_paused_authority(
+    *,
+    selection_spec_id: str,
+    session_start_ms: int,
+    selection_mode: SelectionMode,
+    selection_snapshot_id: str | None,
+    current_authority: CurrentSelectionAuthority | None,
+    owner_control_version: int,
+    created_at_ms: int,
+) -> SelectionSessionAuthority:
+    sequence = (
+        1
+        if current_authority is None
+        or current_authority.authority.session_start_ms != session_start_ms
+        else current_authority.authority.authority_sequence + 1
+    )
+    return SelectionSessionAuthority(
+        selection_authority_id=(
+            f"selection-authority:{selection_spec_id}:{session_start_ms}:{sequence}"
+        ),
+        selection_spec_id=selection_spec_id,
+        session_start_ms=session_start_ms,
+        decision_boundary_ms=session_start_ms + 4 * INTERVAL_MS,
+        authority_sequence=sequence,
+        selection_mode=selection_mode,
+        selection_snapshot_id=selection_snapshot_id,
+        continued_from_selection_authority_id=(
+            None
+            if current_authority is None
+            else current_authority.authority.selection_authority_id
+        ),
+        continuity_source_kind=ContinuitySourceKind.NONE,
+        authority_gap_audit_id=None,
+        materialization_generation_id=None,
+        owner_control_version=owner_control_version,
+        authority_outcome=AuthorityOutcome.OWNER_PAUSED_NOT_MATERIALIZED,
+        authorized_pair=None,
+        grant_proof=None,
+        effective_from_ms=created_at_ms,
+        first_eligible_close_time_ms=None,
+        expires_at_ms=session_start_ms + 100 * INTERVAL_MS,
+        reason_code="OWNER_PAUSE_PRECEDES_MATERIALIZATION",
+        created_at_ms=created_at_ms,
     )
 
 

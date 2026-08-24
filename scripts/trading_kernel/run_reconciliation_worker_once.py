@@ -30,6 +30,7 @@ from src.trading_kernel.application.runtime_facts import (
     PositionSnapshotSource,
     ReviewEconomicsSource,
 )
+from src.trading_kernel.domain.instrument_selection import SOR_STRATEGY_GROUP_ID
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
@@ -40,6 +41,8 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
 from src.trading_kernel.interfaces.worker_process import (
     run_worker_process,
 )
+
+_SELECTION_SPEC_ID = "sor-dynamic-selection-v0"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -136,6 +139,8 @@ async def _run(args: argparse.Namespace) -> int:
                     fee_capability_monitor_interval_ms=(
                         args.fee_capability_monitor_interval_ms
                     ),
+                    entry_vacuum_strategy_group_id=SOR_STRATEGY_GROUP_ID,
+                    entry_vacuum_selection_spec_id=_SELECTION_SPEC_ID,
                 ),
                 account_risk_source=cast(AccountRiskSnapshotSource, adapter),
                 instrument_rules_source=cast(InstrumentRulesSource, adapter),

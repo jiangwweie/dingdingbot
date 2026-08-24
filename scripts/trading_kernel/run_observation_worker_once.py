@@ -20,17 +20,33 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.trading_kernel.application.market_ports import PublicMarketSource
+from src.trading_kernel.application.market_ports import (
+    InstrumentSelectionMarketSource,
+    PublicMarketSource,
+)
+from src.trading_kernel.domain.instrument_selection import SOR_STRATEGY_GROUP_ID
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
+)
+from src.trading_kernel.interfaces.authority_gap_audit_source import (
+    PublicMarketAuthorityGapAuditSource,
 )
 from src.trading_kernel.interfaces.observation_worker import (
     ObservationWorkerRequest,
     run_observation_worker_once,
 )
-from src.trading_kernel.interfaces.worker_process import (
-    run_worker_process,
+from src.trading_kernel.interfaces.selection_runtime_worker import (
+    SelectionRuntimeRequest,
+    run_materialization_runtime_once,
+    run_selection_runtime_once,
 )
+from src.trading_kernel.interfaces.worker_process import (
+    WorkerProcessLoop,
+    run_worker_process,
+    run_worker_process_group,
+)
+
+_SELECTION_SPEC_ID = "sor-dynamic-selection-v0"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -42,6 +58,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--market-source-factory", required=True, help="module:callable")
     parser.add_argument("--worker-id", required=True)
+    parser.add_argument("--selection-worker-id")
+    parser.add_argument("--materialization-worker-id")
     parser.add_argument(
         "--runtime-commit",
         default=os.getenv("TRADING_KERNEL_RUNTIME_COMMIT", ""),
@@ -56,6 +74,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--retry-interval-ms", type=int, default=30_000)
     parser.add_argument("--run-forever", action="store_true")
     parser.add_argument("--poll-interval-ms", type=int, default=5_000)
+    parser.add_argument("--selection-poll-interval-ms", type=int, default=5_000)
+    parser.add_argument("--materialization-poll-interval-ms", type=int, default=2_000)
     parser.add_argument("--idle-log-interval-ms", type=int, default=300_000)
     return parser
 
@@ -78,6 +98,8 @@ async def _run(args: argparse.Namespace) -> int:
         raise ValueError("fixed now-ms is incompatible with run-forever")
     if args.lease_ms <= 0:
         raise ValueError("lease-ms must be positive")
+    if args.selection_poll_interval_ms <= 0 or args.materialization_poll_interval_ms <= 0:
+        raise ValueError("Selection runtime poll intervals must be positive")
 
     source = _load_factory(args.market_source_factory)()
     if inspect.isawaitable(source):
@@ -87,10 +109,21 @@ async def _run(args: argparse.Namespace) -> int:
 
     engine = create_async_engine(database_url)
     try:
-        async def tick():
+        uow_factory = lambda: PostgresKernelUnitOfWork(engine)
+        selection_worker_id = str(args.selection_worker_id or "").strip() or (
+            f"{args.worker_id}:selection"
+        )
+        materialization_worker_id = str(
+            args.materialization_worker_id or ""
+        ).strip() or f"{args.worker_id}:materialization"
+        audit_source = PublicMarketAuthorityGapAuditSource(
+            cast(PublicMarketSource, source)
+        )
+
+        async def observation_tick():
             now_ms = args.now_ms or int(time.time() * 1_000)
             return await run_observation_worker_once(
-                lambda: PostgresKernelUnitOfWork(engine),
+                uow_factory,
                 cast(PublicMarketSource, source),
                 ObservationWorkerRequest(
                     worker_id=args.worker_id,
@@ -103,12 +136,65 @@ async def _run(args: argparse.Namespace) -> int:
                 ),
             )
 
-        return await run_worker_process(
-            tick,
-            run_forever=args.run_forever,
-            poll_interval_ms=args.poll_interval_ms,
+        async def selection_tick():
+            now_ms = args.now_ms or int(time.time() * 1_000)
+            return await run_selection_runtime_once(
+                uow_factory=uow_factory,
+                market_source=cast(InstrumentSelectionMarketSource, source),
+                request=SelectionRuntimeRequest(
+                    selection_spec_id=_SELECTION_SPEC_ID,
+                    strategy_group_id=SOR_STRATEGY_GROUP_ID,
+                    worker_id=selection_worker_id,
+                    now_ms=now_ms,
+                ),
+                clock_ms=lambda: int(time.time() * 1_000),
+            )
+
+        async def materialization_tick():
+            now_ms = args.now_ms or int(time.time() * 1_000)
+            return await run_materialization_runtime_once(
+                uow_factory=uow_factory,
+                audit_source=audit_source,
+                request=SelectionRuntimeRequest(
+                    selection_spec_id=_SELECTION_SPEC_ID,
+                    strategy_group_id=SOR_STRATEGY_GROUP_ID,
+                    worker_id=materialization_worker_id,
+                    now_ms=now_ms,
+                ),
+                clock_ms=lambda: int(time.time() * 1_000),
+            )
+
+        if not args.run_forever:
+            return await run_worker_process(
+                observation_tick,
+                run_forever=False,
+                poll_interval_ms=args.poll_interval_ms,
+                idle_log_interval_ms=args.idle_log_interval_ms,
+                idle_statuses={"no_work"},
+            )
+        return await run_worker_process_group(
+            (
+                WorkerProcessLoop(
+                    component_id=selection_worker_id,
+                    tick=selection_tick,
+                    poll_interval_ms=args.selection_poll_interval_ms,
+                    idle_statuses=frozenset({"not_due", "already_ready"}),
+                ),
+                WorkerProcessLoop(
+                    component_id=materialization_worker_id,
+                    tick=materialization_tick,
+                    poll_interval_ms=args.materialization_poll_interval_ms,
+                    idle_statuses=frozenset({"not_due", "waiting"}),
+                ),
+                WorkerProcessLoop(
+                    component_id=args.worker_id,
+                    tick=observation_tick,
+                    poll_interval_ms=args.poll_interval_ms,
+                    idle_statuses=frozenset({"no_work"}),
+                ),
+            ),
+            run_forever=True,
             idle_log_interval_ms=args.idle_log_interval_ms,
-            idle_statuses={"no_work"},
         )
     finally:
         close = getattr(source, "close", None)

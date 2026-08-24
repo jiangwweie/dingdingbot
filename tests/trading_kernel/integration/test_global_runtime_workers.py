@@ -20,6 +20,14 @@ def test_each_runtime_transition_has_one_worker_owner() -> None:
     }
 
 
+def test_observation_systemd_host_exposes_independent_selection_components() -> None:
+    assert runtime.observation_process_component_map() == {
+        "selection": "selection_runner",
+        "materialization": "materialization_coordinator",
+        "observation": "observation_runner",
+    }
+
+
 def test_observation_worker_owns_idle_only_shadow_projection() -> None:
     assert observation_worker.ObservationWorkerStatus.SHADOW_COMPLETED.value == (
         "shadow_completed"
@@ -93,6 +101,10 @@ def test_observation_worker_cli_owns_pg_scope_selection_and_closed_bar_cadence(
     assert "--schema-revision" in result.stdout
     assert "--timeout-seconds" in result.stdout
     assert "--retry-interval-ms" in result.stdout
+    assert "--selection-worker-id" in result.stdout
+    assert "--materialization-worker-id" in result.stdout
+    assert "--selection-poll-interval-ms" in result.stdout
+    assert "--materialization-poll-interval-ms" in result.stdout
     assert "--runtime-scope-id" not in result.stdout
     assert list(tmp_path.rglob("*")) == []
 
