@@ -12,6 +12,7 @@ from src.trading_kernel.domain.selection_authority import (
     SelectionSessionAuthority,
     UniverseAuthorityPair,
     authority_successor_is_compatible,
+    selection_authority_allows_new_entry,
 )
 
 SESSION_START_MS = 1_704_067_200_000
@@ -84,6 +85,23 @@ def test_authority_requires_exact_long_and_short_pair() -> None:
         )
 
 
+def test_open_vacuum_overrides_an_existing_current_trading_authority() -> None:
+    authority = _authority()
+
+    assert selection_authority_allows_new_entry(
+        authority,
+        now_ms=FIRST_ELIGIBLE_CLOSE_MS + 1,
+        observed_close_time_ms=FIRST_ELIGIBLE_CLOSE_MS,
+        scoped_vacuum_open=False,
+    )
+    assert not selection_authority_allows_new_entry(
+        authority,
+        now_ms=FIRST_ELIGIBLE_CLOSE_MS + 1,
+        observed_close_time_ms=FIRST_ELIGIBLE_CLOSE_MS,
+        scoped_vacuum_open=True,
+    )
+
+
 def test_authority_grant_proof_is_exclusive_and_complete() -> None:
     with pytest.raises(ValidationError, match="continuous proof requires predecessor"):
         AuthorityGrantProof(
@@ -141,6 +159,18 @@ def test_successor_compatibility_accepts_only_uninterrupted_same_pair_chain() ->
     assert authority_successor_is_compatible(
         birth=birth,
         successor=successor,
+        vacuum_opened=False,
+        owner_control_continuous=True,
+        global_policy_continuous=True,
+        eligible_close_coverage_continuous=True,
+    )
+
+    later_first_close = successor.model_copy(
+        update={"first_eligible_close_time_ms": FIRST_ELIGIBLE_CLOSE_MS + 15 * 60 * 1000}
+    )
+    assert authority_successor_is_compatible(
+        birth=birth,
+        successor=later_first_close,
         vacuum_opened=False,
         owner_control_continuous=True,
         global_policy_continuous=True,

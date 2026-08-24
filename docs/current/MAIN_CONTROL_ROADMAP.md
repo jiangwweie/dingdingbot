@@ -164,8 +164,12 @@ Golden as the sole DS-03/DS-09 Selection parity baseline. The active implementat
 then completed **DS-01 Pure Domain Contracts** with 25 focused tests, 946 Fast Unit/Architecture
 tests, full tracked Ruff/Mypy, and exact 23,064-member Golden digest parity. A targeted Codex
 review subsequently froze `DS01_APPROVED`. Owner has now authorized the complete local
-code/test/certification sequence: DS-02 forward Schema/PostgreSQL ownership and DS-03 Selection Runner/immutable Snapshot are approved; active implementation scope is `DS-04`, and later cards may
-advance automatically only after their own acceptance passes. Production Migration execution,
+code/test/certification sequence: DS-02 forward Schema/PostgreSQL ownership and DS-03 Selection Runner/immutable Snapshot are approved. DS-04 has now completed Selection-Period continuity、
+Snapshot disposition、`VALID_EMPTY` intent fencing、durable `PENDING -> DESIRED` Generation handoff、
+Authority Gap Audit、trigger suppression and canonical first-eligible-close recovery with **50 focused**
+and **902 Fast Unit/Architecture** tests. The active implementation scope is `DS-05` for unfinished ENTRY
+drain、durable cancel、unknown outcome and retained-partial lifecycle; later cards may advance automatically
+only after their own acceptance passes. Production Migration execution,
 deployment and first Dynamic activation remain separately gated.（来源：Owner active-task decision；
 `docs/superpowers/specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md`；
 `docs/superpowers/plans/2026-08-23-sor-dynamic-instrument-selection-trading-v0-implementation-plan.md`）

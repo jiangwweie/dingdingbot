@@ -268,6 +268,52 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
         )
         assert runtime_counts == {table: 0 for table in runtime_counts}
 
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_entry_vacuums_current (
+                        entry_vacuum_id, strategy_group_id, selection_spec_id,
+                        session_start_ms, source_generation_id, state,
+                        fenced_at_ms, drained_at_ms, resolved_at_ms,
+                        first_blocker, projection_version
+                    ) VALUES
+                        ('vacuum:history:1', 'SOR-001',
+                         'sor-dynamic-selection-v0', 1703980800000, NULL,
+                         'VALID_EMPTY', 1703984400000, 1703984401000,
+                         1703984402000, 'NO_SELECTION_READY_MEMBERS', 3),
+                        ('vacuum:history:2', 'SOR-001',
+                         'sor-dynamic-selection-v0', 1704067200000, NULL,
+                         'VALID_EMPTY', 1704070800000, 1704070801000,
+                         1704070802000, 'NO_SELECTION_READY_MEMBERS', 3),
+                        ('vacuum:open:1', 'SOR-001',
+                         'sor-dynamic-selection-v0', 1704153600000, NULL,
+                         'OPEN', 1704157200000, NULL, NULL,
+                         'NO_SELECTION_READY_MEMBERS', 1)
+                    """
+                )
+            )
+
+        with pytest.raises(DBAPIError, match="open_scope"):
+            async with engine.begin() as connection:
+                await connection.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_strategy_entry_vacuums_current (
+                            entry_vacuum_id, strategy_group_id, selection_spec_id,
+                            session_start_ms, source_generation_id, state,
+                            fenced_at_ms, drained_at_ms, resolved_at_ms,
+                            first_blocker, projection_version
+                        ) VALUES (
+                            'vacuum:open:2', 'SOR-001',
+                            'sor-dynamic-selection-v0', 1704240000000, NULL,
+                            'DRAINING_ENTRY', 1704243600000, NULL, NULL,
+                            'NO_SELECTION_READY_MEMBERS', 1
+                        )
+                        """
+                    )
+                )
+
         with pytest.raises(DBAPIError, match="exact bound LONG/SHORT targets"):
             async with engine.begin() as connection:
                 await _insert_static_generation(

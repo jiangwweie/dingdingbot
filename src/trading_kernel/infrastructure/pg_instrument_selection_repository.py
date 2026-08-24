@@ -20,13 +20,29 @@ from src.trading_kernel.domain.instrument_selection import (
     build_sor_dynamic_selection_spec_v0,
 )
 from src.trading_kernel.domain.selection_authority import (
+    AuthorityGapAudit,
+    AuthorityGapAuditKind,
+    AuthorityGapAuditState,
+    AuthorityGapScopeResult,
     AuthorityGrantProof,
     AuthorityGrantProofKind,
     AuthorityOutcome,
     ContinuitySourceKind,
+    CurrentSelectionAuthority,
+    MaterializationGeneration,
+    MaterializationGenerationState,
+    MaterializationTarget,
+    SelectionControl,
     SelectionMode,
     SelectionSessionAuthority,
+    SelectionSnapshotDisposition,
+    StrategyTriggerSuppression,
     UniverseAuthorityPair,
+    selected_member_set_digest,
+)
+from src.trading_kernel.domain.strategy_entry_vacuum import (
+    StrategyEntryVacuum,
+    StrategyEntryVacuumState,
 )
 from src.trading_kernel.infrastructure.pg_models import (
     instrument_selection_attempts,
@@ -37,11 +53,28 @@ from src.trading_kernel.infrastructure.pg_models import (
     instrument_selection_spec_members,
     instrument_selection_specs,
     selection_authority_current,
+    selection_authority_gap_audit_events,
+    selection_authority_gap_audits_current,
     selection_session_authorities,
     sor_dynamic_selection_specs_v0,
+    strategy_entry_vacuum_events,
+    strategy_entry_vacuums_current,
+    strategy_selection_control_current,
+    strategy_trigger_suppressions,
+    strategy_universe_materialization_events,
+    strategy_universe_materialization_generations,
+    strategy_universe_materialization_targets,
 )
 
 LeaseKind = Literal["selection", "materialization", "observation"]
+_CURRENT_ENTRY_VACUUM_STATES = (
+    "OPEN",
+    "DRAINING_ENTRY",
+    "RECONFIGURING",
+    "OWNER_PAUSED",
+    "SUPERSEDED",
+    "FAILED_CLOSED",
+)
 
 
 class SelectionAuthorityVersionConflict(RuntimeError):
@@ -465,6 +498,517 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Selection Snapshot does not exist")
         return SelectionSnapshot.model_validate(dict(row))
 
+    async def get_selection_control(
+        self,
+        strategy_group_id: str,
+        *,
+        for_update: bool = False,
+    ) -> SelectionControl | None:
+        statement = sa.select(strategy_selection_control_current).where(
+            strategy_selection_control_current.c.strategy_group_id
+            == strategy_group_id
+        )
+        if for_update:
+            statement = statement.with_for_update(of=strategy_selection_control_current)
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        return None if row is None else _selection_control_from_row(row)
+
+    async def activate_pending_selection_mode(
+        self,
+        *,
+        strategy_group_id: str,
+        expected_control_version: int,
+        expected_pending_mode: SelectionMode,
+        activated_at_ms: int,
+    ) -> SelectionControl:
+        result = await self._connection.execute(
+            sa.update(strategy_selection_control_current)
+            .where(
+                strategy_selection_control_current.c.strategy_group_id
+                == strategy_group_id,
+                strategy_selection_control_current.c.control_version
+                == expected_control_version,
+                strategy_selection_control_current.c.pending_selection_mode
+                == expected_pending_mode.value,
+            )
+            .values(
+                selection_mode=expected_pending_mode.value,
+                pending_selection_mode=None,
+                pending_effective_session_start_ms=None,
+                pending_authorization_id=None,
+                control_version=expected_control_version + 1,
+                updated_at_ms=activated_at_ms,
+            )
+            .returning(strategy_selection_control_current)
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            raise SelectionJobConflict("Selection Control pending mode changed")
+        return _selection_control_from_row(row)
+
+    async def get_snapshot_disposition(
+        self,
+        *,
+        selection_spec_id: str,
+        session_start_ms: int,
+        for_update: bool = False,
+    ) -> SelectionSnapshotDisposition | None:
+        statement = sa.select(instrument_selection_snapshots).where(
+            instrument_selection_snapshots.c.selection_spec_id == selection_spec_id,
+            instrument_selection_snapshots.c.session_start_ms == session_start_ms,
+        )
+        if for_update:
+            statement = statement.with_for_update(of=instrument_selection_snapshots)
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        snapshot = SelectionSnapshot.model_validate(dict(row))
+        members = tuple(
+            str(item)
+            for item in (
+                await self._connection.execute(
+                    sa.select(
+                        instrument_selection_member_decisions.c.exchange_instrument_id
+                    )
+                    .where(
+                        instrument_selection_member_decisions.c.selection_snapshot_id
+                        == snapshot.selection_snapshot_id,
+                        instrument_selection_member_decisions.c.selected.is_(True),
+                    )
+                    .order_by(
+                        instrument_selection_member_decisions.c.exchange_instrument_id
+                    )
+                    .limit(8)
+                )
+            ).scalars()
+        )
+        return SelectionSnapshotDisposition(
+            snapshot=snapshot,
+            selected_members=members,
+            selected_member_set_digest=selected_member_set_digest(members),
+        )
+
+    async def add_pending_materialization_generation(
+        self,
+        generation: MaterializationGeneration,
+        *,
+        targets: tuple[MaterializationTarget, ...],
+    ) -> None:
+        if generation.lifecycle_state is not MaterializationGenerationState.PENDING:
+            raise ValueError("new Materialization Generation must be PENDING")
+        if tuple(item.materialization_order for item in targets) != (1, 2):
+            raise ValueError("Materialization Generation requires exact LONG/SHORT targets")
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_generations).values(
+                _materialization_generation_values(generation)
+            )
+        )
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_targets),
+            [
+                {
+                    "materialization_generation_id": (
+                        generation.materialization_generation_id
+                    ),
+                    **target.model_dump(mode="json"),
+                }
+                for target in targets
+            ],
+        )
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=(
+                    f"materialization-event:{generation.materialization_generation_id}:1"
+                ),
+                materialization_generation_id=generation.materialization_generation_id,
+                event_sequence=1,
+                event_type="PENDING",
+                payload={
+                    "selection_snapshot_id": generation.selection_snapshot_id,
+                    "desired_member_count": generation.desired_member_count,
+                },
+                occurred_at_ms=generation.created_at_ms,
+            )
+        )
+
+    async def get_materialization_generation_for_snapshot(
+        self,
+        selection_snapshot_id: str,
+        *,
+        for_update: bool = False,
+    ) -> MaterializationGeneration | None:
+        statement = sa.select(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.selection_snapshot_id
+            == selection_snapshot_id
+        )
+        if for_update:
+            statement = statement.with_for_update(
+                of=strategy_universe_materialization_generations
+            )
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        return None if row is None else _materialization_generation_from_row(row)
+
+    async def mark_materialization_generation_desired(
+        self,
+        materialization_generation_id: str,
+        *,
+        expected_projection_version: int,
+        desired_at_ms: int,
+    ) -> MaterializationGeneration:
+        row = (
+            await self._connection.execute(
+                sa.select(strategy_universe_materialization_generations)
+                .where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id
+                    == materialization_generation_id
+                )
+                .with_for_update(of=strategy_universe_materialization_generations)
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            raise SelectionJobConflict("Materialization Generation does not exist")
+        current = _materialization_generation_from_row(row)
+        if (
+            current.lifecycle_state is not MaterializationGenerationState.PENDING
+            or current.projection_version != expected_projection_version
+        ):
+            raise SelectionJobConflict("Materialization Generation state changed")
+        desired = current.model_copy(
+            update={
+                "lifecycle_state": MaterializationGenerationState.DESIRED,
+                "desired_at_ms": desired_at_ms,
+                "projection_version": current.projection_version + 1,
+            }
+        )
+        desired = MaterializationGeneration.model_validate(desired.model_dump())
+        result = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == materialization_generation_id,
+                strategy_universe_materialization_generations.c.projection_version
+                == expected_projection_version,
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == "PENDING",
+            )
+            .values(
+                lifecycle_state="DESIRED",
+                desired_at_ms=desired_at_ms,
+                projection_version=desired.projection_version,
+            )
+        )
+        if result.rowcount != 1:
+            raise SelectionJobConflict("Materialization Generation version changed")
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=(
+                    f"materialization-event:{materialization_generation_id}:2"
+                ),
+                materialization_generation_id=materialization_generation_id,
+                event_sequence=2,
+                event_type="DESIRED",
+                payload={"projection_version": desired.projection_version},
+                occurred_at_ms=desired_at_ms,
+            )
+        )
+        return desired
+
+    async def mark_materialization_generation_abandoned(
+        self,
+        materialization_generation_id: str,
+        *,
+        expected_projection_version: int,
+        reason_code: str,
+        abandoned_at_ms: int,
+    ) -> MaterializationGeneration:
+        normalized_reason = reason_code.strip()
+        if not normalized_reason:
+            raise ValueError("abandoned Generation requires reason")
+        row = (
+            await self._connection.execute(
+                sa.select(strategy_universe_materialization_generations)
+                .where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id
+                    == materialization_generation_id
+                )
+                .with_for_update(of=strategy_universe_materialization_generations)
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            raise SelectionJobConflict("Materialization Generation does not exist")
+        current = _materialization_generation_from_row(row)
+        if (
+            current.lifecycle_state is not MaterializationGenerationState.PENDING
+            or current.projection_version != expected_projection_version
+        ):
+            raise SelectionJobConflict("Materialization Generation state changed")
+        abandoned = MaterializationGeneration.model_validate(
+            current.model_copy(
+                update={
+                    "lifecycle_state": MaterializationGenerationState.ABANDONED,
+                    "projection_version": current.projection_version + 1,
+                }
+            ).model_dump()
+        )
+        result = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == materialization_generation_id,
+                strategy_universe_materialization_generations.c.projection_version
+                == expected_projection_version,
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == "PENDING",
+            )
+            .values(
+                lifecycle_state="ABANDONED",
+                terminal_at_ms=abandoned_at_ms,
+                projection_version=abandoned.projection_version,
+            )
+        )
+        if result.rowcount != 1:
+            raise SelectionJobConflict("Materialization Generation version changed")
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=(
+                    f"materialization-event:{materialization_generation_id}:2"
+                ),
+                materialization_generation_id=materialization_generation_id,
+                event_sequence=2,
+                event_type="ABANDONED",
+                payload={
+                    "reason_code": normalized_reason,
+                    "projection_version": abandoned.projection_version,
+                },
+                occurred_at_ms=abandoned_at_ms,
+            )
+        )
+        return abandoned
+
+    async def get_current_entry_vacuum(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        for_update: bool = False,
+    ) -> StrategyEntryVacuum | None:
+        statement = sa.select(strategy_entry_vacuums_current).where(
+            strategy_entry_vacuums_current.c.strategy_group_id == strategy_group_id,
+            strategy_entry_vacuums_current.c.selection_spec_id == selection_spec_id,
+            strategy_entry_vacuums_current.c.state.in_(_CURRENT_ENTRY_VACUUM_STATES),
+        ).order_by(strategy_entry_vacuums_current.c.fenced_at_ms.desc()).limit(1)
+        if for_update:
+            statement = statement.with_for_update(of=strategy_entry_vacuums_current)
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        return None if row is None else _entry_vacuum_from_row(row)
+
+    async def open_valid_empty_intent_vacuum(
+        self,
+        vacuum: StrategyEntryVacuum,
+        *,
+        selection_snapshot_id: str,
+    ) -> None:
+        if (
+            vacuum.state is not StrategyEntryVacuumState.OPEN
+            or vacuum.source_generation_id is not None
+            or vacuum.first_blocker != "NO_SELECTION_READY_MEMBERS"
+        ):
+            raise ValueError("VALID_EMPTY intent requires an open generation-free Vacuum")
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuums_current).values(
+                **vacuum.model_dump(mode="json")
+            )
+        )
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:1",
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=1,
+                event_type="OPEN",
+                payload={
+                    "intended_authority_outcome": AuthorityOutcome.VALID_EMPTY.value,
+                    "selection_snapshot_id": selection_snapshot_id,
+                },
+                occurred_at_ms=vacuum.fenced_at_ms,
+            )
+        )
+
+    async def add_pending_authority_gap_audit(
+        self,
+        audit: AuthorityGapAudit,
+    ) -> None:
+        if audit.state is not AuthorityGapAuditState.PENDING:
+            raise ValueError("new Authority Gap Audit must be PENDING")
+        await self._connection.execute(
+            sa.insert(selection_authority_gap_audits_current).values(
+                **audit.model_dump(mode="json")
+            )
+        )
+        await self._connection.execute(
+            sa.insert(selection_authority_gap_audit_events).values(
+                authority_gap_audit_event_id=(
+                    f"gap-audit-event:{audit.authority_gap_audit_id}:1"
+                ),
+                authority_gap_audit_id=audit.authority_gap_audit_id,
+                event_sequence=1,
+                event_type="STARTED",
+                payload={
+                    "gap_kind": audit.gap_kind.value,
+                    "proposed_authority_outcome": (
+                        audit.proposed_authority_outcome.value
+                    ),
+                },
+                occurred_at_ms=audit.unauthorized_from_close_time_ms,
+            )
+        )
+
+    async def get_authority_gap_audit(
+        self,
+        authority_gap_audit_id: str,
+        *,
+        for_update: bool = False,
+    ) -> AuthorityGapAudit | None:
+        statement = sa.select(selection_authority_gap_audits_current).where(
+            selection_authority_gap_audits_current.c.authority_gap_audit_id
+            == authority_gap_audit_id
+        )
+        if for_update:
+            statement = statement.with_for_update(
+                of=selection_authority_gap_audits_current
+            )
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        return None if row is None else _authority_gap_audit_from_row(row)
+
+    async def complete_authority_gap_audit(
+        self,
+        audit: AuthorityGapAudit,
+        *,
+        results: tuple[AuthorityGapScopeResult, ...],
+        completed_at_ms: int,
+    ) -> None:
+        if audit.state is not AuthorityGapAuditState.COMPLETE:
+            raise ValueError("Authority Gap Audit completion requires COMPLETE proof")
+        result = await self._connection.execute(
+            sa.update(selection_authority_gap_audits_current)
+            .where(
+                selection_authority_gap_audits_current.c.authority_gap_audit_id
+                == audit.authority_gap_audit_id,
+                selection_authority_gap_audits_current.c.state == "PENDING",
+                selection_authority_gap_audits_current.c.projection_version
+                == audit.projection_version - 1,
+            )
+            .values(
+                audited_through_close_time_ms=audit.audited_through_close_time_ms,
+                first_eligible_close_time_ms=audit.first_eligible_close_time_ms,
+                audit_scope_digest=audit.audit_scope_digest,
+                audit_result_digest=audit.audit_result_digest,
+                state=audit.state.value,
+                first_blocker=None,
+                projection_version=audit.projection_version,
+            )
+        )
+        if result.rowcount != 1:
+            raise SelectionJobConflict("Authority Gap Audit version changed")
+        sequence = 2
+        for item in sorted(
+            results,
+            key=lambda value: (
+                value.scope.event_spec_id,
+                value.scope.exchange_instrument_id,
+            ),
+        ):
+            event_type = (
+                "TRIGGER_SUPPRESSED" if item.trigger_consumed else "CHECKED_NEGATIVE"
+            )
+            await self._connection.execute(
+                sa.insert(selection_authority_gap_audit_events).values(
+                    authority_gap_audit_event_id=(
+                        f"gap-audit-event:{audit.authority_gap_audit_id}:{sequence}"
+                    ),
+                    authority_gap_audit_id=audit.authority_gap_audit_id,
+                    event_sequence=sequence,
+                    event_type=event_type,
+                    payload=item.model_dump(mode="json"),
+                    occurred_at_ms=completed_at_ms,
+                )
+            )
+            if item.first_natural_trigger_at_ms is not None:
+                suppression = StrategyTriggerSuppression(
+                    trigger_suppression_id=(
+                        f"trigger-suppression:{audit.authority_gap_audit_id}:"
+                        f"{item.scope.event_spec_id}:{item.scope.exchange_instrument_id}"
+                    ),
+                    authority_gap_audit_id=audit.authority_gap_audit_id,
+                    entry_vacuum_id=audit.source_entry_vacuum_id,
+                    materialization_generation_id=audit.source_generation_id,
+                    event_spec_id=item.scope.event_spec_id,
+                    exchange_instrument_id=item.scope.exchange_instrument_id,
+                    session_reference=item.session_reference,
+                    first_natural_trigger_at_ms=item.first_natural_trigger_at_ms,
+                    detector_semantic_digest=audit.detector_semantic_digest,
+                    created_at_ms=completed_at_ms,
+                )
+                await self._connection.execute(
+                    sa.insert(strategy_trigger_suppressions).values(
+                        **suppression.model_dump(mode="json")
+                    )
+                )
+            sequence += 1
+        await self._connection.execute(
+            sa.insert(selection_authority_gap_audit_events).values(
+                authority_gap_audit_event_id=(
+                    f"gap-audit-event:{audit.authority_gap_audit_id}:{sequence}"
+                ),
+                authority_gap_audit_id=audit.authority_gap_audit_id,
+                event_sequence=sequence,
+                event_type="COMPLETE",
+                payload={
+                    "audit_scope_digest": audit.audit_scope_digest,
+                    "audit_result_digest": audit.audit_result_digest,
+                    "first_eligible_close_time_ms": audit.first_eligible_close_time_ms,
+                },
+                occurred_at_ms=completed_at_ms,
+            )
+        )
+
+    async def fail_authority_gap_audit(
+        self,
+        audit: AuthorityGapAudit,
+        *,
+        failed_at_ms: int,
+    ) -> None:
+        if audit.state is not AuthorityGapAuditState.FAILED:
+            raise ValueError("Authority Gap Audit failure requires FAILED state")
+        result = await self._connection.execute(
+            sa.update(selection_authority_gap_audits_current)
+            .where(
+                selection_authority_gap_audits_current.c.authority_gap_audit_id
+                == audit.authority_gap_audit_id,
+                selection_authority_gap_audits_current.c.state == "PENDING",
+                selection_authority_gap_audits_current.c.projection_version
+                == audit.projection_version - 1,
+            )
+            .values(
+                state=audit.state.value,
+                first_blocker=audit.first_blocker,
+                projection_version=audit.projection_version,
+            )
+        )
+        if result.rowcount != 1:
+            raise SelectionJobConflict("Authority Gap Audit version changed")
+        await self._connection.execute(
+            sa.insert(selection_authority_gap_audit_events).values(
+                authority_gap_audit_event_id=(
+                    f"gap-audit-event:{audit.authority_gap_audit_id}:2"
+                ),
+                authority_gap_audit_id=audit.authority_gap_audit_id,
+                event_sequence=2,
+                event_type="FAILED",
+                payload={"first_blocker": audit.first_blocker},
+                occurred_at_ms=failed_at_ms,
+            )
+        )
+
     async def add_authority_and_set_current(
         self,
         authority: SelectionSessionAuthority,
@@ -515,9 +1059,21 @@ class PostgresInstrumentSelectionRepository:
         self,
         selection_spec_id: str,
     ) -> SelectionSessionAuthority | None:
+        projection = await self.get_current_authority_projection(selection_spec_id)
+        return None if projection is None else projection.authority
+
+    async def get_current_authority_projection(
+        self,
+        selection_spec_id: str,
+    ) -> CurrentSelectionAuthority | None:
         row = (
             await self._connection.execute(
-                sa.select(selection_session_authorities)
+                sa.select(
+                    selection_session_authorities,
+                    selection_authority_current.c.projection_version.label(
+                        "current_projection_version"
+                    ),
+                )
                 .join(
                     selection_authority_current,
                     selection_authority_current.c.selection_authority_id
@@ -530,7 +1086,12 @@ class PostgresInstrumentSelectionRepository:
                 .limit(1)
             )
         ).mappings().one_or_none()
-        return None if row is None else _authority_from_row(row)
+        if row is None:
+            return None
+        return CurrentSelectionAuthority(
+            authority=_authority_from_row(row),
+            projection_version=int(row["current_projection_version"]),
+        )
 
 
 def _authority_values(authority: SelectionSessionAuthority) -> dict[str, object]:
@@ -623,4 +1184,144 @@ def _authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
         expires_at_ms=int(row["expires_at_ms"]),
         reason_code=str(row["reason_code"]),
         created_at_ms=int(row["created_at_ms"]),
+    )
+
+
+def _selection_control_from_row(row: RowMapping) -> SelectionControl:
+    pending_mode = row["pending_selection_mode"]
+    return SelectionControl(
+        strategy_group_id=str(row["strategy_group_id"]),
+        selection_spec_id=str(row["selection_spec_id"]),
+        selection_mode=SelectionMode(str(row["selection_mode"])),
+        pending_selection_mode=(
+            None if pending_mode is None else SelectionMode(str(pending_mode))
+        ),
+        pending_effective_session_start_ms=(
+            None
+            if row["pending_effective_session_start_ms"] is None
+            else int(row["pending_effective_session_start_ms"])
+        ),
+        pending_authorization_id=row["pending_authorization_id"],
+        control_version=int(row["control_version"]),
+        rollback_baseline_id=row["rollback_baseline_id"],
+        updated_at_ms=int(row["updated_at_ms"]),
+    )
+
+
+def _materialization_generation_values(
+    generation: MaterializationGeneration,
+) -> dict[str, object]:
+    return {
+        "materialization_generation_id": generation.materialization_generation_id,
+        "selection_spec_id": generation.selection_spec_id,
+        "strategy_group_id": generation.strategy_group_id,
+        "strategy_version_id": generation.strategy_version_id,
+        "selection_mode": generation.selection_mode.value,
+        "selection_snapshot_id": generation.selection_snapshot_id,
+        "rollback_baseline_id": generation.rollback_baseline_id,
+        "session_start_ms": generation.session_start_ms,
+        "previous_long_universe_version_id": (
+            generation.previous_long_universe_version_id
+        ),
+        "previous_short_universe_version_id": (
+            generation.previous_short_universe_version_id
+        ),
+        "desired_member_count": generation.desired_member_count,
+        "semantic_digest": generation.semantic_digest,
+        "lifecycle_state": generation.lifecycle_state.value,
+        "fallback_reason_code": generation.fallback_reason_code,
+        "lease_owner": None,
+        "lease_expires_at_ms": None,
+        "projection_version": generation.projection_version,
+        "created_at_ms": generation.created_at_ms,
+        "desired_at_ms": generation.desired_at_ms,
+        "fenced_at_ms": None,
+        "activated_at_ms": None,
+        "fallback_at_ms": None,
+        "terminal_at_ms": None,
+    }
+
+
+def _materialization_generation_from_row(
+    row: RowMapping,
+) -> MaterializationGeneration:
+    return MaterializationGeneration(
+        materialization_generation_id=str(row["materialization_generation_id"]),
+        selection_spec_id=str(row["selection_spec_id"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        strategy_version_id=str(row["strategy_version_id"]),
+        selection_mode=SelectionMode(str(row["selection_mode"])),
+        selection_snapshot_id=row["selection_snapshot_id"],
+        rollback_baseline_id=row["rollback_baseline_id"],
+        session_start_ms=(
+            None if row["session_start_ms"] is None else int(row["session_start_ms"])
+        ),
+        previous_long_universe_version_id=str(
+            row["previous_long_universe_version_id"]
+        ),
+        previous_short_universe_version_id=str(
+            row["previous_short_universe_version_id"]
+        ),
+        desired_member_count=int(row["desired_member_count"]),
+        semantic_digest=str(row["semantic_digest"]),
+        lifecycle_state=MaterializationGenerationState(str(row["lifecycle_state"])),
+        fallback_reason_code=row["fallback_reason_code"],
+        projection_version=int(row["projection_version"]),
+        created_at_ms=int(row["created_at_ms"]),
+        desired_at_ms=(
+            None if row["desired_at_ms"] is None else int(row["desired_at_ms"])
+        ),
+    )
+
+
+def _entry_vacuum_from_row(row: RowMapping) -> StrategyEntryVacuum:
+    return StrategyEntryVacuum(
+        entry_vacuum_id=str(row["entry_vacuum_id"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        selection_spec_id=str(row["selection_spec_id"]),
+        session_start_ms=int(row["session_start_ms"]),
+        source_generation_id=row["source_generation_id"],
+        state=StrategyEntryVacuumState(str(row["state"])),
+        fenced_at_ms=int(row["fenced_at_ms"]),
+        drained_at_ms=(
+            None if row["drained_at_ms"] is None else int(row["drained_at_ms"])
+        ),
+        resolved_at_ms=(
+            None if row["resolved_at_ms"] is None else int(row["resolved_at_ms"])
+        ),
+        first_blocker=str(row["first_blocker"]),
+        projection_version=int(row["projection_version"]),
+    )
+
+
+def _authority_gap_audit_from_row(row: RowMapping) -> AuthorityGapAudit:
+    return AuthorityGapAudit(
+        authority_gap_audit_id=str(row["authority_gap_audit_id"]),
+        selection_spec_id=str(row["selection_spec_id"]),
+        session_start_ms=int(row["session_start_ms"]),
+        gap_kind=AuthorityGapAuditKind(str(row["gap_kind"])),
+        source_entry_vacuum_id=row["source_entry_vacuum_id"],
+        source_generation_id=row["source_generation_id"],
+        proposed_authority_outcome=AuthorityOutcome(
+            str(row["proposed_authority_outcome"])
+        ),
+        unauthorized_from_close_time_ms=int(
+            row["unauthorized_from_close_time_ms"]
+        ),
+        audited_through_close_time_ms=(
+            None
+            if row["audited_through_close_time_ms"] is None
+            else int(row["audited_through_close_time_ms"])
+        ),
+        first_eligible_close_time_ms=(
+            None
+            if row["first_eligible_close_time_ms"] is None
+            else int(row["first_eligible_close_time_ms"])
+        ),
+        audit_scope_digest=row["audit_scope_digest"],
+        audit_result_digest=row["audit_result_digest"],
+        detector_semantic_digest=str(row["detector_semantic_digest"]),
+        state=AuthorityGapAuditState(str(row["state"])),
+        first_blocker=row["first_blocker"],
+        projection_version=int(row["projection_version"]),
     )

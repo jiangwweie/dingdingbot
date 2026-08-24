@@ -621,6 +621,44 @@ Candidate Panel或Outcome。
 所有pre-fence outcome和`VALID_EMPTY` intent fence可仅从PostgreSQL恢复，且不存在未授权未审计
 eligible-close gap；最终drain与`VALID_EMPTY` Authority commit明确留给DS-05。
 
+#### DS-04 Execution Evidence — 2026-08-24
+
+**状态：`DS04_COMPLETE / FOCUSED_AND_FAST_ACCEPTANCE_PASSED`。** Active Execution Scope自动推进至
+**DS-05**；`implementation_authority=CODE_AND_TEST_ONLY`，`production_authority=NONE`。
+
+本卡完成Materialization Coordinator的pre-fence半链路，Selector提交Snapshot后即可退出；后续
+Disposition、continuity、Generation handoff、Vacuum intent和Gap Audit只从PostgreSQL durable facts
+恢复：
+
+| Boundary | Implemented contract | Direct evidence |
+| --- | --- | --- |
+| Selection Period | `D 00:00`不创建Authority；already-Dynamic在`D 01:00`建立exact previous pair `PRE_FENCE_CONTINUITY`；未来pending mode不得提前生效 | unit + PostgreSQL integration |
+| Snapshot disposition | Owner Pause优先；same pair=`NO_CHANGE`；changed pair=`PENDING -> DESIRED`；previous pair漂移时Generation=`ABANDONED`；expired Snapshot fail closed | coordinator integration |
+| First activation | `static_baseline -> pending dynamic_selection`在Snapshot前保持Static且不伪造Selection predecessor；same-pair terminal outcome才激活pending mode | domain + integration |
+| VALID_EMPTY intent | zero-member Snapshot只打开generation-free Vacuum并原子阻断new ENTRY；不提前提交`VALID_EMPTY` Authority、不改写既有Ticket | vacuum/authority unit + integration |
+| Gap Audit | 网络读取在transaction外；提交前重验Owner/Selection control、current Authority、Universe projection和Vacuum；positive suppression与checked-negative共同进入digest | domain + PostgreSQL integration |
+| Eligible-close race | 跨过候选close时不提交proof/Authority；同一PENDING Audit增量延伸到下一canonical close，不遗留第二套current Audit | fault integration |
+| Failure evidence | missing scope result与Detector semantic drift持久化`FAILED`；runtime projection drift保持PENDING且不grant | fault integration |
+
+RED阶段直接暴露并关闭两个实现缺陷：Audit网络读取期间Universe projection漂移仍可能错误grant；
+`0006`原scope唯一约束会阻止第二个Selection Period获得新的immutable `entry_vacuum_id`。由于`0006`
+尚未部署，Schema已改为保留terminal历史行、仅对open/fail-closed Vacuum建立partial unique current-fence
+约束；Repository current selector只返回未解析的negative fence。该修正没有执行Migration，也没有修改
+已部署Schema。
+
+验证结果：
+
+| Verification | Result |
+| --- | ---: |
+| DS-04 focused unit/integration/migration | **50 passed** |
+| Fast Unit + Architecture（继续排除DS-08拥有的`test_deploy_tokyo_release.py`） | **902 passed** |
+| Ruff | **passed** |
+| Mypy | **168 source files，zero issues** |
+| `git diff --check` | **passed** |
+
+完整Release tier仍只在DS-09 frozen exact candidate执行。本卡没有运行生产Migration、Tokyo部署、
+Dynamic activation、Crypto SOR resume或exchange mutation。
+
 ### DS-05 — Strategy Entry Vacuum, Durable Cancel And Retained Partial
 
 **Goal**

@@ -972,11 +972,6 @@ def _create_vacuum_and_gap_tables() -> None:
                 "brc_strategy_universe_materialization_generations.materialization_generation_id"
             ],
         ),
-        sa.UniqueConstraint(
-            "strategy_group_id",
-            "selection_spec_id",
-            name="uq_brc_strategy_entry_vacuums_current_scope",
-        ),
         sa.CheckConstraint(
             "state IN ('OPEN', 'DRAINING_ENTRY', 'RECONFIGURING', "
             "'RESOLVED_ACTIVE', 'RESOLVED_FALLBACK', 'VALID_EMPTY', "
@@ -995,6 +990,16 @@ def _create_vacuum_and_gap_tables() -> None:
             "resolved_at_ms IS NULL OR "
             "(drained_at_ms IS NOT NULL AND resolved_at_ms >= drained_at_ms)",
             name="ck_brc_strategy_entry_vacuums_current_resolution_time_valid",
+        ),
+    )
+    op.create_index(
+        "uq_brc_strategy_entry_vacuums_current_open_scope",
+        "brc_strategy_entry_vacuums_current",
+        ["strategy_group_id", "selection_spec_id"],
+        unique=True,
+        postgresql_where=sa.text(
+            "state IN ('OPEN', 'DRAINING_ENTRY', 'RECONFIGURING', "
+            "'OWNER_PAUSED', 'SUPERSEDED', 'FAILED_CLOSED')"
         ),
     )
     op.create_table(

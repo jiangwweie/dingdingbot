@@ -87,13 +87,24 @@ from src.trading_kernel.domain.product import (
     ProductSessionSnapshot,
 )
 from src.trading_kernel.domain.reducer import Reduction
-from src.trading_kernel.domain.selection_authority import SelectionSessionAuthority
+from src.trading_kernel.domain.selection_authority import (
+    AuthorityGapAudit,
+    AuthorityGapScopeResult,
+    CurrentSelectionAuthority,
+    MaterializationGeneration,
+    MaterializationTarget,
+    SelectionControl,
+    SelectionMode,
+    SelectionSessionAuthority,
+    SelectionSnapshotDisposition,
+)
 from src.trading_kernel.domain.shadow_outcome import (
     ShadowOutcomeClaim,
     ShadowOutcomeProjection,
     ShadowOutcomeSpec,
 )
 from src.trading_kernel.domain.signal import SignalFactSnapshot, StrategySignal
+from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     RegistrySeedResult,
@@ -1412,6 +1423,108 @@ class InstrumentSelectionRepository(Protocol):
         self,
         selection_spec_id: str,
     ) -> SelectionSessionAuthority | None: ...
+
+    async def get_current_authority_projection(
+        self,
+        selection_spec_id: str,
+    ) -> CurrentSelectionAuthority | None: ...
+
+    async def get_selection_control(
+        self,
+        strategy_group_id: str,
+        *,
+        for_update: bool = False,
+    ) -> SelectionControl | None: ...
+
+    async def activate_pending_selection_mode(
+        self,
+        *,
+        strategy_group_id: str,
+        expected_control_version: int,
+        expected_pending_mode: SelectionMode,
+        activated_at_ms: int,
+    ) -> SelectionControl: ...
+
+    async def get_snapshot_disposition(
+        self,
+        *,
+        selection_spec_id: str,
+        session_start_ms: int,
+        for_update: bool = False,
+    ) -> SelectionSnapshotDisposition | None: ...
+
+    async def add_pending_materialization_generation(
+        self,
+        generation: MaterializationGeneration,
+        *,
+        targets: tuple[MaterializationTarget, ...],
+    ) -> None: ...
+
+    async def get_materialization_generation_for_snapshot(
+        self,
+        selection_snapshot_id: str,
+        *,
+        for_update: bool = False,
+    ) -> MaterializationGeneration | None: ...
+
+    async def mark_materialization_generation_desired(
+        self,
+        materialization_generation_id: str,
+        *,
+        expected_projection_version: int,
+        desired_at_ms: int,
+    ) -> MaterializationGeneration: ...
+
+    async def mark_materialization_generation_abandoned(
+        self,
+        materialization_generation_id: str,
+        *,
+        expected_projection_version: int,
+        reason_code: str,
+        abandoned_at_ms: int,
+    ) -> MaterializationGeneration: ...
+
+    async def get_current_entry_vacuum(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        for_update: bool = False,
+    ) -> StrategyEntryVacuum | None: ...
+
+    async def open_valid_empty_intent_vacuum(
+        self,
+        vacuum: StrategyEntryVacuum,
+        *,
+        selection_snapshot_id: str,
+    ) -> None: ...
+
+    async def add_pending_authority_gap_audit(
+        self,
+        audit: AuthorityGapAudit,
+    ) -> None: ...
+
+    async def get_authority_gap_audit(
+        self,
+        authority_gap_audit_id: str,
+        *,
+        for_update: bool = False,
+    ) -> AuthorityGapAudit | None: ...
+
+    async def complete_authority_gap_audit(
+        self,
+        audit: AuthorityGapAudit,
+        *,
+        results: tuple[AuthorityGapScopeResult, ...],
+        completed_at_ms: int,
+    ) -> None: ...
+
+    async def fail_authority_gap_audit(
+        self,
+        audit: AuthorityGapAudit,
+        *,
+        failed_at_ms: int,
+    ) -> None: ...
 
 
 class InstrumentCertificationTarget(BaseModel):

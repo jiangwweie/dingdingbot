@@ -828,7 +828,22 @@ strategy_entry_vacuums_current = sa.Table(
         ["source_generation_id"],
         ["brc_strategy_universe_materialization_generations.materialization_generation_id"],
     ),
-    sa.UniqueConstraint("strategy_group_id", "selection_spec_id"),
+)
+sa.Index(
+    "uq_brc_strategy_entry_vacuums_current_open_scope",
+    strategy_entry_vacuums_current.c.strategy_group_id,
+    strategy_entry_vacuums_current.c.selection_spec_id,
+    unique=True,
+    postgresql_where=strategy_entry_vacuums_current.c.state.in_(
+        (
+            "OPEN",
+            "DRAINING_ENTRY",
+            "RECONFIGURING",
+            "OWNER_PAUSED",
+            "SUPERSEDED",
+            "FAILED_CLOSED",
+        )
+    ),
 )
 
 strategy_entry_vacuum_events = sa.Table(
