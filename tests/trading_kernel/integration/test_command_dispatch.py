@@ -74,6 +74,7 @@ from tests.trading_kernel.support.runtime_scope import (
 from tests.trading_kernel.support.runtime_scope import (
     seed_ticket_runtime_scope as _seed_ticket_runtime_scope,
 )
+from tests.trading_kernel.support.selection_vacuum import open_entry_vacuum
 from tests.trading_kernel.support.tickets import make_ticket as _retired_ticket
 
 
@@ -158,6 +159,18 @@ class CountingKindAwareAcceptingVenue(KindAwareAcceptingVenue):
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
         self.calls += 1
         return await super().execute(request)
+
+
+class PausingPreflightFacts(PreflightFacts):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def read_entry_admission_snapshot(self, request):
+        self.started.set()
+        await self.release.wait()
+        return await super().read_entry_admission_snapshot(request)
 
 
 @pytest.mark.asyncio
@@ -461,6 +474,55 @@ async def test_retired_strategy_version_before_entry_preflight_causes_zero_venue
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
     assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_selection_vacuum_opened_during_preflight_supersedes_before_venue(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    facts = PausingPreflightFacts()
+    venue = CountingVenue()
+    dispatch_task = asyncio.create_task(
+        dispatch_one_command(
+            lambda: PostgresKernelUnitOfWork(dispatch_engine),
+            venue,
+            DispatchCommandRequest(
+                worker_id="entry-dispatcher",
+                now_ms=1_100,
+                lease_until_ms=6_100,
+                timeout_seconds=1,
+                runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                admission_snapshot_validity_ms=1_000,
+            ),
+            entry_facts_source=facts,
+        )
+    )
+    await asyncio.wait_for(facts.started.wait(), timeout=2)
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    facts.release.set()
+
+    result = await dispatch_task
+
+    assert result.status is DispatchCommandStatus.SUPERSEDED
+    assert venue.calls == 0
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        command = await uow.exchange_commands.get(result.command_id or "")
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+        domain_active = await uow.entry_admission.has_active_ticket_in_domain(
+            ticket.identity.netting_domain.key()
+        )
+    assert command is not None
+    assert command.status is ExchangeCommandStatus.SUPERSEDED
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.ENTRY_REJECTED
+    assert aggregate.entry_vacuum_id == vacuum.entry_vacuum_id
+    assert reservation is not None and reservation.status == "released"
+    assert domain_active is False
 
 
 @pytest.mark.asyncio

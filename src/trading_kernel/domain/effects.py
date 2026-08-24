@@ -53,6 +53,12 @@ class CancelEntryRemainder(_Effect):
     ticket_id: str
 
 
+class CancelVacuumEntryOrder(_Effect):
+    ticket_id: str
+    exchange_order_id: str
+    entry_vacuum_id: str
+
+
 class RequestControlledFlatten(_Effect):
     ticket_id: str
     quantity: Decimal
@@ -69,6 +75,7 @@ class CancelProtectionOrders(_Effect):
     order_namespace: Literal["regular", "conditional"]
     purpose: Literal[
         "entry_remainder",
+        "selection_vacuum_entry",
         "reconciliation_cleanup",
         "runner_old_stop",
     ]
@@ -123,6 +130,7 @@ KernelEffect = (
     | PrepareProtectionReplacementCommand
     | PrepareExitCommand
     | CancelEntryRemainder
+    | CancelVacuumEntryOrder
     | RequestControlledFlatten
     | PrepareControlledFlattenCommand
     | CancelProtectionOrders

@@ -555,6 +555,36 @@ async def coordinate_selection_materialization_once(
                     ),
                     reason_code=f"GENERATION_{existing.lifecycle_state.value}",
                 )
+            if existing.lifecycle_state is MaterializationGenerationState.DESIRED:
+                generation_vacuum = StrategyEntryVacuum(
+                    entry_vacuum_id=(
+                        f"vacuum:{request.strategy_group_id}:"
+                        f"{request.session_start_ms}:generation"
+                    ),
+                    strategy_group_id=request.strategy_group_id,
+                    selection_spec_id=spec.selection_spec_id,
+                    session_start_ms=request.session_start_ms,
+                    source_generation_id=existing.materialization_generation_id,
+                    state=StrategyEntryVacuumState.DRAINING_ENTRY,
+                    fenced_at_ms=now_ms,
+                    drained_at_ms=None,
+                    resolved_at_ms=None,
+                    first_blocker="DESIRED_MEMBERS_CHANGED",
+                    projection_version=2,
+                )
+                await uow.instrument_selection.open_generation_entry_vacuum(
+                    generation_vacuum,
+                    expected_generation_version=existing.projection_version,
+                )
+                return CoordinateSelectionMaterializationResult(
+                    disposition=MaterializationDisposition.WAITING_VACUUM,
+                    selection_snapshot_id=snapshot.snapshot.selection_snapshot_id,
+                    materialization_generation_id=(
+                        existing.materialization_generation_id
+                    ),
+                    entry_vacuum_id=generation_vacuum.entry_vacuum_id,
+                    reason_code="GENERATION_ENTRY_DRAIN_STARTED",
+                )
             return CoordinateSelectionMaterializationResult(
                 disposition=MaterializationDisposition.GENERATION_DESIRED,
                 selection_snapshot_id=snapshot.snapshot.selection_snapshot_id,

@@ -410,7 +410,7 @@ Owner Console 后续收敛为四个产品中心。页面只是呈现方式，稳
 | --- | --- | --- | --- |
 | **P0：自然市场验收** | 关闭现有 Kernel 与 TradFi SOR 的真实生命周期证据 | 保持只读监控；自然 Signal 出现后观察 Admission、Ticket、保护、退出、Reconciliation、Settlement 和 Review；闭环后执行 `promote-full` 与最终需求审计 | 自然 TradFi Ticket 内外部完整闭环、零残留、零未解决 Incident，`promote-full` 和最终审计通过 |
 | **P2：工程基础设施** | 降低每次开发、测试和部署的固定成本，并统一产品语义 | 测试资产治理；发布流程状态化和精确候选认证复用；Canonical Exit Attribution；Effective Entry Scope 投影/API | 日常开发使用 Focused/Fast 层；完整认证只对冻结候选运行一次；发布显示单一阶段和阻塞点；退出原因和 Entry 能力有唯一权威 |
-| **P3-X：动态标的生产实验** | 把已通过 Replay 的 SOR 选择规则接入唯一 Instrument membership 与 time-bounded ENTRY authority，并以原风险小资金取得真实证据 | 已批准三 Plane设计与P3-X.3A Implementation Plan；DS-00至DS-04已经完成，现已具备Selection Runner、immutable Snapshot、Selection-Period`PRE_FENCE_CONTINUITY`、`NO_CHANGE/VALID_EMPTY` intent、durable Generation handoff、Entry Vacuum negative fence、通用Authority Gap Audit、trigger suppression与`first_eligible_close_time_ms`；当前进入unfinished ENTRY drain、durable cancel、unknown outcome和合法双腿partial protection，后续是LONG/SHORT串行warming+原子切换、post-fence fallback和thin release compatibility projection | 设计状态`DESIGN_APPROVED`；计划状态`PLAN_APPROVED / CODE_AND_TEST_ONLY / DS-05`；Owner已授权DS-02至DS-10本地顺序实施，首次Dynamic Session仍须独立授权，且不提高风险或绕过Strategy Control |
+| **P3-X：动态标的生产实验** | 把已通过 Replay 的 SOR 选择规则接入唯一 Instrument membership 与 time-bounded ENTRY authority，并以原风险小资金取得真实证据 | 已批准三 Plane设计与P3-X.3A Implementation Plan；DS-00至DS-05已经完成，现已具备Selection Runner、immutable Snapshot、Selection-Period`PRE_FENCE_CONTINUITY`、`NO_CHANGE/VALID_EMPTY`、durable Generation handoff、Entry Vacuum全边界negative fence、durable cancel/unknown recovery、合法双腿partial protection、通用Authority Gap Audit、trigger suppression与`first_eligible_close_time_ms`；当前进入LONG/SHORT串行warming、staged pair、原子切换与post-fence fallback，后续是四边界Authority lineage、runtime hosting和thin release compatibility projection | 设计状态`DESIGN_APPROVED`；计划状态`PLAN_APPROVED / CODE_AND_TEST_ONLY / DS-06`；Owner已授权DS-02至DS-10本地顺序实施，首次Dynamic Session仍须独立授权，且不提高风险或绕过Strategy Control |
 | **P1：Owner 产品控制** | 让日常策略、标的和 Ticket 操作主要在前端完成 | 单 Ticket Owner 平仓；Owner Regime Gate + Journal；可读操作审计；策略运行模式；Instrument 生命周期；Strategy-Instrument 临时禁入；异常收件箱 | Owner 无需 SQL、SSH 或拼装日志即可完成日常范围控制、市场参与门控和单笔风险处置 |
 | **P3：实验学习与扩展** | 把交易结果和 Owner 门控证据转化为版本隔离的策略决策，再决定新增策略 | 标准化 Performance Review Query；StrategyVersion 生命周期；Runner/右尾统计；P3-X 结论；Owner Regime 归因；Owner 注释；Continue/Observe/Pause/Retire 决策；类型化参数版本待办；后续 MPG/BRF2/RSRVCB 评估 | 当前版本证据、自然退出、Owner 干预和实验结果可区分，新增策略不复用未经验证的历史总收益 |
 | **P4：资本治理** | 在充分证据后将实验收益转化为可控资本制度 | 风险档位资格、回撤降档建议、资本高水位和提款账本 | 仅输出资格与建议；每次风险档位变更仍须 Owner 明确授权的 Policy 发布，提款/转账仍不由系统执行 |
@@ -438,8 +438,8 @@ P3-X 已完成前两层研究，并把下一步收敛为生产实验链：
    但静态 Symbol 排名无法样本外持续；
 2. **Dynamic Selection V0 Replay**：`UTC 01:00` 事前 Selection 已通过全部冻结定量 Gate；
 3. **Production design / Implementation Plan / certification**：生产设计与Implementation Plan
-   已经批准；DS-00至DS-04已经完成并通过各自Focused/Fast验证，当前Active Execution Scope为
-   `DS-05`。后续实现为三个经PostgreSQL durable handoff解耦的Plane：Selection只提交
+   已经批准；DS-00至DS-05已经完成并通过各自Focused/Fast验证，当前Active Execution Scope为
+   `DS-06`。后续实现为三个经PostgreSQL durable handoff解耦的Plane：Selection只提交
    Snapshot；Materializer独立拥有time-bounded Authority、Entry
    Vacuum、unfinished ENTRY drain、Desired generation、串行warming、通用Authority Gap Audit、
    双边原子切换和受限post-fence fallback；每个已处于Dynamic mode的Session都在Selection结果前
@@ -504,9 +504,9 @@ P2.1–P2.4 的工程基础设施能力已经完成。本节从当前第一个�
    Decimal Golden、输入/源码/规则digest和Focused/Fast/Release测试组合；Artifact仅用于测试，
    `src/trading_kernel/**`零依赖。Decimal Golden已批准为DS-03/DS-09唯一Selection parity baseline；
    DS-01已完成并通过Codex定向审查。Owner已授权DS-02至DS-10整个本地开发、测试和认证流程，
-   DS-02已经通过本地Migration/Schema/Repository验收；DS-03 SelectionCore/Runner已完成961×24 Golden parity与本地PostgreSQL验收；DS-04已完成continuity、Disposition、Vacuum intent、Generation handoff与Gap Audit并通过50项focused和902项Fast验证，当前Active Execution Scope为`DS-05`；生产Migration、部署和首次Dynamic activation仍无授权。
-2. **P3-X.3B Implementation/Certification**：DS-00至DS-04已经完成；当前从DS-05继续顺序执行
-   Vacuum/ENTRY cancel/partial-retained、串行warming/双边原子切换、post-fence fallback、
+   DS-02已经通过本地Migration/Schema/Repository验收；DS-03 SelectionCore/Runner已完成961×24 Golden parity与本地PostgreSQL验收；DS-04已完成continuity、Disposition、Vacuum intent、Generation handoff与Gap Audit；DS-05已完成Admission/Ticket/dispatch Vacuum enforcement、durable cancel、unknown recovery、retained partial和`VALID_EMPTY`原子闭环并通过228项focused和916项Fast验证，当前Active Execution Scope为`DS-06`；生产Migration、部署和首次Dynamic activation仍无授权。
+2. **P3-X.3B Implementation/Certification**：DS-00至DS-05已经完成；当前从DS-06继续顺序执行
+   串行warming/双边原子切换、post-fence fallback、
    Observation/Admission/Ticket/dispatch enforcement、independent runtime leases、thin release
    classification projection和full-chain fault certification；规则修改创建V1，不原地重写V0。
 3. **P1.1 单 Ticket Owner 平仓**：补齐持久化授权、Operation、正式 `request_exit()`

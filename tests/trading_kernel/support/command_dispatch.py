@@ -118,7 +118,12 @@ async def seed_policy(
         )
 
 
-async def issue(engine: AsyncEngine, ticket) -> None:
+async def issue(
+    engine: AsyncEngine,
+    ticket,
+    *,
+    ticket_margin_budget: Decimal = Decimal(30),
+) -> None:
     await seed_ticket_runtime_scope(engine, ticket)
     async with engine.begin() as connection:
         await connection.execute(
@@ -145,7 +150,12 @@ async def issue(engine: AsyncEngine, ticket) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         result = await issue_ticket(
             uow,
-            make_issue_request(ticket=ticket, now_ms=1_001, claim_owner="issuer-1"),
+            make_issue_request(
+                ticket=ticket,
+                now_ms=1_001,
+                claim_owner="issuer-1",
+                ticket_margin_budget=ticket_margin_budget,
+            ),
         )
     assert result.status is IssueTicketStatus.ISSUED
 

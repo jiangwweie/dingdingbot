@@ -696,6 +696,14 @@ class ExchangeCommandRepository(Protocol):
         reason: str,
     ) -> None: ...
 
+    async def mark_prepared_superseded(
+        self,
+        *,
+        command_id: str,
+        observed_at_ms: int,
+        reason: str,
+    ) -> None: ...
+
     async def get_one_expired_claim(
         self,
         *,
@@ -1484,6 +1492,20 @@ class InstrumentSelectionRepository(Protocol):
         abandoned_at_ms: int,
     ) -> MaterializationGeneration: ...
 
+    async def get_materialization_generation(
+        self,
+        materialization_generation_id: str,
+        *,
+        for_update: bool = False,
+    ) -> MaterializationGeneration | None: ...
+
+    async def open_generation_entry_vacuum(
+        self,
+        vacuum: StrategyEntryVacuum,
+        *,
+        expected_generation_version: int,
+    ) -> None: ...
+
     async def get_current_entry_vacuum(
         self,
         *,
@@ -1498,6 +1520,33 @@ class InstrumentSelectionRepository(Protocol):
         *,
         selection_snapshot_id: str,
     ) -> None: ...
+
+    async def mark_entry_vacuum_draining(
+        self,
+        vacuum: StrategyEntryVacuum,
+        *,
+        started_at_ms: int,
+    ) -> StrategyEntryVacuum: ...
+
+    async def get_next_entry_vacuum_ticket(
+        self,
+        *,
+        strategy_group_id: str,
+    ) -> str | None: ...
+
+    async def entry_vacuum_has_drain_blockers(
+        self,
+        *,
+        strategy_group_id: str,
+    ) -> bool: ...
+
+    async def mark_entry_vacuum_drained(
+        self,
+        vacuum: StrategyEntryVacuum,
+        *,
+        target_state: Literal["RECONFIGURING", "VALID_EMPTY"],
+        drained_at_ms: int,
+    ) -> StrategyEntryVacuum: ...
 
     async def add_pending_authority_gap_audit(
         self,

@@ -5,8 +5,8 @@ date: 2026-08-23
 phase: P3-X.3A
 design_authority: ../specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: DS-04
-next_execution_gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_04_TO_DS_10
+active_execution_scope: DS-06
+next_execution_gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_06_TO_DS_10
 production_authority: NONE
 ---
 
@@ -31,8 +31,8 @@ decision）
 design status: DESIGN_APPROVED
 plan status: PLAN_APPROVED
 implementation_authority: CODE_AND_TEST_ONLY
-active execution scope: DS-04
-next execution gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_04_TO_DS_10
+active execution scope: DS-06
+next execution gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_06_TO_DS_10
 production_authority: NONE
 ```
 
@@ -720,6 +720,44 @@ Dynamic activation、Crypto SOR resume或exchange mutation。
 
 没有unfinished ENTRY能跨过resolved Vacuum；`VALID_EMPTY`只在drain完成后成为current Authority；
 retained partial不释放原计划capacity，且既有Ticket只按冻结Lifecycle推进。
+
+#### DS-05 Execution Evidence — 2026-08-24
+
+**状态：`DS05_COMPLETE / FOCUSED_AND_FAST_ACCEPTANCE_PASSED`。** Active Execution Scope自动推进至
+**DS-06**；`implementation_authority=CODE_AND_TEST_ONLY`，`production_authority=NONE`。
+
+本卡把Strategy Entry Vacuum接入Admission、Ticket issuance、ENTRY dispatch最终preflight、durable
+cancel、unknown recovery与正式Lifecycle：
+
+| Boundary | Implemented contract | Direct evidence |
+| --- | --- | --- |
+| Admission / Ticket | open Vacuum在Admission与Ticket transaction内重复fail closed，不产生Claim、Ticket、Reservation、Netting Domain或Command | PostgreSQL integration |
+| Prepared / claimed ENTRY | prepared或claimed ENTRY被精确`SUPERSEDED`，释放预算、ENTRY lane与Netting Domain；行情网络读取期间新开的Vacuum仍在最终DB preflight拦截，zero venue mutation | integration + fault race |
+| Open zero-fill | 先提交带Vacuum lineage的durable `CANCEL_ORDER`，transaction外dispatch；Cancel accepted后仍等待PositionSnapshot确认order absent才冻结final quantity | reducer + PostgreSQL integration |
+| Unknown cancel | `OUTCOME_UNKNOWN`阻塞drain且不blind resend；venue truth仍open时原Command终结为reconciled-absent、Aggregate进入retryable rejection并创建下一generation durable Cancel | integration recovery |
+| Partial fill | 只有step-aligned、正TP1+正Runner、`NORMAL` post-fill risk的actual quantity可进入`VACUUM_PARTIAL_RETAINED`；否则Incident + controlled flatten | unit + integration |
+| Capacity retention | retained partial保持原Ticket、完整planned Reservation、active Ticket count与Netting Domain；Initial Stop/Stress完成前ENTRY lane不释放 | PostgreSQL integration |
+| Protection failure | retained partial Initial Stop rejection创建`vacuum_partial_initial_stop_rejected` Incident与actual-quantity controlled flatten，Vacuum持续阻塞至正式flat closure | integration |
+| Drain finalization | Generation Vacuum在同一transaction推进`DRAINING_ENTRY -> MATERIALIZING`与`DRAINING_ENTRY -> RECONFIGURING`；`VALID_EMPTY`只有exact intent、zero-member Snapshot、Owner enabled且无blocker时原子提交terminal Vacuum、current Authority和pending mode activation | PostgreSQL integration |
+| Non-retroactivity | protected Ticket不属于Vacuum drain blocker；`VALID_EMPTY`不改写Position、Reservation、Netting Domain、Aggregate version或既有Lifecycle | PostgreSQL integration |
+| Read projection | 新增Aggregate/Event状态全部映射到Owner Console Entry causality，保持fail-fast完整性 | unit |
+
+RED阶段直接暴露并关闭两个状态机缺陷：generation-free Vacuum缺少`NO_SELECTION_READY_MEMBERS`
+intent校验；Generation Vacuum已写`OPEN/DRAINING_ENTRY`两条事件但projection version仍为1，导致
+`ENTRY_DRAINED`事件sequence冲突。实现现以projection version 2承接前两条事件，并拒绝任何错误
+intent被提交为`VALID_EMPTY`。
+
+验证结果：
+
+| Verification | Result |
+| --- | ---: |
+| DS-05 focused unit/integration/migration/architecture | **228 passed** |
+| Fast Unit + Architecture（继续排除DS-08拥有的`test_deploy_tokyo_release.py`） | **916 passed** |
+| Ruff | **passed** |
+| Mypy | **169 source files，zero issues** |
+| `git diff --check` | **passed** |
+
+本卡没有运行生产Migration、Tokyo部署、Dynamic activation、Crypto SOR resume或exchange mutation。
 
 ### DS-06 — Serial Warming, Atomic Pair Activation And Fallback
 

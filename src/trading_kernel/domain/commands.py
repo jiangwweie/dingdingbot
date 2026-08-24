@@ -129,9 +129,11 @@ class CancelCommandPayload(BaseModel):
     order_namespace: Literal["regular", "conditional"]
     purpose: Literal[
         "entry_remainder",
+        "selection_vacuum_entry",
         "reconciliation_cleanup",
         "runner_old_stop",
     ]
+    entry_vacuum_id: str | None = None
 
     @field_validator("exchange_order_id", mode="before")
     @classmethod
@@ -140,6 +142,22 @@ class CancelCommandPayload(BaseModel):
         if not normalized:
             raise ValueError("cancel command requires exchange order identity")
         return normalized
+
+    @field_validator("entry_vacuum_id", mode="before")
+    @classmethod
+    def _normalize_entry_vacuum_id(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _validate_vacuum_lineage(self) -> CancelCommandPayload:
+        if (self.purpose == "selection_vacuum_entry") != (
+            self.entry_vacuum_id is not None
+        ):
+            raise ValueError(
+                "selection Vacuum cancel requires exclusive Vacuum lineage"
+            )
+        return self
 
 
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")

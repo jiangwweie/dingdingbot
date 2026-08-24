@@ -159,6 +159,18 @@ async def issue_ready_signal(
             ticket_id=None,
         )
 
+    selection_control = await uow.instrument_selection.get_selection_control(
+        signal.strategy_group_id
+    )
+    vacuum = (
+        None
+        if selection_control is None
+        else await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=signal.strategy_group_id,
+            selection_spec_id=selection_control.selection_spec_id,
+        )
+    )
+
     scope = await uow.signals.get_runtime_scope(signal.runtime_scope_id)
     if (
         scope is None
@@ -293,6 +305,17 @@ async def issue_ready_signal(
             exposure_family=contract.exposure_family,
         ),
     )
+    if vacuum is not None and vacuum.blocks_new_entry:
+        return await _refuse(
+            uow,
+            signal,
+            IssueTicketStatus.SELECTION_ENTRY_VACUUM,
+            request.now_ms,
+            admission_context=admission_context,
+            entry_admission_snapshot_digest=request.admission_snapshot.digest(),
+            binding_constraint=vacuum.entry_vacuum_id,
+            admission_snapshot=request.admission_snapshot,
+        )
     current_product_decision = evaluate_event_product_entry(
         compatibility=product_compatibility_for(signal.event_spec_id),
         profile=product_profile,

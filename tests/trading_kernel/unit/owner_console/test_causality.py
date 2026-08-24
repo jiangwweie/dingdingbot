@@ -45,6 +45,26 @@ def test_causality_has_eight_business_stages_and_ordered_raw_evidence() -> None:
     )
 
 
+def test_vacuum_entry_events_remain_in_entry_causality_stage() -> None:
+    detail = build_trade_causality(
+        trade_causality_facts(
+            event_types=(
+                "TicketIssued",
+                "EntryVacuumCancelRequested",
+                "EntryVacuumCancelConfirmed",
+                "EntryVacuumOrderAbsenceConfirmed",
+                "VacuumPartialRetained",
+            ),
+            aggregate_status="protection_pending",
+            ticket_status="issued",
+            terminal_at_ms=None,
+            review=None,
+        )
+    )
+
+    assert {event.stage for event in detail.raw_events} == {"entry"}
+
+
 def test_exit_reason_comes_from_exit_event_not_candle_shape() -> None:
     detail = build_trade_causality(
         trade_causality_facts(

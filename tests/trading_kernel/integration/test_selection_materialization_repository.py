@@ -13,6 +13,11 @@ from src.trading_kernel.application.coordinate_selection_materialization import 
     complete_pending_authority_gap_audit,
     coordinate_selection_materialization_once,
 )
+from src.trading_kernel.application.drain_strategy_entry_vacuum import (
+    DrainStrategyEntryVacuumRequest,
+    VacuumDrainStatus,
+    drain_strategy_entry_vacuum_once,
+)
 from src.trading_kernel.domain.instrument_selection import (
     CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS,
     SOR_LONG_EVENT_SPEC_ID,
@@ -50,6 +55,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     instrument_selection_specs,
     instruments,
     owner_authorizations,
+    selection_authority_current,
     selection_authority_gap_audit_events,
     selection_authority_gap_audits_current,
     selection_session_authorities,
@@ -72,6 +78,10 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
+from tests.trading_kernel.support.lifecycle import (
+    reach_position_protected,
+    registered_sor_long_ticket,
+)
 
 SESSION_START_MS = 1_704_067_200_000
 SELECTION_SPEC_ID = "sor-dynamic-selection-v0"
@@ -219,6 +229,218 @@ async def test_repository_persists_valid_empty_intent_vacuum_without_authority(
     assert current_count == 1
     assert event["event_type"] == "OPEN"
     assert event["payload"]["intended_authority_outcome"] == "VALID_EMPTY"
+
+
+@pytest.mark.asyncio
+async def test_valid_empty_finalizes_vacuum_authority_and_pending_mode_atomically(
+    head_template_engine,
+) -> None:
+    await _seed_materialization_context(
+        head_template_engine,
+        selected_members=(),
+        selection_mode="static_baseline",
+        pending_selection_mode="dynamic_selection",
+    )
+    vacuum = StrategyEntryVacuum(
+        entry_vacuum_id="vacuum:SOR-001:1704067200000:valid-empty-final",
+        strategy_group_id="SOR-001",
+        selection_spec_id=SELECTION_SPEC_ID,
+        session_start_ms=SESSION_START_MS,
+        source_generation_id=None,
+        state="OPEN",
+        fenced_at_ms=SESSION_START_MS + 3_600_010,
+        drained_at_ms=None,
+        resolved_at_ms=None,
+        first_blocker="NO_SELECTION_READY_MEMBERS",
+        projection_version=1,
+    )
+    async with head_template_engine.begin() as connection:
+        await PostgresInstrumentSelectionRepository(
+            connection
+        ).open_valid_empty_intent_vacuum(
+            vacuum,
+            selection_snapshot_id=(
+                f"selection:{SELECTION_SPEC_ID}:{SESSION_START_MS}"
+            ),
+        )
+
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        started = await drain_strategy_entry_vacuum_once(
+            uow,
+            DrainStrategyEntryVacuumRequest(
+                strategy_group_id="SOR-001",
+                selection_spec_id=SELECTION_SPEC_ID,
+                now_ms=SESSION_START_MS + 3_600_020,
+            ),
+        )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        committed = await drain_strategy_entry_vacuum_once(
+            uow,
+            DrainStrategyEntryVacuumRequest(
+                strategy_group_id="SOR-001",
+                selection_spec_id=SELECTION_SPEC_ID,
+                now_ms=SESSION_START_MS + 3_600_030,
+            ),
+        )
+
+    assert started.status is VacuumDrainStatus.DRAIN_STARTED
+    assert committed.status is VacuumDrainStatus.VALID_EMPTY_COMMITTED
+    async with head_template_engine.connect() as connection:
+        vacuum_row = (
+            await connection.execute(
+                sa.select(strategy_entry_vacuums_current).where(
+                    strategy_entry_vacuums_current.c.entry_vacuum_id
+                    == vacuum.entry_vacuum_id
+                )
+            )
+        ).mappings().one()
+        authority_row = (
+            await connection.execute(
+                sa.select(selection_session_authorities).where(
+                    selection_session_authorities.c.selection_authority_id
+                    == committed.selection_authority_id
+                )
+            )
+        ).mappings().one()
+        current_authority_id = await connection.scalar(
+            sa.select(selection_authority_current.c.selection_authority_id).where(
+                selection_authority_current.c.selection_spec_id == SELECTION_SPEC_ID
+            )
+        )
+        control_row = (
+            await connection.execute(
+                sa.select(strategy_selection_control_current).where(
+                    strategy_selection_control_current.c.strategy_group_id
+                    == "SOR-001"
+                )
+            )
+        ).mappings().one()
+    assert vacuum_row["state"] == "VALID_EMPTY"
+    assert vacuum_row["drained_at_ms"] == SESSION_START_MS + 3_600_030
+    assert vacuum_row["resolved_at_ms"] == SESSION_START_MS + 3_600_030
+    assert authority_row["authority_outcome"] == "VALID_EMPTY"
+    assert current_authority_id == committed.selection_authority_id
+    assert control_row["selection_mode"] == "dynamic_selection"
+    assert control_row["pending_selection_mode"] is None
+
+
+@pytest.mark.asyncio
+async def test_valid_empty_rejects_generation_free_vacuum_with_wrong_intent(
+    head_template_engine,
+) -> None:
+    await _seed_materialization_context(
+        head_template_engine,
+        selected_members=(),
+    )
+    vacuum = StrategyEntryVacuum(
+        entry_vacuum_id="vacuum:SOR-001:1704067200000:wrong-intent",
+        strategy_group_id="SOR-001",
+        selection_spec_id=SELECTION_SPEC_ID,
+        session_start_ms=SESSION_START_MS,
+        source_generation_id=None,
+        state="DRAINING_ENTRY",
+        fenced_at_ms=SESSION_START_MS + 3_600_010,
+        drained_at_ms=None,
+        resolved_at_ms=None,
+        first_blocker="OWNER_PAUSE",
+        projection_version=2,
+    )
+    async with head_template_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(strategy_entry_vacuums_current).values(
+                **vacuum.model_dump(mode="json")
+            )
+        )
+
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        result = await drain_strategy_entry_vacuum_once(
+            uow,
+            DrainStrategyEntryVacuumRequest(
+                strategy_group_id="SOR-001",
+                selection_spec_id=SELECTION_SPEC_ID,
+                now_ms=SESSION_START_MS + 3_600_020,
+            ),
+        )
+
+    assert result.status is VacuumDrainStatus.BLOCKED
+    assert result.reason_code == "VALID_EMPTY_VACUUM_INTENT_INVALID"
+    async with head_template_engine.connect() as connection:
+        persisted_state = await connection.scalar(
+            sa.select(strategy_entry_vacuums_current.c.state).where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == vacuum.entry_vacuum_id
+            )
+        )
+        authority_count = int(
+            await connection.scalar(
+                sa.select(sa.func.count()).select_from(selection_session_authorities)
+            )
+            or 0
+        )
+    assert persisted_state == "DRAINING_ENTRY"
+    assert authority_count == 0
+
+
+@pytest.mark.asyncio
+async def test_valid_empty_is_non_retroactive_for_protected_ticket(
+    head_template_engine,
+) -> None:
+    ticket = registered_sor_long_ticket()
+    await reach_position_protected(head_template_engine, ticket)
+    await _seed_materialization_context(
+        head_template_engine,
+        selected_members=(),
+        include_current_pair=False,
+        seed_current_runtime=False,
+    )
+    vacuum = StrategyEntryVacuum(
+        entry_vacuum_id="vacuum:SOR-001:1704067200000:protected-ticket",
+        strategy_group_id="SOR-001",
+        selection_spec_id=SELECTION_SPEC_ID,
+        session_start_ms=SESSION_START_MS,
+        source_generation_id=None,
+        state="DRAINING_ENTRY",
+        fenced_at_ms=SESSION_START_MS + 3_600_010,
+        drained_at_ms=None,
+        resolved_at_ms=None,
+        first_blocker="NO_SELECTION_READY_MEMBERS",
+        projection_version=2,
+    )
+    async with head_template_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(strategy_entry_vacuums_current).values(
+                **vacuum.model_dump(mode="json")
+            )
+        )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        before = await uow.aggregates.get(ticket.identity.ticket_id)
+        reservation_before = await uow.budgets.get_for_ticket(
+            ticket.identity.ticket_id
+        )
+        result = await drain_strategy_entry_vacuum_once(
+            uow,
+            DrainStrategyEntryVacuumRequest(
+                strategy_group_id="SOR-001",
+                selection_spec_id=SELECTION_SPEC_ID,
+                now_ms=SESSION_START_MS + 3_600_020,
+            ),
+        )
+        after = await uow.aggregates.get(ticket.identity.ticket_id)
+        reservation_after = await uow.budgets.get_for_ticket(
+            ticket.identity.ticket_id
+        )
+        domain_active = await uow.entry_admission.has_active_ticket_in_domain(
+            ticket.identity.netting_domain.key()
+        )
+
+    assert result.status is VacuumDrainStatus.VALID_EMPTY_COMMITTED
+    assert before is not None and after is not None
+    assert after.status == before.status
+    assert after.position_qty == before.position_qty == ticket.quantity
+    assert after.version == before.version
+    assert reservation_after == reservation_before
+    assert reservation_after is not None and reservation_after.status == "active"
+    assert domain_active is True
 
 
 @pytest.mark.asyncio
@@ -546,11 +768,45 @@ async def test_changed_snapshot_advances_pending_then_desired_from_db_only(
         request=request,
         clock_ms=clock,
     )
+    fenced = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=clock,
+    )
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        drained = await drain_strategy_entry_vacuum_once(
+            uow,
+            DrainStrategyEntryVacuumRequest(
+                strategy_group_id="SOR-001",
+                selection_spec_id=SELECTION_SPEC_ID,
+                now_ms=SESSION_START_MS + 3_600_010,
+            ),
+        )
 
     assert continuity.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY
     assert pending.disposition is MaterializationDisposition.GENERATION_PENDING
     assert desired.disposition is MaterializationDisposition.GENERATION_DESIRED
     assert pending.materialization_generation_id == desired.materialization_generation_id
+    assert fenced.disposition is MaterializationDisposition.WAITING_VACUUM
+    assert fenced.entry_vacuum_id is not None
+    assert drained.status is VacuumDrainStatus.ENTRY_DRAINED
+    async with head_template_engine.connect() as connection:
+        generation_state = await connection.scalar(
+            sa.select(
+                strategy_universe_materialization_generations.c.lifecycle_state
+            ).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == desired.materialization_generation_id
+            )
+        )
+        vacuum_state = await connection.scalar(
+            sa.select(strategy_entry_vacuums_current.c.state).where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == fenced.entry_vacuum_id
+            )
+        )
+    assert generation_state == "MATERIALIZING"
+    assert vacuum_state == "RECONFIGURING"
 
 
 @pytest.mark.asyncio
@@ -953,17 +1209,20 @@ async def _seed_materialization_context(
     selection_mode: str = "dynamic_selection",
     pending_selection_mode: str | None = None,
     include_snapshot: bool = True,
+    include_current_pair: bool = True,
+    seed_current_runtime: bool = True,
 ) -> None:
-    async with PostgresKernelUnitOfWork(engine) as uow:
-        await seed_runtime_authority(
-            uow,
-            RuntimeAuthoritySeedRequest(
-                account_id="selection-materialization-test",
-                runtime_commit="selection-materialization-test",
-                schema_revision=CURRENT_SCHEMA_REVISION,
-                seeded_at_ms=SESSION_START_MS,
-            ),
-        )
+    if seed_current_runtime:
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id="selection-materialization-test",
+                    runtime_commit="selection-materialization-test",
+                    schema_revision=CURRENT_SCHEMA_REVISION,
+                    seeded_at_ms=SESSION_START_MS,
+                ),
+            )
     async with engine.begin() as connection:
         await connection.execute(
             pg_insert(instruments).on_conflict_do_nothing(),
@@ -1050,7 +1309,8 @@ async def _seed_materialization_context(
                 for instrument_id in CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
             ],
         )
-        await _seed_current_universe_pair(connection)
+        if include_current_pair:
+            await _seed_current_universe_pair(connection)
         if pending_selection_mode is not None:
             await connection.execute(
                 sa.insert(owner_authorizations).values(
@@ -1081,6 +1341,20 @@ async def _seed_materialization_context(
                 control_version=1,
                 rollback_baseline_id=None,
                 updated_at_ms=SESSION_START_MS,
+            )
+        )
+        await connection.execute(
+            pg_insert(strategy_entry_controls_current)
+            .values(
+                strategy_group_id="SOR-001",
+                entry_state="enabled",
+                control_version=1,
+                last_event_id="strategy-control-event:selection-materialization:test",
+                reason="selection_materialization_test_enabled",
+                updated_at_ms=SESSION_START_MS,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[strategy_entry_controls_current.c.strategy_group_id]
             )
         )
         if include_snapshot:

@@ -46,6 +46,7 @@ class IssueTicketStatus(StrEnum):
     CAPACITY_CLAIM_MISSING = "capacity_claim_missing"
     ADMISSION_INCIDENT_OPEN = "admission_incident_open"
     PRODUCT_ENTRY_BLOCKED = "product_entry_blocked"
+    SELECTION_ENTRY_VACUUM = "selection_entry_vacuum"
 
 
 class IssueTicketRequest(BaseModel):
@@ -130,6 +131,20 @@ async def issue_ticket(
         if not strategy_entry_is_enabled(strategy_control):
             return IssueTicketResult(
                 status=IssueTicketStatus.STRATEGY_PAUSED,
+                ticket_id=None,
+            )
+    selection_control = await uow.instrument_selection.get_selection_control(
+        ticket.identity.runtime.strategy_group_id
+    )
+    if selection_control is not None:
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=ticket.identity.runtime.strategy_group_id,
+            selection_spec_id=selection_control.selection_spec_id,
+            for_update=True,
+        )
+        if vacuum is not None and vacuum.blocks_new_entry:
+            return IssueTicketResult(
+                status=IssueTicketStatus.SELECTION_ENTRY_VACUUM,
                 ticket_id=None,
             )
     if (

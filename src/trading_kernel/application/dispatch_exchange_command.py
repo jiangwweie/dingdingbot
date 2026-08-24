@@ -52,6 +52,10 @@ from src.trading_kernel.domain.events import (
     EntryRemainderCancelConfirmed,
     EntryRemainderCancelOutcomeUnknown,
     EntryRemainderCancelRejected,
+    EntryVacuumCancelConfirmed,
+    EntryVacuumCancelOutcomeUnknown,
+    EntryVacuumCancelRejected,
+    EntryVacuumSuperseded,
     ExitAccepted,
     ExitOutcomeUnknown,
     ExitRejected,
@@ -226,6 +230,55 @@ async def dispatch_one_command(
                     status=DispatchCommandStatus.SUPERSEDED,
                     command_id=command.command_id,
                 )
+            if command.kind in {
+                ExchangeCommandKind.SET_LEVERAGE,
+                ExchangeCommandKind.ENTRY,
+            }:
+                selection_control = (
+                    await uow.instrument_selection.get_selection_control(
+                        aggregate.ticket.identity.runtime.strategy_group_id
+                    )
+                )
+                vacuum = (
+                    None
+                    if selection_control is None
+                    else await uow.instrument_selection.get_current_entry_vacuum(
+                        strategy_group_id=(
+                            aggregate.ticket.identity.runtime.strategy_group_id
+                        ),
+                        selection_spec_id=selection_control.selection_spec_id,
+                    )
+                )
+                if vacuum is not None and vacuum.blocks_new_entry:
+                    await uow.exchange_commands.mark_claimed_superseded(
+                        command_id=command.command_id,
+                        worker_id=request.worker_id,
+                        observed_at_ms=request.now_ms,
+                        reason=(
+                            "selection_entry_vacuum:"
+                            f"{vacuum.entry_vacuum_id}"
+                        ),
+                    )
+                    event = EntryVacuumSuperseded(
+                        event_id=(
+                            f"event:{aggregate.identity.ticket_id}:"
+                            f"{aggregate.last_event_sequence + 1}"
+                        ),
+                        ticket_id=aggregate.identity.ticket_id,
+                        sequence=aggregate.last_event_sequence + 1,
+                        occurred_at_ms=request.now_ms,
+                        entry_vacuum_id=vacuum.entry_vacuum_id,
+                        command_id=command.command_id,
+                    )
+                    await uow.commit_reduction(
+                        event=event,
+                        reduction=reduce_event(aggregate, event),
+                        expected_version=aggregate.version,
+                    )
+                    return DispatchCommandResult(
+                        status=DispatchCommandStatus.SUPERSEDED,
+                        command_id=command.command_id,
+                    )
     if command is None:
         return DispatchCommandResult(status=DispatchCommandStatus.NO_COMMAND)
 
@@ -467,6 +520,19 @@ async def _preflight_new_entry_mutation(
                 aggregate.ticket.identity.runtime.strategy_group_id
             )
         )
+        selection_control = await uow.instrument_selection.get_selection_control(
+            aggregate.ticket.identity.runtime.strategy_group_id
+        )
+        selection_vacuum = (
+            None
+            if selection_control is None
+            else await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=(
+                    aggregate.ticket.identity.runtime.strategy_group_id
+                ),
+                selection_spec_id=selection_control.selection_spec_id,
+            )
+        )
         strategy_version = await uow.signals.get_strategy_version(
             aggregate.ticket.identity.runtime.strategy_version_id
         )
@@ -533,6 +599,9 @@ async def _preflight_new_entry_mutation(
             now_ms=request.now_ms,
             product_entry_decision=product_entry_decision,
             strategy_entry_enabled=strategy_entry_is_enabled(strategy_control),
+            selection_entry_vacuum_open=bool(
+                selection_vacuum and selection_vacuum.blocks_new_entry
+            ),
         )
     )
     return decision.status
@@ -567,6 +636,49 @@ async def _record_preflight_refusal(
         aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
         if current_command is None or aggregate is None:
             raise RuntimeError("claimed command changed before preflight refusal")
+        if status is EntryDispatchPreflightStatus.SELECTION_ENTRY_VACUUM:
+            selection_control = (
+                await uow.instrument_selection.get_selection_control(
+                    aggregate.ticket.identity.runtime.strategy_group_id
+                )
+            )
+            vacuum = (
+                None
+                if selection_control is None
+                else await uow.instrument_selection.get_current_entry_vacuum(
+                    strategy_group_id=(
+                        aggregate.ticket.identity.runtime.strategy_group_id
+                    ),
+                    selection_spec_id=selection_control.selection_spec_id,
+                )
+            )
+            if vacuum is None or not vacuum.blocks_new_entry:
+                raise RuntimeError(
+                    "Selection Entry Vacuum changed before dispatch supersession"
+                )
+            await uow.exchange_commands.mark_claimed_superseded(
+                command_id=current_command.command_id,
+                worker_id=worker_id,
+                observed_at_ms=now_ms,
+                reason=f"selection_entry_vacuum:{vacuum.entry_vacuum_id}",
+            )
+            event = EntryVacuumSuperseded(
+                event_id=(
+                    f"event:{aggregate.identity.ticket_id}:"
+                    f"{aggregate.last_event_sequence + 1}"
+                ),
+                ticket_id=aggregate.identity.ticket_id,
+                sequence=aggregate.last_event_sequence + 1,
+                occurred_at_ms=now_ms,
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                command_id=current_command.command_id,
+            )
+            await uow.commit_reduction(
+                event=event,
+                reduction=reduce_event(aggregate, event),
+                expected_version=aggregate.version,
+            )
+            return
         event = _command_result_event(
             command=current_command,
             aggregate=aggregate,
@@ -605,6 +717,7 @@ def _command_is_applicable(
         },
         ExchangeCommandKind.CANCEL_ORDER: {
             AggregateStatus.PARTIAL_FILL_INCIDENT,
+            AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
             AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING,
             AggregateStatus.RECONCILIATION_PENDING,
         },
@@ -615,6 +728,7 @@ def _command_is_applicable(
         return False
     applicable_cancel_status = {
         "entry_remainder": AggregateStatus.PARTIAL_FILL_INCIDENT,
+        "selection_vacuum_entry": AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
         "runner_old_stop": AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING,
         "reconciliation_cleanup": AggregateStatus.RECONCILIATION_PENDING,
     }
@@ -763,6 +877,7 @@ def _cancel_result_event(
 ):
     expected_status = {
         "entry_remainder": AggregateStatus.PARTIAL_FILL_INCIDENT,
+        "selection_vacuum_entry": AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
         "runner_old_stop": AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING,
         "reconciliation_cleanup": AggregateStatus.RECONCILIATION_PENDING,
     }[payload.purpose]
@@ -771,6 +886,24 @@ def _cancel_result_event(
     if not isinstance(result, ExchangeCommandResult):
         raise TypeError("cancel command result is invalid")
     exchange_order_id = payload.exchange_order_id
+    if payload.purpose == "selection_vacuum_entry":
+        if result.status is ExchangeCommandStatus.ACCEPTED:
+            return EntryVacuumCancelConfirmed(
+                **common,
+                exchange_order_id=exchange_order_id,
+            )
+        if result.status is ExchangeCommandStatus.REJECTED:
+            return EntryVacuumCancelRejected(
+                **common,
+                exchange_order_id=exchange_order_id,
+                reason=str(result.reason),
+            )
+        if result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+            return EntryVacuumCancelOutcomeUnknown(
+                **common,
+                exchange_order_id=exchange_order_id,
+                reason=str(result.reason),
+            )
     if payload.purpose == "entry_remainder":
         if result.status is ExchangeCommandStatus.ACCEPTED:
             return EntryRemainderCancelConfirmed(

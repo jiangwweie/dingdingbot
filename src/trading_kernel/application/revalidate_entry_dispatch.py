@@ -57,6 +57,7 @@ class EntryDispatchPreflightStatus(StrEnum):
     POLICY_DRIFT = "policy_drift"
     NEW_ENTRY_DISABLED = "new_entry_disabled"
     STRATEGY_PAUSED = "strategy_paused"
+    SELECTION_ENTRY_VACUUM = "selection_entry_vacuum"
     SCOPE_DRIFT = "scope_drift"
     RUNTIME_FENCED = "runtime_fenced"
     STALE_SNAPSHOT = "stale_snapshot"
@@ -100,6 +101,7 @@ class EntryDispatchPreflightRequest(BaseModel):
     now_ms: int
     product_entry_decision: ProductEntryDecision | None = None
     strategy_entry_enabled: bool = True
+    selection_entry_vacuum_open: bool = False
 
     @field_validator("runtime_commit", "schema_revision", mode="before")
     @classmethod
@@ -177,6 +179,8 @@ def revalidate_entry_dispatch(
         return _refused(EntryDispatchPreflightStatus.NEW_ENTRY_DISABLED)
     if not request.strategy_entry_enabled:
         return _refused(EntryDispatchPreflightStatus.STRATEGY_PAUSED)
+    if request.selection_entry_vacuum_open:
+        return _refused(EntryDispatchPreflightStatus.SELECTION_ENTRY_VACUUM)
     if (
         request.active_family_ticket_count
         > ticket.family_ticket_limit

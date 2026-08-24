@@ -37,6 +37,9 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
+from tests.trading_kernel.support.selection_vacuum import (
+    open_strategy_entry_vacuum,
+)
 from tests.trading_kernel.support.signal_ingest import (
     seed_runtime_authority as _seed_runtime_authority,
 )
@@ -123,6 +126,63 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
         == ticket.selection_authority_id
         == "authority:persistence:1"
     )
+
+
+@pytest.mark.asyncio
+async def test_open_selection_vacuum_rejects_admission_before_claim_or_ticket(
+    issue_engine,
+) -> None:
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal(signal_event_id="signal-vacuum-refused")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                now_ms=1_002,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
+    vacuum = await open_strategy_entry_vacuum(
+        issue_engine,
+        strategy_group_id=signal.strategy_group_id,
+        strategy_version_id=signal.strategy_version_id,
+    )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result = await issue_ready_signal(
+            uow,
+            IssueReadySignalRequest(
+                signal_event_id=signal.signal_event_id,
+                admission_snapshot=_admission_snapshot(),
+                claim_owner="entry-worker-vacuum",
+                runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                now_ms=1_004,
+            ),
+        )
+
+    assert result.status is IssueTicketStatus.SELECTION_ENTRY_VACUUM
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        claim = await uow.capacity_claims.get_for_signal(signal.signal_event_id)
+        admission = await uow.admission_decisions.get_for_signal(
+            signal.signal_event_id
+        )
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+        has_ticket = await uow.entry_admission.has_ticket_for_signal(
+            signal.signal_event_id
+        )
+    assert claim is None
+    assert has_ticket is False
+    assert admission is not None
+    assert admission.decision_status.value == "rejected"
+    assert admission.first_blocker == "selection_entry_vacuum"
+    assert admission.binding_constraint == vacuum.entry_vacuum_id
+    assert readiness is not None
+    assert readiness.readiness_state == "blocked"
+    assert readiness.first_blocker == "selection_entry_vacuum"
 
 
 async def _seed_selection_authority(engine) -> None:

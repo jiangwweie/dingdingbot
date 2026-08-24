@@ -54,6 +54,10 @@ def test_trade_filter_ids_use_shared_persisted_identity_bounds(
     (
         (AggregateStatus.LEVERAGE_PENDING.value, "entry"),
         (AggregateStatus.ENTRY_OUTCOME_UNKNOWN.value, "entry"),
+        (AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING.value, "entry"),
+        (AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED.value, "entry"),
+        (AggregateStatus.ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN.value, "entry"),
+        (AggregateStatus.ENTRY_VACUUM_CANCELLED.value, "entry"),
         (AggregateStatus.PARTIAL_FILL_INCIDENT.value, "entry"),
         (AggregateStatus.PROTECTION_PENDING.value, "protection"),
         (AggregateStatus.POSITION_PROTECTED.value, "protection"),

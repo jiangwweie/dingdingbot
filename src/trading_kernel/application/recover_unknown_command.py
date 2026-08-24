@@ -35,6 +35,8 @@ from src.trading_kernel.domain.events import (
     EntryAbsenceConfirmed,
     EntryAccepted,
     EntryRemainderCancelConfirmed,
+    EntryVacuumCancelConfirmed,
+    EntryVacuumCancelRejected,
     ExitAbsenceConfirmed,
     ExitAccepted,
     InitialStopAbsenceConfirmed,
@@ -300,6 +302,14 @@ def _recovery_event(
     ):
         if not isinstance(command.payload, CancelCommandPayload):
             raise RuntimeError("cancel recovery payload is invalid")
+        if command.payload.purpose == "selection_vacuum_entry":
+            if aggregate.status is not AggregateStatus.ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN:
+                raise RuntimeError("Vacuum cancel purpose is incompatible with aggregate state")
+            return EntryVacuumCancelRejected(
+                **common,
+                exchange_order_id=command.payload.exchange_order_id,
+                reason="cancel_target_still_open",
+            )
         if command.payload.purpose != "reconciliation_cleanup":
             raise RuntimeError(
                 "cancel purpose cannot enter generic still-open recovery"
@@ -349,6 +359,13 @@ def _recovery_event(
             if aggregate.status is not AggregateStatus.PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN:
                 raise RuntimeError("cancel purpose is incompatible with aggregate state")
             return EntryRemainderCancelConfirmed(
+                **common,
+                exchange_order_id=target_order_id,
+            )
+        if command.payload.purpose == "selection_vacuum_entry":
+            if aggregate.status is not AggregateStatus.ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN:
+                raise RuntimeError("Vacuum cancel purpose is incompatible with aggregate state")
+            return EntryVacuumCancelConfirmed(
                 **common,
                 exchange_order_id=target_order_id,
             )

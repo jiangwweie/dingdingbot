@@ -50,6 +50,7 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.effects import (
     CancelEntryRemainder,
     CancelProtectionOrders,
+    CancelVacuumEntryOrder,
     MarkCancelCommandReconciledAbsent,
     OpenIncident,
     PrepareControlledFlattenCommand,
@@ -302,6 +303,30 @@ class PostgresKernelUnitOfWork:
                         ),
                         generation=generation,
                         occurred_at_ms=event.occurred_at_ms,
+                    )
+                )
+                continue
+            if isinstance(effect, CancelVacuumEntryOrder):
+                if aggregate.entry_exchange_order_id != effect.exchange_order_id:
+                    raise UnsupportedKernelEffect(
+                        "Vacuum cancel differs from authoritative ENTRY order"
+                    )
+                generation = await self.exchange_commands.next_generation(
+                    ticket_id=aggregate.identity.ticket_id,
+                    kind=ExchangeCommandKind.CANCEL_ORDER,
+                )
+                await self.exchange_commands.add(
+                    _cancel_protection_command(
+                        aggregate,
+                        CancelProtectionOrders(
+                            ticket_id=effect.ticket_id,
+                            exchange_order_id=effect.exchange_order_id,
+                            order_namespace="regular",
+                            purpose="selection_vacuum_entry",
+                        ),
+                        generation=generation,
+                        occurred_at_ms=event.occurred_at_ms,
+                        entry_vacuum_id=effect.entry_vacuum_id,
                     )
                 )
                 continue
@@ -791,6 +816,7 @@ def _cancel_protection_command(
     *,
     generation: int,
     occurred_at_ms: int,
+    entry_vacuum_id: str | None = None,
 ) -> ExchangeCommand:
     command_id = build_command_id(
         ticket_id=aggregate.identity.ticket_id,
@@ -808,6 +834,7 @@ def _cancel_protection_command(
             exchange_order_id=effect.exchange_order_id,
             order_namespace=effect.order_namespace,
             purpose=effect.purpose,
+            entry_vacuum_id=entry_vacuum_id,
         ),
         status=ExchangeCommandStatus.PREPARED,
         created_at_ms=occurred_at_ms,

@@ -2249,17 +2249,28 @@ trade_aggregates = sa.Table(
     _time("pending_stop_watermark_ms", nullable=True),
     _time("runner_stop_watermark_ms", nullable=True),
     _id("pending_cancel_exchange_order_id", nullable=True),
+    _id("entry_vacuum_id", nullable=True),
+    sa.Column("entry_materialization_kind", SHORT_TEXT, nullable=True),
     _id("exit_exchange_order_id", nullable=True),
     _id("review_id", nullable=True),
     _time("lifecycle_due_at_ms", nullable=True),
     _time("reconciliation_due_at_ms", nullable=True),
     _time("updated_at_ms"),
+    sa.ForeignKeyConstraint(
+        ["entry_vacuum_id"],
+        ["brc_strategy_entry_vacuums_current.entry_vacuum_id"],
+    ),
     sa.CheckConstraint("version > 0", name="version_positive"),
     sa.CheckConstraint("last_event_sequence > 0", name="sequence_positive"),
     sa.CheckConstraint("position_qty >= 0", name="position_nonnegative"),
     sa.CheckConstraint("protected_qty >= 0", name="protection_nonnegative"),
     sa.CheckConstraint("tp1_target_qty >= 0", name="tp1_target_nonnegative"),
     sa.CheckConstraint("tp1_filled_qty >= 0", name="tp1_filled_nonnegative"),
+    sa.CheckConstraint(
+        "entry_materialization_kind IS NULL OR "
+        "entry_materialization_kind = 'VACUUM_PARTIAL_RETAINED'",
+        name="entry_materialization_kind_valid",
+    ),
 )
 sa.Index(
     "ix_brc_trade_aggregates_lifecycle_due",

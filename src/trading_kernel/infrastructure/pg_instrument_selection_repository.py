@@ -64,6 +64,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_universe_materialization_events,
     strategy_universe_materialization_generations,
     strategy_universe_materialization_targets,
+    trade_aggregates,
+    trade_tickets,
 )
 
 LeaseKind = Literal["selection", "materialization", "observation"]
@@ -74,6 +76,28 @@ _CURRENT_ENTRY_VACUUM_STATES = (
     "OWNER_PAUSED",
     "SUPERSEDED",
     "FAILED_CLOSED",
+)
+_ENTRY_VACUUM_DRAIN_BLOCKING_STATUSES = (
+    "leverage_pending",
+    "leverage_confirmed",
+    "leverage_outcome_unknown",
+    "entry_pending",
+    "entry_accepted",
+    "entry_outcome_unknown",
+    "entry_vacuum_cancel_pending",
+    "entry_vacuum_cancel_rejected",
+    "entry_vacuum_cancel_outcome_unknown",
+    "entry_vacuum_cancelled",
+    "partial_fill_incident",
+    "partial_fill_cancel_rejected",
+    "partial_fill_cancel_outcome_unknown",
+    "protection_pending",
+    "initial_stop_outcome_unknown",
+    "post_fill_risk_pending",
+    "controlled_flatten_pending",
+    "controlled_flatten_accepted",
+    "controlled_flatten_rejected",
+    "controlled_flatten_outcome_unknown",
 )
 
 
@@ -648,6 +672,23 @@ class PostgresInstrumentSelectionRepository:
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         return None if row is None else _materialization_generation_from_row(row)
 
+    async def get_materialization_generation(
+        self,
+        materialization_generation_id: str,
+        *,
+        for_update: bool = False,
+    ) -> MaterializationGeneration | None:
+        statement = sa.select(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id
+            == materialization_generation_id
+        )
+        if for_update:
+            statement = statement.with_for_update(
+                of=strategy_universe_materialization_generations
+            )
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        return None if row is None else _materialization_generation_from_row(row)
+
     async def mark_materialization_generation_desired(
         self,
         materialization_generation_id: str,
@@ -802,6 +843,86 @@ class PostgresInstrumentSelectionRepository:
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         return None if row is None else _entry_vacuum_from_row(row)
 
+    async def open_generation_entry_vacuum(
+        self,
+        vacuum: StrategyEntryVacuum,
+        *,
+        expected_generation_version: int,
+    ) -> None:
+        if (
+            vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY
+            or vacuum.source_generation_id is None
+            or vacuum.projection_version != 2
+        ):
+            raise ValueError(
+                "Generation Vacuum must include OPEN and DRAINING_ENTRY projections"
+            )
+        generation = await self.get_materialization_generation(
+            vacuum.source_generation_id,
+            for_update=True,
+        )
+        if (
+            generation is None
+            or generation.lifecycle_state
+            is not MaterializationGenerationState.DESIRED
+            or generation.projection_version != expected_generation_version
+            or generation.strategy_group_id != vacuum.strategy_group_id
+            or generation.selection_spec_id != vacuum.selection_spec_id
+            or generation.session_start_ms != vacuum.session_start_ms
+        ):
+            raise SelectionJobConflict("Generation changed before Vacuum fence")
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuums_current).values(
+                **vacuum.model_dump(mode="json")
+            )
+        )
+        for sequence, event_type in ((1, "OPEN"), (2, "DRAINING_ENTRY")):
+            await self._connection.execute(
+                sa.insert(strategy_entry_vacuum_events).values(
+                    entry_vacuum_event_id=(
+                        f"vacuum-event:{vacuum.entry_vacuum_id}:{sequence}"
+                    ),
+                    entry_vacuum_id=vacuum.entry_vacuum_id,
+                    event_sequence=sequence,
+                    event_type=event_type,
+                    payload={
+                        "source_generation_id": vacuum.source_generation_id,
+                        "projection_version": vacuum.projection_version,
+                    },
+                    occurred_at_ms=vacuum.fenced_at_ms,
+                )
+            )
+        updated = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == vacuum.source_generation_id,
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == "DESIRED",
+                strategy_universe_materialization_generations.c.projection_version
+                == expected_generation_version,
+            )
+            .values(
+                lifecycle_state="DRAINING_ENTRY",
+                fenced_at_ms=vacuum.fenced_at_ms,
+                projection_version=expected_generation_version + 1,
+            )
+        )
+        if updated.rowcount != 1:
+            raise SelectionJobConflict("Generation changed during Vacuum fence")
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=(
+                    f"materialization-event:{vacuum.source_generation_id}:3"
+                ),
+                materialization_generation_id=vacuum.source_generation_id,
+                event_sequence=3,
+                event_type="DRAINING_ENTRY",
+                payload={"entry_vacuum_id": vacuum.entry_vacuum_id},
+                occurred_at_ms=vacuum.fenced_at_ms,
+            )
+        )
+
     async def open_valid_empty_intent_vacuum(
         self,
         vacuum: StrategyEntryVacuum,
@@ -832,6 +953,237 @@ class PostgresInstrumentSelectionRepository:
                 occurred_at_ms=vacuum.fenced_at_ms,
             )
         )
+
+    async def mark_entry_vacuum_draining(
+        self,
+        vacuum: StrategyEntryVacuum,
+        *,
+        started_at_ms: int,
+    ) -> StrategyEntryVacuum:
+        if vacuum.state is not StrategyEntryVacuumState.OPEN:
+            raise ValueError("only an OPEN Vacuum may start ENTRY drain")
+        draining = StrategyEntryVacuum.model_validate(
+            vacuum.model_copy(
+                update={
+                    "state": StrategyEntryVacuumState.DRAINING_ENTRY,
+                    "projection_version": vacuum.projection_version + 1,
+                }
+            ).model_dump()
+        )
+        updated = await self._connection.execute(
+            sa.update(strategy_entry_vacuums_current)
+            .where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.state == "OPEN",
+                strategy_entry_vacuums_current.c.projection_version
+                == vacuum.projection_version,
+            )
+            .values(
+                state=draining.state.value,
+                projection_version=draining.projection_version,
+            )
+        )
+        if updated.rowcount != 1:
+            raise SelectionJobConflict("Vacuum changed before ENTRY drain")
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=(
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:"
+                    f"{draining.projection_version}"
+                ),
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=draining.projection_version,
+                event_type="DRAINING_ENTRY",
+                payload={"projection_version": draining.projection_version},
+                occurred_at_ms=started_at_ms,
+            )
+        )
+        return draining
+
+    async def get_next_entry_vacuum_ticket(
+        self,
+        *,
+        strategy_group_id: str,
+    ) -> str | None:
+        priority = sa.case(
+            (trade_aggregates.c.status == "entry_accepted", 1),
+            (trade_aggregates.c.status.like("entry_vacuum_%"), 2),
+            (trade_aggregates.c.status.like("entry_%"), 3),
+            (trade_aggregates.c.status.like("leverage_%"), 4),
+            (trade_aggregates.c.status.like("partial_fill_%"), 5),
+            (trade_aggregates.c.status == "protection_pending", 6),
+            (trade_aggregates.c.status == "initial_stop_outcome_unknown", 7),
+            (trade_aggregates.c.status == "post_fill_risk_pending", 8),
+            else_=9,
+        )
+        ticket_id = (
+            await self._connection.execute(
+                sa.select(trade_aggregates.c.ticket_id)
+                .join(
+                    trade_tickets,
+                    trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
+                )
+                .where(
+                    trade_tickets.c.strategy_group_id == strategy_group_id,
+                    trade_tickets.c.terminal_at_ms.is_(None),
+                    trade_aggregates.c.status.in_(
+                        _ENTRY_VACUUM_DRAIN_BLOCKING_STATUSES
+                    ),
+                )
+                .order_by(priority, trade_aggregates.c.updated_at_ms)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return None if ticket_id is None else str(ticket_id)
+
+    async def entry_vacuum_has_drain_blockers(
+        self,
+        *,
+        strategy_group_id: str,
+    ) -> bool:
+        return bool(
+            (
+                await self._connection.execute(
+                    sa.select(
+                        sa.exists().where(
+                            trade_tickets.c.ticket_id
+                            == trade_aggregates.c.ticket_id,
+                            trade_tickets.c.strategy_group_id
+                            == strategy_group_id,
+                            trade_tickets.c.terminal_at_ms.is_(None),
+                            trade_aggregates.c.status.in_(
+                                _ENTRY_VACUUM_DRAIN_BLOCKING_STATUSES
+                            ),
+                        )
+                    )
+                )
+            ).scalar_one()
+        )
+
+    async def mark_entry_vacuum_drained(
+        self,
+        vacuum: StrategyEntryVacuum,
+        *,
+        target_state: Literal["RECONFIGURING", "VALID_EMPTY"],
+        drained_at_ms: int,
+    ) -> StrategyEntryVacuum:
+        if vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY:
+            raise ValueError("Vacuum drain completion requires DRAINING_ENTRY")
+        if await self.entry_vacuum_has_drain_blockers(
+            strategy_group_id=vacuum.strategy_group_id
+        ):
+            raise SelectionJobConflict("Vacuum ENTRY drain still has blockers")
+        target = StrategyEntryVacuumState(target_state)
+        resolved_at_ms = (
+            drained_at_ms
+            if target is StrategyEntryVacuumState.VALID_EMPTY
+            else None
+        )
+        drained = StrategyEntryVacuum.model_validate(
+            vacuum.model_copy(
+                update={
+                    "state": target,
+                    "drained_at_ms": drained_at_ms,
+                    "resolved_at_ms": resolved_at_ms,
+                    "projection_version": vacuum.projection_version + 1,
+                }
+            ).model_dump()
+        )
+        if (
+            target is StrategyEntryVacuumState.RECONFIGURING
+            and vacuum.source_generation_id is None
+        ):
+            raise ValueError("RECONFIGURING requires source Generation")
+        updated = await self._connection.execute(
+            sa.update(strategy_entry_vacuums_current)
+            .where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id
+                == vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.state == "DRAINING_ENTRY",
+                strategy_entry_vacuums_current.c.projection_version
+                == vacuum.projection_version,
+            )
+            .values(
+                state=drained.state.value,
+                drained_at_ms=drained_at_ms,
+                resolved_at_ms=resolved_at_ms,
+                projection_version=drained.projection_version,
+            )
+        )
+        if updated.rowcount != 1:
+            raise SelectionJobConflict("Vacuum changed before drain completion")
+        event_sequence = vacuum.projection_version + 1
+        await self._connection.execute(
+            sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=(
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:{event_sequence}"
+                ),
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=event_sequence,
+                event_type="ENTRY_DRAINED",
+                payload={"target_state": target.value},
+                occurred_at_ms=drained_at_ms,
+            )
+        )
+        if target is StrategyEntryVacuumState.VALID_EMPTY:
+            await self._connection.execute(
+                sa.insert(strategy_entry_vacuum_events).values(
+                    entry_vacuum_event_id=(
+                        f"vacuum-event:{vacuum.entry_vacuum_id}:"
+                        f"{event_sequence + 1}"
+                    ),
+                    entry_vacuum_id=vacuum.entry_vacuum_id,
+                    event_sequence=event_sequence + 1,
+                    event_type="VALID_EMPTY",
+                    payload={"resolved_at_ms": drained_at_ms},
+                    occurred_at_ms=drained_at_ms,
+                )
+            )
+            return drained
+        assert vacuum.source_generation_id is not None
+        generation = await self.get_materialization_generation(
+            vacuum.source_generation_id,
+            for_update=True,
+        )
+        if (
+            generation is None
+            or generation.lifecycle_state
+            is not MaterializationGenerationState.DRAINING_ENTRY
+        ):
+            raise SelectionJobConflict("Generation is not waiting for ENTRY drain")
+        generation_update = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == generation.materialization_generation_id,
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == "DRAINING_ENTRY",
+                strategy_universe_materialization_generations.c.projection_version
+                == generation.projection_version,
+            )
+            .values(
+                lifecycle_state="MATERIALIZING",
+                projection_version=generation.projection_version + 1,
+            )
+        )
+        if generation_update.rowcount != 1:
+            raise SelectionJobConflict("Generation changed before materialization")
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=(
+                    f"materialization-event:{generation.materialization_generation_id}:4"
+                ),
+                materialization_generation_id=(
+                    generation.materialization_generation_id
+                ),
+                event_sequence=4,
+                event_type="MATERIALIZING",
+                payload={"entry_vacuum_id": vacuum.entry_vacuum_id},
+                occurred_at_ms=drained_at_ms,
+            )
+        )
+        return drained
 
     async def add_pending_authority_gap_audit(
         self,

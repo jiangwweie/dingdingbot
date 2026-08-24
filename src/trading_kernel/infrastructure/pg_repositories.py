@@ -948,6 +948,37 @@ class PostgresExchangeCommandRepository:
         if updated.rowcount != 1:
             raise AggregateVersionConflict("command claim changed before supersession")
 
+    async def mark_prepared_superseded(
+        self,
+        *,
+        command_id: str,
+        observed_at_ms: int,
+        reason: str,
+    ) -> None:
+        normalized_reason = str(reason or "").strip()
+        if not normalized_reason:
+            raise ValueError("superseded command requires a reason")
+        updated = await self._connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.command_id == command_id,
+                exchange_commands.c.status == ExchangeCommandStatus.PREPARED.value,
+            )
+            .values(
+                status=ExchangeCommandStatus.SUPERSEDED.value,
+                result_payload={
+                    "status": ExchangeCommandStatus.SUPERSEDED.value,
+                    "reason": normalized_reason,
+                    "observed_at_ms": observed_at_ms,
+                },
+                completed_at_ms=observed_at_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict(
+                "prepared command changed before supersession"
+            )
+
     async def get_one_expired_claim(
         self,
         *,
@@ -3137,6 +3168,8 @@ def _aggregate_values(
         "pending_cancel_exchange_order_id": (
             aggregate.pending_cancel_exchange_order_id
         ),
+        "entry_vacuum_id": aggregate.entry_vacuum_id,
+        "entry_materialization_kind": aggregate.entry_materialization_kind,
         "exit_exchange_order_id": aggregate.exit_exchange_order_id,
         "review_id": aggregate.review_id,
         "updated_at_ms": updated_at_ms or aggregate.ticket.created_at_ms,
@@ -3409,6 +3442,12 @@ def _aggregate_from_row(
             if row["pending_cancel_exchange_order_id"] is None
             else str(row["pending_cancel_exchange_order_id"])
         ),
+        entry_vacuum_id=(
+            None
+            if row["entry_vacuum_id"] is None
+            else str(row["entry_vacuum_id"])
+        ),
+        entry_materialization_kind=row["entry_materialization_kind"],
         exit_exchange_order_id=(
             None
             if row["exit_exchange_order_id"] is None

@@ -17,6 +17,7 @@ from src.trading_kernel.domain.cross_margin_stress import (
 from src.trading_kernel.domain.effects import (
     CancelEntryRemainder,
     CancelProtectionOrders,
+    CancelVacuumEntryOrder,
     MarkCancelCommandReconciledAbsent,
     OpenIncident,
     PrepareControlledFlattenCommand,
@@ -50,6 +51,10 @@ from src.trading_kernel.domain.events import (
     EntryRejected,
     EntryRemainderCancelConfirmed,
     EntryRemainderCancelOutcomeUnknown,
+    EntryVacuumAbsenceConfirmed,
+    EntryVacuumCancelConfirmed,
+    EntryVacuumCancelRequested,
+    EntryVacuumOrderAbsenceConfirmed,
     ExitAbsenceConfirmed,
     ExitAccepted,
     ExitOutcomeUnknown,
@@ -81,6 +86,8 @@ from src.trading_kernel.domain.events import (
     TakeProfitOutcomeUnknown,
     TicketIssued,
     UnownedOrderDetected,
+    VacuumPartialFlattenRequired,
+    VacuumPartialRetained,
 )
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillRiskRequest,
@@ -90,11 +97,16 @@ from src.trading_kernel.domain.reducer import InvalidLifecycleTransition, reduce
 from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
 
-def _normal_post_fill_risk(ticket, average_fill_price: Decimal):
+def _normal_post_fill_risk(
+    ticket,
+    average_fill_price: Decimal,
+    *,
+    filled_quantity: Decimal | None = None,
+):
     return assess_post_fill_risk(
         PostFillRiskRequest(
             position_side=ticket.identity.netting_domain.position_side,
-            filled_quantity=ticket.quantity,
+            filled_quantity=filled_quantity or ticket.quantity,
             average_fill_price=average_fill_price,
             initial_stop_price=ticket.initial_stop_price,
             planned_stop_risk_budget=ticket.planned_stop_risk_budget,
@@ -503,6 +515,282 @@ def test_partial_entry_fill_is_incident_and_controlled_flatten_not_normal_positi
             ticket_id=ticket.identity.ticket_id,
             quantity=Decimal("0.0004"),
         ),
+    )
+
+
+def test_vacuum_partial_retained_freezes_actual_two_leg_plan_and_keeps_capacity() -> None:
+    ticket = _ticket(selection_authority_id="selection-authority:test")
+    issued = reduce_event(
+        None,
+        TicketIssued(
+            event_id="event-1",
+            ticket=ticket,
+            sequence=1,
+            occurred_at_ms=1_001,
+        ),
+    ).aggregate
+    accepted = reduce_event(
+        issued,
+        EntryAccepted(
+            event_id="event-2",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=2,
+            occurred_at_ms=1_050,
+            exchange_order_id="entry-1",
+        ),
+    ).aggregate
+    cancelling = reduce_event(
+        accepted,
+        EntryVacuumCancelRequested(
+            event_id="event-3",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=3,
+            occurred_at_ms=1_100,
+            entry_vacuum_id="vacuum:SOR-001:1704067200000",
+            exchange_order_id="entry-1",
+            observed_qty=Decimal("0.0006"),
+            average_fill_price=Decimal(60000),
+        ),
+    )
+
+    assert cancelling.aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING
+    assert cancelling.aggregate.entry_vacuum_id == (
+        "vacuum:SOR-001:1704067200000"
+    )
+    assert cancelling.effects == (
+        CancelVacuumEntryOrder(
+            ticket_id=ticket.identity.ticket_id,
+            exchange_order_id="entry-1",
+            entry_vacuum_id="vacuum:SOR-001:1704067200000",
+        ),
+    )
+
+    cancelled = reduce_event(
+        cancelling.aggregate,
+        EntryVacuumCancelConfirmed(
+            event_id="event-4",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=4,
+            occurred_at_ms=1_150,
+            exchange_order_id="entry-1",
+        ),
+    ).aggregate
+    assert cancelled.status is AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING
+    frozen = reduce_event(
+        cancelled,
+        EntryVacuumOrderAbsenceConfirmed(
+            event_id="event-5",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=5,
+            occurred_at_ms=1_175,
+            entry_vacuum_id="vacuum:SOR-001:1704067200000",
+            exchange_order_id="entry-1",
+            final_filled_qty=Decimal("0.0006"),
+            average_fill_price=Decimal(60000),
+        ),
+    ).aggregate
+    retained = reduce_event(
+        frozen,
+        VacuumPartialRetained(
+            event_id="event-6",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=6,
+            occurred_at_ms=1_200,
+            entry_vacuum_id="vacuum:SOR-001:1704067200000",
+            selection_authority_id="selection-authority:test",
+            requested_qty=ticket.quantity,
+            final_filled_qty=Decimal("0.0006"),
+            average_fill_price=Decimal(60000),
+            quantity_step=Decimal("0.0001"),
+            effective_tp1_qty=Decimal("0.0003"),
+            effective_runner_qty=Decimal("0.0003"),
+            post_fill_risk=_normal_post_fill_risk(
+                ticket,
+                Decimal(60000),
+                filled_quantity=Decimal("0.0006"),
+            ),
+        ),
+    )
+
+    assert retained.aggregate.status is AggregateStatus.PROTECTION_PENDING
+    assert retained.aggregate.position_qty == Decimal("0.0006")
+    assert retained.aggregate.tp1_target_qty == Decimal("0.0003")
+    assert retained.aggregate.entry_materialization_kind == (
+        "VACUUM_PARTIAL_RETAINED"
+    )
+    assert retained.aggregate.position_qty - retained.aggregate.tp1_target_qty == Decimal(
+        "0.0003"
+    )
+    assert retained.aggregate.entry_lane_held is True
+    assert retained.effects == (
+        PrepareInitialStopCommand(
+            ticket_id=ticket.identity.ticket_id,
+            quantity=Decimal("0.0006"),
+            stop_price=ticket.initial_stop_price,
+        ),
+    )
+
+
+def test_vacuum_partial_without_two_legs_controlled_flattens_after_cancel() -> None:
+    ticket = _ticket()
+    issued = reduce_event(
+        None,
+        TicketIssued(
+            event_id="event-1",
+            ticket=ticket,
+            sequence=1,
+            occurred_at_ms=1_001,
+        ),
+    ).aggregate
+    accepted = reduce_event(
+        issued,
+        EntryAccepted(
+            event_id="event-2",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=2,
+            occurred_at_ms=1_050,
+            exchange_order_id="entry-1",
+        ),
+    ).aggregate
+    cancelling = reduce_event(
+        accepted,
+        EntryVacuumCancelRequested(
+            event_id="event-3",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=3,
+            occurred_at_ms=1_100,
+            entry_vacuum_id="vacuum:SOR-001:1704067200000",
+            exchange_order_id="entry-1",
+            observed_qty=Decimal("0.0001"),
+            average_fill_price=Decimal(60000),
+        ),
+    ).aggregate
+    cancelled = reduce_event(
+        cancelling,
+        EntryVacuumCancelConfirmed(
+            event_id="event-4",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=4,
+            occurred_at_ms=1_150,
+            exchange_order_id="entry-1",
+        ),
+    ).aggregate
+    assert cancelled.status is AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING
+    frozen = reduce_event(
+        cancelled,
+        EntryVacuumOrderAbsenceConfirmed(
+            event_id="event-5",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=5,
+            occurred_at_ms=1_175,
+            entry_vacuum_id="vacuum:SOR-001:1704067200000",
+            exchange_order_id="entry-1",
+            final_filled_qty=Decimal("0.0001"),
+            average_fill_price=Decimal(60000),
+        ),
+    ).aggregate
+    flatten = reduce_event(
+        frozen,
+        VacuumPartialFlattenRequired(
+            event_id="event-6",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=6,
+            occurred_at_ms=1_200,
+            entry_vacuum_id="vacuum:SOR-001:1704067200000",
+            final_filled_qty=Decimal("0.0001"),
+            average_fill_price=Decimal(60000),
+            reason="vacuum_partial_two_leg_unavailable",
+        ),
+    )
+
+    assert flatten.aggregate.status is AggregateStatus.CONTROLLED_FLATTEN_PENDING
+    assert flatten.effects == (
+        OpenIncident(
+            ticket_id=ticket.identity.ticket_id,
+            incident_kind="vacuum_partial_two_leg_unavailable",
+        ),
+        PrepareControlledFlattenCommand(
+            ticket_id=ticket.identity.ticket_id,
+            quantity=Decimal("0.0001"),
+        ),
+    )
+
+
+def test_vacuum_zero_fill_closes_only_after_cancel_and_final_absence() -> None:
+    ticket = _ticket()
+    issued = reduce_event(
+        None,
+        TicketIssued(
+            event_id="event-1",
+            ticket=ticket,
+            sequence=1,
+            occurred_at_ms=1_001,
+        ),
+    ).aggregate
+    accepted = reduce_event(
+        issued,
+        EntryAccepted(
+            event_id="event-2",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=2,
+            occurred_at_ms=1_050,
+            exchange_order_id="entry-1",
+        ),
+    ).aggregate
+    cancelling = reduce_event(
+        accepted,
+        EntryVacuumCancelRequested(
+            event_id="event-3",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=3,
+            occurred_at_ms=1_100,
+            entry_vacuum_id="vacuum:SOR-001:1704067200000",
+            exchange_order_id="entry-1",
+            observed_qty=Decimal(0),
+            average_fill_price=None,
+        ),
+    ).aggregate
+    cancelled = reduce_event(
+        cancelling,
+        EntryVacuumCancelConfirmed(
+            event_id="event-4",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=4,
+            occurred_at_ms=1_150,
+            exchange_order_id="entry-1",
+        ),
+    ).aggregate
+    assert cancelled.status is AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING
+    frozen = reduce_event(
+        cancelled,
+        EntryVacuumOrderAbsenceConfirmed(
+            event_id="event-5",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=5,
+            occurred_at_ms=1_175,
+            entry_vacuum_id="vacuum:SOR-001:1704067200000",
+            exchange_order_id="entry-1",
+            final_filled_qty=Decimal(0),
+            average_fill_price=None,
+        ),
+    ).aggregate
+    absent = reduce_event(
+        frozen,
+        EntryVacuumAbsenceConfirmed(
+            event_id="event-6",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=6,
+            occurred_at_ms=1_200,
+            entry_vacuum_id="vacuum:SOR-001:1704067200000",
+        ),
+    )
+
+    assert absent.aggregate.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
+    assert absent.aggregate.entry_lane_held is False
+    assert absent.effects == (
+        ReleaseBudget(ticket_id=ticket.identity.ticket_id),
+        ReleaseEntryLane(ticket_id=ticket.identity.ticket_id),
+        ProjectTerminalOwnerState(ticket_id=ticket.identity.ticket_id),
     )
 
 

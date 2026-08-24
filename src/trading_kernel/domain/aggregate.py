@@ -26,6 +26,10 @@ class AggregateStatus(StrEnum):
     ENTRY_REJECTED = "entry_rejected"
     ENTRY_OUTCOME_UNKNOWN = "entry_outcome_unknown"
     ENTRY_RECONCILED_ABSENT = "entry_reconciled_absent"
+    ENTRY_VACUUM_CANCEL_PENDING = "entry_vacuum_cancel_pending"
+    ENTRY_VACUUM_CANCEL_REJECTED = "entry_vacuum_cancel_rejected"
+    ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN = "entry_vacuum_cancel_outcome_unknown"
+    ENTRY_VACUUM_CANCELLED = "entry_vacuum_cancelled"
     PARTIAL_FILL_INCIDENT = "partial_fill_incident"
     PARTIAL_FILL_CANCEL_REJECTED = "partial_fill_cancel_rejected"
     PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN = "partial_fill_cancel_outcome_unknown"
@@ -63,6 +67,10 @@ class AggregateStatus(StrEnum):
 
 RECONCILIATION_POSITION_STATUSES = (
     AggregateStatus.ENTRY_ACCEPTED,
+    AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
+    AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED,
+    AggregateStatus.ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN,
+    AggregateStatus.ENTRY_VACUUM_CANCELLED,
     AggregateStatus.PARTIAL_FILL_INCIDENT,
     AggregateStatus.PARTIAL_FILL_CANCEL_REJECTED,
     AggregateStatus.PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN,
@@ -125,5 +133,7 @@ class TradeAggregate(BaseModel):
     pending_stop_watermark_ms: int | None = None
     runner_stop_watermark_ms: int | None = None
     pending_cancel_exchange_order_id: str | None = None
+    entry_vacuum_id: str | None = None
+    entry_materialization_kind: Literal["VACUUM_PARTIAL_RETAINED"] | None = None
     exit_exchange_order_id: str | None = None
     review_id: str | None = None

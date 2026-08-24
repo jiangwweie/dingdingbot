@@ -150,6 +150,132 @@ class EntryRemainderCancelOutcomeUnknown(_TicketEvent):
     reason: str
 
 
+class EntryVacuumSuperseded(_TicketEvent):
+    entry_vacuum_id: str
+    command_id: str
+    reason: Literal["selection_entry_vacuum"] = "selection_entry_vacuum"
+
+    @model_validator(mode="after")
+    def _validate_vacuum_supersession(self) -> EntryVacuumSuperseded:
+        if not self.entry_vacuum_id.strip() or not self.command_id.strip():
+            raise ValueError("Vacuum supersession requires exact identities")
+        return self
+
+
+class EntryVacuumCancelRequested(_TicketEvent):
+    entry_vacuum_id: str
+    exchange_order_id: str
+    observed_qty: Decimal
+    average_fill_price: Decimal | None
+
+    @model_validator(mode="after")
+    def _validate_vacuum_cancel(self) -> EntryVacuumCancelRequested:
+        if not self.entry_vacuum_id.strip() or not self.exchange_order_id.strip():
+            raise ValueError("Vacuum ENTRY cancel requires exact identities")
+        if self.observed_qty < 0:
+            raise ValueError("Vacuum ENTRY observed quantity cannot be negative")
+        if (self.observed_qty == 0) != (self.average_fill_price is None):
+            raise ValueError("Vacuum ENTRY fill price must match observed exposure")
+        if self.average_fill_price is not None and self.average_fill_price <= 0:
+            raise ValueError("Vacuum ENTRY fill price must be positive")
+        return self
+
+
+class EntryVacuumCancelConfirmed(_TicketEvent):
+    exchange_order_id: str
+
+
+class EntryVacuumCancelRejected(_TicketEvent):
+    exchange_order_id: str
+    reason: str
+
+
+class EntryVacuumCancelOutcomeUnknown(_TicketEvent):
+    exchange_order_id: str
+    reason: str
+
+
+class EntryVacuumOrderAbsenceConfirmed(_TicketEvent):
+    entry_vacuum_id: str
+    exchange_order_id: str
+    final_filled_qty: Decimal
+    average_fill_price: Decimal | None
+
+    @model_validator(mode="after")
+    def _validate_order_absence(self) -> EntryVacuumOrderAbsenceConfirmed:
+        if not self.entry_vacuum_id.strip() or not self.exchange_order_id.strip():
+            raise ValueError("Vacuum order absence requires exact identities")
+        if self.final_filled_qty < 0:
+            raise ValueError("Vacuum final filled quantity cannot be negative")
+        if (self.final_filled_qty == 0) != (self.average_fill_price is None):
+            raise ValueError("Vacuum final fill price must match final quantity")
+        if self.average_fill_price is not None and self.average_fill_price <= 0:
+            raise ValueError("Vacuum final fill price must be positive")
+        return self
+
+
+class EntryVacuumAbsenceConfirmed(_TicketEvent):
+    entry_vacuum_id: str
+
+
+class VacuumPartialRetained(_TicketEvent):
+    entry_vacuum_id: str
+    selection_authority_id: str | None
+    requested_qty: Decimal
+    final_filled_qty: Decimal
+    average_fill_price: Decimal
+    quantity_step: Decimal
+    effective_tp1_qty: Decimal
+    effective_runner_qty: Decimal
+    materialization_kind: Literal["VACUUM_PARTIAL_RETAINED"] = (
+        "VACUUM_PARTIAL_RETAINED"
+    )
+    post_fill_risk: PostFillRiskDecision
+
+    @model_validator(mode="after")
+    def _validate_retained_materialization(self) -> VacuumPartialRetained:
+        if not self.entry_vacuum_id.strip():
+            raise ValueError("retained partial requires Vacuum identity")
+        if self.selection_authority_id is not None and not self.selection_authority_id.strip():
+            raise ValueError("retained partial Authority identity cannot be blank")
+        if min(
+            self.requested_qty,
+            self.final_filled_qty,
+            self.average_fill_price,
+            self.quantity_step,
+            self.effective_tp1_qty,
+            self.effective_runner_qty,
+        ) <= 0:
+            raise ValueError("retained partial quantities and price must be positive")
+        if not self.final_filled_qty < self.requested_qty:
+            raise ValueError("retained partial must be smaller than requested quantity")
+        if self.final_filled_qty % self.quantity_step != 0:
+            raise ValueError("retained partial must align to certified quantity step")
+        if self.effective_tp1_qty + self.effective_runner_qty != self.final_filled_qty:
+            raise ValueError("retained partial TP1 and runner must conserve quantity")
+        if self.post_fill_risk.actual_stop_risk < 0:
+            raise ValueError("retained partial stop risk cannot be negative")
+        return self
+
+
+class VacuumPartialFlattenRequired(_TicketEvent):
+    entry_vacuum_id: str
+    final_filled_qty: Decimal
+    average_fill_price: Decimal
+    reason: str
+
+    @model_validator(mode="after")
+    def _validate_flatten(self) -> VacuumPartialFlattenRequired:
+        if (
+            not self.entry_vacuum_id.strip()
+            or not self.reason.strip()
+            or self.final_filled_qty <= 0
+            or self.average_fill_price <= 0
+        ):
+            raise ValueError("Vacuum partial flatten requires exact positive facts")
+        return self
+
+
 class InitialStopConfirmed(_TicketEvent):
     exchange_order_id: str
     protected_qty: Decimal
@@ -376,6 +502,15 @@ TradeEvent = (
     | EntryRemainderCancelConfirmed
     | EntryRemainderCancelRejected
     | EntryRemainderCancelOutcomeUnknown
+    | EntryVacuumSuperseded
+    | EntryVacuumCancelRequested
+    | EntryVacuumCancelConfirmed
+    | EntryVacuumCancelRejected
+    | EntryVacuumCancelOutcomeUnknown
+    | EntryVacuumOrderAbsenceConfirmed
+    | EntryVacuumAbsenceConfirmed
+    | VacuumPartialRetained
+    | VacuumPartialFlattenRequired
     | InitialStopConfirmed
     | PostFillStressAssessed
     | InitialStopRejected

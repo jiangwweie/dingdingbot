@@ -10,6 +10,7 @@ from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.effects import (
     CancelEntryRemainder,
     CancelProtectionOrders,
+    CancelVacuumEntryOrder,
     KernelEffect,
     MarkCancelCommandReconciledAbsent,
     OpenIncident,
@@ -47,6 +48,13 @@ from src.trading_kernel.domain.events import (
     EntryRemainderCancelConfirmed,
     EntryRemainderCancelOutcomeUnknown,
     EntryRemainderCancelRejected,
+    EntryVacuumAbsenceConfirmed,
+    EntryVacuumCancelConfirmed,
+    EntryVacuumCancelOutcomeUnknown,
+    EntryVacuumCancelRejected,
+    EntryVacuumCancelRequested,
+    EntryVacuumOrderAbsenceConfirmed,
+    EntryVacuumSuperseded,
     ExitAbsenceConfirmed,
     ExitAccepted,
     ExitOutcomeUnknown,
@@ -85,6 +93,8 @@ from src.trading_kernel.domain.events import (
     TicketIssued,
     TradeEvent,
     UnownedOrderDetected,
+    VacuumPartialFlattenRequired,
+    VacuumPartialRetained,
 )
 from src.trading_kernel.domain.post_fill_risk import PostFillDisposition
 
@@ -294,8 +304,16 @@ def reduce_event(
                 AggregateStatus.ENTRY_PENDING,
                 AggregateStatus.LEVERAGE_CONFIRMED,
                 AggregateStatus.ENTRY_ACCEPTED,
+                AggregateStatus.ENTRY_VACUUM_CANCELLED,
             },
         )
+        if (
+            current.status is AggregateStatus.ENTRY_VACUUM_CANCELLED
+            and current.entry_vacuum_id is None
+        ):
+            raise InvalidLifecycleTransition(
+                "Vacuum full fill requires exact Vacuum lineage"
+            )
         if event.filled_qty != current.ticket.quantity:
             raise InvalidLifecycleTransition("full entry fill must equal Ticket quantity")
         if event.average_fill_price <= 0:
@@ -447,6 +465,285 @@ def reduce_event(
                 ),
             ),
         )
+
+    if isinstance(event, EntryVacuumSuperseded):
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.LEVERAGE_PENDING,
+                AggregateStatus.LEVERAGE_CONFIRMED,
+                AggregateStatus.ENTRY_PENDING,
+            },
+        )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_REJECTED,
+            updates={
+                "entry_lane_held": False,
+                "entry_vacuum_id": event.entry_vacuum_id,
+            },
+            effects=(
+                ReleaseBudget(ticket_id=current.identity.ticket_id),
+                ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+                ProjectTerminalOwnerState(ticket_id=current.identity.ticket_id),
+            ),
+        )
+
+    if isinstance(event, EntryVacuumCancelRequested):
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.ENTRY_ACCEPTED,
+                AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED,
+            },
+        )
+        if event.exchange_order_id != current.entry_exchange_order_id:
+            raise InvalidLifecycleTransition("Vacuum ENTRY cancel identity mismatch")
+        if not Decimal(0) <= event.observed_qty < current.ticket.quantity:
+            raise InvalidLifecycleTransition(
+                "Vacuum ENTRY cancel requires unfinished requested quantity"
+            )
+        retry_effects: list[KernelEffect] = []
+        if current.status is AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED:
+            retry_effects.append(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="selection_vacuum_entry_cancel_rejected",
+                )
+            )
+        retry_effects.append(
+            CancelVacuumEntryOrder(
+                ticket_id=current.identity.ticket_id,
+                exchange_order_id=event.exchange_order_id,
+                entry_vacuum_id=event.entry_vacuum_id,
+            )
+        )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
+            updates={
+                "position_qty": event.observed_qty,
+                "average_fill_price": event.average_fill_price,
+                "pending_cancel_exchange_order_id": event.exchange_order_id,
+                "entry_vacuum_id": event.entry_vacuum_id,
+            },
+            effects=tuple(retry_effects),
+        )
+
+    if isinstance(event, EntryVacuumCancelConfirmed):
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
+                AggregateStatus.ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN,
+            },
+        )
+        if event.exchange_order_id != current.pending_cancel_exchange_order_id:
+            raise InvalidLifecycleTransition("Vacuum ENTRY cancel result mismatch")
+        effects: tuple[KernelEffect, ...] = ()
+        if current.status is AggregateStatus.ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN:
+            effects = (
+                MarkCancelCommandReconciledAbsent(
+                    ticket_id=current.identity.ticket_id,
+                    exchange_order_id=event.exchange_order_id,
+                ),
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="selection_vacuum_entry_cancel_outcome_unknown",
+                ),
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
+            effects=effects,
+        )
+
+    if isinstance(event, EntryVacuumCancelRejected):
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
+                AggregateStatus.ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN,
+            },
+        )
+        if event.exchange_order_id != current.pending_cancel_exchange_order_id:
+            raise InvalidLifecycleTransition("Vacuum ENTRY cancel rejection mismatch")
+        rejection_effects: list[KernelEffect] = []
+        if current.status is AggregateStatus.ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN:
+            rejection_effects.append(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="selection_vacuum_entry_cancel_outcome_unknown",
+                )
+            )
+        rejection_effects.append(
+            OpenIncident(
+                ticket_id=current.identity.ticket_id,
+                incident_kind="selection_vacuum_entry_cancel_rejected",
+            )
+        )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED,
+            effects=tuple(rejection_effects),
+        )
+
+    if isinstance(event, EntryVacuumCancelOutcomeUnknown):
+        _require_status(current, AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING)
+        if event.exchange_order_id != current.pending_cancel_exchange_order_id:
+            raise InvalidLifecycleTransition("Vacuum ENTRY cancel unknown mismatch")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="selection_vacuum_entry_cancel_outcome_unknown",
+                ),
+            ),
+        )
+
+    if isinstance(event, EntryVacuumOrderAbsenceConfirmed):
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.ENTRY_ACCEPTED,
+                AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
+                AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED,
+            },
+        )
+        if event.exchange_order_id != current.entry_exchange_order_id:
+            raise InvalidLifecycleTransition("Vacuum ENTRY absence identity mismatch")
+        if not Decimal(0) <= event.final_filled_qty <= current.ticket.quantity:
+            raise InvalidLifecycleTransition("Vacuum final filled quantity is invalid")
+        if (
+            current.entry_vacuum_id is not None
+            and event.entry_vacuum_id != current.entry_vacuum_id
+        ):
+            raise InvalidLifecycleTransition("Vacuum ENTRY absence lineage mismatch")
+        absence_effects: tuple[KernelEffect, ...] = ()
+        if current.status is AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED:
+            absence_effects = (
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="selection_vacuum_entry_cancel_rejected",
+                ),
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_VACUUM_CANCELLED,
+            updates={
+                "position_qty": event.final_filled_qty,
+                "average_fill_price": event.average_fill_price,
+                "pending_cancel_exchange_order_id": None,
+                "entry_vacuum_id": event.entry_vacuum_id,
+            },
+            effects=absence_effects,
+        )
+
+    if isinstance(event, EntryVacuumAbsenceConfirmed):
+        _require_status(current, AggregateStatus.ENTRY_VACUUM_CANCELLED)
+        if event.entry_vacuum_id != current.entry_vacuum_id:
+            raise InvalidLifecycleTransition("Vacuum ENTRY absence lineage mismatch")
+        if current.position_qty != 0:
+            raise InvalidLifecycleTransition(
+                "Vacuum ENTRY absence cannot discard filled exposure"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_RECONCILED_ABSENT,
+            updates={"entry_lane_held": False},
+            effects=(
+                ReleaseBudget(ticket_id=current.identity.ticket_id),
+                ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+                ProjectTerminalOwnerState(ticket_id=current.identity.ticket_id),
+            ),
+        )
+
+    if isinstance(event, VacuumPartialRetained):
+        _require_status(current, AggregateStatus.ENTRY_VACUUM_CANCELLED)
+        if (
+            event.entry_vacuum_id != current.entry_vacuum_id
+            or
+            event.requested_qty != current.ticket.quantity
+            or event.final_filled_qty != current.position_qty
+            or event.average_fill_price != current.average_fill_price
+            or event.post_fill_risk.disposition is not PostFillDisposition.NORMAL
+            or event.post_fill_risk.actual_stop_risk
+            != event.final_filled_qty
+            * abs(event.average_fill_price - current.ticket.initial_stop_price)
+        ):
+            raise InvalidLifecycleTransition(
+                "retained Vacuum partial differs from cancelled exposure"
+            )
+        if (
+            current.ticket.selection_authority_id is not None
+            and event.selection_authority_id
+            != current.ticket.selection_authority_id
+        ):
+            raise InvalidLifecycleTransition(
+                "retained Vacuum partial Authority differs from Ticket birth"
+            )
+        if (
+            current.ticket.selection_authority_id is None
+            and event.selection_authority_id is not None
+        ):
+            raise InvalidLifecycleTransition(
+                "retained Vacuum partial cannot invent Ticket Authority"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.PROTECTION_PENDING,
+            updates={
+                "actual_stop_risk": event.post_fill_risk.actual_stop_risk,
+                "post_fill_risk_status": event.post_fill_risk.status,
+                "post_fill_disposition": event.post_fill_risk.disposition,
+                "tp1_target_qty": event.effective_tp1_qty,
+                "entry_materialization_kind": "VACUUM_PARTIAL_RETAINED",
+            },
+            effects=(
+                PrepareInitialStopCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=event.final_filled_qty,
+                    stop_price=current.ticket.initial_stop_price,
+                ),
+            ),
+        )
+
+    if isinstance(event, VacuumPartialFlattenRequired):
+        _require_status(current, AggregateStatus.ENTRY_VACUUM_CANCELLED)
+        if (
+            event.entry_vacuum_id != current.entry_vacuum_id
+            or event.final_filled_qty != current.position_qty
+            or event.average_fill_price != current.average_fill_price
+        ):
+            raise InvalidLifecycleTransition(
+                "Vacuum partial flatten differs from cancelled exposure"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind=event.reason,
+                ),
+                PrepareControlledFlattenCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=event.final_filled_qty,
+                ),
+            ),
+        )
+
     if isinstance(event, InitialStopConfirmed):
         _require_status_in(
             current,
@@ -548,7 +845,11 @@ def reduce_event(
                 ),
             )
         tp_prices = current.ticket.take_profit_prices
-        tp_quantities = current.ticket.take_profit_quantities
+        tp_quantities = (
+            (current.tp1_target_qty,)
+            if current.tp1_target_qty > 0
+            else current.ticket.take_profit_quantities
+        )
         if len(tp_prices) != 1 or len(tp_quantities) != 1:
             raise InvalidLifecycleTransition(
                 "registered exit policy requires exactly one TP1 leg"
@@ -580,6 +881,22 @@ def reduce_event(
         reason = str(event.reason or "").strip()
         if not reason:
             raise InvalidLifecycleTransition("initial stop rejection requires reason")
+        if current.entry_materialization_kind == "VACUUM_PARTIAL_RETAINED":
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+                effects=(
+                    OpenIncident(
+                        ticket_id=current.identity.ticket_id,
+                        incident_kind="vacuum_partial_initial_stop_rejected",
+                    ),
+                    PrepareControlledFlattenCommand(
+                        ticket_id=current.identity.ticket_id,
+                        quantity=current.position_qty,
+                    ),
+                ),
+            )
         return _transition(
             current,
             event,
@@ -619,6 +936,26 @@ def reduce_event(
         if not str(event.command_id or "").strip():
             raise InvalidLifecycleTransition(
                 "reconciled initial stop absence requires command identity"
+            )
+        if current.entry_materialization_kind == "VACUUM_PARTIAL_RETAINED":
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+                effects=(
+                    ResolveIncident(
+                        ticket_id=current.identity.ticket_id,
+                        incident_kind="initial_stop_outcome_unknown",
+                    ),
+                    OpenIncident(
+                        ticket_id=current.identity.ticket_id,
+                        incident_kind="vacuum_partial_initial_stop_absent",
+                    ),
+                    PrepareControlledFlattenCommand(
+                        ticket_id=current.identity.ticket_id,
+                        quantity=current.position_qty,
+                    ),
+                ),
             )
         return _transition(
             current,
@@ -1420,9 +1757,9 @@ def reduce_event(
         if event.exchange_order_id != current.pending_cancel_exchange_order_id:
             raise InvalidLifecycleTransition("absent cancel identity mismatch")
         absence_updates = _clear_cleanup_order(current, event.exchange_order_id)
-        absence_effects: tuple[KernelEffect, ...] = ()
+        cleanup_absence_effects: tuple[KernelEffect, ...] = ()
         if current.status is AggregateStatus.CANCEL_OUTCOME_UNKNOWN:
-            absence_effects = (
+            cleanup_absence_effects = (
                 MarkCancelCommandReconciledAbsent(
                     ticket_id=current.identity.ticket_id,
                     exchange_order_id=event.exchange_order_id,
@@ -1437,7 +1774,7 @@ def reduce_event(
             event,
             status=AggregateStatus.RECONCILIATION_PENDING,
             updates=absence_updates,
-            effects=absence_effects,
+            effects=cleanup_absence_effects,
         )
 
     if isinstance(event, ReconciliationMatched):

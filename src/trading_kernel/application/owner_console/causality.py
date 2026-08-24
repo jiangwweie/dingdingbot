@@ -84,6 +84,15 @@ _ENTRY_EVENTS = {
     "EntryRemainderCancelConfirmed",
     "EntryRemainderCancelRejected",
     "EntryRemainderCancelOutcomeUnknown",
+    "EntryVacuumSuperseded",
+    "EntryVacuumCancelRequested",
+    "EntryVacuumCancelConfirmed",
+    "EntryVacuumCancelRejected",
+    "EntryVacuumCancelOutcomeUnknown",
+    "EntryVacuumOrderAbsenceConfirmed",
+    "EntryVacuumAbsenceConfirmed",
+    "VacuumPartialRetained",
+    "VacuumPartialFlattenRequired",
 }
 _PROTECTION_EVENTS = {
     "InitialStopConfirmed",

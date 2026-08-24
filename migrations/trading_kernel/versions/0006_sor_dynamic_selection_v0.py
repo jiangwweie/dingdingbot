@@ -67,6 +67,7 @@ def upgrade() -> None:
     _create_authority_tables()
     _create_suppression_and_release_tables()
     _add_selection_lineage()
+    _add_entry_vacuum_lifecycle_projection()
     _install_immutability_guards()
     _seed_frozen_sor_v0_if_registry_exists()
 
@@ -1401,6 +1402,30 @@ def _add_selection_lineage() -> None:
             table,
             ["selection_authority_id"],
         )
+
+
+def _add_entry_vacuum_lifecycle_projection() -> None:
+    op.add_column(
+        "brc_trade_aggregates",
+        sa.Column("entry_vacuum_id", ID, nullable=True),
+    )
+    op.add_column(
+        "brc_trade_aggregates",
+        sa.Column("entry_materialization_kind", SHORT_TEXT, nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_brc_trade_aggregates_entry_vacuum",
+        "brc_trade_aggregates",
+        "brc_strategy_entry_vacuums_current",
+        ["entry_vacuum_id"],
+        ["entry_vacuum_id"],
+    )
+    op.create_check_constraint(
+        "ck_brc_trade_aggregates_entry_materialization_kind_valid",
+        "brc_trade_aggregates",
+        "entry_materialization_kind IS NULL OR "
+        "entry_materialization_kind = 'VACUUM_PARTIAL_RETAINED'",
+    )
 
 
 def _install_immutability_guards() -> None:

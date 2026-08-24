@@ -47,6 +47,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from tests.trading_kernel.support.capacity_claims import (
     make_issue_request as _issue_request,
 )
+from tests.trading_kernel.support.selection_vacuum import open_entry_vacuum
 from tests.trading_kernel.support.tickets import (
     make_ticket as _ticket,
 )
@@ -113,6 +114,28 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
             claim_owner="worker-1",
         ).capacity_claim,
     )
+
+
+@pytest.mark.asyncio
+async def test_open_selection_vacuum_blocks_ticket_before_any_durable_entry_state(
+    issue_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket(leverage_change_required=False)
+    await _seed_policy(issue_engine)
+    await open_entry_vacuum(issue_engine, ticket)
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result = await issue_ticket(
+            uow,
+            _issue_request(
+                ticket=ticket,
+                now_ms=1_001,
+                claim_owner="worker-vacuum",
+            ),
+        )
+
+    assert result.status is IssueTicketStatus.SELECTION_ENTRY_VACUUM
+    await _assert_no_durable_entry_state(issue_engine, ticket.identity.ticket_id)
 
 
 @pytest.mark.asyncio
