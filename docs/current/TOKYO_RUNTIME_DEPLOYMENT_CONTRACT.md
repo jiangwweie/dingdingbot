@@ -421,7 +421,13 @@ rewrites an earlier legal Ticket/Position.
 Failures before Schema migration may restore the exact source safety workers
 with Entry fenced. Any failure after `0006` migration is **fix-forward** on
 `0006`: no Alembic downgrade, old runtime restart, dual read/write or retired
-Schema restoration. Dynamic business rollback uses the approved Static
+Schema restoration. When target Schema is already committed but the source
+release remains current, recovery must bind its runtime/schema/Seed markers to
+the Compatibility Fact's exact `from_commit` and `0005` source identity before
+persisting that Fact. If the target release is already current, the exact Fact
+must already exist; target-active plus missing Fact is out of contract and
+fails closed rather than reconstructing source lineage from operator input.
+Dynamic business rollback uses the approved Static
 materialization state machine; direct pointer DML is forbidden. Owner Pause
 always dominates activation and fallback, while existing Ticket lifecycle,
 protection, exit, Reconciliation, Settlement and Review continue.

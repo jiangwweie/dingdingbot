@@ -1117,7 +1117,9 @@ runtime CLI。它们不产生 StrategyUniverse、Signal、Ticket、Command 或�
 - PostgreSQL-owned 24-Candidate readonly operational audit；
 - TOTP-protected first Dynamic activation；
 - success、pre-fence failure、post-fence Static fallback 与 `VALID_EMPTY` readonly acceptance；
-- `0006` fix-forward recovery，禁止 Schema downgrade 和 direct pointer DML。
+- `0006` fix-forward recovery，禁止 Schema downgrade 和 direct pointer DML；target-Schema
+  hard-crash recovery重新绑定source release marker与Compatibility `from_commit`，target active但
+  Fact缺失时fail closed。
 
 DS-10 没有执行生产 Migration、Tokyo systemd/Release action、Crypto SOR resume、Dynamic
 activation、Policy mutation、平仓或 exchange write。Local Implementation sequence 到此结束；下一

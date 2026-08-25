@@ -387,6 +387,7 @@ def test_compatible_upgrade_recovers_target_without_copying_a_stale_manifest() -
     backend = FakeDeploymentBackend(
         source_schema_revision=TARGET_SCHEMA_REVISION,
         current_release=CURRENT_RELEASE,
+        current_release_schema_marker=SOURCE_SCHEMA_REVISION,
         entry_gate_ready=True,
     )
 
@@ -581,6 +582,7 @@ def test_target_schema_fix_forward_recertifies_without_a_stale_manifest() -> Non
     backend = FakeDeploymentBackend(
         source_schema_revision=TARGET_SCHEMA_REVISION,
         current_release=RECOVERY_RELEASE,
+        current_release_schema_marker=SOURCE_SCHEMA_REVISION,
         entry_gate_ready=True,
     )
 
@@ -589,6 +591,55 @@ def test_target_schema_fix_forward_recertifies_without_a_stale_manifest() -> Non
     assert result.status == "pass"
     assert any(call[0] == "certify_r4_recovery" for call in backend.calls)
     assert not any(call[0] == "verify_preservation" for call in backend.calls)
+
+
+def test_target_schema_recovery_rejects_wrong_operator_source_commit() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=TARGET_SCHEMA_REVISION,
+        current_release=RECOVERY_RELEASE,
+        current_release_schema_marker=SOURCE_SCHEMA_REVISION,
+        entry_gate_ready=True,
+    )
+    plan = _compatible_plan(
+        enable_entry=False,
+        runtime_release_compatibility_fact=_compatible_fact(
+            from_commit="c" * 40,
+        ),
+    )
+
+    with pytest.raises(
+        DeploymentBlocked,
+        match="release compatibility source commit differs from current release",
+    ):
+        deploy_tokyo_release(backend, plan)
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+    assert not any(
+        call[0] == "persist_runtime_release_compatibility_fact"
+        for call in backend.calls
+    )
+
+
+def test_target_schema_active_target_without_compatibility_fact_fails_closed() -> None:
+    backend = FakeDeploymentBackend(
+        source_schema_revision=TARGET_SCHEMA_REVISION,
+        current_release=TARGET_RELEASE,
+        target_release_exists=True,
+        entry_gate_ready=True,
+    )
+    backend.runtime_commit = TARGET_COMMIT
+
+    with pytest.raises(
+        DeploymentBlocked,
+        match="active target release lacks exact release compatibility fact",
+    ):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+
+    assert not any(call[0] == "stop_services" for call in backend.calls)
+    assert not any(
+        call[0] == "persist_runtime_release_compatibility_fact"
+        for call in backend.calls
+    )
 
 
 def test_migration_unknown_outcome_remains_primary_when_target_recovery_activation_fails(
@@ -879,6 +930,7 @@ def test_compatible_upgrade_resumes_target_fix_forward_idempotently() -> None:
     backend = FakeDeploymentBackend(
         source_schema_revision=TARGET_SCHEMA_REVISION,
         current_release=CURRENT_RELEASE,
+        current_release_schema_marker=SOURCE_SCHEMA_REVISION,
         preservation_verified=True,
         target_release_exists=True,
     )
@@ -909,6 +961,7 @@ def test_resume_recertifies_the_database_instead_of_trusting_a_file_marker() -> 
         target_release_exists=True,
     )
     backend.runtime_commit = TARGET_COMMIT
+    backend.runtime_release_compatibility_fact = _compatible_fact()
     backend.active_services = set(SAFETY_SERVICES)
     backend.entry_fenced = True
     backend.entry_enabled = False
@@ -1487,6 +1540,7 @@ class FakeDeploymentBackend:
         source_gate: str | None = None,
         source_authority_drift: str | None = None,
         source_seed_marker: str = SEED_IDENTITY,
+        current_release_schema_marker: str | None = None,
         source_preservation_changes_before_stop: bool = False,
         source_gate_after_stop: str | None = None,
         preservation_matches: bool = True,
@@ -1522,6 +1576,7 @@ class FakeDeploymentBackend:
         self.source_gate = source_gate
         self.source_authority_drift = source_authority_drift
         self.source_seed_marker = source_seed_marker
+        self.current_release_schema_marker = current_release_schema_marker
         self.source_preservation_changes_before_stop = (
             source_preservation_changes_before_stop
         )
@@ -1885,7 +1940,11 @@ class FakeDeploymentBackend:
             return (
                 TARGET_SCHEMA_REVISION
                 if release == TARGET_RELEASE
-                else self.source_schema_revision
+                else (
+                    self.source_schema_revision
+                    if self.current_release_schema_marker is None
+                    else self.current_release_schema_marker
+                )
             )
         if marker == ".brc-seed-identity":
             return (

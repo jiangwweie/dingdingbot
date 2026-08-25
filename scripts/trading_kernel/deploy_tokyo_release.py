@@ -567,6 +567,39 @@ def _deploy_compatible_upgrade(
             raise DeploymentBlocked("exact source Seed marker differs")
         recovery_seed_identity = source_identity["seed_identity"]
     else:
+        persisted_compatibility = (
+            backend.read_runtime_release_compatibility_fact(
+                plan.target_release,
+                compatibility_fact.release_compatibility_id,
+            )
+        )
+        if (
+            persisted_compatibility is not None
+            and persisted_compatibility != compatibility_fact
+        ):
+            raise DeploymentBlocked("exact release compatibility fact differs")
+        if current_release == plan.target_release:
+            if persisted_compatibility is None:
+                raise DeploymentBlocked(
+                    "active target release lacks exact release compatibility fact"
+                )
+        else:
+            if (
+                backend.read_release_marker(
+                    current_release,
+                    ".brc-runtime-commit",
+                )
+                != compatibility_fact.from_commit
+            ):
+                raise DeploymentBlocked(
+                    "release compatibility source commit differs from current release"
+                )
+            _require_marker(
+                backend,
+                current_release,
+                ".brc-schema-revision",
+                COMPATIBLE_SOURCE_SCHEMA_REVISION,
+            )
         recovery_seed_identity = backend.read_release_marker(
             current_release,
             ".brc-seed-identity",
