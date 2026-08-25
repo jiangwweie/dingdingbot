@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +27,7 @@ from src.trading_kernel.domain.selection_authority import (
     MaterializationGenerationClaimStatus,
     MaterializationGenerationLeaseClaim,
     MaterializationGenerationState,
+    SelectionControl,
     SelectionMode,
     build_pending_authority_gap_audit,
 )
@@ -39,8 +41,10 @@ from src.trading_kernel.interfaces.readonly_api import (
 from src.trading_kernel.interfaces.selection_runtime_worker import (
     MaterializationRuntimeStatus,
     SelectionRuntimeRequest,
+    SelectionRuntimeStatus,
     current_sor_selection_session_start_ms,
     run_materialization_runtime_once,
+    run_selection_runtime_once,
 )
 from src.trading_kernel.interfaces.worker_process import (
     WorkerProcessLoop,
@@ -64,6 +68,84 @@ def test_selection_period_is_not_due_before_the_0100_decision_boundary() -> None
         current_sor_selection_session_start_ms(session_start_ms + 3_599_999)
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_static_selection_runtime_without_pending_activation_creates_no_job_or_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_start_ms = 1_800_057_600_000
+    repository = _SelectionControlRepository(_selection_control())
+
+    async def forbidden_selection(**_kwargs):
+        raise AssertionError("Static baseline must not run Selection")
+
+    monkeypatch.setattr(
+        "src.trading_kernel.interfaces.selection_runtime_worker."
+        "run_instrument_selection_once",
+        forbidden_selection,
+    )
+    result = await run_selection_runtime_once(
+        uow_factory=lambda: _SelectionControlUow(repository),
+        market_source=SimpleNamespace(),
+        request=SelectionRuntimeRequest(
+            selection_spec_id="sor-dynamic-selection-v0",
+            strategy_group_id="SOR-001",
+            worker_id="selection:test",
+            now_ms=session_start_ms + 3_600_000,
+        ),
+        clock_ms=lambda: session_start_ms + 3_600_000,
+    )
+
+    assert result.status is SelectionRuntimeStatus.NOT_DUE
+    assert result.reason_code == "STATIC_BASELINE_NO_PENDING_DYNAMIC"
+    assert repository.calls == [("SOR-001",)]
+
+
+@pytest.mark.asyncio
+async def test_pending_dynamic_selection_runtime_runs_only_for_its_exact_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_start_ms = 1_800_057_600_000
+    control = _selection_control().model_copy(
+        update={
+            "pending_selection_mode": SelectionMode.DYNAMIC_SELECTION,
+            "pending_effective_session_start_ms": session_start_ms,
+            "pending_authorization_id": "owner-authorization:selection:test",
+        }
+    )
+    repository = _SelectionControlRepository(control)
+    calls: list[object] = []
+
+    async def selection(**kwargs):
+        calls.append(kwargs["request"])
+        return SimpleNamespace(
+            outcome="SNAPSHOT_READY",
+            selection_job_id="selection-job:test",
+            selection_snapshot_id="selection:test",
+            reason_code=None,
+        )
+
+    monkeypatch.setattr(
+        "src.trading_kernel.interfaces.selection_runtime_worker."
+        "run_instrument_selection_once",
+        selection,
+    )
+    result = await run_selection_runtime_once(
+        uow_factory=lambda: _SelectionControlUow(repository),
+        market_source=SimpleNamespace(),
+        request=SelectionRuntimeRequest(
+            selection_spec_id="sor-dynamic-selection-v0",
+            strategy_group_id="SOR-001",
+            worker_id="selection:test",
+            now_ms=session_start_ms + 3_600_000,
+        ),
+        clock_ms=lambda: session_start_ms + 3_600_000,
+    )
+
+    assert result.status is SelectionRuntimeStatus.SNAPSHOT_READY
+    assert result.selection_snapshot_id == "selection:test"
+    assert len(calls) == 1
     assert (
         current_sor_selection_session_start_ms(session_start_ms + 3_600_000)
         == session_start_ms
@@ -536,3 +618,38 @@ class _ReadonlySelectionRepository:
 class _ReadonlySelectionUow:
     def __init__(self, repository: _ReadonlySelectionRepository) -> None:
         self.instrument_selection = repository
+
+
+def _selection_control() -> SelectionControl:
+    return SelectionControl(
+        strategy_group_id="SOR-001",
+        selection_spec_id="sor-dynamic-selection-v0",
+        selection_mode=SelectionMode.STATIC_BASELINE,
+        pending_selection_mode=None,
+        pending_effective_session_start_ms=None,
+        pending_authorization_id=None,
+        control_version=1,
+        rollback_baseline_id="rollback-baseline:SOR-001:pre-dynamic-v0",
+        updated_at_ms=1_800_000_000_000,
+    )
+
+
+class _SelectionControlRepository:
+    def __init__(self, control: SelectionControl) -> None:
+        self._control = control
+        self.calls: list[tuple[str]] = []
+
+    async def get_selection_control(self, strategy_group_id: str):
+        self.calls.append((strategy_group_id,))
+        return self._control
+
+
+class _SelectionControlUow:
+    def __init__(self, repository: _SelectionControlRepository) -> None:
+        self.instrument_selection = repository
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _traceback) -> None:
+        return None

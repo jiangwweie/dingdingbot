@@ -595,6 +595,40 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Selection Control pending mode changed")
         return _selection_control_from_row(row)
 
+    async def stage_pending_selection_mode(
+        self,
+        *,
+        strategy_group_id: str,
+        expected_control_version: int,
+        expected_current_mode: SelectionMode,
+        pending_mode: SelectionMode,
+        effective_session_start_ms: int,
+        authorization_id: str,
+        updated_at_ms: int,
+    ) -> SelectionControl | None:
+        result = await self._connection.execute(
+            sa.update(strategy_selection_control_current)
+            .where(
+                strategy_selection_control_current.c.strategy_group_id
+                == strategy_group_id,
+                strategy_selection_control_current.c.control_version
+                == expected_control_version,
+                strategy_selection_control_current.c.selection_mode
+                == expected_current_mode.value,
+                strategy_selection_control_current.c.pending_selection_mode.is_(None),
+            )
+            .values(
+                pending_selection_mode=pending_mode.value,
+                pending_effective_session_start_ms=effective_session_start_ms,
+                pending_authorization_id=authorization_id,
+                control_version=expected_control_version + 1,
+                updated_at_ms=updated_at_ms,
+            )
+            .returning(strategy_selection_control_current)
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else _selection_control_from_row(row)
+
     async def get_snapshot_disposition(
         self,
         *,

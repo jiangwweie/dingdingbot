@@ -28,11 +28,13 @@ from src.trading_kernel.application.run_instrument_selection import (
 from src.trading_kernel.domain.instrument_selection import DAY_MS, HOUR_MS
 from src.trading_kernel.domain.selection_authority import (
     MaterializationGenerationClaimStatus,
+    SelectionMode,
 )
 
 
 class SelectionRuntimeStatus(StrEnum):
     NOT_DUE = "not_due"
+    BLOCKED = "blocked"
     SNAPSHOT_READY = "snapshot_ready"
     ALREADY_READY = "already_ready"
     SOURCE_FAILED = "source_failed"
@@ -119,6 +121,38 @@ async def run_selection_runtime_once(
     session_start_ms = current_sor_selection_session_start_ms(request.now_ms)
     if session_start_ms is None:
         return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_DUE)
+    async with uow_factory() as uow:
+        control = await uow.instrument_selection.get_selection_control(
+            request.strategy_group_id
+        )
+    if control is None or control.selection_spec_id != request.selection_spec_id:
+        return SelectionRuntimeResult(
+            status=SelectionRuntimeStatus.BLOCKED,
+            session_start_ms=session_start_ms,
+            reason_code="SELECTION_CONTROL_MISSING_OR_DRIFTED",
+        )
+    if control.selection_mode is SelectionMode.DISABLED:
+        return SelectionRuntimeResult(
+            status=SelectionRuntimeStatus.NOT_DUE,
+            session_start_ms=session_start_ms,
+            reason_code="SELECTION_MODE_DISABLED",
+        )
+    if control.selection_mode is SelectionMode.STATIC_BASELINE:
+        if control.pending_selection_mode is None:
+            return SelectionRuntimeResult(
+                status=SelectionRuntimeStatus.NOT_DUE,
+                session_start_ms=session_start_ms,
+                reason_code="STATIC_BASELINE_NO_PENDING_DYNAMIC",
+            )
+        if (
+            control.pending_selection_mode is not SelectionMode.DYNAMIC_SELECTION
+            or control.pending_effective_session_start_ms != session_start_ms
+        ):
+            return SelectionRuntimeResult(
+                status=SelectionRuntimeStatus.BLOCKED,
+                session_start_ms=session_start_ms,
+                reason_code="PENDING_SELECTION_SESSION_MISMATCH",
+            )
     result = await run_instrument_selection_once(
         uow_factory=uow_factory,
         market_source=market_source,

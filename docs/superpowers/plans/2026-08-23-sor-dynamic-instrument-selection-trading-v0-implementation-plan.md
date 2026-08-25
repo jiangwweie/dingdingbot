@@ -2,11 +2,11 @@
 title: SOR_DYNAMIC_INSTRUMENT_SELECTION_TRADING_V0_IMPLEMENTATION_PLAN
 status: PLAN_APPROVED
 date: 2026-08-23
-phase: P3-X.3A
+phase: P3-X.3
 design_authority: ../specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: DS-09
-next_execution_gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_09_TO_DS_10
+active_execution_scope: COMPLETE_LOCAL
+next_execution_gate: OWNER_REVIEWED_R4_DEPLOYMENT
 production_authority: NONE
 ---
 
@@ -31,8 +31,8 @@ decision）
 design status: DESIGN_APPROVED
 plan status: PLAN_APPROVED
 implementation_authority: CODE_AND_TEST_ONLY
-active execution scope: DS-09
-next execution gate: AUTOMATIC_SEQUENTIAL_ACCEPTANCE_DS_09_TO_DS_10
+active execution scope: COMPLETE_LOCAL
+next execution gate: OWNER_REVIEWED_R4_DEPLOYMENT
 production_authority: NONE
 ```
 
@@ -49,7 +49,7 @@ activation始终保持独立Gate。（来源：Owner提供的最终Plan复核意
 | --- | --- | --- |
 | Runtime chain | Observation → StrategySignal → Readiness/Authority → CapacityClaim → immutable Ticket → durable Exchange Command → protected lifecycle → reconciliation → settlement → review | Dynamic Selection只能在StrategySignal之前控制资格，不建立第二执行链 |
 | StrategyUniverse | 已有immutable versions/members、Warming/Active/Retired、current pointer和global warming slot | 扩展为`staged`与generation-owned serial warming，不重建Universe系统 |
-| Schema | tracked forward chain当前结束于`0005_tradfi_instrument_center` | 新增单一forward-only `0006`；禁止downgrade、dual write和old-table reader |
+| Schema | production仍为`0005_tradfi_instrument_center`；tracked exact candidate新增`0006_sor_dynamic_selection_v0` | 单一forward-only revision已实现；禁止downgrade、dual write和old-table reader |
 | Workers | 四个persistent Worker是唯一runtime cadence | V0增加独立application tick/lease，但不强制第五个systemd service |
 | Selection evidence | Frozen V0 Replay已通过历史定量Gate | 实现必须通过961×24 Golden parity；不允许重新调参 |
 | Golden artifact | 已冻结完整961×24 member-level Decimal Golden与输入/源码/规则digest | DS-00完成；DS-01 Domain实现已逐行匹配23,064条Golden member digest |
@@ -1058,6 +1058,29 @@ git diff --check
 - test portfolio删除/合并重复fixture；
 - exact candidate可进入独立部署复核，但尚无生产授权。
 
+#### DS-09 Execution Evidence — 2026-08-25
+
+**状态：`DS09_COMPLETE / EXACT_R4_MANIFEST_REQUIRED`。** R4 portfolio 已把 tracked
+961×24 Decimal Golden integrity 与 Production SelectionCore parity 纳入 exact-candidate
+command set；Golden cache 只通过 `SOR_DYNAMIC_SELECTION_CACHE_DIR` 进入本地认证，生产代码、
+Tokyo release 和 PostgreSQL runtime 对该目录保持零依赖。
+
+完整审计同时闭合了此前未暴露的三个发布级缺口：
+
+1. 首次 `static_baseline -> dynamic_selection` 不再依赖直接 SQL；正式 Owner application/API
+   边界使用 TOTP、expected Selection Control version、idempotency key 和下一个实际 Selection
+   decision boundary，原子写入 `selection_mode_change` Authorization 与 pending mode；
+2. `0005 -> 0006` postflight 现在机器验证零 unexpected Selection Job、Snapshot、Generation、
+   Vacuum、Gap Audit 和 Authority，而不是只验证 Schema/Policy/Registry/Static Universe。
+3. Selection runtime在`static_baseline`且无pending Dynamic Session时执行零网络、零Job；只有
+   已处于Dynamic mode或pending transition精确指向当前Selection Session时才允许计算，关闭
+   Worker启动与zero-Snapshot postflight之间的竞态。
+
+此外新增 PostgreSQL-owned exact 24-Candidate readonly probe 与 display-only bounded Selection
+runtime CLI。它们不产生 StrategyUniverse、Signal、Ticket、Command 或文件型 runtime authority。
+本卡完成状态以最终 clean-HEAD R4 certification manifest 为 exact-candidate 证据；任一后续 Commit
+都会使旧 manifest 失效。
+
 ### DS-10 — Deployment And First Dynamic Activation Evidence Package
 
 **Goal**
@@ -1081,6 +1104,24 @@ git diff --check
 **Done**
 
 形成可复核runbook、release manifest要求、postflight查询和唯一下一动作；生产状态保持不变。
+
+#### DS-10 Execution Evidence — 2026-08-25
+
+**状态：`DS10_COMPLETE / EVIDENCE_ONLY`。** 现有
+`docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` 已吸收完整 `0005 -> 0006` runbook，覆盖：
+
+- stopped-and-flat preservation-gated R4 cutover；
+- exact `COMPATIBLE_RESTART` manifest 与 durable Compatibility Fact；
+- Migration 后 Static baseline 和 zero unexpected Dynamic runtime facts；
+- independent Owner API R2 capability release；
+- PostgreSQL-owned 24-Candidate readonly operational audit；
+- TOTP-protected first Dynamic activation；
+- success、pre-fence failure、post-fence Static fallback 与 `VALID_EMPTY` readonly acceptance；
+- `0006` fix-forward recovery，禁止 Schema downgrade 和 direct pointer DML。
+
+DS-10 没有执行生产 Migration、Tokyo systemd/Release action、Crypto SOR resume、Dynamic
+activation、Policy mutation、平仓或 exchange write。Local Implementation sequence 到此结束；下一
+Gate 是 Owner 独立复核并授权软件部署，首次 Dynamic activation仍是另一独立授权。
 
 ## 9. Stop Conditions
 

@@ -17,6 +17,7 @@ from src.trading_kernel.application.owner_control import (
     preview_flatten_all,
     set_global_entry_state,
     set_strategy_entry_state,
+    stage_dynamic_selection_mode,
 )
 from src.trading_kernel.application.ports import RuntimeProfileSnapshot
 from src.trading_kernel.domain.owner_control import (
@@ -24,6 +25,7 @@ from src.trading_kernel.domain.owner_control import (
     StrategyEntryControl,
     StrategyEntryState,
 )
+from src.trading_kernel.domain.selection_authority import SelectionControl
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.interfaces.owner_console_http.auth import InvalidCredentials
 from src.trading_kernel.interfaces.owner_console_http.dependencies import (
@@ -48,6 +50,10 @@ class ControlWriteBody(BaseModel):
 class FlattenBody(ControlWriteBody):
     snapshot_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     confirmation_text: Literal["确认平仓全部持仓"]
+
+
+class DynamicSelectionActivationBody(ControlWriteBody):
+    effective_session_start_ms: int = Field(gt=0)
 
 
 class EmptyControlBody(BaseModel):
@@ -370,6 +376,28 @@ async def resume_strategy(
     _validate_write_request(request)
     await _require_step_up(body, request)
     return await _set_strategy(strategy_group_id, StrategyEntryState.ENABLED, body, request)
+
+
+@router.post(
+    "/controls/strategies/{strategy_group_id}/selection/dynamic/activate"
+)
+async def activate_dynamic_selection(
+    strategy_group_id: str,
+    body: DynamicSelectionActivationBody,
+    request: Request,
+) -> SelectionControl:
+    _validate_write_request(request)
+    await _require_step_up(body, request)
+    settings = get_settings(request)
+    now_ms = get_clock_ms(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        return await stage_dynamic_selection_mode(
+            uow,
+            strategy_group_id=strategy_group_id,
+            effective_session_start_ms=body.effective_session_start_ms,
+            request=_mutation(body, settings.auth.username, now_ms),
+            authentication_strength="totp_step_up",
+        )
 
 
 @router.post("/controls/entry/pause")

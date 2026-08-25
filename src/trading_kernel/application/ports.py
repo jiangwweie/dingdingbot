@@ -1558,6 +1558,18 @@ class InstrumentSelectionRepository(Protocol):
         activated_at_ms: int,
     ) -> SelectionControl: ...
 
+    async def stage_pending_selection_mode(
+        self,
+        *,
+        strategy_group_id: str,
+        expected_control_version: int,
+        expected_current_mode: SelectionMode,
+        pending_mode: SelectionMode,
+        effective_session_start_ms: int,
+        authorization_id: str,
+        updated_at_ms: int,
+    ) -> SelectionControl | None: ...
+
     async def get_snapshot_disposition(
         self,
         *,

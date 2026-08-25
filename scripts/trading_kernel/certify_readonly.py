@@ -585,6 +585,27 @@ async def _certify(
                     )
                 ).scalar_one()
             )
+            dynamic_selection_runtime_counts_row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            (SELECT count(*)
+                               FROM brc_instrument_selection_jobs_current),
+                            (SELECT count(*)
+                               FROM brc_instrument_selection_snapshots),
+                            (SELECT count(*)
+                               FROM brc_strategy_universe_materialization_generations),
+                            (SELECT count(*)
+                               FROM brc_strategy_entry_vacuums_current),
+                            (SELECT count(*)
+                               FROM brc_selection_session_authorities),
+                            (SELECT count(*)
+                               FROM brc_selection_authority_gap_audits_current)
+                        """
+                    )
+                )
+            ).one()
             universe_counts = (
                 await connection.execute(
                     text(
@@ -1135,6 +1156,14 @@ async def _certify(
         "positions": non_flat_positions,
         "incidents": open_incidents,
     }
+    dynamic_selection_runtime_counts = {
+        "jobs": int(dynamic_selection_runtime_counts_row[0]),
+        "snapshots": int(dynamic_selection_runtime_counts_row[1]),
+        "generations": int(dynamic_selection_runtime_counts_row[2]),
+        "vacuums": int(dynamic_selection_runtime_counts_row[3]),
+        "authorities": int(dynamic_selection_runtime_counts_row[4]),
+        "gap_audits": int(dynamic_selection_runtime_counts_row[5]),
+    }
     release_counts = {
         "budget_reservations": budget_reservations,
         "released_budget_reservations": released_budget_reservations,
@@ -1516,6 +1545,7 @@ async def _certify(
         "owner_policy_lineage_pass": policy_lineage_pass,
         "release_counts": release_counts,
         "active_counts": active_counts,
+        "dynamic_selection_runtime_counts": dynamic_selection_runtime_counts,
         "owner_projection": owner_projection,
         "closure_ticket": closure_ticket,
         "require_flat": require_flat,

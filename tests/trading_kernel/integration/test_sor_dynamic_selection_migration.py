@@ -14,11 +14,19 @@ import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from scripts.trading_kernel.probe_production_runtime import (
+    load_dynamic_selection_candidate_probe_manifest,
+)
 from scripts.trading_kernel.verify_schema import (
     _verify_compatible_source,
     _verify_preservation,
 )
+from src.trading_kernel.application.owner_control import (
+    ControlMutationRequest,
+    stage_dynamic_selection_mode,
+)
 from src.trading_kernel.domain.product import InstrumentProductProfile
+from src.trading_kernel.domain.selection_authority import SelectionMode
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     ArmAcceptancePolicyRequest,
@@ -210,6 +218,37 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
             expected_digest=preservation_digest,
         )
         assert preserved["status"] == "pass", preserved
+
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            selection = await stage_dynamic_selection_mode(
+                uow,
+                strategy_group_id="SOR-001",
+                effective_session_start_ms=1_800_057_600_000,
+                request=ControlMutationRequest(
+                    expected_version=1,
+                    reason="owner_enable_dynamic_selection_v0",
+                    idempotency_key="owner-request:test-selection-dynamic",
+                    owner_identity="owner",
+                    now_ms=1_800_000_000_000,
+                ),
+                authentication_strength="totp_step_up",
+            )
+            assert selection.selection_mode is SelectionMode.STATIC_BASELINE
+            assert selection.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+            assert selection.pending_effective_session_start_ms == 1_800_057_600_000
+
+        assert await load_dynamic_selection_candidate_probe_manifest(database_url) == tuple(
+            sorted(
+                f"binance-usdm:{symbol}:perpetual"
+                for symbol in (
+                    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+                    "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT",
+                    "BCHUSDT", "DOTUSDT", "NEARUSDT", "ATOMUSDT", "FILUSDT",
+                    "ETCUSDT", "APTUSDT", "OPUSDT", "ARBUSDT", "INJUSDT",
+                    "SUIUSDT", "TRXUSDT", "UNIUSDT", "RUNEUSDT",
+                )
+            )
+        )
 
         async with engine.connect() as connection:
             revision = await connection.scalar(

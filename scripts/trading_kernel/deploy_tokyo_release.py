@@ -922,6 +922,23 @@ def _require_dynamic_selection_postflight(
         or seed.get("actual") != seed_identity
     ):
         raise DeploymentBlocked("exact Seed identity differs")
+    runtime_counts = certification.get("dynamic_selection_runtime_counts")
+    if (
+        not isinstance(runtime_counts, Mapping)
+        or set(runtime_counts)
+        != {
+            "jobs",
+            "snapshots",
+            "generations",
+            "vacuums",
+            "authorities",
+            "gap_audits",
+        }
+        or any(int(str(value)) != 0 for value in runtime_counts.values())
+    ):
+        raise DeploymentBlocked(
+            "compatible upgrade created unexpected Dynamic Selection runtime facts"
+        )
 
 
 def _require_compatible_source_facts(

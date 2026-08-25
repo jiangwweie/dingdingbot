@@ -843,6 +843,7 @@ def test_dep_004_missing_target_safety_worker_fails_with_entry_fenced() -> None:
         ("universe_digest", "Universe identity"),
         ("schema", "schema revision"),
         ("seed", "Seed identity"),
+        ("dynamic_runtime", "unexpected Dynamic Selection runtime facts"),
     ],
 )
 def test_dep_005_exact_target_identity_drift_blocks_postflight(
@@ -1593,6 +1594,14 @@ class FakeDeploymentBackend:
                 "positions": 0,
                 "incidents": 0,
             },
+            "dynamic_selection_runtime_counts": {
+                "jobs": 0,
+                "snapshots": 0,
+                "generations": 0,
+                "vacuums": 0,
+                "authorities": 0,
+                "gap_audits": 0,
+            },
             "owner_policy": {
                 "policy_version": 4,
                 "new_entry_submit_enabled": False,
@@ -1669,6 +1678,15 @@ class FakeDeploymentBackend:
                 "status": "fail",
                 "expected": SEED_IDENTITY,
                 "actual": "sha256:" + "0" * 64,
+            }
+        elif self.postflight_drift == "dynamic_runtime":
+            payload["dynamic_selection_runtime_counts"] = {
+                "jobs": 0,
+                "snapshots": 1,
+                "generations": 0,
+                "vacuums": 0,
+                "authorities": 0,
+                "gap_audits": 0,
             }
         if (
             self.certification_gate_failure is not None

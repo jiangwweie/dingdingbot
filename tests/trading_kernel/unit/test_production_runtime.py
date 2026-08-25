@@ -547,6 +547,15 @@ def test_cutover_probe_scope_has_no_operator_supplied_instrument_argument() -> N
     parser = probe_module._parser()
 
     assert parser.parse_args(["--cutover-first-batch"]).cutover_first_batch is True
+    assert (
+        parser.parse_args(["--dynamic-selection-candidates"])
+        .dynamic_selection_candidates
+        is True
+    )
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["--cutover-first-batch", "--dynamic-selection-candidates"]
+        )
     with pytest.raises(SystemExit):
         parser.parse_args(["--exchange-instrument-id", "binance-usdm:BTCUSDT:perpetual"])
 

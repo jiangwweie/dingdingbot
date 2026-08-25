@@ -46,6 +46,7 @@ R2_OWNER_API_COMMANDS: Final[CommandSet] = (
         "-m",
         "pytest",
         "tests/trading_kernel/unit/owner_console",
+        "tests/trading_kernel/unit/test_owner_control.py",
         "tests/trading_kernel/interfaces/test_owner_console_http.py",
         "tests/trading_kernel/architecture/test_owner_console_deployment.py",
         "-q",
@@ -60,6 +61,7 @@ R2_OWNER_API_COMMANDS: Final[CommandSet] = (
         "src/trading_kernel/infrastructure/pg_owner_control.py",
         "src/trading_kernel/infrastructure/pg_owner_read_repository.py",
         "tests/trading_kernel/unit/owner_console",
+        "tests/trading_kernel/unit/test_owner_control.py",
         "tests/trading_kernel/interfaces/test_owner_console_http.py",
         "tests/trading_kernel/architecture/test_owner_console_deployment.py",
     ),
@@ -93,6 +95,17 @@ R3_SAME_SCHEMA_KERNEL_COMMANDS: Final[CommandSet] = (
 
 R4_SCHEMA_AUTHORITY_COMMANDS: Final[CommandSet] = (
     *R3_SAME_SCHEMA_KERNEL_COMMANDS,
+    (
+        ".venv/bin/python",
+        "scripts/trading_kernel/verify_sor_dynamic_selection_golden.py",
+        "verify",
+        "--artifact-dir",
+        "tests/trading_kernel/fixtures/sor_dynamic_selection_v0",
+    ),
+    (
+        ".venv/bin/python",
+        "scripts/trading_kernel/verify_sor_dynamic_selection_core_parity.py",
+    ),
     (
         ".venv/bin/python",
         "-m",

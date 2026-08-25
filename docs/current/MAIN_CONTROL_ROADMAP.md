@@ -156,8 +156,8 @@ engine; releases remain classified as `COMPATIBLE_RESTART` or
 Alpha rule, but it necessarily extends Ticket lineage, durable cancel commands and
 Lifecycle reduction for the narrow retained-partial branch. The final targeted
 architecture review requirements are incorporated and the design status is
-`DESIGN_APPROVED`. The P3-X.3A Implementation Plan has passed independent review with
-status `PLAN_APPROVED / CODE_AND_TEST_ONLY / production_authority=NONE`. Owner-authorized
+`DESIGN_APPROVED`. The P3-X.3 Implementation Plan has passed independent review with
+status `PLAN_APPROVED / LOCAL_IMPLEMENTATION_COMPLETE / production_authority=NONE`. Owner-authorized
 **DS-00 Golden/Evidence/Test Portfolio** execution is complete with a reproducible
 961×24 Decimal Golden and zero production dependency. Independent review approved that
 Golden as the sole DS-03/DS-09 Selection parity baseline. The active implementation scope
@@ -172,9 +172,14 @@ resolution、retained-partial protection and atomic `VALID_EMPTY`/Generation dra
 and **916 Fast Unit/Architecture** tests. DS-06 has now completed serial LONG/SHORT warming、no-authority staged
 scopes、atomic pair activation、exact post-fence fallback、newest-Snapshot supersession and Owner Pause precedence.
 It also closes superseding `VALID_EMPTY` on the existing Vacuum、preserves the concrete fallback cause、terminates
-invalidated pending Gap Audits and makes committed terminal Authorities idempotent coordinator results. The active
-implementation scope has completed `DS-08` independent runtime hosting/recovery、Reconciliation Vacuum facts、Owner Pause、bounded readonly and exact Release Compatibility Fact persistence and is now `DS-09` for Decimal Golden、Migration、full-chain fault、architecture and exact-candidate certification; later cards may advance automatically
-only after their own acceptance passes. Production Migration execution,
+invalidated pending Gap Audits and makes committed terminal Authorities idempotent coordinator results. DS-07
+completed four new-ENTRY Authority boundaries and compatible birth-lineage propagation; DS-08 completed independent
+runtime hosting/recovery、Reconciliation Vacuum facts、Owner Pause、bounded readonly and exact Release
+Compatibility Fact persistence. **DS-09/DS-10 now complete the local sequence** with tracked Golden/Core parity in
+R4 certification, a formal TOTP-protected first Dynamic activation boundary, exact 24-Candidate readonly audit,
+zero unexpected Dynamic runtime-fact deployment postflight, bounded Selection-period status CLI and the stopped-flat
+deployment/first-activation evidence package. The exact candidate is identified only by its clean-HEAD R4 manifest.
+Production Migration execution,
 deployment and first Dynamic activation remain separately gated.（来源：Owner active-task decision；
 `docs/superpowers/specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md`；
 `docs/superpowers/plans/2026-08-23-sor-dynamic-instrument-selection-trading-v0-implementation-plan.md`）

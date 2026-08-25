@@ -1,7 +1,7 @@
 ---
 title: TOKYO_RUNTIME_DEPLOYMENT_CONTRACT
 status: CURRENT
-last_verified: 2026-08-14
+last_verified: 2026-08-25
 ---
 
 # Tokyo Runtime Deployment Contract
@@ -208,6 +208,17 @@ the exact Crypto and TradFi Event/Profile mappings, and seeds paused
 StrategyGroup or bypass postflight; real TradFi ENTRY becomes eligible only
 after the exact R4 certification and explicit TOTP-protected Strategy resume.
 
+The `0005 -> 0006` Dynamic Selection capability upgrade is also stopped,
+exact-flat and forward-only. It preserves the active Static SOR LONG/SHORT pair
+and terminal lineage, adds the frozen 24-member Candidate Panel and generic
+Selection/Materialization/Authority tables, and seeds `SOR-001` Selection
+Control as `static_baseline`. Migration creates zero Selection Job, Snapshot,
+Generation, Vacuum, Gap Audit, Authority, Ticket or Exchange Command. It adds
+the TOTP-protected `selection_mode_change` Owner authority, but never stages or
+activates Dynamic mode by itself.（来源：
+`migrations/trading_kernel/versions/0006_sor_dynamic_selection_v0.py`；
+`docs/superpowers/specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md`）
+
 The same revision binds every existing portfolio-rejection Shadow to its exact
 Signal without changing its completed MFE/MAE lineage, and permits new
 Signal-owned `strategy_observation` Outcomes for TradFi SOR. That projection
@@ -225,6 +236,7 @@ upgrade:
 -> 0003_portfolio_admission_observability
 -> 0004_owner_control_plane
 -> 0005_tradfi_instrument_center
+-> 0006_sor_dynamic_selection_v0
 ```
 
 It preserves terminal PostgreSQL lineage from the exact `0002` source; it does
@@ -245,7 +257,8 @@ The compatible-upgrade preflight requires all of the following to be current:
 7. source revision, target revision, commit, account, venue and policy identity
    match the exact plan.
 
-The official bounded sequence is:
+The completed `0004 -> 0005` Product Authority cutover used this bounded
+sequence:
 
 1. Orient: validate the exact local certification, target commit, source
    release/schema identity, Entry fence, safety workers, PostgreSQL, and
@@ -277,6 +290,141 @@ The official bounded sequence is:
     release state only after all postflight evidence passes. Global Entry and
     `SOR-US-EQ-PERP-001` resume remain explicit postflight promotions and are
     never enabled merely because the schema-changing deployment completed.
+
+## `0005 -> 0006` Dynamic Selection Capability Deployment
+
+### Authorization boundary
+
+**Software deployment** and **first Dynamic activation** are independent Owner
+decisions. Software deployment may install Schema/code/API capability and
+restore the pre-existing Static trading posture; it must not stage
+`pending_selection_mode=dynamic_selection`. First Dynamic activation is a later
+TOTP-protected Owner control action for one exact next UTC Session. Neither
+authorization resumes Crypto `SOR-001`; its Strategy Control remains higher
+priority.（来源：批准的 P3-X Production Design；Owner active-task decisions）
+
+### Frozen release evidence
+
+The exact candidate must have one clean-HEAD **R4 Release Certification** whose
+command set includes:
+
+1. Unit/Architecture, Integration and Full-chain portfolios;
+2. Ruff, repository Mypy and `git diff --check`;
+3. tracked 961×24 Decimal Golden integrity verification;
+4. production SelectionCore parity against that Golden;
+5. empty and production-shaped forward Migration/preservation gates.
+
+The Golden parity command receives the frozen local source cache through
+`SOR_DYNAMIC_SELECTION_CACHE_DIR`; the cache is certification input only and is
+never copied to Tokyo or read by production runtime. The manifest is stored in
+Git metadata and is bound to the exact Commit, Schema, semantic identities and
+command-set digest.（来源：`scripts/trading_kernel/verification_portfolios.py`；
+`scripts/trading_kernel/certify_release_candidate.py`）
+
+### Stopped-and-flat cutover sequence
+
+1. Refresh the Tokyo release marker, PostgreSQL revision/identity, Policy,
+   Strategy Controls, all four systemd service states/restarts and Binance
+   readonly account/position/order/leverage facts.
+2. Require exact internal and external flatness, zero unresolved Command/open
+   Incident, terminal Review coverage and a valid source preservation digest.
+3. Stop, disable and fence Entry; stop the remaining writers before the final
+   source check. Existing exposure must already be terminal—Migration is not a
+   flatten mechanism.
+4. Run only the exact certified `compatible_upgrade` command from
+   `0005_tradfi_instrument_center` to `0006_sor_dynamic_selection_v0`, with
+   classification `COMPATIBLE_RESTART` and reason
+   `PERSISTED_ACTIVE_UNIVERSE_CONTRACT_UNCHANGED`. Do not pass `--enable-entry`.
+5. The deployment command migrates forward, verifies preservation, persists and
+   exact-reads the Release Compatibility Fact, activates the target release and
+   starts Observation/Lifecycle/Reconciliation while Entry remains fenced.
+6. Target postflight proves exact Commit/Schema/Seed/Registry/Policy, preserved
+   Static pair, zero Warming and zero unexpected Selection Job, Snapshot,
+   Generation, Vacuum, Gap Audit or Authority. It also requires zero unresolved
+   Exchange Command and no exchange position/order contradiction.
+7. Deploy the same exact Commit to the independent Owner API through its R2 path
+   so the API Schema marker and Dynamic activation endpoint match `0006`. The
+   static frontend need not change when it does not consume the endpoint.
+8. Restore the ordinary four-Worker production posture only through the current
+   Entry promotion and Owner control gates. This preserves `static_baseline`;
+   it is not Dynamic activation and does not resume paused Crypto `SOR-001`.
+
+Canonical command shapes are:
+
+```bash
+SOR_DYNAMIC_SELECTION_CACHE_DIR=<frozen-24-symbol-cache> \
+.venv/bin/python scripts/trading_kernel/certify_release_candidate.py \
+  --commit HEAD \
+  --release-level R4
+
+.venv/bin/python scripts/trading_kernel/deploy_tokyo_release.py \
+  --target tokyo \
+  --commit <exact-certified-commit> \
+  --mode compatible_upgrade \
+  --source-schema-revision 0005_tradfi_instrument_center \
+  --from-commit <exact-production-commit> \
+  --runtime-compatibility-classification COMPATIBLE_RESTART \
+  --runtime-compatibility-reason-code \
+    PERSISTED_ACTIVE_UNIVERSE_CONTRACT_UNCHANGED \
+  --runtime-compatibility-created-at-ms <frozen-positive-ms>
+```
+
+### First Dynamic activation readiness
+
+Before staging Dynamic mode, run the exact 24-Candidate operational audit:
+
+```bash
+.venv/bin/python scripts/trading_kernel/probe_production_runtime.py \
+  --dynamic-selection-candidates
+```
+
+The command obtains Candidate identity from PostgreSQL, uses readonly Binance
+account/rule/leverage operations, permits no operator-supplied instrument list
+and grants no StrategyUniverse or trading authority. Require exactly 24 rules,
+independent sides, Cross margin, configured `5x` and no ownership
+contradiction.（来源：`scripts/trading_kernel/probe_production_runtime.py`）
+
+The Owner then submits the next exact `D 00:00 UTC` Session through:
+
+```text
+POST /api/owner/v1/controls/strategies/SOR-001/selection/dynamic/activate
+```
+
+with the current Selection Control version, reason, unique idempotency key,
+TOTP code and `effective_session_start_ms`. The application accepts only the
+next UTC Session, leaves current mode `static_baseline`, and writes one durable
+`selection_mode_change` authorization plus pending transition atomically.
+
+### First activation readonly acceptance
+
+For the target Session, use the exact bounded projection:
+
+```bash
+.venv/bin/python scripts/trading_kernel/read_selection_runtime_status.py \
+  --strategy-group-id SOR-001 \
+  --selection-spec-id sor-dynamic-selection-v0 \
+  --session-start-ms <exact-D-00:00-UTC-ms>
+```
+
+| Branch | Required facts | Trading interpretation |
+| --- | --- | --- |
+| Success | Snapshot has exactly 24 decisions; `ACTIVE_NEW` or `NO_CHANGE`; current LONG/SHORT pair is atomic; Vacuum/Audit terminal; `selection_mode=dynamic_selection` | Dynamic eligibility starts from the frozen `first_eligible_close_time_ms` |
+| Pre-fence failure | Job records `SOURCE_FAILED`/`COMPUTE_FAILED`; no Vacuum/Generation/new Authority; current mode and Static pair remain unchanged | Static authority continues; no fallback is fabricated |
+| Post-fence failure | Failed Generation; exact union Gap Audit COMPLETE; `FALLBACK_PREVIOUS + STATIC_BASELINE`; Vacuum terminal; pending fields cleared; Static pair restored atomically | Current mode remains Static; audited Static eligibility resumes from the frozen first eligible close |
+
+`VALID_EMPTY` is a successful business outcome, not a failure: it commits
+forward-only no-new-ENTRY authority for the period and never falls back or
+rewrites an earlier legal Ticket/Position.
+
+### Recovery and rollback
+
+Failures before Schema migration may restore the exact source safety workers
+with Entry fenced. Any failure after `0006` migration is **fix-forward** on
+`0006`: no Alembic downgrade, old runtime restart, dual read/write or retired
+Schema restoration. Dynamic business rollback uses the approved Static
+materialization state machine; direct pointer DML is forbidden. Owner Pause
+always dominates activation and fallback, while existing Ticket lifecycle,
+protection, exit, Reconciliation, Settlement and Review continue.
 
 The terminal source classifier is exact. `terminal / terminal` denotes an
 exposure lifecycle and requires a current Review. The only terminal pairs that

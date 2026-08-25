@@ -34,3 +34,17 @@ def test_schema_and_periodic_portfolios_extend_their_lower_boundaries() -> None:
     assert PERIODIC_AUDIT_COMMANDS[: len(R4_SCHEMA_AUTHORITY_COMMANDS)] == (
         R4_SCHEMA_AUTHORITY_COMMANDS
     )
+
+
+def test_r4_candidate_certification_includes_dynamic_selection_golden_parity() -> None:
+    assert (
+        ".venv/bin/python",
+        "scripts/trading_kernel/verify_sor_dynamic_selection_golden.py",
+        "verify",
+        "--artifact-dir",
+        "tests/trading_kernel/fixtures/sor_dynamic_selection_v0",
+    ) in R4_SCHEMA_AUTHORITY_COMMANDS
+    assert (
+        ".venv/bin/python",
+        "scripts/trading_kernel/verify_sor_dynamic_selection_core_parity.py",
+    ) in R4_SCHEMA_AUTHORITY_COMMANDS

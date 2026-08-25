@@ -82,12 +82,21 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--now-ms", type=int)
     parser.add_argument("--validity-ms", type=int, default=5_000)
-    parser.add_argument(
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument(
         "--cutover-first-batch",
         action="store_true",
         help=(
             "Probe the committed seven-instrument first batch before the "
             "replacement schema exists. This scope cannot be operator-supplied."
+        ),
+    )
+    scope.add_argument(
+        "--dynamic-selection-candidates",
+        action="store_true",
+        help=(
+            "Probe the exact PostgreSQL-owned 24-member SOR Dynamic Selection "
+            "Candidate Panel. This audit is read-only and grants no trading authority."
         ),
     )
     return parser
@@ -223,6 +232,48 @@ async def load_database_probe_manifest(
     return _canonical_active_universe_instrument_ids(tuple(str(row) for row in rows))
 
 
+async def load_dynamic_selection_candidate_probe_manifest(
+    database_url: str,
+    *,
+    selection_spec_id: str = "sor-dynamic-selection-v0",
+) -> tuple[str, ...]:
+    """Read the exact Candidate Panel without turning it into trade authority."""
+
+    normalized = database_url.strip()
+    if not normalized.startswith("postgresql+asyncpg://"):
+        raise ValueError("candidate probe manifest requires postgresql+asyncpg URL")
+    engine = create_async_engine(normalized)
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                await connection.execute(text("SET TRANSACTION READ ONLY"))
+                rows = (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT exchange_instrument_id
+                            FROM brc_instrument_selection_spec_members
+                            WHERE selection_spec_id = :selection_spec_id
+                            ORDER BY exchange_instrument_id
+                            LIMIT 25
+                            """
+                        ),
+                        {"selection_spec_id": selection_spec_id},
+                    )
+                ).scalars().all()
+            finally:
+                await transaction.rollback()
+    finally:
+        await engine.dispose()
+    instruments = _canonical_active_universe_instrument_ids(
+        tuple(str(row) for row in rows)
+    )
+    if len(instruments) != 24:
+        raise ValueError("dynamic Selection Candidate Panel must contain exactly 24")
+    return instruments
+
+
 def load_cutover_first_batch_probe_manifest() -> tuple[str, ...]:
     """Return the fixed approved scope needed before the replacement schema exists."""
 
@@ -272,8 +323,14 @@ async def _run(args: argparse.Namespace) -> int:
             exchange_instrument_ids=(
                 load_cutover_first_batch_probe_manifest()
                 if args.cutover_first_batch
-                else await load_database_probe_manifest(
-                    os.getenv("TRADING_KERNEL_DATABASE_URL", "")
+                else (
+                    await load_dynamic_selection_candidate_probe_manifest(
+                        os.getenv("TRADING_KERNEL_DATABASE_URL", "")
+                    )
+                    if args.dynamic_selection_candidates
+                    else await load_database_probe_manifest(
+                        os.getenv("TRADING_KERNEL_DATABASE_URL", "")
+                    )
                 )
             ),
         )

@@ -9,6 +9,7 @@ from scripts.trading_kernel.certify_release_candidate import (
     RuntimeCompatibilityClassification,
     build_certification_identity,
     build_runtime_release_compatibility_fact,
+    certification_commands_for,
     validate_manifest_identity,
 )
 
@@ -77,7 +78,12 @@ def test_r4_manifest_cannot_satisfy_an_r3_certification_requirement() -> None:
         **identity,
         status="pass",
         certified_at_ms=2_000,
-        command_durations_ms=(1, 2, 3, 4, 5, 6, 7),
+        command_durations_ms=tuple(
+            range(
+                1,
+                len(certification_commands_for(ReleaseCertificationLevel.R4)) + 1,
+            )
+        ),
     )
 
     with pytest.raises(ValueError, match="release level differs"):
@@ -90,7 +96,12 @@ def test_release_compatibility_fact_is_bound_to_the_exact_certification_manifest
         **identity,
         status="pass",
         certified_at_ms=2_000,
-        command_durations_ms=(1, 2, 3, 4, 5, 6, 7),
+        command_durations_ms=tuple(
+            range(
+                1,
+                len(certification_commands_for(ReleaseCertificationLevel.R4)) + 1,
+            )
+        ),
     )
 
     fact = build_runtime_release_compatibility_fact(

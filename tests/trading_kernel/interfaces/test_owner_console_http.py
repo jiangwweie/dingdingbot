@@ -718,6 +718,7 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "/api/owner/v1/controls",
         "/api/owner/v1/controls/strategies/{strategy_group_id}/pause",
         "/api/owner/v1/controls/strategies/{strategy_group_id}/resume",
+        "/api/owner/v1/controls/strategies/{strategy_group_id}/selection/dynamic/activate",
         "/api/owner/v1/controls/entry/pause",
         "/api/owner/v1/controls/entry/resume",
         "/api/owner/v1/controls/exposure/flatten-all/preview",

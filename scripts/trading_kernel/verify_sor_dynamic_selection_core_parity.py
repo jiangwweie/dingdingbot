@@ -8,10 +8,16 @@ import csv
 import gzip
 import hashlib
 import json
+import os
+import sys
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from src.trading_kernel.domain.instrument_selection import (
     INTERVAL_MS,
@@ -39,7 +45,17 @@ class _RawKline:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cache-dir", required=True, type=Path)
+    cache_dir = os.getenv("SOR_DYNAMIC_SELECTION_CACHE_DIR")
+    parser.add_argument(
+        "--cache-dir",
+        required=cache_dir is None,
+        default=cache_dir,
+        type=Path,
+        help=(
+            "Frozen Binance 15m cache; defaults to "
+            "SOR_DYNAMIC_SELECTION_CACHE_DIR"
+        ),
+    )
     parser.add_argument(
         "--artifact-dir",
         type=Path,

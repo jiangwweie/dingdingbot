@@ -2,6 +2,7 @@
 title: EVENTSPEC_INSTRUMENT_FIT_RESEARCH_OVERVIEW
 status: CURRENT_RESEARCH_OVERVIEW
 date: 2026-08-23
+last_verified: 2026-08-25
 phase: P3-X
 production_authority: NONE
 ---
@@ -255,7 +256,7 @@ ENTRY，不追溯撤销此前合法Ticket/fill或protected lifecycle。
 | **P3-X.0 — Instrument Effect** | 已完成固定面板敏感度研究 | None |
 | **P3-X.1 — Dynamic Selection V0 Replay** | 已完成；全部冻结定量 Gate 通过 | None |
 | **P3-X.2 — Production design** | 三Plane ownership/DB handoff、generic Selection facts、独立leases、Selection-Period continuity Authority、SelectionSessionAuthority、Entry Vacuum、source failure、通用Authority Gap Audit、`first_eligible_close_time_ms`、`VALID_EMPTY/NO_CHANGE/SUPERSEDED`、Pause Resume、unfinished ENTRY drain、双腿partial-retained、唯一Generation→Universe linkage、serial warming、atomic switch、first Dynamic activation特例、post-fence fallback、thin release compatibility projection | **DESIGN_APPROVED**；Production Design已完成，不单独授权实现；`production_authority=NONE` |
-| **P3-X.3 — Implementation/certification** | Implementation Plan已独立复核通过；DS-00至DS-08已经完成；Decimal Golden是DS-03/DS-09唯一Selection parity baseline，serial warming、atomic pair activation、supersession、fallback、四个new-ENTRY边界Authority lineage、independent runtime hosting/recovery、Owner Pause和exact release fact projection已经闭合，当前进入exact candidate integrated certification | `PLAN_APPROVED / CODE_AND_TEST_ONLY / production_authority=NONE`；active execution scope=`DS-09`；Owner已授权DS-09至DS-10本地顺序实施 |
+| **P3-X.3 — Implementation/certification** | **DS-00至DS-10本地实现与证据包已完成**；Decimal Golden/Core parity、serial warming、atomic pair activation、supersession/fallback、四个new-ENTRY边界Authority lineage、independent runtime hosting/recovery、Owner Pause、Owner Dynamic activation boundary、24-Candidate readonly audit、exact release fact和zero-runtime-side-effect postflight已经闭合 | `PLAN_APPROVED / LOCAL_IMPLEMENTATION_COMPLETE / production_authority=NONE`；exact candidate由clean-HEAD R4 manifest认证；下一Gate为独立软件部署复核 |
 | **P3-X.4 — Small-capital activation** | Owner 单独授权 Dynamic mode；原风险边界 | Production Instrument eligibility changes |
 | **P3-X.5 — Productization** | API、前端、版本治理和后续策略复用 | Deferred |
 
@@ -289,6 +290,7 @@ docs/superpowers/plans/
 
 它把Schema、test-first批次、Migration、三个独立lease、continuity/Gap Audit close边界、Vacuum/
 ENTRY drain、warming/activation/fallback、release classification和rollback拆成DS-00至DS-10可验收
-Task，当前状态`PLAN_APPROVED / CODE_AND_TEST_ONLY / production_authority=NONE`。DS-00至DS-08已完成，
-当前Active Execution Scope为`DS-09`；Owner已授权DS-09至DS-10本地代码、测试与认证顺序实施。
-生产Migration执行、部署、生产Selection、Strategy Control、Policy与首次Dynamic activation仍无授权。
+Task，当前状态`PLAN_APPROVED / LOCAL_IMPLEMENTATION_COMPLETE / production_authority=NONE`。
+DS-00至DS-10本地代码、测试、认证组合和Deployment/Activation evidence package已闭合；exact
+candidate只由clean-HEAD R4 manifest识别。生产Migration执行、部署、生产Selection、Strategy
+Control、Policy与首次Dynamic activation仍无授权。

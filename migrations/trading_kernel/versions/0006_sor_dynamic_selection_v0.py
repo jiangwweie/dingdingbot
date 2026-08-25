@@ -59,6 +59,7 @@ _CANDIDATE_SYMBOLS = (
 
 def upgrade() -> None:
     _assert_flat_source()
+    _upgrade_owner_selection_authorization()
     _create_selection_spec_tables()
     _create_selection_plane_tables()
     _create_materialization_tables()
@@ -103,6 +104,21 @@ def _assert_flat_source() -> None:
         raise RuntimeError(
             "0006 migration requires exact flat source: " + ",".join(blockers)
         )
+
+
+def _upgrade_owner_selection_authorization() -> None:
+    op.drop_constraint(
+        "ck_brc_owner_authorizations_purpose_valid",
+        "brc_owner_authorizations",
+        type_="check",
+    )
+    op.create_check_constraint(
+        "ck_brc_owner_authorizations_purpose_valid",
+        "brc_owner_authorizations",
+        "purpose IN ('strategy_pause', 'strategy_resume', 'entry_pause', "
+        "'entry_resume', 'owner_flatten_all', 'universe_configure', "
+        "'selection_mode_change')",
+    )
 
 
 def _create_selection_spec_tables() -> None:

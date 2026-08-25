@@ -8,9 +8,14 @@ import pytest
 from pydantic import ValidationError
 
 from src.trading_kernel.application.owner_control import (
+    ControlMutationRequest,
+    OwnerControlBlocked,
+    OwnerControlConflict,
+    _next_dynamic_selection_session_start_ms,
     advance_flatten_operation_once,
     preview_flatten_all,
     set_global_entry_state,
+    stage_dynamic_selection_mode,
     strategy_entry_is_enabled,
 )
 from src.trading_kernel.application.ports import OwnerPolicySnapshot
@@ -23,6 +28,10 @@ from src.trading_kernel.domain.owner_control import (
     StrategyEntryState,
     advance_control_operation,
     transition_strategy_entry_control,
+)
+from src.trading_kernel.domain.selection_authority import (
+    SelectionControl,
+    SelectionMode,
 )
 
 
@@ -90,6 +99,154 @@ def test_control_operation_rejects_invalid_state_jump() -> None:
 
 def test_missing_strategy_control_fails_closed() -> None:
     assert not strategy_entry_is_enabled(None)
+
+
+def test_dynamic_activation_targets_the_next_selection_decision_boundary() -> None:
+    session_start_ms = 1_799_971_200_000
+
+    assert (
+        _next_dynamic_selection_session_start_ms(session_start_ms + 3_599_999)
+        == session_start_ms
+    )
+    assert (
+        _next_dynamic_selection_session_start_ms(session_start_ms + 3_600_000)
+        == session_start_ms + 86_400_000
+    )
+
+
+@pytest.mark.asyncio
+async def test_first_dynamic_activation_stages_next_utc_session_with_owner_authority() -> None:
+    current = _selection_control()
+
+    class OwnerControls:
+        authorization = None
+
+        async def get_authorization_by_idempotency_key(self, _key: str):
+            return None
+
+        async def add_authorization(self, authorization) -> None:
+            self.authorization = authorization
+
+    class InstrumentSelection:
+        staged: dict[str, object] | None = None
+
+        async def get_selection_control(
+            self,
+            _strategy_group_id: str,
+            *,
+            for_update: bool = False,
+        ) -> SelectionControl:
+            assert for_update
+            return current
+
+        async def stage_pending_selection_mode(self, **kwargs: object) -> SelectionControl:
+            self.staged = kwargs
+            return current.model_copy(
+                update={
+                    "pending_selection_mode": SelectionMode.DYNAMIC_SELECTION,
+                    "pending_effective_session_start_ms": kwargs[
+                        "effective_session_start_ms"
+                    ],
+                    "pending_authorization_id": kwargs["authorization_id"],
+                    "control_version": 2,
+                    "updated_at_ms": kwargs["updated_at_ms"],
+                }
+            )
+
+    owner_controls = OwnerControls()
+    instrument_selection = InstrumentSelection()
+    staged = await stage_dynamic_selection_mode(
+        SimpleNamespace(
+            owner_controls=owner_controls,
+            instrument_selection=instrument_selection,
+        ),
+        strategy_group_id="SOR-001",
+        effective_session_start_ms=1_800_057_600_000,
+        request=ControlMutationRequest(
+            expected_version=1,
+            reason="owner_enable_dynamic_selection_v0",
+            idempotency_key="owner-request:selection-mode:1",
+            owner_identity="owner",
+            now_ms=1_800_000_000_000,
+        ),
+        authentication_strength="totp_step_up",
+    )
+
+    assert staged.selection_mode is SelectionMode.STATIC_BASELINE
+    assert staged.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+    assert staged.pending_effective_session_start_ms == 1_800_057_600_000
+    assert owner_controls.authorization is not None
+    assert owner_controls.authorization.purpose == "selection_mode_change"
+    assert owner_controls.authorization.authentication_strength == "totp_step_up"
+    assert owner_controls.authorization.target_scope == {
+        "strategy_group_id": "SOR-001",
+        "target_selection_mode": "dynamic_selection",
+        "effective_session_start_ms": 1_800_057_600_000,
+    }
+    assert instrument_selection.staged is not None
+
+
+@pytest.mark.asyncio
+async def test_first_dynamic_activation_rejects_non_next_session_and_stale_version() -> None:
+    current = _selection_control()
+
+    class OwnerControls:
+        def __init__(self) -> None:
+            self.authorizations = []
+
+        async def get_authorization_by_idempotency_key(self, _key: str):
+            return None
+
+        async def add_authorization(self, authorization) -> None:
+            self.authorizations.append(authorization)
+
+    class InstrumentSelection:
+        async def get_selection_control(
+            self,
+            _strategy_group_id: str,
+            *,
+            for_update: bool = False,
+        ) -> SelectionControl:
+            assert for_update
+            return current
+
+        async def stage_pending_selection_mode(self, **_kwargs: object) -> SelectionControl:
+            raise AssertionError("invalid request must not stage Selection Control")
+
+    owner_controls = OwnerControls()
+    uow = SimpleNamespace(
+        owner_controls=owner_controls,
+        instrument_selection=InstrumentSelection(),
+    )
+    with pytest.raises(OwnerControlBlocked, match="selection_effective_session_not_next"):
+        await stage_dynamic_selection_mode(
+            uow,
+            strategy_group_id="SOR-001",
+            effective_session_start_ms=1_800_144_000_000,
+            request=ControlMutationRequest(
+                expected_version=1,
+                reason="owner_enable_dynamic_selection_v0",
+                idempotency_key="owner-request:selection-mode:future",
+                owner_identity="owner",
+                now_ms=1_800_000_000_000,
+            ),
+            authentication_strength="totp_step_up",
+        )
+    with pytest.raises(OwnerControlConflict, match="selection_control_version_conflict"):
+        await stage_dynamic_selection_mode(
+            uow,
+            strategy_group_id="SOR-001",
+            effective_session_start_ms=1_800_057_600_000,
+            request=ControlMutationRequest(
+                expected_version=2,
+                reason="owner_enable_dynamic_selection_v0",
+                idempotency_key="owner-request:selection-mode:stale",
+                owner_identity="owner",
+                now_ms=1_800_000_000_000,
+            ),
+            authentication_strength="totp_step_up",
+        )
+    assert owner_controls.authorizations == []
 
 
 @pytest.mark.asyncio
@@ -277,6 +434,20 @@ async def _active_account_tickets(scope: dict[str, object]) -> tuple[str, ...]:
         "limit": 3,
     }
     return ("ticket:crypto", "ticket:tradfi")
+
+
+def _selection_control() -> SelectionControl:
+    return SelectionControl(
+        strategy_group_id="SOR-001",
+        selection_spec_id="sor-dynamic-selection-v0",
+        selection_mode=SelectionMode.STATIC_BASELINE,
+        pending_selection_mode=None,
+        pending_effective_session_start_ms=None,
+        pending_authorization_id=None,
+        control_version=1,
+        rollback_baseline_id="rollback-baseline:SOR-001:pre-dynamic-v0",
+        updated_at_ms=1_799_999_999_000,
+    )
 
 
 def _policy(*, new_entry_submit_enabled: bool) -> OwnerPolicySnapshot:

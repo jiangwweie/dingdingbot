@@ -24,7 +24,7 @@ from src.trading_kernel.application.reconcile_ticket import (
     request_exit,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
-from src.trading_kernel.domain.instrument_selection import DAY_MS
+from src.trading_kernel.domain.instrument_selection import DAY_MS, INTERVAL_MS
 from src.trading_kernel.domain.owner_control import (
     ControlOperationState,
     OwnerAuthorization,
@@ -33,6 +33,10 @@ from src.trading_kernel.domain.owner_control import (
     StrategyEntryState,
     advance_control_operation,
     transition_strategy_entry_control,
+)
+from src.trading_kernel.domain.selection_authority import (
+    SelectionControl,
+    SelectionMode,
 )
 from src.trading_kernel.domain.strategy_entry_vacuum import (
     StrategyEntryVacuum,
@@ -231,6 +235,79 @@ async def set_global_entry_state(
         )
     except AggregateVersionConflict as error:
         raise OwnerControlConflict("owner_policy_version_conflict") from error
+
+
+async def stage_dynamic_selection_mode(
+    uow: KernelUnitOfWork,
+    *,
+    strategy_group_id: str,
+    effective_session_start_ms: int,
+    request: ControlMutationRequest,
+    authentication_strength: Literal["totp_step_up"],
+) -> SelectionControl:
+    """Authorize the first Static-to-Dynamic attempt for the next UTC Session."""
+
+    if authentication_strength != "totp_step_up":
+        raise OwnerControlBlocked("selection_mode_change_requires_step_up")
+    target_scope: dict[str, JsonValue] = {
+        "strategy_group_id": strategy_group_id,
+        "target_selection_mode": SelectionMode.DYNAMIC_SELECTION.value,
+        "effective_session_start_ms": effective_session_start_ms,
+    }
+    existing = await uow.owner_controls.get_authorization_by_idempotency_key(
+        request.idempotency_key
+    )
+    current = await uow.instrument_selection.get_selection_control(
+        strategy_group_id,
+        for_update=True,
+    )
+    if current is None:
+        raise OwnerControlBlocked("selection_control_missing")
+    if existing is not None:
+        _require_matching_authorization(
+            existing,
+            purpose="selection_mode_change",
+            request=request,
+            target_scope=target_scope,
+        )
+        if existing.authentication_strength != "totp_step_up":
+            raise OwnerControlConflict("selection_authorization_strength_conflict")
+        return current
+    if current.control_version != request.expected_version:
+        raise OwnerControlConflict("selection_control_version_conflict")
+    if current.selection_mode is not SelectionMode.STATIC_BASELINE:
+        raise OwnerControlBlocked("selection_mode_not_static_baseline")
+    if current.pending_selection_mode is not None:
+        raise OwnerControlBlocked("selection_mode_transition_already_pending")
+    next_session_start_ms = _next_dynamic_selection_session_start_ms(request.now_ms)
+    if effective_session_start_ms != next_session_start_ms:
+        raise OwnerControlBlocked("selection_effective_session_not_next")
+
+    authorization = _authorization(
+        purpose="selection_mode_change",
+        request=request,
+        authentication_strength=authentication_strength,
+        target_scope=target_scope,
+    )
+    await uow.owner_controls.add_authorization(authorization)
+    staged = await uow.instrument_selection.stage_pending_selection_mode(
+        strategy_group_id=strategy_group_id,
+        expected_control_version=current.control_version,
+        expected_current_mode=SelectionMode.STATIC_BASELINE,
+        pending_mode=SelectionMode.DYNAMIC_SELECTION,
+        effective_session_start_ms=effective_session_start_ms,
+        authorization_id=authorization.authorization_id,
+        updated_at_ms=request.now_ms,
+    )
+    if staged is None:
+        raise OwnerControlConflict("selection_control_version_conflict")
+    return staged
+
+
+def _next_dynamic_selection_session_start_ms(now_ms: int) -> int:
+    session_start_ms = (now_ms // DAY_MS) * DAY_MS
+    decision_boundary_ms = session_start_ms + 4 * INTERVAL_MS
+    return session_start_ms if now_ms < decision_boundary_ms else session_start_ms + DAY_MS
 
 
 async def preview_flatten_all(
@@ -624,6 +701,7 @@ def _authorization(
         "entry_pause",
         "entry_resume",
         "owner_flatten_all",
+        "selection_mode_change",
     ],
     request: ControlMutationRequest,
     authentication_strength: Literal["session", "totp_step_up"],
@@ -654,6 +732,7 @@ def _authorization_digest(
         "entry_pause",
         "entry_resume",
         "owner_flatten_all",
+        "selection_mode_change",
     ],
     request: ControlMutationRequest,
     target_scope: dict[str, JsonValue],
@@ -679,6 +758,7 @@ def _require_matching_authorization(
         "entry_pause",
         "entry_resume",
         "owner_flatten_all",
+        "selection_mode_change",
     ],
     request: ControlMutationRequest,
     target_scope: dict[str, JsonValue],
