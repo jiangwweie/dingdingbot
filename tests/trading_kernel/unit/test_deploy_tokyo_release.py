@@ -29,8 +29,8 @@ CURRENT_COMMIT = "b" * 40
 CURRENT_RELEASE = "/opt/brc/releases/brc-trading-kernel-bbbbbbbbbbbb"
 TARGET_RELEASE = "/opt/brc/releases/brc-trading-kernel-aaaaaaaaaaaa"
 RECOVERY_RELEASE = "/opt/brc/releases/brc-trading-kernel-cccccccccccc"
-SOURCE_SCHEMA_REVISION = "0005_tradfi_instrument_center"
-TARGET_SCHEMA_REVISION = "0006_sor_dynamic_selection_v0"
+SOURCE_SCHEMA_REVISION = "0006_sor_dynamic_selection_v0"
+TARGET_SCHEMA_REVISION = "0007_exit_profile_authority_v1"
 RELEASE_COMPATIBILITY_ID = (
     f"release-compatibility:{CURRENT_COMMIT}:{TARGET_COMMIT}"
 )
@@ -74,7 +74,7 @@ def test_regular_plan_rejects_a_schema_change() -> None:
         )
 
 
-def test_dep_002_compatible_upgrade_accepts_only_exact_0005_to_0006() -> None:
+def test_dep_002_compatible_upgrade_accepts_only_exact_source_to_current_head() -> None:
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,
@@ -89,7 +89,7 @@ def test_dep_002_compatible_upgrade_accepts_only_exact_0005_to_0006() -> None:
     assert plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
     assert plan.source_schema_revision == SOURCE_SCHEMA_REVISION
 
-    with pytest.raises(ValueError, match="exact 0005 source"):
+    with pytest.raises(ValueError, match="exact compatible source"):
         DeploymentPlan(
             target_commit=TARGET_COMMIT,
             target_release=TARGET_RELEASE,

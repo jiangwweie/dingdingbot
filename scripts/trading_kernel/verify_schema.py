@@ -135,6 +135,26 @@ _DYNAMIC_SELECTION_ADDITIVE_EXISTING_TABLES = frozenset(
         "brc_instrument_product_profiles",
     }
 )
+_EXIT_PROFILE_TABLES = frozenset(
+    {
+        "brc_event_exit_profile_bindings",
+        "brc_event_exit_profile_binding_current",
+        "brc_event_exit_profile_binding_events",
+    }
+)
+_EXIT_PROFILE_ADDED_COLUMNS = {
+    "brc_exit_policies": ("profile_schema_version",),
+    "brc_capacity_claims": (
+        "exit_binding_id",
+        "exit_binding_semantic_hash",
+        "exit_binding_authority_version",
+    ),
+    "brc_trade_tickets": (
+        "exit_binding_id",
+        "exit_binding_semantic_hash",
+        "exit_binding_authority_version",
+    ),
+}
 _R4_TERMINAL_LINEAGE_TABLES = frozenset(
     {
         "brc_admission_decisions",
@@ -468,7 +488,11 @@ async def _verify_preservation(
     target_revision = (
         HISTORICAL_PRESERVATION_TARGET_REVISION
         if source_revision == COMPATIBLE_SOURCE_REVISION
-        else EXPECTED_ALEMBIC_REVISION
+        else "0004_owner_control_plane"
+        if source_revision == OWNER_CONTROL_SOURCE_REVISION
+        else "0005_tradfi_instrument_center"
+        if source_revision == TRADFI_INSTRUMENT_SOURCE_REVISION
+        else "0006_sor_dynamic_selection_v0"
     )
     passed = bool(revision == target_revision and manifest["digest"] == expected_digest)
     return {
@@ -1360,6 +1384,7 @@ def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
         not in _OWNER_CONTROL_TABLES
         | _TRADFI_INSTRUMENT_TABLES
         | _DYNAMIC_SELECTION_TABLES
+        | _EXIT_PROFILE_TABLES
     }
 
 
@@ -1368,7 +1393,9 @@ def _source_0004_table_columns() -> dict[str, tuple[str, ...]]:
         table.name: _source_columns_before_dynamic_selection(table)
         for table in sorted(metadata.tables.values(), key=lambda item: item.name)
         if table.name
-        not in _TRADFI_INSTRUMENT_TABLES | _DYNAMIC_SELECTION_TABLES
+        not in _TRADFI_INSTRUMENT_TABLES
+        | _DYNAMIC_SELECTION_TABLES
+        | _EXIT_PROFILE_TABLES
     }
 
 
@@ -1379,9 +1406,11 @@ def _source_0005_table_columns() -> dict[str, tuple[str, ...]]:
             for column in table.c
             if column.name
             not in _DYNAMIC_SELECTION_ADDED_COLUMNS.get(table.name, ())
+            and column.name
+            not in _EXIT_PROFILE_ADDED_COLUMNS.get(table.name, ())
         )
         for table in sorted(metadata.tables.values(), key=lambda item: item.name)
-        if table.name not in _DYNAMIC_SELECTION_TABLES
+        if table.name not in _DYNAMIC_SELECTION_TABLES | _EXIT_PROFILE_TABLES
     }
 
 
@@ -1397,6 +1426,7 @@ def _source_columns_before_dynamic_selection(table: sa.Table) -> tuple[str, ...]
         name
         for name in _source_columns_before_tradfi(table)
         if name not in _DYNAMIC_SELECTION_ADDED_COLUMNS.get(table.name, ())
+        and name not in _EXIT_PROFILE_ADDED_COLUMNS.get(table.name, ())
     )
 
 

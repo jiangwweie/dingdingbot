@@ -79,9 +79,9 @@ def test_kernel_has_no_legacy_or_compatibility_module_surface() -> None:
     )
 
 
-def test_flat_upgrade_keeps_historical_preservation_and_current_0005_source() -> None:
+def test_flat_upgrade_keeps_historical_preservation_and_current_0006_source() -> None:
     assert COMPATIBLE_SOURCE_SCHEMA_REVISION == (
-        "0005_tradfi_instrument_center"
+        "0006_sor_dynamic_selection_v0"
     )
     assert COMPATIBLE_SOURCE_REVISION == "0002_sor_v3_strategy_group_capacity"
     assert SCHEMA_REVISION == CURRENT_SCHEMA_REVISION

@@ -8,7 +8,7 @@ design_authority_commit: 50e94cea15445f1c3e268f524dfa6e440581bf3e
 design_authority_semantic_digest: sha256:68415c06387d4cdc13aebc500a095e205fe389ea96be137df07350c4a6364477
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: EX-02
+active_execution_scope: EX-03
 production_authority: NONE
 owner_approval: 2026-08-28 active task decision authorizing EX-00 through EX-08
 ---
@@ -32,7 +32,7 @@ perform Replay, Shadow, parameter search or profitability certification.
 design_status = DESIGN_APPROVED
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = EX-02
+active_execution_scope = EX-03
 production_authority = NONE
 ```
 
@@ -388,6 +388,35 @@ runtime side effects.
 - no dual-write or old-table reader;
 - no active-position handover;
 - final revision number remains integration-owned until merge.
+
+### EX-02 Execution Evidence — 2026-08-28
+
+**Status: `EX02_COMPLETE`.** Added forward-only
+`0007_exit_profile_authority_v1`, immutable Profile physical extensions,
+Binding facts/current/events, composite `MATCH FULL` identities and nullable
+historical-safe Claim/Ticket Binding lineage.
+
+The migration rejects non-flat source state, preserves legacy Policy rows,
+creates zero runtime trading facts and rejects downgrade. Profile content and
+Binding facts/events are immutable; duplicate Binding lifecycle operations are
+database-rejected.
+
+Necessary current-head identity updates move the local deployment target from
+`0006` to `0007` while retaining `0006` as the exact compatible source. Existing
+older preservation manifests project only their source-owned columns; this is a
+bounded preservation query, not a runtime schema fallback.
+
+| Verification | Result |
+| --- | ---: |
+| EX-02 Migration/constraint focused | **3 passed** |
+| Cross-version/schema/Registry integration | **38 passed** |
+| Fast Unit + Architecture | **1,044 passed** |
+| Ruff | **passed** |
+| Mypy | **173 source files, zero issues** |
+| `git diff --check` | **passed** |
+
+Active execution scope advances to **EX-03**. Production Migration was not
+executed.
 
 ## 10. EX-03 — Typed Catalog And Initial Seed
 

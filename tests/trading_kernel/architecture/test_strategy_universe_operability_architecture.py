@@ -31,6 +31,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0004_owner_control_plane.py",
         "0005_tradfi_instrument_center.py",
         "0006_sor_dynamic_selection_v0.py",
+        "0007_exit_profile_authority_v1.py",
     )
 
     revisions: dict[str, str | None] = {}
@@ -54,6 +55,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0004_owner_control_plane": "0003_portfolio_admission_observability",
         "0005_tradfi_instrument_center": "0004_owner_control_plane",
         "0006_sor_dynamic_selection_v0": "0005_tradfi_instrument_center",
+        "0007_exit_profile_authority_v1": "0006_sor_dynamic_selection_v0",
     }
     assert set(revisions.values()) - {None} == {
         "0001_trading_kernel_baseline_v4",
@@ -61,6 +63,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0003_portfolio_admission_observability",
         "0004_owner_control_plane",
         "0005_tradfi_instrument_center",
+        "0006_sor_dynamic_selection_v0",
     }
 
     baseline_source = migration_paths[0].read_text(encoding="utf-8")

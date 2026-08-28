@@ -273,6 +273,7 @@ async def seed_runtime_authority(
         "0004_owner_control_plane",
         "0005_tradfi_instrument_center",
         "0006_sor_dynamic_selection_v0",
+        "0007_exit_profile_authority_v1",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -1092,6 +1093,7 @@ def _schema_includes_tradfi(schema_revision: str) -> bool:
     return schema_revision in {
         "0005_tradfi_instrument_center",
         "0006_sor_dynamic_selection_v0",
+        "0007_exit_profile_authority_v1",
     }
 
 

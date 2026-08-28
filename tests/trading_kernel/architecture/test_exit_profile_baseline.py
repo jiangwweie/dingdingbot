@@ -24,7 +24,7 @@ def test_current_runtime_has_no_yaml_parser_or_exit_profile_yaml_catalog() -> No
     assert exit_yaml == ()
 
 
-def test_current_exit_policy_authority_is_event_bound() -> None:
+def test_exit_policy_catalog_remains_event_generated_until_ex03() -> None:
     domain = (
         REPO_ROOT / "src/trading_kernel/domain/exit_policy.py"
     ).read_text(encoding="utf-8")
@@ -36,7 +36,8 @@ def test_current_exit_policy_authority_is_event_bound() -> None:
     ).read_text(encoding="utf-8")
 
     assert "_policy_for_contract(item)" in domain
-    assert 'sa.UniqueConstraint("event_spec_id")' in models
+    assert '_id("exit_policy_id")' in models
+    assert 'sa.UniqueConstraint("event_spec_id")' not in models
     assert "policy.event_spec_id != aggregate.ticket.identity.runtime.event_spec_id" in lifecycle
 
 

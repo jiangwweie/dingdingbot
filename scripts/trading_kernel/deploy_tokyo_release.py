@@ -41,7 +41,7 @@ from src.trading_kernel.infrastructure.runtime_identity import (
 )
 
 SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
-COMPATIBLE_SOURCE_SCHEMA_REVISION = "0005_tradfi_instrument_center"
+COMPATIBLE_SOURCE_SCHEMA_REVISION = "0006_sor_dynamic_selection_v0"
 R4_LEGACY_PRESERVATION_DIGEST = (
     "sha256:830ed497a82630805504e9f34ba72dcafcad9164a6fc65aa2a70ae1e3c21ec34"
 )
@@ -115,7 +115,7 @@ class DeploymentPlan:
                 raise ValueError("regular deployment cannot change schema revision")
         elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
             if self.source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
-                raise ValueError("compatible upgrade requires the exact 0005 source")
+                raise ValueError("compatible upgrade requires the exact compatible source")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("compatible upgrade requires the current schema head")
             if self.closure_ticket_id is not None:
@@ -157,7 +157,7 @@ class DeploymentPlan:
                 != COMPATIBLE_SOURCE_SCHEMA_REVISION
             ):
                 raise ValueError(
-                    "Deployment Drain integration currently requires exact 0005 compatible upgrade"
+                    "Deployment Drain integration requires the exact compatible source"
                 )
             if self.enable_entry:
                 raise ValueError("Deployment Drain must keep ENTRY disabled")

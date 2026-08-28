@@ -8,7 +8,8 @@ TradingKernelSchemaRevision = Literal[
     "0004_owner_control_plane",
     "0005_tradfi_instrument_center",
     "0006_sor_dynamic_selection_v0",
+    "0007_exit_profile_authority_v1",
 ]
 CURRENT_SCHEMA_REVISION: Final[TradingKernelSchemaRevision] = (
-    "0006_sor_dynamic_selection_v0"
+    "0007_exit_profile_authority_v1"
 )

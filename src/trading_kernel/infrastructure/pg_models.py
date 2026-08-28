@@ -79,17 +79,124 @@ exit_policies = sa.Table(
     metadata,
     _id("exit_policy_id", primary_key=True),
     sa.Column("exit_policy_version", SHORT_TEXT, nullable=False),
-    _id("event_spec_id"),
+    _id("event_spec_id", nullable=True),
+    sa.Column("profile_schema_version", SHORT_TEXT, nullable=True),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     _json("policy"),
     sa.Column("semantic_hash", LONG_TEXT, nullable=False),
     sa.Column("status", SHORT_TEXT, nullable=False),
     _time("created_at_ms"),
-    sa.UniqueConstraint("event_spec_id"),
     sa.UniqueConstraint("semantic_hash"),
+    sa.UniqueConstraint("exit_policy_id", "semantic_hash"),
     sa.CheckConstraint(
         "position_side IN ('long', 'short')",
         name="position_side_valid",
+    ),
+    sa.CheckConstraint(
+        "(event_spec_id IS NOT NULL AND profile_schema_version IS NULL) OR "
+        "(event_spec_id IS NULL AND profile_schema_version = 'exit_profile_v1')",
+        name="profile_schema_shape_valid",
+    ),
+)
+
+event_exit_profile_bindings = sa.Table(
+    "brc_event_exit_profile_bindings",
+    metadata,
+    _id("exit_binding_id", primary_key=True),
+    sa.Column("binding_version", sa.BigInteger, nullable=False),
+    _id("event_spec_id"),
+    _id("exit_profile_id"),
+    sa.Column("exit_profile_semantic_hash", LONG_TEXT, nullable=False),
+    sa.Column("binding_semantic_hash", LONG_TEXT, nullable=False),
+    sa.Column("activation_reason", LONG_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("event_spec_id", "binding_version"),
+    sa.UniqueConstraint("exit_binding_id", "binding_semantic_hash"),
+    sa.ForeignKeyConstraint(
+        ["event_spec_id"],
+        ["brc_event_specs.event_spec_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["exit_profile_id", "exit_profile_semantic_hash"],
+        ["brc_exit_policies.exit_policy_id", "brc_exit_policies.semantic_hash"],
+        match="FULL",
+    ),
+    sa.CheckConstraint("binding_version > 0", name="binding_version_positive"),
+    sa.CheckConstraint(
+        "exit_profile_semantic_hash ~ '^sha256:[0-9a-f]{64}$' "
+        "AND binding_semantic_hash ~ '^sha256:[0-9a-f]{64}$'",
+        name="binding_hashes_valid",
+    ),
+)
+
+event_exit_profile_binding_current = sa.Table(
+    "brc_event_exit_profile_binding_current",
+    metadata,
+    _id("event_spec_id", primary_key=True),
+    _id("exit_binding_id"),
+    sa.Column("binding_semantic_hash", LONG_TEXT, nullable=False),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    _time("activated_at_ms"),
+    sa.UniqueConstraint("exit_binding_id"),
+    sa.ForeignKeyConstraint(
+        ["event_spec_id"],
+        ["brc_event_specs.event_spec_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["exit_binding_id", "binding_semantic_hash"],
+        [
+            "brc_event_exit_profile_bindings.exit_binding_id",
+            "brc_event_exit_profile_bindings.binding_semantic_hash",
+        ],
+        match="FULL",
+    ),
+    sa.CheckConstraint("projection_version > 0", name="projection_version_positive"),
+    sa.CheckConstraint(
+        "binding_semantic_hash ~ '^sha256:[0-9a-f]{64}$'",
+        name="binding_semantic_hash_valid",
+    ),
+)
+
+event_exit_profile_binding_events = sa.Table(
+    "brc_event_exit_profile_binding_events",
+    metadata,
+    _id("binding_event_id", primary_key=True),
+    _id("event_spec_id"),
+    _id("exit_binding_id"),
+    sa.Column("binding_version", sa.BigInteger, nullable=False),
+    sa.Column("operation", SHORT_TEXT, nullable=False),
+    sa.Column("authorization_source", SHORT_TEXT, nullable=False),
+    _id("owner_authorization_id", nullable=True),
+    sa.Column("reason", LONG_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("exit_binding_id", "operation"),
+    sa.ForeignKeyConstraint(
+        ["event_spec_id"],
+        ["brc_event_specs.event_spec_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["exit_binding_id"],
+        ["brc_event_exit_profile_bindings.exit_binding_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["owner_authorization_id"],
+        ["brc_owner_authorizations.authorization_id"],
+    ),
+    sa.CheckConstraint("binding_version > 0", name="binding_version_positive"),
+    sa.CheckConstraint(
+        "operation IN ('ACTIVATED', 'RETIRED')",
+        name="operation_valid",
+    ),
+    sa.CheckConstraint(
+        "authorization_source IN ('system_migration', 'owner_control')",
+        name="authorization_source_valid",
+    ),
+    sa.CheckConstraint(
+        "(authorization_source = 'system_migration' "
+        "AND owner_authorization_id IS NULL) OR "
+        "(authorization_source = 'owner_control' "
+        "AND owner_authorization_id IS NOT NULL)",
+        name="authorization_shape_valid",
     ),
 )
 
@@ -1990,6 +2097,9 @@ capacity_claims = sa.Table(
     sa.Column("fact_digest", LONG_TEXT, nullable=False),
     _id("exit_policy_id"),
     sa.Column("exit_policy_semantic_hash", LONG_TEXT, nullable=False),
+    _id("exit_binding_id", nullable=True),
+    sa.Column("exit_binding_semantic_hash", LONG_TEXT, nullable=True),
+    sa.Column("exit_binding_authority_version", sa.BigInteger, nullable=True),
     sa.Column("entry_admission_snapshot_digest", LONG_TEXT, nullable=False),
     sa.Column("account_entry_health_digest", LONG_TEXT, nullable=False),
     sa.Column("instrument_entry_health_digest", LONG_TEXT, nullable=False),
@@ -2101,6 +2211,23 @@ capacity_claims = sa.Table(
         ["selection_authority_id"],
         ["brc_selection_session_authorities.selection_authority_id"],
     ),
+    sa.ForeignKeyConstraint(
+        ["exit_binding_id", "exit_binding_semantic_hash"],
+        [
+            "brc_event_exit_profile_bindings.exit_binding_id",
+            "brc_event_exit_profile_bindings.binding_semantic_hash",
+        ],
+        match="FULL",
+    ),
+    sa.CheckConstraint(
+        "(exit_binding_id IS NULL "
+        "AND exit_binding_semantic_hash IS NULL "
+        "AND exit_binding_authority_version IS NULL) OR "
+        "(exit_binding_id IS NOT NULL "
+        "AND exit_binding_semantic_hash IS NOT NULL "
+        "AND exit_binding_authority_version > 0)",
+        name="exit_binding_lineage_shape_valid",
+    ),
 )
 sa.Index(
     "ix_brc_capacity_claims_selection_authority_id",
@@ -2139,6 +2266,9 @@ trade_tickets = sa.Table(
     sa.Column("minimum_stop_risk_budget", MONEY, nullable=False),
     _id("exit_policy_id"),
     sa.Column("exit_policy_semantic_hash", LONG_TEXT, nullable=False),
+    _id("exit_binding_id", nullable=True),
+    sa.Column("exit_binding_semantic_hash", LONG_TEXT, nullable=True),
+    sa.Column("exit_binding_authority_version", sa.BigInteger, nullable=True),
     sa.Column("entry_reference_price", MONEY, nullable=False),
     sa.Column("quantity", MONEY, nullable=False),
     sa.Column("notional", MONEY, nullable=False),
@@ -2192,6 +2322,23 @@ trade_tickets = sa.Table(
     sa.ForeignKeyConstraint(
         ["selection_authority_id"],
         ["brc_selection_session_authorities.selection_authority_id"],
+    ),
+    sa.ForeignKeyConstraint(
+        ["exit_binding_id", "exit_binding_semantic_hash"],
+        [
+            "brc_event_exit_profile_bindings.exit_binding_id",
+            "brc_event_exit_profile_bindings.binding_semantic_hash",
+        ],
+        match="FULL",
+    ),
+    sa.CheckConstraint(
+        "(exit_binding_id IS NULL "
+        "AND exit_binding_semantic_hash IS NULL "
+        "AND exit_binding_authority_version IS NULL) OR "
+        "(exit_binding_id IS NOT NULL "
+        "AND exit_binding_semantic_hash IS NOT NULL "
+        "AND exit_binding_authority_version > 0)",
+        name="exit_binding_lineage_shape_valid",
     ),
 )
 sa.Index(

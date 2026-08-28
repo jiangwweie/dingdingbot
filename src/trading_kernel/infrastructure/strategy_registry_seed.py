@@ -644,8 +644,11 @@ class PostgresStrategyRegistryRepository:
             table.c[name] == values[name]
             for name in identity_names
         ]
+        selected_names = tuple(dict.fromkeys((*identity_names, *compare_keys)))
         result = await self._connection.execute(
-            sa.select(table).where(*predicates).limit(1)
+            sa.select(*(table.c[name] for name in selected_names))
+            .where(*predicates)
+            .limit(1)
         )
         existing = result.mappings().one_or_none()
         if existing is None:
