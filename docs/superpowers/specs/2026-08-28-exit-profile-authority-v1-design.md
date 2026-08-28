@@ -63,8 +63,8 @@ The following decisions are final inputs to this design:
 6. retired Profile remains exact-loadable for an already-issued Ticket;
 7. illegal TP1/Runner materialization fails closed and never changes the
    Profile fraction;
-8. holding bars start from real `EntryFilled` exposure and count only closed
-   venue candles;
+8. holding bars start from the earliest authoritative non-zero Exchange
+   exposure event and count only closed venue candles;
 9. PR #4 and candidate `1c57b407` remain frozen and independent;
 10. the migration revision is named `NEXT_AFTER_0006` until the integration
     lane assigns its final Alembic number.
@@ -106,9 +106,11 @@ already supports time stops.
 
 ### 3.4 Current time basis gap
 
-Lifecycle currently passes `Ticket.created_at_ms` as exposure start. The exact
-`EntryFilled` event is already loaded by Lifecycle but its timestamp is not used
-for holding-bar identity.
+Lifecycle currently passes `Ticket.created_at_ms` as exposure start. Full fills
+produce `EntryFilled`; partial fills produce the earlier
+`EntryPartiallyFilled`, and the approved Vacuum retained-partial branch may
+continue that exposure. Neither timestamp is currently used for holding-bar
+identity.
 
 The venue adapter also fetches only:
 
@@ -582,15 +584,25 @@ become explicit.
 
 ### 11.1 Exposure start
 
-The only start identity is:
+The only start identity is the earliest authoritative event that proves
+non-zero Exchange exposure:
 
 ```text
-EntryFilled.occurred_at_ms
+min(
+  EntryFilled.occurred_at_ms,
+  EntryPartiallyFilled.occurred_at_ms
+)
 ```
 
-Lifecycle already loads the exact `EntryFilled` event. It must pass that time to
-`LifecycleFactsRequest.exposure_started_at_ms`; `Ticket.created_at_ms` is no
-longer a valid holding-period basis.
+Only event types that freeze a positive filled quantity are eligible. A normal
+unsupported partial fill proceeds to cancel/controlled flatten and never gains
+long-running Profile authority; when a partial fill is legally retained by the
+approved Vacuum branch, its original `EntryPartiallyFilled` time remains the
+exposure start. `VacuumPartialRetained` does not reset the clock.
+
+Lifecycle already loads Ticket event history. It must pass the earliest exact
+non-zero exposure time to `LifecycleFactsRequest.exposure_started_at_ms`;
+`Ticket.created_at_ms` is no longer a valid holding-period basis.
 
 ### 11.2 Closed-bar count
 
@@ -604,9 +616,9 @@ For a fill at 10:23 on a 1h Profile:
 ```
 
 A holding bar is one final venue candle whose close timestamp is **strictly
-later** than `EntryFilled.occurred_at_ms`. The candle is not required to have
-opened after EntryFilled. Therefore the partially exposed 10:00–11:00 candle
-in the example counts when its 11:00 close becomes final.
+later** than the earliest non-zero exposure time. The candle is not required to
+have opened after that event. Therefore the partially exposed 10:00–11:00
+candle in the example counts when its 11:00 close becomes final.
 
 Signal, Claim, Ticket creation and Command dispatch timestamps never count.
 
@@ -1032,8 +1044,9 @@ an implementation contract.
 
 ### 20.3 Lifecycle
 
-- EntryFilled timestamp, not Ticket creation, owns exposure start;
-- a final close strictly later than EntryFilled counts even when its candle
+- earliest EntryFilled/EntryPartiallyFilled non-zero timestamp, not Ticket
+  creation, owns exposure start;
+- a final close strictly later than exposure start counts even when its candle
   opened before the fill;
 - fill 10:23 produces 11:00 as holding boundary 1;
 - MI/BRF2 12 PRE_TP1 bars request EXIT;
@@ -1145,7 +1158,7 @@ AND Ticket issuance never substitutes current Binding
 AND retired Binding can never be activated again
 AND retired Profile serves issued Ticket
 AND exact two-leg materialization passes
-AND holding boundaries are final venue closes strictly after EntryFilled
+AND holding boundaries are final venue closes strictly after earliest authoritative non-zero exposure
 AND Profile hash covers reclaim/session guard behavior and every Catalog field
 AND PRE_TP1/ABSOLUTE semantics and precedence are deterministic
 AND Lifecycle keeps one TP1 + Runner reducer
