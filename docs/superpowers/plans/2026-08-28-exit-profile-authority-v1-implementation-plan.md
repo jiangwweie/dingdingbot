@@ -3,7 +3,9 @@ title: EXIT_PROFILE_AUTHORITY_V1_IMPLEMENTATION_PLAN
 status: PLAN_REVIEW_REQUIRED
 date: 2026-08-28
 program: EX-P1
-design_authority: ../specs/2026-08-28-exit-profile-authority-v1-design.md
+design_authority_path: ../specs/2026-08-28-exit-profile-authority-v1-design.md
+design_authority_commit: 5f0f645ad0600eb446f1477754e1d2b15645cfc0
+design_authority_semantic_digest: sha256:ea0306a4b61b5c90fd2dbd09bd81a9201cf41df064744b77dfb8dbe1e6f0c9cc
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: NONE
 active_execution_scope: NONE
@@ -35,6 +37,18 @@ production_authority = NONE
 
 This plan is based on stacked branch `codex/exit-profile-v1` from exact
 candidate `1c57b407`. PR #4 remains frozen and is not modified by any Task.
+
+Its upstream Design Authority is exact and immutable for this Plan:
+
+```text
+path = docs/superpowers/specs/2026-08-28-exit-profile-authority-v1-design.md
+commit = 5f0f645ad0600eb446f1477754e1d2b15645cfc0
+semantic_digest = sha256:ea0306a4b61b5c90fd2dbd09bd81a9201cf41df064744b77dfb8dbe1e6f0c9cc
+base_candidate = 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
+```
+
+Any Design content change invalidates this Plan review and requires a new
+digest/reference.
 
 No code Task starts until this plan receives independent `PLAN_APPROVED`.
 
@@ -95,13 +109,13 @@ Global hard stops:
 
 | Task | Goal | Depends on | Exit gate |
 | --- | --- | --- | --- |
-| **EX-00** | Freeze baseline, architecture guards and verification portfolio | Approved design | current defects reproduced; no-YAML guard GREEN and legacy-read replacement gap RED |
+| **EX-00** | Freeze baseline, architecture guards and verification portfolio | Approved design | characterization and guards committed GREEN; temporary RED evidence recorded only |
 | **EX-01** | Pure ExitProfile/Binding/TimeStop/guard domain contracts | EX-00 | deterministic domain semantics pass |
 | **EX-02** | Forward Schema and PostgreSQL repositories | EX-01 | empty/production-shaped migration and constraints pass |
-| **EX-03** | Typed Profile/Binding catalogs, seed and Strategy retirement | EX-02 | eight Profiles/eight current Bindings exact |
-| **EX-04** | Owner Binding mutation and control-plane serialization | EX-02/03 | TOTP, idempotency, advisory lock and switch invariants pass |
+| **EX-03** | Typed Profile/Binding catalogs and initial seed | EX-02 | eight Profiles/eight initial current Bindings exact; no runtime mutation path |
+| **EX-04** | All post-install Binding/Profile mutations and Strategy retirement | EX-02/03 | TOTP, idempotency, advisory lock, switch and retirement invariants pass |
 | **EX-05** | CapacityClaim/Ticket authority and two-leg materialization | EX-02/03 | Binding/Profile lineage and ABA rejection pass |
-| **EX-06** | Lifecycle guard/time/runner execution | EX-01/05 | EntryFilled/closed-boundary and exit modes pass |
+| **EX-06** | Lifecycle guard/time/runner execution | EX-00/01/05 | exposure-start fact gate, closed-boundary and exit modes pass |
 | **EX-07** | HTTP/readonly/release/deployment integration | EX-02–06 | bounded operations and R4 recovery gates pass |
 | **EX-08** | Exact-candidate R4 certification and deployment evidence | EX-00–07 | complete exact command-set manifest and reviewable runbook; no production action |
 
@@ -135,35 +149,47 @@ gaps without implementing new production behavior.
 ### Requirements
 
 1. freeze current SOR Crypto 96 and SOR-US 8 behavior;
-2. prove current non-SOR pre-TP1 TimeStop short-circuit;
-3. prove current holding basis uses Ticket creation rather than EntryFilled;
-4. prove current 33% leg validation lacks per-leg minNotional;
+2. characterize current non-SOR pre-TP1 path as `NO_CHANGE` when reclaim/session
+   references are absent;
+3. characterize current Lifecycle request as using Ticket creation time rather
+   than EntryFilled;
+4. characterize current 33% leg validation as lacking per-leg minNotional;
 5. add an architecture guard that passes immediately because current runtime
    has no YAML/YML reader;
-6. add architecture RED for current EventSpec exit-policy resolution after the
-   future switch boundary;
+6. characterize current EventSpec exit-policy resolution without asserting the
+   future replacement yet;
 7. classify new tests into Focused/Fast/R4 without duplicating full-chain
-   fixtures.
+   fixtures;
+8. audit Entry reduction/fill semantics and record whether
+   `EntryFilled.occurred_at_ms` is the earliest authoritative non-zero Exchange
+   exposure timestamp.
 
-### RED evidence
+### Temporary RED evidence
 
 - MI 12 PRE_TP1 test currently returns `NO_CHANGE`;
 - Entry at 10:23 incorrectly uses Ticket-created time;
 - `A/v10 -> B/v11 -> A/v12` Claim currently lacks authority version;
 - current Registry cannot represent shared independent Profile;
-- architecture guard intentionally fails on current EventSpec resolution.
+- a local, uncommitted future architecture assertion fails on current EventSpec
+  resolution.
 
-The no-YAML guard is a direct GREEN baseline, not a fabricated RED defect.
+Temporary RED tests/output are recorded in execution evidence and then removed
+or moved into their owning implementation Task. The EX-00 checkpoint itself
+must be clean and fully GREEN. The no-YAML guard is a direct GREEN baseline,
+not a fabricated RED defect.
 
 ### Done
 
-Current defects are reproducible from direct tests; no source behavior changed;
-the planned portfolio remains explicit and bounded.
+Current behavior is frozen by GREEN characterization tests; temporary RED
+evidence identifies the owner Task for each gap; EntryFilled exposure semantics
+are explicitly classified; no source behavior changed; the planned portfolio
+remains explicit and bounded.
 
 ### Hard stops
 
 - do not write tests that demand Profile parameters before Domain approval;
 - do not duplicate existing lifecycle support fixtures;
+- do not commit an intentionally failing tree;
 - do not run R4.
 
 ## 8. EX-01 — Pure ExitProfile And Generic Exit Semantics
@@ -262,16 +288,26 @@ Claim/Ticket Binding lineage and exact PostgreSQL constraints.
 6. add `UNIQUE(exit_binding_id, operation)`;
 7. add nullable historical-safe Binding ID/hash/authority version columns to
    CapacityClaim and Ticket;
-8. install content immutability and legal status-transition guards;
-9. migration creates zero Ticket, Command, Position or Incident;
-10. downgrade raises fix-forward error;
-11. legacy `brc_event_specs.exit_policy_id` remains data only.
+8. add all-null/all-present CHECK constraints for those three columns on both
+   tables;
+9. add composite `(exit_binding_id, exit_binding_semantic_hash)` FK with
+   PostgreSQL `MATCH FULL` and require positive authority version when present;
+10. historical rows remain exact all-null without forced backfill; every new
+    runtime Claim/Ticket is all-present;
+11. install content immutability and legal status-transition guards;
+12. migration creates zero Ticket, Command, Position or Incident;
+13. downgrade raises fix-forward error;
+14. legacy `brc_event_specs.exit_policy_id` remains data only.
 
 ### RED tests
 
 - current 0006 rejects shared Profile;
 - duplicate current Binding or hash drift rejected;
 - duplicate Binding ACTIVATED/RETIRED event rejected;
+- half-null Claim/Ticket Binding lineage rejected;
+- all-null historical lineage accepted;
+- all-present composite Binding lineage accepted;
+- mismatched Binding hash rejected by `MATCH FULL` composite FK;
 - retired Binding reactivation shape rejected;
 - Profile content update rejected;
 - non-flat source migration rejected;
@@ -289,13 +325,14 @@ runtime side effects.
 - no active-position handover;
 - final revision number remains integration-owned until merge.
 
-## 10. EX-03 — Typed Catalog, Seed And Strategy Retirement
+## 10. EX-03 — Typed Catalog And Initial Seed
 
 ### Goal
 
 Replace `_policy_for_contract()` generation with exact typed catalogs, install
-eight Owner-frozen Profiles and eight active Event bindings, and decouple
-Strategy retirement from Profile retirement.
+eight Owner-frozen Profiles and eight initial active Event bindings. This Task
+defines retirement ownership but implements no post-install Binding/Profile
+mutation path.
 
 ### Allowed files
 
@@ -324,37 +361,41 @@ Strategy retirement from Profile retirement.
 4. zero current Binding for retired EventSpecs;
 5. validate Event position side against Profile side;
 6. validate guard/reference shape for SOR and empty guards elsewhere;
-7. retire StrategyVersion/EventSpec/current Binding but never shared Profile;
-8. Profile lookup for issued Ticket ignores current active/retired status;
-9. old Event-bound rows remain provenance only;
-10. Profile/Binding manifest digest is deterministic.
+7. freeze the rule that Strategy retirement must later remove current Binding
+   without retiring shared Profile, but leave the runtime mutation to EX-04;
+8. expose no repository-only current-pointer delete/retire helper for runtime
+   use;
+9. Profile lookup for issued Ticket ignores current active/retired status;
+10. old Event-bound rows remain provenance only;
+11. Profile/Binding manifest digest is deterministic.
 
 ### RED tests
 
 - Profile Catalog exact payload/hash matrix;
 - current eight Event mappings exact;
-- shared Profile survives retirement of one Event;
 - retired Profile cannot back a new Binding;
 - retired Profile exact-load succeeds for frozen Ticket identity;
 - Strategy seed does not read EventSpec legacy policy authority.
 
 ### Done
 
-Registry/seed produces one deterministic Profile/Binding manifest with no
-YAML/file dependency or strategy-generated Policy.
+Registry/seed produces one deterministic initial Profile/Binding manifest with
+no YAML/file dependency, strategy-generated Policy or runtime mutation path.
 
 ### Hard stops
 
 - no implicit parameter default;
 - no `_policy_for_contract()` compatibility path;
 - no runtime read from legacy EventSpec policy ID.
+- no temporary Strategy-retirement pointer mutation.
 
 ## 11. EX-04 — Owner Binding Authority And Write Serialization
 
 ### Goal
 
-Implement the formal Owner control boundary for Binding switch/Profile retire
-and serialize rare control-plane writes with one PostgreSQL transaction lock.
+Implement the sole post-install authority boundary for Binding/Profile
+mutations and Strategy retirement, and serialize rare control-plane writes with
+one PostgreSQL transaction lock.
 
 ### Allowed files
 
@@ -386,8 +427,11 @@ and serialize rare control-plane writes with one PostgreSQL transaction lock.
 6. create a new Binding for every switch; retired Binding never reactivates;
 7. Profile retirement rejects an active current Binding;
 8. initial Migration seed uses typed `system_migration` source;
-9. Claim/Ticket/Lifecycle/Reconciliation never acquire this advisory lock;
-10. no direct repository-only or SQL pointer mutation.
+9. StrategyVersion/EventSpec retirement removes its current Binding through
+   this same serialized application boundary and never retires the shared
+   ExitProfile;
+10. Claim/Ticket/Lifecycle/Reconciliation never acquire this advisory lock;
+11. no direct repository-only or SQL pointer mutation.
 
 ### RED tests
 
@@ -398,6 +442,8 @@ and serialize rare control-plane writes with one PostgreSQL transaction lock.
 - missing/weak authentication rejects;
 - active Binding blocks Profile retire;
 - retired Binding activation rejects;
+- retiring one Event removes only its current Binding and preserves a shared
+  Profile used by another Event/issued Ticket;
 - hot-path recording repository sees zero advisory-lock calls.
 
 ### Done
@@ -502,6 +548,10 @@ use EntryFilled time, and preserve current Command/Reducer/Reconciliation chain.
 
 ### Requirements
 
+0. require EX-00 evidence that `EntryFilled.occurred_at_ms` is the earliest
+   authoritative non-zero venue exposure timestamp. If EX-00 classifies it as
+   later than first exposure, stop EX-06 and revise the Design Authority to use
+   the earliest authoritative non-zero exposure event;
 1. Lifecycle exact-loads Profile by Ticket ID/hash regardless of Profile status;
 2. current Binding is never queried;
 3. PRE_TP1 stage depends on exact TP1 fill truth;
@@ -575,12 +625,18 @@ new R4 release without coupling deployment to Profile control operations.
 4. R4 portfolio includes Migration, Profile/Binding manifest and architecture
    gates;
 5. deployment class remains R4 and exact-flat;
-6. target postflight verifies eight Profiles, eight active Bindings, zero
+6. Phase A performs an advisory PostgreSQL/Binance flatness precheck before
+   service stop and aborts early when non-flat;
+7. Phase B fences Entry, stops every writer, then re-reads PostgreSQL and
+   Binance positions, orders, Reservations, Commands, Incidents and terminal
+   Review coverage; only this second exact-flat result authorizes Migration;
+8. Phase A evidence is never reused after writer stop and any drift blocks;
+9. target postflight verifies eight Profiles, eight active Bindings, zero
    retired-Event pointers and zero unexpected Ticket/Command activity;
-7. deployment does not execute Binding switch beyond immutable seed;
-8. software deployment and later Owner Profile switch remain separate actions;
-9. fix-forward recovery binds exact source/target commit and Schema identities;
-10. no YAML file is installed or read.
+10. deployment does not execute Binding switch beyond immutable seed;
+11. software deployment and later Owner Profile switch remain separate actions;
+12. fix-forward recovery binds exact source/target commit and Schema identities;
+13. no YAML file is installed or read.
 
 ### RED tests
 
@@ -589,6 +645,10 @@ new R4 release without coupling deployment to Profile control operations.
 - missing TOTP rejects;
 - manifest hash/profile count drift blocks R4;
 - non-flat source blocks before service stop;
+- flat Phase A followed by new internal/external activity before service stop is
+  caught by Phase B and blocks Migration;
+- Phase B proves Entry fenced and all writers stopped before authoritative
+  reads;
 - target recovery missing exact release fact fails closed;
 - postflight unexpected Profile/Binding state blocks;
 - no frontend/static release mutation.
