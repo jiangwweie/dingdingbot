@@ -462,6 +462,49 @@ do not retire ExitProfiles
 
 Shared Profiles continue serving other Bindings and issued Tickets.
 
+### 9.4 Control-plane write serialization
+
+ExitProfile Authority mutations are rare Owner control-plane actions. All of
+the following acquire one shared PostgreSQL transaction-scoped advisory lock
+before reading or changing authority facts:
+
+```text
+Binding activation
+Binding retirement
+Binding switch
+Profile retirement
+```
+
+The lock identity is one tracked Python constant, not configuration:
+
+```text
+EXIT_PROFILE_AUTHORITY_WRITE_LOCK
+```
+
+The PostgreSQL adapter acquires it with the equivalent of:
+
+```sql
+SELECT pg_advisory_xact_lock(:canonical_lock_key)
+```
+
+The transaction then performs normal row validation, current-pointer locking
+and CAS. Transaction completion automatically releases the advisory lock.
+
+This coarse serialization is intentionally absent from:
+
+```text
+Claim Binding/Profile reads
+Ticket issuance
+Lifecycle
+Reconciliation
+Observation
+```
+
+Trading-path concurrency remains governed by current-pointer row locking,
+Claim-frozen `exit_binding_authority_version` and Ticket issuance CAS. The
+advisory lock adds no trading hot-path latency, lease, Worker, distributed lock
+or retry framework.
+
 ## 10. Generic Exit Evaluation
 
 ### 10.1 PRE_TP1 stage definition
@@ -879,7 +922,7 @@ manual Binding DML is permitted.
 | Transaction | Atomic facts |
 | --- | --- |
 | Registry seed | Profile rows, Binding facts, current pointers, semantic identity |
-| Binding switch | OwnerAuthorization, previous event, new event, current pointer CAS |
+| Binding switch/Profile retirement | shared authority advisory lock, OwnerAuthorization when applicable, events/status, current pointer CAS |
 | Claim build | exact Binding/Profile identity, pointer authority version and sized exit legs |
 | Ticket issuance | Claim lineage, Ticket, Reservation, Domain hold, Aggregate, ENTRY Command |
 | Lifecycle mutation | existing Trade Event/Aggregate/Command effects only |
@@ -895,6 +938,8 @@ Venue/candle/position/order I/O remains outside PostgreSQL transactions.
 | Profile retired before Claim | no new Claim |
 | Binding changed after Claim | `exit_binding_changed`; no Ticket |
 | Binding switch lacks exact Owner authorization | no pointer mutation |
+| Profile retire races Binding activation | authority write lock serializes; one operation revalidates and rejects |
+| Two Binding switches race | authority write lock serializes; exactly one expected-version sequence commits |
 | Profile retired after Ticket | lifecycle continues exact Profile |
 | Profile side differs | hard rejection |
 | TP1/Runner quantity or notional invalid | `exit_leg_materialization_unmet` |
@@ -982,6 +1027,9 @@ an implementation contract.
 - Profile content immutability;
 - active Binding blocks Profile retirement;
 - Binding switch atomicity and crash rollback;
+- concurrent Profile retire/Binding activate cannot commit a retired-current pair;
+- concurrent Binding switches produce exactly one valid authority sequence;
+- Claim/Ticket paths do not acquire the Authority advisory lock;
 - Strategy retirement does not retire shared Profile;
 - EventSpec legacy column has zero runtime read path;
 - downgrade rejected.
