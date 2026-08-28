@@ -112,10 +112,11 @@ async def issue_ready_signal(
             limit=64,
         )
     )
-    candidate_set = (
-        None if not candidates else freeze_candidate_set(candidates)
-    )
-    if not candidates or candidates[0].signal.signal_event_id != request.signal_event_id:
+    candidate_set = None if not candidates else freeze_candidate_set(candidates)
+    if (
+        not candidates
+        or candidates[0].signal.signal_event_id != request.signal_event_id
+    ):
         requested_signal = await uow.signals.get(request.signal_event_id)
         if requested_signal is None:
             return IssueTicketResult(
@@ -185,11 +186,7 @@ async def issue_ready_signal(
     )
 
     scope = await uow.signals.get_runtime_scope(signal.runtime_scope_id)
-    if (
-        scope is None
-        or scope.lifecycle_state != "active"
-        or not scope.entry_enabled
-    ):
+    if scope is None or scope.lifecycle_state != "active" or not scope.entry_enabled:
         return await _refuse(
             uow,
             signal,
@@ -222,8 +219,7 @@ async def issue_ready_signal(
     if (
         profile is None
         or profile.status != "active"
-        or profile.venue_id
-        != request.admission_snapshot.account_risk_snapshot.venue_id
+        or profile.venue_id != request.admission_snapshot.account_risk_snapshot.venue_id
         or profile.account_id
         != request.admission_snapshot.account_risk_snapshot.account_id
         or policy is None
@@ -251,6 +247,23 @@ async def issue_ready_signal(
             IssueTicketStatus.INSTRUMENT_RULES_INVALID,
             request.now_ms,
         )
+    current_exit_binding = await uow.exit_profiles.get_current_binding(
+        signal.event_spec_id,
+        for_update=True,
+    )
+    exit_binding = (
+        None
+        if current_exit_binding is None
+        else await uow.exit_profiles.get_binding(current_exit_binding.exit_binding_id)
+    )
+    exit_profile = (
+        None
+        if exit_binding is None
+        else await uow.exit_profiles.get_profile(
+            exit_profile_id=exit_binding.exit_profile_id,
+            semantic_hash=exit_binding.exit_profile_semantic_hash,
+        )
+    )
     ownership = await uow.entry_admission.read_admission_ownership(
         venue_id=profile.venue_id,
         account_id=profile.account_id,
@@ -271,12 +284,10 @@ async def issue_ready_signal(
         profile.account_id,
     )
     contract = strategy_contract_for(signal.event_spec_id)
-    active_family_ticket_count = (
-        await uow.entry_admission.count_active_family_tickets(
-            venue_id=profile.venue_id,
-            account_id=profile.account_id,
-            exposure_family=contract.exposure_family,
-        )
+    active_family_ticket_count = await uow.entry_admission.count_active_family_tickets(
+        venue_id=profile.venue_id,
+        account_id=profile.account_id,
+        exposure_family=contract.exposure_family,
     )
     directional_risk_at_stop = (
         await uow.entry_admission.sum_active_directional_stop_risk(
@@ -286,12 +297,8 @@ async def issue_ready_signal(
         )
     )
     usage = CapacityUsage(
-        gross_notional=(
-            exposure.gross_notional if exposure else Decimal(0)
-        ),
-        gross_risk_at_stop=(
-            exposure.gross_risk_at_stop if exposure else Decimal(0)
-        ),
+        gross_notional=(exposure.gross_notional if exposure else Decimal(0)),
+        gross_risk_at_stop=(exposure.gross_risk_at_stop if exposure else Decimal(0)),
         current_reserved_margin=(
             exposure.current_reserved_margin if exposure else Decimal(0)
         ),
@@ -318,6 +325,17 @@ async def issue_ready_signal(
             exposure_family=contract.exposure_family,
         ),
     )
+    if current_exit_binding is None or exit_binding is None or exit_profile is None:
+        return await _refuse(
+            uow,
+            signal,
+            IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
+            request.now_ms,
+            admission_context=admission_context,
+            entry_admission_snapshot_digest=request.admission_snapshot.digest(),
+            binding_constraint="exit_profile_authority_missing",
+            admission_snapshot=request.admission_snapshot,
+        )
     if delayed_selection_refusal is not None:
         status = IssueTicketStatus(delayed_selection_refusal.value)
         return await _refuse(
@@ -367,9 +385,7 @@ async def issue_ready_signal(
             IssueTicketStatus.PRODUCT_ENTRY_BLOCKED,
             request.now_ms,
             admission_context=admission_context,
-            entry_admission_snapshot_digest=(
-                request.admission_snapshot.digest()
-            ),
+            entry_admission_snapshot_digest=(request.admission_snapshot.digest()),
             binding_constraint=product_decision.status.value,
         )
     domain = NettingDomain(
@@ -389,12 +405,8 @@ async def issue_ready_signal(
             policy_version=policy.policy_version,
             max_concurrent_tickets=policy.max_concurrent_tickets,
             family_ticket_limits=policy.family_ticket_limits,
-            max_ticket_stop_risk_fraction=(
-                policy.max_ticket_stop_risk_fraction
-            ),
-            max_gross_stop_risk_fraction=(
-                policy.max_gross_stop_risk_fraction
-            ),
+            max_ticket_stop_risk_fraction=(policy.max_ticket_stop_risk_fraction),
+            max_gross_stop_risk_fraction=(policy.max_gross_stop_risk_fraction),
             max_ticket_initial_margin_fraction=(
                 policy.max_ticket_initial_margin_fraction
             ),
@@ -426,9 +438,7 @@ async def issue_ready_signal(
                 rules.maintenance_margin_brackets_digest
             ),
             notional_coefficient=rules.notional_coefficient,
-            notional_coefficient_certified=(
-                rules.notional_coefficient_certified
-            ),
+            notional_coefficient_certified=(rules.notional_coefficient_certified),
             projection_version=rules.projection_version,
             observed_at_ms=rules.observed_at_ms,
             valid_until_ms=rules.valid_until_ms,
@@ -437,6 +447,9 @@ async def issue_ready_signal(
         account_entry_health=account_entry_health,
         instrument_entry_health=instrument_entry_health,
         entry_order_type=EntryOrderType(event_spec.entry_order_type),
+        current_exit_binding=current_exit_binding,
+        exit_binding=exit_binding,
+        exit_profile=exit_profile,
         netting_domain_occupied=(
             await uow.entry_admission.has_active_ticket_in_domain(domain.key())
         ),
@@ -450,9 +463,7 @@ async def issue_ready_signal(
             issue_status,
             request.now_ms,
             admission_context=admission_context,
-            entry_admission_snapshot_digest=(
-                request.admission_snapshot.digest()
-            ),
+            entry_admission_snapshot_digest=(request.admission_snapshot.digest()),
             binding_constraint=decision.status.value,
             admission_snapshot=request.admission_snapshot,
         )
@@ -495,9 +506,7 @@ async def issue_ready_signal(
                 binding_constraint=None,
                 capacity_claim_id=decision.claim.capacity_claim_id,
                 ticket_id=result.ticket_id,
-                entry_admission_snapshot_digest=(
-                    request.admission_snapshot.digest()
-                ),
+                entry_admission_snapshot_digest=(request.admission_snapshot.digest()),
                 decided_at_ms=request.now_ms,
             )
         )
@@ -528,7 +537,8 @@ async def _refuse(
 ) -> IssueTicketResult:
     blocker = (
         "signal_invalid_or_stale"
-        if status in {
+        if status
+        in {
             IssueTicketStatus.SIGNAL_INVALID_OR_STALE,
             IssueTicketStatus.FACTS_EXPIRED,
         }
@@ -610,6 +620,9 @@ def _issue_status(status: CapacityClaimStatus) -> IssueTicketStatus:
         CapacityClaimStatus.PROTECTION_UNAVAILABLE: (
             IssueTicketStatus.PROTECTION_UNAVAILABLE
         ),
+        CapacityClaimStatus.EXIT_LEG_MATERIALIZATION_UNMET: (
+            IssueTicketStatus.EXIT_LEG_MATERIALIZATION_UNMET
+        ),
     }
     return mapping[status]
 
@@ -629,8 +642,7 @@ def _portfolio_usage(
     )
     remaining_initial_margin = max(
         Decimal(0),
-        account.total_margin_balance
-        * policy.max_gross_initial_margin_utilization
+        account.total_margin_balance * policy.max_gross_initial_margin_utilization
         - max(
             account.total_initial_margin,
             usage.current_reserved_margin,
@@ -638,9 +650,7 @@ def _portfolio_usage(
     )
     return AdmissionPortfolioUsage(
         active_ticket_count=usage.active_ticket_count,
-        active_family_ticket_count=(
-            usage.active_family_ticket_count
-        ),
+        active_family_ticket_count=(usage.active_family_ticket_count),
         gross_risk_at_stop=usage.gross_risk_at_stop,
         directional_risk_at_stop=usage.directional_risk_at_stop,
         current_reserved_margin=usage.current_reserved_margin,
@@ -656,8 +666,7 @@ def _portfolio_usage(
         remaining_gross_stop_risk=remaining_gross_risk,
         remaining_directional_stop_risk=max(
             Decimal(0),
-            account.total_wallet_balance
-            * policy.directional_stop_risk_limit_fraction
+            account.total_wallet_balance * policy.directional_stop_risk_limit_fraction
             - usage.directional_risk_at_stop,
         ),
         remaining_initial_margin=remaining_initial_margin,

@@ -11,6 +11,10 @@ from src.trading_kernel.domain.cross_margin_stress import (
     StressPosition,
     evaluate_cross_margin_stress,
 )
+from tests.trading_kernel.support.tickets import (
+    fixture_binding_for_ticket,
+    fixture_profile_identity_for_ticket,
+)
 
 
 def make_issue_request(
@@ -27,6 +31,10 @@ def make_issue_request(
         else ticket.selected_leverage
     )
     resolved_stress_balance = Decimal(300) if stress_balance is None else stress_balance
+    binding = fixture_binding_for_ticket(ticket)
+    exit_profile_id, exit_profile_semantic_hash = (
+        fixture_profile_identity_for_ticket(ticket)
+    )
     return IssueTicketRequest(
         capacity_claim=freeze_capacity_claim(
             ticket_identity=ticket.identity,
@@ -38,8 +46,11 @@ def make_issue_request(
             universe_semantic_digest=ticket.universe_semantic_digest,
             selection_authority_id=ticket.selection_authority_id,
             fact_digest=ticket.fact_digest,
-            exit_policy_id=ticket.exit_policy_id,
-            exit_policy_semantic_hash=ticket.exit_policy_semantic_hash,
+            exit_policy_id=exit_profile_id,
+            exit_policy_semantic_hash=exit_profile_semantic_hash,
+            exit_binding_id=binding.exit_binding_id,
+            exit_binding_semantic_hash=binding.binding_semantic_hash,
+            exit_binding_authority_version=1,
             entry_admission_snapshot_digest="sha256:" + "2" * 64,
             account_entry_health_digest="sha256:" + "3" * 64,
             instrument_entry_health_digest="sha256:" + "4" * 64,

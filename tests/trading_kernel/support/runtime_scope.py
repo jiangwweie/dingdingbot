@@ -9,8 +9,11 @@ from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    event_exit_profile_binding_current,
+    event_exit_profile_bindings,
     event_product_compatibility,
     event_specs,
+    exit_policies,
     instrument_product_profiles,
     instruments,
     owner_authorizations,
@@ -22,6 +25,10 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_universe_members,
     strategy_universe_versions,
     strategy_versions,
+)
+from tests.trading_kernel.support.tickets import (
+    fixture_binding_for_ticket,
+    fixture_profile_identity_for_ticket,
 )
 
 
@@ -100,6 +107,10 @@ async def seed_ticket_registry(connection, ticket) -> None:
     runtime = identity.runtime
     instrument = parse_binance_usdm_instrument_id(
         identity.netting_domain.exchange_instrument_id
+    )
+    binding = fixture_binding_for_ticket(ticket)
+    exit_profile_id, exit_profile_semantic_hash = (
+        fixture_profile_identity_for_ticket(ticket)
     )
     await connection.execute(
         pg_insert(instruments)
@@ -221,6 +232,56 @@ async def seed_ticket_registry(connection, ticket) -> None:
                 "position_side": identity.netting_domain.position_side,
                 "entry_order_type": ticket.entry_order_type.value,
                 "status": "active",
+            },
+        )
+    )
+    await connection.execute(
+        pg_insert(exit_policies)
+        .values(
+            exit_policy_id=exit_profile_id,
+            exit_policy_version="test-v1",
+            event_spec_id=runtime.event_spec_id,
+            profile_schema_version=None,
+            position_side=identity.netting_domain.position_side,
+            policy={},
+            semantic_hash=exit_profile_semantic_hash,
+            status="active",
+            created_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_nothing(index_elements=[exit_policies.c.exit_policy_id])
+    )
+    await connection.execute(
+        pg_insert(event_exit_profile_bindings)
+        .values(
+            exit_binding_id=binding.exit_binding_id,
+            binding_version=1,
+            event_spec_id=runtime.event_spec_id,
+            exit_profile_id=exit_profile_id,
+            exit_profile_semantic_hash=exit_profile_semantic_hash,
+            binding_semantic_hash=binding.binding_semantic_hash,
+            activation_reason="test_fixture",
+            created_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[event_exit_profile_bindings.c.exit_binding_id]
+        )
+    )
+    await connection.execute(
+        pg_insert(event_exit_profile_binding_current)
+        .values(
+            event_spec_id=runtime.event_spec_id,
+            exit_binding_id=binding.exit_binding_id,
+            binding_semantic_hash=binding.binding_semantic_hash,
+            projection_version=1,
+            activated_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_update(
+            index_elements=[event_exit_profile_binding_current.c.event_spec_id],
+            set_={
+                "exit_binding_id": binding.exit_binding_id,
+                "binding_semantic_hash": binding.binding_semantic_hash,
+                "projection_version": 1,
+                "activated_at_ms": ticket.created_at_ms,
             },
         )
     )

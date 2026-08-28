@@ -25,12 +25,12 @@ def test_current_runtime_has_no_yaml_parser_or_exit_profile_yaml_catalog() -> No
 
 
 def test_exit_policy_catalog_remains_event_generated_until_ex03() -> None:
-    domain = (
-        REPO_ROOT / "src/trading_kernel/domain/exit_policy.py"
-    ).read_text(encoding="utf-8")
-    models = (
-        REPO_ROOT / "src/trading_kernel/infrastructure/pg_models.py"
-    ).read_text(encoding="utf-8")
+    domain = (REPO_ROOT / "src/trading_kernel/domain/exit_policy.py").read_text(
+        encoding="utf-8"
+    )
+    models = (REPO_ROOT / "src/trading_kernel/infrastructure/pg_models.py").read_text(
+        encoding="utf-8"
+    )
     lifecycle = (
         REPO_ROOT / "src/trading_kernel/application/maintain_ticket_lifecycle.py"
     ).read_text(encoding="utf-8")
@@ -38,7 +38,10 @@ def test_exit_policy_catalog_remains_event_generated_until_ex03() -> None:
     assert "_policy_for_contract(item)" in domain
     assert '_id("exit_policy_id")' in models
     assert 'sa.UniqueConstraint("event_spec_id")' not in models
-    assert "policy.event_spec_id != aggregate.ticket.identity.runtime.event_spec_id" in lifecycle
+    assert (
+        "policy.event_spec_id != aggregate.ticket.identity.runtime.event_spec_id"
+        in lifecycle
+    )
 
 
 def test_current_lifecycle_request_uses_ticket_creation_as_exposure_start() -> None:
@@ -47,3 +50,16 @@ def test_current_lifecycle_request_uses_ticket_creation_as_exposure_start() -> N
     ).read_text(encoding="utf-8")
 
     assert "exposure_started_at_ms=aggregate.ticket.created_at_ms" in worker
+
+
+def test_exit_profile_authority_lock_is_absent_from_trading_hot_paths() -> None:
+    for relative_path in (
+        "src/trading_kernel/application/build_capacity_claim.py",
+        "src/trading_kernel/application/issue_ready_signal.py",
+        "src/trading_kernel/application/issue_ticket.py",
+        "src/trading_kernel/application/maintain_ticket_lifecycle.py",
+        "src/trading_kernel/application/reconcile_ticket.py",
+    ):
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        assert "acquire_authority_write_lock" not in source
+        assert "EXIT_PROFILE_AUTHORITY_WRITE_LOCK" not in source

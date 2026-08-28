@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from hashlib import sha256
 
+from src.trading_kernel.domain.exit_policy import (
+    EventExitBinding,
+    build_event_exit_binding,
+    exit_policy_for,
+)
 from src.trading_kernel.domain.identities import (
     NettingDomain,
     RuntimeIdentity,
@@ -87,4 +93,66 @@ def make_ticket(**updates: object) -> TradeTicket:
         "status": TicketStatus.ISSUED,
     }
     payload.update(updates)
+    if "exit_policy_id" in updates and "exit_policy_semantic_hash" not in updates:
+        payload["exit_policy_semantic_hash"] = "sha256:" + sha256(
+            str(payload["exit_policy_id"]).encode()
+        ).hexdigest()
+    identity = payload["identity"]
+    assert isinstance(identity, TicketIdentity)
+    if not all(
+        name in updates
+        for name in (
+            "exit_binding_id",
+            "exit_binding_semantic_hash",
+            "exit_binding_authority_version",
+        )
+    ):
+        binding = fixture_binding_for(
+            event_spec_id=identity.runtime.event_spec_id,
+            exit_profile_id=str(payload["exit_policy_id"]),
+            exit_profile_semantic_hash=str(payload["exit_policy_semantic_hash"]),
+        )
+        payload.update(
+            {
+                "exit_binding_id": binding.exit_binding_id,
+                "exit_binding_semantic_hash": binding.binding_semantic_hash,
+                "exit_binding_authority_version": 1,
+            }
+        )
     return TradeTicket.model_validate(payload)
+
+
+def fixture_profile_identity_for_ticket(ticket: TradeTicket) -> tuple[str, str]:
+    try:
+        policy = exit_policy_for(ticket.identity.runtime.event_spec_id)
+    except ValueError:
+        return ticket.exit_policy_id, ticket.exit_policy_semantic_hash
+    return policy.exit_policy_id, policy.semantic_hash()
+
+
+def fixture_binding_for_ticket(ticket: TradeTicket) -> EventExitBinding:
+    exit_profile_id, exit_profile_semantic_hash = (
+        fixture_profile_identity_for_ticket(ticket)
+    )
+    return fixture_binding_for(
+        event_spec_id=ticket.identity.runtime.event_spec_id,
+        exit_profile_id=exit_profile_id,
+        exit_profile_semantic_hash=exit_profile_semantic_hash,
+    )
+
+
+def fixture_binding_for(
+    *,
+    event_spec_id: str,
+    exit_profile_id: str,
+    exit_profile_semantic_hash: str,
+) -> EventExitBinding:
+    return build_event_exit_binding(
+        exit_binding_id=f"exit-binding:{event_spec_id}:test-v1",
+        binding_version=1,
+        event_spec_id=event_spec_id,
+        exit_profile_id=exit_profile_id,
+        exit_profile_semantic_hash=exit_profile_semantic_hash,
+        activation_reason="test_fixture",
+        created_at_ms=1,
+    )

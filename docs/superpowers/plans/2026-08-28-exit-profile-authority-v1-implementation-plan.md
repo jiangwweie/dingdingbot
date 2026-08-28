@@ -8,7 +8,7 @@ design_authority_commit: 50e94cea15445f1c3e268f524dfa6e440581bf3e
 design_authority_semantic_digest: sha256:68415c06387d4cdc13aebc500a095e205fe389ea96be137df07350c4a6364477
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: EX-05
+active_execution_scope: EX-06
 production_authority: NONE
 owner_approval: 2026-08-28 active task decision authorizing EX-00 through EX-08
 ---
@@ -32,7 +32,7 @@ perform Replay, Shadow, parameter search or profitability certification.
 design_status = DESIGN_APPROVED
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = EX-05
+active_execution_scope = EX-06
 production_authority = NONE
 ```
 
@@ -667,6 +667,33 @@ Profile legs; no Profile drift can cross Ticket issuance.
 - no quantity/risk expansion;
 - no new TP tranche;
 - no exchange call inside transaction.
+
+### EX-05 Execution Evidence — 2026-08-28
+
+**Status: `EX05_COMPLETE`.** Claim construction now resolves and freezes the
+exact current Binding pointer, immutable Binding fact and active Profile.
+CapacityClaim and Ticket persist Binding ID/hash/authority version together
+with the physical Profile ID/hash. Ticket issuance locks the current pointer
+and rejects drift or `A -> B -> A-new` ABA as `exit_binding_changed` without
+re-sizing or substituting the Profile.
+
+Sizing now derives the exact TP1 fraction from the Profile and validates both
+TP1 and Runner legs against quantity step, `minQty` and conservative
+`minNotional` bases. MPG remains exact `0.33`, producing `33/67` for 100 units;
+floor residue belongs only to Runner. An invalid leg returns the terminal
+`exit_leg_materialization_unmet` blocker and creates no Ticket, Reservation or
+Command.
+
+| Verification | Result |
+| --- | ---: |
+| Claim/Ticket/Sizing focused | **79 passed** |
+| Core PostgreSQL Integration | **68 passed** |
+| Related Full-chain | **13 passed** |
+| Fast Unit + Architecture | **1,056 passed** |
+| Ruff/Mypy/diff | **passed** |
+
+Active execution scope advances to **EX-06**. No capital, leverage, Initial
+Stop, concurrent-capacity, production state or exchange authority changed.
 
 ## 13. EX-06 — Lifecycle Profile Execution And Time Identity
 

@@ -37,6 +37,17 @@ def test_trade_ticket_freezes_policy_and_scope_identity_and_version() -> None:
     assert ticket.runtime_scope_id == "scope-sor-btc-long"
     assert ticket.runtime_scope_version == 4
     assert ticket.universe_version_id == "universe:sor-long:4"
+    assert ticket.exit_binding_id is not None
+    assert ticket.exit_binding_semantic_hash is not None
+    assert ticket.exit_binding_authority_version == 1
+
+
+def test_trade_ticket_rejects_partial_binding_lineage() -> None:
+    payload = make_ticket().model_dump(mode="python")
+    payload["exit_binding_semantic_hash"] = None
+
+    with pytest.raises(ValidationError, match="all-null or all-present"):
+        type(make_ticket()).model_validate(payload)
 
 
 @pytest.mark.parametrize(

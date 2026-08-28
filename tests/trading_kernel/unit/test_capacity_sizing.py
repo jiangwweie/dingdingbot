@@ -102,9 +102,7 @@ def test_gross_margin_uses_greater_of_exchange_and_internal_reservations(
 
 
 def test_directional_stop_risk_caps_the_new_ticket() -> None:
-    selected = select_capacity_candidate(
-        _request(directional_risk_at_stop=Decimal(30))
-    )
+    selected = select_capacity_candidate(_request(directional_risk_at_stop=Decimal(30)))
     exhausted = select_capacity_candidate(
         _request(directional_risk_at_stop=Decimal(40))
     )
@@ -157,9 +155,7 @@ def test_minimum_materialization_binds_after_risk_rounding(
 
 
 def test_gross_margin_exhaustion_is_fail_closed() -> None:
-    decision = select_capacity_candidate(
-        _request(current_reserved_margin=Decimal(900))
-    )
+    decision = select_capacity_candidate(_request(current_reserved_margin=Decimal(900)))
 
     assert decision.status is CapacitySizingStatus.MARGIN_EXHAUSTED
     assert decision.selected is None
@@ -207,9 +203,7 @@ def test_configured_leverage_above_policy_is_invalid() -> None:
     assert decision.selected is None
 
 
-def test_current_sizing_does_not_validate_each_exit_leg_min_notional() -> None:
-    """Characterizes the EX-05 gap without changing current admission semantics."""
-
+def test_sizing_rejects_when_runner_leg_is_below_min_notional() -> None:
     request = _request(
         total_wallet_balance=Decimal("12.5"),
         total_margin_balance=Decimal("12.5"),
@@ -220,15 +214,92 @@ def test_current_sizing_does_not_validate_each_exit_leg_min_notional() -> None:
     )
     decision = select_capacity_candidate(request)
 
+    assert decision.status is CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
+    assert decision.selected is None
+
+
+def test_mpg_exact_fraction_materializes_33_and_67_units() -> None:
+    decision = select_capacity_candidate(
+        _request(
+            total_wallet_balance=Decimal(50_000),
+            total_margin_balance=Decimal(50_000),
+            available_margin=Decimal(50_000),
+            entry_reference_price=Decimal(100),
+            initial_stop_price=Decimal(90),
+            take_profit_price=Decimal(110),
+            quantity_step=Decimal(1),
+            min_quantity=Decimal(1),
+            min_notional=Decimal(5),
+            tp1_quantity_fraction=Decimal("0.33"),
+        )
+    )
+
     assert decision.status is CapacitySizingStatus.SELECTED
     assert decision.selected is not None
-    assert decision.selected.quantity == Decimal("0.10")
-    assert decision.selected.tp1_quantity == Decimal("0.05")
-    assert decision.selected.runner_quantity == Decimal("0.05")
-    assert (
-        decision.selected.runner_quantity * request.initial_stop_price
-        < request.min_notional
+    assert decision.selected.quantity == Decimal(100)
+    assert decision.selected.tp1_quantity == Decimal(33)
+    assert decision.selected.runner_quantity == Decimal(67)
+
+
+def test_step_floor_residue_belongs_to_runner() -> None:
+    decision = select_capacity_candidate(
+        _request(
+            total_wallet_balance=Decimal(50_500),
+            total_margin_balance=Decimal(50_500),
+            available_margin=Decimal(50_500),
+            entry_reference_price=Decimal(100),
+            initial_stop_price=Decimal(90),
+            take_profit_price=Decimal(110),
+            quantity_step=Decimal(1),
+            min_quantity=Decimal(1),
+            min_notional=Decimal(5),
+            tp1_quantity_fraction=Decimal("0.33"),
+        )
     )
+
+    assert decision.status is CapacitySizingStatus.SELECTED
+    assert decision.selected is not None
+    assert decision.selected.quantity == Decimal(101)
+    assert decision.selected.tp1_quantity == Decimal(33)
+    assert decision.selected.runner_quantity == Decimal(68)
+
+
+@pytest.mark.parametrize("tp1_fraction", [Decimal("0.5"), Decimal("0.8")])
+def test_each_exit_leg_must_meet_min_quantity(tp1_fraction: Decimal) -> None:
+    decision = select_capacity_candidate(
+        _request(
+            total_wallet_balance=Decimal("12.5"),
+            total_margin_balance=Decimal(100),
+            available_margin=Decimal(100),
+            quantity_step=Decimal("0.01"),
+            min_quantity=Decimal("0.06"),
+            min_notional=Decimal(1),
+            tp1_quantity_fraction=tp1_fraction,
+        )
+    )
+
+    assert decision.status is CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
+    assert decision.selected is None
+
+
+@pytest.mark.parametrize("tp1_fraction", [Decimal("0.25"), Decimal("0.75")])
+def test_each_exit_leg_must_meet_conservative_min_notional(
+    tp1_fraction: Decimal,
+) -> None:
+    decision = select_capacity_candidate(
+        _request(
+            total_wallet_balance=Decimal(25),
+            total_margin_balance=Decimal(100),
+            available_margin=Decimal(100),
+            quantity_step=Decimal("0.01"),
+            min_quantity=Decimal("0.01"),
+            min_notional=Decimal(6),
+            tp1_quantity_fraction=tp1_fraction,
+        )
+    )
+
+    assert decision.status is CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
+    assert decision.selected is None
 
 
 def _request(**changes: object) -> CapacitySizingRequest:
@@ -252,6 +323,7 @@ def _request(**changes: object) -> CapacitySizingRequest:
         "configured_leverage": 5,
         "entry_reference_price": Decimal(100),
         "initial_stop_price": Decimal("97.5"),
+        "take_profit_price": Decimal("102.5"),
         "quantity_step": Decimal("0.1"),
         "min_quantity": Decimal("0.1"),
         "min_notional": Decimal(5),

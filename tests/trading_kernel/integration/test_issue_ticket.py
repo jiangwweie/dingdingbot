@@ -18,6 +18,7 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.exit_policy import build_event_exit_binding
 from src.trading_kernel.domain.identities import NettingDomain, TicketIdentity
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.instrument_identity import (
@@ -26,8 +27,11 @@ from src.trading_kernel.domain.instrument_identity import (
 from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
     entry_lane_current,
+    event_exit_profile_binding_current,
+    event_exit_profile_bindings,
     event_product_compatibility,
     event_specs,
+    exit_policies,
     instrument_product_profiles,
     instruments,
     owner_authorizations,
@@ -48,6 +52,10 @@ from tests.trading_kernel.support.capacity_claims import (
     make_issue_request as _issue_request,
 )
 from tests.trading_kernel.support.selection_vacuum import open_entry_vacuum
+from tests.trading_kernel.support.tickets import (
+    fixture_binding_for_ticket,
+    fixture_profile_identity_for_ticket,
+)
 from tests.trading_kernel.support.tickets import (
     make_ticket as _ticket,
 )
@@ -93,6 +101,12 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
     assert persisted.selected_leverage == ticket.selected_leverage
     assert persisted.reserved_margin == ticket.reserved_margin
     assert persisted.capacity_claim_id.startswith("claim:")
+    assert persisted.exit_binding_id == ticket.exit_binding_id
+    assert persisted.exit_binding_semantic_hash == ticket.exit_binding_semantic_hash
+    assert (
+        persisted.exit_binding_authority_version
+        == ticket.exit_binding_authority_version
+    )
     assert reservation is not None
     assert reservation.reserved_notional == ticket.notional
     assert reservation.reserved_risk == ticket.risk_at_stop
@@ -114,6 +128,67 @@ async def test_issue_ticket_claims_global_lane_and_reserves_budget_atomically(
             claim_owner="worker-1",
         ).capacity_claim,
     )
+
+
+@pytest.mark.asyncio
+async def test_binding_aba_after_claim_rejects_ticket_without_resizing(
+    issue_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket(leverage_change_required=False)
+    await _seed_policy(issue_engine)
+    request = _issue_request(
+        ticket=ticket,
+        now_ms=1_001,
+        claim_owner="worker-binding-aba",
+    )
+    assert ticket.exit_binding_id is not None
+    assert ticket.exit_binding_semantic_hash is not None
+    assert ticket.exit_binding_authority_version == 1
+    second = build_event_exit_binding(
+        exit_binding_id=f"exit-binding:{ticket.identity.runtime.event_spec_id}:test-v2",
+        binding_version=2,
+        event_spec_id=ticket.identity.runtime.event_spec_id,
+        exit_profile_id=ticket.exit_policy_id,
+        exit_profile_semantic_hash=ticket.exit_policy_semantic_hash,
+        activation_reason="test_switch_b",
+        created_at_ms=1_000,
+    )
+    third = build_event_exit_binding(
+        exit_binding_id=f"exit-binding:{ticket.identity.runtime.event_spec_id}:test-v3",
+        binding_version=3,
+        event_spec_id=ticket.identity.runtime.event_spec_id,
+        exit_profile_id=ticket.exit_policy_id,
+        exit_profile_semantic_hash=ticket.exit_policy_semantic_hash,
+        activation_reason="test_return_a_new",
+        created_at_ms=1_001,
+    )
+    async with issue_engine.begin() as connection:
+        await connection.execute(
+            sa.insert(event_exit_profile_bindings),
+            [
+                second.model_dump(mode="python"),
+                third.model_dump(mode="python"),
+            ],
+        )
+        await connection.execute(
+            sa.update(event_exit_profile_binding_current)
+            .where(
+                event_exit_profile_binding_current.c.event_spec_id
+                == ticket.identity.runtime.event_spec_id
+            )
+            .values(
+                exit_binding_id=third.exit_binding_id,
+                binding_semantic_hash=third.binding_semantic_hash,
+                projection_version=3,
+                activated_at_ms=1_001,
+            )
+        )
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result = await issue_ticket(uow, request)
+
+    assert result.status is IssueTicketStatus.EXIT_BINDING_CHANGED
+    await _assert_no_durable_entry_state(issue_engine, ticket.identity.ticket_id)
 
 
 @pytest.mark.asyncio
@@ -1194,7 +1269,6 @@ def _ticket_for_strategy_group(
         "identity": identity,
         "runtime_scope_id": runtime_scope_id,
         "universe_version_id": f"universe:{event_spec_id}:1",
-        "exit_policy_id": f"exit-policy:{event_spec_id}",
         "exposure_family": (
             "opening_range" if strategy_group_id == "SOR-001" else "long_continuation"
         ),
@@ -1285,6 +1359,10 @@ async def _seed_ticket_registry(connection, ticket) -> None:
     runtime = identity.runtime
     instrument = parse_binance_usdm_instrument_id(
         identity.netting_domain.exchange_instrument_id
+    )
+    binding = fixture_binding_for_ticket(ticket)
+    exit_profile_id, exit_profile_semantic_hash = (
+        fixture_profile_identity_for_ticket(ticket)
     )
     await connection.execute(
         pg_insert(instruments)
@@ -1409,6 +1487,56 @@ async def _seed_ticket_registry(connection, ticket) -> None:
                 "position_side": identity.netting_domain.position_side,
                 "entry_order_type": ticket.entry_order_type.value,
                 "status": "active",
+            },
+        )
+    )
+    await connection.execute(
+        pg_insert(exit_policies)
+        .values(
+            exit_policy_id=exit_profile_id,
+            exit_policy_version="test-v1",
+            event_spec_id=runtime.event_spec_id,
+            profile_schema_version=None,
+            position_side=identity.netting_domain.position_side,
+            policy={},
+            semantic_hash=exit_profile_semantic_hash,
+            status="active",
+            created_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_nothing(index_elements=[exit_policies.c.exit_policy_id])
+    )
+    await connection.execute(
+        pg_insert(event_exit_profile_bindings)
+        .values(
+            exit_binding_id=binding.exit_binding_id,
+            binding_version=1,
+            event_spec_id=runtime.event_spec_id,
+            exit_profile_id=exit_profile_id,
+            exit_profile_semantic_hash=exit_profile_semantic_hash,
+            binding_semantic_hash=binding.binding_semantic_hash,
+            activation_reason="test_fixture",
+            created_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[event_exit_profile_bindings.c.exit_binding_id]
+        )
+    )
+    await connection.execute(
+        pg_insert(event_exit_profile_binding_current)
+        .values(
+            event_spec_id=runtime.event_spec_id,
+            exit_binding_id=binding.exit_binding_id,
+            binding_semantic_hash=binding.binding_semantic_hash,
+            projection_version=1,
+            activated_at_ms=ticket.created_at_ms,
+        )
+        .on_conflict_do_update(
+            index_elements=[event_exit_profile_binding_current.c.event_spec_id],
+            set_={
+                "exit_binding_id": binding.exit_binding_id,
+                "binding_semantic_hash": binding.binding_semantic_hash,
+                "projection_version": 1,
+                "activated_at_ms": ticket.created_at_ms,
             },
         )
     )

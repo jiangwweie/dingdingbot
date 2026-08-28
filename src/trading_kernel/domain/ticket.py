@@ -57,6 +57,9 @@ class TradeTicket(BaseModel):
     minimum_stop_risk_budget: Decimal
     exit_policy_id: str
     exit_policy_semantic_hash: str
+    exit_binding_id: str | None = None
+    exit_binding_semantic_hash: str | None = None
+    exit_binding_authority_version: int | None = None
     capacity_claim_id: str
     created_at_ms: int
     expires_at_ms: int
@@ -105,6 +108,12 @@ class TradeTicket(BaseModel):
         normalized = str(value or "").strip()
         return normalized or None
 
+    @field_validator("exit_binding_id", mode="before")
+    @classmethod
+    def _normalize_optional_exit_binding(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
     @field_validator(
         "fact_digest",
         "universe_semantic_digest",
@@ -118,6 +127,20 @@ class TradeTicket(BaseModel):
         if _SHA256_DIGEST.fullmatch(normalized) is None:
             raise ValueError("ticket digests must be exact sha256 identities")
         return normalized
+
+    @field_validator("exit_binding_semantic_hash")
+    @classmethod
+    def _require_optional_binding_digest(cls, value: str | None) -> str | None:
+        if value is not None and _SHA256_DIGEST.fullmatch(value) is None:
+            raise ValueError("Ticket Binding hash must be exact sha256")
+        return value
+
+    @field_validator("exit_binding_authority_version")
+    @classmethod
+    def _require_optional_binding_version(cls, value: int | None) -> int | None:
+        if value is not None and (isinstance(value, bool) or value <= 0):
+            raise ValueError("Ticket Binding authority version must be positive")
+        return value
 
     @field_validator("owner_policy_version", "runtime_scope_version")
     @classmethod
@@ -207,6 +230,15 @@ class TradeTicket(BaseModel):
 
     @model_validator(mode="after")
     def _validate_deadline_and_order_shape(self) -> TradeTicket:
+        binding_lineage = (
+            self.exit_binding_id,
+            self.exit_binding_semantic_hash,
+            self.exit_binding_authority_version,
+        )
+        if any(value is None for value in binding_lineage) and not all(
+            value is None for value in binding_lineage
+        ):
+            raise ValueError("Ticket Binding lineage must be all-null or all-present")
         if self.expires_at_ms <= self.created_at_ms:
             raise ValueError("ticket expiry must be after creation")
         if self.entry_order_type is EntryOrderType.LIMIT:
@@ -241,6 +273,10 @@ class TradeTicket(BaseModel):
         payload = self.model_dump(mode="json", exclude={"status"})
         if payload["selection_authority_id"] is None:
             payload.pop("selection_authority_id")
+        if payload["exit_binding_id"] is None:
+            payload.pop("exit_binding_id")
+            payload.pop("exit_binding_semantic_hash")
+            payload.pop("exit_binding_authority_version")
         encoded = json.dumps(
             payload,
             sort_keys=True,

@@ -118,8 +118,7 @@ from src.trading_kernel.infrastructure.pg_models import (
 )
 
 _EVENT_MODELS = {
-    event_type.__name__: event_type
-    for event_type in PERSISTED_TRADE_EVENT_MODELS
+    event_type.__name__: event_type for event_type in PERSISTED_TRADE_EVENT_MODELS
 }
 _COMMAND_PAYLOAD_ADAPTER: TypeAdapter[CommandPayload] = TypeAdapter(CommandPayload)
 
@@ -179,7 +178,9 @@ def _owner_policy_from_row(row: RowMapping | dict[str, object]) -> OwnerPolicySn
         family_ticket_limits=FamilyTicketLimits.model_validate(
             row["family_ticket_limits"]
         ),
-        max_ticket_stop_risk_fraction=Decimal(str(row["max_ticket_stop_risk_fraction"])),
+        max_ticket_stop_risk_fraction=Decimal(
+            str(row["max_ticket_stop_risk_fraction"])
+        ),
         max_gross_stop_risk_fraction=Decimal(str(row["max_gross_stop_risk_fraction"])),
         max_ticket_initial_margin_fraction=Decimal(
             str(row["max_ticket_initial_margin_fraction"])
@@ -244,7 +245,9 @@ class PostgresTicketRepository:
         self._connection = connection
 
     async def add(self, ticket: TradeTicket) -> None:
-        await self._connection.execute(sa.insert(trade_tickets).values(_ticket_values(ticket)))
+        await self._connection.execute(
+            sa.insert(trade_tickets).values(_ticket_values(ticket))
+        )
 
     async def get(self, ticket_id: str) -> TradeTicket | None:
         result = await self._connection.execute(
@@ -316,7 +319,9 @@ class PostgresTicketRepository:
             .values(active_netting_domain_key=None)
         )
         if updated.rowcount != 1:
-            raise AggregateVersionConflict("active Netting Domain is missing during release")
+            raise AggregateVersionConflict(
+                "active Netting Domain is missing during release"
+            )
 
     async def has_other_instrument_ticket_in_window(
         self,
@@ -336,8 +341,7 @@ class PostgresTicketRepository:
                     trade_tickets.c.ticket_id != ticket_id,
                     trade_tickets.c.venue_id == venue_id,
                     trade_tickets.c.account_id == account_id,
-                    trade_tickets.c.exchange_instrument_id
-                    == exchange_instrument_id,
+                    trade_tickets.c.exchange_instrument_id == exchange_instrument_id,
                     trade_tickets.c.status.not_in(
                         (
                             "expired_before_submit",
@@ -393,21 +397,25 @@ class PostgresAggregateRepository:
         if limit <= 0 or limit > 3:
             raise ValueError("active Ticket selection limit must be 1 through 3")
         rows = (
-            await self._connection.execute(
-                sa.select(trade_aggregates.c.ticket_id)
-                .join(
-                    trade_tickets,
-                    trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
+            (
+                await self._connection.execute(
+                    sa.select(trade_aggregates.c.ticket_id)
+                    .join(
+                        trade_tickets,
+                        trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
+                    )
+                    .where(
+                        trade_tickets.c.venue_id == venue_id,
+                        trade_tickets.c.account_id == account_id,
+                        trade_tickets.c.terminal_at_ms.is_(None),
+                    )
+                    .order_by(trade_aggregates.c.ticket_id)
+                    .limit(limit + 1)
                 )
-                .where(
-                    trade_tickets.c.venue_id == venue_id,
-                    trade_tickets.c.account_id == account_id,
-                    trade_tickets.c.terminal_at_ms.is_(None),
-                )
-                .order_by(trade_aggregates.c.ticket_id)
-                .limit(limit + 1)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if len(rows) > limit:
             raise RuntimeError("active Ticket set exceeds Controlled Exit bound")
         return tuple(str(ticket_id) for ticket_id in rows)
@@ -429,14 +437,11 @@ class PostgresAggregateRepository:
         if due_column is not None and (now_ms is None or now_ms <= 0):
             raise ValueError("scheduled aggregate selection requires positive now_ms")
         conditions: list[ColumnElement[bool]] = [
-            trade_aggregates.c.status.in_(
-                tuple(status.value for status in statuses)
-            )
+            trade_aggregates.c.status.in_(tuple(status.value for status in statuses))
         ]
         if due_column is not None:
             conditions.append(
-                sa.func.coalesce(due_column, trade_aggregates.c.updated_at_ms)
-                <= now_ms
+                sa.func.coalesce(due_column, trade_aggregates.c.updated_at_ms) <= now_ms
             )
         order_column = (
             trade_aggregates.c.updated_at_ms
@@ -547,25 +552,29 @@ class PostgresAggregateRepository:
             trade_aggregates.c.updated_at_ms,
         )
         row = (
-            await self._connection.execute(
-                sa.select(
-                    trade_aggregates.c.ticket_id,
-                    trade_aggregates.c.status,
-                    due_at.label("due_at_ms"),
+            (
+                await self._connection.execute(
+                    sa.select(
+                        trade_aggregates.c.ticket_id,
+                        trade_aggregates.c.status,
+                        due_at.label("due_at_ms"),
+                    )
+                    .where(
+                        trade_aggregates.c.status.in_(
+                            (
+                                AggregateStatus.SETTLEMENT_PENDING.value,
+                                AggregateStatus.REVIEW_PENDING.value,
+                            )
+                        ),
+                        due_at <= now_ms,
+                    )
+                    .order_by(due_at, trade_aggregates.c.ticket_id)
+                    .limit(1)
                 )
-                .where(
-                    trade_aggregates.c.status.in_(
-                        (
-                            AggregateStatus.SETTLEMENT_PENDING.value,
-                            AggregateStatus.REVIEW_PENDING.value,
-                        )
-                    ),
-                    due_at <= now_ms,
-                )
-                .order_by(due_at, trade_aggregates.c.ticket_id)
-                .limit(1)
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None:
             return None
         status = AggregateStatus(str(row["status"]))
@@ -681,7 +690,9 @@ class PostgresEventRepository:
         for row in result.mappings():
             event_model = _EVENT_MODELS.get(row["event_type"])
             if event_model is None:
-                raise RuntimeError(f"unsupported persisted event type: {row['event_type']}")
+                raise RuntimeError(
+                    f"unsupported persisted event type: {row['event_type']}"
+                )
             events.append(event_model.model_validate(row["payload"]))
         return events
 
@@ -747,7 +758,8 @@ class PostgresExchangeCommandRepository:
         if ticket_row is None:
             raise RuntimeError("order attribution Ticket does not exist")
         result = await self._connection.execute(
-            sa.select(exchange_commands).where(
+            sa.select(exchange_commands)
+            .where(
                 exchange_commands.c.ticket_id == ticket_id,
                 exchange_commands.c.status.in_(
                     (
@@ -755,7 +767,8 @@ class PostgresExchangeCommandRepository:
                         ExchangeCommandStatus.RECONCILED_ACCEPTED.value,
                     )
                 ),
-            ).order_by(
+            )
+            .order_by(
                 exchange_commands.c.created_at_ms,
                 exchange_commands.c.command_id,
             )
@@ -775,7 +788,9 @@ class PostgresExchangeCommandRepository:
                 namespace = OrderNamespace.CONDITIONAL
                 conditional_expectation: ConditionalOrderExpectation | None = (
                     ConditionalOrderExpectation(
-                        exchange_instrument_id=str(ticket_row["exchange_instrument_id"]),
+                        exchange_instrument_id=str(
+                            ticket_row["exchange_instrument_id"]
+                        ),
                         position_side=_position_side(ticket_row["position_side"]),
                         side=payload.side,
                         order_type=cast(
@@ -812,8 +827,9 @@ class PostgresExchangeCommandRepository:
         kind: ExchangeCommandKind,
     ) -> int:
         result = await self._connection.execute(
-            sa.select(sa.func.coalesce(sa.func.max(exchange_commands.c.generation), 0))
-            .where(
+            sa.select(
+                sa.func.coalesce(sa.func.max(exchange_commands.c.generation), 0)
+            ).where(
                 exchange_commands.c.ticket_id == ticket_id,
                 exchange_commands.c.command_kind == kind.value,
             )
@@ -902,7 +918,8 @@ class PostgresExchangeCommandRepository:
             sa.update(exchange_commands)
             .where(
                 exchange_commands.c.command_id == command_id,
-                exchange_commands.c.command_kind == ExchangeCommandKind.SET_LEVERAGE.value,
+                exchange_commands.c.command_kind
+                == ExchangeCommandKind.SET_LEVERAGE.value,
                 exchange_commands.c.status == ExchangeCommandStatus.CLAIMED.value,
                 exchange_commands.c.claim_owner == worker_id,
             )
@@ -914,7 +931,9 @@ class PostgresExchangeCommandRepository:
             )
         )
         if updated.rowcount != 1:
-            raise AggregateVersionConflict("leverage command claim changed before result")
+            raise AggregateVersionConflict(
+                "leverage command claim changed before result"
+            )
 
     async def mark_claimed_superseded(
         self,
@@ -1001,7 +1020,9 @@ class PostgresExchangeCommandRepository:
         result = await self._connection.execute(
             sa.select(exchange_commands.c.command_id)
             .where(*conditions)
-            .order_by(exchange_commands.c.lease_until_ms, exchange_commands.c.command_id)
+            .order_by(
+                exchange_commands.c.lease_until_ms, exchange_commands.c.command_id
+            )
             .with_for_update(skip_locked=True, of=exchange_commands)
             .limit(1)
         )
@@ -1117,8 +1138,10 @@ class PostgresExchangeCommandRepository:
             sa.update(exchange_commands)
             .where(
                 exchange_commands.c.command_id == command_id,
-                exchange_commands.c.command_kind == ExchangeCommandKind.SET_LEVERAGE.value,
-                exchange_commands.c.status == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
+                exchange_commands.c.command_kind
+                == ExchangeCommandKind.SET_LEVERAGE.value,
+                exchange_commands.c.status
+                == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
             )
             .values(
                 status=ExchangeCommandStatus.RECONCILED_ACCEPTED.value,
@@ -1226,14 +1249,10 @@ class PostgresCapacityClaimRepository:
         )
 
     async def get(self, capacity_claim_id: str) -> CapacityClaim | None:
-        return await self._get(
-            capacity_claims.c.capacity_claim_id == capacity_claim_id
-        )
+        return await self._get(capacity_claims.c.capacity_claim_id == capacity_claim_id)
 
     async def get_for_signal(self, signal_event_id: str) -> CapacityClaim | None:
-        return await self._get(
-            capacity_claims.c.signal_event_id == signal_event_id
-        )
+        return await self._get(capacity_claims.c.signal_event_id == signal_event_id)
 
     async def get_for_ticket(self, ticket_id: str) -> CapacityClaim | None:
         return await self._get(capacity_claims.c.ticket_id == ticket_id)
@@ -1316,9 +1335,7 @@ class PostgresAdmissionDecisionRepository:
 
     async def add(self, decision: AdmissionDecision) -> None:
         await self._connection.execute(
-            sa.insert(admission_decisions).values(
-                _admission_decision_values(decision)
-            )
+            sa.insert(admission_decisions).values(_admission_decision_values(decision))
         )
 
     async def get_for_signal(
@@ -1326,12 +1343,16 @@ class PostgresAdmissionDecisionRepository:
         signal_event_id: str,
     ) -> AdmissionDecision | None:
         row = (
-            await self._connection.execute(
-                sa.select(admission_decisions).where(
-                    admission_decisions.c.signal_event_id == signal_event_id
+            (
+                await self._connection.execute(
+                    sa.select(admission_decisions).where(
+                        admission_decisions.c.signal_event_id == signal_event_id
+                    )
                 )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else _admission_decision_from_row(row)
 
     async def list_recent(
@@ -1378,28 +1399,32 @@ class PostgresShadowOutcomeRepository:
         lease_until_ms: int,
     ) -> ShadowOutcomeClaim | None:
         row = (
-            await self._connection.execute(
-                sa.select(shadow_outcomes_current)
-                .where(
-                    sa.or_(
-                        sa.and_(
-                            shadow_outcomes_current.c.status == "pending",
-                            shadow_outcomes_current.c.horizon_end_ms <= now_ms,
-                        ),
-                        sa.and_(
-                            shadow_outcomes_current.c.status == "claimed",
-                            shadow_outcomes_current.c.lease_until_ms <= now_ms,
-                        ),
+            (
+                await self._connection.execute(
+                    sa.select(shadow_outcomes_current)
+                    .where(
+                        sa.or_(
+                            sa.and_(
+                                shadow_outcomes_current.c.status == "pending",
+                                shadow_outcomes_current.c.horizon_end_ms <= now_ms,
+                            ),
+                            sa.and_(
+                                shadow_outcomes_current.c.status == "claimed",
+                                shadow_outcomes_current.c.lease_until_ms <= now_ms,
+                            ),
+                        )
                     )
+                    .order_by(
+                        shadow_outcomes_current.c.horizon_end_ms,
+                        shadow_outcomes_current.c.shadow_outcome_id,
+                    )
+                    .limit(1)
+                    .with_for_update(skip_locked=True)
                 )
-                .order_by(
-                    shadow_outcomes_current.c.horizon_end_ms,
-                    shadow_outcomes_current.c.shadow_outcome_id,
-                )
-                .limit(1)
-                .with_for_update(skip_locked=True)
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None:
             return None
         shadow_id = str(row["shadow_outcome_id"])
@@ -1549,13 +1574,17 @@ class PostgresShadowOutcomeRepository:
         if rowcount == 1:
             return
         row = (
-            await self._connection.execute(
-                sa.select(shadow_outcomes_current.c.status).where(
-                    shadow_outcomes_current.c.shadow_outcome_id
-                    == claim.spec.shadow_outcome_id
+            (
+                await self._connection.execute(
+                    sa.select(shadow_outcomes_current.c.status).where(
+                        shadow_outcomes_current.c.shadow_outcome_id
+                        == claim.spec.shadow_outcome_id
+                    )
                 )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is not None and str(row["status"]) in {"completed", "unavailable"}:
             return
         raise RuntimeError("lost Shadow claim")
@@ -1658,9 +1687,7 @@ class PostgresPositionRepository:
             "ticket_id": ticket_id if snapshot.quantity > 0 else None,
             "venue_id": snapshot.netting_domain.venue_id,
             "account_id": snapshot.netting_domain.account_id,
-            "exchange_instrument_id": (
-                snapshot.netting_domain.exchange_instrument_id
-            ),
+            "exchange_instrument_id": (snapshot.netting_domain.exchange_instrument_id),
             "position_side": snapshot.netting_domain.position_side,
             "quantity": snapshot.quantity,
             "average_entry_price": snapshot.average_entry_price,
@@ -1734,9 +1761,7 @@ class PostgresReviewRepository:
 
     async def get(self, review_id: str) -> TradeReviewRecord | None:
         result = await self._connection.execute(
-            sa.select(trade_reviews).where(
-                trade_reviews.c.review_id == review_id
-            )
+            sa.select(trade_reviews).where(trade_reviews.c.review_id == review_id)
         )
         row = result.mappings().one_or_none()
         return None if row is None else TradeReviewRecord.model_validate(row)
@@ -1789,11 +1814,11 @@ class PostgresMonitorRepository:
                 .where(monitor_current.c.monitor_key == state.monitor_key)
                 .values(updated_at_ms=state.updated_at_ms)
             )
-            return current.model_copy(
-                update={"updated_at_ms": state.updated_at_ms}
-            )
+            return current.model_copy(update={"updated_at_ms": state.updated_at_ms})
 
-        version = 1 if current_row is None else int(current_row["projection_version"]) + 1
+        version = (
+            1 if current_row is None else int(current_row["projection_version"]) + 1
+        )
         persisted = state.model_copy(update={"projection_version": version})
         values = persisted.model_dump(mode="json")
         if current_row is None:
@@ -1865,12 +1890,16 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
         idempotency_key: str,
     ) -> OwnerAuthorization | None:
         row = (
-            await self._connection.execute(
-                sa.select(owner_authorizations).where(
-                    owner_authorizations.c.idempotency_key == idempotency_key
+            (
+                await self._connection.execute(
+                    sa.select(owner_authorizations).where(
+                        owner_authorizations.c.idempotency_key == idempotency_key
+                    )
                 )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else OwnerAuthorization.model_validate(row)
 
     async def save_strategy_control(
@@ -1924,12 +1953,16 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
         updated_at_ms: int,
     ) -> OwnerPolicySnapshot:
         row = (
-            await self._connection.execute(
-                sa.select(owner_policy_current)
-                .where(owner_policy_current.c.owner_policy_id == owner_policy_id)
-                .with_for_update(of=owner_policy_current)
+            (
+                await self._connection.execute(
+                    sa.select(owner_policy_current)
+                    .where(owner_policy_current.c.owner_policy_id == owner_policy_id)
+                    .with_for_update(of=owner_policy_current)
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None:
             raise RuntimeError("Owner policy is missing")
         if int(row["policy_version"]) != expected_version:
@@ -1989,27 +2022,23 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
         except ValueError:
             return "owner_policy_scope_not_ready"
         runtime_profile_ids = tuple(
-            sorted(
-                {
-                    item.runtime_profile_id
-                    for item in scope.event_runtime_profiles
-                }
-            )
+            sorted({item.runtime_profile_id for item in scope.event_runtime_profiles})
         )
         profiles = (
-            await self._connection.execute(
-                sa.select(runtime_profiles).where(
-                    runtime_profiles.c.runtime_profile_id.in_(runtime_profile_ids)
+            (
+                await self._connection.execute(
+                    sa.select(runtime_profiles).where(
+                        runtime_profiles.c.runtime_profile_id.in_(runtime_profile_ids)
+                    )
                 )
             )
-        ).mappings().all()
-        if (
-            len(profiles) != len(runtime_profile_ids)
-            or any(
-                profile["status"] != "active"
-                or profile["position_mode"] != "independent_sides"
-                for profile in profiles
-            )
+            .mappings()
+            .all()
+        )
+        if len(profiles) != len(runtime_profile_ids) or any(
+            profile["status"] != "active"
+            or profile["position_mode"] != "independent_sides"
+            for profile in profiles
         ):
             return "runtime_profile_not_ready"
         metadata_rows = {
@@ -2025,13 +2054,17 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
             ).mappings()
         }
         capability = (
-            await self._connection.execute(
-                sa.select(runtime_capabilities_current).where(
-                    runtime_capabilities_current.c.capability_key
-                    == "exchange_commands"
+            (
+                await self._connection.execute(
+                    sa.select(runtime_capabilities_current).where(
+                        runtime_capabilities_current.c.capability_key
+                        == "exchange_commands"
+                    )
                 )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if (
             capability is None
             or not bool(capability["enabled"])
@@ -2040,14 +2073,16 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
         ):
             return "runtime_identity_not_ready"
         open_incident_count = await self._connection.scalar(
-            sa.select(sa.func.count()).select_from(runtime_incidents).where(
-                runtime_incidents.c.status == "open"
-            )
+            sa.select(sa.func.count())
+            .select_from(runtime_incidents)
+            .where(runtime_incidents.c.status == "open")
         )
         if int(open_incident_count or 0) != 0:
             return "runtime_incident_open"
         unresolved_command_count = await self._connection.scalar(
-            sa.select(sa.func.count()).select_from(exchange_commands).where(
+            sa.select(sa.func.count())
+            .select_from(exchange_commands)
+            .where(
                 exchange_commands.c.status.in_(
                     ("prepared", "claimed", "dispatch_started", "outcome_unknown")
                 )
@@ -2138,33 +2173,41 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
 
     async def get_latest_operation(self) -> OwnerControlOperation | None:
         row = (
-            await self._connection.execute(
-                sa.select(owner_control_operations_current)
-                .order_by(owner_control_operations_current.c.created_at_ms.desc())
-                .limit(1)
+            (
+                await self._connection.execute(
+                    sa.select(owner_control_operations_current)
+                    .order_by(owner_control_operations_current.c.created_at_ms.desc())
+                    .limit(1)
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else _operation_from_row(row)
 
     async def get_latest_nonterminal_operation(self) -> OwnerControlOperation | None:
         row = (
-            await self._connection.execute(
-                sa.select(owner_control_operations_current)
-                .where(
-                    owner_control_operations_current.c.state.not_in(
-                        (
-                            ControlOperationState.COMPLETED.value,
-                            ControlOperationState.BLOCKED.value,
+            (
+                await self._connection.execute(
+                    sa.select(owner_control_operations_current)
+                    .where(
+                        owner_control_operations_current.c.state.not_in(
+                            (
+                                ControlOperationState.COMPLETED.value,
+                                ControlOperationState.BLOCKED.value,
+                            )
                         )
                     )
+                    .order_by(
+                        owner_control_operations_current.c.updated_at_ms.desc(),
+                        owner_control_operations_current.c.authorization_id,
+                    )
+                    .limit(1)
                 )
-                .order_by(
-                    owner_control_operations_current.c.updated_at_ms.desc(),
-                    owner_control_operations_current.c.authorization_id,
-                )
-                .limit(1)
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         return None if row is None else _operation_from_row(row)
 
     async def list_recent_operations(
@@ -2309,12 +2352,8 @@ class PostgresEntryAdmissionRepository:
             family_ticket_limits=FamilyTicketLimits.model_validate(
                 row["family_ticket_limits"]
             ),
-            max_ticket_stop_risk_fraction=Decimal(
-                row["max_ticket_stop_risk_fraction"]
-            ),
-            max_gross_stop_risk_fraction=Decimal(
-                row["max_gross_stop_risk_fraction"]
-            ),
+            max_ticket_stop_risk_fraction=Decimal(row["max_ticket_stop_risk_fraction"]),
+            max_gross_stop_risk_fraction=Decimal(row["max_gross_stop_risk_fraction"]),
             max_ticket_initial_margin_fraction=Decimal(
                 row["max_ticket_initial_margin_fraction"]
             ),
@@ -2337,9 +2376,7 @@ class PostgresEntryAdmissionRepository:
     async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool:
         result = await self._connection.execute(
             sa.select(trade_tickets.c.ticket_id)
-            .where(
-                trade_tickets.c.active_netting_domain_key == netting_domain_key
-            )
+            .where(trade_tickets.c.active_netting_domain_key == netting_domain_key)
             .limit(1)
         )
         return result.scalar_one_or_none() is not None
@@ -2449,9 +2486,7 @@ class PostgresEntryAdmissionRepository:
                 trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
             )
         ).where(active_ticket)
-        order_rows = await self._connection.execute(
-            orders_statement
-        )
+        order_rows = await self._connection.execute(orders_statement)
         owned_exchange_order_ids = tuple(
             sorted(
                 {
@@ -2464,19 +2499,21 @@ class PostgresEntryAdmissionRepository:
         )
 
         unknown_statement = sa.select(exchange_commands.c.ticket_id)
-        unknown_statement = unknown_statement.select_from(
-            exchange_commands.join(
-                trade_tickets,
-                trade_tickets.c.ticket_id == exchange_commands.c.ticket_id,
+        unknown_statement = (
+            unknown_statement.select_from(
+                exchange_commands.join(
+                    trade_tickets,
+                    trade_tickets.c.ticket_id == exchange_commands.c.ticket_id,
+                )
             )
-        ).where(
-            active_ticket,
-            exchange_commands.c.status
-            == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
-        ).order_by(exchange_commands.c.ticket_id)
-        unknown_result = await self._connection.execute(
-            unknown_statement
+            .where(
+                active_ticket,
+                exchange_commands.c.status
+                == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
+            )
+            .order_by(exchange_commands.c.ticket_id)
         )
+        unknown_result = await self._connection.execute(unknown_statement)
         unknown_command_outcome_ticket_ids = tuple(
             sorted({str(value) for value in unknown_result.scalars().all()})
         )
@@ -2496,8 +2533,7 @@ class PostgresEntryAdmissionRepository:
         incident_statement = incident_statement.where(
             runtime_incidents.c.status == "open",
             sa.or_(
-                runtime_incidents.c.entry_block_scope
-                == EntryBlockScope.RUNTIME.value,
+                runtime_incidents.c.entry_block_scope == EntryBlockScope.RUNTIME.value,
                 sa.and_(
                     runtime_incidents.c.entry_block_scope
                     == EntryBlockScope.ACCOUNT_CAPACITY.value,
@@ -2510,9 +2546,7 @@ class PostgresEntryAdmissionRepository:
                 ),
             ),
         ).order_by(runtime_incidents.c.entry_block_scope)
-        incident_result = await self._connection.execute(
-            incident_statement
-        )
+        incident_result = await self._connection.execute(incident_statement)
         open_incident_scopes = tuple(
             sorted(
                 {
@@ -2539,17 +2573,13 @@ class PostgresEntryAdmissionRepository:
     ) -> AccountExposureSnapshot | None:
         statement = sa.select(account_exposure_current).where(
             account_exposure_current.c.venue_id == venue_id,
-            account_exposure_current.c.account_id == account_id
+            account_exposure_current.c.account_id == account_id,
         )
         if for_update:
             statement = statement.with_for_update(of=account_exposure_current)
         result = await self._connection.execute(statement)
         row = result.mappings().one_or_none()
-        return (
-            None
-            if row is None
-            else AccountExposureSnapshot.model_validate(row)
-        )
+        return None if row is None else AccountExposureSnapshot.model_validate(row)
 
     async def reserve_account_exposure(
         self,
@@ -2589,8 +2619,7 @@ class PostgresEntryAdmissionRepository:
                     account_exposure_current.c.gross_risk_at_stop + risk_at_stop
                 ),
                 current_reserved_margin=(
-                    account_exposure_current.c.current_reserved_margin
-                    + reserved_margin
+                    account_exposure_current.c.current_reserved_margin + reserved_margin
                 ),
                 active_ticket_count=account_exposure_current.c.active_ticket_count + 1,
                 projection_version=expected_version + 1,
@@ -2622,7 +2651,9 @@ class PostgresEntryAdmissionRepository:
             or current.gross_risk_at_stop < risk_at_stop
             or current.current_reserved_margin < reserved_margin
         ):
-            raise AggregateVersionConflict("account exposure release would become negative")
+            raise AggregateVersionConflict(
+                "account exposure release would become negative"
+            )
         updated = await self._connection.execute(
             sa.update(account_exposure_current)
             .where(
@@ -2725,9 +2756,7 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
             ticket.active_family_ticket_count_at_claim
         ),
         "family_ticket_limit": ticket.family_ticket_limit,
-        "directional_risk_at_stop_at_claim": (
-            ticket.directional_risk_at_stop_at_claim
-        ),
+        "directional_risk_at_stop_at_claim": (ticket.directional_risk_at_stop_at_claim),
         "directional_stop_risk_limit_fraction": (
             ticket.directional_stop_risk_limit_fraction
         ),
@@ -2760,6 +2789,9 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
         "fact_digest": ticket.fact_digest,
         "exit_policy_id": ticket.exit_policy_id,
         "exit_policy_semantic_hash": ticket.exit_policy_semantic_hash,
+        "exit_binding_id": ticket.exit_binding_id,
+        "exit_binding_semantic_hash": ticket.exit_binding_semantic_hash,
+        "exit_binding_authority_version": ticket.exit_binding_authority_version,
         "decision_digest": ticket.decision_digest(),
         "status": ticket.status.value,
         "created_at_ms": ticket.created_at_ms,
@@ -2816,6 +2848,13 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         minimum_stop_risk_budget=Decimal(row["minimum_stop_risk_budget"]),
         exit_policy_id=str(row["exit_policy_id"]),
         exit_policy_semantic_hash=str(row["exit_policy_semantic_hash"]),
+        exit_binding_id=row["exit_binding_id"],
+        exit_binding_semantic_hash=row["exit_binding_semantic_hash"],
+        exit_binding_authority_version=(
+            None
+            if row["exit_binding_authority_version"] is None
+            else int(row["exit_binding_authority_version"])
+        ),
         capacity_claim_id=str(row["capacity_claim_id"]),
         created_at_ms=int(row["created_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),
@@ -2881,14 +2920,15 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "universe_semantic_digest": claim.universe_semantic_digest,
         "account_id": identity.netting_domain.account_id,
         "venue_id": identity.netting_domain.venue_id,
-        "exchange_instrument_id": (
-            identity.netting_domain.exchange_instrument_id
-        ),
+        "exchange_instrument_id": (identity.netting_domain.exchange_instrument_id),
         "position_side": identity.netting_domain.position_side,
         "netting_domain_key": identity.netting_domain.key(),
         "fact_digest": claim.fact_digest,
         "exit_policy_id": claim.exit_policy_id,
         "exit_policy_semantic_hash": claim.exit_policy_semantic_hash,
+        "exit_binding_id": claim.exit_binding_id,
+        "exit_binding_semantic_hash": claim.exit_binding_semantic_hash,
+        "exit_binding_authority_version": claim.exit_binding_authority_version,
         "entry_admission_snapshot_digest": claim.entry_admission_snapshot_digest,
         "account_entry_health_digest": claim.account_entry_health_digest,
         "instrument_entry_health_digest": claim.instrument_entry_health_digest,
@@ -2913,18 +2953,10 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         ),
         "family_ticket_limit": claim.family_ticket_limit,
         "gross_risk_at_stop_at_claim": claim.gross_risk_at_stop_at_claim,
-        "directional_risk_at_stop_at_claim": (
-            claim.directional_risk_at_stop_at_claim
-        ),
-        "current_reserved_margin_at_claim": (
-            claim.current_reserved_margin_at_claim
-        ),
-        "max_ticket_stop_risk_fraction": (
-            claim.max_ticket_stop_risk_fraction
-        ),
-        "max_gross_stop_risk_fraction": (
-            claim.max_gross_stop_risk_fraction
-        ),
+        "directional_risk_at_stop_at_claim": (claim.directional_risk_at_stop_at_claim),
+        "current_reserved_margin_at_claim": (claim.current_reserved_margin_at_claim),
+        "max_ticket_stop_risk_fraction": (claim.max_ticket_stop_risk_fraction),
+        "max_gross_stop_risk_fraction": (claim.max_gross_stop_risk_fraction),
         "directional_stop_risk_limit_fraction": (
             claim.directional_stop_risk_limit_fraction
         ),
@@ -3009,6 +3041,13 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         fact_digest=str(row["fact_digest"]),
         exit_policy_id=str(row["exit_policy_id"]),
         exit_policy_semantic_hash=str(row["exit_policy_semantic_hash"]),
+        exit_binding_id=row["exit_binding_id"],
+        exit_binding_semantic_hash=row["exit_binding_semantic_hash"],
+        exit_binding_authority_version=(
+            None
+            if row["exit_binding_authority_version"] is None
+            else int(row["exit_binding_authority_version"])
+        ),
         entry_admission_snapshot_digest=str(row["entry_admission_snapshot_digest"]),
         account_entry_health_digest=str(row["account_entry_health_digest"]),
         instrument_entry_health_digest=str(row["instrument_entry_health_digest"]),
@@ -3044,21 +3083,15 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
             int(row["family_ticket_limit"])
             - int(row["active_family_ticket_count_at_claim"])
         ),
-        gross_risk_at_stop_at_claim=Decimal(
-            row["gross_risk_at_stop_at_claim"]
-        ),
+        gross_risk_at_stop_at_claim=Decimal(row["gross_risk_at_stop_at_claim"]),
         directional_risk_at_stop_at_claim=Decimal(
             row["directional_risk_at_stop_at_claim"]
         ),
         current_reserved_margin_at_claim=Decimal(
             row["current_reserved_margin_at_claim"]
         ),
-        max_ticket_stop_risk_fraction=Decimal(
-            row["max_ticket_stop_risk_fraction"]
-        ),
-        max_gross_stop_risk_fraction=Decimal(
-            row["max_gross_stop_risk_fraction"]
-        ),
+        max_ticket_stop_risk_fraction=Decimal(row["max_ticket_stop_risk_fraction"]),
+        max_gross_stop_risk_fraction=Decimal(row["max_gross_stop_risk_fraction"]),
         directional_stop_risk_limit_fraction=Decimal(
             row["directional_stop_risk_limit_fraction"]
         ),
@@ -3109,9 +3142,7 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
             if row["exposure_session_end_ms"] is None
             else int(row["exposure_session_end_ms"])
         ),
-        take_profit_prices=tuple(
-            Decimal(value) for value in row["take_profit_prices"]
-        ),
+        take_profit_prices=tuple(Decimal(value) for value in row["take_profit_prices"]),
         take_profit_quantities=tuple(
             Decimal(value) for value in row["take_profit_quantities"]
         ),
@@ -3147,9 +3178,7 @@ def _aggregate_values(
             else aggregate.post_fill_disposition.value
         ),
         "post_fill_stress_status": aggregate.post_fill_stress_status,
-        "post_fill_stress_proof_digest": (
-            aggregate.post_fill_stress_proof_digest
-        ),
+        "post_fill_stress_proof_digest": (aggregate.post_fill_stress_proof_digest),
         "protected_qty": aggregate.protected_qty,
         "entry_exchange_order_id": aggregate.entry_exchange_order_id,
         "initial_stop_exchange_order_id": aggregate.initial_stop_exchange_order_id,
@@ -3210,9 +3239,7 @@ def _admission_decision_values(
         "binding_constraint": decision.binding_constraint,
         "capacity_claim_id": decision.capacity_claim_id,
         "ticket_id": decision.ticket_id,
-        "entry_admission_snapshot_digest": (
-            decision.entry_admission_snapshot_digest
-        ),
+        "entry_admission_snapshot_digest": (decision.entry_admission_snapshot_digest),
         "decision_digest": decision.decision_digest,
         "decided_at_ms": decision.decided_at_ms,
     }
@@ -3224,8 +3251,7 @@ def _admission_decision_from_row(row: RowMapping) -> AdmissionDecision:
             **dict(row),
             "candidate_set": {
                 "ranked_signal_event_ids": tuple(
-                    item["signal_event_id"]
-                    for item in row["candidate_set_summary"]
+                    item["signal_event_id"] for item in row["candidate_set_summary"]
                 ),
                 "candidate_count": int(row["candidate_count"]),
                 "candidate_set_digest": str(row["candidate_set_digest"]),
@@ -3323,9 +3349,7 @@ def _shadow_outcome_spec_from_row(row: RowMapping) -> ShadowOutcomeSpec:
         best_bid_quantity=_decimal_or_none(row["best_bid_quantity"]),
         best_ask_quantity=_decimal_or_none(row["best_ask_quantity"]),
         unavailable_reason=(
-            str(row["completion_reason"])
-            if row["status"] == "unavailable"
-            else None
+            str(row["completion_reason"]) if row["status"] == "unavailable" else None
         ),
         horizon_start_ms=int(row["horizon_start_ms"]),
         horizon_end_ms=int(row["horizon_end_ms"]),
@@ -3443,9 +3467,7 @@ def _aggregate_from_row(
             else str(row["pending_cancel_exchange_order_id"])
         ),
         entry_vacuum_id=(
-            None
-            if row["entry_vacuum_id"] is None
-            else str(row["entry_vacuum_id"])
+            None if row["entry_vacuum_id"] is None else str(row["entry_vacuum_id"])
         ),
         entry_materialization_kind=row["entry_materialization_kind"],
         exit_exchange_order_id=(
@@ -3500,7 +3522,4 @@ def _exposure_family(value: object) -> ExposureFamily:
 
 
 def _is_historical_terminal_ticket(row: RowMapping) -> bool:
-    return (
-        row["terminal_at_ms"] is not None
-        and row["minimum_stop_risk_budget"] is None
-    )
+    return row["terminal_at_ms"] is not None and row["minimum_stop_risk_budget"] is None

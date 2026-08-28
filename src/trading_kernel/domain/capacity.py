@@ -33,11 +33,10 @@ class CapacityClaimStatus(StrEnum):
     INSTRUMENT_RULES_INVALID = "instrument_rules_invalid"
     NETTING_DOMAIN_OCCUPIED = "netting_domain_occupied"
     BUDGET_EXHAUSTED = "budget_exhausted"
-    EXPOSURE_FAMILY_CAPACITY_EXHAUSTED = (
-        "exposure_family_capacity_exhausted"
-    )
+    EXPOSURE_FAMILY_CAPACITY_EXHAUSTED = "exposure_family_capacity_exhausted"
     DIRECTIONAL_RISK_EXHAUSTED = "directional_risk_exhausted"
     PROTECTION_UNAVAILABLE = "protection_unavailable"
+    EXIT_LEG_MATERIALIZATION_UNMET = "exit_leg_materialization_unmet"
 
 
 class FamilyTicketLimits(BaseModel):
@@ -207,7 +206,9 @@ class CapacityInstrumentRules(BaseModel):
         ):
             raise ValueError("instrument rule identity must be current and versioned")
         if self.exchange_max_leverage <= 0 or not self.maintenance_margin_brackets:
-            raise ValueError("instrument leverage and maintenance authority are required")
+            raise ValueError(
+                "instrument leverage and maintenance authority are required"
+            )
         if _SHA256_DIGEST.fullmatch(self.maintenance_margin_brackets_digest) is None:
             raise ValueError("instrument maintenance authority requires a digest")
         return self
@@ -227,6 +228,9 @@ class CapacityClaim(BaseModel):
     fact_digest: str
     exit_policy_id: str
     exit_policy_semantic_hash: str
+    exit_binding_id: str | None = None
+    exit_binding_semantic_hash: str | None = None
+    exit_binding_authority_version: int | None = None
     entry_admission_snapshot_digest: str
     account_entry_health_digest: str
     instrument_entry_health_digest: str
@@ -306,6 +310,12 @@ class CapacityClaim(BaseModel):
         normalized = str(value or "").strip()
         return normalized or None
 
+    @field_validator("exit_binding_id", mode="before")
+    @classmethod
+    def _normalize_optional_exit_binding(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
     @field_validator(
         "fact_digest",
         "universe_semantic_digest",
@@ -319,6 +329,20 @@ class CapacityClaim(BaseModel):
     def _require_digest(cls, value: str) -> str:
         if _SHA256_DIGEST.fullmatch(value) is None:
             raise ValueError("CapacityClaim digests must be canonical sha256 values")
+        return value
+
+    @field_validator("exit_binding_semantic_hash")
+    @classmethod
+    def _require_optional_binding_digest(cls, value: str | None) -> str | None:
+        if value is not None and _SHA256_DIGEST.fullmatch(value) is None:
+            raise ValueError("CapacityClaim Binding hash must be canonical")
+        return value
+
+    @field_validator("exit_binding_authority_version")
+    @classmethod
+    def _require_optional_binding_version(cls, value: int | None) -> int | None:
+        if value is not None and (isinstance(value, bool) or value <= 0):
+            raise ValueError("CapacityClaim Binding version must be positive")
         return value
 
     @field_validator(
@@ -405,6 +429,17 @@ class CapacityClaim(BaseModel):
 
     @model_validator(mode="after")
     def _validate_claim(self) -> CapacityClaim:
+        binding_lineage = (
+            self.exit_binding_id,
+            self.exit_binding_semantic_hash,
+            self.exit_binding_authority_version,
+        )
+        if any(value is None for value in binding_lineage) and not all(
+            value is None for value in binding_lineage
+        ):
+            raise ValueError(
+                "CapacityClaim Binding lineage must be all-null or all-present"
+            )
         if (
             self.owner_policy_version <= 0
             or self.runtime_scope_version <= 0
@@ -414,8 +449,7 @@ class CapacityClaim(BaseModel):
         ):
             raise ValueError("CapacityClaim authority and time must be positive")
         if self.remaining_family_slots_at_claim != (
-            self.family_ticket_limit
-            - self.active_family_ticket_count_at_claim
+            self.family_ticket_limit - self.active_family_ticket_count_at_claim
         ):
             raise ValueError("CapacityClaim Family slot evidence differs")
         if self.entry_order_type is EntryOrderType.MARKET:
@@ -447,13 +481,11 @@ class CapacityClaim(BaseModel):
         if self.post_fill_stop_risk_limit < self.planned_stop_risk_budget:
             raise ValueError("CapacityClaim post-fill limit undercuts planned risk")
         if self.planned_stop_risk_budget > (
-            self.total_wallet_balance_at_claim
-            * self.max_ticket_stop_risk_fraction
+            self.total_wallet_balance_at_claim * self.max_ticket_stop_risk_fraction
         ):
             raise ValueError("CapacityClaim exceeds the per-Ticket stop-risk limit")
         remaining_gross_risk = (
-            self.total_wallet_balance_at_claim
-            * self.max_gross_stop_risk_fraction
+            self.total_wallet_balance_at_claim * self.max_gross_stop_risk_fraction
             - self.gross_risk_at_stop_at_claim
         )
         if self.planned_stop_risk_budget > remaining_gross_risk:
@@ -464,9 +496,7 @@ class CapacityClaim(BaseModel):
             - self.directional_risk_at_stop_at_claim
         )
         if self.planned_stop_risk_budget > remaining_directional_risk:
-            raise ValueError(
-                "CapacityClaim exceeds remaining directional stop risk"
-            )
+            raise ValueError("CapacityClaim exceeds remaining directional stop risk")
         expected_minimum = (
             self.total_wallet_balance_at_claim
             * self.max_ticket_stop_risk_fraction
@@ -477,8 +507,7 @@ class CapacityClaim(BaseModel):
         if self.risk_at_stop < self.minimum_stop_risk_budget:
             raise ValueError("CapacityClaim is below minimum materialization")
         if self.ticket_margin_budget > (
-            self.total_margin_balance_at_claim
-            * self.max_ticket_initial_margin_fraction
+            self.total_margin_balance_at_claim * self.max_ticket_initial_margin_fraction
         ):
             raise ValueError("CapacityClaim exceeds the per-Ticket margin limit")
         if self.reserved_margin > self.ticket_margin_budget:
@@ -498,10 +527,7 @@ class CapacityClaim(BaseModel):
         evidence = self.cross_margin_stress_evidence
         if evidence.proof.status is not CrossMarginStressStatus.PASSED:
             raise ValueError("CapacityClaim requires a passed stress proof")
-        if (
-            evidence.request.post_stop_stress_multiple
-            != self.post_stop_stress_multiple
-        ):
+        if evidence.request.post_stop_stress_multiple != self.post_stop_stress_multiple:
             raise ValueError("CapacityClaim stress proof differs from policy")
         if (
             evidence.request.evaluated_side
@@ -522,10 +548,8 @@ class CapacityClaim(BaseModel):
             != self.total_maintenance_margin_at_claim
             or account.available_margin != self.available_margin_at_claim
             or account.mark_price != self.mark_price_at_claim
-            or account.configured_leverage
-            != self.configured_leverage_at_claim
-            or evidence.request.reference_entry_price
-            != self.entry_reference_price
+            or account.configured_leverage != self.configured_leverage_at_claim
+            or evidence.request.reference_entry_price != self.entry_reference_price
             or evidence.request.initial_stop_price != self.initial_stop_price
         ):
             raise ValueError("CapacityClaim stress proof differs from Claim facts")
@@ -547,13 +571,22 @@ class CapacityClaim(BaseModel):
         expected_digest = build_capacity_claim_digest(self)
         if expected_digest != self.decision_digest:
             raise ValueError("CapacityClaim decision digest differs from its payload")
-        if self.capacity_claim_id != f"claim:{expected_digest.removeprefix('sha256:')[:32]}":
+        if (
+            self.capacity_claim_id
+            != f"claim:{expected_digest.removeprefix('sha256:')[:32]}"
+        ):
             raise ValueError("CapacityClaim identity differs from its decision digest")
         return self
 
     def to_ticket(self) -> TradeTicket:
         if self.margin_mode_at_claim != "cross":
             raise ValueError("Ticket issuance requires the supported cross margin mode")
+        if (
+            self.exit_binding_id is None
+            or self.exit_binding_semantic_hash is None
+            or self.exit_binding_authority_version is None
+        ):
+            raise ValueError("new Ticket issuance requires exact Binding lineage")
         return TradeTicket(
             identity=self.ticket_identity,
             owner_policy_id=self.owner_policy_id,
@@ -569,9 +602,7 @@ class CapacityClaim(BaseModel):
                 self.active_family_ticket_count_at_claim
             ),
             family_ticket_limit=self.family_ticket_limit,
-            directional_risk_at_stop_at_claim=(
-                self.directional_risk_at_stop_at_claim
-            ),
+            directional_risk_at_stop_at_claim=(self.directional_risk_at_stop_at_claim),
             directional_stop_risk_limit_fraction=(
                 self.directional_stop_risk_limit_fraction
             ),
@@ -579,6 +610,9 @@ class CapacityClaim(BaseModel):
             minimum_stop_risk_budget=self.minimum_stop_risk_budget,
             exit_policy_id=self.exit_policy_id,
             exit_policy_semantic_hash=self.exit_policy_semantic_hash,
+            exit_binding_id=self.exit_binding_id,
+            exit_binding_semantic_hash=self.exit_binding_semantic_hash,
+            exit_binding_authority_version=self.exit_binding_authority_version,
             capacity_claim_id=self.capacity_claim_id,
             created_at_ms=self.created_at_ms,
             expires_at_ms=self.expires_at_ms,
@@ -635,6 +669,9 @@ def freeze_capacity_claim(
     fact_digest: str,
     exit_policy_id: str,
     exit_policy_semantic_hash: str,
+    exit_binding_id: str,
+    exit_binding_semantic_hash: str,
+    exit_binding_authority_version: int,
     entry_admission_snapshot_digest: str,
     account_entry_health_digest: str,
     instrument_entry_health_digest: str,
@@ -705,6 +742,9 @@ def freeze_capacity_claim(
         "fact_digest": fact_digest,
         "exit_policy_id": exit_policy_id,
         "exit_policy_semantic_hash": exit_policy_semantic_hash,
+        "exit_binding_id": exit_binding_id,
+        "exit_binding_semantic_hash": exit_binding_semantic_hash,
+        "exit_binding_authority_version": exit_binding_authority_version,
         "entry_admission_snapshot_digest": entry_admission_snapshot_digest,
         "account_entry_health_digest": account_entry_health_digest,
         "instrument_entry_health_digest": instrument_entry_health_digest,
@@ -722,27 +762,17 @@ def freeze_capacity_claim(
         "active_ticket_count_at_claim": active_ticket_count_at_claim,
         "remaining_slots_at_claim": remaining_slots_at_claim,
         "exposure_family": exposure_family,
-        "active_family_ticket_count_at_claim": (
-            active_family_ticket_count_at_claim
-        ),
+        "active_family_ticket_count_at_claim": (active_family_ticket_count_at_claim),
         "family_ticket_limit": family_ticket_limit,
         "remaining_family_slots_at_claim": remaining_family_slots_at_claim,
         "gross_risk_at_stop_at_claim": gross_risk_at_stop_at_claim,
-        "directional_risk_at_stop_at_claim": (
-            directional_risk_at_stop_at_claim
-        ),
+        "directional_risk_at_stop_at_claim": (directional_risk_at_stop_at_claim),
         "current_reserved_margin_at_claim": current_reserved_margin_at_claim,
         "max_ticket_stop_risk_fraction": max_ticket_stop_risk_fraction,
         "max_gross_stop_risk_fraction": max_gross_stop_risk_fraction,
-        "directional_stop_risk_limit_fraction": (
-            directional_stop_risk_limit_fraction
-        ),
-        "max_ticket_initial_margin_fraction": (
-            max_ticket_initial_margin_fraction
-        ),
-        "max_gross_initial_margin_utilization": (
-            max_gross_initial_margin_utilization
-        ),
+        "directional_stop_risk_limit_fraction": (directional_stop_risk_limit_fraction),
+        "max_ticket_initial_margin_fraction": (max_ticket_initial_margin_fraction),
+        "max_gross_initial_margin_utilization": (max_gross_initial_margin_utilization),
         "min_materialization_ratio": min_materialization_ratio,
         "minimum_stop_risk_budget": minimum_stop_risk_budget,
         "planned_stop_risk_budget": planned_stop_risk_budget,
@@ -795,6 +825,10 @@ def build_capacity_claim_digest(claim: CapacityClaim) -> str:
     )
     if payload["selection_authority_id"] is None:
         payload.pop("selection_authority_id")
+    if payload["exit_binding_id"] is None:
+        payload.pop("exit_binding_id")
+        payload.pop("exit_binding_semantic_hash")
+        payload.pop("exit_binding_authority_version")
     return _digest(payload)
 
 
@@ -815,10 +849,7 @@ def _canonicalize(value: object) -> object:
     if isinstance(value, StrEnum):
         return value.value
     if isinstance(value, dict):
-        return {
-            str(key): _canonicalize(item)
-            for key, item in value.items()
-        }
+        return {str(key): _canonicalize(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_canonicalize(item) for item in value]
     return value
@@ -897,7 +928,9 @@ def _normalize_claim_decimals_for_storage(
 
 def _quantize_storage_decimal(value: Decimal, *, rounding: str) -> Decimal:
     if not value.is_finite() or value < 0:
-        raise ValueError("CapacityClaim financial values must be finite and nonnegative")
+        raise ValueError(
+            "CapacityClaim financial values must be finite and nonnegative"
+        )
     with localcontext() as context:
         context.prec = 60
         return value.quantize(_PERSISTED_DECIMAL_QUANTUM, rounding=rounding)

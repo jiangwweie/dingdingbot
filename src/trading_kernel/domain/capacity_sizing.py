@@ -47,6 +47,7 @@ class CapacitySizingRequest(BaseModel):
     configured_leverage: int
     entry_reference_price: Decimal
     initial_stop_price: Decimal
+    take_profit_price: Decimal
     quantity_step: Decimal
     min_quantity: Decimal
     min_notional: Decimal
@@ -70,6 +71,7 @@ class CapacitySizingRequest(BaseModel):
     @field_validator(
         "entry_reference_price",
         "initial_stop_price",
+        "take_profit_price",
         "quantity_step",
         "min_quantity",
         "min_notional",
@@ -77,7 +79,9 @@ class CapacitySizingRequest(BaseModel):
     @classmethod
     def _require_finite_positive(cls, value: Decimal) -> Decimal:
         if not value.is_finite() or value <= 0:
-            raise ValueError("sizing prices, rules, and ratios must be finite and positive")
+            raise ValueError(
+                "sizing prices, rules, and ratios must be finite and positive"
+            )
         return value
 
     @field_validator(
@@ -158,7 +162,9 @@ class CapacitySizingDecision(BaseModel):
 
     @model_validator(mode="after")
     def _validate_shape(self) -> CapacitySizingDecision:
-        if (self.status is CapacitySizingStatus.SELECTED) != (self.selected is not None):
+        if (self.status is CapacitySizingStatus.SELECTED) != (
+            self.selected is not None
+        ):
             raise ValueError("selected sizing decisions require exactly one candidate")
         return self
 
@@ -170,8 +176,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
         return _refused(CapacitySizingStatus.COUNT_EXHAUSTED)
     if (
         request.configured_leverage != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
-        or FIXED_EXCHANGE_CONFIGURED_LEVERAGE
-        > request.permitted_max_leverage
+        or FIXED_EXCHANGE_CONFIGURED_LEVERAGE > request.permitted_max_leverage
     ):
         return _refused(CapacitySizingStatus.INVALID_FACTS)
 
@@ -182,8 +187,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
         Decimal(0),
     )
     remaining_directional_stop_risk = max(
-        request.total_wallet_balance
-        * request.directional_stop_risk_limit_fraction
+        request.total_wallet_balance * request.directional_stop_risk_limit_fraction
         - request.directional_risk_at_stop,
         Decimal(0),
     )
@@ -203,8 +207,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
     )
 
     gross_initial_margin_limit = (
-        request.total_margin_balance
-        * request.max_gross_initial_margin_utilization
+        request.total_margin_balance * request.max_gross_initial_margin_utilization
     )
     current_margin_usage = max(
         request.total_initial_margin,
@@ -219,8 +222,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
         remaining_gross_margin,
     )
     ticket_margin_budget = min(
-        request.total_margin_balance
-        * request.max_ticket_initial_margin_fraction,
+        request.total_margin_balance * request.max_ticket_initial_margin_fraction,
         remaining_executable_margin,
     )
     if ticket_margin_budget <= 0:
@@ -248,9 +250,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
             remaining_slots=remaining_slots,
             ticket_stop_risk_budget=ticket_stop_risk_budget,
             remaining_gross_stop_risk=remaining_gross_stop_risk,
-            remaining_directional_stop_risk=(
-                remaining_directional_stop_risk
-            ),
+            remaining_directional_stop_risk=(remaining_directional_stop_risk),
             minimum_stop_risk_budget=minimum_stop_risk_budget,
             remaining_gross_margin=remaining_gross_margin,
             remaining_executable_margin=remaining_executable_margin,
@@ -272,7 +272,9 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
             return _refused(CapacitySizingStatus.VENUE_MINIMUM_UNMET)
         return _refused(CapacitySizingStatus.INVALID_FACTS)
 
-    full_target = [candidate for candidate in candidates if candidate.quantity == risk_quantity]
+    full_target = [
+        candidate for candidate in candidates if candidate.quantity == risk_quantity
+    ]
     selected = (
         min(full_target, key=lambda candidate: candidate.selected_leverage)
         if full_target
@@ -285,9 +287,7 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
         )
     )
     if selected.planned_stop_risk < minimum_stop_risk_budget:
-        return _refused(
-            CapacitySizingStatus.MINIMUM_MATERIALIZATION_UNMET
-        )
+        return _refused(CapacitySizingStatus.MINIMUM_MATERIALIZATION_UNMET)
     return CapacitySizingDecision(
         status=CapacitySizingStatus.SELECTED,
         selected=selected,
@@ -331,6 +331,12 @@ def _evaluate_candidate(
     runner_quantity = quantity - tp1_quantity
     if tp1_quantity <= 0 or runner_quantity < request.min_quantity:
         return CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
+    if (
+        tp1_quantity < request.min_quantity
+        or tp1_quantity * request.take_profit_price < request.min_notional
+        or runner_quantity * request.initial_stop_price < request.min_notional
+    ):
+        return CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
     return CapacitySizingSelection(
         remaining_slots=remaining_slots,
         ticket_stop_risk_budget=ticket_stop_risk_budget,
@@ -339,10 +345,7 @@ def _evaluate_candidate(
         minimum_stop_risk_budget=minimum_stop_risk_budget,
         materialization_ratio=(
             planned_stop_risk
-            / (
-                request.total_wallet_balance
-                * request.max_ticket_stop_risk_fraction
-            )
+            / (request.total_wallet_balance * request.max_ticket_stop_risk_fraction)
         ),
         remaining_gross_margin=remaining_gross_margin,
         remaining_executable_margin=remaining_executable_margin,

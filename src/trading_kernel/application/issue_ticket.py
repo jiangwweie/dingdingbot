@@ -53,6 +53,8 @@ class IssueTicketStatus(StrEnum):
     SELECTION_ENTRY_VACUUM = "selection_entry_vacuum"
     SELECTION_AUTHORITY_INVALID = "selection_authority_invalid"
     SELECTION_TRIGGER_SUPPRESSED = "selection_trigger_suppressed"
+    EXIT_BINDING_CHANGED = "exit_binding_changed"
+    EXIT_LEG_MATERIALIZATION_UNMET = "exit_leg_materialization_unmet"
 
 
 class IssueTicketRequest(BaseModel):
@@ -167,8 +169,7 @@ async def issue_ticket(
         )
     if (
         ticket.selected_leverage != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
-        or claim.configured_leverage_at_claim
-        != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+        or claim.configured_leverage_at_claim != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
         or ticket.leverage_change_required
     ):
         return IssueTicketResult(
@@ -178,9 +179,7 @@ async def issue_ticket(
 
     universe = await uow.signals.get_active_universe_member(
         event_spec_id=ticket.identity.runtime.event_spec_id,
-        exchange_instrument_id=(
-            ticket.identity.netting_domain.exchange_instrument_id
-        ),
+        exchange_instrument_id=(ticket.identity.netting_domain.exchange_instrument_id),
         for_update=True,
     )
     if (
@@ -244,6 +243,28 @@ async def issue_ticket(
             status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
             ticket_id=None,
         )
+    current_exit_binding = await uow.exit_profiles.get_current_binding(
+        ticket.identity.runtime.event_spec_id,
+        for_update=True,
+    )
+    if (
+        claim.exit_binding_id is None
+        or claim.exit_binding_semantic_hash is None
+        or claim.exit_binding_authority_version is None
+        or current_exit_binding is None
+        or current_exit_binding.exit_binding_id != claim.exit_binding_id
+        or current_exit_binding.binding_semantic_hash
+        != claim.exit_binding_semantic_hash
+        or current_exit_binding.projection_version
+        != claim.exit_binding_authority_version
+        or ticket.exit_binding_id != claim.exit_binding_id
+        or ticket.exit_binding_semantic_hash != claim.exit_binding_semantic_hash
+        or ticket.exit_binding_authority_version != claim.exit_binding_authority_version
+    ):
+        return IssueTicketResult(
+            status=IssueTicketStatus.EXIT_BINDING_CHANGED,
+            ticket_id=None,
+        )
 
     ownership = await uow.entry_admission.read_admission_ownership(
         venue_id=ticket.identity.netting_domain.venue_id,
@@ -263,20 +284,16 @@ async def issue_ticket(
             status=IssueTicketStatus.ACTIVE_NETTING_DOMAIN,
             ticket_id=None,
         )
-    if await uow.entry_admission.has_ticket_for_signal(
-        ticket.identity.signal_event_id
-    ):
+    if await uow.entry_admission.has_ticket_for_signal(ticket.identity.signal_event_id):
         return IssueTicketResult(
             status=IssueTicketStatus.DUPLICATE_SIGNAL,
             ticket_id=None,
         )
 
-    active_family_ticket_count = (
-        await uow.entry_admission.count_active_family_tickets(
-            venue_id=ticket.identity.netting_domain.venue_id,
-            account_id=ticket.identity.netting_domain.account_id,
-            exposure_family=ticket.exposure_family,
-        )
+    active_family_ticket_count = await uow.entry_admission.count_active_family_tickets(
+        venue_id=ticket.identity.netting_domain.venue_id,
+        account_id=ticket.identity.netting_domain.account_id,
+        exposure_family=ticket.exposure_family,
     )
     if active_family_ticket_count >= ticket.family_ticket_limit:
         return IssueTicketResult(
@@ -304,10 +321,8 @@ async def issue_ticket(
         or ticket.margin_mode != policy.supported_margin_mode
         or ticket.risk_at_stop > ticket.planned_stop_risk_budget
         or ticket.post_fill_stop_risk_limit < ticket.planned_stop_risk_budget
-        or policy.max_ticket_stop_risk_fraction
-        != claim.max_ticket_stop_risk_fraction
-        or policy.max_gross_stop_risk_fraction
-        != claim.max_gross_stop_risk_fraction
+        or policy.max_ticket_stop_risk_fraction != claim.max_ticket_stop_risk_fraction
+        or policy.max_gross_stop_risk_fraction != claim.max_gross_stop_risk_fraction
         or policy.max_ticket_initial_margin_fraction
         != claim.max_ticket_initial_margin_fraction
         or policy.max_gross_initial_margin_utilization
@@ -316,11 +331,9 @@ async def issue_ticket(
         != claim.directional_stop_risk_limit_fraction
         or policy.min_materialization_ratio != claim.min_materialization_ratio
         or ticket.risk_at_stop
-        > claim.total_wallet_balance_at_claim
-        * policy.max_ticket_stop_risk_fraction
+        > claim.total_wallet_balance_at_claim * policy.max_ticket_stop_risk_fraction
         or current_gross_risk + ticket.risk_at_stop
-        > claim.total_wallet_balance_at_claim
-        * policy.max_gross_stop_risk_fraction
+        > claim.total_wallet_balance_at_claim * policy.max_gross_stop_risk_fraction
         or directional_risk_at_stop + ticket.risk_at_stop
         > claim.total_wallet_balance_at_claim
         * policy.directional_stop_risk_limit_fraction
@@ -360,9 +373,7 @@ async def issue_ticket(
         notional=ticket.notional,
         risk_at_stop=ticket.risk_at_stop,
         reserved_margin=ticket.reserved_margin,
-        expected_version=(
-            None if exposure is None else exposure.projection_version
-        ),
+        expected_version=(None if exposure is None else exposure.projection_version),
         updated_at_ms=request.now_ms,
     )
     await uow.entry_admission.claim_global_lane(
@@ -397,11 +408,7 @@ def _scope_matches_ticket(
 ) -> bool:
     """Require the locked current Scope to match the frozen Claim/Ticket authority."""
 
-    if (
-        scope is None
-        or scope.lifecycle_state != "active"
-        or not scope.entry_enabled
-    ):
+    if scope is None or scope.lifecycle_state != "active" or not scope.entry_enabled:
         return False
     identity = ticket.identity
     return (

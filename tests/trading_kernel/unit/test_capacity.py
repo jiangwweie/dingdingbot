@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
@@ -24,6 +25,13 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionOwnership,
     EntryAdmissionSnapshot,
     canonical_digest,
+)
+from src.trading_kernel.domain.exit_policy import (
+    CurrentEventExitBinding,
+    ExitProfileRecord,
+    build_event_exit_binding,
+    registered_event_exit_bindings,
+    registered_exit_profiles,
 )
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
@@ -65,14 +73,25 @@ def test_capacity_claim_freezes_configured_leverage_and_demand_based_margin() ->
     )
     assert claim.entry_admission_snapshot_digest == snapshot.digest()
     assert claim.account_capacity_domain_key == "binance-usdm:experiment-1"
-    assert claim.leverage_domain_key == "binance-usdm:experiment-1:binance-usdm:BTCUSDT:perpetual"
+    assert (
+        claim.leverage_domain_key
+        == "binance-usdm:experiment-1:binance-usdm:BTCUSDT:perpetual"
+    )
     assert claim.leverage_change_required is False
-    assert claim.ticket_identity.exposure_episode_id == _long_signal().exposure_episode_id
-    assert claim.exit_policy_id.startswith("exit-policy:SOR-001:SOR-LONG:")
+    assert (
+        claim.ticket_identity.exposure_episode_id == _long_signal().exposure_episode_id
+    )
+    assert claim.exit_policy_id == "exit-profile:orb-crypto:15m:long:v1"
     assert claim.exit_policy_semantic_hash.startswith("sha256:")
+    assert claim.exit_binding_id is not None
+    assert claim.exit_binding_semantic_hash is not None
+    assert claim.exit_binding_authority_version == 1
     assert claim.pre_tp1_reclaim_price == Decimal(102)
     assert claim.exposure_session_end_ms == 86_401_000
     ticket = claim.to_ticket()
+    assert ticket.exit_binding_id == claim.exit_binding_id
+    assert ticket.exit_binding_semantic_hash == claim.exit_binding_semantic_hash
+    assert ticket.exit_binding_authority_version == claim.exit_binding_authority_version
     assert ticket.selected_leverage == 5
     assert (
         claim.universe_version_id
@@ -86,14 +105,13 @@ def test_capacity_claim_freezes_configured_leverage_and_demand_based_margin() ->
     )
 
 
-def test_capacity_claim_rejects_reserved_margin_above_its_frozen_ticket_budget() -> None:
+def test_capacity_claim_rejects_reserved_margin_above_its_frozen_ticket_budget() -> (
+    None
+):
     _, decision = _build_decision()
     assert decision.claim is not None
     claim = decision.claim
-    payload = {
-        name: getattr(claim, name)
-        for name in CapacityClaim.model_fields
-    }
+    payload = {name: getattr(claim, name) for name in CapacityClaim.model_fields}
     payload["reserved_margin"] = claim.ticket_margin_budget + Decimal(1)
     provisional = CapacityClaim.model_construct(**payload)
     decision_digest = build_capacity_claim_digest(provisional)
@@ -118,9 +136,7 @@ def test_capacity_claim_enforces_opening_range_family_limit(
     active_family_ticket_count: int,
     expected_status: CapacityClaimStatus,
 ) -> None:
-    _, decision = _build_decision(
-        active_family_ticket_count=active_family_ticket_count
-    )
+    _, decision = _build_decision(active_family_ticket_count=active_family_ticket_count)
 
     assert decision.status is expected_status
     if decision.claim is not None:
@@ -157,12 +173,32 @@ def test_capacity_claim_and_ticket_freeze_signal_selection_authority() -> None:
     assert decision.claim.to_ticket().selection_authority_id == "authority:test:1"
 
 
+def test_capacity_claim_rejects_retired_or_wrong_side_exit_profile() -> None:
+    _, retired = _build_decision(exit_profile_status="retired")
+    _, wrong_side = _build_decision(profile_side="short")
+
+    assert retired.status is CapacityClaimStatus.SCOPE_OR_POLICY_MISMATCH
+    assert retired.claim is None
+    assert wrong_side.status is CapacityClaimStatus.SCOPE_OR_POLICY_MISMATCH
+    assert wrong_side.claim is None
+
+
+def test_capacity_claim_reports_exact_exit_leg_materialization_blocker() -> None:
+    _, decision = _build_decision(min_notional=Decimal(500))
+
+    assert decision.status is CapacityClaimStatus.EXIT_LEG_MATERIALIZATION_UNMET
+    assert decision.claim is None
+
+
 def _build_decision(
     *,
     active_family_ticket_count: int = 0,
     directional_risk_at_stop: Decimal = Decimal(0),
     configured_leverage: int = 5,
     selection_authority_id: str | None = None,
+    exit_profile_status: Literal["active", "retired"] = "active",
+    profile_side: Literal["long", "short"] = "long",
+    min_notional: Decimal = Decimal(5),
 ):
     snapshot = _snapshot()
     risk_values = snapshot.account_risk_snapshot.model_dump(
@@ -174,8 +210,30 @@ def _build_decision(
         update={"account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)}
     )
     ownership = AdmissionOwnership()
+    signal = _long_signal(selection_authority_id=selection_authority_id)
+    binding = next(
+        item
+        for item in registered_event_exit_bindings()
+        if item.event_spec_id == signal.event_spec_id
+    )
+    profile = next(
+        item
+        for item in registered_exit_profiles()
+        if item.exit_profile_id == binding.exit_profile_id
+    )
+    if profile_side != profile.position_side:
+        profile = profile.model_copy(update={"position_side": profile_side})
+        binding = build_event_exit_binding(
+            exit_binding_id=binding.exit_binding_id,
+            binding_version=binding.binding_version,
+            event_spec_id=binding.event_spec_id,
+            exit_profile_id=profile.exit_profile_id,
+            exit_profile_semantic_hash=profile.semantic_hash(),
+            activation_reason=binding.activation_reason,
+            created_at_ms=binding.created_at_ms,
+        )
     decision = build_capacity_claim(
-        signal=_long_signal(selection_authority_id=selection_authority_id),
+        signal=signal,
         runtime_profile_id="tiny-live-v1",
         venue_id="binance-usdm",
         account_id="experiment-1",
@@ -189,7 +247,7 @@ def _build_decision(
             active_family_ticket_count=active_family_ticket_count,
             directional_risk_at_stop=directional_risk_at_stop,
         ),
-        instrument_rules=_rules(),
+        instrument_rules=_rules(min_notional=min_notional),
         admission_snapshot=snapshot,
         account_entry_health=classify_account_entry_health(snapshot, ownership),
         instrument_entry_health=classify_instrument_entry_health(
@@ -199,6 +257,18 @@ def _build_decision(
             requested_position_side="long",
         ),
         entry_order_type=EntryOrderType.MARKET,
+        current_exit_binding=CurrentEventExitBinding(
+            event_spec_id=binding.event_spec_id,
+            exit_binding_id=binding.exit_binding_id,
+            binding_semantic_hash=binding.binding_semantic_hash,
+            projection_version=1,
+            activated_at_ms=1,
+        ),
+        exit_binding=binding,
+        exit_profile=ExitProfileRecord(
+            profile=profile,
+            status=exit_profile_status,
+        ),
         netting_domain_occupied=False,
         now_ms=1_010,
     )
@@ -207,9 +277,7 @@ def _build_decision(
 
 def _long_signal(selection_authority_id: str | None = None):
     contract = next(
-        item
-        for item in registered_strategy_contracts()
-        if item.event_id == "SOR-LONG"
+        item for item in registered_strategy_contracts() if item.event_id == "SOR-LONG"
     )
     values = {
         "opening_range_defined_v3": True,
@@ -275,7 +343,7 @@ def _policy() -> CapacityPolicy:
     )
 
 
-def _rules() -> CapacityInstrumentRules:
+def _rules(*, min_notional: Decimal = Decimal(5)) -> CapacityInstrumentRules:
     brackets = (
         MaintenanceMarginBracket(
             bracket_id="binance-usdm:BTCUSDT:1",
@@ -291,7 +359,7 @@ def _rules() -> CapacityInstrumentRules:
         quantity_step=Decimal("0.1"),
         price_tick=Decimal("0.1"),
         min_quantity=Decimal("0.1"),
-        min_notional=Decimal(5),
+        min_notional=min_notional,
         exchange_max_leverage=10,
         maintenance_margin_brackets=brackets,
         maintenance_margin_brackets_digest=canonical_digest(brackets),

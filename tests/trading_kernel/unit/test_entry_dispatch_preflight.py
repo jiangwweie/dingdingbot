@@ -35,6 +35,12 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
+from src.trading_kernel.domain.exit_policy import (
+    CurrentEventExitBinding,
+    ExitProfileRecord,
+    registered_event_exit_bindings,
+    registered_exit_profiles,
+)
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
 )
@@ -88,9 +94,7 @@ def test_entry_preflight_recomputes_stress_from_fresh_account_facts() -> None:
         total_maintenance_margin=Decimal(1500),
     )
     stressed = snapshot.model_copy(
-        update={
-            "account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)
-        }
+        update={"account_risk_snapshot": AccountRiskSnapshot.create(**risk_values)}
     )
 
     decision = revalidate_entry_dispatch(_preflight_request(snapshot=stressed))
@@ -265,7 +269,9 @@ def test_entry_preflight_refuses_blocked_product() -> None:
     assert decision.status is EntryDispatchPreflightStatus.PRODUCT_ENTRY_BLOCKED
 
 
-def test_entry_preflight_refuses_forged_ten_x_claim_even_when_policy_allows_ten_x() -> None:
+def test_entry_preflight_refuses_forged_ten_x_claim_even_when_policy_allows_ten_x() -> (
+    None
+):
     base = _preflight_request(snapshot=_snapshot())
     claim = base.capacity_claim.model_copy(
         update={
@@ -337,8 +343,19 @@ def test_entry_preflight_refuses_set_leverage_command_under_fixed_profile() -> N
 
 
 def _preflight_request(*, snapshot):
+    signal = _long_signal()
+    binding = next(
+        item
+        for item in registered_event_exit_bindings()
+        if item.event_spec_id == signal.event_spec_id
+    )
+    profile = next(
+        item
+        for item in registered_exit_profiles()
+        if item.exit_profile_id == binding.exit_profile_id
+    )
     claim_decision = build_capacity_claim(
-        signal=_long_signal(),
+        signal=signal,
         runtime_profile_id="tiny-live-v1",
         venue_id="binance-usdm",
         account_id="experiment-1",
@@ -364,6 +381,15 @@ def _preflight_request(*, snapshot):
             requested_position_side="long",
         ),
         entry_order_type=EntryOrderType.MARKET,
+        current_exit_binding=CurrentEventExitBinding(
+            event_spec_id=binding.event_spec_id,
+            exit_binding_id=binding.exit_binding_id,
+            binding_semantic_hash=binding.binding_semantic_hash,
+            projection_version=1,
+            activated_at_ms=1,
+        ),
+        exit_binding=binding,
+        exit_profile=ExitProfileRecord(profile=profile, status="active"),
         netting_domain_occupied=False,
         now_ms=1_010,
     )
