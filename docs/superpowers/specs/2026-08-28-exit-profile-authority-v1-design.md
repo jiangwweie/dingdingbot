@@ -1,11 +1,12 @@
 ---
 title: EXIT_PROFILE_AUTHORITY_V1_PRODUCTION_DESIGN
-status: DESIGN_REVIEW_REQUIRED
+status: DESIGN_APPROVED
 date: 2026-08-28
 program: EX-P1
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: NONE
 production_authority: NONE
+owner_approval: 2026-08-28 active task decision
 ---
 
 # ExitProfile Authority V1 Production Design
