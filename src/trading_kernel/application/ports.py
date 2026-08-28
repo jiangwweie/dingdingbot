@@ -64,7 +64,6 @@ from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.exit_policy import (
     CurrentEventExitBinding,
     EventExitBinding,
-    ExitPolicy,
     ExitProfile,
     ExitProfileRecord,
 )
@@ -1327,14 +1326,6 @@ class StrategyRegistryRepository(Protocol):
     ) -> RegistrySeedResult: ...
 
     async def list_current_event_ids(self) -> tuple[str, ...]: ...
-
-    async def get_exit_policy(
-        self,
-        *,
-        exit_policy_id: str,
-        semantic_hash: str,
-    ) -> ExitPolicy | None: ...
-
 
 class StrategyUniverseRepository(Protocol):
     async def resolve_install_context(

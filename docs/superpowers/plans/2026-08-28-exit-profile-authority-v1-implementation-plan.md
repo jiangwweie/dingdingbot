@@ -8,7 +8,7 @@ design_authority_commit: 50e94cea15445f1c3e268f524dfa6e440581bf3e
 design_authority_semantic_digest: sha256:68415c06387d4cdc13aebc500a095e205fe389ea96be137df07350c4a6364477
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: EX-06
+active_execution_scope: EX-07
 production_authority: NONE
 owner_approval: 2026-08-28 active task decision authorizing EX-00 through EX-08
 ---
@@ -32,7 +32,7 @@ perform Replay, Shadow, parameter search or profitability certification.
 design_status = DESIGN_APPROVED
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = EX-06
+active_execution_scope = EX-07
 production_authority = NONE
 ```
 
@@ -765,6 +765,39 @@ durable Command path with no Strategy-specific branch.
 - no Multi-TP/reducer rewrite;
 - no detector or comparison-universe dependency;
 - no wall-clock fabricated TradFi bars.
+
+### EX-06 Execution Evidence — 2026-08-28
+
+**Status: `EX06_COMPLETE`.** Lifecycle and the retained-partial Vacuum branch
+now exact-load only the Ticket-frozen ExitProfile ID/hash and never read the
+current Binding or legacy Event-bound Policy. A Profile retired after Ticket
+issuance remains exact-loadable and continues the protected Ticket lifecycle.
+
+PRE_TP1 uses exact TP1 fill truth and explicit Profile guards. MI/BRF2 exit at
+the 12th final closed bar before TP1; PRE_TP1 is permanently ignored after TP1.
+Crypto SOR ABSOLUTE 96 and SOR-US ABSOLUTE 8 apply before and after TP1, with
+Session -> Reclaim -> Absolute -> PRE_TP1 precedence. Runner execution uses the
+truthful rolling-extreme ATR rule through the unchanged one-TP1/Runner reducer.
+
+Lifecycle Worker derives exposure start from the earliest positive
+`EntryFilled` or `EntryPartiallyFilled` event. `VacuumPartialRetained` does not
+reset that time. Venue holding count includes only final candle closes strictly
+later than exposure start, and the frozen maximum market request is **97 rows**.
+Target Registry seed installs only the eight typed Profiles/Bindings; legacy
+Event Policies remain source-revision preservation facts rather than target
+runtime authority. The `_policy_for_contract()` path and runtime
+`get_exit_policy()` port were removed.
+
+| Verification | Result |
+| --- | ---: |
+| Profile/Lifecycle/venue focused | **124 passed** |
+| Registry/Migration/seed regression | **29 passed** |
+| Lifecycle Full-chain | **15 passed** |
+| Fast Unit + Architecture | **1,063 passed** |
+| Ruff/Mypy/diff | **passed** |
+
+Active execution scope advances to **EX-07**. No new Command kind, direct venue
+exit, detector dependency, production mutation or exchange write was added.
 
 ## 14. EX-07 — Readonly, HTTP, Release And Deployment Integration
 

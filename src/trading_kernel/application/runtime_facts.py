@@ -351,6 +351,7 @@ class LifecycleFactsRequest(BaseModel):
     price_tick: Decimal
     structure_window_bars: int
     atr_period: int
+    time_stop_max_holding_bars: int | None = None
     runner_market_required: bool
     observed_at_ms: int
 
@@ -373,6 +374,16 @@ class LifecycleFactsRequest(BaseModel):
             return None
         normalized = str(value).strip()
         return normalized or None
+
+    @field_validator("time_stop_max_holding_bars")
+    @classmethod
+    def _require_bounded_time_stop(
+        cls,
+        value: int | None,
+    ) -> int | None:
+        if value is not None and (value <= 0 or value > 96):
+            raise ValueError("lifecycle TimeStop window must be in [1, 96]")
+        return value
 
     @model_validator(mode="after")
     def _validate_facts(self) -> LifecycleFactsRequest:

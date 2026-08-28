@@ -20,8 +20,8 @@ from src.trading_kernel.domain.exit_policy import (
     ExitDecisionKind,
     LifecycleMarketFacts,
     calculate_cost_adjusted_break_even,
-    evaluate_exit_policy,
-    evaluate_pre_tp1_exit,
+    evaluate_profile_pre_tp1_exit,
+    evaluate_profile_runner_exit,
 )
 from src.trading_kernel.domain.reducer import reduce_event
 
@@ -120,16 +120,15 @@ async def maintain_ticket_lifecycle(
     aggregate = await uow.aggregates.get(request.ticket_id)
     if aggregate is None:
         raise ValueError("lifecycle Ticket does not exist")
-    policy = await uow.strategy_registry.get_exit_policy(
-        exit_policy_id=aggregate.ticket.exit_policy_id,
+    profile_record = await uow.exit_profiles.get_profile(
+        exit_profile_id=aggregate.ticket.exit_policy_id,
         semantic_hash=aggregate.ticket.exit_policy_semantic_hash,
     )
-    if policy is None:
-        raise ValueError("Ticket has no exact frozen exit policy")
-    if policy.event_spec_id != aggregate.ticket.identity.runtime.event_spec_id:
-        raise ValueError("exit-policy Event differs from frozen Ticket")
-    if policy.position_side != aggregate.identity.netting_domain.position_side:
-        raise ValueError("exit-policy side differs from Ticket Netting Domain")
+    if profile_record is None:
+        raise ValueError("Ticket has no exact frozen ExitProfile")
+    profile = profile_record.profile
+    if profile.position_side != aggregate.identity.netting_domain.position_side:
+        raise ValueError("ExitProfile side differs from Ticket Netting Domain")
 
     if aggregate.status is AggregateStatus.POSITION_PROTECTED:
         target = aggregate.tp1_target_qty
@@ -138,24 +137,20 @@ async def maintain_ticket_lifecycle(
                 raise ValueError(
                     "pre-TP1 venue quantity differs from Ticket projection"
                 )
-            reclaim = aggregate.ticket.pre_tp1_reclaim_price
-            session_end = aggregate.ticket.exposure_session_end_ms
-            if reclaim is None and session_end is None:
+            if not profile.pre_tp1_guards and profile.time_stop is None:
                 return LifecycleMaintenanceResult(
                     status=LifecycleMaintenanceStatus.NO_CHANGE
                 )
-            if reclaim is None or session_end is None:
-                raise ValueError("Ticket pre-TP1 exit plan is incomplete")
             if request.facts.market_facts is None:
                 return LifecycleMaintenanceResult(
                     status=LifecycleMaintenanceStatus.NO_CHANGE
                 )
-            decision = evaluate_pre_tp1_exit(
-                policy=policy,
-                pre_tp1_reclaim_price=reclaim,
-                exposure_session_end_ms=session_end,
+            decision = evaluate_profile_pre_tp1_exit(
+                profile=profile,
                 market_facts=request.facts.market_facts,
                 observed_at_ms=request.facts.observed_at_ms,
+                pre_tp1_reclaim_price=aggregate.ticket.pre_tp1_reclaim_price,
+                exposure_session_end_ms=aggregate.ticket.exposure_session_end_ms,
             )
             if decision.kind is ExitDecisionKind.EXIT:
                 exit_event = ExitRequested(
@@ -185,13 +180,15 @@ async def maintain_ticket_lifecycle(
         ):
             raise ValueError("TP1 venue facts contradict the frozen Ticket")
         floor = calculate_cost_adjusted_break_even(
-            side=policy.position_side,
+            side=profile.position_side,
             entry_average_price=aggregate.average_fill_price,
             runner_quantity=runner_quantity,
             allocated_entry_fee_quote=request.facts.allocated_entry_fee_quote,
             exit_taker_fee_rate=request.facts.exit_taker_fee_rate,
             price_tick=request.facts.price_tick,
-            slippage_buffer_ticks=policy.break_even_floor.slippage_buffer_ticks,
+            slippage_buffer_ticks=(
+                profile.break_even_floor.slippage_buffer_ticks
+            ),
         )
         tp1_event = TakeProfitFilled(
             **_event_fields(aggregate, request.now_ms),
@@ -221,8 +218,8 @@ async def maintain_ticket_lifecycle(
             or aggregate.break_even_floor_price is None
         ):
             raise ValueError("runner protection lacks its active and floor prices")
-        decision = evaluate_exit_policy(
-            policy=policy,
+        decision = evaluate_profile_runner_exit(
+            profile=profile,
             current_stop=aggregate.active_stop_price,
             break_even_floor=aggregate.break_even_floor_price,
             price_tick=request.facts.price_tick,

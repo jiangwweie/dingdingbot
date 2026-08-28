@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from decimal import Decimal
 from enum import StrEnum
 
@@ -27,7 +28,12 @@ from src.trading_kernel.application.runtime_facts import (
 from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind
-from src.trading_kernel.domain.events import EntryFilled
+from src.trading_kernel.domain.events import (
+    EntryFilled,
+    EntryPartiallyFilled,
+    TradeEvent,
+)
+from src.trading_kernel.domain.exit_policy import TimeStopMode
 from src.trading_kernel.domain.order_attribution import OrderRole
 
 _LIFECYCLE_COMMAND_KINDS = (
@@ -150,8 +156,8 @@ async def run_lifecycle_worker_once(
         )
         if aggregate is None:
             return LifecycleWorkerResult(status=LifecycleWorkerStatus.NO_WORK)
-        policy = await uow.strategy_registry.get_exit_policy(
-            exit_policy_id=aggregate.ticket.exit_policy_id,
+        profile_record = await uow.exit_profiles.get_profile(
+            exit_profile_id=aggregate.ticket.exit_policy_id,
             semantic_hash=aggregate.ticket.exit_policy_semantic_hash,
         )
         rules = await uow.signals.get_instrument_rules(
@@ -162,7 +168,7 @@ async def run_lifecycle_worker_once(
             aggregate.identity.ticket_id
         )
         events = await uow.events.list_for_ticket(aggregate.identity.ticket_id)
-    if policy is None or rules is None:
+    if profile_record is None or rules is None:
         async with uow_factory() as uow:
             await uow.aggregates.schedule_next_check(
                 aggregate.identity.ticket_id,
@@ -172,7 +178,7 @@ async def run_lifecycle_worker_once(
         return LifecycleWorkerResult(
             status=LifecycleWorkerStatus.FACTS_UNAVAILABLE,
             ticket_id=aggregate.identity.ticket_id,
-            detail="exit_policy_or_instrument_rules_missing",
+            detail="exit_profile_or_instrument_rules_missing",
         )
     entry_order_reference = next(
         (
@@ -182,11 +188,8 @@ async def run_lifecycle_worker_once(
         ),
         None,
     )
-    entry_fill = next(
-        (event for event in events if isinstance(event, EntryFilled)),
-        None,
-    )
-    if entry_order_reference is None or entry_fill is None:
+    exposure_started_at_ms = _earliest_nonzero_exposure_started_at_ms(events)
+    if entry_order_reference is None or exposure_started_at_ms is None:
         async with uow_factory() as uow:
             await uow.aggregates.schedule_next_check(
                 aggregate.identity.ticket_id,
@@ -196,24 +199,36 @@ async def run_lifecycle_worker_once(
         return LifecycleWorkerResult(
             status=LifecycleWorkerStatus.FACTS_UNAVAILABLE,
             ticket_id=aggregate.identity.ticket_id,
-            detail="entry_command_or_fill_missing",
+            detail="entry_command_or_exposure_missing",
         )
+    profile = profile_record.profile
+    applicable_time_stop_bars = (
+        None
+        if profile.time_stop is None
+        or (
+            aggregate.status is AggregateStatus.RUNNER_PROTECTED
+            and profile.time_stop.mode is TimeStopMode.PRE_TP1
+        )
+        else profile.time_stop.max_holding_bars
+    )
     facts_request = LifecycleFactsRequest(
         ticket_id=aggregate.identity.ticket_id,
         netting_domain=aggregate.identity.netting_domain,
         event_spec_id=aggregate.identity.runtime.event_spec_id,
-        timeframe=policy.runner.timeframe,
+        timeframe=profile.runner.timeframe,
         entry_quantity=aggregate.ticket.quantity,
         expected_position_quantity=aggregate.position_qty,
         entry_order_reference=entry_order_reference,
         tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
-        exposure_started_at_ms=aggregate.ticket.created_at_ms,
+        exposure_started_at_ms=exposure_started_at_ms,
         price_tick=rules.price_tick,
-        structure_window_bars=policy.runner.structure_window_bars,
-        atr_period=policy.runner.atr_period,
+        structure_window_bars=profile.runner.lookback_bars,
+        atr_period=profile.runner.atr_period,
+        time_stop_max_holding_bars=applicable_time_stop_bars,
         runner_market_required=(
             aggregate.status is AggregateStatus.RUNNER_PROTECTED
-            or aggregate.ticket.pre_tp1_reclaim_price is not None
+            or bool(profile.pre_tp1_guards)
+            or applicable_time_stop_bars is not None
         ),
         observed_at_ms=request.now_ms,
     )
@@ -321,3 +336,15 @@ async def _dispatch_lifecycle(
             timeout_seconds=request.timeout_seconds,
         ),
     )
+
+
+def _earliest_nonzero_exposure_started_at_ms(
+    events: Sequence[TradeEvent],
+) -> int | None:
+    candidates = tuple(
+        event.occurred_at_ms
+        for event in events
+        if isinstance(event, (EntryFilled, EntryPartiallyFilled))
+        and event.filled_qty > 0
+    )
+    return None if not candidates else min(candidates)

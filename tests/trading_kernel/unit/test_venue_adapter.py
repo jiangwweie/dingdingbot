@@ -55,6 +55,7 @@ from src.trading_kernel.infrastructure.venue_adapter import (
     CcxtVenueAdapter,
     InstrumentCertificationSnapshotContradiction,
     _binance_maintenance_margin_brackets,
+    _lifecycle_market_facts,
     _position_details,
 )
 
@@ -2137,7 +2138,7 @@ async def test_ccxt_adapter_accepts_entry_fill_after_ticket_issue_before_observa
 
 
 @pytest.mark.asyncio
-async def test_ccxt_adapter_keeps_runner_window_after_dropping_open_candle() -> None:
+async def test_ccxt_adapter_bounds_absolute_time_stop_window_at_97_rows() -> None:
     exchange = IncompleteLastLifecycleFactsExchange()
     adapter = CcxtVenueAdapter(
         exchanges={("binance-usdm", "experiment-1"): exchange},
@@ -2173,15 +2174,44 @@ async def test_ccxt_adapter_keeps_runner_window_after_dropping_open_candle() -> 
         price_tick=Decimal("0.1"),
         structure_window_bars=4,
         atr_period=14,
+        time_stop_max_holding_bars=96,
         runner_market_required=True,
         observed_at_ms=20_000_000,
     )
 
     facts = await adapter.read_lifecycle_facts(request)
 
-    assert exchange.ohlcv_limit == 16
+    assert exchange.ohlcv_limit == 97
     assert facts.market_facts is not None
     assert facts.market_facts.is_final_closed_candle is True
+
+
+def test_lifecycle_holding_bars_use_closes_strictly_after_exposure_start() -> None:
+    duration_ms = 3_600_000
+    rows = [
+        [
+            index * duration_ms,
+            "100",
+            "101",
+            "99",
+            "100",
+            "1",
+        ]
+        for index in range(16)
+    ]
+    exposure_started_at_ms = 14 * duration_ms + duration_ms - 1
+
+    facts = _lifecycle_market_facts(
+        rows,
+        timeframe="1h",
+        observed_at_ms=16 * duration_ms,
+        entered_at_ms=exposure_started_at_ms,
+        position_side="long",
+        structure_window_bars=4,
+        atr_period=14,
+    )
+
+    assert facts.holding_bars == 1
 
 
 @pytest.mark.asyncio

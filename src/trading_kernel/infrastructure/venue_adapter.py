@@ -784,7 +784,15 @@ class CcxtVenueAdapter:
 
         tp1_exchange_order_id = request.tp1_exchange_order_id
         # The latest venue candle can still be open and is excluded below.
-        candle_limit = max(request.atr_period + 2, request.structure_window_bars + 1)
+        candle_limit = max(
+            request.atr_period + 2,
+            request.structure_window_bars + 1,
+            (
+                0
+                if request.time_stop_max_holding_bars is None
+                else request.time_stop_max_holding_bars + 1
+            ),
+        )
         positions_call = _call_raw_exchange(
             exchange.fetch_positions,
             [symbol],
@@ -2716,7 +2724,7 @@ def _lifecycle_market_facts(
         latest_close=candles[-1][4],
         structure_reference=structure_reference,
         atr=atr,
-        holding_bars=sum(1 for item in candles if item[1] >= entered_at_ms),
+        holding_bars=sum(1 for item in candles if item[1] > entered_at_ms),
     )
 
 

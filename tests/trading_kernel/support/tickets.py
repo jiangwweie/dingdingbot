@@ -6,7 +6,7 @@ from hashlib import sha256
 from src.trading_kernel.domain.exit_policy import (
     EventExitBinding,
     build_event_exit_binding,
-    exit_policy_for,
+    registered_event_exit_bindings,
 )
 from src.trading_kernel.domain.identities import (
     NettingDomain,
@@ -123,16 +123,32 @@ def make_ticket(**updates: object) -> TradeTicket:
 
 
 def fixture_profile_identity_for_ticket(ticket: TradeTicket) -> tuple[str, str]:
-    try:
-        policy = exit_policy_for(ticket.identity.runtime.event_spec_id)
-    except ValueError:
+    binding = next(
+        (
+            item
+            for item in registered_event_exit_bindings()
+            if item.event_spec_id == ticket.identity.runtime.event_spec_id
+        ),
+        None,
+    )
+    if binding is None:
         return ticket.exit_policy_id, ticket.exit_policy_semantic_hash
-    return policy.exit_policy_id, policy.semantic_hash()
+    return binding.exit_profile_id, binding.exit_profile_semantic_hash
 
 
 def fixture_binding_for_ticket(ticket: TradeTicket) -> EventExitBinding:
-    exit_profile_id, exit_profile_semantic_hash = (
-        fixture_profile_identity_for_ticket(ticket)
+    registered = next(
+        (
+            item
+            for item in registered_event_exit_bindings()
+            if item.event_spec_id == ticket.identity.runtime.event_spec_id
+        ),
+        None,
+    )
+    if registered is not None:
+        return registered
+    exit_profile_id, exit_profile_semantic_hash = fixture_profile_identity_for_ticket(
+        ticket
     )
     return fixture_binding_for(
         event_spec_id=ticket.identity.runtime.event_spec_id,

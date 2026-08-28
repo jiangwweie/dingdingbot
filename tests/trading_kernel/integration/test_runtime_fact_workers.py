@@ -945,7 +945,8 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     assert replacement.status is LifecycleWorkerStatus.DISPATCHED
     assert len(filled_facts.requests) == 1
     assert filled_facts.requests[0].tp1_exchange_order_id is not None
-    assert filled_facts.requests[0].exposure_started_at_ms == ticket.created_at_ms
+    assert filled_facts.requests[0].exposure_started_at_ms == 1_007
+    assert filled_facts.requests[0].time_stop_max_holding_bars == 96
     assert venue.command_kinds == [
         "entry",
         "initial_stop",

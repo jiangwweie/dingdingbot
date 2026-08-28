@@ -12,6 +12,7 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
+from src.trading_kernel.domain.exit_policy import registered_exit_profiles
 from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
     registered_strategy_contracts,
@@ -119,7 +120,7 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
     assert first.inserted_strategy_version_count == 6
     assert first.inserted_event_count == 8
     assert first.inserted_product_compatibility_count == 8
-    assert first.inserted_exit_policy_count == 8
+    assert first.inserted_exit_policy_count == 0
     assert first.inserted_exit_profile_count == 8
     assert first.inserted_exit_binding_count == 8
     assert first.inserted_exit_binding_current_count == 8
@@ -145,7 +146,9 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         assert await connection.scalar(sa.select(sa.func.count()).select_from(runtime_scopes_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(owner_policy_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(instruments)) == 0
-        assert await connection.scalar(sa.select(sa.func.count()).select_from(exit_policies)) == 16
+        assert await connection.scalar(
+            sa.select(sa.func.count()).select_from(exit_policies)
+        ) == 8
         current_versions = dict(
             (
                 await connection.execute(
@@ -209,20 +212,26 @@ async def test_strategy_seed_conflicts_when_contract_status_changes(
 
 
 @pytest.mark.asyncio
-async def test_strategy_seed_fails_closed_on_exit_policy_semantic_conflict(
+async def test_strategy_seed_fails_closed_on_exit_profile_semantic_conflict(
     registry_engine: AsyncEngine,
 ) -> None:
-    async with PostgresKernelUnitOfWork(registry_engine) as uow:
-        await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
-
+    profile = registered_exit_profiles()[0]
     async with registry_engine.begin() as connection:
         await connection.execute(
-            sa.update(exit_policies)
-            .where(exit_policies.c.event_spec_id == "event_spec:SOR-001:SOR-LONG:v4")
-            .values(semantic_hash="sha256:" + "0" * 64)
+            sa.insert(exit_policies).values(
+                exit_policy_id=profile.exit_profile_id,
+                exit_policy_version=str(profile.exit_profile_version),
+                event_spec_id=None,
+                profile_schema_version=profile.profile_schema_version,
+                position_side=profile.position_side,
+                policy=profile.model_dump(mode="json"),
+                semantic_hash="sha256:" + "0" * 64,
+                status="active",
+                created_at_ms=1_800_000_000_000,
+            )
         )
 
-    with pytest.raises(RegistrySeedConflict, match="exit-policy:SOR-001:SOR-LONG"):
+    with pytest.raises(RegistrySeedConflict, match=profile.exit_profile_id):
         async with PostgresKernelUnitOfWork(registry_engine) as uow:
             await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)
 
@@ -295,9 +304,7 @@ async def test_strategy_seed_monotonically_retires_source_sor_v3_and_activates_v
         ("event_spec:SOR-001:SOR-SHORT:v4", "active"),
     ]
     assert policies == [
-        ("exit-policy:SOR-001:SOR-LONG:portfolio-admission-v1", "active"),
         ("exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1", "active"),
-        ("exit-policy:SOR-001:SOR-SHORT:portfolio-admission-v1", "active"),
         ("exit-policy:SOR-001:SOR-SHORT:sor-v3-right-tail-v1", "active"),
     ]
     assert first.inserted_strategy_group_count == 5

@@ -24,7 +24,7 @@ def test_current_runtime_has_no_yaml_parser_or_exit_profile_yaml_catalog() -> No
     assert exit_yaml == ()
 
 
-def test_exit_policy_catalog_remains_event_generated_until_ex03() -> None:
+def test_lifecycle_uses_ticket_profile_without_current_binding_or_legacy_event_policy() -> None:
     domain = (REPO_ROOT / "src/trading_kernel/domain/exit_policy.py").read_text(
         encoding="utf-8"
     )
@@ -35,21 +35,27 @@ def test_exit_policy_catalog_remains_event_generated_until_ex03() -> None:
         REPO_ROOT / "src/trading_kernel/application/maintain_ticket_lifecycle.py"
     ).read_text(encoding="utf-8")
 
-    assert "_policy_for_contract(item)" in domain
+    assert "registered_exit_profiles" in domain
+    assert "_policy_for_contract" not in domain
     assert '_id("exit_policy_id")' in models
     assert 'sa.UniqueConstraint("event_spec_id")' not in models
-    assert (
-        "policy.event_spec_id != aggregate.ticket.identity.runtime.event_spec_id"
-        in lifecycle
-    )
+    assert "uow.exit_profiles.get_profile(" in lifecycle
+    assert "uow.strategy_registry.get_exit_policy(" not in lifecycle
+    assert "get_current_binding(" not in lifecycle
+    assert "profile.event_spec_id" not in lifecycle
 
 
-def test_current_lifecycle_request_uses_ticket_creation_as_exposure_start() -> None:
+def test_lifecycle_request_uses_earliest_nonzero_exposure_event() -> None:
     worker = (
         REPO_ROOT / "src/trading_kernel/interfaces/lifecycle_worker.py"
     ).read_text(encoding="utf-8")
 
-    assert "exposure_started_at_ms=aggregate.ticket.created_at_ms" in worker
+    assert "EntryPartiallyFilled" in worker
+    assert "event.filled_qty > 0" in worker
+    assert "_earliest_nonzero_exposure_started_at_ms(events)" in worker
+    assert "min(candidates)" in worker
+    assert "exposure_started_at_ms=exposure_started_at_ms" in worker
+    assert "aggregate.ticket.created_at_ms" not in worker
 
 
 def test_exit_profile_authority_lock_is_absent_from_trading_hot_paths() -> None:
@@ -63,3 +69,19 @@ def test_exit_profile_authority_lock_is_absent_from_trading_hot_paths() -> None:
         source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         assert "acquire_authority_write_lock" not in source
         assert "EXIT_PROFILE_AUTHORITY_WRITE_LOCK" not in source
+
+
+def test_application_runtime_has_no_legacy_event_exit_policy_resolution() -> None:
+    violations = []
+    application_root = REPO_ROOT / "src/trading_kernel/application"
+    for path in application_root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for marker in (
+            "get_exit_policy(",
+            "exit_policy_for(",
+            ".event_spec_id != aggregate.ticket.identity.runtime.event_spec_id",
+        ):
+            if marker in source:
+                violations.append(f"{path.relative_to(REPO_ROOT)}: {marker}")
+
+    assert violations == []

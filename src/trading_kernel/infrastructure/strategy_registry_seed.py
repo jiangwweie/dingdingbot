@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import KernelUnitOfWork
 from src.trading_kernel.domain.exit_policy import (
-    ExitPolicy,
     registered_event_exit_bindings,
     registered_exit_policies,
     registered_exit_profiles,
@@ -240,33 +239,34 @@ class PostgresStrategyRegistryRepository:
                     ),
                 )
 
-            exit_policy = next(
-                policy
-                for policy in registered_exit_policies()
-                if policy.event_spec_id == contract.event_spec_id
-            )
-            counters["inserted_exit_policy_count"] += await self._insert_exact(
-                exit_policies,
-                "exit_policy_id",
-                {
-                    "exit_policy_id": exit_policy.exit_policy_id,
-                    "exit_policy_version": exit_policy.exit_policy_version,
-                    "event_spec_id": exit_policy.event_spec_id,
-                    "position_side": exit_policy.position_side,
-                    "policy": exit_policy.model_dump(mode="json"),
-                    "semantic_hash": exit_policy.semantic_hash(),
-                    "status": contract.status,
-                    "created_at_ms": seeded_at_ms,
-                },
-                compare_keys=(
-                    "exit_policy_version",
-                    "event_spec_id",
-                    "position_side",
-                    "policy",
-                    "semantic_hash",
-                    "status",
-                ),
-            )
+            if not include_exit_profile_authority:
+                exit_policy = next(
+                    policy
+                    for policy in registered_exit_policies()
+                    if policy.event_spec_id == contract.event_spec_id
+                )
+                counters["inserted_exit_policy_count"] += await self._insert_exact(
+                    exit_policies,
+                    "exit_policy_id",
+                    {
+                        "exit_policy_id": exit_policy.exit_policy_id,
+                        "exit_policy_version": exit_policy.exit_policy_version,
+                        "event_spec_id": exit_policy.event_spec_id,
+                        "position_side": exit_policy.position_side,
+                        "policy": exit_policy.model_dump(mode="json"),
+                        "semantic_hash": exit_policy.semantic_hash(),
+                        "status": contract.status,
+                        "created_at_ms": seeded_at_ms,
+                    },
+                    compare_keys=(
+                        "exit_policy_version",
+                        "event_spec_id",
+                        "position_side",
+                        "policy",
+                        "semantic_hash",
+                        "status",
+                    ),
+                )
 
             for fact in (*contract.required_facts, *contract.disable_facts):
                 counters["inserted_event_fact_count"] += await self._insert_exact(
@@ -674,37 +674,6 @@ class PostgresStrategyRegistryRepository:
             .order_by(event_specs.c.event_id)
         )
         return tuple(str(value) for value in result.scalars())
-
-    async def get_exit_policy(
-        self,
-        *,
-        exit_policy_id: str,
-        semantic_hash: str,
-    ) -> ExitPolicy | None:
-        normalized_policy_id = str(exit_policy_id or "").strip()
-        normalized_hash = str(semantic_hash or "").strip()
-        if not normalized_policy_id or not normalized_hash:
-            raise ValueError("exit-policy lookup requires frozen identity and hash")
-        result = await self._connection.execute(
-            sa.select(exit_policies).where(
-                exit_policies.c.exit_policy_id == normalized_policy_id,
-                exit_policies.c.semantic_hash == normalized_hash,
-            )
-        )
-        row = result.mappings().one_or_none()
-        if row is None:
-            return None
-        policy = ExitPolicy.model_validate(row["policy"])
-        if (
-            policy.exit_policy_id != str(row["exit_policy_id"])
-            or policy.exit_policy_version != str(row["exit_policy_version"])
-            or policy.exit_policy_id != normalized_policy_id
-            or policy.semantic_hash() != str(row["semantic_hash"])
-        ):
-            raise RegistrySeedConflict(
-                f"existing Registry row conflicts: {row['exit_policy_id']}"
-            )
-        return policy
 
     async def _insert_exact(
         self,

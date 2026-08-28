@@ -15,6 +15,12 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
     maintain_ticket_lifecycle,
 )
+from src.trading_kernel.application.owner_control import (
+    ExitProfileBindingMutationRequest,
+    ExitProfileRetirementRequest,
+    retire_exit_profile,
+    switch_event_exit_profile,
+)
 from src.trading_kernel.application.reconcile_ticket import (
     ExitTicketRequest,
     ReconcileTicketRequest,
@@ -23,9 +29,12 @@ from src.trading_kernel.application.reconcile_ticket import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind, OrderCommandPayload
+from src.trading_kernel.domain.events import ExitRequested
 from src.trading_kernel.domain.exit_policy import (
     LifecycleMarketFacts,
     exit_policy_for,
+    registered_event_exit_bindings,
+    registered_exit_profiles,
 )
 from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
@@ -106,11 +115,11 @@ async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protect
     ("latest_close", "holding_bars", "session_end_ms", "reason"),
     [
         (Decimal(60000), 10, 86_400_000, "failed_breakout_reclaimed"),
-        (Decimal(60500), 10, 3_000, "sor_session_expired"),
-        (Decimal(60500), 96, 86_400_000, "time_stop_hit"),
+        (Decimal(60500), 10, 3_000, "session_expired"),
+        (Decimal(60500), 96, 86_400_000, "absolute_time_stop_hit"),
     ],
 )
-async def test_sor_v3_position_protected_exit_plan_is_durable(
+async def test_sor_profile_position_protected_exit_plan_is_durable(
     lifecycle_engine,
     latest_close: Decimal,
     holding_bars: int,
@@ -161,16 +170,16 @@ async def test_sor_v3_position_protected_exit_plan_is_durable(
 
 
 @pytest.mark.asyncio
-async def test_current_non_sor_pre_tp1_without_references_is_no_change(
+@pytest.mark.parametrize("event_id", ["MI-LONG", "BRF2-SHORT"])
+async def test_mi_pre_tp1_time_stop_triggers_at_exact_twelfth_closed_bar(
     lifecycle_engine,
+    event_id: str,
 ) -> None:
-    """Characterizes the generic PRE_TP1 gap owned by EX-01/EX-06."""
-
-    ticket = _registered_event_ticket("MI-LONG")
+    ticket = _registered_event_ticket(event_id)
     await _reach_position_protected(lifecycle_engine, ticket)
 
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
-        result = await maintain_ticket_lifecycle(
+        before_boundary = await maintain_ticket_lifecycle(
             uow,
             LifecycleMaintenanceRequest(
                 ticket_id=ticket.identity.ticket_id,
@@ -187,7 +196,7 @@ async def test_current_non_sor_pre_tp1_without_references_is_no_change(
                         latest_close=Decimal(60500),
                         structure_reference=Decimal(60500),
                         atr=Decimal(100),
-                        holding_bars=10_000,
+                        holding_bars=11,
                     ),
                     observed_at_ms=3_000,
                 ),
@@ -196,9 +205,39 @@ async def test_current_non_sor_pre_tp1_without_references_is_no_change(
         )
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
 
-    assert result.status is LifecycleMaintenanceStatus.NO_CHANGE
+    assert before_boundary.status is LifecycleMaintenanceStatus.NO_CHANGE
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.POSITION_PROTECTED
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        at_boundary = await maintain_ticket_lifecycle(
+            uow,
+            LifecycleMaintenanceRequest(
+                ticket_id=ticket.identity.ticket_id,
+                facts=TicketLifecycleFacts(
+                    position_quantity=ticket.quantity,
+                    tp1_filled_quantity=Decimal(0),
+                    tp1_average_fill_price=None,
+                    allocated_entry_fee_quote=Decimal("0.01"),
+                    exit_taker_fee_rate=Decimal("0.001"),
+                    price_tick=Decimal("0.1"),
+                    market_facts=LifecycleMarketFacts(
+                        watermark_ms=3_100,
+                        is_final_closed_candle=True,
+                        latest_close=Decimal(60500),
+                        structure_reference=Decimal(60500),
+                        atr=Decimal(100),
+                        holding_bars=12,
+                    ),
+                    observed_at_ms=3_100,
+                ),
+                now_ms=3_100,
+            ),
+        )
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+
+    assert at_boundary.status is LifecycleMaintenanceStatus.EXIT_REQUESTED
+    assert events[-1].reason == "pre_tp1_time_stop_hit"
 
 
 @pytest.mark.asyncio
@@ -276,7 +315,133 @@ async def test_runner_maintenance_uses_closed_candle_and_sor_time_stop(
 
 
 @pytest.mark.asyncio
-async def test_runner_maintenance_requests_monotonic_structural_atr_stop(
+async def test_runner_stage_permanently_ignores_pre_tp1_time_stop(
+    lifecycle_engine,
+) -> None:
+    ticket = _registered_event_ticket("MI-LONG")
+    await _reach_runner_protected(lifecycle_engine, ticket)
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        result = await maintain_ticket_lifecycle(
+            uow,
+            LifecycleMaintenanceRequest(
+                ticket_id=ticket.identity.ticket_id,
+                facts=TicketLifecycleFacts(
+                    position_quantity=(
+                        ticket.quantity - ticket.take_profit_quantities[0]
+                    ),
+                    tp1_filled_quantity=ticket.take_profit_quantities[0],
+                    tp1_average_fill_price=ticket.take_profit_prices[0],
+                    allocated_entry_fee_quote=Decimal("0.01"),
+                    exit_taker_fee_rate=Decimal("0.001"),
+                    price_tick=Decimal("0.1"),
+                    market_facts=LifecycleMarketFacts(
+                        watermark_ms=3_100,
+                        is_final_closed_candle=True,
+                        latest_close=Decimal(60500),
+                        structure_reference=Decimal(60500),
+                        atr=Decimal(100),
+                        holding_bars=100,
+                    ),
+                    observed_at_ms=3_100,
+                ),
+                now_ms=3_100,
+            ),
+        )
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+
+    assert result.status is not LifecycleMaintenanceStatus.EXIT_REQUESTED
+    assert not (
+        isinstance(events[-1], ExitRequested)
+        and events[-1].reason == "pre_tp1_time_stop_hit"
+    )
+
+
+@pytest.mark.asyncio
+async def test_issued_ticket_continues_exact_retired_profile_without_current_binding(
+    lifecycle_engine,
+) -> None:
+    ticket = _registered_event_ticket("MI-LONG")
+    await _reach_position_protected(lifecycle_engine, ticket)
+    source = next(
+        item
+        for item in registered_event_exit_bindings()
+        if item.event_spec_id == ticket.identity.runtime.event_spec_id
+    )
+    source_profile = next(
+        item
+        for item in registered_exit_profiles()
+        if item.exit_profile_id == source.exit_profile_id
+    )
+    replacement = next(
+        item
+        for item in registered_exit_profiles()
+        if "trend-continuation" in item.exit_profile_id
+    )
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        await switch_event_exit_profile(
+            uow,
+            strategy_group_id=ticket.identity.runtime.strategy_group_id,
+            event_spec_id=ticket.identity.runtime.event_spec_id,
+            request=ExitProfileBindingMutationRequest(
+                expected_version=1,
+                expected_binding_id=source.exit_binding_id,
+                target_exit_profile_id=replacement.exit_profile_id,
+                target_exit_profile_semantic_hash=replacement.semantic_hash(),
+                reason="test_ticket_profile_retirement",
+                idempotency_key="owner-request:test-ticket-profile-switch",
+                owner_identity="owner",
+                now_ms=3_000,
+            ),
+            authentication_strength="totp_step_up",
+        )
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        retired = await retire_exit_profile(
+            uow,
+            request=ExitProfileRetirementRequest(
+                expected_version=source_profile.exit_profile_version,
+                exit_profile_id=source_profile.exit_profile_id,
+                exit_profile_semantic_hash=source_profile.semantic_hash(),
+                reason="test_retire_issued_ticket_profile",
+                idempotency_key="owner-request:test-ticket-profile-retire",
+                owner_identity="owner",
+                now_ms=3_001,
+            ),
+            authentication_strength="totp_step_up",
+        )
+    assert retired.status == "retired"
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        result = await maintain_ticket_lifecycle(
+            uow,
+            LifecycleMaintenanceRequest(
+                ticket_id=ticket.identity.ticket_id,
+                facts=TicketLifecycleFacts(
+                    position_quantity=ticket.quantity,
+                    tp1_filled_quantity=Decimal(0),
+                    tp1_average_fill_price=None,
+                    allocated_entry_fee_quote=Decimal("0.01"),
+                    exit_taker_fee_rate=Decimal("0.001"),
+                    price_tick=Decimal("0.1"),
+                    market_facts=LifecycleMarketFacts(
+                        watermark_ms=3_100,
+                        is_final_closed_candle=True,
+                        latest_close=Decimal(60500),
+                        structure_reference=Decimal(60500),
+                        atr=Decimal(100),
+                        holding_bars=12,
+                    ),
+                    observed_at_ms=3_100,
+                ),
+                now_ms=3_100,
+            ),
+        )
+
+    assert result.status is LifecycleMaintenanceStatus.EXIT_REQUESTED
+
+
+@pytest.mark.asyncio
+async def test_runner_maintenance_requests_monotonic_rolling_extreme_atr_stop(
     lifecycle_engine,
 ) -> None:
     ticket = _registered_sor_long_ticket()
@@ -617,25 +782,34 @@ def _registered_event_ticket(event_id: str):
             "event_spec_id": contract.event_spec_id,
         }
     )
+    netting_domain = base.identity.netting_domain.model_copy(
+        update={"position_side": contract.position_side}
+    )
     identity = TicketIdentity(
         ticket_id=build_ticket_id(
             signal_event_id=base.identity.signal_event_id,
             runtime=runtime,
-            netting_domain=base.identity.netting_domain,
+            netting_domain=netting_domain,
         ),
         exposure_episode_id=base.identity.exposure_episode_id,
         signal_event_id=base.identity.signal_event_id,
         runtime=runtime,
-        netting_domain=base.identity.netting_domain,
+        netting_domain=netting_domain,
     )
     policy = exit_policy_for(contract.event_spec_id)
-    return base.model_copy(
-        update={
+    updates = {
             "identity": identity,
             "exit_policy_id": policy.exit_policy_id,
             "exit_policy_semantic_hash": policy.semantic_hash(),
-        }
-    )
+    }
+    if contract.position_side == "short":
+        updates.update(
+            {
+                "initial_stop_price": Decimal(61000),
+                "take_profit_prices": (Decimal(58000),),
+            }
+        )
+    return base.model_copy(update=updates)
 
 
 async def _reach_runner_protected(engine, ticket) -> None:

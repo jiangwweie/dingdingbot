@@ -386,12 +386,12 @@ async def drain_strategy_entry_vacuum_once(
             aggregate.identity.netting_domain.venue_id,
             aggregate.identity.netting_domain.exchange_instrument_id,
         )
-        policy = await uow.strategy_registry.get_exit_policy(
-            exit_policy_id=aggregate.ticket.exit_policy_id,
+        profile_record = await uow.exit_profiles.get_profile(
+            exit_profile_id=aggregate.ticket.exit_policy_id,
             semantic_hash=aggregate.ticket.exit_policy_semantic_hash,
         )
         if aggregate.position_qty not in {Decimal(0), aggregate.ticket.quantity}:
-            if rules is None or policy is None:
+            if rules is None or profile_record is None:
                 return _ticket_result(
                     VacuumDrainStatus.BLOCKED,
                     vacuum.entry_vacuum_id,
@@ -399,7 +399,7 @@ async def drain_strategy_entry_vacuum_once(
                     "VACUUM_PARTIAL_EXIT_POLICY_FACTS_MISSING",
                 )
             quantity_step = rules.quantity_step
-            tp1_fraction = policy.tp1.quantity_fraction
+            tp1_fraction = profile_record.profile.tp1.quantity_fraction
 
     snapshot = request.position_snapshot
     if snapshot is not None:

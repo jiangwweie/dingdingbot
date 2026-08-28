@@ -455,6 +455,40 @@ def test_runner_ignores_pre_tp1_time_stop_but_honors_absolute(
     assert decision.kind is expected
 
 
+@pytest.mark.parametrize("stage", ["pre_tp1", "runner"])
+def test_sor_us_profile_applies_absolute_stop_at_eighth_closed_bar(
+    stage: str,
+) -> None:
+    profile = next(
+        item
+        for item in registered_exit_profiles()
+        if item.exit_profile_id == "exit-profile:orb-us:15m:long:v1"
+    )
+    facts = _market_facts(holding_bars=8)
+
+    decision = (
+        evaluate_profile_pre_tp1_exit(
+            profile=profile,
+            market_facts=facts,
+            observed_at_ms=2_000,
+            pre_tp1_reclaim_price=Decimal(90),
+            exposure_session_end_ms=10_000,
+        )
+        if stage == "pre_tp1"
+        else evaluate_profile_runner_exit(
+            profile=profile,
+            current_stop=Decimal(95),
+            break_even_floor=Decimal(95),
+            price_tick=Decimal("0.1"),
+            last_runner_watermark_ms=1_000,
+            market_facts=facts,
+        )
+    )
+
+    assert decision.kind is ExitDecisionKind.EXIT
+    assert decision.reason == "absolute_time_stop_hit"
+
+
 @pytest.mark.parametrize(
     ("side", "expected"),
     [("long", Decimal("98.9")), ("short", Decimal("101.1"))],

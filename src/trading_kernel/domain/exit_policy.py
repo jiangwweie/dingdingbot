@@ -518,7 +518,12 @@ def build_exit_profile_catalog_digest() -> str:
 
 
 def registered_exit_policies() -> tuple[ExitPolicy, ...]:
-    return tuple(_policy_for_contract(item) for item in registered_strategy_contracts())
+    """Return legacy source-revision provenance for migration verification only."""
+
+    return tuple(
+        _legacy_source_exit_policy(item)
+        for item in registered_strategy_contracts()
+    )
 
 
 def exit_policy_for(event_spec_id: str) -> ExitPolicy:
@@ -929,7 +934,9 @@ def evaluate_pre_tp1_exit(
     )
 
 
-def _policy_for_contract(contract: RegisteredStrategyContract) -> ExitPolicy:
+def _legacy_source_exit_policy(
+    contract: RegisteredStrategyContract,
+) -> ExitPolicy:
     return ExitPolicy(
         exit_policy_id=contract.exit_policy_id,
         exit_policy_version=(
