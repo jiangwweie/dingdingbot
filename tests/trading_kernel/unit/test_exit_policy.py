@@ -3,15 +3,29 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from src.trading_kernel.domain.exit_policy import (
+    BreakEvenFloorRule,
+    EventExitBinding,
     ExitDecisionKind,
+    ExitProfile,
     LifecycleMarketFacts,
+    PreTp1GuardKind,
+    RollingExtremeAtrRunnerRule,
     RunnerKind,
+    RunnerRuleKind,
+    TakeProfitRule,
+    TimeStopMode,
+    TimeStopRule,
+    build_event_exit_binding,
     calculate_cost_adjusted_break_even,
+    calculate_rolling_extreme_atr_stop,
     calculate_structural_runner_stop,
     evaluate_exit_policy,
     evaluate_pre_tp1_exit,
+    evaluate_profile_pre_tp1_exit,
+    evaluate_profile_runner_exit,
     exit_policy_for,
     split_tp1_quantity,
 )
@@ -313,3 +327,185 @@ def test_runner_ignores_open_or_duplicate_candle_and_requires_two_tick_improveme
     assert open_candle.kind is ExitDecisionKind.NO_CHANGE
     assert duplicate.kind is ExitDecisionKind.NO_CHANGE
     assert too_small.kind is ExitDecisionKind.NO_CHANGE
+
+
+def test_exit_profile_hash_covers_pre_tp1_guards() -> None:
+    baseline = _profile(pre_tp1_guards=())
+    guarded = _profile(
+        pre_tp1_guards=(PreTp1GuardKind.RECLAIM_REFERENCE,)
+    )
+
+    assert baseline.semantic_hash() != guarded.semantic_hash()
+
+
+def test_event_exit_binding_hash_covers_exact_profile_identity() -> None:
+    profile = _profile()
+    first = build_event_exit_binding(
+        exit_binding_id="exit-binding:event:test:v1",
+        binding_version=1,
+        event_spec_id="event_spec:test:v1",
+        exit_profile_id=profile.exit_profile_id,
+        exit_profile_semantic_hash=profile.semantic_hash(),
+        activation_reason="owner_frozen_v1",
+        created_at_ms=1_000,
+    )
+    changed = build_event_exit_binding(
+        exit_binding_id="exit-binding:event:test:v2",
+        binding_version=2,
+        event_spec_id="event_spec:test:v1",
+        exit_profile_id=profile.exit_profile_id,
+        exit_profile_semantic_hash="sha256:" + "f" * 64,
+        activation_reason="owner_frozen_v1",
+        created_at_ms=2_000,
+    )
+
+    assert isinstance(first, EventExitBinding)
+    assert first.binding_semantic_hash != changed.binding_semantic_hash
+
+
+def test_exit_profile_is_frozen() -> None:
+    profile = _profile()
+
+    with pytest.raises(ValidationError):
+        profile.position_side = "short"  # type: ignore[misc]
+
+
+def test_profile_pre_tp1_precedence_is_session_reclaim_absolute_then_pre_tp1() -> None:
+    profile = _profile(
+        time_stop=TimeStopRule(
+            max_holding_bars=12,
+            mode=TimeStopMode.ABSOLUTE,
+        ),
+        pre_tp1_guards=(
+            PreTp1GuardKind.RECLAIM_REFERENCE,
+            PreTp1GuardKind.SESSION_EXPIRY,
+        ),
+    )
+    facts = LifecycleMarketFacts(
+        watermark_ms=10_000,
+        is_final_closed_candle=True,
+        latest_close=Decimal(90),
+        structure_reference=Decimal(100),
+        atr=Decimal(1),
+        holding_bars=12,
+    )
+
+    decision = evaluate_profile_pre_tp1_exit(
+        profile=profile,
+        pre_tp1_reclaim_price=Decimal(95),
+        exposure_session_end_ms=10_000,
+        market_facts=facts,
+        observed_at_ms=10_000,
+    )
+
+    assert decision.reason == "session_expired"
+
+
+def test_pre_tp1_time_stop_uses_11_12_boundary() -> None:
+    profile = _profile(
+        time_stop=TimeStopRule(
+            max_holding_bars=12,
+            mode=TimeStopMode.PRE_TP1,
+        )
+    )
+
+    before = evaluate_profile_pre_tp1_exit(
+        profile=profile,
+        market_facts=_market_facts(holding_bars=11),
+        observed_at_ms=2_000,
+    )
+    hit = evaluate_profile_pre_tp1_exit(
+        profile=profile,
+        market_facts=_market_facts(holding_bars=12),
+        observed_at_ms=2_000,
+    )
+
+    assert before.kind is ExitDecisionKind.NO_CHANGE
+    assert hit.kind is ExitDecisionKind.EXIT
+    assert hit.reason == "pre_tp1_time_stop_hit"
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (TimeStopMode.PRE_TP1, ExitDecisionKind.MOVE_STOP),
+        (TimeStopMode.ABSOLUTE, ExitDecisionKind.EXIT),
+    ],
+)
+def test_runner_ignores_pre_tp1_time_stop_but_honors_absolute(
+    mode: TimeStopMode,
+    expected: ExitDecisionKind,
+) -> None:
+    profile = _profile(
+        time_stop=TimeStopRule(max_holding_bars=12, mode=mode)
+    )
+
+    decision = evaluate_profile_runner_exit(
+        profile=profile,
+        current_stop=Decimal(100),
+        break_even_floor=Decimal(100),
+        price_tick=Decimal("0.1"),
+        last_runner_watermark_ms=1_000,
+        market_facts=_market_facts(holding_bars=12),
+    )
+
+    assert decision.kind is expected
+
+
+@pytest.mark.parametrize(
+    ("side", "expected"),
+    [("long", Decimal("98.9")), ("short", Decimal("101.1"))],
+)
+def test_rolling_extreme_atr_rule_has_truthful_identity(
+    side: str,
+    expected: Decimal,
+) -> None:
+    assert RunnerRuleKind.ROLLING_EXTREME_ATR.value == "rolling_extreme_atr"
+    assert calculate_rolling_extreme_atr_stop(
+        side=side,
+        rolling_extreme=Decimal(100),
+        atr=Decimal("2.1"),
+        atr_buffer_multiple=Decimal("0.5"),
+        price_tick=Decimal("0.1"),
+    ) == expected
+
+
+def _profile(
+    *,
+    time_stop: TimeStopRule | None = None,
+    pre_tp1_guards: tuple[PreTp1GuardKind, ...] = (),
+) -> ExitProfile:
+    return ExitProfile(
+        exit_profile_id="exit-profile:test:1h:long:v1",
+        exit_profile_version=1,
+        profile_schema_version="exit_profile_v1",
+        position_side="long",
+        tp1=TakeProfitRule(
+            reward_multiple=Decimal(1),
+            quantity_fraction=Decimal("0.5"),
+        ),
+        break_even_floor=BreakEvenFloorRule(
+            slippage_buffer_ticks=2,
+            minimum_improvement_ticks=2,
+        ),
+        runner=RollingExtremeAtrRunnerRule(
+            timeframe="1h",
+            lookback_bars=4,
+            atr_period=14,
+            atr_buffer_multiple=Decimal("0.5"),
+            minimum_improvement_ticks=2,
+        ),
+        time_stop=time_stop,
+        pre_tp1_guards=pre_tp1_guards,
+    )
+
+
+def _market_facts(*, holding_bars: int) -> LifecycleMarketFacts:
+    return LifecycleMarketFacts(
+        watermark_ms=2_000,
+        is_final_closed_candle=True,
+        latest_close=Decimal(102),
+        structure_reference=Decimal(102),
+        atr=Decimal(2),
+        holding_bars=holding_bars,
+    )

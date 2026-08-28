@@ -22,6 +22,20 @@ class RunnerKind(StrEnum):
     STRUCTURAL_ATR = "structural_atr"
 
 
+class RunnerRuleKind(StrEnum):
+    ROLLING_EXTREME_ATR = "rolling_extreme_atr"
+
+
+class TimeStopMode(StrEnum):
+    PRE_TP1 = "pre_tp1"
+    ABSOLUTE = "absolute"
+
+
+class PreTp1GuardKind(StrEnum):
+    RECLAIM_REFERENCE = "reclaim_reference"
+    SESSION_EXPIRY = "session_expiry"
+
+
 class ExitDecisionKind(StrEnum):
     NO_CHANGE = "no_change"
     MOVE_STOP = "move_stop"
@@ -135,6 +149,7 @@ class TimeStopRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     max_holding_bars: int
+    mode: TimeStopMode = TimeStopMode.ABSOLUTE
 
     @field_validator("max_holding_bars")
     @classmethod
@@ -142,6 +157,111 @@ class TimeStopRule(BaseModel):
         if value <= 0:
             raise ValueError("time-stop holding bars must be positive")
         return value
+
+
+class RollingExtremeAtrRunnerRule(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: RunnerRuleKind = RunnerRuleKind.ROLLING_EXTREME_ATR
+    timeframe: Literal["15m", "1h"]
+    lookback_bars: int
+    atr_period: int
+    atr_buffer_multiple: Decimal
+    minimum_improvement_ticks: int
+
+    @model_validator(mode="after")
+    def _validate_parameters(self) -> RollingExtremeAtrRunnerRule:
+        if self.lookback_bars <= 0 or self.atr_period <= 0:
+            raise ValueError("runner lookback and ATR windows must be positive")
+        if self.atr_buffer_multiple < 0:
+            raise ValueError("runner ATR buffer cannot be negative")
+        if self.minimum_improvement_ticks <= 0:
+            raise ValueError("runner minimum improvement must be positive")
+        return self
+
+
+class ExitProfile(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exit_profile_id: str
+    exit_profile_version: int
+    profile_schema_version: Literal["exit_profile_v1"]
+    position_side: PositionSide
+    tp1: TakeProfitRule
+    break_even_floor: BreakEvenFloorRule
+    runner: RollingExtremeAtrRunnerRule
+    time_stop: TimeStopRule | None
+    pre_tp1_guards: tuple[PreTp1GuardKind, ...]
+
+    @field_validator("exit_profile_id", mode="before")
+    @classmethod
+    def _require_profile_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("ExitProfile identity must be non-blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_profile(self) -> ExitProfile:
+        if self.exit_profile_version <= 0:
+            raise ValueError("ExitProfile version must be positive")
+        canonical_guards = tuple(
+            sorted(set(self.pre_tp1_guards), key=lambda item: item.value)
+        )
+        if canonical_guards != self.pre_tp1_guards:
+            raise ValueError("ExitProfile guards must be canonical and unique")
+        return self
+
+    def semantic_hash(self) -> str:
+        return _semantic_hash(self.model_dump(mode="json"))
+
+
+class EventExitBinding(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exit_binding_id: str
+    binding_version: int
+    event_spec_id: str
+    exit_profile_id: str
+    exit_profile_semantic_hash: str
+    binding_semantic_hash: str
+    activation_reason: str
+    created_at_ms: int
+
+    @field_validator(
+        "exit_binding_id",
+        "event_spec_id",
+        "exit_profile_id",
+        "activation_reason",
+        mode="before",
+    )
+    @classmethod
+    def _require_binding_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("EventExitBinding identity must be non-blank")
+        return normalized
+
+    @field_validator("exit_profile_semantic_hash", "binding_semantic_hash")
+    @classmethod
+    def _require_binding_hash(cls, value: str) -> str:
+        if not value.startswith("sha256:") or len(value) != 71:
+            raise ValueError("EventExitBinding hash must be canonical SHA-256")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_binding(self) -> EventExitBinding:
+        if self.binding_version <= 0 or self.created_at_ms <= 0:
+            raise ValueError("Binding version and creation time must be positive")
+        if self.binding_semantic_hash != _event_exit_binding_hash(
+            binding_version=self.binding_version,
+            event_spec_id=self.event_spec_id,
+            exit_profile_id=self.exit_profile_id,
+            exit_profile_semantic_hash=self.exit_profile_semantic_hash,
+            activation_reason=self.activation_reason,
+        ):
+            raise ValueError("EventExitBinding semantic hash differs")
+        return self
 
 
 class ExitPolicy(BaseModel):
@@ -233,6 +353,34 @@ def split_tp1_quantity(
     )
 
 
+def build_event_exit_binding(
+    *,
+    exit_binding_id: str,
+    binding_version: int,
+    event_spec_id: str,
+    exit_profile_id: str,
+    exit_profile_semantic_hash: str,
+    activation_reason: str,
+    created_at_ms: int,
+) -> EventExitBinding:
+    return EventExitBinding(
+        exit_binding_id=exit_binding_id,
+        binding_version=binding_version,
+        event_spec_id=event_spec_id,
+        exit_profile_id=exit_profile_id,
+        exit_profile_semantic_hash=exit_profile_semantic_hash,
+        binding_semantic_hash=_event_exit_binding_hash(
+            binding_version=binding_version,
+            event_spec_id=event_spec_id,
+            exit_profile_id=exit_profile_id,
+            exit_profile_semantic_hash=exit_profile_semantic_hash,
+            activation_reason=activation_reason,
+        ),
+        activation_reason=activation_reason,
+        created_at_ms=created_at_ms,
+    )
+
+
 def calculate_cost_adjusted_break_even(
     *,
     side: str,
@@ -302,6 +450,159 @@ def calculate_structural_runner_stop(
             rounding=ROUND_CEILING,
         )
     raise ValueError("position side must be long or short")
+
+
+def calculate_rolling_extreme_atr_stop(
+    *,
+    side: str,
+    rolling_extreme: Decimal,
+    atr: Decimal,
+    atr_buffer_multiple: Decimal,
+    price_tick: Decimal,
+) -> Decimal:
+    return calculate_structural_runner_stop(
+        side=side,
+        structure_reference=rolling_extreme,
+        atr=atr,
+        atr_buffer_multiple=atr_buffer_multiple,
+        price_tick=price_tick,
+    )
+
+
+def evaluate_profile_runner_exit(
+    *,
+    profile: ExitProfile,
+    current_stop: Decimal,
+    break_even_floor: Decimal,
+    price_tick: Decimal,
+    last_runner_watermark_ms: int,
+    market_facts: LifecycleMarketFacts,
+) -> ExitDecision:
+    if current_stop <= 0 or break_even_floor <= 0 or price_tick <= 0:
+        raise ValueError("runner evaluation prices and tick must be positive")
+    if market_facts.watermark_ms <= last_runner_watermark_ms:
+        return _exit_decision(
+            ExitDecisionKind.NO_CHANGE,
+            "market_watermark_not_new",
+            market_facts.watermark_ms,
+        )
+    if not market_facts.is_final_closed_candle:
+        return _exit_decision(
+            ExitDecisionKind.NO_CHANGE,
+            "closed_candle_required",
+            market_facts.watermark_ms,
+        )
+    if (
+        profile.time_stop is not None
+        and profile.time_stop.mode is TimeStopMode.ABSOLUTE
+        and market_facts.holding_bars >= profile.time_stop.max_holding_bars
+    ):
+        return _exit_decision(
+            ExitDecisionKind.EXIT,
+            "absolute_time_stop_hit",
+            market_facts.watermark_ms,
+        )
+    candidate = calculate_rolling_extreme_atr_stop(
+        side=profile.position_side,
+        rolling_extreme=market_facts.structure_reference,
+        atr=market_facts.atr,
+        atr_buffer_multiple=profile.runner.atr_buffer_multiple,
+        price_tick=price_tick,
+    )
+    candidate = (
+        max(candidate, break_even_floor)
+        if profile.position_side == "long"
+        else min(candidate, break_even_floor)
+    )
+    required_improvement = price_tick * profile.runner.minimum_improvement_ticks
+    improvement = (
+        candidate - current_stop
+        if profile.position_side == "long"
+        else current_stop - candidate
+    )
+    if improvement < required_improvement:
+        return _exit_decision(
+            ExitDecisionKind.NO_CHANGE,
+            "runner_stop_not_improved",
+            market_facts.watermark_ms,
+        )
+    return ExitDecision(
+        kind=ExitDecisionKind.MOVE_STOP,
+        reason="rolling_extreme_atr_runner_improvement",
+        source_watermark_ms=market_facts.watermark_ms,
+        proposed_stop=candidate,
+    )
+
+
+def evaluate_profile_pre_tp1_exit(
+    *,
+    profile: ExitProfile,
+    market_facts: LifecycleMarketFacts,
+    observed_at_ms: int,
+    pre_tp1_reclaim_price: Decimal | None = None,
+    exposure_session_end_ms: int | None = None,
+) -> ExitDecision:
+    if observed_at_ms < market_facts.watermark_ms:
+        raise ValueError("pre-TP1 observation precedes market facts")
+    if not market_facts.is_final_closed_candle:
+        return _exit_decision(
+            ExitDecisionKind.NO_CHANGE,
+            "closed_candle_required",
+            market_facts.watermark_ms,
+        )
+    guards = set(profile.pre_tp1_guards)
+    if PreTp1GuardKind.SESSION_EXPIRY in guards:
+        if exposure_session_end_ms is None or exposure_session_end_ms <= 0:
+            raise ValueError("session-expiry guard requires a positive deadline")
+        if observed_at_ms >= exposure_session_end_ms:
+            return _exit_decision(
+                ExitDecisionKind.EXIT,
+                "session_expired",
+                market_facts.watermark_ms,
+            )
+    if PreTp1GuardKind.RECLAIM_REFERENCE in guards:
+        if pre_tp1_reclaim_price is None or pre_tp1_reclaim_price <= 0:
+            raise ValueError("reclaim guard requires a positive reference")
+        reclaim_hit = (
+            market_facts.latest_close <= pre_tp1_reclaim_price
+            if profile.position_side == "long"
+            else market_facts.latest_close >= pre_tp1_reclaim_price
+        )
+        if reclaim_hit:
+            return _exit_decision(
+                ExitDecisionKind.EXIT,
+                (
+                    "failed_breakout_reclaimed"
+                    if profile.position_side == "long"
+                    else "failed_breakdown_reclaimed"
+                ),
+                market_facts.watermark_ms,
+            )
+    if (
+        profile.time_stop is not None
+        and profile.time_stop.mode is TimeStopMode.ABSOLUTE
+        and market_facts.holding_bars >= profile.time_stop.max_holding_bars
+    ):
+        return _exit_decision(
+            ExitDecisionKind.EXIT,
+            "absolute_time_stop_hit",
+            market_facts.watermark_ms,
+        )
+    if (
+        profile.time_stop is not None
+        and profile.time_stop.mode is TimeStopMode.PRE_TP1
+        and market_facts.holding_bars >= profile.time_stop.max_holding_bars
+    ):
+        return _exit_decision(
+            ExitDecisionKind.EXIT,
+            "pre_tp1_time_stop_hit",
+            market_facts.watermark_ms,
+        )
+    return _exit_decision(
+        ExitDecisionKind.NO_CHANGE,
+        "pre_tp1_plan_intact",
+        market_facts.watermark_ms,
+    )
 
 
 def evaluate_exit_policy(
@@ -471,6 +772,35 @@ def _policy_for_contract(contract: RegisteredStrategyContract) -> ExitPolicy:
 
 def _round_to_step(value: Decimal, step: Decimal, *, rounding: str) -> Decimal:
     return (value / step).to_integral_value(rounding=rounding) * step
+
+
+def _semantic_hash(payload: object) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"sha256:{sha256(encoded).hexdigest()}"
+
+
+def _event_exit_binding_hash(
+    *,
+    binding_version: int,
+    event_spec_id: str,
+    exit_profile_id: str,
+    exit_profile_semantic_hash: str,
+    activation_reason: str,
+) -> str:
+    return _semantic_hash(
+        {
+            "binding_version": binding_version,
+            "event_spec_id": event_spec_id,
+            "exit_profile_id": exit_profile_id,
+            "exit_profile_semantic_hash": exit_profile_semantic_hash,
+            "activation_reason": activation_reason,
+        }
+    )
 
 
 def _require_financial_inputs(

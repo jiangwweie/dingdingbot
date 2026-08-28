@@ -8,7 +8,7 @@ design_authority_commit: 50e94cea15445f1c3e268f524dfa6e440581bf3e
 design_authority_semantic_digest: sha256:68415c06387d4cdc13aebc500a095e205fe389ea96be137df07350c4a6364477
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: EX-01
+active_execution_scope: EX-02
 production_authority: NONE
 owner_approval: 2026-08-28 active task decision authorizing EX-00 through EX-08
 ---
@@ -32,7 +32,7 @@ perform Replay, Shadow, parameter search or profitability certification.
 design_status = DESIGN_APPROVED
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = EX-01
+active_execution_scope = EX-02
 production_authority = NONE
 ```
 
@@ -291,6 +291,28 @@ no infrastructure dependency.
 - no YAML parser;
 - no detector/rank exit;
 - no Multi-TP abstraction.
+
+### EX-01 Execution Evidence — 2026-08-28
+
+**Status: `EX01_COMPLETE`.** Added pure frozen `ExitProfile` and
+`EventExitBinding` contracts, truthful `rolling_extreme_atr` identity,
+`PRE_TP1/ABSOLUTE` TimeStop modes, explicit reclaim/session guards, canonical
+semantic hashes and deterministic evaluation precedence.
+
+Legacy Event-bound `ExitPolicy` remains only to keep the 0006 baseline green
+until EX-03 replaces current Registry authority; no PostgreSQL/application/
+venue behavior changed in this Task.
+
+| Verification | Result |
+| --- | ---: |
+| EX-01 focused domain | **28 passed** |
+| Fast Unit + Architecture | **1,044 passed** |
+| Ruff | **passed** |
+| Mypy changed domain | **zero issues** |
+| `git diff --check` | **passed** |
+
+Active execution scope advances to **EX-02**. Production authority remains
+`NONE`.
 
 ## 9. EX-02 — Forward Schema And PostgreSQL Authority
 
