@@ -11,7 +11,12 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import KernelUnitOfWork
-from src.trading_kernel.domain.exit_policy import ExitPolicy, registered_exit_policies
+from src.trading_kernel.domain.exit_policy import (
+    ExitPolicy,
+    registered_event_exit_bindings,
+    registered_exit_policies,
+    registered_exit_profiles,
+)
 from src.trading_kernel.domain.product import product_compatibility_for
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
@@ -21,6 +26,9 @@ from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    event_exit_profile_binding_current,
+    event_exit_profile_binding_events,
+    event_exit_profile_bindings,
     event_product_compatibility,
     event_required_facts,
     event_specs,
@@ -44,6 +52,7 @@ async def seed_strategy_registry(
     seeded_at_ms: int,
     contracts: tuple[RegisteredStrategyContract, ...] | None = None,
     include_product_compatibility: bool = True,
+    include_exit_profile_authority: bool = True,
     compatible_source_registry_semantic_hash: str | None = None,
 ) -> RegistrySeedResult:
     if seeded_at_ms <= 0:
@@ -56,6 +65,7 @@ async def seed_strategy_registry(
         registry_semantic_hash=build_registry_semantic_hash(selected_contracts),
         seeded_at_ms=seeded_at_ms,
         include_product_compatibility=include_product_compatibility,
+        include_exit_profile_authority=include_exit_profile_authority,
         compatible_source_registry_semantic_hash=(
             compatible_source_registry_semantic_hash
         ),
@@ -73,6 +83,7 @@ class PostgresStrategyRegistryRepository:
         registry_semantic_hash: str,
         seeded_at_ms: int,
         include_product_compatibility: bool = True,
+        include_exit_profile_authority: bool = True,
         compatible_source_registry_semantic_hash: str | None = None,
     ) -> RegistrySeedResult:
         counters = {
@@ -81,6 +92,10 @@ class PostgresStrategyRegistryRepository:
             "inserted_event_count": 0,
             "inserted_product_compatibility_count": 0,
             "inserted_exit_policy_count": 0,
+            "inserted_exit_profile_count": 0,
+            "inserted_exit_binding_count": 0,
+            "inserted_exit_binding_current_count": 0,
+            "inserted_exit_binding_event_count": 0,
             "inserted_fact_definition_count": 0,
             "inserted_event_fact_count": 0,
         }
@@ -267,6 +282,104 @@ class PostgresStrategyRegistryRepository:
                     compare_keys=("role", "required"),
                 )
 
+        if include_exit_profile_authority:
+            for profile in registered_exit_profiles():
+                counters["inserted_exit_profile_count"] += await self._insert_exact(
+                    exit_policies,
+                    "exit_policy_id",
+                    {
+                        "exit_policy_id": profile.exit_profile_id,
+                        "exit_policy_version": str(profile.exit_profile_version),
+                        "event_spec_id": None,
+                        "profile_schema_version": profile.profile_schema_version,
+                        "position_side": profile.position_side,
+                        "policy": profile.model_dump(mode="json"),
+                        "semantic_hash": profile.semantic_hash(),
+                        "status": "active",
+                        "created_at_ms": seeded_at_ms,
+                    },
+                    compare_keys=(
+                        "exit_policy_version",
+                        "event_spec_id",
+                        "profile_schema_version",
+                        "position_side",
+                        "policy",
+                        "semantic_hash",
+                        "status",
+                    ),
+                )
+            for binding in registered_event_exit_bindings():
+                counters["inserted_exit_binding_count"] += await self._insert_exact(
+                    event_exit_profile_bindings,
+                    "exit_binding_id",
+                    {
+                        "exit_binding_id": binding.exit_binding_id,
+                        "binding_version": binding.binding_version,
+                        "event_spec_id": binding.event_spec_id,
+                        "exit_profile_id": binding.exit_profile_id,
+                        "exit_profile_semantic_hash": (
+                            binding.exit_profile_semantic_hash
+                        ),
+                        "binding_semantic_hash": binding.binding_semantic_hash,
+                        "activation_reason": binding.activation_reason,
+                        "created_at_ms": seeded_at_ms,
+                    },
+                    compare_keys=(
+                        "binding_version",
+                        "event_spec_id",
+                        "exit_profile_id",
+                        "exit_profile_semantic_hash",
+                        "binding_semantic_hash",
+                        "activation_reason",
+                    ),
+                )
+                counters["inserted_exit_binding_current_count"] += (
+                    await self._insert_exact(
+                        event_exit_profile_binding_current,
+                        "event_spec_id",
+                        {
+                            "event_spec_id": binding.event_spec_id,
+                            "exit_binding_id": binding.exit_binding_id,
+                            "binding_semantic_hash": binding.binding_semantic_hash,
+                            "projection_version": 1,
+                            "activated_at_ms": seeded_at_ms,
+                        },
+                        compare_keys=(
+                            "exit_binding_id",
+                            "binding_semantic_hash",
+                            "projection_version",
+                        ),
+                    )
+                )
+                counters["inserted_exit_binding_event_count"] += (
+                    await self._insert_exact(
+                        event_exit_profile_binding_events,
+                        "binding_event_id",
+                        {
+                            "binding_event_id": (
+                                f"binding-event:{binding.exit_binding_id}:activated"
+                            ),
+                            "event_spec_id": binding.event_spec_id,
+                            "exit_binding_id": binding.exit_binding_id,
+                            "binding_version": binding.binding_version,
+                            "operation": "ACTIVATED",
+                            "authorization_source": "system_migration",
+                            "owner_authorization_id": None,
+                            "reason": binding.activation_reason,
+                            "created_at_ms": seeded_at_ms,
+                        },
+                        compare_keys=(
+                            "event_spec_id",
+                            "exit_binding_id",
+                            "binding_version",
+                            "operation",
+                            "authorization_source",
+                            "owner_authorization_id",
+                            "reason",
+                        ),
+                    )
+                )
+
         return RegistrySeedResult(
             registry_semantic_hash=registry_semantic_hash,
             **counters,
@@ -412,45 +525,6 @@ class PostgresStrategyRegistryRepository:
             raise RegistrySeedConflict(
                 f"strategy Registry historical Event conflicts: {strategy_version_id}"
             )
-        historical_event_ids = tuple(
-            str(row["event_spec_id"]) for row in historical_events
-        )
-        historical_policies = (
-            await self._connection.execute(
-                sa.select(
-                    exit_policies.c.exit_policy_id,
-                    exit_policies.c.event_spec_id,
-                    exit_policies.c.status,
-                )
-                .where(
-                    exit_policies.c.event_spec_id.in_(historical_event_ids)
-                )
-                .order_by(exit_policies.c.event_spec_id)
-                .with_for_update(of=exit_policies)
-            )
-        ).mappings().all()
-        policies_by_event = {
-            str(row["event_spec_id"]): row for row in historical_policies
-        }
-        if len(policies_by_event) != len(historical_events) or any(
-            event_id not in policies_by_event
-            or policies_by_event[event_id]["status"] != "active"
-            or str(policies_by_event[event_id]["exit_policy_id"])
-            != str(event["exit_policy_id"])
-            for event_id, event in zip(
-                historical_event_ids,
-                historical_events,
-                strict=True,
-            )
-        ):
-            raise RegistrySeedConflict(
-                f"strategy Registry historical policy conflicts: {strategy_version_id}"
-            )
-        await self._connection.execute(
-            sa.update(exit_policies)
-            .where(exit_policies.c.event_spec_id.in_(historical_event_ids))
-            .values(status="retired")
-        )
         await self._connection.execute(
             sa.update(event_specs)
             .where(event_specs.c.strategy_version_id == strategy_version_id)

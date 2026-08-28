@@ -17,6 +17,8 @@ from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    event_exit_profile_binding_current,
+    event_exit_profile_bindings,
     event_specs,
     exit_policies,
     instruments,
@@ -118,6 +120,10 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
     assert first.inserted_event_count == 8
     assert first.inserted_product_compatibility_count == 8
     assert first.inserted_exit_policy_count == 8
+    assert first.inserted_exit_profile_count == 8
+    assert first.inserted_exit_binding_count == 8
+    assert first.inserted_exit_binding_current_count == 8
+    assert first.inserted_exit_binding_event_count == 8
     assert first.inserted_fact_definition_count == 29
     assert first.inserted_event_fact_count == 39
     assert "inserted_instrument_count" not in type(first).model_fields
@@ -139,7 +145,7 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         assert await connection.scalar(sa.select(sa.func.count()).select_from(runtime_scopes_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(owner_policy_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(instruments)) == 0
-        assert await connection.scalar(sa.select(sa.func.count()).select_from(exit_policies)) == 8
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(exit_policies)) == 16
         current_versions = dict(
             (
                 await connection.execute(
@@ -290,9 +296,9 @@ async def test_strategy_seed_monotonically_retires_source_sor_v3_and_activates_v
     ]
     assert policies == [
         ("exit-policy:SOR-001:SOR-LONG:portfolio-admission-v1", "active"),
-        ("exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1", "retired"),
+        ("exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1", "active"),
         ("exit-policy:SOR-001:SOR-SHORT:portfolio-admission-v1", "active"),
-        ("exit-policy:SOR-001:SOR-SHORT:sor-v3-right-tail-v1", "retired"),
+        ("exit-policy:SOR-001:SOR-SHORT:sor-v3-right-tail-v1", "active"),
     ]
     assert first.inserted_strategy_group_count == 5
     assert first.inserted_strategy_version_count == 6
@@ -327,6 +333,61 @@ async def test_universe_install_resolves_the_active_v4_registry_pointer(
 
 
 @pytest.mark.asyncio
+async def test_registry_seed_installs_exit_profile_catalog_and_initial_bindings(
+    registry_engine: AsyncEngine,
+) -> None:
+    async with PostgresKernelUnitOfWork(registry_engine) as uow:
+        first = await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
+    async with PostgresKernelUnitOfWork(registry_engine) as uow:
+        second = await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
+
+    async with registry_engine.connect() as connection:
+        profiles = (
+            await connection.execute(
+                sa.select(
+                    exit_policies.c.exit_policy_id,
+                    exit_policies.c.profile_schema_version,
+                    exit_policies.c.event_spec_id,
+                    exit_policies.c.semantic_hash,
+                )
+                .where(exit_policies.c.profile_schema_version == "exit_profile_v1")
+                .order_by(exit_policies.c.exit_policy_id)
+            )
+        ).all()
+        bindings = (
+            await connection.execute(
+                sa.select(
+                    event_exit_profile_bindings.c.event_spec_id,
+                    event_exit_profile_bindings.c.exit_profile_id,
+                    event_exit_profile_bindings.c.exit_profile_semantic_hash,
+                    event_exit_profile_bindings.c.binding_semantic_hash,
+                ).order_by(event_exit_profile_bindings.c.event_spec_id)
+            )
+        ).all()
+        current = (
+            await connection.execute(
+                sa.select(
+                    event_exit_profile_binding_current.c.event_spec_id,
+                    event_exit_profile_binding_current.c.exit_binding_id,
+                    event_exit_profile_binding_current.c.projection_version,
+                ).order_by(event_exit_profile_binding_current.c.event_spec_id)
+            )
+        ).all()
+
+    assert len(profiles) == 8
+    assert all(row.profile_schema_version == "exit_profile_v1" for row in profiles)
+    assert all(row.event_spec_id is None for row in profiles)
+    assert len(bindings) == 8
+    assert len(current) == 8
+    assert {row.projection_version for row in current} == {1}
+    assert first.inserted_exit_profile_count == 8
+    assert first.inserted_exit_binding_count == 8
+    assert first.inserted_exit_binding_current_count == 8
+    assert first.inserted_exit_binding_event_count == 8
+    assert second.total_inserted_count == 0
+
+
+@pytest.mark.asyncio
 async def test_strategy_seed_rejects_an_extra_active_version_outside_the_pointer(
     registry_engine: AsyncEngine,
 ) -> None:
@@ -349,7 +410,7 @@ async def test_strategy_seed_rejects_an_extra_active_version_outside_the_pointer
 
 
 @pytest.mark.asyncio
-async def test_strategy_seed_rejects_partial_historical_policy_authority(
+async def test_strategy_seed_ignores_legacy_policy_retirement_for_current_profiles(
     registry_engine: AsyncEngine,
 ) -> None:
     async with registry_engine.begin() as connection:
@@ -363,9 +424,22 @@ async def test_strategy_seed_rejects_partial_historical_policy_authority(
             .values(status="retired")
         )
 
-    with pytest.raises(RegistrySeedConflict, match="historical policy conflicts"):
-        async with PostgresKernelUnitOfWork(registry_engine) as uow:
-            await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
+    async with PostgresKernelUnitOfWork(registry_engine) as uow:
+        await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
+
+    async with registry_engine.connect() as connection:
+        active_profiles = int(
+            await connection.scalar(
+                sa.select(sa.func.count())
+                .select_from(exit_policies)
+                .where(
+                    exit_policies.c.profile_schema_version == "exit_profile_v1",
+                    exit_policies.c.status == "active",
+                )
+            )
+            or 0
+        )
+    assert active_profiles == 8
 
 
 async def _insert_source_sor_v3_registry(

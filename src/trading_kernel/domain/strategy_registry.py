@@ -38,6 +38,10 @@ class RegistrySeedResult(BaseModel):
     inserted_event_count: int = 0
     inserted_product_compatibility_count: int = 0
     inserted_exit_policy_count: int = 0
+    inserted_exit_profile_count: int = 0
+    inserted_exit_binding_count: int = 0
+    inserted_exit_binding_current_count: int = 0
+    inserted_exit_binding_event_count: int = 0
     inserted_fact_definition_count: int = 0
     inserted_event_fact_count: int = 0
 
@@ -49,6 +53,10 @@ class RegistrySeedResult(BaseModel):
             + self.inserted_event_count
             + self.inserted_product_compatibility_count
             + self.inserted_exit_policy_count
+            + self.inserted_exit_profile_count
+            + self.inserted_exit_binding_count
+            + self.inserted_exit_binding_current_count
+            + self.inserted_exit_binding_event_count
             + self.inserted_fact_definition_count
             + self.inserted_event_fact_count
         )

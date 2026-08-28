@@ -314,6 +314,171 @@ class TakeProfitSplit(BaseModel):
         return self
 
 
+def registered_exit_profiles() -> tuple[ExitProfile, ...]:
+    return tuple(
+        sorted(
+            (
+                _exit_profile(
+                    exit_profile_id="exit-profile:trend-continuation:1h:long:v1",
+                    side="long",
+                    timeframe="1h",
+                    quantity_fraction=Decimal("0.50"),
+                    lookback_bars=4,
+                    atr_buffer_multiple=Decimal("0.50"),
+                    time_stop=None,
+                    guards=(),
+                ),
+                _exit_profile(
+                    exit_profile_id="exit-profile:momentum-tail:1h:long:v1",
+                    side="long",
+                    timeframe="1h",
+                    quantity_fraction=Decimal("0.33"),
+                    lookback_bars=5,
+                    atr_buffer_multiple=Decimal("0.75"),
+                    time_stop=None,
+                    guards=(),
+                ),
+                _exit_profile(
+                    exit_profile_id="exit-profile:impulse-decay:1h:long:v1",
+                    side="long",
+                    timeframe="1h",
+                    quantity_fraction=Decimal("0.50"),
+                    lookback_bars=4,
+                    atr_buffer_multiple=Decimal("0.50"),
+                    time_stop=TimeStopRule(
+                        max_holding_bars=12,
+                        mode=TimeStopMode.PRE_TP1,
+                    ),
+                    guards=(),
+                ),
+                _exit_profile(
+                    exit_profile_id="exit-profile:failure-reversal:1h:short:v1",
+                    side="short",
+                    timeframe="1h",
+                    quantity_fraction=Decimal("0.50"),
+                    lookback_bars=4,
+                    atr_buffer_multiple=Decimal("0.50"),
+                    time_stop=TimeStopRule(
+                        max_holding_bars=12,
+                        mode=TimeStopMode.PRE_TP1,
+                    ),
+                    guards=(),
+                ),
+                _exit_profile(
+                    exit_profile_id="exit-profile:orb-crypto:15m:long:v1",
+                    side="long",
+                    timeframe="15m",
+                    quantity_fraction=Decimal("0.50"),
+                    lookback_bars=4,
+                    atr_buffer_multiple=Decimal("0.50"),
+                    time_stop=TimeStopRule(
+                        max_holding_bars=96,
+                        mode=TimeStopMode.ABSOLUTE,
+                    ),
+                    guards=(
+                        PreTp1GuardKind.RECLAIM_REFERENCE,
+                        PreTp1GuardKind.SESSION_EXPIRY,
+                    ),
+                ),
+                _exit_profile(
+                    exit_profile_id="exit-profile:orb-crypto:15m:short:v1",
+                    side="short",
+                    timeframe="15m",
+                    quantity_fraction=Decimal("0.50"),
+                    lookback_bars=4,
+                    atr_buffer_multiple=Decimal("0.50"),
+                    time_stop=TimeStopRule(
+                        max_holding_bars=96,
+                        mode=TimeStopMode.ABSOLUTE,
+                    ),
+                    guards=(
+                        PreTp1GuardKind.RECLAIM_REFERENCE,
+                        PreTp1GuardKind.SESSION_EXPIRY,
+                    ),
+                ),
+                _exit_profile(
+                    exit_profile_id="exit-profile:orb-us:15m:long:v1",
+                    side="long",
+                    timeframe="15m",
+                    quantity_fraction=Decimal("0.50"),
+                    lookback_bars=4,
+                    atr_buffer_multiple=Decimal("0.50"),
+                    time_stop=TimeStopRule(
+                        max_holding_bars=8,
+                        mode=TimeStopMode.ABSOLUTE,
+                    ),
+                    guards=(
+                        PreTp1GuardKind.RECLAIM_REFERENCE,
+                        PreTp1GuardKind.SESSION_EXPIRY,
+                    ),
+                ),
+                _exit_profile(
+                    exit_profile_id="exit-profile:orb-us:15m:short:v1",
+                    side="short",
+                    timeframe="15m",
+                    quantity_fraction=Decimal("0.50"),
+                    lookback_bars=4,
+                    atr_buffer_multiple=Decimal("0.50"),
+                    time_stop=TimeStopRule(
+                        max_holding_bars=8,
+                        mode=TimeStopMode.ABSOLUTE,
+                    ),
+                    guards=(
+                        PreTp1GuardKind.RECLAIM_REFERENCE,
+                        PreTp1GuardKind.SESSION_EXPIRY,
+                    ),
+                ),
+            ),
+            key=lambda item: item.exit_profile_id,
+        )
+    )
+
+
+def registered_event_exit_bindings() -> tuple[EventExitBinding, ...]:
+    profile_ids = {
+        "CPM-LONG": "exit-profile:trend-continuation:1h:long:v1",
+        "MPG-LONG": "exit-profile:momentum-tail:1h:long:v1",
+        "MI-LONG": "exit-profile:impulse-decay:1h:long:v1",
+        "BRF2-SHORT": "exit-profile:failure-reversal:1h:short:v1",
+        "SOR-LONG": "exit-profile:orb-crypto:15m:long:v1",
+        "SOR-SHORT": "exit-profile:orb-crypto:15m:short:v1",
+        "SOR-US-LONG-15M": "exit-profile:orb-us:15m:long:v1",
+        "SOR-US-SHORT-15M": "exit-profile:orb-us:15m:short:v1",
+    }
+    profiles = {item.exit_profile_id: item for item in registered_exit_profiles()}
+    bindings = []
+    for contract in registered_strategy_contracts():
+        profile_id = profile_ids[contract.event_id]
+        profile = profiles[profile_id]
+        bindings.append(
+            build_event_exit_binding(
+                exit_binding_id=f"exit-binding:{contract.event_spec_id}:v1",
+                binding_version=1,
+                event_spec_id=contract.event_spec_id,
+                exit_profile_id=profile_id,
+                exit_profile_semantic_hash=profile.semantic_hash(),
+                activation_reason="owner_frozen_v1",
+                created_at_ms=1,
+            )
+        )
+    return tuple(sorted(bindings, key=lambda item: item.event_spec_id))
+
+
+def build_exit_profile_catalog_digest() -> str:
+    return _semantic_hash(
+        {
+            "profiles": [
+                item.model_dump(mode="json")
+                for item in registered_exit_profiles()
+            ],
+            "bindings": [
+                item.model_dump(mode="json")
+                for item in registered_event_exit_bindings()
+            ],
+        }
+    )
+
+
 def registered_exit_policies() -> tuple[ExitPolicy, ...]:
     return tuple(_policy_for_contract(item) for item in registered_strategy_contracts())
 
@@ -767,6 +932,46 @@ def _policy_for_contract(contract: RegisteredStrategyContract) -> ExitPolicy:
             if contract.strategy_group_id == "SOR-US-EQ-PERP-001"
             else None
         ),
+    )
+
+
+def _exit_profile(
+    *,
+    exit_profile_id: str,
+    side: PositionSide,
+    timeframe: Literal["15m", "1h"],
+    quantity_fraction: Decimal,
+    lookback_bars: int,
+    atr_buffer_multiple: Decimal,
+    time_stop: TimeStopRule | None,
+    guards: tuple[PreTp1GuardKind, ...],
+) -> ExitProfile:
+    return ExitProfile(
+        exit_profile_id=exit_profile_id,
+        exit_profile_version=1,
+        profile_schema_version="exit_profile_v1",
+        position_side=side,
+        tp1=TakeProfitRule(
+            reward_multiple=Decimal(1),
+            quantity_fraction=quantity_fraction,
+            execution_style="limit_gtc",
+            market_fallback_allowed=False,
+        ),
+        break_even_floor=BreakEvenFloorRule(
+            exit_fee_basis="conservative_taker",
+            slippage_buffer_ticks=2,
+            minimum_improvement_ticks=2,
+        ),
+        runner=RollingExtremeAtrRunnerRule(
+            kind=RunnerRuleKind.ROLLING_EXTREME_ATR,
+            timeframe=timeframe,
+            lookback_bars=lookback_bars,
+            atr_period=14,
+            atr_buffer_multiple=atr_buffer_multiple,
+            minimum_improvement_ticks=2,
+        ),
+        time_stop=time_stop,
+        pre_tp1_guards=guards,
     )
 
 

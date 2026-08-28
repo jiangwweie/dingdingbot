@@ -1312,6 +1312,7 @@ class StrategyRegistryRepository(Protocol):
         registry_semantic_hash: str,
         seeded_at_ms: int,
         include_product_compatibility: bool = True,
+        include_exit_profile_authority: bool = True,
         compatible_source_registry_semantic_hash: str | None = None,
     ) -> RegistrySeedResult: ...
 

@@ -15,6 +15,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.domain.capacity import FamilyTicketLimits
+from src.trading_kernel.domain.exit_policy import build_exit_profile_catalog_digest
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     build_registry_semantic_hash,
@@ -250,6 +251,11 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
         registry_semantic_hash=build_registry_semantic_hash(contracts),
         allowed_event_spec_ids=_allowed_event_spec_ids(contracts),
         include_tradfi=include_tradfi,
+        exit_profile_catalog_digest=(
+            build_exit_profile_catalog_digest()
+            if request.schema_revision == "0007_exit_profile_authority_v1"
+            else None
+        ),
     )
 
 
@@ -266,6 +272,9 @@ async def seed_runtime_authority(
         seeded_at_ms=request.seeded_at_ms,
         contracts=contracts,
         include_product_compatibility=include_tradfi,
+        include_exit_profile_authority=(
+            request.schema_revision == "0007_exit_profile_authority_v1"
+        ),
     )
     connection = uow._require_connection()
     control_inserted_count = 0
@@ -289,6 +298,11 @@ async def seed_runtime_authority(
         registry_semantic_hash=registry.registry_semantic_hash,
         allowed_event_spec_ids=allowed_event_spec_ids,
         include_tradfi=include_tradfi,
+        exit_profile_catalog_digest=(
+            build_exit_profile_catalog_digest()
+            if request.schema_revision == "0007_exit_profile_authority_v1"
+            else None
+        ),
     )
     policy_builder = _policy_values if include_tradfi else _crypto_source_policy_values
     policy = policy_builder(
@@ -640,6 +654,11 @@ async def deploy_compatible_upgrade_identity(
         registry_semantic_hash=registry.registry_semantic_hash,
         allowed_event_spec_ids=target_event_spec_ids,
         include_tradfi=True,
+        exit_profile_catalog_digest=(
+            build_exit_profile_catalog_digest()
+            if request.schema_revision == "0007_exit_profile_authority_v1"
+            else None
+        ),
     )
     if not _policy_matches(
         current_policy,
@@ -1240,6 +1259,7 @@ def _seed_identity(
     registry_semantic_hash: str,
     allowed_event_spec_ids: tuple[str, ...],
     include_tradfi: bool,
+    exit_profile_catalog_digest: str | None = None,
 ) -> str:
     policy_builder = _policy_values if include_tradfi else _crypto_source_policy_values
     semantics = policy_builder(
@@ -1249,18 +1269,21 @@ def _seed_identity(
         updated_at_ms=1,
     )
     semantics.pop("updated_at_ms")
+    payload: dict[str, object] = {
+        "account_id": account_id,
+        "registry_semantic_hash": registry_semantic_hash,
+        "runtime_profile_ids": [
+            RUNTIME_PROFILE_ID,
+            *([TRADFI_RUNTIME_PROFILE_ID] if include_tradfi else []),
+        ],
+        "schema_revision": schema_revision,
+        "position_mode": POSITION_MODE,
+        "acceptance_policy": semantics,
+    }
+    if exit_profile_catalog_digest is not None:
+        payload["exit_profile_catalog_digest"] = exit_profile_catalog_digest
     canonical = json.dumps(
-        {
-            "account_id": account_id,
-            "registry_semantic_hash": registry_semantic_hash,
-            "runtime_profile_ids": [
-                RUNTIME_PROFILE_ID,
-                *([TRADFI_RUNTIME_PROFILE_ID] if include_tradfi else []),
-            ],
-            "schema_revision": schema_revision,
-            "position_mode": POSITION_MODE,
-            "acceptance_policy": semantics,
-        },
+        payload,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,

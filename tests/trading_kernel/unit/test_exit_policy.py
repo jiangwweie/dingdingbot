@@ -19,6 +19,7 @@ from src.trading_kernel.domain.exit_policy import (
     TimeStopMode,
     TimeStopRule,
     build_event_exit_binding,
+    build_exit_profile_catalog_digest,
     calculate_cost_adjusted_break_even,
     calculate_rolling_extreme_atr_stop,
     calculate_structural_runner_stop,
@@ -27,6 +28,8 @@ from src.trading_kernel.domain.exit_policy import (
     evaluate_profile_pre_tp1_exit,
     evaluate_profile_runner_exit,
     exit_policy_for,
+    registered_event_exit_bindings,
+    registered_exit_profiles,
     split_tp1_quantity,
 )
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
@@ -468,6 +471,51 @@ def test_rolling_extreme_atr_rule_has_truthful_identity(
         atr_buffer_multiple=Decimal("0.5"),
         price_tick=Decimal("0.1"),
     ) == expected
+
+
+def test_owner_frozen_v1_catalog_is_complete_and_explicit() -> None:
+    profiles = registered_exit_profiles()
+    bindings = registered_event_exit_bindings()
+
+    assert len(profiles) == 8
+    assert len({item.exit_profile_id for item in profiles}) == 8
+    assert len(bindings) == 8
+    assert len({item.event_spec_id for item in bindings}) == 8
+    assert {item.exit_profile_id for item in bindings} == {
+        item.exit_profile_id for item in profiles
+    }
+    assert all(item.profile_schema_version == "exit_profile_v1" for item in profiles)
+    assert all(item.tp1.reward_multiple == Decimal(1) for item in profiles)
+    assert all(item.tp1.execution_style == "limit_gtc" for item in profiles)
+    assert all(item.tp1.market_fallback_allowed is False for item in profiles)
+    assert all(item.break_even_floor.slippage_buffer_ticks == 2 for item in profiles)
+    assert all(
+        item.break_even_floor.minimum_improvement_ticks == 2 for item in profiles
+    )
+    assert all(item.runner.atr_period == 14 for item in profiles)
+    assert all(item.runner.minimum_improvement_ticks == 2 for item in profiles)
+
+    momentum = next(
+        item for item in profiles if "momentum-tail" in item.exit_profile_id
+    )
+    assert momentum.tp1.quantity_fraction == Decimal("0.33")
+    assert momentum.runner.lookback_bars == 5
+    assert momentum.runner.atr_buffer_multiple == Decimal("0.75")
+
+
+def test_registered_binding_hashes_exact_profile_payloads() -> None:
+    profiles = {item.exit_profile_id: item for item in registered_exit_profiles()}
+
+    for binding in registered_event_exit_bindings():
+        assert (
+            binding.exit_profile_semantic_hash
+            == profiles[binding.exit_profile_id].semantic_hash()
+        )
+
+
+def test_exit_profile_catalog_digest_is_deterministic() -> None:
+    assert build_exit_profile_catalog_digest() == build_exit_profile_catalog_digest()
+    assert build_exit_profile_catalog_digest().startswith("sha256:")
 
 
 def _profile(

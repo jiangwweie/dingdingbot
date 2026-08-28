@@ -8,7 +8,7 @@ design_authority_commit: 50e94cea15445f1c3e268f524dfa6e440581bf3e
 design_authority_semantic_digest: sha256:68415c06387d4cdc13aebc500a095e205fe389ea96be137df07350c4a6364477
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: EX-03
+active_execution_scope: EX-04
 production_authority: NONE
 owner_approval: 2026-08-28 active task decision authorizing EX-00 through EX-08
 ---
@@ -32,7 +32,7 @@ perform Replay, Shadow, parameter search or profitability certification.
 design_status = DESIGN_APPROVED
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = EX-03
+active_execution_scope = EX-04
 production_authority = NONE
 ```
 
@@ -481,6 +481,32 @@ no YAML/file dependency, strategy-generated Policy or runtime mutation path.
 - no `_policy_for_contract()` compatibility path;
 - no runtime read from legacy EventSpec policy ID.
 - no temporary Strategy-retirement pointer mutation.
+
+### EX-03 Execution Evidence — 2026-08-28
+
+**Status: `EX03_COMPLETE / INITIAL_AUTHORITY_ONLY`.** Added the exact typed
+eight-Profile/eight-Binding Catalog, deterministic Catalog digest and
+idempotent initial PostgreSQL seed for Profile rows, Binding facts, current
+pointers and ACTIVATED events.
+
+Every hashed field is explicit. Source `0006` runtime seeding excludes the new
+authority tables; target `0007` seed identity includes the Catalog digest.
+StrategyVersion retirement no longer retires Event-bound Policy/Profile rows.
+No post-install Binding/Profile mutation helper exists in this Task.
+
+The pre-existing Event-bound lookup remains only as an unmodified intermediate
+trading path until EX-05/EX-06 switch Claim/Lifecycle to current Binding/Profile
+authority; it is not used to seed the new current pointers.
+
+| Verification | Result |
+| --- | ---: |
+| Catalog/Binding focused | **41 passed** |
+| Cross-version seed/migration | **16 passed** |
+| Fast Unit + Architecture | **1,047 passed** |
+| Ruff/Mypy/diff | **passed** |
+
+Active execution scope advances to **EX-04**. Production authority remains
+`NONE`.
 
 ## 11. EX-04 — Owner Binding Authority And Write Serialization
 
