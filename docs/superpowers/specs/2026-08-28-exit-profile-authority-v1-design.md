@@ -841,11 +841,31 @@ brc_trade_tickets.exit_binding_semantic_hash
 brc_trade_tickets.exit_binding_authority_version
 ```
 
-Target runtime requires them for every newly issued Claim/Ticket. Existing
-terminal rows remain nullable. New Claim/Ticket rows use composite Binding and
-Profile FKs where the preserved source data permits exact constraints.
-AdmissionDecision retains its exact Claim/Ticket
-and digest lineage rather than duplicating all Profile fields.
+Historical rows preserve the exact all-null shape:
+
+```text
+exit_binding_id = NULL
+exit_binding_semantic_hash = NULL
+exit_binding_authority_version = NULL
+```
+
+Every new runtime Claim/Ticket requires the exact all-present shape. Both
+tables add a CHECK constraint permitting only all-null or all-present lineage.
+Partial lineage is invalid.
+
+The composite FK:
+
+```text
+(exit_binding_id, exit_binding_semantic_hash)
+```
+
+references the immutable Binding with PostgreSQL `MATCH FULL`, so ID/hash
+cannot become half-null. `exit_binding_authority_version` must be positive when
+present. Existing Profile ID/hash fields also receive exact composite FK
+coverage when source preservation proves their rows are complete.
+
+AdmissionDecision retains its exact Claim/Ticket and digest lineage rather than
+duplicating all Profile fields.
 
 ### 14.6 Legacy EventSpec column
 
@@ -867,9 +887,15 @@ NEXT_AFTER_0006_exit_profile_authority_v1
 The final Alembic number is assigned only when the branch is integrated and the
 forward head is known.
 
-### 15.2 Source gate
+### 15.2 Two-phase source gate
 
-The migration is R4 and requires:
+Phase A is an advisory precheck before service stop. It refreshes PostgreSQL and
+Binance facts and aborts early when any active exposure or residue already
+exists. Phase A avoids unnecessary Worker interruption but is not migration
+authority.
+
+Phase B is the authoritative cutover gate. After Entry is fenced and every
+writer is stopped, the deployment re-reads PostgreSQL and Binance and requires:
 
 ```text
 source schema = exact 0006 head
@@ -883,6 +909,9 @@ zero open Incident
 all exposure-bearing terminal Tickets reviewed
 Entry fenced and all writers stopped
 ```
+
+Only Phase B permits Migration. A Phase A pass can never be reused after writer
+stop, and any internal/external drift between the two phases fails closed.
 
 There is no active-position handover. Existing protected Tickets must finish on
 their original release before migration.
