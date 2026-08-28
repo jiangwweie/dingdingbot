@@ -36,6 +36,7 @@ from src.trading_kernel.application.runtime import (
     RuntimeCompatibilityClassification,
     RuntimeReleaseCompatibilityFact,
 )
+from src.trading_kernel.domain.exit_policy import build_exit_profile_catalog_digest
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
@@ -972,6 +973,18 @@ def _require_dynamic_selection_postflight(
         raise DeploymentBlocked(
             "compatible upgrade created unexpected Dynamic Selection runtime facts"
         )
+    exit_profile_authority = certification.get("exit_profile_authority")
+    if (
+        not isinstance(exit_profile_authority, Mapping)
+        or exit_profile_authority.get("status") != "pass"
+        or exit_profile_authority.get("catalog_digest")
+        != build_exit_profile_catalog_digest()
+        or int(str(exit_profile_authority.get("profile_count", -1))) != 8
+        or int(str(exit_profile_authority.get("binding_fact_count", -1))) != 8
+        or int(str(exit_profile_authority.get("current_binding_count", -1))) != 8
+        or int(str(exit_profile_authority.get("binding_event_count", -1))) != 8
+    ):
+        raise DeploymentBlocked("exact ExitProfile/Binding manifest differs")
 
 
 def _require_compatible_source_facts(

@@ -11,6 +11,7 @@ from src.trading_kernel.application.ports import ExitProfileAuthorityConflict
 from src.trading_kernel.domain.exit_policy import (
     CurrentEventExitBinding,
     EventExitBinding,
+    EventExitBindingEvent,
     ExitProfile,
     ExitProfileRecord,
 )
@@ -266,6 +267,86 @@ class PostgresExitProfileAuthorityRepository:
             )
             if deleted.rowcount != 1:
                 raise ExitProfileAuthorityConflict("EXIT_BINDING_VERSION_CONFLICT")
+
+    async def list_profiles(self, *, limit: int) -> tuple[ExitProfileRecord, ...]:
+        if not 1 <= limit <= 32:
+            raise ValueError("ExitProfile readonly limit must be in [1, 32]")
+        rows = (
+            await self._connection.execute(
+                sa.select(exit_policies)
+                .where(exit_policies.c.profile_schema_version == "exit_profile_v1")
+                .order_by(exit_policies.c.exit_policy_id)
+                .limit(limit)
+            )
+        ).mappings().all()
+        records = []
+        for row in rows:
+            profile = ExitProfile.model_validate(row["policy"])
+            if (
+                profile.exit_profile_id != str(row["exit_policy_id"])
+                or profile.semantic_hash() != str(row["semantic_hash"])
+            ):
+                raise ExitProfileAuthorityConflict("EXIT_PROFILE_HASH_DRIFT")
+            status = str(row["status"])
+            if status not in {"active", "retired"}:
+                raise ExitProfileAuthorityConflict("EXIT_PROFILE_STATUS_INVALID")
+            records.append(
+                ExitProfileRecord(
+                    profile=profile,
+                    status=cast(Literal["active", "retired"], status),
+                )
+            )
+        return tuple(records)
+
+    async def list_current_bindings(
+        self,
+        *,
+        event_spec_id: str | None,
+        limit: int,
+    ) -> tuple[CurrentEventExitBinding, ...]:
+        if not 1 <= limit <= 32:
+            raise ValueError("current Binding readonly limit must be in [1, 32]")
+        statement = sa.select(event_exit_profile_binding_current)
+        if event_spec_id is not None:
+            statement = statement.where(
+                event_exit_profile_binding_current.c.event_spec_id
+                == event_spec_id
+            )
+        rows = (
+            await self._connection.execute(
+                statement.order_by(
+                    event_exit_profile_binding_current.c.event_spec_id
+                ).limit(limit)
+            )
+        ).mappings().all()
+        return tuple(
+            CurrentEventExitBinding.model_validate(dict(row)) for row in rows
+        )
+
+    async def list_binding_events(
+        self,
+        *,
+        event_spec_id: str | None,
+        limit: int,
+    ) -> tuple[EventExitBindingEvent, ...]:
+        if not 1 <= limit <= 50:
+            raise ValueError("Binding event readonly limit must be in [1, 50]")
+        statement = sa.select(event_exit_profile_binding_events)
+        if event_spec_id is not None:
+            statement = statement.where(
+                event_exit_profile_binding_events.c.event_spec_id == event_spec_id
+            )
+        rows = (
+            await self._connection.execute(
+                statement.order_by(
+                    event_exit_profile_binding_events.c.created_at_ms.desc(),
+                    event_exit_profile_binding_events.c.binding_event_id.desc(),
+                ).limit(limit)
+            )
+        ).mappings().all()
+        return tuple(
+            EventExitBindingEvent.model_validate(dict(row)) for row in rows
+        )
 
     async def _add_binding_event(
         self,

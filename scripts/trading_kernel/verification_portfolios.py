@@ -114,6 +114,8 @@ R4_SCHEMA_AUTHORITY_COMMANDS: Final[CommandSet] = (
         "tests/trading_kernel/integration/test_portfolio_admission_observability_migration.py",
         "tests/trading_kernel/integration/test_portfolio_admission_flat_compatible_deployment.py",
         "tests/trading_kernel/integration/test_tradfi_instrument_center_upgrade.py",
+        "tests/trading_kernel/integration/test_exit_profile_authority_migration.py",
+        "tests/trading_kernel/integration/test_exit_profile_authority_repository.py",
         "tests/trading_kernel/integration/test_clean_baseline_rebuild.py",
         "-q",
     ),

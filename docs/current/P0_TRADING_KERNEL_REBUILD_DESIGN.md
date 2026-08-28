@@ -69,7 +69,8 @@ src/trading_kernel/interfaces     bounded runtime and readonly surfaces
 
 The forward schema chain is `0001_trading_kernel_baseline_v4 ->
 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability ->
-0004_owner_control_plane -> 0005_tradfi_instrument_center`.
+0004_owner_control_plane -> 0005_tradfi_instrument_center ->
+0006_sor_dynamic_selection_v0 -> 0007_exit_profile_authority_v1`.
 The frozen `0001_trading_kernel_baseline_v4` definition remains historical
 source lineage only. PostgreSQL owns current runtime truth and append-only
 lifecycle facts. Exchange readonly facts own external truth. Repository

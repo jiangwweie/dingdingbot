@@ -8,8 +8,11 @@ from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
+import pyotp
 import pytest
 import sqlalchemy as sa
+from argon2 import PasswordHasher
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.owner_control import (
@@ -25,11 +28,17 @@ from src.trading_kernel.domain.exit_policy import (
     registered_exit_profiles,
 )
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.infrastructure.pg_exit_profile_repository import (
+    PostgresExitProfileAuthorityRepository,
+)
 from src.trading_kernel.infrastructure.pg_models import (
     event_exit_profile_binding_current,
     event_exit_profile_binding_events,
     event_exit_profile_bindings,
     exit_policies,
+)
+from src.trading_kernel.infrastructure.pg_owner_read_repository import (
+    create_owner_read_engine,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
@@ -39,6 +48,15 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     PostgresStrategyRegistryRepository,
+)
+from src.trading_kernel.interfaces.owner_console_http.app import (
+    OwnerConsoleSettings,
+    create_owner_console_app,
+)
+from src.trading_kernel.interfaces.owner_console_http.auth import OwnerAuthSettings
+from src.trading_kernel.interfaces.readonly_api import (
+    ExitProfileAuthorityReadonlyRequest,
+    get_exit_profile_authority_view,
 )
 from tests.trading_kernel.support.postgres import TEST_POSTGRES_ADMIN_DSN
 
@@ -582,6 +600,160 @@ async def test_active_profile_blocks_retirement_and_retired_profile_cannot_bind(
     finally:
         await engine.dispose()
         await _drop(database_name)
+
+
+@pytest.mark.asyncio
+async def test_exit_profile_readonly_view_is_exact_bounded_and_read_only() -> None:
+    database_name, engine = await _database()
+    try:
+        await _seed(engine)
+        source = next(
+            item
+            for item in registered_event_exit_bindings()
+            if "MPG-001" in item.event_spec_id
+        )
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(sa.text("SET TRANSACTION READ ONLY"))
+            assert await connection.scalar(
+                sa.text("SHOW transaction_read_only")
+            ) == "on"
+            view = await get_exit_profile_authority_view(
+                PostgresExitProfileAuthorityRepository(connection),
+                ExitProfileAuthorityReadonlyRequest(
+                    event_spec_id=source.event_spec_id,
+                    event_limit=5,
+                ),
+            )
+            await transaction.rollback()
+
+        assert len(view.profiles) == 8
+        assert len(view.current_bindings) == 1
+        assert len(view.binding_facts) == 1
+        assert len(view.recent_events) == 1
+        assert view.current_bindings[0].event_spec_id == source.event_spec_id
+        assert view.binding_facts[0].exit_binding_id == source.exit_binding_id
+        assert (
+            view.binding_facts[0].binding_semantic_hash
+            == source.binding_semantic_hash
+        )
+        assert view.catalog_digest.startswith("sha256:")
+    finally:
+        await engine.dispose()
+        await _drop(database_name)
+
+
+@pytest.mark.asyncio
+async def test_exit_profile_http_requires_totp_and_maps_stale_version_to_409() -> None:
+    database_name, engine = await _database()
+    try:
+        await _seed(engine)
+        source = next(
+            item
+            for item in registered_event_exit_bindings()
+            if "MPG-001" in item.event_spec_id
+        )
+        target = next(
+            item
+            for item in registered_exit_profiles()
+            if "trend-continuation" in item.exit_profile_id
+        )
+        totp_seed = "JBSWY3DPEHPK3PXP"
+        now_ms = 1_800_000_000_000
+        read_engine = create_owner_read_engine(
+            engine.url.render_as_string(hide_password=False)
+        )
+        app = create_owner_console_app(
+            OwnerConsoleSettings(
+                database_dsn="postgresql+asyncpg://unused",
+                control_database_dsn="postgresql+asyncpg://unused",
+                account_id="exit-profile-authority-test",
+                public_origin="https://owner.example.test",
+                public_host="owner.example.test",
+                auth=OwnerAuthSettings(
+                    username="owner",
+                    password_hash=PasswordHasher(
+                        time_cost=3,
+                        memory_cost=65_536,
+                        parallelism=1,
+                        hash_len=32,
+                        salt_len=16,
+                    ).hash("test-password"),
+                    totp_seed=totp_seed,
+                    session_signing_key=(
+                        "test-signing-key-with-enough-random-looking-material"
+                    ),
+                ),
+            ),
+            engine=read_engine,
+            control_engine=engine,
+            market_data=_NoopMarketData(),  # type: ignore[arg-type]
+            clock_ms=lambda: now_ms,
+        )
+        headers = {
+            "origin": "https://owner.example.test",
+            "host": "owner.example.test",
+        }
+        async with app.router.lifespan_context(app), AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="https://owner.example.test",
+        ) as client:
+            login = await client.post(
+                "/api/owner/v1/auth/login",
+                json={
+                    "username": "owner",
+                    "password": "test-password",
+                    "totp_code": pyotp.TOTP(totp_seed).at(now_ms // 1_000),
+                },
+            )
+            assert login.status_code == 204
+            body = {
+                "expected_version": 99,
+                "expected_binding_id": source.exit_binding_id,
+                "target_exit_profile_id": target.exit_profile_id,
+                "target_exit_profile_semantic_hash": target.semantic_hash(),
+                "reason": "test_stale_http_binding",
+                "idempotency_key": "owner-request:http-stale-binding",
+            }
+            missing_totp = await client.post(
+                (
+                    "/api/owner/v1/controls/strategies/MPG-001/events/"
+                    f"{source.event_spec_id}/exit-profile"
+                ),
+                json=body,
+                headers=headers,
+            )
+            assert missing_totp.status_code == 401
+
+            stale = await client.post(
+                (
+                    "/api/owner/v1/controls/strategies/MPG-001/events/"
+                    f"{source.event_spec_id}/exit-profile"
+                ),
+                json={
+                    **body,
+                    "totp_code": pyotp.TOTP(totp_seed).at(now_ms // 1_000),
+                },
+                headers=headers,
+            )
+            assert stale.status_code == 409
+            assert stale.json()["error"]["code"] == "control_conflict"
+
+            readonly = await client.get(
+                "/api/owner/v1/controls/exit-profiles",
+                params={"event_spec_id": source.event_spec_id},
+            )
+            assert readonly.status_code == 200
+            assert len(readonly.json()["profiles"]) == 8
+            assert len(readonly.json()["current_bindings"]) == 1
+    finally:
+        await engine.dispose()
+        await _drop(database_name)
+
+
+class _NoopMarketData:
+    async def close(self) -> None:
+        return None
 
 
 async def _seed(engine: AsyncEngine) -> None:

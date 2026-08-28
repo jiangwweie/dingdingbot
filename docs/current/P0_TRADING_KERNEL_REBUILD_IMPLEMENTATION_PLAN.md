@@ -56,7 +56,7 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| PostgreSQL revision chain | Complete in the current tracked authority | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability -> 0004_owner_control_plane -> 0005_tradfi_instrument_center`; exact deployed revision and release state belong only to `MAIN_CONTROL_ROADMAP.md` |
+| PostgreSQL revision chain | Complete in the current tracked authority | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability -> 0004_owner_control_plane -> 0005_tradfi_instrument_center -> 0006_sor_dynamic_selection_v0 -> 0007_exit_profile_authority_v1`; exact deployed revision and release state belong only to `MAIN_CONTROL_ROADMAP.md` |
 | Owner control plane | Complete | Explicit StrategyGroup pause/resume, global new-ENTRY pause/resume, durable flatten-all authorization and progress projection, authenticated Owner API, and `/trading/` console |
 | Eight Strategy Events | Complete | Six Crypto CPM/MPG/MI/BRF2/SOR Events plus independent TradFi SOR LONG/SHORT Registry contracts |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, rising-edge or session Exposure Episode identity, deterministic Live/Replay parity |
@@ -64,7 +64,7 @@ settle, and review concurrently.
 | Admission evidence and Shadow Outcome | Complete | One Signal-owned Outcome supports eligible portfolio rejection through `fixed_horizon_excursion_v1` and TradFi strategy observation through `sor_path_observation_v1`; Observation creates no simulated Ticket or PnL, while an eligible live Signal may independently continue through the same formal Ticket path: AdmissionDecision, CapacityClaim, Ticket and Command |
 | Ticket issuance | Complete | Atomic Claim, budget, domain, Ticket, aggregate, event, and ENTRY command |
 | Venue Truth and recovery | Complete | ENTRY, protection, EXIT, flatten, cancel, timeout and unknown resolution |
-| Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, structural runner, controlled exit |
+| Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, immutable ExitProfile guards/TimeStop, rolling-extreme ATR Runner, controlled exit |
 | Reconciliation, Settlement, Review | Complete | Exact typed Binance order identities, append-only Review revisions, explicit funding availability, and atomic terminal Owner projection |
 | Runtime ownership | Complete | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
 | StrategyUniverse capability | Complete and deployed | Versioned 1..10 member pools, readonly certification, Warming with zero Signal, automatic atomic activation, frozen Ticket lineage, bounded CLI and PostgreSQL evidence |
@@ -127,20 +127,20 @@ starts Entry last. Any failure after service stop fences Entry and restores the
 safety workers. This bounded regular-release path does not rebuild PostgreSQL
 and does not run the historical destructive cutover.
 
-The one approved schema-changing path is explicit `compatible_upgrade`. Its
-current source is exact flat `0004_owner_control_plane` and its target is
-`0005_tradfi_instrument_center`. It requires zero active Ticket, position,
+The one approved schema-changing path is explicit `compatible_upgrade`. The
+current tracked transition is exact flat `0006_sor_dynamic_selection_v0` to
+`0007_exit_profile_authority_v1`; earlier transitions remain preservation
+evidence. It requires zero active Ticket, position,
 order, Reservation, Netting Domain, unresolved Command, unreviewed terminal
 Ticket and open Incident, and requires Entry fenced with all old writers
-stopped. It computes the canonical `0004` source-column preservation digest,
+stopped. It computes the canonical `0006` source-column preservation digest,
 runs the single Alembic revision, verifies the same digest, preserves the sole
-`policy-main` lineage and existing Universe authority, installs Product
-Compatibility plus the neutral `tradfi-equity-usdm-v1` Profile, expands the
-same Policy to exact Crypto and TradFi Event/Profile mappings, installs paused
-`SOR-US-EQ-PERP-001` control, and starts safety workers while Entry stays
-fenced. Historical `0002 -> 0003` and `0003 -> 0004`
-evidence remains intact; none of these transitions is an active-position
-handover or a runtime compatibility reader.
+`policy-main` lineage, Strategy controls and Universe authority, installs the
+immutable typed ExitProfile Catalog plus initial EventExitBinding authority,
+and starts safety workers while Entry stays fenced. Historical `0002 -> 0003`,
+`0003 -> 0004`, `0004 -> 0005` and `0005 -> 0006` evidence remains intact;
+none of these transitions is an active-position handover or a runtime
+compatibility reader.
 
 ## Completed Destructive Cutover
 

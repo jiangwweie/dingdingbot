@@ -64,6 +64,7 @@ from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.exit_policy import (
     CurrentEventExitBinding,
     EventExitBinding,
+    EventExitBindingEvent,
     ExitProfile,
     ExitProfileRecord,
 )
@@ -1846,6 +1847,22 @@ class ExitProfileAuthorityRepository(Protocol):
         reason: str,
         retired_at_ms: int,
     ) -> None: ...
+
+    async def list_profiles(self, *, limit: int) -> tuple[ExitProfileRecord, ...]: ...
+
+    async def list_current_bindings(
+        self,
+        *,
+        event_spec_id: str | None,
+        limit: int,
+    ) -> tuple[CurrentEventExitBinding, ...]: ...
+
+    async def list_binding_events(
+        self,
+        *,
+        event_spec_id: str | None,
+        limit: int,
+    ) -> tuple[EventExitBindingEvent, ...]: ...
 
 
 class InstrumentCertificationTarget(BaseModel):

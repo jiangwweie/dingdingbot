@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.application.ports import (
+    ExitProfileAuthorityRepository,
     KernelUnitOfWork,
     MonitorStateRecord,
     SelectionJobRecord,
@@ -13,6 +14,13 @@ from src.trading_kernel.application.project_owner_state import (
     owner_ticket_monitor_key,
 )
 from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
+from src.trading_kernel.domain.exit_policy import (
+    CurrentEventExitBinding,
+    EventExitBinding,
+    EventExitBindingEvent,
+    ExitProfileRecord,
+    build_exit_profile_catalog_digest,
+)
 from src.trading_kernel.domain.instrument_selection import DAY_MS
 from src.trading_kernel.domain.selection_authority import (
     AuthorityGapAudit,
@@ -24,6 +32,72 @@ from src.trading_kernel.domain.selection_authority import (
 from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
 
 _PERIOD_FACT_LIMIT = 8
+_EXIT_PROFILE_LIMIT = 32
+
+
+class ExitProfileAuthorityReadonlyRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str | None = None
+    event_limit: int = 20
+
+    @field_validator("event_spec_id", mode="before")
+    @classmethod
+    def _normalize_event_spec_id(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
+    @field_validator("event_limit")
+    @classmethod
+    def _require_event_limit(cls, value: int) -> int:
+        if not 1 <= value <= 50:
+            raise ValueError("Binding event limit must be in [1, 50]")
+        return value
+
+
+class ExitProfileAuthorityReadonlyView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str | None
+    catalog_digest: str
+    profiles: tuple[ExitProfileRecord, ...]
+    current_bindings: tuple[CurrentEventExitBinding, ...]
+    binding_facts: tuple[EventExitBinding, ...]
+    recent_events: tuple[EventExitBindingEvent, ...]
+
+    @model_validator(mode="after")
+    def _validate_authority_view(self) -> ExitProfileAuthorityReadonlyView:
+        if self.catalog_digest != build_exit_profile_catalog_digest():
+            raise ValueError("ExitProfile Catalog digest differs")
+        if len({item.profile.exit_profile_id for item in self.profiles}) != len(
+            self.profiles
+        ):
+            raise ValueError("ExitProfile readonly view contains duplicate Profiles")
+        facts = {item.exit_binding_id: item for item in self.binding_facts}
+        for current in self.current_bindings:
+            binding = facts.get(current.exit_binding_id)
+            if (
+                binding is None
+                or binding.event_spec_id != current.event_spec_id
+                or binding.binding_semantic_hash != current.binding_semantic_hash
+            ):
+                raise ValueError("current Binding differs from immutable fact")
+        if self.event_spec_id is not None and (
+            any(
+                item.event_spec_id != self.event_spec_id
+                for item in self.current_bindings
+            ) or any(
+                item.event_spec_id != self.event_spec_id
+                for item in self.binding_facts
+            ) or any(
+                item.event_spec_id != self.event_spec_id
+                for item in self.recent_events
+            )
+        ):
+            raise ValueError(
+                "ExitProfile readonly facts differ from requested Event"
+            )
+        return self
 
 
 class SelectionRuntimeReadonlyRequest(BaseModel):
@@ -211,4 +285,35 @@ async def get_selection_runtime_view(
             else current_authority.authority.first_eligible_close_time_ms
         ),
         release_compatibility_fact=release_fact,
+    )
+
+
+async def get_exit_profile_authority_view(
+    repository: ExitProfileAuthorityRepository,
+    request: ExitProfileAuthorityReadonlyRequest,
+) -> ExitProfileAuthorityReadonlyView:
+    profiles = await repository.list_profiles(limit=_EXIT_PROFILE_LIMIT)
+    current_bindings = await repository.list_current_bindings(
+        event_spec_id=request.event_spec_id,
+        limit=_EXIT_PROFILE_LIMIT,
+    )
+    binding_fact_items = []
+    for current in current_bindings:
+        binding = await repository.get_binding(current.exit_binding_id)
+        if binding is not None:
+            binding_fact_items.append(binding)
+    binding_facts = tuple(binding_fact_items)
+    if len(binding_facts) != len(current_bindings):
+        raise ValueError("current ExitProfile Binding fact is missing")
+    recent_events = await repository.list_binding_events(
+        event_spec_id=request.event_spec_id,
+        limit=request.event_limit,
+    )
+    return ExitProfileAuthorityReadonlyView(
+        event_spec_id=request.event_spec_id,
+        catalog_digest=build_exit_profile_catalog_digest(),
+        profiles=profiles,
+        current_bindings=current_bindings,
+        binding_facts=binding_facts,
+        recent_events=recent_events,
     )

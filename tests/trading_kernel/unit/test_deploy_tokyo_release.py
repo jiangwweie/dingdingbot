@@ -23,6 +23,7 @@ from src.trading_kernel.application.runtime import (
     RuntimeCompatibilityClassification,
     RuntimeReleaseCompatibilityFact,
 )
+from src.trading_kernel.domain.exit_policy import build_exit_profile_catalog_digest
 
 TARGET_COMMIT = "a" * 40
 CURRENT_COMMIT = "b" * 40
@@ -895,6 +896,7 @@ def test_dep_004_missing_target_safety_worker_fails_with_entry_fenced() -> None:
         ("schema", "schema revision"),
         ("seed", "Seed identity"),
         ("dynamic_runtime", "unexpected Dynamic Selection runtime facts"),
+        ("exit_profile_authority", "ExitProfile/Binding manifest"),
     ],
 )
 def test_dep_005_exact_target_identity_drift_blocks_postflight(
@@ -1657,6 +1659,14 @@ class FakeDeploymentBackend:
                 "authorities": 0,
                 "gap_audits": 0,
             },
+            "exit_profile_authority": {
+                "status": "pass",
+                "catalog_digest": build_exit_profile_catalog_digest(),
+                "profile_count": 8,
+                "binding_fact_count": 8,
+                "current_binding_count": 8,
+                "binding_event_count": 8,
+            },
             "owner_policy": {
                 "policy_version": 4,
                 "new_entry_submit_enabled": False,
@@ -1742,6 +1752,15 @@ class FakeDeploymentBackend:
                 "vacuums": 0,
                 "authorities": 0,
                 "gap_audits": 0,
+            }
+        elif self.postflight_drift == "exit_profile_authority":
+            payload["exit_profile_authority"] = {
+                "status": "fail",
+                "catalog_digest": "sha256:" + "0" * 64,
+                "profile_count": 7,
+                "binding_fact_count": 8,
+                "current_binding_count": 7,
+                "binding_event_count": 8,
             }
         if (
             self.certification_gate_failure is not None

@@ -5,34 +5,54 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from src.trading_kernel.application.owner_control import (
     ControlMutationRequest,
+    ExitProfileBindingMutationRequest,
+    ExitProfileRetirementRequest,
     FlattenPreview,
     FlattenSubmitRequest,
     begin_flatten_all,
     freeze_flatten_targets,
     preview_flatten_all,
+    retire_exit_profile,
     set_global_entry_state,
     set_strategy_entry_state,
     stage_dynamic_selection_mode,
+    switch_event_exit_profile,
 )
 from src.trading_kernel.application.ports import RuntimeProfileSnapshot
+from src.trading_kernel.domain.exit_policy import (
+    CurrentEventExitBinding,
+    ExitProfileRecord,
+)
 from src.trading_kernel.domain.owner_control import (
     OwnerControlOperation,
     StrategyEntryControl,
     StrategyEntryState,
 )
 from src.trading_kernel.domain.selection_authority import SelectionControl
+from src.trading_kernel.infrastructure.pg_exit_profile_repository import (
+    PostgresExitProfileAuthorityRepository,
+)
+from src.trading_kernel.infrastructure.pg_owner_read_repository import (
+    owner_read_transaction,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.interfaces.owner_console_http.auth import InvalidCredentials
 from src.trading_kernel.interfaces.owner_console_http.dependencies import (
     get_auth_service,
     get_clock_ms,
     get_control_engine,
+    get_read_engine,
     get_settings,
+)
+from src.trading_kernel.interfaces.readonly_api import (
+    ExitProfileAuthorityReadonlyRequest,
+    ExitProfileAuthorityReadonlyView,
+    get_exit_profile_authority_view,
 )
 
 router = APIRouter(prefix="/api/owner/v1", tags=["owner-controls"])
@@ -54,6 +74,18 @@ class FlattenBody(ControlWriteBody):
 
 class DynamicSelectionActivationBody(ControlWriteBody):
     effective_session_start_ms: int = Field(gt=0)
+
+
+class ExitProfileBindingBody(ControlWriteBody):
+    expected_binding_id: str = Field(min_length=1, max_length=240)
+    target_exit_profile_id: str = Field(min_length=1, max_length=240)
+    target_exit_profile_semantic_hash: str = Field(
+        pattern=r"^sha256:[0-9a-f]{64}$"
+    )
+
+
+class ExitProfileRetirementBody(ControlWriteBody):
+    exit_profile_semantic_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
 class EmptyControlBody(BaseModel):
@@ -396,6 +428,80 @@ async def activate_dynamic_selection(
             strategy_group_id=strategy_group_id,
             effective_session_start_ms=body.effective_session_start_ms,
             request=_mutation(body, settings.auth.username, now_ms),
+            authentication_strength="totp_step_up",
+        )
+
+
+@router.get("/controls/exit-profiles")
+async def read_exit_profile_authority(
+    request: Request,
+    event_spec_id: str | None = None,
+    event_limit: int = Query(default=20, ge=1, le=50),
+) -> ExitProfileAuthorityReadonlyView:
+    async with owner_read_transaction(get_read_engine(request)) as connection:
+        return await get_exit_profile_authority_view(
+            PostgresExitProfileAuthorityRepository(connection),
+            ExitProfileAuthorityReadonlyRequest(
+                event_spec_id=event_spec_id,
+                event_limit=event_limit,
+            ),
+        )
+
+
+@router.post(
+    "/controls/strategies/{strategy_group_id}/events/{event_spec_id}/exit-profile"
+)
+async def bind_event_exit_profile(
+    strategy_group_id: str,
+    event_spec_id: str,
+    body: ExitProfileBindingBody,
+    request: Request,
+) -> CurrentEventExitBinding:
+    _validate_write_request(request)
+    await _require_step_up(body, request)
+    settings = get_settings(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        return await switch_event_exit_profile(
+            uow,
+            strategy_group_id=strategy_group_id,
+            event_spec_id=event_spec_id,
+            request=ExitProfileBindingMutationRequest(
+                expected_version=body.expected_version,
+                expected_binding_id=body.expected_binding_id,
+                target_exit_profile_id=body.target_exit_profile_id,
+                target_exit_profile_semantic_hash=(
+                    body.target_exit_profile_semantic_hash
+                ),
+                reason=body.reason,
+                idempotency_key=body.idempotency_key,
+                owner_identity=settings.auth.username,
+                now_ms=get_clock_ms(request),
+            ),
+            authentication_strength="totp_step_up",
+        )
+
+
+@router.post("/controls/exit-profiles/{exit_profile_id}/retire")
+async def retire_profile(
+    exit_profile_id: str,
+    body: ExitProfileRetirementBody,
+    request: Request,
+) -> ExitProfileRecord:
+    _validate_write_request(request)
+    await _require_step_up(body, request)
+    settings = get_settings(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        return await retire_exit_profile(
+            uow,
+            request=ExitProfileRetirementRequest(
+                expected_version=body.expected_version,
+                exit_profile_id=exit_profile_id,
+                exit_profile_semantic_hash=body.exit_profile_semantic_hash,
+                reason=body.reason,
+                idempotency_key=body.idempotency_key,
+                owner_identity=settings.auth.username,
+                now_ms=get_clock_ms(request),
+            ),
             authentication_strength="totp_step_up",
         )
 

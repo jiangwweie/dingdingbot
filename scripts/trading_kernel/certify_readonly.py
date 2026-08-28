@@ -25,7 +25,12 @@ if str(REPO_ROOT) not in sys.path:
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_UNIVERSE_BATCHES,
 )
-from src.trading_kernel.domain.exit_policy import registered_exit_policies
+from src.trading_kernel.domain.exit_policy import (
+    build_exit_profile_catalog_digest,
+    registered_event_exit_bindings,
+    registered_exit_policies,
+    registered_exit_profiles,
+)
 from src.trading_kernel.domain.instrument_certification import (
     build_certification_manifest_digest,
 )
@@ -552,6 +557,74 @@ async def _certify(
                 or ""
             )
             live_registry_manifest = await _live_registry_manifest(connection)
+            exit_profile_rows = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT exit_policy_id, exit_policy_version,
+                               profile_schema_version, position_side, policy,
+                               semantic_hash, status
+                          FROM brc_exit_policies
+                         WHERE profile_schema_version = 'exit_profile_v1'
+                         ORDER BY exit_policy_id
+                        """
+                    )
+                )
+            ).mappings().all()
+            exit_binding_rows = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT exit_binding_id, binding_version, event_spec_id,
+                               exit_profile_id, exit_profile_semantic_hash,
+                               binding_semantic_hash, activation_reason
+                          FROM brc_event_exit_profile_bindings
+                         ORDER BY exit_binding_id
+                        """
+                    )
+                )
+            ).mappings().all()
+            exit_current_rows = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT current.event_spec_id,
+                               current.exit_binding_id,
+                               current.binding_semantic_hash,
+                               current.projection_version,
+                               binding.event_spec_id AS binding_event_spec_id,
+                               binding.exit_profile_id,
+                               binding.exit_profile_semantic_hash,
+                               binding.binding_semantic_hash AS fact_binding_hash,
+                               profile.status AS profile_status,
+                               event.status AS event_status
+                          FROM brc_event_exit_profile_binding_current current
+                          JOIN brc_event_exit_profile_bindings binding
+                            ON binding.exit_binding_id = current.exit_binding_id
+                           AND binding.binding_semantic_hash =
+                               current.binding_semantic_hash
+                          JOIN brc_exit_policies profile
+                            ON profile.exit_policy_id = binding.exit_profile_id
+                           AND profile.semantic_hash =
+                               binding.exit_profile_semantic_hash
+                          JOIN brc_event_specs event
+                            ON event.event_spec_id = current.event_spec_id
+                         ORDER BY current.event_spec_id
+                        """
+                    )
+                )
+            ).mappings().all()
+            exit_binding_event_rows = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT exit_binding_id, operation
+                          FROM brc_event_exit_profile_binding_events
+                         ORDER BY exit_binding_id, operation
+                        """
+                    )
+                )
+            ).mappings().all()
             runtime_profile_row = (
                 await connection.execute(
                     text(
@@ -1164,6 +1237,12 @@ async def _certify(
         "authorities": int(dynamic_selection_runtime_counts_row[4]),
         "gap_audits": int(dynamic_selection_runtime_counts_row[5]),
     }
+    exit_profile_authority = _exit_profile_authority_manifest(
+        profile_rows=exit_profile_rows,
+        binding_rows=exit_binding_rows,
+        current_rows=exit_current_rows,
+        event_rows=exit_binding_event_rows,
+    )
     release_counts = {
         "budget_reservations": budget_reservations,
         "released_budget_reservations": released_budget_reservations,
@@ -1278,6 +1357,7 @@ async def _certify(
         and legacy_execution_tables == 0
         and unresolved_commands == 0
         and open_incidents == 0
+        and exit_profile_authority["status"] == "pass"
     )
     expected_event_specs = tuple(
         sorted(
@@ -1546,11 +1626,93 @@ async def _certify(
         "release_counts": release_counts,
         "active_counts": active_counts,
         "dynamic_selection_runtime_counts": dynamic_selection_runtime_counts,
+        "exit_profile_authority": exit_profile_authority,
         "owner_projection": owner_projection,
         "closure_ticket": closure_ticket,
         "require_flat": require_flat,
         "closure_ticket_id": normalized_closure_ticket_id,
         "checks": checks,
+    }
+
+
+def _exit_profile_authority_manifest(
+    *,
+    profile_rows: Sequence[RowMapping],
+    binding_rows: Sequence[RowMapping],
+    current_rows: Sequence[RowMapping],
+    event_rows: Sequence[RowMapping],
+) -> dict[str, object]:
+    expected_profiles = {
+        item.exit_profile_id: item for item in registered_exit_profiles()
+    }
+    actual_profiles = {str(row["exit_policy_id"]): row for row in profile_rows}
+    profiles_pass = bool(
+        set(actual_profiles) == set(expected_profiles)
+        and all(
+            str(actual_profiles[profile_id]["exit_policy_version"])
+            == str(profile.exit_profile_version)
+            and actual_profiles[profile_id]["profile_schema_version"]
+            == profile.profile_schema_version
+            and actual_profiles[profile_id]["position_side"]
+            == profile.position_side
+            and actual_profiles[profile_id]["policy"]
+            == profile.model_dump(mode="json")
+            and actual_profiles[profile_id]["semantic_hash"]
+            == profile.semantic_hash()
+            and actual_profiles[profile_id]["status"] in {"active", "retired"}
+            for profile_id, profile in expected_profiles.items()
+        )
+    )
+    expected_bindings = {
+        item.exit_binding_id: item for item in registered_event_exit_bindings()
+    }
+    actual_bindings = {str(row["exit_binding_id"]): row for row in binding_rows}
+    initial_bindings_pass = all(
+        binding_id in actual_bindings
+        and int(str(actual_bindings[binding_id]["binding_version"]))
+        == binding.binding_version
+        and actual_bindings[binding_id]["event_spec_id"] == binding.event_spec_id
+        and actual_bindings[binding_id]["exit_profile_id"]
+        == binding.exit_profile_id
+        and actual_bindings[binding_id]["exit_profile_semantic_hash"]
+        == binding.exit_profile_semantic_hash
+        and actual_bindings[binding_id]["binding_semantic_hash"]
+        == binding.binding_semantic_hash
+        and actual_bindings[binding_id]["activation_reason"]
+        == binding.activation_reason
+        for binding_id, binding in expected_bindings.items()
+    )
+    current_pass = bool(
+        len(current_rows) == len(registered_event_exit_bindings())
+        and all(
+            row["event_spec_id"] == row["binding_event_spec_id"]
+            and row["binding_semantic_hash"] == row["fact_binding_hash"]
+            and int(str(row["projection_version"])) > 0
+            and row["profile_status"] == "active"
+            and row["event_status"] == "active"
+            for row in current_rows
+        )
+    )
+    activated_ids = {
+        str(row["exit_binding_id"])
+        for row in event_rows
+        if row["operation"] == "ACTIVATED"
+    }
+    events_pass = all(
+        binding_id in activated_ids for binding_id in expected_bindings
+    )
+    passed = profiles_pass and initial_bindings_pass and current_pass and events_pass
+    return {
+        "status": "pass" if passed else "fail",
+        "catalog_digest": build_exit_profile_catalog_digest(),
+        "profile_count": len(profile_rows),
+        "binding_fact_count": len(binding_rows),
+        "current_binding_count": len(current_rows),
+        "binding_event_count": len(event_rows),
+        "profiles_pass": profiles_pass,
+        "initial_bindings_pass": initial_bindings_pass,
+        "current_bindings_pass": current_pass,
+        "binding_events_pass": events_pass,
     }
 
 

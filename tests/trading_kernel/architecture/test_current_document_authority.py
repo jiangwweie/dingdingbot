@@ -326,7 +326,9 @@ def test_current_schema_authority_is_the_exact_flat_forward_revision_chain() -> 
         "-> 0002_sor_v3_strategy_group_capacity "
         "-> 0003_portfolio_admission_observability "
         "-> 0004_owner_control_plane "
-        "-> 0005_tradfi_instrument_center"
+        "-> 0005_tradfi_instrument_center "
+        "-> 0006_sor_dynamic_selection_v0 "
+        "-> 0007_exit_profile_authority_v1"
     )
 
     for relative_path in SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS:
@@ -353,6 +355,8 @@ def test_current_documents_converge_on_portfolio_admission_authority() -> None:
             "0003_portfolio_admission_observability",
             "0004_owner_control_plane",
             "0005_tradfi_instrument_center",
+            "0006_sor_dynamic_selection_v0",
+            "0007_exit_profile_authority_v1",
             "AdmissionDecision",
             "Shadow Outcome",
         ),
@@ -365,6 +369,8 @@ def test_current_documents_converge_on_portfolio_admission_authority() -> None:
             "0003_portfolio_admission_observability",
             "0004_owner_control_plane",
             "0005_tradfi_instrument_center",
+            "0006_sor_dynamic_selection_v0",
+            "0007_exit_profile_authority_v1",
             "fix-forward",
         ),
         "docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md": (

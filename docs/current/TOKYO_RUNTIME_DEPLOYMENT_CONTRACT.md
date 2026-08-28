@@ -237,6 +237,7 @@ upgrade:
 -> 0004_owner_control_plane
 -> 0005_tradfi_instrument_center
 -> 0006_sor_dynamic_selection_v0
+-> 0007_exit_profile_authority_v1
 ```
 
 It preserves terminal PostgreSQL lineage from the exact `0002` source; it does
@@ -446,6 +447,69 @@ gates and authority transition. They must not evolve into different migration
 semantics. A failure after migration remains Entry-fenced and proceeds by
 target-schema fix-forward; the `0002` runtime is never restarted against
 `0003`.
+
+## `0006 -> 0007` ExitProfile Authority Capability Deployment
+
+### Authorization boundary
+
+**Software deployment**, **Crypto SOR resume** and any later **Owner Profile
+switch** are three independent authorities. The software deployment installs
+Schema, typed Profile/Binding Catalog, Owner API and Lifecycle capability only.
+It does not resume a StrategyGroup, switch an Event to another Profile, mutate
+Profile content or write to the exchange.
+
+### Frozen release evidence
+
+The exact R4 candidate must include complete Unit/Architecture, PostgreSQL
+Integration, Full-chain, Ruff, Mypy and diff checks plus:
+
+1. empty and production-shaped `0006 -> 0007` Migration/preservation;
+2. exact eight-Profile/eight-initial-Binding Catalog identity;
+3. Owner TOTP, idempotency, stale-version, retirement and concurrency tests;
+4. Claim/Ticket Binding ID/hash/version and two-leg materialization tests;
+5. Lifecycle PRE_TP1/ABSOLUTE, earliest non-zero exposure and 97-row bounds;
+6. architecture proof of zero YAML/YML authority and zero legacy Event Policy
+   resolution in application runtime.
+
+### Two-phase stopped-and-flat gate
+
+Phase A is advisory only. Before stopping services, refresh PostgreSQL and
+Binance readonly facts and abort without interruption when exposure, order,
+Reservation, unresolved Command, open Incident or missing Review already makes
+the source non-flat.
+
+Phase B is authoritative. Fence Entry, stop Observation, Lifecycle and
+Reconciliation, prove every writer stopped, then freshly re-read PostgreSQL and
+Binance. Phase A evidence is never reused. Only the second exact-flat result
+authorizes the single forward Alembic revision from
+`0006_sor_dynamic_selection_v0` to `0007_exit_profile_authority_v1`.
+
+### Target postflight
+
+While Entry remains fenced, require:
+
+```text
+8 exact ExitProfiles
+8 initial immutable Binding facts
+8 current Event Binding pointers
+8 initial ACTIVATED events
+0 Profile switch/retirement side effect
+0 new Ticket/Exchange Command/Position/Incident
+exact Registry/Policy/Universe/Seed identity
+```
+
+The target runtime reads Profile/Binding authority only from PostgreSQL. No
+YAML/YML, JSON, Markdown, cache or generated report is installed or read as
+authority. Owner Profile switch and Profile retirement remain later
+TOTP-protected control-plane actions.
+
+### Recovery
+
+Any failure after Schema commit is fix-forward on `0007`. Downgrade, old
+runtime restart against the new Schema, dual read/write, legacy Event Policy
+fallback and direct Binding pointer DML are forbidden. Existing exposure must
+already be terminal before Migration; Migration is never a position handover
+or flatten mechanism.
 
 ## StrategyUniverse Deployment Gate
 

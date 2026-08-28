@@ -302,6 +302,40 @@ class ExitProfileRecord(BaseModel):
     status: Literal["active", "retired"]
 
 
+class EventExitBindingEvent(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    binding_event_id: str
+    event_spec_id: str
+    exit_binding_id: str
+    binding_version: int
+    operation: Literal["ACTIVATED", "RETIRED"]
+    authorization_source: Literal["system_migration", "owner_control"]
+    owner_authorization_id: str | None
+    reason: str
+    created_at_ms: int
+
+    @model_validator(mode="after")
+    def _validate_event(self) -> EventExitBindingEvent:
+        if min(self.binding_version, self.created_at_ms) <= 0:
+            raise ValueError("Binding event version and time must be positive")
+        if not all(
+            value.strip()
+            for value in (
+                self.binding_event_id,
+                self.event_spec_id,
+                self.exit_binding_id,
+                self.reason,
+            )
+        ):
+            raise ValueError("Binding event identities must be non-blank")
+        if (self.authorization_source == "owner_control") != (
+            self.owner_authorization_id is not None
+        ):
+            raise ValueError("Binding event authorization shape is invalid")
+        return self
+
+
 class ExitPolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

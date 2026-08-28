@@ -73,6 +73,7 @@ is one unbranched forward Alembic chain:
 -> 0004_owner_control_plane
 -> 0005_tradfi_instrument_center
 -> 0006_sor_dynamic_selection_v0
+-> 0007_exit_profile_authority_v1
 ```
 
 `0001` is a frozen historical schema snapshot. `0002 -> 0003` is a stopped,
@@ -102,6 +103,16 @@ pair while adding immutable Selection facts, Materialization Generation,
 time-bounded SelectionSessionAuthority, Entry Vacuum, Authority Gap Audit and
 nullable birth-authority lineage. The migration creates no active Snapshot,
 Generation, Authority, Vacuum, Ticket or Exchange Command.
+
+`0006 -> 0007` is the stopped, flat, forward-only ExitProfile Authority
+upgrade. It preserves terminal lineage, Static/Dynamic Selection facts and
+existing Profile provenance, then installs the immutable typed ExitProfile
+Catalog, versioned EventExitBinding facts/current/events and nullable
+historical-safe Claim/Ticket Binding lineage. New Claim authority comes only
+from the PostgreSQL current Binding; issued Ticket lifecycle exact-loads only
+its frozen Profile. The migration performs no Profile switch, creates no
+Ticket or Exchange Command, and installs no YAML/YML or file-backed runtime
+authority.
 
 Strategy semantics live in the Registry, while concrete instrument membership,
 certification, warming, current activation, and frozen Signal/Ticket lineage
