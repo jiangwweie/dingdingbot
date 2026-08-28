@@ -264,6 +264,44 @@ class EventExitBinding(BaseModel):
         return self
 
 
+class CurrentEventExitBinding(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str
+    exit_binding_id: str
+    binding_semantic_hash: str
+    projection_version: int
+    activated_at_ms: int
+
+    @field_validator("event_spec_id", "exit_binding_id", mode="before")
+    @classmethod
+    def _require_current_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("current EventExitBinding identity must be non-blank")
+        return normalized
+
+    @field_validator("binding_semantic_hash")
+    @classmethod
+    def _require_current_hash(cls, value: str) -> str:
+        if not value.startswith("sha256:") or len(value) != 71:
+            raise ValueError("current EventExitBinding hash must be canonical")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_current(self) -> CurrentEventExitBinding:
+        if self.projection_version <= 0 or self.activated_at_ms <= 0:
+            raise ValueError("current Binding version and time must be positive")
+        return self
+
+
+class ExitProfileRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    profile: ExitProfile
+    status: Literal["active", "retired"]
+
+
 class ExitPolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

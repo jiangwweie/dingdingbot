@@ -19,6 +19,7 @@ LONG_TEXT = sa.String(512)
 
 def upgrade() -> None:
     _assert_flat_source()
+    _upgrade_owner_authorization_purposes()
     _upgrade_profile_store()
     _create_binding_authority()
     _add_claim_ticket_binding_lineage()
@@ -88,6 +89,22 @@ def _upgrade_profile_store() -> None:
         "brc_exit_policies",
         "(event_spec_id IS NOT NULL AND profile_schema_version IS NULL) OR "
         "(event_spec_id IS NULL AND profile_schema_version = 'exit_profile_v1')",
+    )
+
+
+def _upgrade_owner_authorization_purposes() -> None:
+    op.drop_constraint(
+        "ck_brc_owner_authorizations_purpose_valid",
+        "brc_owner_authorizations",
+        type_="check",
+    )
+    op.create_check_constraint(
+        "ck_brc_owner_authorizations_purpose_valid",
+        "brc_owner_authorizations",
+        "purpose IN ('strategy_pause', 'strategy_resume', 'entry_pause', "
+        "'entry_resume', 'owner_flatten_all', 'universe_configure', "
+        "'selection_mode_change', 'exit_profile_bind', "
+        "'exit_profile_retire')",
     )
 
 

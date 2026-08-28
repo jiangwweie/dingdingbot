@@ -25,6 +25,9 @@ from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
     registered_strategy_contracts,
 )
+from src.trading_kernel.infrastructure.pg_exit_profile_repository import (
+    PostgresExitProfileAuthorityRepository,
+)
 from src.trading_kernel.infrastructure.pg_models import (
     event_exit_profile_binding_current,
     event_exit_profile_binding_events,
@@ -111,9 +114,7 @@ class PostgresStrategyRegistryRepository:
                 group_contracts,
                 key=lambda item: item.event_spec_id,
             )
-            version_ids = {
-                contract.strategy_version_id for contract in group_contracts
-            }
+            version_ids = {contract.strategy_version_id for contract in group_contracts}
             semantic_versions = {
                 contract.semantic_version for contract in group_contracts
             }
@@ -129,29 +130,27 @@ class PostgresStrategyRegistryRepository:
                     f"strategy Registry group status conflicts: {strategy_group_id}"
                 )
             status = group_contracts[0].status
-            counters["inserted_strategy_group_count"] += (
-                await self._activate_strategy_group_version(
-                    strategy_group_id=strategy_group_id,
-                    active_version_id=active_version_id,
-                    status=status,
-                    seeded_at_ms=seeded_at_ms,
-                )
+            counters[
+                "inserted_strategy_group_count"
+            ] += await self._activate_strategy_group_version(
+                strategy_group_id=strategy_group_id,
+                active_version_id=active_version_id,
+                status=status,
+                seeded_at_ms=seeded_at_ms,
             )
-            counters["inserted_strategy_version_count"] += (
-                await self._insert_strategy_version(
-                    strategy_version_id=active_version_id,
-                    strategy_group_id=strategy_group_id,
-                    semantic_version=semantic_version,
-                    event_spec_ids=tuple(
-                        item.event_spec_id for item in group_contracts
-                    ),
-                    registry_semantic_hash=registry_semantic_hash,
-                    status=status,
-                    seeded_at_ms=seeded_at_ms,
-                    compatible_source_registry_semantic_hash=(
-                        compatible_source_registry_semantic_hash
-                    ),
-                )
+            counters[
+                "inserted_strategy_version_count"
+            ] += await self._insert_strategy_version(
+                strategy_version_id=active_version_id,
+                strategy_group_id=strategy_group_id,
+                semantic_version=semantic_version,
+                event_spec_ids=tuple(item.event_spec_id for item in group_contracts),
+                registry_semantic_hash=registry_semantic_hash,
+                status=status,
+                seeded_at_ms=seeded_at_ms,
+                compatible_source_registry_semantic_hash=(
+                    compatible_source_registry_semantic_hash
+                ),
             )
 
         facts_by_id = {
@@ -216,29 +215,29 @@ class PostgresStrategyRegistryRepository:
 
             if include_product_compatibility:
                 compatibility = product_compatibility_for(contract.event_spec_id)
-                counters["inserted_product_compatibility_count"] += (
-                    await self._insert_exact(
-                        event_product_compatibility,
-                        "event_spec_id",
-                        {
-                            "event_spec_id": compatibility.event_spec_id,
-                            "product_family": compatibility.product_family,
-                            "asset_class": compatibility.asset_class,
-                            "contract_type": compatibility.contract_type,
-                            "underlying_type": compatibility.underlying_type,
-                            "margin_asset": compatibility.margin_asset,
-                            "semantic_digest": compatibility.semantic_digest,
-                            "created_at_ms": seeded_at_ms,
-                        },
-                        compare_keys=(
-                            "product_family",
-                            "asset_class",
-                            "contract_type",
-                            "underlying_type",
-                            "margin_asset",
-                            "semantic_digest",
-                        ),
-                    )
+                counters[
+                    "inserted_product_compatibility_count"
+                ] += await self._insert_exact(
+                    event_product_compatibility,
+                    "event_spec_id",
+                    {
+                        "event_spec_id": compatibility.event_spec_id,
+                        "product_family": compatibility.product_family,
+                        "asset_class": compatibility.asset_class,
+                        "contract_type": compatibility.contract_type,
+                        "underlying_type": compatibility.underlying_type,
+                        "margin_asset": compatibility.margin_asset,
+                        "semantic_digest": compatibility.semantic_digest,
+                        "created_at_ms": seeded_at_ms,
+                    },
+                    compare_keys=(
+                        "product_family",
+                        "asset_class",
+                        "contract_type",
+                        "underlying_type",
+                        "margin_asset",
+                        "semantic_digest",
+                    ),
                 )
 
             exit_policy = next(
@@ -333,51 +332,51 @@ class PostgresStrategyRegistryRepository:
                         "activation_reason",
                     ),
                 )
-                counters["inserted_exit_binding_current_count"] += (
-                    await self._insert_exact(
-                        event_exit_profile_binding_current,
-                        "event_spec_id",
-                        {
-                            "event_spec_id": binding.event_spec_id,
-                            "exit_binding_id": binding.exit_binding_id,
-                            "binding_semantic_hash": binding.binding_semantic_hash,
-                            "projection_version": 1,
-                            "activated_at_ms": seeded_at_ms,
-                        },
-                        compare_keys=(
-                            "exit_binding_id",
-                            "binding_semantic_hash",
-                            "projection_version",
-                        ),
-                    )
+                counters[
+                    "inserted_exit_binding_current_count"
+                ] += await self._insert_exact(
+                    event_exit_profile_binding_current,
+                    "event_spec_id",
+                    {
+                        "event_spec_id": binding.event_spec_id,
+                        "exit_binding_id": binding.exit_binding_id,
+                        "binding_semantic_hash": binding.binding_semantic_hash,
+                        "projection_version": 1,
+                        "activated_at_ms": seeded_at_ms,
+                    },
+                    compare_keys=(
+                        "exit_binding_id",
+                        "binding_semantic_hash",
+                        "projection_version",
+                    ),
                 )
-                counters["inserted_exit_binding_event_count"] += (
-                    await self._insert_exact(
-                        event_exit_profile_binding_events,
-                        "binding_event_id",
-                        {
-                            "binding_event_id": (
-                                f"binding-event:{binding.exit_binding_id}:activated"
-                            ),
-                            "event_spec_id": binding.event_spec_id,
-                            "exit_binding_id": binding.exit_binding_id,
-                            "binding_version": binding.binding_version,
-                            "operation": "ACTIVATED",
-                            "authorization_source": "system_migration",
-                            "owner_authorization_id": None,
-                            "reason": binding.activation_reason,
-                            "created_at_ms": seeded_at_ms,
-                        },
-                        compare_keys=(
-                            "event_spec_id",
-                            "exit_binding_id",
-                            "binding_version",
-                            "operation",
-                            "authorization_source",
-                            "owner_authorization_id",
-                            "reason",
+                counters[
+                    "inserted_exit_binding_event_count"
+                ] += await self._insert_exact(
+                    event_exit_profile_binding_events,
+                    "binding_event_id",
+                    {
+                        "binding_event_id": (
+                            f"binding-event:{binding.exit_binding_id}:activated"
                         ),
-                    )
+                        "event_spec_id": binding.event_spec_id,
+                        "exit_binding_id": binding.exit_binding_id,
+                        "binding_version": binding.binding_version,
+                        "operation": "ACTIVATED",
+                        "authorization_source": "system_migration",
+                        "owner_authorization_id": None,
+                        "reason": binding.activation_reason,
+                        "created_at_ms": seeded_at_ms,
+                    },
+                    compare_keys=(
+                        "event_spec_id",
+                        "exit_binding_id",
+                        "binding_version",
+                        "operation",
+                        "authorization_source",
+                        "owner_authorization_id",
+                        "reason",
+                    ),
                 )
 
         return RegistrySeedResult(
@@ -412,8 +411,7 @@ class PostgresStrategyRegistryRepository:
                 await self._connection.execute(
                     sa.select(strategy_versions.c.strategy_version_id)
                     .where(
-                        strategy_versions.c.strategy_group_id
-                        == strategy_group_id,
+                        strategy_versions.c.strategy_group_id == strategy_group_id,
                         strategy_versions.c.status == "active",
                     )
                     .order_by(
@@ -427,8 +425,7 @@ class PostgresStrategyRegistryRepository:
         if existing is None:
             if active_version_ids:
                 raise RegistrySeedConflict(
-                    "strategy Registry active version conflicts: "
-                    f"{strategy_group_id}"
+                    f"strategy Registry active version conflicts: {strategy_group_id}"
                 )
             await self._connection.execute(sa.insert(strategy_groups).values(expected))
             return 1
@@ -468,6 +465,7 @@ class PostgresStrategyRegistryRepository:
                 strategy_group_id=strategy_group_id,
                 strategy_version_id=current_version_id,
                 semantic_version=current_version,
+                retired_at_ms=seeded_at_ms,
             )
 
         await self._connection.execute(
@@ -487,12 +485,11 @@ class PostgresStrategyRegistryRepository:
         strategy_group_id: str,
         strategy_version_id: str,
         semantic_version: int,
+        retired_at_ms: int,
     ) -> None:
         result = await self._connection.execute(
             sa.select(strategy_versions)
-            .where(
-                strategy_versions.c.strategy_version_id == strategy_version_id
-            )
+            .where(strategy_versions.c.strategy_version_id == strategy_version_id)
             .with_for_update(of=strategy_versions)
         )
         existing = result.mappings().one_or_none()
@@ -506,25 +503,36 @@ class PostgresStrategyRegistryRepository:
                 f"strategy Registry active version conflicts: {strategy_version_id}"
             )
         historical_events = (
-            await self._connection.execute(
-                sa.select(
-                    event_specs.c.event_spec_id,
-                    event_specs.c.exit_policy_id,
-                    event_specs.c.status,
+            (
+                await self._connection.execute(
+                    sa.select(
+                        event_specs.c.event_spec_id,
+                        event_specs.c.exit_policy_id,
+                        event_specs.c.status,
+                    )
+                    .where(event_specs.c.strategy_version_id == strategy_version_id)
+                    .order_by(event_specs.c.event_spec_id)
+                    .with_for_update(of=event_specs)
                 )
-                .where(
-                    event_specs.c.strategy_version_id == strategy_version_id
-                )
-                .order_by(event_specs.c.event_spec_id)
-                .with_for_update(of=event_specs)
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         if not historical_events or any(
             row["status"] != "active" for row in historical_events
         ):
             raise RegistrySeedConflict(
                 f"strategy Registry historical Event conflicts: {strategy_version_id}"
             )
+        await PostgresExitProfileAuthorityRepository(
+            self._connection
+        ).retire_current_bindings_for_events(
+            event_spec_ids=tuple(
+                str(row["event_spec_id"]) for row in historical_events
+            ),
+            reason=f"strategy_version_retired:{strategy_version_id}",
+            retired_at_ms=retired_at_ms,
+        )
         await self._connection.execute(
             sa.update(event_specs)
             .where(event_specs.c.strategy_version_id == strategy_version_id)
@@ -532,9 +540,7 @@ class PostgresStrategyRegistryRepository:
         )
         await self._connection.execute(
             sa.update(strategy_versions)
-            .where(
-                strategy_versions.c.strategy_version_id == strategy_version_id
-            )
+            .where(strategy_versions.c.strategy_version_id == strategy_version_id)
             .values(status="retired")
         )
 
@@ -565,14 +571,14 @@ class PostgresStrategyRegistryRepository:
         }
         result = await self._connection.execute(
             sa.select(strategy_versions)
-            .where(
-                strategy_versions.c.strategy_version_id == strategy_version_id
-            )
+            .where(strategy_versions.c.strategy_version_id == strategy_version_id)
             .limit(1)
         )
         existing = result.mappings().one_or_none()
         if existing is None:
-            await self._connection.execute(sa.insert(strategy_versions).values(expected))
+            await self._connection.execute(
+                sa.insert(strategy_versions).values(expected)
+            )
             return 1
         if not _matches(
             existing,
@@ -595,8 +601,7 @@ class PostgresStrategyRegistryRepository:
             updated = await self._connection.execute(
                 sa.update(strategy_versions)
                 .where(
-                    strategy_versions.c.strategy_version_id
-                    == strategy_version_id,
+                    strategy_versions.c.strategy_version_id == strategy_version_id,
                     strategy_versions.c.semantics == compatible_source_semantics,
                 )
                 .values(semantics=semantics)
@@ -714,10 +719,7 @@ class PostgresStrategyRegistryRepository:
             if isinstance(identity_columns, str)
             else identity_columns
         )
-        predicates = [
-            table.c[name] == values[name]
-            for name in identity_names
-        ]
+        predicates = [table.c[name] == values[name] for name in identity_names]
         selected_names = tuple(dict.fromkeys((*identity_names, *compare_keys)))
         result = await self._connection.execute(
             sa.select(*(table.c[name] for name in selected_names))
@@ -730,9 +732,7 @@ class PostgresStrategyRegistryRepository:
             return 1
         if not _matches(existing, values, compare_keys):
             identity = ":".join(str(values[name]) for name in identity_names)
-            raise RegistrySeedConflict(
-                f"strategy Registry conflict for {identity}"
-            )
+            raise RegistrySeedConflict(f"strategy Registry conflict for {identity}")
         return 0
 
 

@@ -61,7 +61,13 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.events import TradeEvent
-from src.trading_kernel.domain.exit_policy import ExitPolicy
+from src.trading_kernel.domain.exit_policy import (
+    CurrentEventExitBinding,
+    EventExitBinding,
+    ExitPolicy,
+    ExitProfile,
+    ExitProfileRecord,
+)
 from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.instrument_certification import (
@@ -124,6 +130,10 @@ if TYPE_CHECKING:
 
 class AggregateVersionConflict(RuntimeError):
     """The persisted aggregate is not the version used to compute a change."""
+
+
+class ExitProfileAuthorityConflict(RuntimeError):
+    """ExitProfile authority changed or current facts block the mutation."""
 
 
 class UnsupportedKernelEffect(RuntimeError):
@@ -1802,6 +1812,51 @@ class InstrumentSelectionRepository(Protocol):
     ) -> None: ...
 
 
+class ExitProfileAuthorityRepository(Protocol):
+    async def acquire_authority_write_lock(self) -> None: ...
+
+    async def get_current_binding(
+        self,
+        event_spec_id: str,
+        *,
+        for_update: bool = False,
+    ) -> CurrentEventExitBinding | None: ...
+
+    async def get_binding(self, exit_binding_id: str) -> EventExitBinding | None: ...
+
+    async def get_profile(
+        self,
+        *,
+        exit_profile_id: str,
+        semantic_hash: str,
+    ) -> ExitProfileRecord | None: ...
+
+    async def switch_current_binding(
+        self,
+        *,
+        expected_current: CurrentEventExitBinding,
+        new_binding: EventExitBinding,
+        owner_authorization_id: str,
+        reason: str,
+        switched_at_ms: int,
+    ) -> CurrentEventExitBinding: ...
+
+    async def retire_profile(
+        self,
+        *,
+        profile: ExitProfile,
+        retired_at_ms: int,
+    ) -> ExitProfileRecord: ...
+
+    async def retire_current_bindings_for_events(
+        self,
+        *,
+        event_spec_ids: tuple[str, ...],
+        reason: str,
+        retired_at_ms: int,
+    ) -> None: ...
+
+
 class InstrumentCertificationTarget(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1973,6 +2028,7 @@ class KernelUnitOfWork(Protocol):
     strategy_registry: StrategyRegistryRepository
     strategy_universes: StrategyUniverseRepository
     instrument_selection: InstrumentSelectionRepository
+    exit_profiles: ExitProfileAuthorityRepository
 
     async def __aenter__(self) -> Self: ...
 

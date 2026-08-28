@@ -50,9 +50,7 @@ COMPATIBLE_SOURCE_REVISION = "0002_sor_v3_strategy_group_capacity"
 OWNER_CONTROL_SOURCE_REVISION = "0003_portfolio_admission_observability"
 TRADFI_INSTRUMENT_SOURCE_REVISION = "0004_owner_control_plane"
 DYNAMIC_SELECTION_SOURCE_REVISION = "0005_tradfi_instrument_center"
-HISTORICAL_PRESERVATION_TARGET_REVISION = (
-    "0003_portfolio_admission_observability"
-)
+HISTORICAL_PRESERVATION_TARGET_REVISION = "0003_portfolio_admission_observability"
 _OWNER_CONTROL_TABLES = frozenset(
     {
         "brc_owner_authorizations",
@@ -211,9 +209,7 @@ _TARGET_CONTRACTS = registered_strategy_contracts()
 _TARGET_VERSION_IDS = frozenset(
     contract.strategy_version_id for contract in _TARGET_CONTRACTS
 )
-_TARGET_EVENT_IDS = frozenset(
-    contract.event_spec_id for contract in _TARGET_CONTRACTS
-)
+_TARGET_EVENT_IDS = frozenset(contract.event_spec_id for contract in _TARGET_CONTRACTS)
 _TARGET_EXIT_POLICY_IDS = frozenset(
     policy.exit_policy_id for policy in registered_exit_policies()
 )
@@ -465,7 +461,9 @@ async def _verify_preservation(
     }:
         raise ValueError("preservation source revision is unsupported")
     if not _is_sha256_identity(expected_digest):
-        raise ValueError("expected preservation digest must be an exact sha256 identity")
+        raise ValueError(
+            "expected preservation digest must be an exact sha256 identity"
+        )
     engine = _create_engine(database_url)
     try:
         async with engine.connect() as connection:
@@ -485,21 +483,48 @@ async def _verify_preservation(
             await connection.rollback()
     finally:
         await engine.dispose()
-    target_revision = (
-        HISTORICAL_PRESERVATION_TARGET_REVISION
-        if source_revision == COMPATIBLE_SOURCE_REVISION
-        else "0004_owner_control_plane"
-        if source_revision == OWNER_CONTROL_SOURCE_REVISION
-        else "0005_tradfi_instrument_center"
-        if source_revision == TRADFI_INSTRUMENT_SOURCE_REVISION
-        else "0006_sor_dynamic_selection_v0"
+    allowed_targets_by_source: dict[str, frozenset[str]] = {
+        COMPATIBLE_SOURCE_REVISION: frozenset(
+            {
+                HISTORICAL_PRESERVATION_TARGET_REVISION,
+                "0004_owner_control_plane",
+                "0005_tradfi_instrument_center",
+                "0006_sor_dynamic_selection_v0",
+                EXPECTED_ALEMBIC_REVISION,
+            }
+        ),
+        OWNER_CONTROL_SOURCE_REVISION: frozenset(
+            {
+                "0004_owner_control_plane",
+                "0005_tradfi_instrument_center",
+                "0006_sor_dynamic_selection_v0",
+                EXPECTED_ALEMBIC_REVISION,
+            }
+        ),
+        TRADFI_INSTRUMENT_SOURCE_REVISION: frozenset(
+            {
+                "0005_tradfi_instrument_center",
+                "0006_sor_dynamic_selection_v0",
+                EXPECTED_ALEMBIC_REVISION,
+            }
+        ),
+        DYNAMIC_SELECTION_SOURCE_REVISION: frozenset(
+            {
+                "0006_sor_dynamic_selection_v0",
+                EXPECTED_ALEMBIC_REVISION,
+            }
+        ),
+    }
+    allowed_target_revisions = allowed_targets_by_source[source_revision]
+    passed = bool(
+        revision in allowed_target_revisions and manifest["digest"] == expected_digest
     )
-    passed = bool(revision == target_revision and manifest["digest"] == expected_digest)
     return {
         "schema": SCHEMA,
         "status": "pass" if passed else "fail",
         "alembic_revision": revision,
         "source_revision": source_revision,
+        "allowed_target_revisions": sorted(allowed_target_revisions),
         "expected_preservation_digest": expected_digest,
         "preservation_manifest": manifest,
     }
@@ -773,7 +798,9 @@ async def _record_preservation_proof(
     if source_revision != COMPATIBLE_SOURCE_REVISION:
         raise ValueError("preservation source must be the exact 0002 revision")
     if not _is_sha256_identity(expected_digest):
-        raise ValueError("expected preservation digest must be an exact sha256 identity")
+        raise ValueError(
+            "expected preservation digest must be an exact sha256 identity"
+        )
     engine = _create_engine(database_url)
     try:
         async with engine.begin() as connection:
@@ -844,7 +871,9 @@ async def _verify_preservation_proof(
     if source_revision != COMPATIBLE_SOURCE_REVISION:
         raise ValueError("preservation source must be the exact 0002 revision")
     if not _is_sha256_identity(expected_digest):
-        raise ValueError("expected preservation digest must be an exact sha256 identity")
+        raise ValueError(
+            "expected preservation digest must be an exact sha256 identity"
+        )
     if not _is_sha256_identity(expected_proof_digest):
         raise ValueError("expected preservation proof must be an exact sha256 identity")
     stored_verification = await _verify_stored_preservation_proof(database_url)
@@ -912,15 +941,19 @@ async def _stored_preservation_proof_status(
 
 async def _database_identity(connection: AsyncConnection) -> str:
     row = (
-        await connection.execute(
-            text(
-                "SELECT system_identifier::text AS system_identifier, "
-                "(SELECT oid::text FROM pg_database "
-                "WHERE datname = current_database()) AS database_oid "
-                "FROM pg_control_system()"
+        (
+            await connection.execute(
+                text(
+                    "SELECT system_identifier::text AS system_identifier, "
+                    "(SELECT oid::text FROM pg_database "
+                    "WHERE datname = current_database()) AS database_oid "
+                    "FROM pg_control_system()"
+                )
             )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     system_identifier = str(row["system_identifier"])
     database_oid = str(row["database_oid"])
     if not system_identifier.isdigit() or not database_oid.isdigit():
@@ -977,10 +1010,7 @@ async def _preservation_proof_metadata(
             {"keys": list(_PRESERVATION_PROOF_METADATA_KEYS)},
         )
     ).mappings()
-    return {
-        str(row["metadata_key"]): str(row["metadata_value"])
-        for row in rows
-    }
+    return {str(row["metadata_key"]): str(row["metadata_value"]) for row in rows}
 
 
 def _create_engine(database_url: str):
@@ -992,9 +1022,7 @@ def _create_engine(database_url: str):
 async def _alembic_revision(connection: AsyncConnection) -> str:
     return str(
         (
-            await connection.execute(
-                text("SELECT version_num FROM alembic_version")
-            )
+            await connection.execute(text("SELECT version_num FROM alembic_version"))
         ).scalar_one()
     )
 
@@ -1065,8 +1093,7 @@ async def _verify_exact_metadata_shape(
 async def _migration_gate(connection: AsyncConnection) -> dict[str, int]:
     statements = {
         "active_tickets": (
-            "SELECT count(*) FROM brc_trade_tickets "
-            "WHERE terminal_at_ms IS NULL"
+            "SELECT count(*) FROM brc_trade_tickets WHERE terminal_at_ms IS NULL"
         ),
         "non_flat_positions": (
             "SELECT count(*) FROM brc_positions_current WHERE quantity <> 0"
@@ -1143,10 +1170,7 @@ async def _runtime_identity(connection: AsyncConnection) -> dict[str, str]:
             )
         )
     ).mappings()
-    values = {
-        str(row["metadata_key"]): str(row["metadata_value"])
-        for row in rows
-    }
+    values = {str(row["metadata_key"]): str(row["metadata_value"]) for row in rows}
     return {
         "runtime_commit": values.get("runtime_commit", ""),
         "schema_revision": values.get("schema_revision", ""),
@@ -1213,10 +1237,7 @@ async def _certified_0002_registry_identity(
         """,
     }
     manifest = {
-        name: [
-            dict(row)
-            for row in (await connection.execute(text(query))).mappings()
-        ]
+        name: [dict(row) for row in (await connection.execute(text(query))).mappings()]
         for name, query in queries.items()
     }
     counts = {name: len(rows) for name, rows in manifest.items()}
@@ -1238,20 +1259,24 @@ async def _certified_0002_owner_policy(
     connection: AsyncConnection,
 ) -> dict[str, object]:
     row = (
-        await connection.execute(
-            text(
-                "SELECT owner_policy_id, policy_version, enabled, "
-                "new_entry_submit_enabled, priority_rank, "
-                "max_concurrent_tickets, max_strategy_group_concurrent_tickets, "
-                "max_ticket_stop_risk_fraction, max_gross_stop_risk_fraction, "
-                "max_ticket_initial_margin_fraction, "
-                "max_gross_initial_margin_utilization, max_leverage, "
-                "supported_margin_mode, post_stop_stress_multiple, "
-                "max_post_fill_stop_risk_overrun_fraction, scope "
-                "FROM brc_owner_policy_current"
+        (
+            await connection.execute(
+                text(
+                    "SELECT owner_policy_id, policy_version, enabled, "
+                    "new_entry_submit_enabled, priority_rank, "
+                    "max_concurrent_tickets, max_strategy_group_concurrent_tickets, "
+                    "max_ticket_stop_risk_fraction, max_gross_stop_risk_fraction, "
+                    "max_ticket_initial_margin_fraction, "
+                    "max_gross_initial_margin_utilization, max_leverage, "
+                    "supported_margin_mode, post_stop_stress_multiple, "
+                    "max_post_fill_stop_risk_overrun_fraction, scope "
+                    "FROM brc_owner_policy_current"
+                )
             )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     expected_scope = {
         "runtime_profile_id": RUNTIME_PROFILE_ID,
         "allowed_event_spec_ids": list(_SOURCE_POLICY_EVENT_IDS),
@@ -1268,8 +1293,7 @@ async def _certified_0002_owner_policy(
         and Decimal(str(row["max_ticket_stop_risk_fraction"])) == Decimal("0.03")
         and Decimal(str(row["max_gross_stop_risk_fraction"])) == Decimal("0.06")
         and Decimal(str(row["max_ticket_initial_margin_fraction"])) == Decimal("0.45")
-        and Decimal(str(row["max_gross_initial_margin_utilization"]))
-        == Decimal("0.90")
+        and Decimal(str(row["max_gross_initial_margin_utilization"])) == Decimal("0.90")
         and int(str(row["max_leverage"])) == 10
         and row["supported_margin_mode"] == "cross"
         and Decimal(str(row["post_stop_stress_multiple"])) == Decimal("2.0")
@@ -1294,14 +1318,18 @@ async def _certified_0002_runtime_profile(
     connection: AsyncConnection,
 ) -> dict[str, object]:
     rows = (
-        await connection.execute(
-            text(
-                "SELECT runtime_profile_id, venue_id, account_id, environment, "
-                "position_mode, status FROM brc_runtime_profiles "
-                "ORDER BY runtime_profile_id"
+        (
+            await connection.execute(
+                text(
+                    "SELECT runtime_profile_id, venue_id, account_id, environment, "
+                    "position_mode, status FROM brc_runtime_profiles "
+                    "ORDER BY runtime_profile_id"
+                )
             )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     row = rows[0] if len(rows) == 1 else None
     passed = bool(
         row is not None
@@ -1314,9 +1342,7 @@ async def _certified_0002_runtime_profile(
     )
     return {
         "status": "pass" if passed else "fail",
-        "runtime_profile_id": (
-            "" if row is None else str(row["runtime_profile_id"])
-        ),
+        "runtime_profile_id": ("" if row is None else str(row["runtime_profile_id"])),
         "position_mode": "" if row is None else str(row["position_mode"]),
     }
 
@@ -1404,10 +1430,8 @@ def _source_0005_table_columns() -> dict[str, tuple[str, ...]]:
         table.name: tuple(
             column.name
             for column in table.c
-            if column.name
-            not in _DYNAMIC_SELECTION_ADDED_COLUMNS.get(table.name, ())
-            and column.name
-            not in _EXIT_PROFILE_ADDED_COLUMNS.get(table.name, ())
+            if column.name not in _DYNAMIC_SELECTION_ADDED_COLUMNS.get(table.name, ())
+            and column.name not in _EXIT_PROFILE_ADDED_COLUMNS.get(table.name, ())
         )
         for table in sorted(metadata.tables.values(), key=lambda item: item.name)
         if table.name not in _DYNAMIC_SELECTION_TABLES | _EXIT_PROFILE_TABLES
@@ -1438,10 +1462,14 @@ async def _owner_control_preservation_manifest(
     for table_name, column_names in sorted(_source_0003_table_columns().items()):
         table = sa.table(table_name, *(sa.column(name) for name in column_names))
         rows = (
-            await connection.execute(
-                sa.select(*(table.c[name] for name in column_names))
+            (
+                await connection.execute(
+                    sa.select(*(table.c[name] for name in column_names))
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         canonical_rows = sorted(
             (
                 _row_manifest(column_names, projected)
@@ -1487,10 +1515,14 @@ async def _tradfi_instrument_preservation_manifest(
     for table_name, column_names in sorted(_source_0004_table_columns().items()):
         table = sa.table(table_name, *(sa.column(name) for name in column_names))
         rows = (
-            await connection.execute(
-                sa.select(*(table.c[name] for name in column_names))
+            (
+                await connection.execute(
+                    sa.select(*(table.c[name] for name in column_names))
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         canonical_rows = sorted(
             (
                 _row_manifest(column_names, projected)
@@ -1539,10 +1571,14 @@ async def _dynamic_selection_preservation_manifest(
             continue
         table = sa.table(table_name, *(sa.column(name) for name in column_names))
         rows = (
-            await connection.execute(
-                sa.select(*(table.c[name] for name in column_names))
+            (
+                await connection.execute(
+                    sa.select(*(table.c[name] for name in column_names))
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         canonical_rows = sorted(
             (_row_manifest(column_names, dict(row)) for row in rows),
             key=lambda row: str(row["digest"]),
@@ -1586,10 +1622,14 @@ async def _r4_terminal_lineage_manifest(
         table = metadata.tables[table_name]
         column_names = tuple(table.c.keys())
         rows = (
-            await connection.execute(
-                sa.select(*(table.c[name] for name in column_names))
+            (
+                await connection.execute(
+                    sa.select(*(table.c[name] for name in column_names))
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         canonical_rows = sorted(
             (_row_manifest(column_names, dict(row)) for row in rows),
             key=lambda row: str(row["digest"]),
@@ -1626,12 +1666,8 @@ async def _current_registry_identity(
         if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
     )
     expected_hash = build_registry_semantic_hash(source_contracts)
-    expected_groups = {
-        contract.strategy_group_id for contract in source_contracts
-    }
-    expected_versions = {
-        contract.strategy_version_id for contract in source_contracts
-    }
+    expected_groups = {contract.strategy_group_id for contract in source_contracts}
+    expected_versions = {contract.strategy_version_id for contract in source_contracts}
     expected_events = {contract.event_spec_id for contract in source_contracts}
     metadata_hash = str(
         (
@@ -1745,8 +1781,7 @@ async def _target_registry_identity(
         for value in (
             await connection.execute(
                 text(
-                    "SELECT event_spec_id FROM brc_event_specs "
-                    "WHERE status = 'active'"
+                    "SELECT event_spec_id FROM brc_event_specs WHERE status = 'active'"
                 )
             )
         ).scalars()
@@ -1780,14 +1815,18 @@ async def _current_strategy_controls(
         if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
     }
     rows = (
-        await connection.execute(
-            text(
-                "SELECT strategy_group_id, entry_state, control_version "
-                "FROM brc_strategy_entry_controls_current "
-                "ORDER BY strategy_group_id"
+        (
+            await connection.execute(
+                text(
+                    "SELECT strategy_group_id, entry_state, control_version "
+                    "FROM brc_strategy_entry_controls_current "
+                    "ORDER BY strategy_group_id"
+                )
             )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     actual_groups = {str(row["strategy_group_id"]) for row in rows}
     passed = bool(
         actual_groups == expected_groups
@@ -1810,13 +1849,17 @@ async def _target_strategy_controls(
         contract.strategy_group_id for contract in registered_strategy_contracts()
     }
     rows = (
-        await connection.execute(
-            text(
-                "SELECT strategy_group_id, entry_state, control_version "
-                "FROM brc_strategy_entry_controls_current"
+        (
+            await connection.execute(
+                text(
+                    "SELECT strategy_group_id, entry_state, control_version "
+                    "FROM brc_strategy_entry_controls_current"
+                )
             )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     actual_groups = {str(row["strategy_group_id"]) for row in rows}
     passed = bool(
         actual_groups == expected_groups
@@ -1836,15 +1879,19 @@ async def _current_owner_policy(
     connection: AsyncConnection,
 ) -> dict[str, object]:
     row = (
-        await connection.execute(
-            text(
-                "SELECT policy_version, enabled, new_entry_submit_enabled, "
-                "supported_margin_mode FROM brc_owner_policy_current "
-                "WHERE owner_policy_id = :owner_policy_id"
-            ),
-            {"owner_policy_id": OWNER_POLICY_ID},
+        (
+            await connection.execute(
+                text(
+                    "SELECT policy_version, enabled, new_entry_submit_enabled, "
+                    "supported_margin_mode FROM brc_owner_policy_current "
+                    "WHERE owner_policy_id = :owner_policy_id"
+                ),
+                {"owner_policy_id": OWNER_POLICY_ID},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     passed = bool(
         row is not None
         and int(str(row["policy_version"])) >= 4
@@ -1867,14 +1914,18 @@ async def _current_runtime_profile(
     connection: AsyncConnection,
 ) -> dict[str, object]:
     row = (
-        await connection.execute(
-            text(
-                "SELECT venue_id, environment, position_mode, status "
-                "FROM brc_runtime_profiles WHERE runtime_profile_id = :profile_id"
-            ),
-            {"profile_id": RUNTIME_PROFILE_ID},
+        (
+            await connection.execute(
+                text(
+                    "SELECT venue_id, environment, position_mode, status "
+                    "FROM brc_runtime_profiles WHERE runtime_profile_id = :profile_id"
+                ),
+                {"profile_id": RUNTIME_PROFILE_ID},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     passed = bool(
         row is not None
         and row["venue_id"] == "binance-usdm"
@@ -1961,8 +2012,14 @@ async def _source_preservation_manifest(
     for table_name, column_names in source_columns.items():
         table = sa.table(table_name, *(sa.column(name) for name in column_names))
         rows = (
-            await connection.execute(sa.select(*(table.c[name] for name in column_names)))
-        ).mappings().all()
+            (
+                await connection.execute(
+                    sa.select(*(table.c[name] for name in column_names))
+                )
+            )
+            .mappings()
+            .all()
+        )
         projected_rows = [
             projected
             for row in rows
@@ -2078,12 +2135,8 @@ def _project_source_row(
                 "policy_version": 3,
                 "new_entry_submit_enabled": True,
                 "max_strategy_group_concurrent_tickets": 2,
-                "max_ticket_stop_risk_fraction": Decimal(
-                    "0.030000000000000000"
-                ),
-                "max_ticket_initial_margin_fraction": Decimal(
-                    "0.450000000000000000"
-                ),
+                "max_ticket_stop_risk_fraction": Decimal("0.030000000000000000"),
+                "max_ticket_initial_margin_fraction": Decimal("0.450000000000000000"),
             }
         )
         scope = dict(row["scope"])
@@ -2274,9 +2327,7 @@ def main(argv: list[str] | None = None) -> int:
                     database_url,
                     source_revision=str(args.preserve_source_revision),
                     expected_digest=str(args.expected_preservation_digest),
-                    expected_proof_digest=str(
-                        args.expected_preservation_proof_digest
-                    ),
+                    expected_proof_digest=str(args.expected_preservation_proof_digest),
                 )
             )
         else:
@@ -2326,7 +2377,13 @@ def _summary_payload(payload: dict[str, object]) -> dict[str, object]:
         **payload,
         "preservation_manifest": {
             key: manifest[key]
-            for key in ("schema", "source_revision", "table_count", "row_count", "digest")
+            for key in (
+                "schema",
+                "source_revision",
+                "table_count",
+                "row_count",
+                "digest",
+            )
             if key in manifest
         },
     }

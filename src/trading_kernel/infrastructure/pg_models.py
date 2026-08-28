@@ -2685,7 +2685,8 @@ owner_authorizations = sa.Table(
     sa.CheckConstraint(
         "purpose IN ('strategy_pause', 'strategy_resume', 'entry_pause', "
         "'entry_resume', 'owner_flatten_all', 'universe_configure', "
-        "'selection_mode_change')",
+        "'selection_mode_change', 'exit_profile_bind', "
+        "'exit_profile_retire')",
         name="purpose_valid",
     ),
     sa.CheckConstraint(

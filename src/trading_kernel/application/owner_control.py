@@ -15,6 +15,7 @@ from src.trading_kernel.application.controlled_exit import (
 )
 from src.trading_kernel.application.ports import (
     AggregateVersionConflict,
+    ExitProfileAuthorityConflict,
     KernelUnitOfWork,
     OwnerPolicySnapshot,
     UnitOfWorkFactory,
@@ -24,6 +25,11 @@ from src.trading_kernel.application.reconcile_ticket import (
     request_exit,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.exit_policy import (
+    CurrentEventExitBinding,
+    ExitProfileRecord,
+    build_event_exit_binding,
+)
 from src.trading_kernel.domain.instrument_selection import DAY_MS, INTERVAL_MS
 from src.trading_kernel.domain.owner_control import (
     ControlOperationState,
@@ -89,6 +95,51 @@ class FlattenSubmitRequest(ControlMutationRequest):
     venue_id: str
     account_id: str
     snapshot_digest: str
+
+
+class ExitProfileBindingMutationRequest(ControlMutationRequest):
+    expected_binding_id: str
+    target_exit_profile_id: str
+    target_exit_profile_semantic_hash: str
+
+    @field_validator(
+        "expected_binding_id",
+        "target_exit_profile_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_exit_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("ExitProfile mutation identities must be non-blank")
+        return normalized
+
+    @field_validator("target_exit_profile_semantic_hash")
+    @classmethod
+    def _require_profile_hash(cls, value: str) -> str:
+        if not value.startswith("sha256:") or len(value) != 71:
+            raise ValueError("ExitProfile mutation hash must be canonical")
+        return value
+
+
+class ExitProfileRetirementRequest(ControlMutationRequest):
+    exit_profile_id: str
+    exit_profile_semantic_hash: str
+
+    @field_validator("exit_profile_id", mode="before")
+    @classmethod
+    def _require_retirement_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("ExitProfile retirement identity must be non-blank")
+        return normalized
+
+    @field_validator("exit_profile_semantic_hash")
+    @classmethod
+    def _require_retirement_hash(cls, value: str) -> str:
+        if not value.startswith("sha256:") or len(value) != 71:
+            raise ValueError("ExitProfile retirement hash must be canonical")
+        return value
 
 
 async def set_strategy_entry_state(
@@ -307,7 +358,183 @@ async def stage_dynamic_selection_mode(
 def _next_dynamic_selection_session_start_ms(now_ms: int) -> int:
     session_start_ms = (now_ms // DAY_MS) * DAY_MS
     decision_boundary_ms = session_start_ms + 4 * INTERVAL_MS
-    return session_start_ms if now_ms < decision_boundary_ms else session_start_ms + DAY_MS
+    return (
+        session_start_ms if now_ms < decision_boundary_ms else session_start_ms + DAY_MS
+    )
+
+
+async def switch_event_exit_profile(
+    uow: KernelUnitOfWork,
+    *,
+    strategy_group_id: str,
+    event_spec_id: str,
+    request: ExitProfileBindingMutationRequest,
+    authentication_strength: Literal["totp_step_up"],
+) -> CurrentEventExitBinding:
+    if authentication_strength != "totp_step_up":
+        raise OwnerControlBlocked("exit_profile_bind_requires_step_up")
+    await uow.exit_profiles.acquire_authority_write_lock()
+    previous = await uow.exit_profiles.get_binding(request.expected_binding_id)
+    if previous is None or previous.event_spec_id != event_spec_id:
+        raise OwnerControlBlocked("exit_binding_missing")
+    binding = build_event_exit_binding(
+        exit_binding_id=(
+            f"exit-binding:{event_spec_id}:v{previous.binding_version + 1}"
+        ),
+        binding_version=previous.binding_version + 1,
+        event_spec_id=event_spec_id,
+        exit_profile_id=request.target_exit_profile_id,
+        exit_profile_semantic_hash=request.target_exit_profile_semantic_hash,
+        activation_reason=request.reason,
+        created_at_ms=request.now_ms,
+    )
+    target_scope: dict[str, JsonValue] = {
+        "strategy_group_id": strategy_group_id,
+        "event_spec_id": event_spec_id,
+        "expected_binding_id": request.expected_binding_id,
+        "target_exit_profile_id": request.target_exit_profile_id,
+        "target_exit_profile_semantic_hash": (
+            request.target_exit_profile_semantic_hash
+        ),
+        "target_exit_binding_id": binding.exit_binding_id,
+        "target_binding_semantic_hash": binding.binding_semantic_hash,
+    }
+    existing = await uow.owner_controls.get_authorization_by_idempotency_key(
+        request.idempotency_key
+    )
+    if existing is not None:
+        _require_matching_authorization(
+            existing,
+            purpose="exit_profile_bind",
+            request=request,
+            target_scope=target_scope,
+        )
+        if existing.authentication_strength != "totp_step_up":
+            raise OwnerControlBlocked("exit_profile_bind_requires_step_up")
+        committed_binding = build_event_exit_binding(
+            exit_binding_id=binding.exit_binding_id,
+            binding_version=binding.binding_version,
+            event_spec_id=event_spec_id,
+            exit_profile_id=request.target_exit_profile_id,
+            exit_profile_semantic_hash=request.target_exit_profile_semantic_hash,
+            activation_reason=request.reason,
+            created_at_ms=existing.authorized_at_ms,
+        )
+        committed = await uow.exit_profiles.get_binding(
+            committed_binding.exit_binding_id
+        )
+        if committed != committed_binding:
+            raise OwnerControlBlocked("exit_binding_idempotency_result_missing")
+        return CurrentEventExitBinding(
+            event_spec_id=event_spec_id,
+            exit_binding_id=committed_binding.exit_binding_id,
+            binding_semantic_hash=committed_binding.binding_semantic_hash,
+            projection_version=request.expected_version + 1,
+            activated_at_ms=existing.authorized_at_ms,
+        )
+    current = await uow.exit_profiles.get_current_binding(
+        event_spec_id,
+        for_update=True,
+    )
+    if current is None:
+        raise OwnerControlBlocked("exit_binding_current_missing")
+    if (
+        current.projection_version != request.expected_version
+        or current.exit_binding_id != request.expected_binding_id
+    ):
+        raise OwnerControlConflict("exit_binding_version_conflict")
+    event_spec = await uow.signals.get_event_spec(event_spec_id)
+    if event_spec is None or event_spec.status != "active":
+        raise OwnerControlBlocked("event_spec_not_active")
+    strategy_version = await uow.signals.get_strategy_version(
+        event_spec.strategy_version_id
+    )
+    if (
+        strategy_version is None
+        or strategy_version.status != "active"
+        or strategy_version.strategy_group_id != strategy_group_id
+    ):
+        raise OwnerControlBlocked("event_strategy_scope_mismatch")
+    target = await uow.exit_profiles.get_profile(
+        exit_profile_id=request.target_exit_profile_id,
+        semantic_hash=request.target_exit_profile_semantic_hash,
+    )
+    if target is None or target.status != "active":
+        raise OwnerControlBlocked("exit_profile_not_active")
+    authorization = _authorization(
+        purpose="exit_profile_bind",
+        request=request,
+        authentication_strength=authentication_strength,
+        target_scope=target_scope,
+    )
+    await uow.owner_controls.add_authorization(authorization)
+    if (
+        binding.exit_profile_id != target.profile.exit_profile_id
+        or binding.exit_profile_semantic_hash != target.profile.semantic_hash()
+    ):
+        raise OwnerControlBlocked("exit_profile_hash_drift")
+    try:
+        return await uow.exit_profiles.switch_current_binding(
+            expected_current=current,
+            new_binding=binding,
+            owner_authorization_id=authorization.authorization_id,
+            reason=request.reason,
+            switched_at_ms=request.now_ms,
+        )
+    except ExitProfileAuthorityConflict as error:
+        if str(error) == "EXIT_BINDING_VERSION_CONFLICT":
+            raise OwnerControlConflict("exit_binding_version_conflict") from error
+        raise OwnerControlBlocked(str(error).lower()) from error
+
+
+async def retire_exit_profile(
+    uow: KernelUnitOfWork,
+    *,
+    request: ExitProfileRetirementRequest,
+    authentication_strength: Literal["totp_step_up"],
+) -> ExitProfileRecord:
+    if authentication_strength != "totp_step_up":
+        raise OwnerControlBlocked("exit_profile_retire_requires_step_up")
+    target_scope: dict[str, JsonValue] = {
+        "exit_profile_id": request.exit_profile_id,
+        "exit_profile_semantic_hash": request.exit_profile_semantic_hash,
+    }
+    await uow.exit_profiles.acquire_authority_write_lock()
+    record = await uow.exit_profiles.get_profile(
+        exit_profile_id=request.exit_profile_id,
+        semantic_hash=request.exit_profile_semantic_hash,
+    )
+    if record is None:
+        raise OwnerControlBlocked("exit_profile_missing")
+    existing = await uow.owner_controls.get_authorization_by_idempotency_key(
+        request.idempotency_key
+    )
+    if existing is not None:
+        _require_matching_authorization(
+            existing,
+            purpose="exit_profile_retire",
+            request=request,
+            target_scope=target_scope,
+        )
+        if existing.authentication_strength != "totp_step_up":
+            raise OwnerControlBlocked("exit_profile_retire_requires_step_up")
+        return record
+    if record.profile.exit_profile_version != request.expected_version:
+        raise OwnerControlConflict("exit_profile_version_conflict")
+    authorization = _authorization(
+        purpose="exit_profile_retire",
+        request=request,
+        authentication_strength=authentication_strength,
+        target_scope=target_scope,
+    )
+    await uow.owner_controls.add_authorization(authorization)
+    try:
+        return await uow.exit_profiles.retire_profile(
+            profile=record.profile,
+            retired_at_ms=request.now_ms,
+        )
+    except ExitProfileAuthorityConflict as error:
+        raise OwnerControlBlocked(str(error).lower()) from error
 
 
 async def preview_flatten_all(
@@ -334,8 +561,13 @@ async def preview_flatten_all(
             continue
         classification = classify_controlled_exit_status(aggregate.status)
         states[ticket_id] = classification.value
-        if classification is ControlledExitClassification.BLOCKED and first_blocker is None:
-            first_blocker = f"ticket_not_flattenable:{ticket_id}:{aggregate.status.value}"
+        if (
+            classification is ControlledExitClassification.BLOCKED
+            and first_blocker is None
+        ):
+            first_blocker = (
+                f"ticket_not_flattenable:{ticket_id}:{aggregate.status.value}"
+            )
     digest = _snapshot_digest(
         venue_id=venue_id,
         account_id=account_id,
@@ -574,9 +806,7 @@ async def advance_flatten_operation_once(
     async with uow_factory() as uow:
         if getattr(uow, "owner_controls", None) is None:
             return None
-        operation = await uow.owner_controls.get_progressable_operation(
-            for_update=True
-        )
+        operation = await uow.owner_controls.get_progressable_operation(for_update=True)
         if operation is None:
             return None
         aggregates = []
@@ -610,7 +840,8 @@ async def advance_flatten_operation_once(
         if operation.state is ControlOperationState.EXITS_REQUESTED:
             target = (
                 ControlOperationState.RECONCILIATION_PENDING
-                if statuses <= {
+                if statuses
+                <= {
                     AggregateStatus.SETTLEMENT_PENDING,
                     AggregateStatus.REVIEW_PENDING,
                     AggregateStatus.TERMINAL,
@@ -702,6 +933,8 @@ def _authorization(
         "entry_resume",
         "owner_flatten_all",
         "selection_mode_change",
+        "exit_profile_bind",
+        "exit_profile_retire",
     ],
     request: ControlMutationRequest,
     authentication_strength: Literal["session", "totp_step_up"],
@@ -733,6 +966,8 @@ def _authorization_digest(
         "entry_resume",
         "owner_flatten_all",
         "selection_mode_change",
+        "exit_profile_bind",
+        "exit_profile_retire",
     ],
     request: ControlMutationRequest,
     target_scope: dict[str, JsonValue],
@@ -744,9 +979,14 @@ def _authorization_digest(
         "idempotency_key": request.idempotency_key,
         "target_scope": target_scope,
     }
-    return "sha256:" + sha256(
-        json.dumps(canonical_request, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    return (
+        "sha256:"
+        + sha256(
+            json.dumps(
+                canonical_request, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+    )
 
 
 def _require_matching_authorization(
@@ -759,6 +999,8 @@ def _require_matching_authorization(
         "entry_resume",
         "owner_flatten_all",
         "selection_mode_change",
+        "exit_profile_bind",
+        "exit_profile_retire",
     ],
     request: ControlMutationRequest,
     target_scope: dict[str, JsonValue],
@@ -793,6 +1035,9 @@ def _snapshot_digest(
         "global_entry_enabled": global_entry_enabled,
         "tickets": sorted(states.items()),
     }
-    return "sha256:" + sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    return (
+        "sha256:"
+        + sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )

@@ -17,6 +17,7 @@ from src.trading_kernel.application.ports import (
     EntryAdmissionRepository,
     EventRepository,
     ExchangeCommandRepository,
+    ExitProfileAuthorityRepository,
     IncidentRepository,
     InstrumentSelectionRepository,
     MonitorRepository,
@@ -76,6 +77,9 @@ from src.trading_kernel.domain.incident_blocking import (
 )
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
+from src.trading_kernel.infrastructure.pg_exit_profile_repository import (
+    PostgresExitProfileAuthorityRepository,
+)
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
     PostgresInstrumentSelectionRepository,
 )
@@ -127,6 +131,7 @@ class PostgresKernelUnitOfWork:
     strategy_registry: StrategyRegistryRepository
     strategy_universes: StrategyUniverseRepository
     instrument_selection: InstrumentSelectionRepository
+    exit_profiles: ExitProfileAuthorityRepository
 
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
@@ -150,9 +155,7 @@ class PostgresKernelUnitOfWork:
         self.positions = PostgresPositionRepository(self._connection)
         self.reviews = PostgresReviewRepository(self._connection)
         self.entry_admission = PostgresEntryAdmissionRepository(self._connection)
-        self.admission_decisions = PostgresAdmissionDecisionRepository(
-            self._connection
-        )
+        self.admission_decisions = PostgresAdmissionDecisionRepository(self._connection)
         self.shadow_outcomes = PostgresShadowOutcomeRepository(self._connection)
         self.signals = PostgresSignalRepository(self._connection)
         self.strategy_registry = PostgresStrategyRegistryRepository(self._connection)
@@ -160,6 +163,7 @@ class PostgresKernelUnitOfWork:
         self.instrument_selection = PostgresInstrumentSelectionRepository(
             self._connection
         )
+        self.exit_profiles = PostgresExitProfileAuthorityRepository(self._connection)
         return self
 
     async def __aexit__(
@@ -398,8 +402,7 @@ class PostgresKernelUnitOfWork:
                     )
                     if (
                         isinstance(prior.payload, CancelCommandPayload)
-                        and prior.payload.exchange_order_id
-                        == effect.exchange_order_id
+                        and prior.payload.exchange_order_id == effect.exchange_order_id
                     ):
                         require_next_generation_allowed(
                             kind=ExchangeCommandKind.CANCEL_ORDER,
@@ -442,9 +445,7 @@ class PostgresKernelUnitOfWork:
                 )
                 continue
             if isinstance(effect, OpenIncident):
-                entry_block_scope = _incident_entry_block_scope(
-                    effect.incident_kind
-                )
+                entry_block_scope = _incident_entry_block_scope(effect.incident_kind)
                 await self.incidents.add(
                     RuntimeIncidentRecord(
                         incident_id=(
@@ -657,9 +658,7 @@ def _initial_leverage_fact_digest(claim: CapacityClaim) -> str:
 
     return canonical_digest(
         {
-            "entry_admission_snapshot_digest": (
-                claim.entry_admission_snapshot_digest
-            ),
+            "entry_admission_snapshot_digest": (claim.entry_admission_snapshot_digest),
             "instrument_facts": {
                 "exchange_instrument_id": (
                     claim.ticket_identity.netting_domain.exchange_instrument_id
@@ -870,7 +869,9 @@ def _order_command(
 
 
 def _closing_side(aggregate) -> Literal["buy", "sell"]:
-    return "sell" if aggregate.identity.netting_domain.position_side == "long" else "buy"
+    return (
+        "sell" if aggregate.identity.netting_domain.position_side == "long" else "buy"
+    )
 
 
 def _incident_entry_block_scope(incident_kind: str) -> EntryBlockScope:

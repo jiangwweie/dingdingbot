@@ -8,7 +8,7 @@ design_authority_commit: 50e94cea15445f1c3e268f524dfa6e440581bf3e
 design_authority_semantic_digest: sha256:68415c06387d4cdc13aebc500a095e205fe389ea96be137df07350c4a6364477
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: EX-04
+active_execution_scope: EX-05
 production_authority: NONE
 owner_approval: 2026-08-28 active task decision authorizing EX-00 through EX-08
 ---
@@ -32,7 +32,7 @@ perform Replay, Shadow, parameter search or profitability certification.
 design_status = DESIGN_APPROVED
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = EX-04
+active_execution_scope = EX-05
 production_authority = NONE
 ```
 
@@ -575,6 +575,33 @@ trading hot paths remain lock-free from the global Authority advisory lock.
 - no new concurrency framework;
 - no Profile content edit endpoint;
 - no automatic binding switch.
+
+### EX-04 Execution Evidence — 2026-08-28
+
+**Status: `EX04_COMPLETE`.** Added the sole post-install ExitProfile Authority
+repository and Owner application boundary for Profile switching and retirement.
+All Authority writes acquire one PostgreSQL transaction-scoped advisory lock,
+then revalidate the current Binding/Profile and apply immutable Binding events
+plus pointer CAS. Exact TOTP step-up, canonical idempotency replay and payload
+mismatch rejection are enforced.
+
+StrategyVersion retirement now removes only the retired Events' current
+Bindings under the same lock domain and preserves shared Profiles and issued
+Ticket lookup authority. The retirement event uses the actual retirement seed
+time. Historical preservation verification now accepts only known forward
+successors through the current `0007` head while still requiring the exact
+source-owned digest.
+
+| Verification | Result |
+| --- | ---: |
+| Authority/Owner/Migration/Registry focused | **45 passed** |
+| Fast Unit + Architecture | **1,047 passed** |
+| Ruff | **passed** |
+| Mypy | **174 source files, zero issues** |
+| `git diff --check` | **passed** |
+
+Active execution scope advances to **EX-05**. No production Migration, Profile
+switch, Strategy resume or exchange mutation was executed.
 
 ## 12. EX-05 — CapacityClaim, Ticket And Exit-Leg Materialization
 
