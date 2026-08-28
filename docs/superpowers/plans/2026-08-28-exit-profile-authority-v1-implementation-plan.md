@@ -1,15 +1,16 @@
 ---
 title: EXIT_PROFILE_AUTHORITY_V1_IMPLEMENTATION_PLAN
-status: PLAN_REVIEW_REQUIRED
+status: PLAN_APPROVED
 date: 2026-08-28
 program: EX-P1
 design_authority_path: ../specs/2026-08-28-exit-profile-authority-v1-design.md
 design_authority_commit: 5f0f645ad0600eb446f1477754e1d2b15645cfc0
 design_authority_semantic_digest: sha256:ea0306a4b61b5c90fd2dbd09bd81a9201cf41df064744b77dfb8dbe1e6f0c9cc
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
-implementation_authority: NONE
-active_execution_scope: NONE
+implementation_authority: CODE_AND_TEST_ONLY
+active_execution_scope: EX-00
 production_authority: NONE
+owner_approval: 2026-08-28 active task decision authorizing EX-00 through EX-08
 ---
 
 # ExitProfile Authority V1 Implementation Plan
@@ -29,9 +30,9 @@ perform Replay, Shadow, parameter search or profitability certification.
 
 ```text
 design_status = DESIGN_APPROVED
-plan_status = PLAN_REVIEW_REQUIRED
-implementation_authority = NONE
-active_execution_scope = NONE
+plan_status = PLAN_APPROVED
+implementation_authority = CODE_AND_TEST_ONLY
+active_execution_scope = EX-00
 production_authority = NONE
 ```
 
@@ -50,7 +51,9 @@ base_candidate = 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 Any Design content change invalidates this Plan review and requires a new
 digest/reference.
 
-No code Task starts until this plan receives independent `PLAN_APPROVED`.
+The Owner has authorized the complete local EX-00 through EX-08 sequence. Each
+Task may advance automatically only after its own RED/GREEN and proportional
+acceptance passes. Production actions remain independently forbidden.
 
 ## 3. Owner-Frozen Product Decisions
 
