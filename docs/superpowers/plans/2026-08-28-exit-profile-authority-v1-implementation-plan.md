@@ -4,8 +4,8 @@ status: PLAN_APPROVED
 date: 2026-08-28
 program: EX-P1
 design_authority_path: ../specs/2026-08-28-exit-profile-authority-v1-design.md
-design_authority_commit: 5f0f645ad0600eb446f1477754e1d2b15645cfc0
-design_authority_semantic_digest: sha256:ea0306a4b61b5c90fd2dbd09bd81a9201cf41df064744b77dfb8dbe1e6f0c9cc
+design_authority_commit: 50e94cea15445f1c3e268f524dfa6e440581bf3e
+design_authority_semantic_digest: sha256:68415c06387d4cdc13aebc500a095e205fe389ea96be137df07350c4a6364477
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: CODE_AND_TEST_ONLY
 active_execution_scope: EX-00
@@ -43,8 +43,8 @@ Its upstream Design Authority is exact and immutable for this Plan:
 
 ```text
 path = docs/superpowers/specs/2026-08-28-exit-profile-authority-v1-design.md
-commit = 5f0f645ad0600eb446f1477754e1d2b15645cfc0
-semantic_digest = sha256:ea0306a4b61b5c90fd2dbd09bd81a9201cf41df064744b77dfb8dbe1e6f0c9cc
+commit = 50e94cea15445f1c3e268f524dfa6e440581bf3e
+semantic_digest = sha256:68415c06387d4cdc13aebc500a095e205fe389ea96be137df07350c4a6364477
 base_candidate = 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 ```
 
@@ -77,7 +77,7 @@ acceptance passes. Production actions remain independently forbidden.
 | PostgreSQL | EventSpec↔Policy 1:1 | immutable Binding facts/current/events and composite identities |
 | CapacityClaim | freezes Policy ID/hash | Binding ID/hash/authority version and exact leg notional proof |
 | Ticket | copies Policy ID/hash | exact Binding lineage copy and issuance ABA rejection |
-| Lifecycle | uses Ticket-created time and implicit SOR guards | EntryFilled boundary, explicit guards and Profile modes |
+| Lifecycle | uses Ticket-created time and implicit SOR guards | earliest authoritative non-zero exposure boundary, explicit guards and Profile modes |
 | Deployment | 0006 candidate frozen | NEXT_AFTER_0006 R4 preservation/cutover evidence |
 
 The earliest executable gap is the pure domain contract. Schema and runtime
@@ -155,7 +155,7 @@ gaps without implementing new production behavior.
 2. characterize current non-SOR pre-TP1 path as `NO_CHANGE` when reclaim/session
    references are absent;
 3. characterize current Lifecycle request as using Ticket creation time rather
-   than EntryFilled;
+   than earliest EntryFilled/EntryPartiallyFilled exposure time;
 4. characterize current 33% leg validation as lacking per-leg minNotional;
 5. add an architecture guard that passes immediately because current runtime
    has no YAML/YML reader;
@@ -163,9 +163,9 @@ gaps without implementing new production behavior.
    future replacement yet;
 7. classify new tests into Focused/Fast/R4 without duplicating full-chain
    fixtures;
-8. audit Entry reduction/fill semantics and record whether
-   `EntryFilled.occurred_at_ms` is the earliest authoritative non-zero Exchange
-   exposure timestamp.
+8. audit Entry reduction/fill semantics and freeze that full fill uses
+   `EntryFilled`, retained partial exposure starts at `EntryPartiallyFilled`,
+   and `VacuumPartialRetained` does not reset the time.
 
 ### Temporary RED evidence
 
@@ -184,8 +184,8 @@ not a fabricated RED defect.
 ### Done
 
 Current behavior is frozen by GREEN characterization tests; temporary RED
-evidence identifies the owner Task for each gap; EntryFilled exposure semantics
-are explicitly classified; no source behavior changed; the planned portfolio
+evidence identifies the owner Task for each gap; earliest non-zero exposure
+semantics are explicitly classified; no source behavior changed; the planned portfolio
 remains explicit and bounded.
 
 ### Hard stops
@@ -530,7 +530,8 @@ Profile legs; no Profile drift can cross Ticket issuance.
 ### Goal
 
 Make Lifecycle exact-load the Ticket Profile, evaluate Profile guards/modes,
-use EntryFilled time, and preserve current Command/Reducer/Reconciliation chain.
+use earliest authoritative non-zero exposure time, and preserve current
+Command/Reducer/Reconciliation chain.
 
 ### Allowed files
 
@@ -551,18 +552,18 @@ use EntryFilled time, and preserve current Command/Reducer/Reconciliation chain.
 
 ### Requirements
 
-0. require EX-00 evidence that `EntryFilled.occurred_at_ms` is the earliest
-   authoritative non-zero venue exposure timestamp. If EX-00 classifies it as
-   later than first exposure, stop EX-06 and revise the Design Authority to use
-   the earliest authoritative non-zero exposure event;
+0. require EX-00 evidence that full fill starts at `EntryFilled`, legally
+   retained partial exposure starts at the earlier `EntryPartiallyFilled`, and
+   later retention events do not reset time;
 1. Lifecycle exact-loads Profile by Ticket ID/hash regardless of Profile status;
 2. current Binding is never queried;
 3. PRE_TP1 stage depends on exact TP1 fill truth;
 4. Profile guards decide whether reclaim/session references are consumed;
 5. deterministic Session → Reclaim → Absolute → PRE_TP1 precedence;
 6. Runner honors ABSOLUTE and ignores PRE_TP1;
-7. use `EntryFilled.occurred_at_ms`, not Ticket creation;
-8. count final venue closes strictly later than EntryFilled;
+7. use earliest authoritative `EntryFilled`/`EntryPartiallyFilled` non-zero
+   exposure time, not Ticket creation;
+8. count final venue closes strictly later than that exposure time;
 9. request market facts whenever guards/TimeStop/Runner require them;
 10. candle limit is bounded by ATR, Runner and applicable TimeStop, maximum 97;
 11. market failure retains protection and retries;
@@ -570,7 +571,8 @@ use EntryFilled time, and preserve current Command/Reducer/Reconciliation chain.
 
 ### RED tests
 
-- fill 10:23, close 11:00 = boundary 1;
+- full or retained-partial exposure at 10:23, close 11:00 = boundary 1;
+- `VacuumPartialRetained` does not reset the retained partial clock;
 - equal-to-fill close excluded;
 - MI/BRF2 11/12 PRE_TP1;
 - TP1 complete permanently disables PRE_TP1;
@@ -682,7 +684,7 @@ do not execute the stopped-flat deployment.
 | Schema | empty and production-shaped forward migration, preservation, constraints, downgrade rejection |
 | Authority | Owner switch, advisory lock, ABA, idempotency and retirement races |
 | Claim/Ticket | exact Binding/Profile/version lineage and leg materialization |
-| Lifecycle | EntryFilled boundaries, guards, PRE_TP1/ABSOLUTE, 97-row bound |
+| Lifecycle | earliest non-zero exposure boundaries, guards, PRE_TP1/ABSOLUTE, 97-row bound |
 | Full chain | Signal → Claim → Ticket → protection → Profile exit → Command → closure |
 | Architecture | no YAML, legacy Event resolution, parallel chain or current Binding lifecycle lookup |
 | Static | Ruff, repository Mypy, diff check |
@@ -780,7 +782,7 @@ AND control-plane writes are advisory-lock serialized
 AND Claim/Ticket freeze Binding ID/hash/version and Profile ID/hash
 AND Ticket rejects drift/ABA without re-sizing
 AND both exit legs satisfy exact venue minimums
-AND holding boundaries use final closes strictly after EntryFilled
+AND holding boundaries use final closes strictly after earliest authoritative non-zero exposure
 AND Profile guards and TimeStop modes are deterministic
 AND Lifecycle uses no current Binding or Strategy detector
 AND EventSpec policy ID has zero runtime authority
