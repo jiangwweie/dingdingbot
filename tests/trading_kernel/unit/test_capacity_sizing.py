@@ -207,6 +207,30 @@ def test_configured_leverage_above_policy_is_invalid() -> None:
     assert decision.selected is None
 
 
+def test_current_sizing_does_not_validate_each_exit_leg_min_notional() -> None:
+    """Characterizes the EX-05 gap without changing current admission semantics."""
+
+    request = _request(
+        total_wallet_balance=Decimal("12.5"),
+        total_margin_balance=Decimal("12.5"),
+        available_margin=Decimal("12.5"),
+        quantity_step=Decimal("0.01"),
+        min_quantity=Decimal("0.01"),
+        tp1_quantity_fraction=Decimal("0.5"),
+    )
+    decision = select_capacity_candidate(request)
+
+    assert decision.status is CapacitySizingStatus.SELECTED
+    assert decision.selected is not None
+    assert decision.selected.quantity == Decimal("0.10")
+    assert decision.selected.tp1_quantity == Decimal("0.05")
+    assert decision.selected.runner_quantity == Decimal("0.05")
+    assert (
+        decision.selected.runner_quantity * request.initial_stop_price
+        < request.min_notional
+    )
+
+
 def _request(**changes: object) -> CapacitySizingRequest:
     payload: dict[str, object] = {
         "total_wallet_balance": Decimal(1000),

@@ -8,7 +8,7 @@ design_authority_commit: 50e94cea15445f1c3e268f524dfa6e440581bf3e
 design_authority_semantic_digest: sha256:68415c06387d4cdc13aebc500a095e205fe389ea96be137df07350c4a6364477
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: EX-00
+active_execution_scope: EX-01
 production_authority: NONE
 owner_approval: 2026-08-28 active task decision authorizing EX-00 through EX-08
 ---
@@ -32,7 +32,7 @@ perform Replay, Shadow, parameter search or profitability certification.
 design_status = DESIGN_APPROVED
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = EX-00
+active_execution_scope = EX-01
 production_authority = NONE
 ```
 
@@ -194,6 +194,45 @@ remains explicit and bounded.
 - do not duplicate existing lifecycle support fixtures;
 - do not commit an intentionally failing tree;
 - do not run R4.
+
+### EX-00 Execution Evidence — 2026-08-28
+
+**Status: `EX00_COMPLETE / GREEN_CHECKPOINT`.** Current behavior is frozen by
+GREEN characterization tests:
+
+- Crypto SOR 96 and SOR-US 8 TimeStop baselines remain exact;
+- non-SOR pre-TP1 without reclaim/session references returns `NO_CHANGE`;
+- Lifecycle request currently uses Ticket creation time;
+- current sizing can select a plan whose Runner leg is below per-leg
+  minNotional;
+- current Policy authority is Event-bound;
+- runtime imports no YAML parser and has no ExitProfile YAML catalog.
+
+Temporary, uncommitted RED evidence confirmed the owner gaps:
+
+```text
+TimeStopMode missing
+registered_exit_profiles missing
+CapacityClaim.exit_binding_authority_version missing
+```
+
+The temporary test was removed before commit. Existing reducer evidence proves
+full fill uses `EntryFilled`, partial non-zero exposure uses
+`EntryPartiallyFilled`, and legal Vacuum retention preserves that partial
+exposure rather than creating a new start. The approved Design Authority was
+therefore narrowed to earliest authoritative non-zero exposure and the Plan
+digest was updated before implementation.
+
+Verification:
+
+| Check | Result |
+| --- | ---: |
+| Focused characterization | **55 passed** |
+| Partial exposure semantic audit | **3 passed** |
+| Checkpoint | **clean and GREEN** |
+
+No production code, Migration, PostgreSQL production state, Policy, Ticket or
+exchange fact was changed. Active execution scope advances to **EX-01**.
 
 ## 8. EX-01 — Pure ExitProfile And Generic Exit Semantics
 

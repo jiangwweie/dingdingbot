@@ -23,8 +23,14 @@ from src.trading_kernel.application.reconcile_ticket import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind, OrderCommandPayload
-from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
+from src.trading_kernel.domain.exit_policy import (
+    LifecycleMarketFacts,
+    exit_policy_for,
+)
+from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import owner_policy_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
@@ -47,6 +53,7 @@ from tests.trading_kernel.support.dispatch_venues import (
 from tests.trading_kernel.support.lifecycle import (
     registered_sor_long_ticket as _registered_sor_long_ticket,
 )
+from tests.trading_kernel.support.tickets import make_ticket
 
 
 @pytest.mark.asyncio
@@ -151,6 +158,47 @@ async def test_sor_v3_position_protected_exit_plan_is_durable(
     assert aggregate is not None and aggregate.status is AggregateStatus.EXIT_PENDING
     assert events[-1].reason == reason
     assert any(command.kind is ExchangeCommandKind.EXIT for command in commands)
+
+
+@pytest.mark.asyncio
+async def test_current_non_sor_pre_tp1_without_references_is_no_change(
+    lifecycle_engine,
+) -> None:
+    """Characterizes the generic PRE_TP1 gap owned by EX-01/EX-06."""
+
+    ticket = _registered_event_ticket("MI-LONG")
+    await _reach_position_protected(lifecycle_engine, ticket)
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        result = await maintain_ticket_lifecycle(
+            uow,
+            LifecycleMaintenanceRequest(
+                ticket_id=ticket.identity.ticket_id,
+                facts=TicketLifecycleFacts(
+                    position_quantity=ticket.quantity,
+                    tp1_filled_quantity=Decimal(0),
+                    tp1_average_fill_price=None,
+                    allocated_entry_fee_quote=Decimal("0.01"),
+                    exit_taker_fee_rate=Decimal("0.001"),
+                    price_tick=Decimal("0.1"),
+                    market_facts=LifecycleMarketFacts(
+                        watermark_ms=3_000,
+                        is_final_closed_candle=True,
+                        latest_close=Decimal(60500),
+                        structure_reference=Decimal(60500),
+                        atr=Decimal(100),
+                        holding_bars=10_000,
+                    ),
+                    observed_at_ms=3_000,
+                ),
+                now_ms=3_000,
+            ),
+        )
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+
+    assert result.status is LifecycleMaintenanceStatus.NO_CHANGE
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.POSITION_PROTECTED
 
 
 @pytest.mark.asyncio
@@ -550,6 +598,44 @@ async def _reach_position_protected(engine, ticket) -> None:
         )
     await _dispatch(engine, venue, ticket.identity.ticket_id, now_ms=2_200)
     await _dispatch(engine, venue, ticket.identity.ticket_id, now_ms=2_300)
+
+
+def _registered_event_ticket(event_id: str):
+    contract = next(
+        item for item in registered_strategy_contracts() if item.event_id == event_id
+    )
+    base = make_ticket(
+        exposure_family=contract.exposure_family,
+        family_ticket_limit=1,
+        pre_tp1_reclaim_price=None,
+        exposure_session_end_ms=None,
+    )
+    runtime = base.identity.runtime.model_copy(
+        update={
+            "strategy_group_id": contract.strategy_group_id,
+            "strategy_version_id": contract.strategy_version_id,
+            "event_spec_id": contract.event_spec_id,
+        }
+    )
+    identity = TicketIdentity(
+        ticket_id=build_ticket_id(
+            signal_event_id=base.identity.signal_event_id,
+            runtime=runtime,
+            netting_domain=base.identity.netting_domain,
+        ),
+        exposure_episode_id=base.identity.exposure_episode_id,
+        signal_event_id=base.identity.signal_event_id,
+        runtime=runtime,
+        netting_domain=base.identity.netting_domain,
+    )
+    policy = exit_policy_for(contract.event_spec_id)
+    return base.model_copy(
+        update={
+            "identity": identity,
+            "exit_policy_id": policy.exit_policy_id,
+            "exit_policy_semantic_hash": policy.semantic_hash(),
+        }
+    )
 
 
 async def _reach_runner_protected(engine, ticket) -> None:
