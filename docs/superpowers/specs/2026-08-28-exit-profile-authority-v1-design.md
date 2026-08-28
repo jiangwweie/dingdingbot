@@ -128,7 +128,8 @@ buffer. No confirmed swing pivot exists.
 
 1. make PRE_TP1 and ABSOLUTE time stops generic Exit Engine behavior;
 2. create immutable, strategy-neutral ExitProfile identities;
-3. create one versioned EventExitBinding authority per EventSpec;
+3. create exactly one current versioned EventExitBinding authority per active,
+   entry-eligible EventSpec and zero for retired EventSpecs;
 4. freeze Binding and Profile in CapacityClaim and Ticket without TOCTOU;
 5. support Profile retirement without breaking issued Tickets;
 6. enforce exact two-leg materialization at CapacityClaim time;
@@ -249,7 +250,19 @@ fully filled, it is permanently inactive for that Ticket.
 
 `ABSOLUTE` applies both before TP1 and during Runner management.
 
-### 7.3 ExitProfile
+### 7.3 PreTp1GuardKind
+
+```python
+class PreTp1GuardKind(StrEnum):
+    RECLAIM_REFERENCE = "reclaim_reference"
+    SESSION_EXPIRY = "session_expiry"
+```
+
+Strategy/Event semantics may provide lifecycle reference values, but the
+ExitProfile decides whether those values have exit behavior. A Ticket field is
+not an implicit instruction to exit.
+
+### 7.4 ExitProfile
 
 ```python
 class ExitProfile(BaseModel):
@@ -263,13 +276,14 @@ class ExitProfile(BaseModel):
     break_even_floor: BreakEvenFloorRule
     runner: RollingExtremeAtrRunnerRule
     time_stop: TimeStopRule | None
+    pre_tp1_guards: tuple[PreTp1GuardKind, ...]
 ```
 
 The semantic hash includes every field. A Profile ID/version/hash tuple is
 permanently immutable. Parameter change always creates a new Profile ID or
 version; `UPDATE policy JSON` is forbidden.
 
-### 7.4 EventExitBinding
+### 7.5 EventExitBinding
 
 ```python
 class EventExitBinding(BaseModel):
@@ -297,27 +311,29 @@ activation_reason
 
 The current pointer is not part of the immutable Binding hash.
 
-### 7.5 CapacityClaim lineage
+### 7.6 CapacityClaim lineage
 
 CapacityClaim adds:
 
 ```text
 exit_binding_id
 exit_binding_semantic_hash
+exit_binding_authority_version
 ```
 
 The existing `exit_policy_id` and `exit_policy_semantic_hash` physical fields
 remain data-compatible and are interpreted as frozen Profile identity in V1.
 No duplicate Profile columns are added merely to rename the concept.
 
-### 7.6 Ticket lineage
+### 7.7 Ticket lineage
 
-TradeTicket adds the same exact Binding fields and copies all four identities
-from CapacityClaim:
+TradeTicket adds the same exact Binding fields and copies the complete frozen
+Binding authority and Profile lineage from CapacityClaim:
 
 ```text
 Claim.exit_binding_id == Ticket.exit_binding_id
 Claim.exit_binding_semantic_hash == Ticket.exit_binding_semantic_hash
+Claim.exit_binding_authority_version == Ticket.exit_binding_authority_version
 Claim.exit_policy_id == Ticket.exit_policy_id
 Claim.exit_policy_semantic_hash == Ticket.exit_policy_semantic_hash
 ```
@@ -336,7 +352,8 @@ Ticket issuance must not resolve a different current Binding or Profile.
 4. require Binding and Profile active for new Claim authority;
 5. require Profile side equals Signal/Ticket Netting Domain side;
 6. calculate TP1/Runner materialization;
-7. freeze Binding/Profile identity into CapacityClaim;
+7. freeze Binding/Profile identity and current pointer `projection_version`
+   into CapacityClaim;
 8. commit the Claim with its existing admission snapshot lineage.
 
 There is no network I/O in this transaction.
@@ -349,6 +366,7 @@ Binding pointer and requires:
 ```text
 current_binding_id == claim.exit_binding_id
 current_binding_hash == claim.exit_binding_semantic_hash
+current_projection_version == claim.exit_binding_authority_version
 ```
 
 If the Binding changed after sizing, Admission is terminally rejected with:
@@ -357,7 +375,8 @@ If the Binding changed after sizing, Admission is terminally rejected with:
 exit_binding_changed
 ```
 
-The Kernel must not silently rebuild the Claim or substitute the new Profile.
+The version check closes `A -> B -> A` ABA. The Kernel must not silently
+rebuild the Claim or substitute the new Profile.
 
 If the Binding remains exact, Ticket copies Claim lineage atomically with the
 Reservation, Netting Domain hold, Aggregate and durable ENTRY Command.
@@ -399,7 +418,7 @@ Use three ownership surfaces:
 
 ```text
 brc_event_exit_profile_bindings          immutable facts
-brc_event_exit_profile_binding_current   one current pointer per EventSpec
+brc_event_exit_profile_binding_current   one pointer per active EventSpec
 brc_event_exit_profile_binding_events    append-only transitions
 ```
 
@@ -420,8 +439,15 @@ Initial migration bindings use a typed `system_migration` authorization source.
 Every later production switch uses the Owner control boundary; direct SQL and
 repository-only pointer mutation are forbidden.
 
-The current table has exactly one row per EventSpec. PostgreSQL unique/FK/check
-constraints prevent two current bindings or mismatched Profile hashes.
+One immutable Binding may be activated at most once and retired at most once.
+A retired Binding can never become current again; any future return to the same
+Profile requires a new Binding identity and higher binding version. This rule,
+together with Claim-frozen pointer projection version, eliminates ABA.
+
+The current table has exactly one row per currently active/entry-eligible
+EventSpec. Retired EventSpecs have zero current rows. PostgreSQL
+unique/FK/check constraints prevent two current bindings or mismatched Profile
+hashes.
 
 ### 9.3 Strategy retirement
 
@@ -467,6 +493,16 @@ For one final closed candle before TP1:
 
 Session deadline has precedence over price-thesis attribution when multiple
 conditions become true on the same candle.
+
+`SESSION_EXPIRY` is evaluated only when the Profile contains
+`PreTp1GuardKind.SESSION_EXPIRY`; `RECLAIM_FAILURE` is evaluated only when the
+Profile contains `PreTp1GuardKind.RECLAIM_REFERENCE`. Claim construction
+requires the corresponding Strategy lifecycle reference when a guard is
+enabled. Missing required reference fails closed rather than silently disabling
+the guard.
+
+Profiles with `pre_tp1_guards=()` do not consume Strategy-provided reclaim or
+session references.
 
 ### 10.3 Runner stage precedence
 
@@ -523,7 +559,11 @@ For a fill at 10:23 on a 1h Profile:
 22:00 close -> bar 12
 ```
 
-Only final venue candles whose close time is at or after exposure start count.
+A holding bar is one final venue candle whose close timestamp is **strictly
+later** than `EntryFilled.occurred_at_ms`. The candle is not required to have
+opened after EntryFilled. Therefore the partially exposed 10:00–11:00 candle
+in the example counts when its 11:00 close becomes final.
+
 Signal, Claim, Ticket creation and Command dispatch timestamps never count.
 
 ### 11.3 Bounded market window
@@ -610,18 +650,38 @@ hash.
 
 ## 13. Owner-Frozen V1 Catalog
 
-Six semantic families require eight side-bound immutable Profile records:
+Six semantic families require eight side-bound immutable Profile records.
 
-| Profile record | Side | TP1 | Runner | Time Stop |
-| --- | --- | ---: | --- | --- |
-| `exit-profile:trend-continuation:1h:long:v1` | long | 1R / 50% | 4 bars / 0.5ATR | none |
-| `exit-profile:momentum-tail:1h:long:v1` | long | 1R / 33% | 5 bars / 0.75ATR | none |
-| `exit-profile:impulse-decay:1h:long:v1` | long | 1R / 50% | 4 bars / 0.5ATR | 12 PRE_TP1 |
-| `exit-profile:failure-reversal:1h:short:v1` | short | 1R / 50% | 4 bars / 0.5ATR | 12 PRE_TP1 |
-| `exit-profile:orb-crypto:15m:long:v1` | long | 1R / 50% | 4 bars / 0.5ATR | 96 ABSOLUTE |
-| `exit-profile:orb-crypto:15m:short:v1` | short | 1R / 50% | 4 bars / 0.5ATR | 96 ABSOLUTE |
-| `exit-profile:orb-us:15m:long:v1` | long | 1R / 50% | 4 bars / 0.5ATR | 8 ABSOLUTE |
-| `exit-profile:orb-us:15m:short:v1` | short | 1R / 50% | 4 bars / 0.5ATR | 8 ABSOLUTE |
+Every V1 Profile freezes these shared hashed fields explicitly:
+
+| Field | Frozen value |
+| --- | --- |
+| `profile_schema_version` | `exit_profile_v1` |
+| `tp1.reward_multiple` | `Decimal("1")` |
+| `tp1.execution_style` | `limit_gtc` |
+| `tp1.market_fallback_allowed` | `false` |
+| `break_even_floor.exit_fee_basis` | `conservative_taker` |
+| `break_even_floor.slippage_buffer_ticks` | `2` |
+| `break_even_floor.minimum_improvement_ticks` | `2` |
+| `runner.kind` | `rolling_extreme_atr` |
+| `runner.atr_period` | `14` |
+| `runner.minimum_improvement_ticks` | `2` |
+
+Profile-specific hashed fields are:
+
+| Profile record | Side | TP1 fraction | Runner timeframe | Lookback | ATR buffer | TimeStop | Pre-TP1 guards |
+| --- | --- | ---: | --- | ---: | ---: | --- | --- |
+| `exit-profile:trend-continuation:1h:long:v1` | long | `0.50` | `1h` | 4 | `0.50` | none | `()` |
+| `exit-profile:momentum-tail:1h:long:v1` | long | `0.33` | `1h` | 5 | `0.75` | none | `()` |
+| `exit-profile:impulse-decay:1h:long:v1` | long | `0.50` | `1h` | 4 | `0.50` | `PRE_TP1 / 12` | `()` |
+| `exit-profile:failure-reversal:1h:short:v1` | short | `0.50` | `1h` | 4 | `0.50` | `PRE_TP1 / 12` | `()` |
+| `exit-profile:orb-crypto:15m:long:v1` | long | `0.50` | `15m` | 4 | `0.50` | `ABSOLUTE / 96` | `(RECLAIM_REFERENCE, SESSION_EXPIRY)` |
+| `exit-profile:orb-crypto:15m:short:v1` | short | `0.50` | `15m` | 4 | `0.50` | `ABSOLUTE / 96` | `(RECLAIM_REFERENCE, SESSION_EXPIRY)` |
+| `exit-profile:orb-us:15m:long:v1` | long | `0.50` | `15m` | 4 | `0.50` | `ABSOLUTE / 8` | `(RECLAIM_REFERENCE, SESSION_EXPIRY)` |
+| `exit-profile:orb-us:15m:short:v1` | short | `0.50` | `15m` | 4 | `0.50` | `ABSOLUTE / 8` | `(RECLAIM_REFERENCE, SESSION_EXPIRY)` |
+
+No constructor default is allowed to supply a hashed Profile field. Catalog
+tests compare the complete canonical payload and semantic hash.
 
 Current Event bindings are:
 
@@ -654,7 +714,8 @@ Migration changes:
 5. insert V1 ExitProfile rows with `event_spec_id=NULL`;
 6. install immutability triggers over Profile identity, version, side, payload
    and semantic hash;
-7. permit only `active -> retired` status transition.
+7. add `UNIQUE(exit_policy_id, semantic_hash)` for exact composite references;
+8. permit only `active -> retired` status transition.
 
 Historical event-bound rows remain provenance only. Current Lifecycle does not
 fallback to their payload type after cutover.
@@ -677,8 +738,10 @@ created_at_ms
 Constraints:
 
 - unique `(event_spec_id, binding_version)`;
+- unique `(exit_binding_id, binding_semantic_hash)`;
 - canonical SHA-256 hashes;
-- exact Profile ID/hash FK or deferred validation trigger;
+- composite FK `(exit_profile_id, exit_profile_semantic_hash)` to
+  `brc_exit_policies(exit_policy_id, semantic_hash)`;
 - immutable row trigger.
 
 ### 14.3 Current pointer
@@ -693,7 +756,8 @@ projection_version
 activated_at_ms
 ```
 
-The pointer row is the sole new-Claim authority.
+The pointer uses composite FK `(exit_binding_id, binding_semantic_hash)` to the
+immutable Binding fact. The pointer row is the sole new-Claim authority.
 
 ### 14.4 Binding events
 
@@ -711,6 +775,15 @@ reason
 created_at_ms
 ```
 
+Constraints include:
+
+```text
+UNIQUE(exit_binding_id, operation)
+```
+
+so one Binding has at most one `ACTIVATED` and one `RETIRED` event and cannot be
+reactivated.
+
 ### 14.5 Claim and Ticket columns
 
 Add nullable historical-safe columns to:
@@ -718,12 +791,16 @@ Add nullable historical-safe columns to:
 ```text
 brc_capacity_claims.exit_binding_id
 brc_capacity_claims.exit_binding_semantic_hash
+brc_capacity_claims.exit_binding_authority_version
 brc_trade_tickets.exit_binding_id
 brc_trade_tickets.exit_binding_semantic_hash
+brc_trade_tickets.exit_binding_authority_version
 ```
 
 Target runtime requires them for every newly issued Claim/Ticket. Existing
-terminal rows remain nullable. AdmissionDecision retains its exact Claim/Ticket
+terminal rows remain nullable. New Claim/Ticket rows use composite Binding and
+Profile FKs where the preserved source data permits exact constraints.
+AdmissionDecision retains its exact Claim/Ticket
 and digest lineage rather than duplicating all Profile fields.
 
 ### 14.6 Legacy EventSpec column
@@ -780,8 +857,8 @@ Migration/target identity installation:
 1. create/alter Profile and Binding Schema;
 2. preserve historical rows;
 3. insert eight immutable V1 Profiles;
-4. insert eight initial Bindings for the eight current EventSpecs;
-5. create eight current pointers;
+4. insert eight initial Bindings for the eight active EventSpecs;
+5. create exactly eight current pointers and zero for retired EventSpecs;
 6. add Claim/Ticket lineage columns;
 7. rotate Registry/Schema/Seed identity with global new ENTRY paused;
 8. start safety workers;
@@ -803,7 +880,7 @@ manual Binding DML is permitted.
 | --- | --- |
 | Registry seed | Profile rows, Binding facts, current pointers, semantic identity |
 | Binding switch | OwnerAuthorization, previous event, new event, current pointer CAS |
-| Claim build | exact Binding/Profile identity plus sized exit legs |
+| Claim build | exact Binding/Profile identity, pointer authority version and sized exit legs |
 | Ticket issuance | Claim lineage, Ticket, Reservation, Domain hold, Aggregate, ENTRY Command |
 | Lifecycle mutation | existing Trade Event/Aggregate/Command effects only |
 
@@ -859,15 +936,18 @@ an implementation contract.
 - PRE_TP1 at 11/12 closed bars;
 - ABSOLUTE before and after TP1;
 - deterministic session/reclaim/time-stop precedence;
+- reclaim/session guards included in Profile hash and selectively consumed;
 - rolling-extreme long/short calculations;
 - Profile and Binding deterministic semantic hashes;
+- complete V1 Catalog payload/hash parity with zero constructor defaults;
 - Profile mutation rejected.
 
 ### 20.2 Capacity and lineage
 
-- Claim freezes exact Binding/Profile IDs and hashes;
+- Claim freezes exact Binding/Profile IDs, hashes and pointer authority version;
 - Ticket copies Claim identities byte-for-byte;
 - Binding switch between Claim/Ticket rejects without re-sizing;
+- `A/v10 -> B/v11 -> A-new/v12` ABA rejects the v10 Claim;
 - Profile side mismatch rejects;
 - 33/67 normal split;
 - TP1 below minQty/minNotional;
@@ -878,7 +958,9 @@ an implementation contract.
 ### 20.3 Lifecycle
 
 - EntryFilled timestamp, not Ticket creation, owns exposure start;
-- fill 10:23 produces 11:00 as holding bar 1;
+- a final close strictly later than EntryFilled counts even when its candle
+  opened before the fill;
+- fill 10:23 produces 11:00 as holding boundary 1;
 - MI/BRF2 12 PRE_TP1 bars request EXIT;
 - MI/BRF2 after TP1 ignore PRE_TP1 time stop;
 - Crypto SOR ABSOLUTE 96 applies before and after TP1;
@@ -893,7 +975,10 @@ an implementation contract.
 - source non-flat rejection;
 - historical Policy/Ticket preservation;
 - eight immutable Profile rows and eight Binding pointers;
-- one current Binding per EventSpec;
+- exactly one current Binding per active EventSpec and zero per retired EventSpec;
+- Profile and Binding current composite FKs reject hash drift;
+- one ACTIVATED and one RETIRED event maximum per Binding;
+- retired Binding reactivation rejected;
 - Profile content immutability;
 - active Binding blocks Profile retirement;
 - Binding switch atomicity and crash rollback;
@@ -974,13 +1059,16 @@ Stop implementation review if any solution requires:
 Design implementation is complete only when:
 
 ```text
-one active EventExitBinding per EventSpec
+exactly one current EventExitBinding per active/entry-eligible EventSpec
+AND zero current EventExitBinding per retired EventSpec
 AND immutable ExitProfile content
-AND Binding/Profile frozen in CapacityClaim and Ticket
+AND Binding/Profile identity and pointer authority version frozen in CapacityClaim and Ticket
 AND Ticket issuance never substitutes current Binding
+AND retired Binding can never be activated again
 AND retired Profile serves issued Ticket
 AND exact two-leg materialization passes
-AND holding bars use EntryFilled and final venue candles
+AND holding boundaries are final venue closes strictly after EntryFilled
+AND Profile hash covers reclaim/session guard behavior and every Catalog field
 AND PRE_TP1/ABSOLUTE semantics and precedence are deterministic
 AND Lifecycle keeps one TP1 + Runner reducer
 AND EventSpec exit_policy_id has zero runtime authority
