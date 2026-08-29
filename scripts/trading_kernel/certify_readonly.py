@@ -28,7 +28,6 @@ from src.trading_kernel.application.strategy_universe_batch_manifest import (
 from src.trading_kernel.domain.exit_policy import (
     build_exit_profile_catalog_digest,
     registered_event_exit_bindings,
-    registered_exit_policies,
     registered_exit_profiles,
 )
 from src.trading_kernel.domain.instrument_certification import (
@@ -316,25 +315,6 @@ def _expected_registry_manifest() -> dict[str, object]:
             }
             for fact in (*contract.required_facts, *contract.disable_facts)
         )
-    policy_by_event = {
-        policy.event_spec_id: policy for policy in registered_exit_policies()
-    }
-    policies = [
-        {
-            "exit_policy_id": policy_by_event[contract.event_spec_id].exit_policy_id,
-            "exit_policy_version": policy_by_event[
-                contract.event_spec_id
-            ].exit_policy_version,
-            "event_spec_id": contract.event_spec_id,
-            "position_side": contract.position_side,
-            "policy": policy_by_event[contract.event_spec_id].model_dump(mode="json"),
-            "semantic_hash": policy_by_event[
-                contract.event_spec_id
-            ].semantic_hash(),
-            "status": contract.status,
-        }
-        for contract in sorted(contracts, key=lambda item: item.event_spec_id)
-    ]
     return {
         "groups": groups,
         "versions": sorted(
@@ -362,7 +342,6 @@ def _expected_registry_manifest() -> dict[str, object]:
             event_facts,
             key=lambda row: (row["event_spec_id"], row["fact_definition_id"]),
         ),
-        "policies": policies,
     }
 
 
@@ -415,13 +394,6 @@ async def _live_registry_manifest(
                 ON event.event_spec_id = link.event_spec_id
                AND event.status = 'active'
           ORDER BY link.event_spec_id, link.fact_definition_id
-        """,
-        "policies": """
-            SELECT exit_policy_id, exit_policy_version, event_spec_id,
-                   position_side, policy, semantic_hash, status
-              FROM brc_exit_policies
-             WHERE status = 'active'
-          ORDER BY event_spec_id
         """,
     }
     return {

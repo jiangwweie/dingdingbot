@@ -465,7 +465,7 @@ CERTIFIED_0002_SOURCE_EVENTS = (
 
 
 def test_runtime_identity_points_to_current_schema_head() -> None:
-    assert CURRENT_SCHEMA_REVISION == "0006_sor_dynamic_selection_v0"
+    assert CURRENT_SCHEMA_REVISION == "0007_exit_profile_authority_v1"
 
 
 def test_alembic_has_one_exact_current_head() -> None:
@@ -822,6 +822,7 @@ async def test_0003_installs_vnext_registry_and_retires_exact_source_lineage(
                 if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
             ),
             include_product_compatibility=False,
+            include_exit_profile_authority=False,
         )
 
     async with engine.connect() as connection:

@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from src.trading_kernel.application.ports import KernelUnitOfWork
 from src.trading_kernel.domain.exit_policy import (
     registered_event_exit_bindings,
-    registered_exit_policies,
     registered_exit_profiles,
 )
 from src.trading_kernel.domain.product import product_compatibility_for
@@ -236,35 +235,6 @@ class PostgresStrategyRegistryRepository:
                         "underlying_type",
                         "margin_asset",
                         "semantic_digest",
-                    ),
-                )
-
-            if not include_exit_profile_authority:
-                exit_policy = next(
-                    policy
-                    for policy in registered_exit_policies()
-                    if policy.event_spec_id == contract.event_spec_id
-                )
-                counters["inserted_exit_policy_count"] += await self._insert_exact(
-                    exit_policies,
-                    "exit_policy_id",
-                    {
-                        "exit_policy_id": exit_policy.exit_policy_id,
-                        "exit_policy_version": exit_policy.exit_policy_version,
-                        "event_spec_id": exit_policy.event_spec_id,
-                        "position_side": exit_policy.position_side,
-                        "policy": exit_policy.model_dump(mode="json"),
-                        "semantic_hash": exit_policy.semantic_hash(),
-                        "status": contract.status,
-                        "created_at_ms": seeded_at_ms,
-                    },
-                    compare_keys=(
-                        "exit_policy_version",
-                        "event_spec_id",
-                        "position_side",
-                        "policy",
-                        "semantic_hash",
-                        "status",
                     ),
                 )
 
