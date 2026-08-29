@@ -10,6 +10,10 @@ from scripts.trading_kernel.verification_portfolios import (
     command_set_digest,
     validate_command_set,
 )
+from scripts.trading_kernel.verify_sor_dynamic_selection_golden import (
+    RESEARCH_PROVENANCE_SOURCE_PATHS,
+    SELECTION_SEMANTIC_SOURCE_PATHS,
+)
 
 
 def test_every_tracked_portfolio_is_nonempty_unique_and_digest_stable() -> None:
@@ -48,3 +52,14 @@ def test_r4_candidate_certification_includes_dynamic_selection_golden_parity() -
         ".venv/bin/python",
         "scripts/trading_kernel/verify_sor_dynamic_selection_core_parity.py",
     ) in R4_SCHEMA_AUTHORITY_COMMANDS
+
+
+def test_selection_golden_tracks_selection_sources_not_exit_runtime_files() -> None:
+    assert SELECTION_SEMANTIC_SOURCE_PATHS == (
+        "src/trading_kernel/domain/detectors/sor.py",
+        "src/trading_kernel/domain/instrument_selection.py",
+    )
+    assert RESEARCH_PROVENANCE_SOURCE_PATHS == (
+        "src/trading_kernel/domain/strategy_registry.py",
+        "src/trading_kernel/domain/exit_policy.py",
+    )

@@ -64,6 +64,15 @@ CANDIDATE_SYMBOLS = (
     "RUNEUSDT",
 )
 
+SELECTION_SEMANTIC_SOURCE_PATHS = (
+    "src/trading_kernel/domain/detectors/sor.py",
+    "src/trading_kernel/domain/instrument_selection.py",
+)
+RESEARCH_PROVENANCE_SOURCE_PATHS = (
+    "src/trading_kernel/domain/strategy_registry.py",
+    "src/trading_kernel/domain/exit_policy.py",
+)
+
 STATIC_SYMBOLS = frozenset(
     {
         "BTCUSDT",
@@ -682,14 +691,17 @@ def build_artifact(args: argparse.Namespace) -> None:
     generator_path = Path(__file__).resolve()
     source_files = {
         relative: _sha256_file(repo_root / relative)
-        for relative in (
-            "src/trading_kernel/domain/detectors/sor.py",
-            "src/trading_kernel/domain/strategy_registry.py",
-            "src/trading_kernel/domain/exit_policy.py",
-        )
+        for relative in SELECTION_SEMANTIC_SOURCE_PATHS
     }
     provenance_files = {
-        "events_csv": {"path_label": events_path.name, "sha256": _sha256_file(events_path)}
+        "events_csv": {"path_label": events_path.name, "sha256": _sha256_file(events_path)},
+        **{
+            f"research_source:{relative}": {
+                "path_label": relative,
+                "sha256": _sha256_file(repo_root / relative),
+            }
+            for relative in RESEARCH_PROVENANCE_SOURCE_PATHS
+        },
     }
     for label, path in (
         ("independent_replay_report", args.report),

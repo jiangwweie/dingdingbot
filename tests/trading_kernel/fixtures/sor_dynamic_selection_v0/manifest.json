@@ -20,7 +20,7 @@
   "generator": {
     "path": "scripts/trading_kernel/verify_sor_dynamic_selection_golden.py",
     "python": "3.14.2 (main, Dec  5 2025, 16:49:16) [Clang 16.0.0 (clang-1600.0.26.6)]",
-    "sha256": "319d976e771f70a50663856bb1d86f25cfa5a7df8365ac06b14ad991b51d2119"
+    "sha256": "4948cbb6eca26e61211e2623b932464da30357b0f335a14e17942cfb4fa43cf0"
   },
   "independent_replay_parity": {
     "computed_policy_metrics": {
@@ -448,6 +448,14 @@
     "instrument_effect_results_archive": {
       "path_label": "sor_instrument_effect_v1_results.tgz",
       "sha256": "d5947191abe392553ba8bccddc6ba0d5c691af511d663100cfbbecd0866f0ea2"
+    },
+    "research_source:src/trading_kernel/domain/exit_policy.py": {
+      "path_label": "src/trading_kernel/domain/exit_policy.py",
+      "sha256": "a095e5921708bbc9ec088bfdf070918c2610b831b849de5927d1addb586b0d40"
+    },
+    "research_source:src/trading_kernel/domain/strategy_registry.py": {
+      "path_label": "src/trading_kernel/domain/strategy_registry.py",
+      "sha256": "fde60e73996b5c1c06e1b506b8dc837a0d42e458c9e7489e8e632ddaee8f3f1d"
     }
   },
   "research_spec_id": "sor-dynamic-selection-v0",
@@ -517,8 +525,7 @@
   "session_start_ms": 1704067200000,
   "source_semantic_identity": {
     "src/trading_kernel/domain/detectors/sor.py": "62841a063b1d0b9cc8d9f41d51befa6117953117c8c3adb38c371441539feba8",
-    "src/trading_kernel/domain/exit_policy.py": "25511f11e2b930d0572321b8989fe1cf63c87c941e615ca7b6b4f5266810348e",
-    "src/trading_kernel/domain/strategy_registry.py": "db44ea2f39dbab3671d5bed8e63963248b86f1316fc29fbc6f10dded1c168049"
+    "src/trading_kernel/domain/instrument_selection.py": "baddb1b95f2e2a7ce5e629f6a0da0af10a3c0f5e267a4d27fac2878547b0d54b"
   },
   "source_set_digest": "sha256:05f1e3dcfc469aaf3022ca897b1efb3f5704cf85b9155a261a09170832e8d6da",
   "test_portfolio": {
