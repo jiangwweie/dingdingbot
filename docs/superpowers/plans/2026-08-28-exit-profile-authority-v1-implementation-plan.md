@@ -1,6 +1,6 @@
 ---
 title: EXIT_PROFILE_AUTHORITY_V1_IMPLEMENTATION_PLAN
-status: PLAN_APPROVED
+status: LOCAL_IMPLEMENTATION_COMPLETE
 date: 2026-08-28
 program: EX-P1
 design_authority_path: ../specs/2026-08-28-exit-profile-authority-v1-design.md
@@ -8,7 +8,7 @@ design_authority_commit: 50e94cea15445f1c3e268f524dfa6e440581bf3e
 design_authority_semantic_digest: sha256:68415c06387d4cdc13aebc500a095e205fe389ea96be137df07350c4a6364477
 base_candidate: 1c57b407c8f7ae5dcd2a15b40fb4f49366012b00
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: EX-08
+active_execution_scope: NONE
 production_authority: NONE
 owner_approval: 2026-08-28 active task decision authorizing EX-00 through EX-08
 ---
@@ -32,7 +32,7 @@ perform Replay, Shadow, parameter search or profitability certification.
 design_status = DESIGN_APPROVED
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = EX-08
+active_execution_scope = NONE
 production_authority = NONE
 ```
 
@@ -964,6 +964,41 @@ AND production unchanged
 - do not certify an uncommitted worktree;
 - any fix creates a new candidate and invalidates the manifest;
 - do not push/merge/deploy without the next explicit authority.
+
+### EX-08 Execution Evidence — 2026-08-29
+
+**Status: `EX08_COMPLETE / LOCAL_IMPLEMENTATION_COMPLETE`.** The final local
+candidate is identified only by its clean-HEAD R4 manifest; this document does
+not copy a mutable candidate SHA. Release classification is **R4** with the
+`stopped_flat_forward_upgrade` blocker and Schema target
+`0007_exit_profile_authority_v1`.
+
+The complete exact-candidate command set passed Unit/Architecture, PostgreSQL
+Integration, Full-chain, Ruff, repository Mypy, diff check, the tracked
+961×24 Decimal Golden integrity check, Production SelectionCore parity and the
+explicit Migration/Authority/clean-rebuild audit. The Golden artifact-set
+digest and all 23,064 member decisions / 961 snapshots remained unchanged;
+Golden semantic source identity was narrowed to the actual SOR detector and
+SelectionCore while Registry/Exit sources remain research provenance.
+
+Deployment evidence is reviewable in the current Tokyo deployment contract:
+exact `0006 -> 0007` source/target identity, Phase A advisory precheck, Phase B
+fresh post-fence/post-stop PostgreSQL/Binance reread, preservation digest,
+eight-Profile/eight-Binding postflight, four Worker identity checks, zero
+runtime activity, zero YAML/YML installation and target-Schema fix-forward
+recovery.
+
+The following authorities remain separate and absent:
+
+```text
+software_deployment_authority = NONE
+crypto_sor_resume_authority = NONE
+future_profile_switch_authority = NONE
+```
+
+No Tokyo PostgreSQL Migration, systemd action, Strategy resume, Profile switch,
+manual flatten or exchange write was executed. The branch remains local and
+unmerged until the next explicit integration/deployment decision.
 
 ## 16. Required Test Portfolio Maintenance
 
