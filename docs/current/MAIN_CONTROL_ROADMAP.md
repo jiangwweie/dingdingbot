@@ -52,11 +52,12 @@ different Netting Domains progress concurrently.
 
 | Area | Verified state |
 | --- | --- |
-| Verified at | `2026-08-17`; direct Tokyo release marker, systemd, Unix-Socket health and public HTTPS evidence |
-| Release commit and tag | Static Owner Console and Owner API both run `92b7b222cd3392e96cc61d23ceeb4887bbca080b`, tagged `tokyo-runtime-2026.08.17.1` and pushed with `dev` |
-| Scope | R2: only `/opt/brc/owner-console/current`, `/opt/brc/owner-console-api/current` and `brc-owner-console-api.service` changed; no schema, Policy, Registry, Nginx configuration or Kernel Worker action occurred |
-| Postflight | Static and API release markers match; API Unix-Socket `/healthz` returns `{"status":"ok"}`; public HTTPS succeeds; all four Kernel Workers remain `active`, `enabled` and at zero restarts |
-| Recovery observation | The independent API deployment fallback selected system Python `3.10`, while current API imports require Python `3.11+`; the first target startup failed and the API was recovered with the server's existing Python `3.12` Kernel environment. The target API is healthy, but the automated R2 fallback/rollback path requires a focused P2.2 fix before the next Owner API release |
+| Verified at | `2026-08-31`; direct Tokyo API release marker, systemd and Unix-Socket health evidence |
+| Static release | Static Owner Console remains at `92b7b222cd3392e96cc61d23ceeb4887bbca080b` |
+| Owner API release | Owner API runs `552bc3d3f0bd807d5fefa7d284c6b440f6619cdb`, R2 certified against Schema `0007_exit_profile_authority_v1` |
+| Scope | R2 changed only `/opt/brc/owner-console-api/current` and `brc-owner-console-api.service`; it did not change Kernel release, Policy, Entry fence, Registry, Nginx or exchange state |
+| Postflight | API exact marker matches, service is active and Unix-Socket `/healthz` returns `{"status":"ok"}`; Kernel remains `dd047941` with Entry fenced and safety workers active |
+| Deployment repair | API release provisioning now bootstraps pip through the target venv Python from the release directory and waits for Unix-Socket readiness before judging health, avoiding rollback to a Schema-incompatible old API |
 
 ## Deployment Repairs Closed
 
