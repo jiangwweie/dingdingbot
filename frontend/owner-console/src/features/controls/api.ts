@@ -7,6 +7,9 @@ export type ControlWriteBody = components["schemas"]["ControlWriteBody"];
 export type FlattenBody = components["schemas"]["FlattenBody"];
 export type FlattenPreview = components["schemas"]["FlattenPreview"];
 export type OwnerControlOperation = components["schemas"]["OwnerControlOperation"];
+export type DynamicSelectionActivationBody = ControlWriteBody & {
+  effective_session_start_ms: number;
+};
 
 export const controlsQueryKey = ["owner", "controls"] as const;
 
@@ -39,6 +42,24 @@ export async function setGlobalEntry(
     ? await apiClient.POST("/api/owner/v1/controls/entry/pause", { body })
     : await apiClient.POST("/api/owner/v1/controls/entry/resume", { body });
   if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
+}
+
+export async function activateSorDynamicSelection(
+  body: DynamicSelectionActivationBody,
+): Promise<void> {
+  const response = await fetch(
+    "/api/owner/v1/controls/strategies/SOR-001/selection/dynamic/activate",
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw apiErrorFromResponse(response, payload);
+  }
 }
 
 export async function getFlattenPreview(): Promise<FlattenPreview> {

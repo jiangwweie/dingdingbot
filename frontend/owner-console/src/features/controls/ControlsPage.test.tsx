@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ownerQueryClient } from "../../app/queryClient";
 import { ControlsPage } from "./ControlsPage";
-import { getControls, getFlattenPreview } from "./api";
+import { activateSorDynamicSelection, getControls, getFlattenPreview } from "./api";
 
 vi.mock("./api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api")>();
@@ -16,6 +16,7 @@ vi.mock("./api", async (importOriginal) => {
     setGlobalEntry: vi.fn(),
     setStrategyControl: vi.fn(),
     submitFlatten: vi.fn(),
+    activateSorDynamicSelection: vi.fn(),
   };
 });
 
@@ -96,4 +97,14 @@ it("shows one readable control operation instead of individual state-machine eve
   expect(within(history!).getByText("曾需关注，现已完成")).toBeInTheDocument();
   expect(within(history!).getByText(/1 个 Ticket/)).toBeInTheDocument();
   expect(screen.queryByText("owner-authorization:technical-id")).not.toBeInTheDocument();
+});
+
+it("keeps Dynamic activation TOTP-local and submits only after confirmation", async () => {
+  const user = userEvent.setup();
+  render(<QueryClientProvider client={ownerQueryClient}><MemoryRouter initialEntries={["/controls"]}><ControlsPage /></MemoryRouter></QueryClientProvider>);
+  await user.click(await screen.findByRole("button", { name: "激活 Dynamic" }));
+  expect(screen.getByText("确认激活 SOR Dynamic Universe")).toBeInTheDocument();
+  await user.type(screen.getByLabelText("Google Authenticator 验证码"), "123456");
+  await user.click(screen.getByRole("button", { name: "确认激活" }));
+  expect(vi.mocked(activateSorDynamicSelection)).toHaveBeenCalledOnce();
 });

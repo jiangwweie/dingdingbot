@@ -14,6 +14,7 @@ import { formatOwnerReason, formatOwnerStatus } from "../../components/ui/presen
 import {
   getControls,
   getFlattenPreview,
+  activateSorDynamicSelection,
   setGlobalEntry,
   setStrategyControl,
   submitFlatten,
@@ -66,6 +67,7 @@ export function ControlsPage() {
   const [totpCode, setTotpCode] = useState("");
   const [flattenPreview, setFlattenPreview] = useState<FlattenPreview | null>(null);
   const [confirmationText, setConfirmationText] = useState("");
+  const [dynamicActivationOpen, setDynamicActivationOpen] = useState(false);
 
   const refresh = async () => {
     await ownerQueryClient.invalidateQueries({ queryKey: controlsQueryKey });
@@ -110,6 +112,21 @@ export function ControlsPage() {
       setFlattenPreview(null);
       setTotpCode("");
       setConfirmationText("");
+      await refresh();
+    },
+  });
+
+  const dynamicActivationMutation = useMutation({
+    mutationFn: async () => activateSorDynamicSelection({
+      expected_version: 1,
+      effective_session_start_ms: nextUtcSessionStartMs(),
+      reason: "owner_activate_sor_dynamic_selection_v0",
+      idempotency_key: requestId("owner-request-sor-dynamic"),
+      totp_code: totpCode,
+    }),
+    onSuccess: async () => {
+      setDynamicActivationOpen(false);
+      setTotpCode("");
       await refresh();
     },
   });
@@ -194,6 +211,18 @@ export function ControlsPage() {
         </div>
       </Panel>
 
+      <Panel title="SOR Dynamic Universe">
+        <div className="control-row control-row--global">
+          <div className="control-row__identity">
+            <strong>首个 Dynamic Selection Session</strong>
+            <span>固定 24 Candidate · 当前 Static baseline 将在下一 UTC Session 后由正式 Materialization 接管</span>
+          </div>
+          <StatusTag tone="attention">待激活</StatusTag>
+          <div className="control-row__facts"><span>下一 UTC Session</span><strong>{formatTime(nextUtcSessionStartMs())}</strong></div>
+          <Button onClick={() => setDynamicActivationOpen(true)}>激活 Dynamic</Button>
+        </div>
+      </Panel>
+
       <Panel title="当前受控操作">
         {operation ? (
           <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
@@ -253,6 +282,25 @@ export function ControlsPage() {
           </AlertDialog.Content>
         </AlertDialog.Portal>
       </AlertDialog.Root>
+
+      <AlertDialog.Root open={dynamicActivationOpen} onOpenChange={(open) => { if (!open) { setDynamicActivationOpen(false); setTotpCode(""); } }}>
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay className="control-dialog__overlay" />
+          <AlertDialog.Content className="control-dialog">
+            <AlertDialog.Title>确认激活 SOR Dynamic Universe</AlertDialog.Title>
+            <AlertDialog.Description>将为下一 UTC Session 写入一次性 Dynamic Selection 请求。当前 Static Universe 在正式切换前继续作为权威集合。</AlertDialog.Description>
+            <div className="mt-3 grid gap-1 text-[11px] text-[var(--color-text-secondary)]"><span>下一 UTC Session</span><strong className="tabular-number text-[var(--color-text-primary)]">{formatTime(nextUtcSessionStartMs())}</strong></div>
+            <label className="control-field">Google Authenticator 验证码<input autoComplete="one-time-code" inputMode="numeric" maxLength={8} value={totpCode} onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, ""))} /></label>
+            {dynamicActivationMutation.isError ? <p className="control-dialog__error">激活未提交；请刷新当前状态后重试。</p> : null}
+            <div className="control-dialog__actions"><AlertDialog.Cancel asChild><Button>取消</Button></AlertDialog.Cancel><AlertDialog.Action asChild><Button disabled={totpCode.length < 6 || dynamicActivationMutation.isPending} onClick={(event) => { event.preventDefault(); dynamicActivationMutation.mutate(); }}>确认激活</Button></AlertDialog.Action></div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
     </AppShell>
   );
+}
+
+function nextUtcSessionStartMs(nowMs = Date.now()): number {
+  const dayMs = 24 * 60 * 60 * 1000;
+  return (Math.floor(nowMs / dayMs) + 1) * dayMs;
 }
