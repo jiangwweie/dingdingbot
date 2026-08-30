@@ -85,6 +85,34 @@ strategy-performance or host-capacity benchmark.
 | Release identity | Current release, runtime metadata and PostgreSQL schema identify `3fa2e21c` and `0005_tradfi_instrument_center` | No old/new writer identity overlap remains after the R4 release |
 | Product readiness | Eight traded TradFi instruments are `active / regular` with eight fresh eligible certifications; corporate-event data is unavailable and recorded as a warning | Current Product gates permit Entry when spread, mark/index deviation and all remaining action-time facts pass |
 
+## Pending Two-Hop R4 Capability Deployment
+
+The current Tokyo runtime remains at its separately verified `0005` release.
+The following local release evidence is prepared for one stopped-and-flat
+maintenance window; it is not evidence of a production mutation or an Entry
+resume. Current PostgreSQL, systemd and Binance readonly facts must be
+refreshed immediately before Phase B of each hop.（来源：local exact-commit R4
+manifests；`TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`）
+
+| Hop | Exact candidate | Target schema | Local release evidence | Production scope after postflight |
+| --- | --- | --- | --- | --- |
+| A | `codex/sor-dynamic-universe-v0-deploy-plumbing-fix` @ `4bf4cd2369e6b2c7cce0f669da787de91f1a92b6` | `0006_sor_dynamic_selection_v0` | R4 `pass`; frozen Decimal Golden and `961 × 24` Core parity; real `0005 -> 0006` CLI identity rotation | Dynamic Selection capability only; Static SOR pair remains authoritative; Entry fenced |
+| B | `dev` @ `a2892d774d051288fadd543a8ee803f7c23a8440` | `0007_exit_profile_authority_v1` | R4 `pass`; frozen Decimal Golden and `961 × 24` Core parity; real `0006 -> 0007` source verification, preservation and identity rotation | ExitProfile/Binding capability only; Policy remains paused through cutover; Entry fenced |
+
+The two hops are deliberately separate forward Alembic revisions:
+
+```text
+0005 production
+-> A / 0006 postflight, Entry fenced
+-> B / 0007 postflight, Entry fenced
+```
+
+They must not be collapsed into one migration or deployed by the `0007` code as
+the first hop. A failure after either schema commit is target-schema
+fix-forward only. Software installation does not authorize Crypto `SOR-001`
+resume, first Dynamic activation, ExitProfile switch or exchange write.（来源：
+`TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`；R4 manifests in local Git metadata）
+
 ## Remaining Critical Path
 
 The natural TradFi acceptance below is an independent production-evidence lane.
