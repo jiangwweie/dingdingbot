@@ -75,7 +75,7 @@ SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS = (
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
 )
 
-CURRENT_ACCEPTANCE_STAGE = "Controlled flatten acceptance"
+CURRENT_ACCEPTANCE_STAGE = "ExitProfile postflight"
 RETIRED_ACCEPTANCE_TICKET = "ticket:c1ebc24a178a3ae4d87978e2fa1204ae"
 RESIDENT_WORKER_NAMES = (
     "Observation",
@@ -474,11 +474,11 @@ def test_stable_policy_v4_contract_defers_deployed_identity_to_roadmap() -> None
         assert "currently deployed Policy v3" not in source
         assert "MAIN_CONTROL_ROADMAP.md" in source
 
-    assert "| Owner controls | Global new ENTRY is enabled at Policy version `" in roadmap
-    assert "Entry write fence is absent" in roadmap
-    assert "0005_tradfi_instrument_center" in roadmap
-    assert "`SOR-001` is paused" in roadmap
-    assert "`SOR-US-EQ-PERP-001` is enabled" in roadmap
+    assert "| Owner controls | Policy version `13` has `new_entry_submit_enabled=false`" in roadmap
+    assert "write fence is present" in roadmap
+    assert "0007_exit_profile_authority_v1" in roadmap
+    assert "Static SOR pair" in roadmap
+    assert "Entry is the intentionally disabled final activation phase" in roadmap
 
 
 def test_current_deployment_authority_has_no_active_handover_or_schema_deletion() -> None:

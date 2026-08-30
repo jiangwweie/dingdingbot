@@ -30,27 +30,23 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Integration branch | `dev` |
-| Verified at | `2026-08-14 00:18 CST`; direct PostgreSQL, systemd, release-marker, Owner control API and Binance readonly evidence |
-| Production commit | `3fa2e21ce52bc3c203c721be4b696dc4265fcf96` |
-| Production tag | `tokyo-runtime-2026.08.13.1`; annotated, immutable, verified locally and pushed to `origin` |
-| Production release | `/opt/brc/releases/brc-trading-kernel-3fa2e21ce52b` |
-| Production-commit certification | `6/6 pass`; unit/architecture, integration, full-chain, Ruff, Mypy and diff checks passed for the exact deployed commit |
-| Deployment phase | R4 stopped-and-flat fix-forward deployment completed with `status=pass`; Product Schedule parsing and StrategyUniverse manifest certification defects were repaired before the final successful release |
-| PostgreSQL identity | Alembic and runtime authority identify `0005_tradfi_instrument_center`; Registry, Policy, Seed and runtime capabilities agree with the deployed commit and schema |
-| History preservation | The forward migration retained certified terminal lineage without downgrade, dual write, old-schema reader, active-position handover or manual lifecycle DML |
-| StrategyUniverse deployment | Eight Universes are Active, zero are Warming, 58 scopes are Active and 15 instruments are eligible |
-| Owner controls | Global new ENTRY is enabled at Policy version `12`; Entry write fence is absent; Crypto `SOR-001` is paused at Strategy Control version `2`, and TradFi `SOR-US-EQ-PERP-001` is enabled at Strategy Control version `2` |
-| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation are active and enabled; the persistent Entry worker is in its normal arbitration loop |
-| Runtime stability | All four persistent workers report zero restarts; Entry has produced repeated `no_candidate` results after promotion without service error |
-| Current PostgreSQL activity | No active Ticket, non-flat Position, unresolved Exchange Command or open Incident exists; the 16 active TradFi scopes are Entry-ready, all 16 Readiness rows report `signal_absent`, and there is no fresh unadmitted TradFi Signal |
-| Exchange postflight | Binance reports zero non-flat position domains and zero open-order domains; wallet balance is `449.26301574U`, account mode remains compatible and all 15 eligible instruments are configured at `5x` |
-| Product session | Eight traded TradFi Equity instruments resolve to `active / regular`; their unavailable corporate-event feed is an explicit warning, not an Entry rejection, while the two reference instruments remain outside executable membership |
-| Current live acceptance | Official Entry Promotion completed with `status=promoted`; `SOR-US-EQ-PERP-001` was resumed through the TOTP-protected Owner API and may now produce a natural real Ticket through the official chain |
-| Controlled flatten acceptance | The earlier natural controlled-flatten Ticket remains certified terminal, reconciled, settled and reviewed; no new controlled flatten or lifecycle DML was performed by this deployment |
-| Owner Console | The existing public HTTPS Owner Console and Nginx isolation were preserved; this R4 deployment did not replace or rewrite unrelated Nginx service configuration |
-| Multi-asset capability | Product Compatibility, Instrument Center, bounded Product/Session refresh, independent `SOR-US-EQ-PERP-001` semantics and direct official-chain TradFi ENTRY capability are deployed under the shared `policy-main / Policy v4` capital authority |
-| Full capability | Entry Promotion and TradFi Strategy resume are complete; the first natural TradFi lifecycle, `promote-full` and the final requirement audit remain explicit follow-up evidence |
-| Scope boundary | Crypto `SOR-001` remains paused; no Crypto SOR Entry authority was restored, and funding ownership and broader Incident-quality work were not changed |
+| Verified at | `2026-08-31`; direct PostgreSQL, systemd, release-marker and Binance readonly evidence after the two-hop stopped-flat cutover |
+| Production commit | `dd047941495634fff3fdda54a1e96f7b1a5ad20e` |
+| Production tag | `tokyo-runtime-2026.08.31.1`; annotated, immutable and pending push with `dev` |
+| Production release | `/opt/brc/releases/brc-trading-kernel-dd0479414956` |
+| Production-commit certification | R4 `pass`; unit/architecture, integration, full-chain, Ruff, Mypy, diff, Decimal Golden, `961 × 24` Core parity and cross-version migration gates passed for the exact deployed commit |
+| Deployment phase | `0005 -> 0006 -> 0007` stopped-flat forward deployment and required `0007` fix-forward identity/Catalog completion both passed; no schema downgrade, dual write or old writer restart occurred |
+| PostgreSQL identity | Alembic and runtime authority identify `0007_exit_profile_authority_v1`; Registry, Policy, Seed and runtime capabilities agree with `dd047941` |
+| History preservation | Both forward revisions preserved certified lineage; B completed exact `0006` source preservation before its `0007` runtime identity rotation |
+| StrategyUniverse deployment | Eight Universes remain Active, zero are Warming, 58 scopes are Active and the Static SOR pair remains the current pair |
+| Owner controls | Policy version `13` has `new_entry_submit_enabled=false`; the deployment write fence is present and Entry is inactive/disabled. Existing Strategy controls were preserved rather than changed by deployment |
+| Runtime ownership | Observation, Lifecycle and Reconciliation are active/enabled; Entry is the intentionally disabled final activation phase |
+| Current PostgreSQL activity | Zero active Ticket, Position, Reservation, unresolved Exchange Command and open Incident; the controlled SOL Ticket is terminal, reconciled, settled and reviewed |
+| Exchange postflight | Binance reports zero non-flat position domains and zero open-order domains; independent sides, Cross margin and configured `5x` remain valid for all 15 bounded instruments |
+| Dynamic Selection postflight | Selection Job, Snapshot, Generation, Authority, Vacuum and Gap Audit counts are all zero; `SOR-001` remains in Static baseline materialization state |
+| ExitProfile postflight | Eight immutable ExitProfiles, eight initial Bindings, eight current pointers and eight `ACTIVATED` events exist; no Profile switch/retirement side effect occurred |
+| New trading activity | The two-hop deployment created zero new Ticket, Exchange Command or Incident |
+| Scope boundary | Automatic Entry resume, first Dynamic activation, new Profile switch and exchange mutation are not authorized by this deployment seal |
 
 ## Owner Console R1/R2 Release
 
@@ -70,7 +66,7 @@ different Netting Domains progress concurrently.
 | StrategyUniverse readonly certification failure | Manifest comparison incorrectly depended on Event row ordering | Certification now compares the manifest semantically and independently of Event order; the final readonly postflight passes identity and semantic-digest checks |
 | Initial R4 bootstrap timeout | A pre-fix failed Observation cadence had already scheduled the next attempt at the following closed 15-minute bar | The deployment resumed through the official bounded bootstrap path after the next natural closed bar; no synthetic lifecycle write or exchange mutation was used |
 
-## Current Performance Snapshot
+## Historical Performance Snapshot
 
 The 2026-08-14 post-promotion snapshot verifies immediate trade authority,
 runtime safety and identity alignment. It is not a representative
@@ -85,19 +81,17 @@ strategy-performance or host-capacity benchmark.
 | Release identity | Current release, runtime metadata and PostgreSQL schema identify `3fa2e21c` and `0005_tradfi_instrument_center` | No old/new writer identity overlap remains after the R4 release |
 | Product readiness | Eight traded TradFi instruments are `active / regular` with eight fresh eligible certifications; corporate-event data is unavailable and recorded as a warning | Current Product gates permit Entry when spread, mark/index deviation and all remaining action-time facts pass |
 
-## Pending Two-Hop R4 Capability Deployment
+## Completed Two-Hop R4 Capability Deployment
 
-The current Tokyo runtime remains at its separately verified `0005` release.
-The following local release evidence is prepared for one stopped-and-flat
-maintenance window; it is not evidence of a production mutation or an Entry
-resume. Current PostgreSQL, systemd and Binance readonly facts must be
-refreshed immediately before Phase B of each hop.（来源：local exact-commit R4
-manifests；`TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`）
+The stopped-flat maintenance window completed with distinct forward Alembic
+revisions and fresh Phase-B PostgreSQL/Binance proofs for each hop. Entry
+remains fenced after target postflight.（来源：Tokyo direct PostgreSQL, systemd,
+release-marker and Binance readonly evidence；exact R4 manifests）
 
 | Hop | Exact candidate | Target schema | Local release evidence | Production scope after postflight |
 | --- | --- | --- | --- | --- |
-| A | `codex/sor-dynamic-universe-v0-deploy-plumbing-fix` @ `4bf4cd2369e6b2c7cce0f669da787de91f1a92b6` | `0006_sor_dynamic_selection_v0` | R4 `pass`; frozen Decimal Golden and `961 × 24` Core parity; real `0005 -> 0006` CLI identity rotation | Dynamic Selection capability only; Static SOR pair remains authoritative; Entry fenced |
-| B | `dev` @ `a2892d774d051288fadd543a8ee803f7c23a8440` | `0007_exit_profile_authority_v1` | R4 `pass`; frozen Decimal Golden and `961 × 24` Core parity; real `0006 -> 0007` source verification, preservation and identity rotation | ExitProfile/Binding capability only; Policy remains paused through cutover; Entry fenced |
+| A | `codex/sor-dynamic-universe-v0-deploy-plumbing-fix` @ `4bf4cd2369e6b2c7cce0f669da787de91f1a92b6` | `0006_sor_dynamic_selection_v0` | R4 `pass`; production deployment `pass` | Static SOR pair preserved; Dynamic runtime facts remain zero; Entry fenced |
+| B | `dev` @ `dd047941495634fff3fdda54a1e96f7b1a5ad20e` | `0007_exit_profile_authority_v1` | R4 `pass`; source preservation and required `0007` fix-forward `pass` | Eight Profile/Binding facts seeded; Entry fenced |
 
 The two hops are deliberately separate forward Alembic revisions:
 
@@ -207,8 +201,7 @@ Compatibility Fact persistence. **DS-09/DS-10 now complete the local sequence** 
 R4 certification, a formal TOTP-protected first Dynamic activation boundary, exact 24-Candidate readonly audit,
 zero unexpected Dynamic runtime-fact deployment postflight, bounded Selection-period status CLI and the stopped-flat
 deployment/first-activation evidence package. The exact candidate is identified only by its clean-HEAD R4 manifest.
-Production Migration execution,
-deployment and first Dynamic activation remain separately gated.（来源：Owner active-task decision；
+First Dynamic activation remains separately gated.（来源：Owner active-task decision；
 `docs/superpowers/specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md`；
 `docs/superpowers/plans/2026-08-23-sor-dynamic-instrument-selection-trading-v0-implementation-plan.md`）
 
@@ -227,9 +220,9 @@ stale or contradictory facts, same-domain occupancy, missing budget or Initial
 Stop, duplicate or unknown command outcome, schema/code mismatch, old-writer
 overlap, or official-path bypass.
 
-The `0005_tradfi_instrument_center` R4 deployment is complete and sealed at
-`3fa2e21ce52bc3c203c721be4b696dc4265fcf96`. Global Entry is enabled at Policy
-version `12`, Entry is active with no write fence, `SOR-US-EQ-PERP-001` is
-enabled and `SOR-001` remains paused. The current TradFi chain is therefore
-waiting only for a natural eligible Signal. A 15-minute readonly heartbeat
-observes chain progress and abnormalities without performing runtime mutation.
+The `0007_exit_profile_authority_v1` R4 deployment is sealed at
+`dd047941495634fff3fdda54a1e96f7b1a5ad20e`. Global Entry is disabled at Policy
+version `13`, the Entry service is inactive/disabled and the write fence is
+present. The next activation of new trading authority, Dynamic Selection or an
+ExitProfile switch requires its own explicit Owner authorization. Observation,
+Lifecycle and Reconciliation continue as the safety-only runtime posture.
