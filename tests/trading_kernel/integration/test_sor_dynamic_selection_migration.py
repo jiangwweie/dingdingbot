@@ -476,6 +476,183 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
         await _drop_database(database_name)
 
 
+@pytest.mark.asyncio
+async def test_real_0005_to_0006_identity_rotation_preserves_static_authority() -> None:
+    """The 0006 release itself must be able to finish its source cutover."""
+
+    database_name, database_url = await _create_database()
+    engine = create_async_engine(database_url)
+    try:
+        result = _run_alembic(database_url, "upgrade", SOURCE_REVISION)
+        assert result.returncode == 0, result.stderr[-4000:]
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id="selection-identity-rotation-test",
+                    runtime_commit="5" * 40,
+                    schema_revision=SOURCE_REVISION,
+                    seeded_at_ms=1_800_000_000_000,
+                ),
+            )
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await arm_acceptance_policy(
+                uow,
+                ArmAcceptancePolicyRequest(armed_at_ms=1_800_000_000_100),
+            )
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.text(
+                    "UPDATE brc_runtime_capabilities_current SET enabled = true "
+                    "WHERE capability_key = 'exchange_commands'"
+                )
+            )
+            await connection.execute(
+                sa.text(
+                    "UPDATE brc_owner_policy_current SET policy_version = 4 "
+                    "WHERE owner_policy_id = 'policy-main'"
+                )
+            )
+            await _seed_static_sor_pair(connection)
+
+        result = _run_alembic(database_url, "upgrade", TARGET_REVISION)
+        assert result.returncode == 0, result.stderr[-4000:]
+
+        identity = _run_seed_runtime_authority(
+            database_url,
+            runtime_commit="6" * 40,
+            now_ms=1_800_000_000_200,
+        )
+        assert identity.returncode == 0, identity.stderr[-4000:]
+
+        async with engine.connect() as connection:
+            metadata = dict(
+                (
+                    await connection.execute(
+                        sa.text(
+                            "SELECT metadata_key, metadata_value "
+                            "FROM brc_schema_metadata"
+                        )
+                    )
+                ).all()
+            )
+            policy = (
+                await connection.execute(
+                    sa.text(
+                        "SELECT policy_version, new_entry_submit_enabled "
+                        "FROM brc_owner_policy_current "
+                        "WHERE owner_policy_id = 'policy-main'"
+                    )
+                )
+            ).one()
+            capability_revisions = tuple(
+                (
+                    await connection.execute(
+                        sa.text(
+                            "SELECT certified_commit, schema_revision "
+                            "FROM brc_runtime_capabilities_current "
+                            "ORDER BY capability_key"
+                        )
+                    )
+                ).all()
+            )
+            static_pair = tuple(
+                (
+                    await connection.execute(
+                        sa.text(
+                            "SELECT universe_version_id "
+                            "FROM brc_strategy_universe_current "
+                            "WHERE event_spec_id IN ("
+                            "'event_spec:SOR-001:SOR-LONG:v4', "
+                            "'event_spec:SOR-001:SOR-SHORT:v4') "
+                            "ORDER BY event_spec_id"
+                        )
+                    )
+                ).scalars().all()
+            )
+            runtime_work_count = int(
+                await connection.scalar(
+                    sa.text(
+                        "SELECT count(*) FROM brc_instrument_selection_snapshots"
+                    )
+                )
+                or 0
+            )
+
+        assert metadata["runtime_commit"] == "6" * 40
+        assert metadata["schema_revision"] == TARGET_REVISION
+        assert policy == (5, False)
+        assert capability_revisions == (
+            ("6" * 40, TARGET_REVISION),
+            ("6" * 40, TARGET_REVISION),
+        )
+        assert static_pair == ("universe:static:long", "universe:static:short")
+        assert runtime_work_count == 0
+    finally:
+        await engine.dispose()
+        await _drop_database(database_name)
+
+
+@pytest.mark.asyncio
+async def test_real_0005_to_0006_identity_rotation_keeps_an_already_paused_policy() -> None:
+    """A prior Owner pause is a valid source state, never a release blocker."""
+
+    database_name, database_url = await _create_database()
+    engine = create_async_engine(database_url)
+    try:
+        result = _run_alembic(database_url, "upgrade", SOURCE_REVISION)
+        assert result.returncode == 0, result.stderr[-4000:]
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id="selection-paused-identity-test",
+                    runtime_commit="5" * 40,
+                    schema_revision=SOURCE_REVISION,
+                    seeded_at_ms=1_800_000_000_000,
+                ),
+            )
+        async with engine.begin() as connection:
+            await _seed_static_sor_pair(connection)
+
+        result = _run_alembic(database_url, "upgrade", TARGET_REVISION)
+        assert result.returncode == 0, result.stderr[-4000:]
+
+        identity = _run_seed_runtime_authority(
+            database_url,
+            account_id="selection-paused-identity-test",
+            runtime_commit="6" * 40,
+            now_ms=1_800_000_000_100,
+        )
+        assert identity.returncode == 0, identity.stderr[-4000:]
+
+        async with engine.connect() as connection:
+            policy = (
+                await connection.execute(
+                    sa.text(
+                        "SELECT policy_version, new_entry_submit_enabled "
+                        "FROM brc_owner_policy_current "
+                        "WHERE owner_policy_id = 'policy-main'"
+                    )
+                )
+            ).one()
+            pause_events = tuple(
+                (
+                    await connection.execute(
+                        sa.text(
+                            "SELECT operation FROM brc_owner_policy_events "
+                            "WHERE operation = 'dynamic_selection_upgrade_pause_entry'"
+                        )
+                    )
+                ).scalars().all()
+            )
+        assert policy == (1, False)
+        assert pause_events == ()
+    finally:
+        await engine.dispose()
+        await _drop_database(database_name)
+
+
 async def _seed_static_sor_pair(connection) -> None:
     digest = "sha256:" + "a" * 64
     await connection.execute(
@@ -587,6 +764,36 @@ def _run_alembic(
         ),
         cwd=REPO_ROOT,
         env=os.environ | {"TRADING_KERNEL_DATABASE_URL": database_url},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_seed_runtime_authority(
+    database_url: str,
+    *,
+    account_id: str = "selection-identity-rotation-test",
+    runtime_commit: str,
+    now_ms: int,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        (
+            sys.executable,
+            "scripts/trading_kernel/seed_runtime_authority.py",
+            "--database-url",
+            database_url,
+            "deploy-compatible-identity",
+            "--account-id",
+            account_id,
+            "--runtime-commit",
+            runtime_commit,
+            "--schema-revision",
+            TARGET_REVISION,
+            "--now-ms",
+            str(now_ms),
+        ),
+        cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=False,

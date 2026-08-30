@@ -56,6 +56,7 @@ POSITION_MODE = "independent_sides"
 COMPATIBLE_SOURCE_SCHEMA_REVISION = "0002_sor_v3_strategy_group_capacity"
 OWNER_CONTROL_SOURCE_SCHEMA_REVISION = "0003_portfolio_admission_observability"
 TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION = "0004_owner_control_plane"
+DYNAMIC_SELECTION_SOURCE_SCHEMA_REVISION = "0005_tradfi_instrument_center"
 _RUNTIME_FENCE_INCIDENT_ID = "incident:runtime-fence"
 _RUNTIME_FENCE_INCIDENT_KIND = "runtime_identity_mismatch"
 _PRESERVATION_METADATA_KEYS = frozenset(
@@ -494,6 +495,12 @@ async def deploy_compatible_upgrade_identity(
             allow_compatible_runtime_fence=True,
         )
     source_schema_revision = metadata_rows.get("schema_revision")
+    if source_schema_revision == DYNAMIC_SELECTION_SOURCE_SCHEMA_REVISION:
+        return await _deploy_dynamic_selection_compatible_identity(
+            uow,
+            request=request,
+            metadata_rows=metadata_rows,
+        )
     if source_schema_revision not in {
         COMPATIBLE_SOURCE_SCHEMA_REVISION,
         OWNER_CONTROL_SOURCE_SCHEMA_REVISION,
@@ -742,6 +749,167 @@ async def deploy_compatible_upgrade_identity(
         resolved_at_ms=request.seeded_at_ms,
     )
 
+    return RuntimeDeploymentIdentityResult(
+        runtime_commit=request.runtime_commit,
+        schema_revision=request.schema_revision,
+        runtime_seed_semantic_hash=seed_identity,
+        refreshed_existing_authority=True,
+    )
+
+
+async def _deploy_dynamic_selection_compatible_identity(
+    uow: PostgresKernelUnitOfWork,
+    *,
+    request: RuntimeAuthoritySeedRequest,
+    metadata_rows: Mapping[str, str],
+) -> RuntimeDeploymentIdentityResult:
+    """Rotate a flat 0005 authority into 0006 without replacing source facts.
+
+    Dynamic Selection is a capability upgrade: the full Registry, Policy
+    scope, RuntimeProfiles and static StrategyUniverse pair are already
+    authoritative source facts. The release must only fence new ENTRY and
+    rotate the certified runtime identity after the forward migration.
+    """
+
+    connection = uow._require_connection()
+    await _require_flat_compatible_upgrade_activity(
+        connection,
+        allow_compatible_runtime_fence=True,
+    )
+    current_policy = dict(await _lock_policy(connection))
+    target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
+    source_entry_enabled = bool(current_policy["new_entry_submit_enabled"])
+    current_policy_version = int(str(current_policy["policy_version"]))
+    if not _policy_matches(
+        current_policy,
+        version=current_policy_version,
+        new_entry_submit_enabled=source_entry_enabled,
+        allowed_event_spec_ids=target_event_spec_ids,
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "Dynamic Selection identity requires exact full source Policy"
+        )
+    if request.seeded_at_ms <= int(str(current_policy["updated_at_ms"])):
+        raise RuntimeAuthorityTransitionRefused(
+            "Dynamic Selection identity time must advance monotonically"
+        )
+
+    if source_entry_enabled:
+        current_policy = await _pause_entry_for_compatible_upgrade(
+            connection,
+            current_policy=current_policy,
+            occurred_at_ms=request.seeded_at_ms,
+            runtime_commit=request.runtime_commit,
+            operation="dynamic_selection_upgrade_pause_entry",
+            event_namespace="dynamic-selection-upgrade",
+        )
+    else:
+        current_policy = dict(current_policy)
+    registry = await seed_strategy_registry(
+        uow,
+        seeded_at_ms=request.seeded_at_ms,
+    )
+    expected_policy_version = int(str(current_policy["policy_version"]))
+    if not _policy_matches(
+        current_policy,
+        version=expected_policy_version,
+        new_entry_submit_enabled=False,
+        allowed_event_spec_ids=target_event_spec_ids,
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "Dynamic Selection identity changed migrated Policy authority"
+        )
+    await _assert_exact_identity_set(
+        connection,
+        runtime_profiles,
+        "runtime_profile_id",
+        {RUNTIME_PROFILE_ID, TRADFI_RUNTIME_PROFILE_ID},
+    )
+    await _assert_exact_identity_set(
+        connection,
+        strategy_entry_controls_current,
+        "strategy_group_id",
+        {
+            contract.strategy_group_id
+            for contract in registered_strategy_contracts()
+        },
+    )
+    capabilities = (
+        await connection.execute(
+            sa.select(runtime_capabilities_current).with_for_update(
+                of=runtime_capabilities_current
+            )
+        )
+    ).mappings().all()
+    if {str(row["capability_key"]) for row in capabilities} != {
+        "exchange_commands",
+        "strategy_signal_ingest",
+    }:
+        raise RuntimeAuthorityTransitionRefused(
+            "Dynamic Selection runtime capability identities differ"
+        )
+    seed_identity = _seed_identity(
+        account_id=request.account_id,
+        schema_revision=request.schema_revision,
+        registry_semantic_hash=registry.registry_semantic_hash,
+        allowed_event_spec_ids=target_event_spec_ids,
+        include_tradfi=True,
+    )
+    for capability in capabilities:
+        certification = dict(capability["certification"])
+        certification.update(
+            {
+                "deployment_commit": request.runtime_commit,
+                "seed_identity": seed_identity,
+                "stage": "compatible_dynamic_selection_upgrade",
+            }
+        )
+        updated = await connection.execute(
+            sa.update(runtime_capabilities_current)
+            .where(
+                runtime_capabilities_current.c.capability_key
+                == capability["capability_key"]
+            )
+            .values(
+                certified_commit=request.runtime_commit,
+                schema_revision=request.schema_revision,
+                certification=certification,
+                updated_at_ms=request.seeded_at_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            raise RuntimeAuthorityTransitionRefused(
+                "Dynamic Selection runtime capability update was lost"
+            )
+    metadata_targets = {
+        "registry_semantic_hash": registry.registry_semantic_hash,
+        "runtime_commit": request.runtime_commit,
+        "schema_revision": request.schema_revision,
+        "seed_identity": seed_identity,
+    }
+    metadata_keys = frozenset(metadata_rows)
+    identity_keys = frozenset(metadata_targets)
+    if metadata_keys not in {
+        identity_keys,
+        identity_keys | _PRESERVATION_METADATA_KEYS,
+    }:
+        raise RuntimeAuthorityTransitionRefused(
+            "Dynamic Selection runtime metadata identity set differs"
+        )
+    for key, value in metadata_targets.items():
+        updated = await connection.execute(
+            sa.update(schema_metadata)
+            .where(schema_metadata.c.metadata_key == key)
+            .values(metadata_value=value, updated_at_ms=request.seeded_at_ms)
+        )
+        if updated.rowcount != 1:
+            raise RuntimeAuthorityTransitionRefused(
+                "Dynamic Selection runtime metadata update was lost"
+            )
+    await _resolve_compatible_runtime_fence(
+        connection,
+        resolved_at_ms=request.seeded_at_ms,
+    )
     return RuntimeDeploymentIdentityResult(
         runtime_commit=request.runtime_commit,
         schema_revision=request.schema_revision,
