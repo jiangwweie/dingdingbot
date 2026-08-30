@@ -499,3 +499,18 @@ def test_current_deployment_authority_has_no_active_handover_or_schema_deletion(
     assert not violations, (
         "retired deployment authority remains:\n" + "\n".join(violations)
     )
+
+
+def test_current_deployment_contract_requires_each_capability_source_verifier() -> None:
+    source = (
+        REPO_ROOT / "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md"
+    ).read_text(encoding="utf-8")
+
+    for marker in (
+        "0005 -> 0006",
+        "0006 -> 0007",
+        "0006 source verification",
+        "0006 preservation manifest",
+        "compatible identity transition",
+    ):
+        assert marker in source

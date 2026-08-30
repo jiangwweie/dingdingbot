@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -13,6 +14,13 @@ import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_authority_seed import (
+    ArmAcceptancePolicyRequest,
+    RuntimeAuthoritySeedRequest,
+    arm_acceptance_policy,
+    seed_runtime_authority,
+)
 from tests.trading_kernel.support.postgres import TEST_POSTGRES_ADMIN_DSN
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -31,7 +39,9 @@ async def test_flat_0006_upgrade_adds_exit_profile_authority_without_runtime_wor
     engine = create_async_engine(database_url)
     try:
         source = _run_alembic(database_url, "upgrade", SOURCE_REVISION)
-        assert source.returncode == 0, source.stderr[-4000:]
+        assert source.returncode == 0, (
+            source.stdout[-4000:] + source.stderr[-4000:]
+        )
         async with engine.connect() as connection:
             legacy_profiles = tuple(
                 (
@@ -271,7 +281,9 @@ async def test_nonflat_0006_source_is_rejected_before_exit_profile_schema_change
     engine = create_async_engine(database_url)
     try:
         source = _run_alembic(database_url, "upgrade", SOURCE_REVISION)
-        assert source.returncode == 0, source.stderr[-4000:]
+        assert source.returncode == 0, (
+            source.stdout[-4000:] + source.stderr[-4000:]
+        )
         async with engine.begin() as connection:
             await connection.execute(
                 sa.text(
@@ -301,6 +313,136 @@ async def test_nonflat_0006_source_is_rejected_before_exit_profile_schema_change
             )
         assert revision == SOURCE_REVISION
         assert NEW_TABLES.isdisjoint(tables)
+    finally:
+        await engine.dispose()
+        await _drop_database(database_name)
+
+
+@pytest.mark.asyncio
+async def test_real_0006_to_0007_source_verification_preservation_and_identity_path() -> None:
+    database_name, database_url = await _create_database()
+    engine = create_async_engine(database_url)
+    try:
+        result = _run_alembic(database_url, "upgrade", "0005_tradfi_instrument_center")
+        assert result.returncode == 0, result.stderr[-4000:]
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
+                    account_id="exit-profile-deployment-path",
+                    runtime_commit="5" * 40,
+                    schema_revision="0005_tradfi_instrument_center",
+                    seeded_at_ms=1_800_000_000_000,
+                ),
+            )
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await arm_acceptance_policy(
+                uow,
+                ArmAcceptancePolicyRequest(armed_at_ms=1_800_000_000_100),
+            )
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.text(
+                    "UPDATE brc_runtime_capabilities_current "
+                    "SET enabled = true "
+                    "WHERE capability_key = 'exchange_commands'"
+                )
+            )
+            await connection.execute(
+                sa.text(
+                    "UPDATE brc_owner_policy_current SET policy_version = 4 "
+                    "WHERE owner_policy_id = 'policy-main'"
+                )
+            )
+            await _seed_static_sor_pair(connection)
+
+        result = _run_alembic(database_url, "upgrade", SOURCE_REVISION)
+        assert result.returncode == 0, result.stderr[-4000:]
+
+        upgraded_0006 = _run_seed_runtime_authority(
+            database_url,
+            action="deploy-compatible-identity",
+            runtime_commit="6" * 40,
+            schema_revision=SOURCE_REVISION,
+            now_ms=1_800_000_000_200,
+        )
+        assert upgraded_0006.returncode == 0, upgraded_0006.stderr[-4000:]
+
+        source = _run_verify_schema(
+            database_url,
+            "--compatible-source-revision",
+            SOURCE_REVISION,
+        )
+        source_payload = json.loads(source.stdout)
+        assert source.returncode == 0, {
+            key: source_payload[key]
+            for key in (
+                "status",
+                "source_shape",
+                "migration_gate",
+                "runtime_identity",
+                "registry_identity",
+                "owner_policy",
+                "runtime_profile",
+                "strategy_controls",
+                "capabilities",
+                "account_mode",
+            )
+        }
+        assert source_payload["status"] == "pass", source_payload
+        preservation_digest = str(source_payload["preservation_manifest"]["digest"])
+        source_tables = {
+            str(entry["table"])
+            for entry in source_payload["preservation_manifest"]["tables"]
+        }
+        assert {
+            "brc_instrument_selection_specs",
+            "brc_sor_dynamic_selection_specs_v0",
+            "brc_strategy_selection_control_current",
+            "brc_strategy_selection_rollback_baselines",
+            "brc_runtime_release_compatibility_facts",
+            "brc_strategy_universe_current",
+        } <= source_tables
+
+        result = _run_alembic(database_url, "upgrade", TARGET_REVISION)
+        assert result.returncode == 0, result.stderr[-4000:]
+
+        preserved = _run_verify_schema(
+            database_url,
+            "--preserve-source-revision",
+            SOURCE_REVISION,
+            "--expected-preservation-digest",
+            preservation_digest,
+        )
+        assert preserved.returncode == 0, preserved.stderr[-4000:]
+        assert json.loads(preserved.stdout)["status"] == "pass"
+
+        upgraded_0007 = _run_seed_runtime_authority(
+            database_url,
+            action="deploy-compatible-identity",
+            runtime_commit="7" * 40,
+            schema_revision=TARGET_REVISION,
+            now_ms=1_800_000_000_300,
+        )
+        assert upgraded_0007.returncode == 0, upgraded_0007.stderr[-4000:]
+
+        async with engine.begin() as connection:
+            await connection.execute(
+                sa.text(
+                    "UPDATE brc_strategy_selection_control_current "
+                    "SET control_version = control_version + 1 "
+                    "WHERE strategy_group_id = 'SOR-001'"
+                )
+            )
+        tampered = _run_verify_schema(
+            database_url,
+            "--preserve-source-revision",
+            SOURCE_REVISION,
+            "--expected-preservation-digest",
+            preservation_digest,
+        )
+        assert tampered.returncode != 0
+        assert json.loads(tampered.stdout)["status"] == "fail"
     finally:
         await engine.dispose()
         await _drop_database(database_name)
@@ -351,4 +493,92 @@ def _run_alembic(
         capture_output=True,
         text=True,
         check=False,
+    )
+
+
+def _run_verify_schema(
+    database_url: str,
+    *arguments: str,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        (
+            sys.executable,
+            "scripts/trading_kernel/verify_schema.py",
+            "--database-url",
+            database_url,
+            *arguments,
+        ),
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_seed_runtime_authority(
+    database_url: str,
+    *,
+    action: str,
+    runtime_commit: str,
+    schema_revision: str,
+    now_ms: int,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        (
+            sys.executable,
+            "scripts/trading_kernel/seed_runtime_authority.py",
+            "--database-url",
+            database_url,
+            action,
+            "--account-id",
+            "exit-profile-deployment-path",
+            "--runtime-commit",
+            runtime_commit,
+            "--schema-revision",
+            schema_revision,
+            "--now-ms",
+            str(now_ms),
+        ),
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+async def _seed_static_sor_pair(connection) -> None:
+    digest = "sha256:" + "a" * 64
+    await connection.execute(
+        sa.text(
+            """
+            INSERT INTO brc_strategy_universe_versions (
+                universe_version_id, strategy_group_id, event_spec_id,
+                universe_version, semantic_digest, lifecycle_state,
+                installed_at_ms, activated_at_ms, retired_at_ms,
+                abandoned_at_ms, abandon_reason_code
+            ) VALUES
+                ('universe:static:long', 'SOR-001',
+                 'event_spec:SOR-001:SOR-LONG:v4', 1, :digest,
+                 'active', 1000, 1100, NULL, NULL, NULL),
+                ('universe:static:short', 'SOR-001',
+                 'event_spec:SOR-001:SOR-SHORT:v4', 1, :digest,
+                 'active', 1000, 1100, NULL, NULL, NULL)
+            """
+        ),
+        {"digest": digest},
+    )
+    await connection.execute(
+        sa.text(
+            """
+            INSERT INTO brc_strategy_universe_current (
+                event_spec_id, universe_version_id, semantic_digest,
+                lifecycle_state, activation_generation, activated_at_ms
+            ) VALUES
+                ('event_spec:SOR-001:SOR-LONG:v4',
+                 'universe:static:long', :digest, 'active', 1, 1100),
+                ('event_spec:SOR-001:SOR-SHORT:v4',
+                 'universe:static:short', :digest, 'active', 1, 1100)
+            """
+        ),
+        {"digest": digest},
     )

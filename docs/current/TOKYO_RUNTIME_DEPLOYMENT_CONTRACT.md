@@ -219,6 +219,12 @@ activates Dynamic mode by itself.（来源：
 `migrations/trading_kernel/versions/0006_sor_dynamic_selection_v0.py`；
 `docs/superpowers/specs/2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md`）
 
+The `0005 -> 0006` identity transition is a capability transition: after the
+external Entry fence and final flat gate it records the existing full Policy as
+paused, preserves Registry/Universe authority and writes the exact 0006
+runtime identity. It must not re-run the older Crypto-to-TradFi Policy expansion
+logic.
+
 The same revision binds every existing portfolio-rejection Shadow to its exact
 Signal without changing its completed MFE/MAE lineage, and permits new
 Signal-owned `strategy_observation` Outcomes for TradFi SOR. That projection
@@ -483,6 +489,16 @@ Reconciliation, prove every writer stopped, then freshly re-read PostgreSQL and
 Binance. Phase A evidence is never reused. Only the second exact-flat result
 authorizes the single forward Alembic revision from
 `0006_sor_dynamic_selection_v0` to `0007_exit_profile_authority_v1`.
+
+Before that Alembic revision the target release must run 0006 source verification.
+Its 0006 preservation manifest covers every 0006-owned
+Dynamic Selection fact and column, including the Selection Spec/Candidate
+Panel, Selection Control, rollback baseline, Static SOR pair, selection lineage
+and runtime release compatibility facts, in addition to all pre-existing
+trading lineage. After migration, the same manifest must match exactly before
+0007 runtime identity rotation. The 0007 compatible identity transition seeds
+only the immutable Profile/Binding Catalog and preserves the paused Policy,
+Universe and Selection authority.
 
 ### Target postflight
 

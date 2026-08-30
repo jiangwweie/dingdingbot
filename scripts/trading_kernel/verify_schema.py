@@ -50,6 +50,7 @@ COMPATIBLE_SOURCE_REVISION = "0002_sor_v3_strategy_group_capacity"
 OWNER_CONTROL_SOURCE_REVISION = "0003_portfolio_admission_observability"
 TRADFI_INSTRUMENT_SOURCE_REVISION = "0004_owner_control_plane"
 DYNAMIC_SELECTION_SOURCE_REVISION = "0005_tradfi_instrument_center"
+EXIT_PROFILE_SOURCE_REVISION = "0006_sor_dynamic_selection_v0"
 HISTORICAL_PRESERVATION_TARGET_REVISION = "0003_portfolio_admission_observability"
 _OWNER_CONTROL_TABLES = frozenset(
     {
@@ -373,6 +374,8 @@ async def _verify_compatible_source(
             database_url,
             source_revision,
         )
+    if source_revision == EXIT_PROFILE_SOURCE_REVISION:
+        return await _verify_exit_profile_source(database_url, source_revision)
     if source_revision == TRADFI_INSTRUMENT_SOURCE_REVISION:
         return await _verify_tradfi_instrument_source(
             database_url,
@@ -458,6 +461,7 @@ async def _verify_preservation(
         OWNER_CONTROL_SOURCE_REVISION,
         TRADFI_INSTRUMENT_SOURCE_REVISION,
         DYNAMIC_SELECTION_SOURCE_REVISION,
+        EXIT_PROFILE_SOURCE_REVISION,
     }:
         raise ValueError("preservation source revision is unsupported")
     if not _is_sha256_identity(expected_digest):
@@ -471,6 +475,10 @@ async def _verify_preservation(
             revision = await _alembic_revision(connection)
             if source_revision == DYNAMIC_SELECTION_SOURCE_REVISION:
                 manifest = await _dynamic_selection_preservation_manifest(connection)
+            elif source_revision == EXIT_PROFILE_SOURCE_REVISION:
+                manifest = await _exit_profile_source_preservation_manifest(
+                    connection
+                )
             elif source_revision == TRADFI_INSTRUMENT_SOURCE_REVISION:
                 manifest = await _tradfi_instrument_preservation_manifest(connection)
             elif source_revision == OWNER_CONTROL_SOURCE_REVISION:
@@ -513,6 +521,9 @@ async def _verify_preservation(
                 "0006_sor_dynamic_selection_v0",
                 EXPECTED_ALEMBIC_REVISION,
             }
+        ),
+        EXIT_PROFILE_SOURCE_REVISION: frozenset(
+            {EXPECTED_ALEMBIC_REVISION}
         ),
     }
     allowed_target_revisions = allowed_targets_by_source[source_revision]
@@ -736,6 +747,76 @@ async def _verify_dynamic_selection_source(
             )
             migration_gate = await _migration_gate(connection)
             manifest = await _dynamic_selection_preservation_manifest(connection)
+            runtime_identity = await _runtime_identity(connection)
+            registry_identity = await _target_registry_identity(connection)
+            owner_policy = await _current_owner_policy(connection)
+            runtime_profile = await _current_runtime_profile(connection)
+            controls = await _target_strategy_controls(connection)
+            capabilities = await _current_capabilities(
+                connection,
+                runtime_identity=runtime_identity,
+            )
+            account_mode = {
+                "status": (
+                    "pass"
+                    if runtime_profile["status"] == "pass"
+                    and runtime_profile["position_mode"] == "independent_sides"
+                    and owner_policy["status"] == "pass"
+                    and owner_policy["supported_margin_mode"] == "cross"
+                    else "fail"
+                ),
+                "position_mode": runtime_profile["position_mode"],
+                "margin_mode": owner_policy["supported_margin_mode"],
+            }
+            await connection.rollback()
+    finally:
+        await engine.dispose()
+    passed = bool(
+        revision == source_revision
+        and shape["status"] == "pass"
+        and all(int(value) == 0 for value in migration_gate.values())
+        and runtime_identity["schema_revision"] == source_revision
+        and registry_identity["status"] == "pass"
+        and owner_policy["status"] == "pass"
+        and runtime_profile["status"] == "pass"
+        and controls["status"] == "pass"
+        and capabilities["status"] == "pass"
+        and account_mode["status"] == "pass"
+    )
+    return {
+        "schema": SCHEMA,
+        "status": "pass" if passed else "fail",
+        "alembic_revision": revision,
+        "source_shape": shape,
+        "runtime_identity": runtime_identity,
+        "registry_identity": registry_identity,
+        "owner_policy": owner_policy,
+        "runtime_profile": runtime_profile,
+        "strategy_controls": controls,
+        "capabilities": capabilities,
+        "account_mode": account_mode,
+        "migration_gate": migration_gate,
+        "preservation_manifest": manifest,
+    }
+
+
+async def _verify_exit_profile_source(
+    database_url: str,
+    source_revision: str,
+) -> dict[str, object]:
+    """Verify exact flat 0006 authority before the 0007 Profile upgrade."""
+
+    engine = _create_engine(database_url)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            revision = await _alembic_revision(connection)
+            shape = await _verify_exact_metadata_shape(
+                connection,
+                expected_columns=_source_0006_table_columns(),
+            )
+            migration_gate = await _migration_gate(connection)
+            manifest = await _exit_profile_source_preservation_manifest(connection)
             runtime_identity = await _runtime_identity(connection)
             registry_identity = await _target_registry_identity(connection)
             owner_policy = await _current_owner_policy(connection)
@@ -1438,6 +1519,18 @@ def _source_0005_table_columns() -> dict[str, tuple[str, ...]]:
     }
 
 
+def _source_0006_table_columns() -> dict[str, tuple[str, ...]]:
+    return {
+        table.name: tuple(
+            column.name
+            for column in table.c
+            if column.name not in _EXIT_PROFILE_ADDED_COLUMNS.get(table.name, ())
+        )
+        for table in sorted(metadata.tables.values(), key=lambda item: item.name)
+        if table.name not in _EXIT_PROFILE_TABLES
+    }
+
+
 def _source_columns_before_tradfi(table: sa.Table) -> tuple[str, ...]:
     columns = tuple(table.c.keys())
     if table.name != "brc_shadow_outcomes_current":
@@ -1599,6 +1692,46 @@ async def _dynamic_selection_preservation_manifest(
     payload = {
         "schema": "brc.trading_kernel.0005_preservation.v1",
         "source_revision": DYNAMIC_SELECTION_SOURCE_REVISION,
+        "tables": table_entries,
+        "table_count": len(table_entries),
+        "row_count": total_rows,
+    }
+    return {**payload, "digest": _sha256_json(payload)}
+
+
+async def _exit_profile_source_preservation_manifest(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    table_entries: list[dict[str, object]] = []
+    total_rows = 0
+    for table_name, column_names in sorted(_source_0006_table_columns().items()):
+        table = sa.table(table_name, *(sa.column(name) for name in column_names))
+        rows = (
+            (
+                await connection.execute(
+                    sa.select(*(table.c[name] for name in column_names))
+                )
+            )
+            .mappings()
+            .all()
+        )
+        canonical_rows = sorted(
+            (_row_manifest(column_names, dict(row)) for row in rows),
+            key=lambda row: str(row["digest"]),
+        )
+        table_payload = {
+            "table": table_name,
+            "columns": list(column_names),
+            "row_count": len(canonical_rows),
+            "rows": canonical_rows,
+        }
+        table_entries.append(
+            {**table_payload, "digest": _sha256_json(table_payload)}
+        )
+        total_rows += len(canonical_rows)
+    payload = {
+        "schema": "brc.trading_kernel.0006_preservation.v1",
+        "source_revision": EXIT_PROFILE_SOURCE_REVISION,
         "tables": table_entries,
         "table_count": len(table_entries),
         "row_count": total_rows,
@@ -2202,6 +2335,7 @@ async def _inspect_deployment_revision(database_url: str) -> dict[str, object]:
                 OWNER_CONTROL_SOURCE_REVISION,
                 TRADFI_INSTRUMENT_SOURCE_REVISION,
                 DYNAMIC_SELECTION_SOURCE_REVISION,
+                EXIT_PROFILE_SOURCE_REVISION,
                 EXPECTED_ALEMBIC_REVISION,
             }
             else "fail"
