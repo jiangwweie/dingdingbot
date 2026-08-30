@@ -134,27 +134,15 @@ def test_api_release_bootstraps_pip_through_its_target_venv_python(
     backend._install_api_release(plan)
 
     target_python = f"{plan.target_release}/.venv-owner-console/bin/python"
+    expected_prefix = ("sudo", "-u", "brc", "/bin/bash", "-lc")
+    shell_commands = [command[-1] for command in commands if command[:5] == expected_prefix]
+    assert f"cd {plan.target_release}" in shell_commands[0]
+    assert f"{target_python} -m ensurepip --upgrade" in shell_commands[0]
+    assert f"cd {plan.target_release}" in shell_commands[1]
     assert (
-        "sudo",
-        "-u",
-        "brc",
-        target_python,
-        "-m",
-        "ensurepip",
-        "--upgrade",
-    ) in commands
-    assert (
-        "sudo",
-        "-u",
-        "brc",
-        target_python,
-        "-m",
-        "pip",
-        "install",
-        "--disable-pip-version-check",
-        "--requirement",
-        f"{plan.target_release}/requirements-owner-console.txt",
-    ) in commands
+        f"{target_python} -m pip install --disable-pip-version-check --requirement "
+        f"{plan.target_release}/requirements-owner-console.txt"
+    ) in shell_commands[1]
     assert not any(command[-1].endswith("/bin/pip") for command in commands)
 
 

@@ -374,32 +374,37 @@ class SshOwnerConsoleReleaseBackend:
         else:
             self._remote(("sudo", "cp", "-a", source_venv, target_venv))
         self._remote(("sudo", "chown", "-R", "brc:brc", plan.target_release))
-        self._remote(
-            (
-                "sudo",
-                "-u",
-                "brc",
-                f"{target_venv}/bin/python",
-                "-m",
-                "ensurepip",
-                "--upgrade",
-            )
+        target_python = f"{target_venv}/bin/python"
+        self._run_api_venv_module(
+            release=plan.target_release,
+            target_python=target_python,
+            module_args=("ensurepip", "--upgrade"),
         )
-        self._remote(
-            (
-                "sudo",
-                "-u",
-                "brc",
-                f"{target_venv}/bin/python",
-                "-m",
+        self._run_api_venv_module(
+            release=plan.target_release,
+            target_python=target_python,
+            module_args=(
                 "pip",
                 "install",
                 "--disable-pip-version-check",
                 "--requirement",
                 f"{plan.target_release}/requirements-owner-console.txt",
-            )
+            ),
         )
         self._write_marker(plan)
+
+    def _run_api_venv_module(
+        self,
+        *,
+        release: str,
+        target_python: str,
+        module_args: tuple[str, ...],
+    ) -> None:
+        command = (
+            f"cd {shlex.quote(release)} && exec "
+            f"{shlex.join((target_python, '-m', *module_args))}"
+        )
+        self._remote(("sudo", "-u", "brc", "/bin/bash", "-lc", command))
 
     def _backup_api_unit(self) -> None:
         if self._remote(("sudo", "test", "-f", API_UNIT), check=False).returncode == 0:
