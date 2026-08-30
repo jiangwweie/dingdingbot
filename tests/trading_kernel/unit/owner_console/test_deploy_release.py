@@ -4,9 +4,11 @@ from pathlib import Path
 
 import pytest
 
+from scripts.owner_console import deploy_release as release_module
 from scripts.owner_console.deploy_release import (
     OwnerConsoleReleaseKind,
     OwnerConsoleReleasePlan,
+    SshOwnerConsoleReleaseBackend,
     deploy_owner_console_release,
 )
 
@@ -95,6 +97,65 @@ def test_repeated_exact_owner_console_release_runs_only_smoke() -> None:
         ("read_current_release", OwnerConsoleReleaseKind.API),
         ("smoke_release", plan),
     ]
+
+
+def test_api_release_bootstraps_pip_through_its_target_venv_python(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A copied production venv may deliberately omit the pip console script."""
+
+    backend = SshOwnerConsoleReleaseBackend(
+        target="tokyo",
+        repo_root=Path("/repo"),
+        timeout_seconds=30,
+    )
+    plan = OwnerConsoleReleasePlan(
+        kind=OwnerConsoleReleaseKind.API,
+        target_commit=TARGET_COMMIT,
+        target_release=f"/opt/brc/owner-console-api/releases/{TARGET_COMMIT}",
+    )
+    commands: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(backend, "_upload_git_archive", lambda *_: None)
+    monkeypatch.setattr(backend, "_write_marker", lambda *_: None)
+
+    def _remote(
+        argv: tuple[str, ...],
+        *,
+        check: bool = True,
+        input_text: str | None = None,
+    ) -> release_module._CommandResult:
+        del check, input_text
+        commands.append(argv)
+        return release_module._CommandResult(0, "", "")
+
+    monkeypatch.setattr(backend, "_remote", _remote)
+
+    backend._install_api_release(plan)
+
+    target_python = f"{plan.target_release}/.venv-owner-console/bin/python"
+    assert (
+        "sudo",
+        "-u",
+        "brc",
+        target_python,
+        "-m",
+        "ensurepip",
+        "--upgrade",
+    ) in commands
+    assert (
+        "sudo",
+        "-u",
+        "brc",
+        target_python,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "--requirement",
+        f"{plan.target_release}/requirements-owner-console.txt",
+    ) in commands
+    assert not any(command[-1].endswith("/bin/pip") for command in commands)
 
 
 class FakeOwnerConsoleReleaseBackend:

@@ -379,7 +379,20 @@ class SshOwnerConsoleReleaseBackend:
                 "sudo",
                 "-u",
                 "brc",
-                f"{target_venv}/bin/pip",
+                f"{target_venv}/bin/python",
+                "-m",
+                "ensurepip",
+                "--upgrade",
+            )
+        )
+        self._remote(
+            (
+                "sudo",
+                "-u",
+                "brc",
+                f"{target_venv}/bin/python",
+                "-m",
+                "pip",
                 "install",
                 "--disable-pip-version-check",
                 "--requirement",
