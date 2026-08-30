@@ -267,22 +267,36 @@ class SshOwnerConsoleReleaseBackend:
             check=False,
         ).returncode != 0:
             raise RuntimeError("Owner Console API service is not active")
-        payload = self._remote(
-            (
-                "sudo",
-                "curl",
-                "--fail",
-                "--silent",
-                "--show-error",
-                "--max-time",
-                "10",
-                "--unix-socket",
-                API_SOCKET,
-                "http://localhost/healthz",
+        self._wait_for_api_health()
+
+    def _wait_for_api_health(self) -> None:
+        deadline = time.monotonic() + self._timeout_seconds
+        while True:
+            payload = self._remote(
+                (
+                    "sudo",
+                    "curl",
+                    "--fail",
+                    "--silent",
+                    "--show-error",
+                    "--max-time",
+                    "10",
+                    "--unix-socket",
+                    API_SOCKET,
+                    "http://localhost/healthz",
+                ),
+                check=False,
             )
-        ).stdout
-        if json.loads(payload) != {"status": "ok"}:
-            raise RuntimeError("Owner Console API health payload differs")
+            if payload.returncode == 0:
+                try:
+                    if json.loads(payload.stdout) == {"status": "ok"}:
+                        return
+                except json.JSONDecodeError:
+                    pass
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("Owner Console API health smoke timed out")
+            time.sleep(min(1.0, remaining))
 
     def restore_release(
         self,

@@ -146,6 +146,41 @@ def test_api_release_bootstraps_pip_through_its_target_venv_python(
     assert not any(command[-1].endswith("/bin/pip") for command in commands)
 
 
+def test_api_health_smoke_retries_until_the_unix_socket_is_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = SshOwnerConsoleReleaseBackend(
+        target="tokyo",
+        repo_root=Path("/repo"),
+        timeout_seconds=30,
+    )
+    attempts = 0
+
+    def _remote(
+        argv: tuple[str, ...],
+        *,
+        check: bool = True,
+        input_text: str | None = None,
+    ) -> release_module._CommandResult:
+        nonlocal attempts
+        del check, input_text
+        if argv[:3] == ("sudo", "curl", "--fail"):
+            attempts += 1
+            return release_module._CommandResult(
+                7 if attempts == 1 else 0,
+                "" if attempts == 1 else '{"status":"ok"}',
+                "",
+            )
+        return release_module._CommandResult(0, "", "")
+
+    monkeypatch.setattr(backend, "_remote", _remote)
+    monkeypatch.setattr(release_module.time, "sleep", lambda _: None)
+
+    backend._wait_for_api_health()
+
+    assert attempts == 2
+
+
 class FakeOwnerConsoleReleaseBackend:
     def __init__(
         self,
