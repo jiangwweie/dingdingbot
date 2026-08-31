@@ -474,11 +474,11 @@ def test_stable_policy_v4_contract_defers_deployed_identity_to_roadmap() -> None
         assert "currently deployed Policy v3" not in source
         assert "MAIN_CONTROL_ROADMAP.md" in source
 
-    assert "| Owner controls | Policy version `13` has `new_entry_submit_enabled=false`" in roadmap
-    assert "write fence is present" in roadmap
+    assert "| Owner controls | Policy version `14` has `new_entry_submit_enabled=true`" in roadmap
+    assert "write fence is absent" in roadmap
     assert "0007_exit_profile_authority_v1" in roadmap
     assert "Static SOR pair" in roadmap
-    assert "Entry is the intentionally disabled final activation phase" in roadmap
+    assert "pending_selection_mode=dynamic_selection" in roadmap
 
 
 def test_current_deployment_authority_has_no_active_handover_or_schema_deletion() -> None:

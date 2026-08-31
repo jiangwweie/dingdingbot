@@ -39,14 +39,14 @@ different Netting Domains progress concurrently.
 | PostgreSQL identity | Alembic and runtime authority identify `0007_exit_profile_authority_v1`; Registry, Policy, Seed and runtime capabilities agree with `dd047941` |
 | History preservation | Both forward revisions preserved certified lineage; B completed exact `0006` source preservation before its `0007` runtime identity rotation |
 | StrategyUniverse deployment | Eight Universes remain Active, zero are Warming, 58 scopes are Active and the Static SOR pair remains the current pair |
-| Owner controls | Policy version `13` has `new_entry_submit_enabled=false`; the deployment write fence is present and Entry is inactive/disabled. Existing Strategy controls were preserved rather than changed by deployment |
-| Runtime ownership | Observation, Lifecycle and Reconciliation are active/enabled; Entry is the intentionally disabled final activation phase |
+| Owner controls | Policy version `14` has `new_entry_submit_enabled=true`; the TOTP-protected first Dynamic activation is committed for the next UTC Session at `1788220800000` with Selection Control version `2` |
+| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation are active/enabled; the deployment write fence is absent after official Entry Promotion |
 | Current PostgreSQL activity | Zero active Ticket, Position, Reservation, unresolved Exchange Command and open Incident; the controlled SOL Ticket is terminal, reconciled, settled and reviewed |
 | Exchange postflight | Binance reports zero non-flat position domains and zero open-order domains; independent sides, Cross margin and configured `5x` remain valid for all 15 bounded instruments |
 | Dynamic Selection postflight | Selection Job, Snapshot, Generation, Authority, Vacuum and Gap Audit counts are all zero; `SOR-001` remains in Static baseline materialization state |
 | ExitProfile postflight | Eight immutable ExitProfiles, eight initial Bindings, eight current pointers and eight `ACTIVATED` events exist; no Profile switch/retirement side effect occurred |
 | New trading activity | The two-hop deployment created zero new Ticket, Exchange Command or Incident |
-| Scope boundary | Automatic Entry resume, first Dynamic activation, new Profile switch and exchange mutation are not authorized by this deployment seal |
+| Scope boundary | Entry resume and first Dynamic activation are now explicitly Owner-authorized; ExitProfile switch/retirement remains a separate exact-target Owner action |
 
 ## Owner Console R1/R2 Release
 
@@ -222,8 +222,9 @@ Stop, duplicate or unknown command outcome, schema/code mismatch, old-writer
 overlap, or official-path bypass.
 
 The `0007_exit_profile_authority_v1` R4 deployment is sealed at
-`dd047941495634fff3fdda54a1e96f7b1a5ad20e`. Global Entry is disabled at Policy
-version `13`, the Entry service is inactive/disabled and the write fence is
-present. The next activation of new trading authority, Dynamic Selection or an
-ExitProfile switch requires its own explicit Owner authorization. Observation,
-Lifecycle and Reconciliation continue as the safety-only runtime posture.
+`dd047941495634fff3fdda54a1e96f7b1a5ad20e`. Global Entry is enabled at Policy
+version `14`; the Entry worker is active/enabled and the write fence is absent.
+SOR Dynamic Selection remains `static_baseline` until the committed next UTC
+Session activation, with `pending_selection_mode=dynamic_selection` and exact
+TOTP Owner authorization. Observation, Entry, Lifecycle and Reconciliation now
+run in the ordinary four-worker production posture.
