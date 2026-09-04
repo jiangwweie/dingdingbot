@@ -1,0 +1,73 @@
+{
+  "artifact_sha256": {
+    "STAGE2_1_CLUSTER_ROBUSTNESS_REPORT.md": "sha256:d405687ffb5e3972ecc9d9fb929d11dcb879e6d6b56afb61051e6e41da670f26",
+    "stage2_1_cluster_summary.csv": "sha256:52a8fbe7b3c8ed17a44a6af5fcf91819f4e1ebc2ef10e1685e4070d10f89fb84",
+    "stage2_1_effect_by_day.csv": "sha256:ad55f4a9935c5776a64ba665fb6857057507547f0336b49cfd5ec323cd03ed3b",
+    "stage2_1_effect_by_utc_week.csv": "sha256:7dad65e1d36868a5f72ea5b4ee8bc870b798845b29760b75fcfe34e035b6f0c2",
+    "stage2_1_lodo.csv": "sha256:463bd9133cd868b0c4a6319becbdee61a8816c55f52f85fc7b67895ceb5ea6c6",
+    "stage2_1_lowo.csv": "sha256:0437d788a1040b3fba5b8c8a11d028b1efd9665494e1aae2a1acf1330784cc69",
+    "stage2_1_trigger_hour_clusters.csv": "sha256:0304fbf0d84e37076085a006d29b43d17592d2520ae0d443c93b7adc696608da"
+  },
+  "audit_code_sha256": "sha256:a685f15acd239967c96ce80a50a304dea8075f9856cb6637b9bcff5bea6b4680",
+  "base_stage2_commit": "3e073c29a27621dcde8830af6a1a7cb8115ae83e",
+  "bootstrap": {
+    "base_seed": 20260904,
+    "clusters": [
+      "UTC calendar day",
+      "Monday-based UTC week"
+    ],
+    "interval": [
+      0.025,
+      0.975
+    ],
+    "replicates": 20000
+  },
+  "cutoff_changed": false,
+  "effect": "HIGH net_path_rate minus LOW net_path_rate",
+  "feature_selection_changed": false,
+  "implementation_authority": "NONE",
+  "input_feature_screening_sha256": "sha256:a5d518e93191b7fe4a6773a7bd2986032762bfc00f250673a91ad46e44648653",
+  "input_replayed_events_sha256": "sha256:2e56a61019ef8a95aeae6df6921b5c43ce02127963a927e2d75626701e873361",
+  "input_stage2_manifest_sha256": "sha256:4efb9480ac3e254941f79fb318697cac9b2536535d8dc8960936abf684c094df",
+  "leave_one_out": [
+    "UTC calendar day",
+    "Monday-based UTC week"
+  ],
+  "periods": {
+    "Discovery": [
+      "2026-07-31T00:00:00Z",
+      "2026-08-16T00:00:00Z"
+    ],
+    "Holdout": [
+      "2026-08-16T00:00:00Z",
+      "2026-08-31T00:00:00Z"
+    ]
+  },
+  "production_authority": "NONE",
+  "research_status": "STAGE2_1_CLUSTER_ROBUSTNESS_COMPLETE",
+  "resolved_labels": [
+    "SIGNAL_STOP_FIRST",
+    "SIGNAL_TP1_FIRST"
+  ],
+  "schema": "brc.research.multi_strategy_selection.stage2_1_cluster_audit.v1",
+  "selector_design_authority": "NONE",
+  "supported_hypotheses": [
+    {
+      "feature": "avg_cross_asset_corr_24h",
+      "strategy": "BRF2-001"
+    },
+    {
+      "feature": "market_rv_24h",
+      "strategy": "BRF2-001"
+    },
+    {
+      "feature": "avg_cross_asset_corr_24h",
+      "strategy": "CPM-RO-001"
+    },
+    {
+      "feature": "directional_efficiency_24h",
+      "strategy": "CPM-RO-001"
+    }
+  ],
+  "trigger_hour_aggregation": "equal weight per unique trigger hour and bucket"
+}

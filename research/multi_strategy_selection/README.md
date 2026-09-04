@@ -20,3 +20,13 @@ See:
 - `STAGE2_EXECUTION_BLOCKER.md`
 - `artifacts/STAGE2_FULL_REPLAY_REPORT.md`
 - `artifacts/feature_screening.csv`
+
+Stage-2.1 adds a research-only time-cluster robustness audit for the exact four
+supported hypotheses. It freezes the Stage-2 buckets and labels, then reports
+trigger-hour aggregation, leave-one-day/week-out stability, UTC-day/week
+cluster bootstrap intervals, and per-block effects without changing any
+classification or Selector authority.
+
+- `artifacts/STAGE2_1_CLUSTER_ROBUSTNESS_REPORT.md`
+- `artifacts/stage2_1_cluster_summary.csv`
+- `artifacts/stage2_1_cluster_manifest.json`
