@@ -31,22 +31,22 @@ different Netting Domains progress concurrently.
 | --- | --- |
 | Integration branch | `dev` |
 | Verified at | `2026-09-04`; direct PostgreSQL, systemd, Owner API and Binance readonly evidence after the failed first Dynamic activation was Owner-paused |
-| Production commit | `dd047941495634fff3fdda54a1e96f7b1a5ad20e` |
-| Production tag | `tokyo-runtime-2026.08.31.1`; annotated, immutable and pending push with `dev` |
-| Production release | `/opt/brc/releases/brc-trading-kernel-dd0479414956` |
-| Production-commit certification | R4 `pass`; unit/architecture, integration, full-chain, Ruff, Mypy, diff, Decimal Golden, `961 × 24` Core parity and cross-version migration gates passed for the exact deployed commit |
-| Deployment phase | `0005 -> 0006 -> 0007` stopped-flat forward deployment and required `0007` fix-forward identity/Catalog completion both passed; no schema downgrade, dual write or old writer restart occurred |
-| PostgreSQL identity | Alembic and runtime authority identify `0007_exit_profile_authority_v1`; Registry, Policy, Seed and runtime capabilities agree with `dd047941` |
+| Production commit | `f8abcfc816b1986a1736ca8e69e1c1bd24d934b5` |
+| Production tag | `tokyo-runtime-2026.09.04.1`; annotated, immutable and pushed |
+| Production release | `/opt/brc/releases/brc-trading-kernel-f8abcfc816b1` |
+| Production-commit certification | R3 `pass`; complete unit/architecture, PostgreSQL integration, full-chain, Ruff, Mypy and diff gates passed for the exact deployed commit |
+| Deployment phase | Same-Schema stopped-flat R3 deployment completed on `0007`; target Policy v15 Certification Batches completed before final postflight, with no migration, downgrade, dual write or old writer restart |
+| PostgreSQL identity | Alembic and runtime authority identify `0007_exit_profile_authority_v1`; Registry, Policy, Seed and runtime capabilities agree with `f8abcfc8` |
 | History preservation | Both forward revisions preserved certified lineage; B completed exact `0006` source preservation before its `0007` runtime identity rotation |
 | StrategyUniverse deployment | Eight Universes remain Active, zero are Warming, 58 scopes are Active and the Static SOR pair remains the current pair |
-| Owner controls | Policy version `14` has `new_entry_submit_enabled=true`; Crypto `SOR-001` is explicitly Owner-paused at Strategy Control version `4`; other enabled StrategyGroups and every existing Ticket lifecycle remain independent |
-| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation are active/enabled; the deployment write fence is absent after official Entry Promotion |
-| Current PostgreSQL activity | Three active Ticket domains and three non-flat Position domains; zero unresolved Exchange Command and zero open Incident; the protected Ticket lifecycles remain owned by Lifecycle and Reconciliation |
-| Exchange postflight | Binance reports three non-flat position domains and three open-order domains; independent sides and Cross margin remain valid |
-| Dynamic Selection postflight | The `2026-09-01 00:00 UTC` first attempt is terminally abandoned under Owner Pause: one ready Snapshot, one abandoned Generation, one `OWNER_PAUSED` Vacuum, zero Session Authority for that Session and one preserved failed Gap Audit; the Static SOR pair remains current |
+| Owner controls | Policy version `15` has `new_entry_submit_enabled=false`; Crypto `SOR-001` remains explicitly Owner-paused at Strategy Control version `4` |
+| Runtime ownership | Observation, Lifecycle and Reconciliation are active; Entry is inactive and the deployment Entry fence is present |
+| Current PostgreSQL activity | Zero active Ticket, Position, unresolved Exchange Command and open Incident |
+| Exchange postflight | Binance reports zero non-flat position domains and zero open-order domains; independent sides and Cross margin remain valid |
+| Dynamic Selection postflight | The `2026-09-01 00:00 UTC` attempt remains `ABANDONED / OWNER_PAUSED`; `EXPIRED_ACTIVATION_RECOVERED` cleared the stale pending transition, preserved Static mode and pair, and created zero retroactive Session Authority |
 | ExitProfile postflight | Eight immutable ExitProfiles, eight initial Bindings, eight current pointers and eight `ACTIVATED` events exist; no Profile switch/retirement side effect occurred |
-| New trading activity | The two-hop deployment created zero new Ticket, Exchange Command or Incident |
-| Scope boundary | `SOR-001` new ENTRY is paused. The expired first-attempt recovery candidate is R3-certified but deployment remains blocked by current internal and exchange non-flatness; ExitProfile switch/retirement remains a separate exact-target Owner action |
+| New trading activity | The controlled close reached terminal Review for all three Tickets before deployment; the R3 deployment and Dynamic recovery created zero Ticket or Exchange Command |
+| Scope boundary | Global ENTRY and `SOR-001` remain paused. Entry resume, a new first Dynamic activation, and ExitProfile switch/retirement each remain separate exact Owner actions |
 
 ## Owner Console R1/R2 Release
 
@@ -74,9 +74,9 @@ R3 release certification）
 | Root cause B | fallback Gap Audit ran before the first eligible `01:15 UTC` close and persisted `AUTHORITY_GAP_SOURCE_INTEGRITY_FAILED` from an invalid four-bar window |
 | Owner containment | `SOR-001` is paused at Strategy Control version `4`; the failed Generation is `ABANDONED`, its Vacuum is `OWNER_PAUSED`, and existing Tickets continue normal protection and exit |
 | Permission repair | The Owner control role now has the exact Vacuum current/event privileges required by the official Pause path; the tracked source repair is isolated on `codex/owner-console-vacuum-grant-fix` |
-| Runtime repair candidate | `codex/sor-dynamic-first-activation-recovery` at `0e97e2042d9ada8b16d951dc537002ee8f885229`; R3 certification passed all six command groups against Schema `0007_exit_profile_authority_v1` |
-| Deployment gate | `WAITING_FOR_FLAT`: PostgreSQL and Binance each report three active/non-flat domains, so the same-Schema release cannot cut over yet |
-| Required post-deploy action | Use the typed `recover_expired_dynamic_activation` boundary to clear only the stale pending Dynamic transition, preserve the Static pair and Owner Pause, and create no retroactive Authority or exchange command |
+| Runtime repair | `f8abcfc816b1986a1736ca8e69e1c1bd24d934b5` is deployed and R3-certified on Schema `0007_exit_profile_authority_v1` |
+| Recovery result | `recover_expired_dynamic_activation` advanced Selection Control to version `3`, cleared the exact stale pending transition, preserved the Static pair and Owner Pause, and appended `EXPIRED_ACTIVATION_RECOVERED` |
+| Current gate | Recovery is complete; Global ENTRY, Entry Worker and first Dynamic activation remain intentionally disabled pending an explicit next-session activation decision |
 
 ## Deployment Repairs Closed
 
@@ -85,6 +85,7 @@ R3 release certification）
 | TradFi `warm_facts_invalid` | Binance returns the live Equity schedule under `marketSchedules.EQUITY.sessions`, while the parser expected a symbol-keyed schedule | Product Schedule parsing now accepts the production response shape; the production-shaped regression formed seven Warming Facts with zero Signal, Ticket or Command |
 | StrategyUniverse readonly certification failure | Manifest comparison incorrectly depended on Event row ordering | Certification now compares the manifest semantically and independently of Event order; the final readonly postflight passes identity and semantic-digest checks |
 | Initial R4 bootstrap timeout | A pre-fix failed Observation cadence had already scheduled the next attempt at the following closed 15-minute bar | The deployment resumed through the official bounded bootstrap path after the next natural closed bar; no synthetic lifecycle write or exchange mutation was used |
+| Lifecycle entry-fill time inversion | `EntryFilled.occurred_at_ms` represented PostgreSQL observation time and could be seconds later than the exact Binance ENTRY fill, causing every lifecycle fill-window validation to fail | Lifecycle now freezes ENTRY Command creation as the legal lookup lower bound, derives the actual exposure start from exact attributed fill timestamps, and persists account-blocking Incident/Owner Monitor facts for deterministic lifecycle contradictions |
 
 ## Historical Performance Snapshot
 
