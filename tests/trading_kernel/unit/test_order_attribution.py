@@ -31,6 +31,7 @@ def _reference(*, namespace: OrderNamespace = OrderNamespace.REGULAR) -> TicketO
             namespace=namespace,
             venue_client_order_id="brc-entry",
             submitted_exchange_order_id="12345",
+            command_created_at_ms=900,
             conditional_expectation=ConditionalOrderExpectation(
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
                 position_side="long",
@@ -46,6 +47,7 @@ def _reference(*, namespace: OrderNamespace = OrderNamespace.REGULAR) -> TicketO
         namespace=namespace,
         venue_client_order_id="brc-entry",
         submitted_exchange_order_id="12345",
+        command_created_at_ms=900,
     )
 
 
@@ -79,6 +81,31 @@ def test_regular_order_requires_its_submitted_order_id_as_actual_order_id() -> N
             resolution_status="executable",
             actual_order_id="other-order",
             resolved_at_ms=1_000,
+        )
+
+
+def test_order_reference_freezes_command_creation_as_fill_window_lower_bound() -> None:
+    reference = TicketOrderReference(
+        command_id="command:entry-window",
+        command_kind=ExchangeCommandKind.ENTRY,
+        role=OrderRole.ENTRY,
+        namespace=OrderNamespace.REGULAR,
+        venue_client_order_id="brc-entry-window",
+        submitted_exchange_order_id="12346",
+        command_created_at_ms=999,
+    )
+
+    assert reference.command_created_at_ms == 999
+
+    with pytest.raises(ValidationError, match="command creation time"):
+        TicketOrderReference(
+            command_id="command:invalid-window",
+            command_kind=ExchangeCommandKind.ENTRY,
+            role=OrderRole.ENTRY,
+            namespace=OrderNamespace.REGULAR,
+            venue_client_order_id="brc-invalid-window",
+            submitted_exchange_order_id="12347",
+            command_created_at_ms=0,
         )
 
 

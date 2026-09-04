@@ -849,18 +849,21 @@ class CcxtVenueAdapter:
             review_observed_at_ms=request.observed_at_ms,
         )
         attributed_entry_fills: list[ReviewFill] = []
+        exact_entry_fill_times: list[int] = []
         bnb_entry_fee_upper_quote = Decimal(0)
         for row in _require_list(entry_fills, name="entry fills"):
             if _review_fee_asset(row, settlement_asset=settlement_asset) == "BNB":
-                notional = _exact_order_fill_notional(
+                metric = _exact_order_fill_notional(
                     row,
                     resolved=resolved_entry,
                     position_side=domain.position_side,
-                    entry_time_ms=request.exposure_started_at_ms,
+                    entry_time_ms=request.entry_fill_window_started_at_ms,
                     exit_time_ms=request.observed_at_ms,
                 )
-                if notional is not None:
+                if metric is not None:
+                    notional, occurred_at_ms = metric
                     bnb_entry_fee_upper_quote += notional * taker_fee_rate
+                    exact_entry_fill_times.append(occurred_at_ms)
                 continue
             fill = await _review_fill(
                 row,
@@ -868,13 +871,17 @@ class CcxtVenueAdapter:
                 fee_valuation_context=lifecycle_fee_context,
                 settlement_asset=settlement_asset,
                 position_side=domain.position_side,
-                entry_time_ms=request.exposure_started_at_ms,
+                entry_time_ms=request.entry_fill_window_started_at_ms,
                 exit_time_ms=request.observed_at_ms,
             )
             if fill is not None:
                 attributed_entry_fills.append(fill)
+                exact_entry_fill_times.append(fill.occurred_at_ms)
         if not attributed_entry_fills and bnb_entry_fee_upper_quote == 0:
             raise RuntimeError("entry fills are unavailable for the exact order identity")
+        if not exact_entry_fill_times:
+            raise RuntimeError("entry fill times are unavailable for the exact order identity")
+        exposure_started_at_ms = min(exact_entry_fill_times)
         entry_fee_quote = sum(
             (fill.fee_quote for fill in attributed_entry_fills),
             Decimal(0),
@@ -888,7 +895,7 @@ class CcxtVenueAdapter:
                 _require_list(candle_rows, name="lifecycle candles"),
                 timeframe=request.timeframe,
                 observed_at_ms=request.observed_at_ms,
-                entered_at_ms=request.exposure_started_at_ms,
+                entered_at_ms=exposure_started_at_ms,
                 position_side=domain.position_side,
                 structure_window_bars=request.structure_window_bars,
                 atr_period=request.atr_period,
@@ -2479,7 +2486,7 @@ def _exact_order_fill_notional(
     position_side: Literal["long", "short"],
     entry_time_ms: int,
     exit_time_ms: int,
-) -> Decimal | None:
+) -> tuple[Decimal, int] | None:
     if not isinstance(value, Mapping):
         raise TypeError("venue review fill row is not a mapping")
     info = value.get("info")
@@ -2511,7 +2518,7 @@ def _exact_order_fill_notional(
     price = Decimal(str(value.get("price") or raw_info.get("price") or "0"))
     if quantity <= 0 or price <= 0:
         raise RuntimeError("review fill quantity and price must be positive")
-    return quantity * price
+    return quantity * price, occurred_at_ms
 
 
 async def _review_fill(

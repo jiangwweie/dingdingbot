@@ -815,6 +815,7 @@ class PostgresExchangeCommandRepository:
                     namespace=namespace,
                     venue_client_order_id=str(row["venue_client_order_id"] or ""),
                     submitted_exchange_order_id=_accepted_exchange_order_id(row),
+                    command_created_at_ms=int(row["created_at_ms"]),
                     conditional_expectation=conditional_expectation,
                 )
             )

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 from decimal import Decimal
 from enum import StrEnum
 
@@ -13,6 +12,10 @@ from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandRequest,
     DispatchCommandStatus,
     dispatch_one_command,
+)
+from src.trading_kernel.application.lifecycle_facts_health import (
+    record_lifecycle_facts_failure,
+    resolve_lifecycle_facts_failure,
 )
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     LifecycleMaintenanceRequest,
@@ -28,11 +31,6 @@ from src.trading_kernel.application.runtime_facts import (
 from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind
-from src.trading_kernel.domain.events import (
-    EntryFilled,
-    EntryPartiallyFilled,
-    TradeEvent,
-)
 from src.trading_kernel.domain.exit_policy import TimeStopMode
 from src.trading_kernel.domain.order_attribution import OrderRole
 
@@ -167,7 +165,6 @@ async def run_lifecycle_worker_once(
         order_references = await uow.exchange_commands.list_order_references(
             aggregate.identity.ticket_id
         )
-        events = await uow.events.list_for_ticket(aggregate.identity.ticket_id)
     if profile_record is None or rules is None:
         async with uow_factory() as uow:
             await uow.aggregates.schedule_next_check(
@@ -188,8 +185,7 @@ async def run_lifecycle_worker_once(
         ),
         None,
     )
-    exposure_started_at_ms = _earliest_nonzero_exposure_started_at_ms(events)
-    if entry_order_reference is None or exposure_started_at_ms is None:
+    if entry_order_reference is None:
         async with uow_factory() as uow:
             await uow.aggregates.schedule_next_check(
                 aggregate.identity.ticket_id,
@@ -220,7 +216,9 @@ async def run_lifecycle_worker_once(
         expected_position_quantity=aggregate.position_qty,
         entry_order_reference=entry_order_reference,
         tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
-        exposure_started_at_ms=exposure_started_at_ms,
+        entry_fill_window_started_at_ms=(
+            entry_order_reference.command_created_at_ms
+        ),
         price_tick=rules.price_tick,
         structure_window_bars=profile.runner.lookback_bars,
         atr_period=profile.runner.atr_period,
@@ -239,15 +237,24 @@ async def run_lifecycle_worker_once(
         )
     except Exception as exc:  # noqa: BLE001 - protection facts failure reschedules safely.
         async with uow_factory() as uow:
-            await uow.aggregates.schedule_next_check(
-                aggregate.identity.ticket_id,
-                work_kind="lifecycle",
+            await record_lifecycle_facts_failure(
+                uow,
+                ticket_id=aggregate.identity.ticket_id,
+                error_type=type(exc).__name__,
+                now_ms=request.now_ms,
                 due_at_ms=request.now_ms + request.idle_poll_interval_ms,
             )
         return LifecycleWorkerResult(
             status=LifecycleWorkerStatus.FACTS_UNAVAILABLE,
             ticket_id=aggregate.identity.ticket_id,
             detail=f"lifecycle_facts:{type(exc).__name__}",
+        )
+
+    async with uow_factory() as uow:
+        await resolve_lifecycle_facts_failure(
+            uow,
+            ticket_id=aggregate.identity.ticket_id,
+            now_ms=request.now_ms,
         )
 
     expected_position_quantity: Decimal | None = aggregate.position_qty
@@ -336,15 +343,3 @@ async def _dispatch_lifecycle(
             timeout_seconds=request.timeout_seconds,
         ),
     )
-
-
-def _earliest_nonzero_exposure_started_at_ms(
-    events: Sequence[TradeEvent],
-) -> int | None:
-    candidates = tuple(
-        event.occurred_at_ms
-        for event in events
-        if isinstance(event, (EntryFilled, EntryPartiallyFilled))
-        and event.filled_qty > 0
-    )
-    return None if not candidates else min(candidates)

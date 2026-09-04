@@ -880,8 +880,9 @@ class TransientCertificationExchange(InstrumentCertificationExchange):
 
 
 class LifecycleFactsExchange(FakeAsyncExchange):
-    def __init__(self) -> None:
+    def __init__(self, *, entry_fill_timestamp: int = 1_100) -> None:
         self.tp1_order_calls: list[tuple[object, str, dict[str, object]]] = []
+        self.entry_fill_timestamp = entry_fill_timestamp
 
     async def fetch_positions(self, symbols, params):
         return [
@@ -904,7 +905,7 @@ class LifecycleFactsExchange(FakeAsyncExchange):
                     "amount": "0.01",
                     "price": "60000",
                     "fee": {"cost": "0.4", "currency": "USDT"},
-                    "timestamp": 1_100,
+                    "timestamp": self.entry_fill_timestamp,
                     "info": {
                         "positionSide": "LONG",
                         "commission": "0.4",
@@ -2063,7 +2064,7 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
         expected_position_quantity=Decimal("0.005"),
         entry_order_reference=_entry_order_reference(),
         tp1_exchange_order_id="venue-tp1-1",
-        exposure_started_at_ms=1_000,
+        entry_fill_window_started_at_ms=1_000,
         price_tick=Decimal("0.1"),
         structure_window_bars=4,
         atr_period=14,
@@ -2124,7 +2125,7 @@ async def test_ccxt_adapter_accepts_entry_fill_after_ticket_issue_before_observa
         expected_position_quantity=Decimal("0.005"),
         entry_order_reference=_entry_order_reference(),
         tp1_exchange_order_id="venue-tp1-1",
-        exposure_started_at_ms=1_000,
+        entry_fill_window_started_at_ms=1_000,
         price_tick=Decimal("0.1"),
         structure_window_bars=4,
         atr_period=14,
@@ -2135,6 +2136,105 @@ async def test_ccxt_adapter_accepts_entry_fill_after_ticket_issue_before_observa
     facts = await adapter.read_lifecycle_facts(request)
 
     assert facts.allocated_entry_fee_quote == Decimal("0.20")
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_uses_exact_entry_fill_time_for_holding_bars() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): LifecycleFactsExchange(
+                entry_fill_timestamp=901_000
+            )
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        taker_fee_rates={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): Decimal("0.0005")
+        },
+        clock_ms=lambda: 20_000_000,
+    )
+    request = LifecycleFactsRequest(
+        ticket_id="ticket-1",
+        netting_domain=NettingDomain(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            position_side="long",
+        ),
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+        timeframe="15m",
+        entry_quantity=Decimal("0.01"),
+        expected_position_quantity=Decimal("0.005"),
+        entry_order_reference=_entry_order_reference(),
+        tp1_exchange_order_id=None,
+        entry_fill_window_started_at_ms=1_000,
+        price_tick=Decimal("0.1"),
+        structure_window_bars=4,
+        atr_period=14,
+        time_stop_max_holding_bars=96,
+        runner_market_required=True,
+        observed_at_ms=20_000_000,
+    )
+
+    facts = await adapter.read_lifecycle_facts(request)
+
+    assert facts.market_facts is not None
+    assert facts.market_facts.holding_bars == 21
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_rejects_entry_fill_before_exact_command_creation() -> None:
+    adapter = CcxtVenueAdapter(
+        exchanges={
+            ("binance-usdm", "experiment-1"): LifecycleFactsExchange(
+                entry_fill_timestamp=999
+            )
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        taker_fee_rates={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): Decimal("0.0005")
+        },
+        clock_ms=lambda: 20_000_000,
+    )
+    request = LifecycleFactsRequest(
+        ticket_id="ticket-1",
+        netting_domain=NettingDomain(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            position_side="long",
+        ),
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+        timeframe="15m",
+        entry_quantity=Decimal("0.01"),
+        expected_position_quantity=Decimal("0.005"),
+        entry_order_reference=_entry_order_reference(),
+        tp1_exchange_order_id=None,
+        entry_fill_window_started_at_ms=1_000,
+        price_tick=Decimal("0.1"),
+        structure_window_bars=4,
+        atr_period=14,
+        runner_market_required=False,
+        observed_at_ms=20_000_000,
+    )
+
+    with pytest.raises(RuntimeError, match="outside Ticket exposure window"):
+        await adapter.read_lifecycle_facts(request)
 
 
 @pytest.mark.asyncio
@@ -2170,7 +2270,7 @@ async def test_ccxt_adapter_bounds_absolute_time_stop_window_at_97_rows() -> Non
         expected_position_quantity=Decimal("0.005"),
         entry_order_reference=_entry_order_reference(),
         tp1_exchange_order_id=None,
-        exposure_started_at_ms=1_000,
+        entry_fill_window_started_at_ms=1_000,
         price_tick=Decimal("0.1"),
         structure_window_bars=4,
         atr_period=14,
@@ -2248,7 +2348,7 @@ async def test_ccxt_adapter_uses_conservative_taker_bound_for_bnb_lifecycle_fee(
         expected_position_quantity=Decimal("0.005"),
         entry_order_reference=_entry_order_reference(),
         tp1_exchange_order_id=None,
-        exposure_started_at_ms=1_000,
+        entry_fill_window_started_at_ms=1_000,
         price_tick=Decimal("0.1"),
         structure_window_bars=4,
         atr_period=14,
@@ -2711,6 +2811,7 @@ def _review_request() -> ReviewEconomicsRequest:
                 namespace=OrderNamespace.REGULAR,
                 venue_client_order_id="brc-tp1-1",
                 submitted_exchange_order_id="venue-tp1-1",
+                command_created_at_ms=1_500,
             ),
             TicketOrderReference(
                 command_id="command:runner-1",
@@ -2719,6 +2820,7 @@ def _review_request() -> ReviewEconomicsRequest:
                 namespace=OrderNamespace.CONDITIONAL,
                 venue_client_order_id="brc-runner-1",
                 submitted_exchange_order_id="venue-runner-algo-1",
+                command_created_at_ms=2_500,
                 conditional_expectation=ConditionalOrderExpectation(
                     exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
                     position_side="long",
@@ -2743,4 +2845,5 @@ def _entry_order_reference() -> TicketOrderReference:
         namespace=OrderNamespace.REGULAR,
         venue_client_order_id="brc-entry-1",
         submitted_exchange_order_id="venue-entry-1",
+        command_created_at_ms=1_000,
     )

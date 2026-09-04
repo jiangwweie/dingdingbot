@@ -63,6 +63,7 @@ class TicketOrderReference(BaseModel):
     namespace: OrderNamespace
     venue_client_order_id: str
     submitted_exchange_order_id: str
+    command_created_at_ms: int
     conditional_expectation: ConditionalOrderExpectation | None = None
 
     @field_validator(
@@ -77,6 +78,13 @@ class TicketOrderReference(BaseModel):
         if not normalized:
             raise ValueError("order attribution identities must be non-blank")
         return normalized
+
+    @field_validator("command_created_at_ms")
+    @classmethod
+    def _require_command_creation_time(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("order reference command creation time must be positive")
+        return value
 
     @model_validator(mode="after")
     def _validate_role(self) -> TicketOrderReference:

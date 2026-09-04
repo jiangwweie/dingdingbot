@@ -45,17 +45,14 @@ def test_lifecycle_uses_ticket_profile_without_current_binding_or_legacy_event_p
     assert "profile.event_spec_id" not in lifecycle
 
 
-def test_lifecycle_request_uses_earliest_nonzero_exposure_event() -> None:
+def test_lifecycle_request_uses_entry_command_as_fill_window_lower_bound() -> None:
     worker = (
         REPO_ROOT / "src/trading_kernel/interfaces/lifecycle_worker.py"
     ).read_text(encoding="utf-8")
 
-    assert "EntryPartiallyFilled" in worker
-    assert "event.filled_qty > 0" in worker
-    assert "_earliest_nonzero_exposure_started_at_ms(events)" in worker
-    assert "min(candidates)" in worker
-    assert "exposure_started_at_ms=exposure_started_at_ms" in worker
-    assert "aggregate.ticket.created_at_ms" not in worker
+    assert "entry_order_reference.command_created_at_ms" in worker
+    assert "entry_fill_window_started_at_ms" in worker
+    assert "_earliest_nonzero_exposure_started_at_ms" not in worker
 
 
 def test_exit_profile_authority_lock_is_absent_from_trading_hot_paths() -> None:

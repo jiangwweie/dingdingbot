@@ -82,6 +82,7 @@ async def test_repository_builds_exact_regular_and_conditional_order_references(
         ("command:stop", OrderNamespace.CONDITIONAL, OrderRole.EXIT),
     ]
     assert [item.submitted_exchange_order_id for item in references] == ["1001", "9001"]
+    assert [item.command_created_at_ms for item in references] == [1_000, 1_000]
 
 
 def _command(

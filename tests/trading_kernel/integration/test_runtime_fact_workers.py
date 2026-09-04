@@ -57,6 +57,7 @@ from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
 from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
+    monitor_current,
     owner_policy_current,
     runtime_capabilities_current,
     runtime_incidents,
@@ -331,6 +332,15 @@ class FakeLifecycleFactsSource:
     ) -> TicketLifecycleFacts:
         self.requests.append(request)
         return self.facts.model_copy(update={"observed_at_ms": request.observed_at_ms})
+
+
+class FailingLifecycleFactsSource:
+    async def read_lifecycle_facts(
+        self,
+        request: LifecycleFactsRequest,
+    ) -> TicketLifecycleFacts:
+        del request
+        raise RuntimeError("review fill falls outside Ticket exposure window")
 
 
 async def _enable_exchange_commands(engine) -> None:
@@ -921,6 +931,45 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     )
     assert mismatch.status is LifecycleWorkerStatus.RECONCILIATION_REQUIRED
 
+    unavailable = await run_lifecycle_worker_once(
+        lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
+        venue,
+        FailingLifecycleFactsSource(),
+        worker_request.model_copy(update={"now_ms": 3_010, "lease_until_ms": 8_010}),
+    )
+    assert unavailable.status is LifecycleWorkerStatus.FACTS_UNAVAILABLE
+    async with runtime_fact_worker_engine.connect() as connection:
+        incident = (
+            await connection.execute(
+                sa.select(
+                    runtime_incidents.c.status,
+                    runtime_incidents.c.incident_kind,
+                    runtime_incidents.c.entry_block_scope,
+                ).where(
+                    runtime_incidents.c.ticket_id == entry.ticket_id,
+                    runtime_incidents.c.incident_kind
+                    == "lifecycle_facts_contradictory",
+                )
+            )
+        ).one()
+        monitor = (
+            await connection.execute(
+                sa.select(
+                    monitor_current.c.owner_status,
+                    monitor_current.c.ticket_id,
+                ).where(
+                    monitor_current.c.monitor_key
+                    == f"lifecycle-facts:{entry.ticket_id}"
+                )
+            )
+        ).one()
+    assert incident == (
+        "open",
+        "lifecycle_facts_contradictory",
+        "account_capacity",
+    )
+    assert monitor == ("needs_intervention", entry.ticket_id)
+
     tp1_quantity = ticket.take_profit_quantities[0]
     runner_quantity = ticket.quantity - tp1_quantity
     filled_facts = FakeLifecycleFactsSource(
@@ -932,20 +981,20 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
             exit_taker_fee_rate=Decimal("0.0005"),
             price_tick=Decimal("0.1"),
             market_facts=None,
-            observed_at_ms=3_011,
+            observed_at_ms=5_011,
         )
     )
     replacement = await run_lifecycle_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
         filled_facts,
-        worker_request.model_copy(update={"now_ms": 3_011, "lease_until_ms": 8_011}),
+        worker_request.model_copy(update={"now_ms": 5_011, "lease_until_ms": 10_011}),
     )
 
     assert replacement.status is LifecycleWorkerStatus.DISPATCHED
     assert len(filled_facts.requests) == 1
     assert filled_facts.requests[0].tp1_exchange_order_id is not None
-    assert filled_facts.requests[0].exposure_started_at_ms == 1_007
+    assert filled_facts.requests[0].entry_fill_window_started_at_ms == 1_003
     assert filled_facts.requests[0].time_stop_max_holding_bars == 96
     assert venue.command_kinds == [
         "entry",
@@ -953,6 +1002,22 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         "take_profit",
         "replace_protection",
     ]
+    async with runtime_fact_worker_engine.connect() as connection:
+        incident_status = await connection.scalar(
+            sa.select(runtime_incidents.c.status).where(
+                runtime_incidents.c.ticket_id == entry.ticket_id,
+                runtime_incidents.c.incident_kind
+                == "lifecycle_facts_contradictory",
+            )
+        )
+        monitor_status = await connection.scalar(
+            sa.select(monitor_current.c.owner_status).where(
+                monitor_current.c.monitor_key
+                == f"lifecycle-facts:{entry.ticket_id}"
+            )
+        )
+    assert incident_status == "resolved"
+    assert monitor_status == "processing"
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         aggregate = await uow.aggregates.get(entry.ticket_id)
     assert aggregate is not None
@@ -962,7 +1027,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
         filled_facts,
-        worker_request.model_copy(update={"now_ms": 3_012, "lease_until_ms": 8_012}),
+        worker_request.model_copy(update={"now_ms": 5_012, "lease_until_ms": 10_012}),
     )
     assert old_stop_cancel.status is LifecycleWorkerStatus.DISPATCHED
 

@@ -35,6 +35,7 @@ def _reference(*, namespace: OrderNamespace) -> TicketOrderReference:
             namespace=namespace,
             venue_client_order_id="brc-runner",
             submitted_exchange_order_id="4000001795783472",
+            command_created_at_ms=1_000,
             conditional_expectation=ConditionalOrderExpectation(
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
                 position_side="long",
@@ -50,6 +51,7 @@ def _reference(*, namespace: OrderNamespace) -> TicketOrderReference:
         namespace=namespace,
         venue_client_order_id="brc-runner",
         submitted_exchange_order_id="4000001795783472",
+        command_created_at_ms=1_000,
     )
 
 

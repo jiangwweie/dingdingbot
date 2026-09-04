@@ -91,6 +91,7 @@ class _CommandRepository:
                 namespace=OrderNamespace.REGULAR,
                 venue_client_order_id=command.venue_client_order_id,
                 submitted_exchange_order_id=f"venue:{command.command_id}",
+                command_created_at_ms=command.created_at_ms,
             )
             for command in self.commands
         )
