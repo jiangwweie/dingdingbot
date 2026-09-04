@@ -1,0 +1,73 @@
+{
+  "schema": "brc.research.multi_strategy_selection.stage2_manifest.v1",
+  "research_status": "RUNTIME_REFACTOR_REQUIRED",
+  "blocker_code": "ENTRY_REFERENCE_DATA_GAP",
+  "dev_head_sha": "2697f4b5943ed6a98f04a93e1b78d38e53780890",
+  "production_reference_commit": "3fa2e21ce52bc3c203c721be4b696dc4265fcf96",
+  "production_reference_snapshot_status": "PROD_PARITY_DATA_UNAVAILABLE",
+  "evaluation_window": {
+    "start_inclusive": "2026-07-31T00:00:00Z",
+    "end_exclusive": "2026-08-31T00:00:00Z"
+  },
+  "warmup_window": {
+    "start_inclusive": "2026-06-15T00:00:00Z",
+    "events_included": false
+  },
+  "candidate_universe": [
+    "binance-usdm:ADAUSDT:perpetual",
+    "binance-usdm:APTUSDT:perpetual",
+    "binance-usdm:ARBUSDT:perpetual",
+    "binance-usdm:ATOMUSDT:perpetual",
+    "binance-usdm:AVAXUSDT:perpetual",
+    "binance-usdm:BCHUSDT:perpetual",
+    "binance-usdm:BNBUSDT:perpetual",
+    "binance-usdm:BTCUSDT:perpetual",
+    "binance-usdm:DOGEUSDT:perpetual",
+    "binance-usdm:DOTUSDT:perpetual",
+    "binance-usdm:ETCUSDT:perpetual",
+    "binance-usdm:ETHUSDT:perpetual",
+    "binance-usdm:FILUSDT:perpetual",
+    "binance-usdm:INJUSDT:perpetual",
+    "binance-usdm:LINKUSDT:perpetual",
+    "binance-usdm:LTCUSDT:perpetual",
+    "binance-usdm:NEARUSDT:perpetual",
+    "binance-usdm:OPUSDT:perpetual",
+    "binance-usdm:RUNEUSDT:perpetual",
+    "binance-usdm:SOLUSDT:perpetual",
+    "binance-usdm:SUIUSDT:perpetual",
+    "binance-usdm:TRXUSDT:perpetual",
+    "binance-usdm:UNIUSDT:perpetual",
+    "binance-usdm:XRPUSDT:perpetual"
+  ],
+  "candidate_count": 24,
+  "candidate_universe_digest": "sha256:1570f50d916fc01a103c1d781740cebe2979625badf83438694c5d0a12d23e75",
+  "detector_file_sha256": {
+    "src/trading_kernel/domain/detectors/cpm.py": "b02a6f5a1885785597df5c9e23c081005195180c0a6763b88122efd065f77c41",
+    "src/trading_kernel/domain/detectors/mpg.py": "9cce8f1969381d579a9fb0af3280f64b687ad20c4725e774b4b635040fcb6a91",
+    "src/trading_kernel/domain/detectors/mi.py": "692f0c2db5feb11dc39dbd521c911a568c347eef5c388de9b88da3a6d4784832",
+    "src/trading_kernel/domain/detectors/brf2.py": "41e285facda6f9a8ea181489502ffd04880cf973edaa34cb7d0c9770c6bac0ce"
+  },
+  "signal_construction_sha256": "8ec10dc7b5826c7bce3165b2ace8e2663a09f3acaefda1cb5d09818a6e5b7b4b",
+  "capacity_geometry_sha256": "69f917df4d06997aa0d9f463e92bf4640d8301ec512d007c33f879f95fb14c77",
+  "production_lineage_sanity": {
+    "source": "current Tokyo PostgreSQL retained historical lineage, not the requested immutable 0005 snapshot",
+    "signal_counts": {
+      "BRF2-001": 84,
+      "CPM-RO-001": 242,
+      "MI-001": 47,
+      "MPG-001": 47
+    },
+    "ticket_counts": {
+      "BRF2-001": 17,
+      "CPM-RO-001": 17,
+      "MI-001": 0,
+      "MPG-001": 7
+    },
+    "shadow_outcome_count": 282
+  },
+  "completed_stages": ["R0", "R1", "R2"],
+  "blocked_before_stage": "R3",
+  "selector_design_authority": "NONE",
+  "implementation_authority": "NONE",
+  "production_authority": "NONE"
+}

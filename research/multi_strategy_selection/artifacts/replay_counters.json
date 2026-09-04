@@ -1,0 +1,8 @@
+{
+  "candidate_hour_count": 17856,
+  "invalid_detector_evaluation_count": 0,
+  "invalid_reasons": {},
+  "raw_triggered_count": 2188,
+  "replay_event_count": 1476,
+  "valid_detector_evaluation_count": 71424
+}
