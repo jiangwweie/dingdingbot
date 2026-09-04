@@ -30,7 +30,7 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Integration branch | `dev` |
-| Verified at | `2026-08-31`; direct PostgreSQL, systemd, release-marker and Binance readonly evidence after the two-hop stopped-flat cutover |
+| Verified at | `2026-09-04`; direct PostgreSQL, systemd, Owner API and Binance readonly evidence after the failed first Dynamic activation was Owner-paused |
 | Production commit | `dd047941495634fff3fdda54a1e96f7b1a5ad20e` |
 | Production tag | `tokyo-runtime-2026.08.31.1`; annotated, immutable and pending push with `dev` |
 | Production release | `/opt/brc/releases/brc-trading-kernel-dd0479414956` |
@@ -39,14 +39,14 @@ different Netting Domains progress concurrently.
 | PostgreSQL identity | Alembic and runtime authority identify `0007_exit_profile_authority_v1`; Registry, Policy, Seed and runtime capabilities agree with `dd047941` |
 | History preservation | Both forward revisions preserved certified lineage; B completed exact `0006` source preservation before its `0007` runtime identity rotation |
 | StrategyUniverse deployment | Eight Universes remain Active, zero are Warming, 58 scopes are Active and the Static SOR pair remains the current pair |
-| Owner controls | Policy version `14` has `new_entry_submit_enabled=true`; the TOTP-protected first Dynamic activation is committed for the next UTC Session at `1788220800000` with Selection Control version `2` |
+| Owner controls | Policy version `14` has `new_entry_submit_enabled=true`; Crypto `SOR-001` is explicitly Owner-paused at Strategy Control version `4`; other enabled StrategyGroups and every existing Ticket lifecycle remain independent |
 | Runtime ownership | Observation, Entry, Lifecycle and Reconciliation are active/enabled; the deployment write fence is absent after official Entry Promotion |
-| Current PostgreSQL activity | Zero active Ticket, Position, Reservation, unresolved Exchange Command and open Incident; the controlled SOL Ticket is terminal, reconciled, settled and reviewed |
-| Exchange postflight | Binance reports zero non-flat position domains and zero open-order domains; independent sides, Cross margin and configured `5x` remain valid for all 15 bounded instruments |
-| Dynamic Selection postflight | Selection Job, Snapshot, Generation, Authority, Vacuum and Gap Audit counts are all zero; `SOR-001` remains in Static baseline materialization state |
+| Current PostgreSQL activity | Three active Ticket domains and three non-flat Position domains; zero unresolved Exchange Command and zero open Incident; the protected Ticket lifecycles remain owned by Lifecycle and Reconciliation |
+| Exchange postflight | Binance reports three non-flat position domains and three open-order domains; independent sides and Cross margin remain valid |
+| Dynamic Selection postflight | The `2026-09-01 00:00 UTC` first attempt is terminally abandoned under Owner Pause: one ready Snapshot, one abandoned Generation, one `OWNER_PAUSED` Vacuum, zero Session Authority for that Session and one preserved failed Gap Audit; the Static SOR pair remains current |
 | ExitProfile postflight | Eight immutable ExitProfiles, eight initial Bindings, eight current pointers and eight `ACTIVATED` events exist; no Profile switch/retirement side effect occurred |
 | New trading activity | The two-hop deployment created zero new Ticket, Exchange Command or Incident |
-| Scope boundary | Entry resume and first Dynamic activation are now explicitly Owner-authorized; ExitProfile switch/retirement remains a separate exact-target Owner action |
+| Scope boundary | `SOR-001` new ENTRY is paused. The expired first-attempt recovery candidate is R3-certified but deployment remains blocked by current internal and exchange non-flatness; ExitProfile switch/retirement remains a separate exact-target Owner action |
 
 ## Owner Console R1/R2 Release
 
@@ -58,6 +58,25 @@ different Netting Domains progress concurrently.
 | Scope | R2 changed only `/opt/brc/owner-console-api/current` and `brc-owner-console-api.service`; it did not change Kernel release, Policy, Entry fence, Registry, Nginx or exchange state |
 | Postflight | API exact marker matches, service is active and Unix-Socket `/healthz` returns `{"status":"ok"}`; Kernel remains `dd047941` with Entry fenced and safety workers active |
 | Deployment repair | API release provisioning now bootstraps pip through the target venv Python from the release directory and waits for Unix-Socket readiness before judging health, avoiding rollback to a Schema-incompatible old API |
+
+## Dynamic First-Activation Incident And Recovery
+
+The first Dynamic Session is not recoverable as trading authority and must never
+be revived. The current facts below come from direct Tokyo PostgreSQL, Owner API,
+systemd and Binance readonly inspection on `2026-09-04`.（来源：Tokyo production
+PostgreSQL、Owner API journal、systemd、Binance USDⓈ-M readonly facts；exact local
+R3 release certification）
+
+| Area | Current authority |
+| --- | --- |
+| Failed Session | `2026-09-01 00:00 UTC`; Candidate data and Snapshot completed, but no Session Authority was granted |
+| Root cause A | `temporarily_unavailable` certification was collapsed into a terminal non-eligible result, causing premature fallback |
+| Root cause B | fallback Gap Audit ran before the first eligible `01:15 UTC` close and persisted `AUTHORITY_GAP_SOURCE_INTEGRITY_FAILED` from an invalid four-bar window |
+| Owner containment | `SOR-001` is paused at Strategy Control version `4`; the failed Generation is `ABANDONED`, its Vacuum is `OWNER_PAUSED`, and existing Tickets continue normal protection and exit |
+| Permission repair | The Owner control role now has the exact Vacuum current/event privileges required by the official Pause path; the tracked source repair is isolated on `codex/owner-console-vacuum-grant-fix` |
+| Runtime repair candidate | `codex/sor-dynamic-first-activation-recovery` at `0e97e2042d9ada8b16d951dc537002ee8f885229`; R3 certification passed all six command groups against Schema `0007_exit_profile_authority_v1` |
+| Deployment gate | `WAITING_FOR_FLAT`: PostgreSQL and Binance each report three active/non-flat domains, so the same-Schema release cannot cut over yet |
+| Required post-deploy action | Use the typed `recover_expired_dynamic_activation` boundary to clear only the stale pending Dynamic transition, preserve the Static pair and Owner Pause, and create no retroactive Authority or exchange command |
 
 ## Deployment Repairs Closed
 
