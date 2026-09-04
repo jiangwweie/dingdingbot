@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from src.trading_kernel.application.coordinate_selection_materialization import (
+    AuthorityGapAuditWindowDisposition,
     MaterializationDisposition,
     MaterializationPlanningFacts,
+    plan_authority_gap_audit_window,
     plan_selection_materialization,
 )
 from src.trading_kernel.domain.instrument_selection import (
@@ -178,6 +180,53 @@ def test_next_eligible_close_is_strictly_future_and_canonical() -> None:
         session_start_ms=SESSION_START_MS,
         now_ms=FIRST_ELIGIBLE_CLOSE_MS,
     ) == FIRST_ELIGIBLE_CLOSE_MS + INTERVAL_MS
+
+
+def test_gap_audit_before_first_sor_close_stays_pending_without_source_call() -> None:
+    audit = build_pending_authority_gap_audit(
+        authority_gap_audit_id="gap-audit:test:pre-first-close",
+        selection_spec_id="sor-dynamic-selection-v0",
+        session_start_ms=SESSION_START_MS,
+        gap_kind=AuthorityGapAuditKind.ENTRY_VACUUM,
+        proposed_authority_outcome="FALLBACK_PREVIOUS",
+        unauthorized_from_close_time_ms=FIRST_ELIGIBLE_CLOSE_MS,
+        detector_semantic_digest="sha256:" + "a" * 64,
+        created_at_ms=DECISION_BOUNDARY_MS + 1,
+    )
+
+    plan = plan_authority_gap_audit_window(
+        audit,
+        now_ms=DECISION_BOUNDARY_MS + 3 * 60 * 1000,
+    )
+
+    assert plan.disposition is AuthorityGapAuditWindowDisposition.PENDING
+    assert plan.audited_through_close_time_ms is None
+
+
+def test_gap_audit_becomes_ready_after_first_close_and_expires_at_session_end() -> None:
+    audit = build_pending_authority_gap_audit(
+        authority_gap_audit_id="gap-audit:test:bounded-session",
+        selection_spec_id="sor-dynamic-selection-v0",
+        session_start_ms=SESSION_START_MS,
+        gap_kind=AuthorityGapAuditKind.ENTRY_VACUUM,
+        proposed_authority_outcome="FALLBACK_PREVIOUS",
+        unauthorized_from_close_time_ms=FIRST_ELIGIBLE_CLOSE_MS,
+        detector_semantic_digest="sha256:" + "a" * 64,
+        created_at_ms=DECISION_BOUNDARY_MS + 1,
+    )
+
+    ready = plan_authority_gap_audit_window(
+        audit,
+        now_ms=FIRST_ELIGIBLE_CLOSE_MS,
+    )
+    expired = plan_authority_gap_audit_window(
+        audit,
+        now_ms=SESSION_START_MS + 96 * INTERVAL_MS,
+    )
+
+    assert ready.disposition is AuthorityGapAuditWindowDisposition.READY
+    assert ready.audited_through_close_time_ms == FIRST_ELIGIBLE_CLOSE_MS
+    assert expired.disposition is AuthorityGapAuditWindowDisposition.SESSION_EXPIRED
 
 
 def _facts(

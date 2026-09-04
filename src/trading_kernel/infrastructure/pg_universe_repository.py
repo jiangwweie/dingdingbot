@@ -2089,6 +2089,21 @@ class PostgresStrategyUniverseRepository:
         certifications_are_complete = bool(certification_keys) and all(
             key in certifications_by_key for key in certification_keys
         )
+        certifications_require_owner_action = (
+            certifications_are_complete
+            and any(
+                certifications_by_key[key]["status"] == "owner_action_required"
+                for key in certification_keys
+            )
+        )
+        certifications_are_temporarily_unavailable = (
+            certifications_are_complete
+            and not certifications_require_owner_action
+            and any(
+                certifications_by_key[key]["status"] == "temporarily_unavailable"
+                for key in certification_keys
+            )
+        )
         certifications_are_eligible = (
             certifications_are_complete
             and all(
@@ -2179,6 +2194,12 @@ class PostgresStrategyUniverseRepository:
             members_are_complete=members_are_complete,
             scopes_are_complete=scopes_are_complete,
             certifications_are_complete=certifications_are_complete,
+            certifications_are_temporarily_unavailable=(
+                certifications_are_temporarily_unavailable
+            ),
+            certifications_require_owner_action=(
+                certifications_require_owner_action
+            ),
             certifications_are_eligible=certifications_are_eligible,
             certifications_are_fresh=certifications_are_fresh,
             warm_readiness_is_complete=warm_readiness_is_complete,

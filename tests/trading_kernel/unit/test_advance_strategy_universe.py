@@ -45,6 +45,8 @@ def test_activation_readiness_decision_has_stable_fail_closed_precedence(
         "members_are_complete": True,
         "scopes_are_complete": True,
         "certifications_are_complete": True,
+        "certifications_are_temporarily_unavailable": False,
+        "certifications_require_owner_action": False,
         "certifications_are_eligible": True,
         "certifications_are_fresh": True,
         "warm_readiness_is_complete": True,
@@ -53,11 +55,56 @@ def test_activation_readiness_decision_has_stable_fail_closed_precedence(
         "comparative_projection_is_complete": True,
     }
     baseline[changed_field] = False
+    if changed_field == "certifications_are_complete":
+        baseline["certifications_are_eligible"] = False
     readiness = module.UniverseActivationReadiness(**baseline)
 
     assert module.activation_readiness_blocker(readiness) == expected_reason
     with pytest.raises(ValidationError):
         module.UniverseActivationReadiness(**baseline, bypass=True)
+
+
+@pytest.mark.parametrize(
+    ("field", "reason"),
+    (
+        (
+            "certifications_are_temporarily_unavailable",
+            "CERTIFICATION_TEMPORARILY_UNAVAILABLE",
+        ),
+        (
+            "certifications_require_owner_action",
+            "CERTIFICATION_OWNER_ACTION_REQUIRED",
+        ),
+    ),
+)
+def test_activation_preserves_noneligible_certification_classification(
+    field: str,
+    reason: str,
+) -> None:
+    module = importlib.import_module(
+        "src.trading_kernel.application.advance_strategy_universe"
+    )
+    values = {
+        "target_lifecycle_is_valid": True,
+        "current_is_complete": True,
+        "event_is_active": True,
+        "members_are_complete": True,
+        "scopes_are_complete": True,
+        "certifications_are_complete": True,
+        "certifications_are_temporarily_unavailable": False,
+        "certifications_require_owner_action": False,
+        "certifications_are_eligible": False,
+        "certifications_are_fresh": True,
+        "warm_readiness_is_complete": True,
+        "warm_readiness_is_fresh": True,
+        "comparative_projection_is_required": False,
+        "comparative_projection_is_complete": True,
+    }
+    values[field] = True
+
+    readiness = module.UniverseActivationReadiness(**values)
+
+    assert module.activation_readiness_blocker(readiness) == reason
 
 
 @pytest.mark.asyncio

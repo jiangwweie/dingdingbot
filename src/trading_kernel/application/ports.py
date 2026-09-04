@@ -45,6 +45,10 @@ from src.trading_kernel.application.read_strategy_universe_status import (
 from src.trading_kernel.application.reconciliation_scheduler import (
     ReconciliationActionCandidate,
 )
+from src.trading_kernel.application.recover_expired_dynamic_activation import (
+    RecoverExpiredDynamicActivationRequest,
+    RecoverExpiredDynamicActivationResult,
+)
 from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
 from src.trading_kernel.domain.admission_decision import AdmissionDecision
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
@@ -1572,6 +1576,11 @@ class InstrumentSelectionRepository(Protocol):
         authorization_id: str,
         updated_at_ms: int,
     ) -> SelectionControl | None: ...
+
+    async def recover_expired_dynamic_activation(
+        self,
+        request: RecoverExpiredDynamicActivationRequest,
+    ) -> RecoverExpiredDynamicActivationResult: ...
 
     async def get_snapshot_disposition(
         self,

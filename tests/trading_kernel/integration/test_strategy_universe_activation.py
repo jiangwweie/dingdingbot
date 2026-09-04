@@ -193,7 +193,11 @@ async def test_v3_activation_atomically_retires_the_v2_event_lineage(
     ("blocked_fact", "expected_reason"),
     (
         ("certification_missing", "CERTIFICATION_MISSING"),
-        ("certification_owner_action", "CERTIFICATION_NOT_ELIGIBLE"),
+        (
+            "certification_temporarily_unavailable",
+            "CERTIFICATION_TEMPORARILY_UNAVAILABLE",
+        ),
+        ("certification_owner_action", "CERTIFICATION_OWNER_ACTION_REQUIRED"),
         ("certification_expired", "CERTIFICATION_STALE"),
         ("warm_readiness_missing", "WARM_READINESS_MISSING"),
         ("warm_readiness_expired", "WARM_READINESS_STALE"),
@@ -222,7 +226,15 @@ async def test_incomplete_or_stale_readiness_keeps_old_universe_fully_active(
                     == REPLACEMENT_MEMBERS[0]
                 )
             )
-        elif blocked_fact == "certification_owner_action":
+        elif blocked_fact in {
+            "certification_temporarily_unavailable",
+            "certification_owner_action",
+        }:
+            status = (
+                "temporarily_unavailable"
+                if blocked_fact == "certification_temporarily_unavailable"
+                else "owner_action_required"
+            )
             await connection.execute(
                 sa.update(instrument_certification_current)
                 .where(
@@ -230,8 +242,12 @@ async def test_incomplete_or_stale_readiness_keeps_old_universe_fully_active(
                     == REPLACEMENT_MEMBERS[0]
                 )
                 .values(
-                    status="owner_action_required",
-                    blocker_code="instrument_leverage_mismatch",
+                    status=status,
+                    blocker_code=(
+                        "readonly_facts_unavailable"
+                        if status == "temporarily_unavailable"
+                        else "instrument_leverage_mismatch"
+                    ),
                 )
             )
         elif blocked_fact == "certification_expired":
@@ -292,6 +308,52 @@ async def test_incomplete_or_stale_readiness_keeps_old_universe_fully_active(
     assert result.reason_code == expected_reason
     assert result.activated_at_ms is None
     assert after == before
+
+
+@pytest.mark.asyncio
+async def test_owner_action_precedes_temporary_unavailability_across_members(
+    activation_engine: AsyncEngine,
+) -> None:
+    _, new_version_id = await prepare_active_and_warming(activation_engine)
+    await make_warming_ready(
+        activation_engine,
+        universe_version_id=new_version_id,
+    )
+    async with activation_engine.begin() as connection:
+        await connection.execute(
+            sa.update(instrument_certification_current)
+            .where(
+                instrument_certification_current.c.exchange_instrument_id
+                == REPLACEMENT_MEMBERS[0]
+            )
+            .values(
+                status="temporarily_unavailable",
+                blocker_code="readonly_facts_unavailable",
+            )
+        )
+        await connection.execute(
+            sa.update(instrument_certification_current)
+            .where(
+                instrument_certification_current.c.exchange_instrument_id
+                == REPLACEMENT_MEMBERS[1]
+            )
+            .values(
+                status="owner_action_required",
+                blocker_code="instrument_leverage_mismatch",
+            )
+        )
+
+    async with PostgresKernelUnitOfWork(activation_engine) as uow:
+        result = await advance_strategy_universe(
+            uow,
+            UniverseActivationRequest(
+                universe_version_id=new_version_id,
+                attempted_at_ms=NOW_MS,
+            ),
+        )
+
+    assert result.status is UniverseActivationStatus.NOT_READY
+    assert result.reason_code == "CERTIFICATION_OWNER_ACTION_REQUIRED"
 
 
 @pytest.mark.asyncio

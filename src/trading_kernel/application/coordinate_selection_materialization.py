@@ -90,6 +90,33 @@ class MaterializationDisposition(StrEnum):
     BLOCKED = "BLOCKED"
 
 
+class AuthorityGapAuditWindowDisposition(StrEnum):
+    PENDING = "PENDING"
+    READY = "READY"
+    SESSION_EXPIRED = "SESSION_EXPIRED"
+
+
+class AuthorityGapAuditWindowPlan(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    disposition: AuthorityGapAuditWindowDisposition
+    first_eligible_close_time_ms: int | None = None
+    audited_through_close_time_ms: int | None = None
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> AuthorityGapAuditWindowPlan:
+        times = (
+            self.first_eligible_close_time_ms,
+            self.audited_through_close_time_ms,
+        )
+        if self.disposition is AuthorityGapAuditWindowDisposition.READY:
+            if any(value is None for value in times):
+                raise ValueError("ready Gap Audit window requires exact closes")
+        elif any(value is not None for value in times):
+            raise ValueError("non-ready Gap Audit window forbids close authority")
+        return self
+
+
 class MaterializationPlanningFacts(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -212,6 +239,7 @@ class AuthorityGapAuditDetectorDriftError(RuntimeError):
 _TRANSIENT_WARMING_BLOCKERS = frozenset(
     {
         "CERTIFICATION_MISSING",
+        "CERTIFICATION_TEMPORARILY_UNAVAILABLE",
         "CERTIFICATION_STALE",
         "WARM_READINESS_MISSING",
         "WARM_READINESS_STALE",
@@ -220,6 +248,34 @@ _TRANSIENT_WARMING_BLOCKERS = frozenset(
     }
 )
 _MATERIALIZATION_TIMEOUT_MS = 1_800_000
+
+
+def plan_authority_gap_audit_window(
+    audit: AuthorityGapAudit,
+    *,
+    now_ms: int,
+) -> AuthorityGapAuditWindowPlan:
+    """Keep pre-trigger audits pending and forbid cross-session authority."""
+
+    session_end_ms = audit.session_start_ms + 96 * INTERVAL_MS
+    if now_ms >= session_end_ms:
+        return AuthorityGapAuditWindowPlan(
+            disposition=AuthorityGapAuditWindowDisposition.SESSION_EXPIRED
+        )
+    first_eligible_close = next_canonical_eligible_close(
+        session_start_ms=audit.session_start_ms,
+        now_ms=now_ms,
+    )
+    audited_through = first_eligible_close - INTERVAL_MS
+    if audited_through < audit.unauthorized_from_close_time_ms:
+        return AuthorityGapAuditWindowPlan(
+            disposition=AuthorityGapAuditWindowDisposition.PENDING
+        )
+    return AuthorityGapAuditWindowPlan(
+        disposition=AuthorityGapAuditWindowDisposition.READY,
+        first_eligible_close_time_ms=first_eligible_close,
+        audited_through_close_time_ms=audited_through,
+    )
 
 
 def plan_selection_materialization(
@@ -1049,11 +1105,26 @@ async def _complete_pending_authority_gap_audit(
             long_members = tuple(sorted(set(long_members) | set(target_members)))
             short_members = tuple(sorted(set(short_members) | set(target_members)))
     scopes = _pair_scopes(long_members=long_members, short_members=short_members)
-    first_eligible_close = next_canonical_eligible_close(
-        session_start_ms=audit.session_start_ms,
+    window = plan_authority_gap_audit_window(
+        audit,
         now_ms=clock_ms(),
     )
-    audited_through = first_eligible_close - INTERVAL_MS
+    if window.disposition is AuthorityGapAuditWindowDisposition.PENDING:
+        return CoordinateSelectionMaterializationResult(
+            disposition=MaterializationDisposition.GAP_AUDIT_PENDING,
+            authority_gap_audit_id=audit.authority_gap_audit_id,
+            reason_code="AUTHORITY_GAP_BEFORE_FIRST_ELIGIBLE_CLOSE",
+        )
+    if window.disposition is AuthorityGapAuditWindowDisposition.SESSION_EXPIRED:
+        return CoordinateSelectionMaterializationResult(
+            disposition=MaterializationDisposition.GAP_AUDIT_WINDOW_EXPIRED,
+            authority_gap_audit_id=audit.authority_gap_audit_id,
+            reason_code="AUTHORITY_GAP_SESSION_EXPIRED",
+        )
+    first_eligible_close = window.first_eligible_close_time_ms
+    audited_through = window.audited_through_close_time_ms
+    if first_eligible_close is None or audited_through is None:
+        raise RuntimeError("ready Gap Audit window lost exact closes")
     try:
         results = await audit_source.evaluate_authority_gap(
             AuthorityGapAuditEvaluationRequest(

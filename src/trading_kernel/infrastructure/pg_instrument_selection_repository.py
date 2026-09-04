@@ -10,8 +10,16 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import SelectionJobRecord
+from src.trading_kernel.application.recover_expired_dynamic_activation import (
+    ExpiredDynamicActivationRecoveryBlocked,
+    ExpiredDynamicActivationRecoveryStatus,
+    RecoverExpiredDynamicActivationRequest,
+    RecoverExpiredDynamicActivationResult,
+)
 from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
 from src.trading_kernel.domain.instrument_selection import (
+    SOR_LONG_EVENT_SPEC_ID,
+    SOR_SHORT_EVENT_SPEC_ID,
     SelectionAttemptOutcome,
     SelectionComputation,
     SelectionJobClaim,
@@ -62,13 +70,16 @@ from src.trading_kernel.infrastructure.pg_models import (
     selection_authority_gap_audits_current,
     selection_session_authorities,
     sor_dynamic_selection_specs_v0,
+    strategy_entry_controls_current,
     strategy_entry_vacuum_events,
     strategy_entry_vacuums_current,
     strategy_selection_control_current,
     strategy_trigger_suppressions,
+    strategy_universe_current,
     strategy_universe_materialization_events,
     strategy_universe_materialization_generations,
     strategy_universe_materialization_targets,
+    strategy_universe_versions,
     trade_aggregates,
     trade_tickets,
 )
@@ -628,6 +639,233 @@ class PostgresInstrumentSelectionRepository:
         )
         row = result.mappings().one_or_none()
         return None if row is None else _selection_control_from_row(row)
+
+    async def recover_expired_dynamic_activation(
+        self,
+        request: RecoverExpiredDynamicActivationRequest,
+    ) -> RecoverExpiredDynamicActivationResult:
+        """Atomically clear one exact expired first-activation transition."""
+
+        generation = (
+            await self._connection.execute(
+                sa.select(strategy_universe_materialization_generations)
+                .where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id
+                    == request.materialization_generation_id
+                )
+                .with_for_update(of=strategy_universe_materialization_generations)
+            )
+        ).mappings().one_or_none()
+        vacuum = (
+            await self._connection.execute(
+                sa.select(strategy_entry_vacuums_current)
+                .where(
+                    strategy_entry_vacuums_current.c.entry_vacuum_id
+                    == request.entry_vacuum_id
+                )
+                .with_for_update(of=strategy_entry_vacuums_current)
+            )
+        ).mappings().one_or_none()
+        audit = (
+            await self._connection.execute(
+                sa.select(selection_authority_gap_audits_current)
+                .where(
+                    selection_authority_gap_audits_current.c.authority_gap_audit_id
+                    == request.authority_gap_audit_id
+                )
+                .with_for_update(of=selection_authority_gap_audits_current)
+            )
+        ).mappings().one_or_none()
+        owner_control = (
+            await self._connection.execute(
+                sa.select(strategy_entry_controls_current)
+                .where(
+                    strategy_entry_controls_current.c.strategy_group_id
+                    == request.strategy_group_id
+                )
+                .with_for_update(of=strategy_entry_controls_current)
+            )
+        ).mappings().one_or_none()
+        selection_control = (
+            await self._connection.execute(
+                sa.select(strategy_selection_control_current)
+                .where(
+                    strategy_selection_control_current.c.strategy_group_id
+                    == request.strategy_group_id
+                )
+                .with_for_update(of=strategy_selection_control_current)
+            )
+        ).mappings().one_or_none()
+        current_pair = {
+            str(row["event_spec_id"]): str(row["universe_version_id"])
+            for row in (
+                await self._connection.execute(
+                    sa.select(strategy_universe_current)
+                    .where(
+                        strategy_universe_current.c.event_spec_id.in_(
+                            (SOR_LONG_EVENT_SPEC_ID, SOR_SHORT_EVENT_SPEC_ID)
+                        )
+                    )
+                    .with_for_update(of=strategy_universe_current)
+                )
+            ).mappings()
+        }
+        authority_count = int(
+            await self._connection.scalar(
+                sa.select(sa.func.count())
+                .select_from(selection_session_authorities)
+                .where(
+                    selection_session_authorities.c.selection_spec_id
+                    == request.selection_spec_id,
+                    selection_session_authorities.c.session_start_ms
+                    == request.session_start_ms,
+                )
+            )
+            or 0
+        )
+        target_states = tuple(
+            await self._connection.scalars(
+                sa.select(strategy_universe_materialization_targets.c.event_spec_id)
+                .join(
+                    strategy_universe_versions,
+                    strategy_universe_versions.c.materialization_generation_id
+                    == strategy_universe_materialization_targets.c.materialization_generation_id,
+                )
+                .where(
+                    strategy_universe_materialization_targets.c.materialization_generation_id
+                    == request.materialization_generation_id,
+                    strategy_universe_versions.c.lifecycle_state != "abandoned",
+                )
+            )
+        )
+        valid_audit_blockers = {
+            "AUTHORITY_GAP_SOURCE_INTEGRITY_FAILED",
+            "OWNER_PAUSED",
+        }
+        if (
+            generation is None
+            or vacuum is None
+            or audit is None
+            or owner_control is None
+            or selection_control is None
+            or generation["strategy_group_id"] != request.strategy_group_id
+            or generation["selection_spec_id"] != request.selection_spec_id
+            or generation["session_start_ms"] != request.session_start_ms
+            or generation["lifecycle_state"] != "ABANDONED"
+            or generation["previous_long_universe_version_id"]
+            != request.expected_long_universe_version_id
+            or generation["previous_short_universe_version_id"]
+            != request.expected_short_universe_version_id
+            or vacuum["strategy_group_id"] != request.strategy_group_id
+            or vacuum["selection_spec_id"] != request.selection_spec_id
+            or vacuum["session_start_ms"] != request.session_start_ms
+            or vacuum["source_generation_id"]
+            != request.materialization_generation_id
+            or vacuum["state"] != "OWNER_PAUSED"
+            or audit["selection_spec_id"] != request.selection_spec_id
+            or audit["session_start_ms"] != request.session_start_ms
+            or audit["source_generation_id"]
+            != request.materialization_generation_id
+            or audit["source_entry_vacuum_id"] != request.entry_vacuum_id
+            or audit["state"] != "FAILED"
+            or audit["first_blocker"] not in valid_audit_blockers
+            or owner_control["entry_state"] != "paused"
+            or owner_control["control_version"]
+            != request.expected_owner_control_version
+            or selection_control["selection_spec_id"] != request.selection_spec_id
+            or selection_control["selection_mode"] != "static_baseline"
+            or selection_control["pending_selection_mode"] != "dynamic_selection"
+            or selection_control["pending_effective_session_start_ms"]
+            != request.session_start_ms
+            or selection_control["pending_authorization_id"] is None
+            or selection_control["control_version"]
+            != request.expected_selection_control_version
+            or current_pair.get(SOR_LONG_EVENT_SPEC_ID)
+            != request.expected_long_universe_version_id
+            or current_pair.get(SOR_SHORT_EVENT_SPEC_ID)
+            != request.expected_short_universe_version_id
+            or authority_count != 0
+            or target_states
+        ):
+            raise ExpiredDynamicActivationRecoveryBlocked(
+                "expired_activation_recovery_shape_conflict"
+            )
+
+        next_control_version = request.expected_selection_control_version + 1
+        control_update = await self._connection.execute(
+            sa.update(strategy_selection_control_current)
+            .where(
+                strategy_selection_control_current.c.strategy_group_id
+                == request.strategy_group_id,
+                strategy_selection_control_current.c.control_version
+                == request.expected_selection_control_version,
+                strategy_selection_control_current.c.selection_mode
+                == "static_baseline",
+                strategy_selection_control_current.c.pending_selection_mode
+                == "dynamic_selection",
+                strategy_selection_control_current.c.pending_effective_session_start_ms
+                == request.session_start_ms,
+            )
+            .values(
+                pending_selection_mode=None,
+                pending_effective_session_start_ms=None,
+                pending_authorization_id=None,
+                control_version=next_control_version,
+                updated_at_ms=request.recovered_at_ms,
+            )
+        )
+        if control_update.rowcount != 1:
+            raise ExpiredDynamicActivationRecoveryBlocked(
+                "selection_control_changed_during_recovery"
+            )
+
+        next_generation_version = int(generation["projection_version"]) + 1
+        generation_update = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == request.materialization_generation_id,
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == "ABANDONED",
+                strategy_universe_materialization_generations.c.projection_version
+                == generation["projection_version"],
+            )
+            .values(
+                projection_version=next_generation_version,
+            )
+        )
+        if generation_update.rowcount != 1:
+            raise ExpiredDynamicActivationRecoveryBlocked(
+                "generation_changed_during_recovery"
+            )
+        await self._connection.execute(
+            sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=(
+                    "materialization-event:"
+                    f"{request.materialization_generation_id}:"
+                    f"{next_generation_version}"
+                ),
+                materialization_generation_id=request.materialization_generation_id,
+                event_sequence=next_generation_version,
+                event_type="EXPIRED_ACTIVATION_RECOVERED",
+                payload={
+                    "selection_control_version": next_control_version,
+                    "owner_control_version": request.expected_owner_control_version,
+                    "authority_created": False,
+                    "static_pair_preserved": True,
+                },
+                occurred_at_ms=request.recovered_at_ms,
+            )
+        )
+        return RecoverExpiredDynamicActivationResult(
+            status=ExpiredDynamicActivationRecoveryStatus.RECOVERED,
+            strategy_group_id=request.strategy_group_id,
+            selection_spec_id=request.selection_spec_id,
+            session_start_ms=request.session_start_ms,
+            materialization_generation_id=request.materialization_generation_id,
+            selection_control_version=next_control_version,
+            recovered_at_ms=request.recovered_at_ms,
+        )
 
     async def get_snapshot_disposition(
         self,

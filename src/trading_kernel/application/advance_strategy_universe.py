@@ -40,12 +40,27 @@ class UniverseActivationReadiness(BaseModel):
     members_are_complete: bool
     scopes_are_complete: bool
     certifications_are_complete: bool
+    certifications_are_temporarily_unavailable: bool
+    certifications_require_owner_action: bool
     certifications_are_eligible: bool
     certifications_are_fresh: bool
     warm_readiness_is_complete: bool
     warm_readiness_is_fresh: bool
     comparative_projection_is_required: bool
     comparative_projection_is_complete: bool
+
+    @model_validator(mode="after")
+    def _validate_certification_state(self) -> UniverseActivationReadiness:
+        classified = (
+            self.certifications_are_temporarily_unavailable,
+            self.certifications_require_owner_action,
+            self.certifications_are_eligible,
+        )
+        if sum(classified) > 1 or (
+            not self.certifications_are_complete and any(classified)
+        ):
+            raise ValueError("certification readiness state is contradictory")
+        return self
 
 
 def activation_readiness_blocker(
@@ -74,6 +89,14 @@ def activation_readiness_blocker(
         (
             readiness.certifications_are_complete,
             "CERTIFICATION_MISSING",
+        ),
+        (
+            not readiness.certifications_are_temporarily_unavailable,
+            "CERTIFICATION_TEMPORARILY_UNAVAILABLE",
+        ),
+        (
+            not readiness.certifications_require_owner_action,
+            "CERTIFICATION_OWNER_ACTION_REQUIRED",
         ),
         (
             readiness.certifications_are_eligible,
