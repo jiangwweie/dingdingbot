@@ -118,7 +118,7 @@ export function ControlsPage() {
 
   const dynamicActivationMutation = useMutation({
     mutationFn: async () => activateSorDynamicSelection({
-      expected_version: 1,
+      expected_version: data?.dynamic_selection.control_version ?? 0,
       effective_session_start_ms: nextUtcSessionStartMs(),
       reason: "owner_activate_sor_dynamic_selection_v0",
       idempotency_key: requestId("owner-request-sor-dynamic"),
@@ -155,6 +155,8 @@ export function ControlsPage() {
   }
 
   const globalPaused = data.global_entry.configured_state === "paused";
+  const dynamicPending = data.dynamic_selection.pending_selection_mode === "dynamic_selection";
+  const dynamicActive = data.dynamic_selection.selection_mode === "dynamic_selection";
   const operation = data.current_operation;
   const actionNeedsTotp = pendingAction?.action === "resume";
 
@@ -217,9 +219,9 @@ export function ControlsPage() {
             <strong>首个 Dynamic Selection Session</strong>
             <span>固定 24 Candidate · 当前 Static baseline 将在下一 UTC Session 后由正式 Materialization 接管</span>
           </div>
-          <StatusTag tone="attention">待激活</StatusTag>
+          <StatusTag tone={dynamicActive ? "success" : "attention"}>{dynamicActive ? "已启用" : dynamicPending ? "已授权" : "待激活"}</StatusTag>
           <div className="control-row__facts"><span>下一 UTC Session</span><strong>{formatTime(nextUtcSessionStartMs())}</strong></div>
-          <Button onClick={() => setDynamicActivationOpen(true)}>激活 Dynamic</Button>
+          <Button disabled={dynamicActive || dynamicPending} onClick={() => setDynamicActivationOpen(true)}>{dynamicActive ? "Dynamic 已启用" : dynamicPending ? "等待生效" : "激活 Dynamic"}</Button>
         </div>
       </Panel>
 

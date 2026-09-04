@@ -14,6 +14,8 @@ from src.trading_kernel.application.owner_control import (
     ExitProfileRetirementRequest,
     FlattenPreview,
     FlattenSubmitRequest,
+    OwnerControlBlocked,
+    OwnerControlConflict,
     begin_flatten_all,
     freeze_flatten_targets,
     preview_flatten_all,
@@ -164,6 +166,17 @@ class StrategyControlView(BaseModel):
     effective_state: Literal["enabled", "paused", "paused_by_global"]
 
 
+class DynamicSelectionControlView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    strategy_group_id: str
+    selection_spec_id: str
+    selection_mode: Literal["static_baseline", "dynamic_selection"]
+    pending_selection_mode: Literal["dynamic_selection"] | None
+    pending_effective_session_start_ms: int | None
+    control_version: int
+
+
 class ControlEventView(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -182,6 +195,7 @@ class ControlsResponse(BaseModel):
     global_entry: GlobalEntryView
     account_capacity: AccountCapacityView
     runtime_entry_authority: RuntimeEntryAuthorityView
+    dynamic_selection: DynamicSelectionControlView
     strategies: tuple[StrategyControlView, ...]
     current_operation: OwnerControlOperation | None
     recent_operations: tuple[OwnerControlOperation, ...]
@@ -216,6 +230,11 @@ async def read_controls(request: Request) -> ControlsResponse:
         policy = await uow.entry_admission.get_owner_policy(settings.owner_policy_id)
         if policy is None:
             raise RuntimeError("Owner Policy is unavailable")
+        dynamic_selection = await uow.instrument_selection.get_selection_control(
+            "SOR-001"
+        )
+        if dynamic_selection is None:
+            raise RuntimeError("SOR Dynamic Selection Control is unavailable")
         strategies = await uow.owner_controls.list_strategy_controls()
         ticket_ids = await uow.aggregates.list_active_ticket_ids(
             venue_id=settings.venue_id,
@@ -366,6 +385,20 @@ async def read_controls(request: Request) -> ControlsResponse:
                 "runtime_profile_ids": runtime_profile_ids,
                 "first_blocker": entry_blocker,
             },
+            "dynamic_selection": {
+                "strategy_group_id": dynamic_selection.strategy_group_id,
+                "selection_spec_id": dynamic_selection.selection_spec_id,
+                "selection_mode": dynamic_selection.selection_mode.value,
+                "pending_selection_mode": (
+                    None
+                    if dynamic_selection.pending_selection_mode is None
+                    else dynamic_selection.pending_selection_mode.value
+                ),
+                "pending_effective_session_start_ms": (
+                    dynamic_selection.pending_effective_session_start_ms
+                ),
+                "control_version": dynamic_selection.control_version,
+            },
             "strategies": [
                 {
                     **control.model_dump(mode="json"),
@@ -419,9 +452,17 @@ async def activate_dynamic_selection(
     request: Request,
 ) -> SelectionControl:
     _validate_write_request(request)
-    await _require_step_up(body, request)
     settings = get_settings(request)
     now_ms = get_clock_ms(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        current = await uow.instrument_selection.get_selection_control(
+            strategy_group_id
+        )
+        if current is None:
+            raise OwnerControlBlocked("selection_control_missing")
+        if current.control_version != body.expected_version:
+            raise OwnerControlConflict("selection_control_version_conflict")
+    await _require_step_up(body, request)
     async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
         return await stage_dynamic_selection_mode(
             uow,

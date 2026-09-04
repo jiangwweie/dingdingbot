@@ -738,6 +738,10 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         for path_item in owner_console_app.openapi()["paths"].values()
         for method in ("put", "patch", "delete")
     )
+    controls_schema = owner_console_app.openapi()["components"]["schemas"][
+        "ControlsResponse"
+    ]
+    assert "dynamic_selection" in controls_schema["properties"]
 
 
 async def test_login_sets_strict_secure_http_only_cookie(

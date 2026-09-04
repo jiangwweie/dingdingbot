@@ -77,3 +77,17 @@ def test_kernel_systemd_directory_remains_four_workers_plus_slice() -> None:
         "brc-trading-kernel-reconciliation-worker.service",
     }
     assert {path.name for path in (REPO_ROOT / "deploy/systemd").iterdir()} == expected
+
+
+def test_dynamic_activation_rejects_stale_version_before_consuming_totp() -> None:
+    source = (
+        REPO_ROOT
+        / "src/trading_kernel/interfaces/owner_console_http/routes/controls.py"
+    ).read_text(encoding="utf-8")
+    route = source.split("async def activate_dynamic_selection(", 1)[1].split(
+        "\n\n@router", 1
+    )[0]
+
+    assert route.index("current.control_version != body.expected_version") < route.index(
+        "await _require_step_up(body, request)"
+    )

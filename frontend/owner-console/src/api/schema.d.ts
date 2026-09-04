@@ -149,6 +149,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/controls/exit-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Exit Profile Authority */
+        get: operations["read_exit_profile_authority_api_owner_v1_controls_exit_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/exit-profiles/{exit_profile_id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retire Profile */
+        post: operations["retire_profile_api_owner_v1_controls_exit_profiles__exit_profile_id__retire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/controls/exposure/flatten-all": {
         parameters: {
             query?: never;
@@ -183,6 +217,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/controls/strategies/{strategy_group_id}/events/{event_spec_id}/exit-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind Event Exit Profile */
+        post: operations["bind_event_exit_profile_api_owner_v1_controls_strategies__strategy_group_id__events__event_spec_id__exit_profile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/controls/strategies/{strategy_group_id}/pause": {
         parameters: {
             query?: never;
@@ -211,6 +262,23 @@ export interface paths {
         put?: never;
         /** Resume Strategy */
         post: operations["resume_strategy_api_owner_v1_controls_strategies__strategy_group_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/strategies/{strategy_group_id}/selection/dynamic/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Dynamic Selection */
+        post: operations["activate_dynamic_selection_api_owner_v1_controls_strategies__strategy_group_id__selection_dynamic_activate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -722,6 +790,19 @@ export interface components {
             /** Source Watermark */
             source_watermark: string | null;
         };
+        /** BreakEvenFloorRule */
+        BreakEvenFloorRule: {
+            /**
+             * Exit Fee Basis
+             * @default conservative_taker
+             * @constant
+             */
+            exit_fee_basis: "conservative_taker";
+            /** Minimum Improvement Ticks */
+            minimum_improvement_ticks: number;
+            /** Slippage Buffer Ticks */
+            slippage_buffer_ticks: number;
+        };
         /** CandleSeries */
         CandleSeries: {
             /** Candles */
@@ -809,6 +890,7 @@ export interface components {
         ControlsResponse: {
             account_capacity: components["schemas"]["AccountCapacityView"];
             current_operation: components["schemas"]["OwnerControlOperation"] | null;
+            dynamic_selection: components["schemas"]["DynamicSelectionControlView"];
             /** Events */
             events: components["schemas"]["ControlEventView"][];
             /** Generated At Ms */
@@ -819,6 +901,50 @@ export interface components {
             runtime_entry_authority: components["schemas"]["RuntimeEntryAuthorityView"];
             /** Strategies */
             strategies: components["schemas"]["StrategyControlView"][];
+        };
+        /** CurrentEventExitBinding */
+        CurrentEventExitBinding: {
+            /** Activated At Ms */
+            activated_at_ms: number;
+            /** Binding Semantic Hash */
+            binding_semantic_hash: string;
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Exit Binding Id */
+            exit_binding_id: string;
+            /** Projection Version */
+            projection_version: number;
+        };
+        /** DynamicSelectionActivationBody */
+        DynamicSelectionActivationBody: {
+            /** Effective Session Start Ms */
+            effective_session_start_ms: number;
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Totp Code */
+            totp_code?: string | null;
+        };
+        /** DynamicSelectionControlView */
+        DynamicSelectionControlView: {
+            /** Control Version */
+            control_version: number;
+            /** Pending Effective Session Start Ms */
+            pending_effective_session_start_ms: number | null;
+            /** Pending Selection Mode */
+            pending_selection_mode: "dynamic_selection" | null;
+            /**
+             * Selection Mode
+             * @enum {string}
+             */
+            selection_mode: "static_baseline" | "dynamic_selection";
+            /** Selection Spec Id */
+            selection_spec_id: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
         };
         /** EffectiveEntryScope */
         EffectiveEntryScope: {
@@ -869,6 +995,52 @@ export interface components {
         };
         /** EmptyControlBody */
         EmptyControlBody: Record<string, never>;
+        /** EventExitBinding */
+        EventExitBinding: {
+            /** Activation Reason */
+            activation_reason: string;
+            /** Binding Semantic Hash */
+            binding_semantic_hash: string;
+            /** Binding Version */
+            binding_version: number;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Exit Binding Id */
+            exit_binding_id: string;
+            /** Exit Profile Id */
+            exit_profile_id: string;
+            /** Exit Profile Semantic Hash */
+            exit_profile_semantic_hash: string;
+        };
+        /** EventExitBindingEvent */
+        EventExitBindingEvent: {
+            /**
+             * Authorization Source
+             * @enum {string}
+             */
+            authorization_source: "system_migration" | "owner_control";
+            /** Binding Event Id */
+            binding_event_id: string;
+            /** Binding Version */
+            binding_version: number;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Exit Binding Id */
+            exit_binding_id: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "ACTIVATED" | "RETIRED";
+            /** Owner Authorization Id */
+            owner_authorization_id: string | null;
+            /** Reason */
+            reason: string;
+        };
         /** EvidenceRef */
         EvidenceRef: {
             /** Identity */
@@ -880,6 +1052,83 @@ export interface components {
             kind: "signal" | "admission" | "ticket" | "aggregate" | "event" | "command" | "incident" | "settlement" | "review" | "shadow" | "fact";
             /** Occurred At Ms */
             occurred_at_ms: number;
+        };
+        /** ExitProfile */
+        ExitProfile: {
+            break_even_floor: components["schemas"]["BreakEvenFloorRule"];
+            /** Exit Profile Id */
+            exit_profile_id: string;
+            /** Exit Profile Version */
+            exit_profile_version: number;
+            /**
+             * Position Side
+             * @enum {string}
+             */
+            position_side: "long" | "short";
+            /** Pre Tp1 Guards */
+            pre_tp1_guards: components["schemas"]["PreTp1GuardKind"][];
+            /**
+             * Profile Schema Version
+             * @constant
+             */
+            profile_schema_version: "exit_profile_v1";
+            runner: components["schemas"]["RollingExtremeAtrRunnerRule"];
+            time_stop: components["schemas"]["TimeStopRule"] | null;
+            tp1: components["schemas"]["TakeProfitRule"];
+        };
+        /** ExitProfileAuthorityReadonlyView */
+        ExitProfileAuthorityReadonlyView: {
+            /** Binding Facts */
+            binding_facts: components["schemas"]["EventExitBinding"][];
+            /** Catalog Digest */
+            catalog_digest: string;
+            /** Current Bindings */
+            current_bindings: components["schemas"]["CurrentEventExitBinding"][];
+            /** Event Spec Id */
+            event_spec_id: string | null;
+            /** Profiles */
+            profiles: components["schemas"]["ExitProfileRecord"][];
+            /** Recent Events */
+            recent_events: components["schemas"]["EventExitBindingEvent"][];
+        };
+        /** ExitProfileBindingBody */
+        ExitProfileBindingBody: {
+            /** Expected Binding Id */
+            expected_binding_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Target Exit Profile Id */
+            target_exit_profile_id: string;
+            /** Target Exit Profile Semantic Hash */
+            target_exit_profile_semantic_hash: string;
+            /** Totp Code */
+            totp_code?: string | null;
+        };
+        /** ExitProfileRecord */
+        ExitProfileRecord: {
+            profile: components["schemas"]["ExitProfile"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "retired";
+        };
+        /** ExitProfileRetirementBody */
+        ExitProfileRetirementBody: {
+            /** Exit Profile Semantic Hash */
+            exit_profile_semantic_hash: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Totp Code */
+            totp_code?: string | null;
         };
         /** FlattenBody */
         FlattenBody: {
@@ -1261,6 +1510,11 @@ export interface components {
             /** Today Signal Count */
             today_signal_count: number;
         };
+        /**
+         * PreTp1GuardKind
+         * @enum {string}
+         */
+        PreTp1GuardKind: "reclaim_reference" | "session_expiry";
         /** ProgrammaticTradeReview */
         ProgrammaticTradeReview: {
             /** Attention Items */
@@ -1441,6 +1695,29 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** RollingExtremeAtrRunnerRule */
+        RollingExtremeAtrRunnerRule: {
+            /** Atr Buffer Multiple */
+            atr_buffer_multiple: string;
+            /** Atr Period */
+            atr_period: number;
+            /** @default rolling_extreme_atr */
+            kind: components["schemas"]["RunnerRuleKind"];
+            /** Lookback Bars */
+            lookback_bars: number;
+            /** Minimum Improvement Ticks */
+            minimum_improvement_ticks: number;
+            /**
+             * Timeframe
+             * @enum {string}
+             */
+            timeframe: "15m" | "1h";
+        };
+        /**
+         * RunnerRuleKind
+         * @enum {string}
+         */
+        RunnerRuleKind: "rolling_extreme_atr";
         /** RuntimeEntryAuthorityView */
         RuntimeEntryAuthorityView: {
             /**
@@ -1455,6 +1732,30 @@ export interface components {
             /** Runtime Profile Ids */
             runtime_profile_ids: string[];
         };
+        /** SelectionControl */
+        SelectionControl: {
+            /** Control Version */
+            control_version: number;
+            /** Pending Authorization Id */
+            pending_authorization_id: string | null;
+            /** Pending Effective Session Start Ms */
+            pending_effective_session_start_ms: number | null;
+            pending_selection_mode: components["schemas"]["SelectionMode"] | null;
+            /** Rollback Baseline Id */
+            rollback_baseline_id: string | null;
+            selection_mode: components["schemas"]["SelectionMode"];
+            /** Selection Spec Id */
+            selection_spec_id: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Updated At Ms */
+            updated_at_ms: number;
+        };
+        /**
+         * SelectionMode
+         * @enum {string}
+         */
+        SelectionMode: "disabled" | "static_baseline" | "dynamic_selection";
         /** ShadowOutcomeSummary */
         ShadowOutcomeSummary: {
             /** Completed At Ms */
@@ -1919,6 +2220,37 @@ export interface components {
             /** Win Count */
             win_count: number;
         };
+        /** TakeProfitRule */
+        TakeProfitRule: {
+            /**
+             * Execution Style
+             * @default limit_gtc
+             * @constant
+             */
+            execution_style: "limit_gtc";
+            /**
+             * Market Fallback Allowed
+             * @default false
+             * @constant
+             */
+            market_fallback_allowed: false;
+            /** Quantity Fraction */
+            quantity_fraction: string;
+            /** Reward Multiple */
+            reward_multiple: string;
+        };
+        /**
+         * TimeStopMode
+         * @enum {string}
+         */
+        TimeStopMode: "pre_tp1" | "absolute";
+        /** TimeStopRule */
+        TimeStopRule: {
+            /** Max Holding Bars */
+            max_holding_bars: number;
+            /** @default absolute */
+            mode: components["schemas"]["TimeStopMode"];
+        };
         /** TradeCausalityDetail */
         TradeCausalityDetail: {
             /** Annotations */
@@ -2105,7 +2437,7 @@ export interface components {
             /** Inserted Version Count */
             inserted_version_count: number;
             /** Lifecycle State */
-            lifecycle_state: ("warming" | "active") | null;
+            lifecycle_state: ("warming" | "staged" | "active") | null;
             status: components["schemas"]["UniverseInstallStatus"];
             universe: components["schemas"]["StrategyUniverseVersion"] | null;
         };
@@ -2113,7 +2445,7 @@ export interface components {
          * UniverseInstallStatus
          * @enum {string}
          */
-        UniverseInstallStatus: "installed" | "already_warming" | "already_active" | "WARMING_UNIVERSE_ALREADY_EXISTS";
+        UniverseInstallStatus: "installed" | "already_warming" | "already_staged" | "already_active" | "WARMING_UNIVERSE_ALREADY_EXISTS";
         /** UniversePreviewBody */
         UniversePreviewBody: {
             /** Event Id */
@@ -2373,6 +2705,73 @@ export interface operations {
             };
         };
     };
+    read_exit_profile_authority_api_owner_v1_controls_exit_profiles_get: {
+        parameters: {
+            query?: {
+                event_spec_id?: string | null;
+                event_limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExitProfileAuthorityReadonlyView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retire_profile_api_owner_v1_controls_exit_profiles__exit_profile_id__retire_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                exit_profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExitProfileRetirementBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExitProfileRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     flatten_submit_api_owner_v1_controls_exposure_flatten_all_post: {
         parameters: {
             query?: never;
@@ -2426,6 +2825,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FlattenPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bind_event_exit_profile_api_owner_v1_controls_strategies__strategy_group_id__events__event_spec_id__exit_profile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_group_id: string;
+                event_spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExitProfileBindingBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentEventExitBinding"];
                 };
             };
             /** @description Validation Error */
@@ -2496,6 +2931,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrategyEntryControl"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_dynamic_selection_api_owner_v1_controls_strategies__strategy_group_id__selection_dynamic_activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DynamicSelectionActivationBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectionControl"];
                 };
             };
             /** @description Validation Error */
