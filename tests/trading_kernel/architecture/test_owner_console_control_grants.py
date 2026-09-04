@@ -11,6 +11,7 @@ def test_owner_control_role_covers_dynamic_selection_and_exit_profile_writes() -
 
     for table in (
         "brc_strategy_selection_control_current",
+        "brc_strategy_entry_vacuums_current",
         "brc_event_exit_profile_binding_current",
         "brc_exit_policies",
     ):
@@ -19,5 +20,7 @@ def test_owner_control_role_covers_dynamic_selection_and_exit_profile_writes() -
     for table in (
         "brc_event_exit_profile_bindings",
         "brc_event_exit_profile_binding_events",
+        "brc_strategy_entry_vacuums_current",
+        "brc_strategy_entry_vacuum_events",
     ):
         assert table in source.split("GRANT INSERT ON TABLE", 1)[1]
