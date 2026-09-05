@@ -1,0 +1,13 @@
+{
+  "baseline_event_count": 1476,
+  "baseline_membership_event_count": 1476,
+  "discovery_end_ms": 1786838400000,
+  "dynamic_detector_evaluation_count": 47616,
+  "dynamic_invalid_detector_count": 0,
+  "dynamic_outcome_count": 1163,
+  "dynamic_raw_triggered_count": 1696,
+  "dynamic_replay_event_count": 1163,
+  "member_decision_count": 111120,
+  "mpg_mi_rank_parity_mismatch_count": 0,
+  "selection_snapshot_count": 4630
+}
