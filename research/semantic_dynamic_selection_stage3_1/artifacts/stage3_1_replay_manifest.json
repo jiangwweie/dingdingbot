@@ -1,0 +1,171 @@
+{
+  "artifact_sha256": {
+    "STAGE3_1_FINAL_SEMANTIC_REVISION_REPORT.md": "sha256:5f4c8b1e1de0300ed9cda4ca8393857f98c41acf26b0c0a6c054c3654c84ff34",
+    "stage3_1_baseline_membership_events.parquet": "sha256:22614cf2a167a51a21ae1db92beb95f9e5f05bb8de96d241c5b4a03586151520",
+    "stage3_1_block_summary.csv": "sha256:cca3ce87d10a4df9be724da0abdee443cd108e2b1eb2a15062ed8354c4d3c792",
+    "stage3_1_dynamic_detector_evaluations.parquet": "sha256:0e1fef64adc32482b935276246f473b416f94c25017b063199394386e9c017d8",
+    "stage3_1_dynamic_events.parquet": "sha256:09824800a6451f632621413231b1fd520742257c1869de9306fcf76c2f096bc5",
+    "stage3_1_dynamic_outcomes.parquet": "sha256:40884a12bef6f4b99e433e58f7e6ab5bf6ab3ba06aec8cb9c526e90d2d8f8079",
+    "stage3_1_hysteresis_summary.csv": "sha256:d8b1e377087a1764f05c9575eafb7f6256a4f9b4ebffb9b72f8640cc515ee65d",
+    "stage3_1_member_decisions.parquet": "sha256:cc99baa6d75c9c5fd93e72b04361f27bd24df932f3d126386d38a9dc8bcae924",
+    "stage3_1_mpg_discrimination_audit.csv": "sha256:50c617aa7a66ce0e3218a663188bc118cd4ca884c5c48e4281719b7a4c629db6",
+    "stage3_1_overall_decision.csv": "sha256:3251de4839ec04e962815808eccdd8e744228514d17e53007bca4f59a0998938",
+    "stage3_1_period_summary.csv": "sha256:15b5abbf6a466e900f9031308054a57ec464639798a46bdeb1792abc65ef6ea9",
+    "stage3_1_rank_parity_audit.csv": "sha256:54447f4fe969ac7a679bf7763fd5ee440bea42f7209a39d27373b6144c9aa228",
+    "stage3_1_selection_snapshots.parquet": "sha256:011b62e394cae8fa4a08fe24806aac11593432847eebecd0e9c3df1fd4cc0e2c",
+    "stage3_1_strategy_cardinality_summary.csv": "sha256:cb806e47a3aebe7e223f0f6b4f46c762938c34375e8aafe465e8bb1bb5e9c265",
+    "stage3_1_turnover_summary.csv": "sha256:af61dd64cad6cb1da9bf9580d28589b32fcf220cb1daaaa7c5e4754af3544f26"
+  },
+  "cardinalities": [
+    16,
+    12,
+    8
+  ],
+  "cpm_revision": {
+    "adverse_block_count": 1,
+    "adverse_block_ratio": 0.2,
+    "comparable_block_count": 5,
+    "revision_removed_stage3_failure": true,
+    "strategy": "CPM-RO-001",
+    "verdict": "CPM_THEORY_COMPATIBLE_DYNAMIC_V1"
+  },
+  "generic_selection_design_authority": "ALLOWED_FOR_ELIGIBLE_STRATEGIES",
+  "generic_selection_implementation_authority": "NONE",
+  "market_data_manifest_sha256": "sha256:09f0a8f03c93912a050c0778e4ebacb219ff81f847c7859fe1ba95bbe34cf094",
+  "mpg_revision": {
+    "meaningful_discrimination": true,
+    "persistent_clear_adverse": false,
+    "strategy": "MPG-001",
+    "verdict": "MPG_THEORY_COMPATIBLE_DYNAMIC_V1"
+  },
+  "overall": [
+    {
+      "evidence_status": "TOP16_FALLBACK_CAPTURE_BELOW_FLOOR",
+      "frozen_selector": "CPM_ABSOLUTE_DIRECTIONAL_EFFICIENCY_V1",
+      "generic_implementation_eligible": true,
+      "production_activation_eligible": false,
+      "recommended_entry_cardinality": 16,
+      "retention_cardinality": 16,
+      "strategy": "CPM-RO-001",
+      "strategy_dynamic_spec_eligible": true
+    },
+    {
+      "evidence_status": "MINIMUM_COMPATIBLE_CAPTURE_CARDINALITY",
+      "frozen_selector": "MPG_PERSISTENT_LEADERSHIP_SCORE_V1",
+      "generic_implementation_eligible": true,
+      "production_activation_eligible": false,
+      "recommended_entry_cardinality": 12,
+      "retention_cardinality": 16,
+      "strategy": "MPG-001",
+      "strategy_dynamic_spec_eligible": true
+    },
+    {
+      "evidence_status": "MINIMUM_COMPATIBLE_CAPTURE_CARDINALITY",
+      "frozen_selector": "MI_POSITIVE_IMPULSE_RECENCY_V0",
+      "generic_implementation_eligible": true,
+      "production_activation_eligible": false,
+      "recommended_entry_cardinality": 16,
+      "retention_cardinality": 16,
+      "strategy": "MI-001",
+      "strategy_dynamic_spec_eligible": true
+    },
+    {
+      "evidence_status": "TOP16_FALLBACK_CAPTURE_BELOW_FLOOR",
+      "frozen_selector": "BRF2_RESIDUAL_EXTENSION_V0",
+      "generic_implementation_eligible": true,
+      "production_activation_eligible": false,
+      "recommended_entry_cardinality": 16,
+      "retention_cardinality": 16,
+      "strategy": "BRF2-001",
+      "strategy_dynamic_spec_eligible": true
+    },
+    {
+      "evidence_status": "EXISTING_GOLDEN_AUTHORITY",
+      "frozen_selector": "EXISTING_SOR_DYNAMIC_SELECTION_V0",
+      "generic_implementation_eligible": true,
+      "production_activation_eligible": false,
+      "recommended_entry_cardinality": 7,
+      "retention_cardinality": 7,
+      "strategy": "SOR-001",
+      "strategy_dynamic_spec_eligible": true
+    }
+  ],
+  "pre_result_run_commit_sha": "46d7fecc9222bbbf1e85308410be2924b34cfdff",
+  "production_dynamic_activation_authority": "NONE",
+  "protocol_commit_sha": "9907153b94b2603535c9c846611ed90b0a2ea112",
+  "protocol_sha256": "sha256:7e3ab69dce47cb583efc041195cd82fcbbd7acff68c3dfbb03f61bbbcb73ab17",
+  "rank_parity": [
+    {
+      "cardinality": 8,
+      "checked_count": 5952,
+      "mismatch_count": 0,
+      "strategy": "MI-001"
+    },
+    {
+      "cardinality": 12,
+      "checked_count": 8928,
+      "mismatch_count": 0,
+      "strategy": "MI-001"
+    },
+    {
+      "cardinality": 16,
+      "checked_count": 11904,
+      "mismatch_count": 0,
+      "strategy": "MI-001"
+    },
+    {
+      "cardinality": 8,
+      "checked_count": 5952,
+      "mismatch_count": 0,
+      "strategy": "MPG-001"
+    },
+    {
+      "cardinality": 12,
+      "checked_count": 8928,
+      "mismatch_count": 0,
+      "strategy": "MPG-001"
+    },
+    {
+      "cardinality": 16,
+      "checked_count": 11904,
+      "mismatch_count": 0,
+      "strategy": "MPG-001"
+    }
+  ],
+  "recommendations": [
+    {
+      "recommendation_status": "TOP16_FALLBACK_CAPTURE_BELOW_FLOOR",
+      "recommended_entry_cardinality": 16,
+      "retention_cardinality": 16,
+      "strategy": "BRF2-001"
+    },
+    {
+      "recommendation_status": "TOP16_FALLBACK_CAPTURE_BELOW_FLOOR",
+      "recommended_entry_cardinality": 16,
+      "retention_cardinality": 16,
+      "strategy": "CPM-RO-001"
+    },
+    {
+      "recommendation_status": "MINIMUM_COMPATIBLE_CAPTURE_CARDINALITY",
+      "recommended_entry_cardinality": 16,
+      "retention_cardinality": 16,
+      "strategy": "MI-001"
+    },
+    {
+      "recommendation_status": "MINIMUM_COMPATIBLE_CAPTURE_CARDINALITY",
+      "recommended_entry_cardinality": 12,
+      "retention_cardinality": 16,
+      "strategy": "MPG-001"
+    }
+  ],
+  "research_status": "STAGE3_1_FINAL_SEMANTIC_REVISION_COMPLETE",
+  "schema": "brc.research.semantic_dynamic_selection.stage3_1.v1",
+  "source_file_sha256": {
+    "research/semantic_dynamic_selection_stage3_1/analyze.py": "sha256:7a4516106c767ff84b314797636cfd3b173555ca54184d01fb02235f66706f87",
+    "research/semantic_dynamic_selection_stage3_1/core.py": "sha256:b1c8904f3b31e0f5ae817bdf1318de86c84f07116d92b3ca010ae65c3826b34d",
+    "research/semantic_dynamic_selection_stage3_1/replay.py": "sha256:3be8ac69330fd0f9d774663d15d1e0479801633708fff0a780b0caa93244e916",
+    "research/semantic_dynamic_selection_stage3_1/run_stage3_1.py": "sha256:c34fb3e6203761242771df6420d54398ac4f0d993a557d46cfd9905812d5b743",
+    "research/semantic_dynamic_selection_stage3_1/selection.py": "sha256:4cdf2af98c80074164800a634dbb32fe9a334b4feaa0a56279b4c13e20916c10"
+  },
+  "stage3_authority_commit": "28b47e6d219acf2a008aacce92be1bd140b98964"
+}

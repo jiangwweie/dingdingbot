@@ -1,0 +1,7 @@
+strategy,cardinality,checked_count,mismatch_count
+MI-001,8,5952,0
+MI-001,12,8928,0
+MI-001,16,11904,0
+MPG-001,8,5952,0
+MPG-001,12,8928,0
+MPG-001,16,11904,0
