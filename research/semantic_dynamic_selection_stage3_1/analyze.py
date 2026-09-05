@@ -188,24 +188,31 @@ def recommend_cardinalities(summary: pd.DataFrame) -> pd.DataFrame:
     for strategy in sorted(summary["strategy"].unique()):
         scoped = summary.loc[summary["strategy"] == strategy].set_index("cardinality")
         recommended: int | None = None
-        for cardinality in (8, 12, 16):
+        recommendation_status = "NO_COMPATIBLE_CARDINALITY"
+        for cardinality in (8, 12):
             row = cast(pd.Series, scoped.loc[cardinality])
             if (
                 float(row["full_good_event_capture"]) >= 0.80
                 and not bool(row["persistent_clear_adverse"])
             ):
                 recommended = cardinality
+                recommendation_status = "MINIMUM_COMPATIBLE_CAPTURE_CARDINALITY"
                 break
+        if recommended is None:
+            top16 = cast(pd.Series, scoped.loc[16])
+            if not bool(top16["persistent_clear_adverse"]):
+                recommended = 16
+                recommendation_status = (
+                    "MINIMUM_COMPATIBLE_CAPTURE_CARDINALITY"
+                    if float(top16["full_good_event_capture"]) >= 0.80
+                    else "TOP16_FALLBACK_CAPTURE_BELOW_FLOOR"
+                )
         rows.append(
             {
                 "strategy": strategy,
                 "recommended_entry_cardinality": recommended,
                 "retention_cardinality": 16 if recommended is not None else None,
-                "recommendation_status": (
-                    "MINIMUM_COMPATIBLE_CAPTURE_CARDINALITY"
-                    if recommended is not None
-                    else "NO_COMPATIBLE_CARDINALITY"
-                ),
+                "recommendation_status": recommendation_status,
             }
         )
     return pd.DataFrame(rows)

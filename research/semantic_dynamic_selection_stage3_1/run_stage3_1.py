@@ -146,8 +146,9 @@ def _overall_decisions(
     for strategy in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"):
         item = cast(dict[str, object], recommendation[strategy])
         cardinality = item["recommended_entry_cardinality"]
-        evidence_status = "CARDINALITY_CAPTURE_COMPATIBLE"
-        selector_eligible = True
+        missing_cardinality = _is_missing(cardinality)
+        evidence_status = str(item["recommendation_status"])
+        selector_eligible = not missing_cardinality
         if strategy == "CPM-RO-001" and not bool(cpm["revision_removed_stage3_failure"]):
             cardinality = None
             evidence_status = str(cpm["verdict"])
@@ -161,7 +162,9 @@ def _overall_decisions(
                 "strategy": strategy,
                 "frozen_selector": SELECTION_SPECS[strategy][0],
                 "recommended_entry_cardinality": cardinality,
-                "retention_cardinality": 16 if cardinality is not None else None,
+                "retention_cardinality": (
+                    None if _is_missing(cardinality) else 16
+                ),
                 "evidence_status": evidence_status,
                 "generic_implementation_eligible": True,
                 "strategy_dynamic_spec_eligible": selector_eligible,

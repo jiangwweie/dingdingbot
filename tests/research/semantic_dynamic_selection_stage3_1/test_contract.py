@@ -4,6 +4,9 @@ from research.semantic_dynamic_selection.features import (
     positive_impulse_recency_12h,
     residual_extension_z_24h,
 )
+from research.semantic_dynamic_selection_stage3_1.analyze import (
+    recommend_cardinalities,
+)
 from research.semantic_dynamic_selection_stage3_1.core import (
     CARDINALITIES,
     absolute_directional_efficiency_24h,
@@ -52,4 +55,27 @@ def test_mi_and_brf2_stage3_features_are_reused_unchanged() -> None:
 def test_stage3_1_reclassifies_the_original_stage2_all24_events() -> None:
     assert BASELINE_RELATIVE_PATH == (
         "research/multi_strategy_selection/artifacts/replayed_events.parquet"
+    )
+
+
+def test_cardinality_contract_falls_back_to_top16_below_capture_floor() -> None:
+    import pandas as pd
+
+    summary = pd.DataFrame(
+        [
+            {
+                "strategy": "CPM-RO-001",
+                "cardinality": cardinality,
+                "full_good_event_capture": capture,
+                "persistent_clear_adverse": False,
+            }
+            for cardinality, capture in ((16, 0.70), (12, 0.60), (8, 0.40))
+        ]
+    )
+
+    result = recommend_cardinalities(summary).iloc[0]
+
+    assert result["recommended_entry_cardinality"] == 16
+    assert result["recommendation_status"] == (
+        "TOP16_FALLBACK_CAPTURE_BELOW_FLOOR"
     )
