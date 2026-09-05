@@ -1,6 +1,6 @@
 ---
 title: MULTI_STRATEGY_EVENTSPEC_FORWARD_SHADOW_V1_DESIGN
-status: DRAFT_FOR_INDEPENDENT_REVIEW
+status: REVISED_FOR_FINAL_REVIEW
 date: 2026-09-04
 phase: P3-MSS-FS-V1
 implementation_authority: NONE
@@ -22,7 +22,7 @@ official Observation
 -> immutable StrategySignal
 ================ authoritative trading chain unchanged ================
 -> Signal-owned Context Shadow Evaluation
--> hypothetical would_select / UNSCORED
+-> hypothetical qualification_state / nullable would_select
 -> 48h Signal-R first-passage Outcome
 -> optional Capacity-entry sensitivity
 -> bounded Forward Evidence review
@@ -38,7 +38,7 @@ Ticket、ExitProfile、风险、杠杆或交易所写入。
 
 ```text
 retrospective_context_research = COMPLETE
-forward_shadow_design = DRAFT_FOR_INDEPENDENT_REVIEW
+forward_shadow_design = REVISED_FOR_FINAL_REVIEW
 forward_shadow_implementation = NOT_AUTHORIZED
 production_selection_gate = NONE
 production_behavior_change = NONE
@@ -96,14 +96,14 @@ StrategySignal。固定 24-member Context Panel 只用于测量 market state，�
 > 在 Stage-2 的完整 24 × hourly Detector grid 中再次得到同样结果。
 
 每条 Forward Signal 已经冻结 `universe_version_id` 和 `universe_semantic_digest`。Epoch 激活
-时进一步冻结每个目标 EventSpec 的 population binding。若这些 Universe identities 在观察
-期间改变：
+时进一步创建每个目标 EventSpec 的独立 population binding。若某一个 EventSpec 的 Universe
+identity 在观察期间改变：
 
 1. 真实交易继续遵循新 Universe；
-2. 旧 Epoch 不把新 population 混入原分母；
+2. 只关闭该 EventSpec 的旧 population binding；
 3. 记录 `forward_population_drift`；
-4. 关闭旧 Epoch 的新 enrollment；
-5. 如仍需继续观察，使用新 population binding 创建新 Epoch。
+4. 其它 EventSpec bindings 与全局 Protocol Epoch 继续运行；
+5. 如仍需继续观察该 Strategy，创建同一 Epoch 内的新 population binding。
 
 这样避免 Universe change 与 Context effect 混入同一 Forward 分母。
 
@@ -233,12 +233,22 @@ point-in-time immutable observation。
 Selection Shadow Decision 是每条 Signal 的唯一 Core summary：
 
 ```text
-EVALUATED -> would_select = true / false
-UNSCORED  -> would_select = null
-INVALID   -> would_select = null
+HIGH -> qualification_state = PREFERRED   -> would_select = true
+MID  -> qualification_state = NEUTRAL     -> would_select = null
+LOW  -> qualification_state = DISFAVORED  -> would_select = false
+
+no supported Hypothesis
+     -> qualification_state = UNSCORED    -> would_select = null
+
+invalid Core input
+     -> qualification_state = INVALID     -> would_select = null
 ```
 
 Diagnostic Hypothesis 不拥有最终 `would_select` Authority。
+
+`would_select` is a nullable projection of the three-state Core qualification, not an independently
+researched `HIGH vs MID+LOW` policy. Forward primary evidence always compares `PREFERRED` with
+`DISFAVORED`; `NEUTRAL` remains a separate cohort.
 
 ### 5.5 Signal-R Outcome
 
@@ -338,7 +348,15 @@ LOW  <= 0.1016505239587715
 MID  <= 0.23203331067591773
 HIGH >  0.23203331067591773
 
-would_select = (bucket == HIGH)
+qualification_state:
+HIGH -> PREFERRED
+MID  -> NEUTRAL
+LOW  -> DISFAVORED
+
+would_select:
+PREFERRED   -> true
+NEUTRAL     -> null
+DISFAVORED  -> false
 expected_effect_direction = HIGH_MINUS_LOW_POSITIVE
 ```
 
@@ -355,7 +373,7 @@ HIGH >  0.4746936301499299
 
 hypothesis_match = (bucket == LOW)
 expected_effect_direction = HIGH_MINUS_LOW_NEGATIVE
-produces_core_would_select = false
+produces_core_qualification = false
 ```
 
 Correlation 的语义是观察 high-correlation common-move 环境是否继续损害 CPM；它不与
@@ -379,7 +397,15 @@ LOW  <= 0.018675901617112554
 MID  <= 0.020946788428373938
 HIGH >  0.020946788428373938
 
-would_select = (bucket == HIGH)
+qualification_state:
+HIGH -> PREFERRED
+MID  -> NEUTRAL
+LOW  -> DISFAVORED
+
+would_select:
+PREFERRED   -> true
+NEUTRAL     -> null
+DISFAVORED  -> false
 expected_effect_direction = HIGH_MINUS_LOW_POSITIVE
 ```
 
@@ -398,7 +424,7 @@ HIGH >  0.4746936301499299
 
 hypothesis_match = (bucket == HIGH)
 expected_effect_direction = HIGH_MINUS_LOW_POSITIVE
-produces_core_would_select = false
+produces_core_qualification = false
 ```
 
 ### 9.3 MPG
@@ -562,7 +588,8 @@ For every exact panel member:
 ```text
 log_return_i,j = ln(close_i,j / close_i,j-1)
 rv_i_24h = sqrt(sum(log_return_i,j ^ 2, j=1..24))
-market_rv_24h = median(rv_i_24h across exact 24 members)
+ordered_rv = sort(rv_i_24h across exact 24 members ascending)
+market_rv_24h = (ordered_rv[11] + ordered_rv[12]) / 2
 ```
 
 All 24 members must be complete. There is no 23/24 fallback.
@@ -576,6 +603,21 @@ avg_cross_asset_corr_24h
 = mean(all 276 valid upper-triangle pair correlations)
 ```
 
+For each pair of 24-return vectors `x` and `y`, freeze Pearson as:
+
+```text
+mean_x = fsum(x) / 24
+mean_y = fsum(y) / 24
+dx_j = x_j - mean_x
+dy_j = y_j - mean_y
+
+corr_xy
+= fsum(dx_j * dy_j)
+  / sqrt(fsum(dx_j^2) * fsum(dy_j^2))
+
+avg_corr = fsum(all corr_xy in canonical member-pair order) / 276
+```
+
 Requirements:
 
 - exact candidate count = 24;
@@ -586,25 +628,60 @@ Requirements:
 
 ### 11.5 Numeric representation
 
-Source prices remain Decimal. Statistical log, square root and correlation use a frozen pure-Python
-IEEE-754 binary64 implementation based on `math.log`, `math.sqrt` and `math.fsum`; production runtime
-does not add NumPy or Pandas.
+Source prices remain Decimal. Statistical log, square root and correlation use the frozen pure-Python
+algorithm above with `math.log`, `math.sqrt` and `math.fsum`; production runtime does not add NumPy or
+Pandas.
 
-Each binary64 output is canonicalized with exact `float.hex()` plus a 17-significant-digit decimal
-display value. Bucketing compares the binary64 feature against the exact decimal cutoff converted
-once under the same frozen implementation.
+Cross-host economic authority is **not** the last binary64 bit. V1 freezes two layers:
+
+```text
+raw audit value:
+    float.hex()                    display/debug only
+
+canonical authority value:
+    Decimal(repr(binary64_value))
+    quantize(Decimal("0.000000000001"), ROUND_HALF_EVEN)
+```
+
+Cutoffs are loaded from their exact frozen decimal strings and quantized by the same `1e-12` rule.
+LOW/MID/HIGH comparison uses only canonical authority values. The snapshot semantic digest includes:
+
+```text
+source window digest
+algorithm identity
+canonical quantized feature value
+canonical quantized cutoff identities
+bucket
+```
+
+It excludes raw `float.hex()`. Therefore a harmless cross-host one-ULP difference does not create a
+digest conflict when canonical value and bucket are unchanged. A canonical value or bucket drift is
+an authority conflict.
+
+Stage-2 artifact audit found the nearest observed Feature-to-cutoff distances were:
+
+| Feature | Minimum observed distance |
+| --- | ---: |
+| `avg_cross_asset_corr_24h` | `4.0180051501470526e-05` |
+| `market_rv_24h` | `8.54239751196112e-07` |
+| `directional_efficiency_24h` | `4.322376925797178e-06` |
+
+These are audit facts, not a future guard band. They show the frozen Golden bucket assignments are
+not dependent on `1e-12` quantization.
 
 Before implementation may continue, **FS-00 Golden** must prove against Stage-2 artifacts:
 
 1. exact 744 market Context cutoff identities;
 2. exact 17,856 candidate Context identities;
 3. exact LOW/MID/HIGH bucket parity for all four Hypotheses;
-4. deterministic rerun digest equality;
-5. machine-readable diff for every value that is not byte-equal.
+4. deterministic canonical authority digest equality;
+5. macOS and Linux exact bucket parity;
+6. machine-readable raw numeric diff and distance-to-cutoff for every non-byte-equal value.
 
-If bucket parity differs, implementation stops. The old research result is retained and any accepted
-representation correction requires an explicit Protocol amendment; implementation may not silently
-choose the prettier result.
+If source-window, formula, canonical value or bucket parity differs, implementation stops. A raw
+binary64 difference alone is non-blocking only when canonical value, cutoff distance and bucket remain
+identical. The old research result is retained and any accepted economic-semantic correction requires
+an explicit Protocol amendment; implementation may not silently choose the prettier result.
 
 ## 12. Temporal Contract
 
@@ -696,9 +773,11 @@ feature_kind
 context_panel_id nullable
 low_cutoff
 high_cutoff
-preferred_bucket
+preferred_bucket = HIGH
+neutral_bucket = MID
+disfavored_bucket = LOW
 expected_effect_direction
-produces_core_would_select
+produces_core_qualification
 evidence_tier
 stage2_evidence_digest
 stage2_1_evidence_digest
@@ -709,7 +788,7 @@ installed_at_ms
 
 Invariants:
 
-- Core must set `produces_core_would_select=true`;
+- Core must set `produces_core_qualification=true`;
 - Diagnostic must set it false;
 - `evidence_tier` records independent research review strength and is not a numeric weight;
 - no Strategy has more than one active Core V1 Hypothesis;
@@ -723,7 +802,6 @@ forward_shadow_epoch_id
 protocol_id = MULTI_STRATEGY_EVENTSPEC_FORWARD_SHADOW_V1
 catalog_semantic_digest
 context_panel_digest
-event_population_bindings_digest
 activated_at_ms
 effective_from_ms
 status = ACTIVE | CLOSED
@@ -736,35 +814,59 @@ epoch_semantic_digest
 Only one V1 epoch may be ACTIVE. Closing the epoch stops new Shadow enrollment but does not stop due
 Outcome resolution.
 
-`event_population_bindings_digest` binds the exact EventSpec、UniverseVersion and Universe semantic
-digest that define the actual Forward Signal population. It is distinct from the 24-member Context
-Panel digest.
-
-Each Epoch owns exact immutable binding rows:
+Each Epoch owns sequential EventSpec population bindings:
 
 ```text
+forward_population_binding_id
 forward_shadow_epoch_id
 event_spec_id
 strategy_group_id
 strategy_version_id
 universe_version_id
 universe_semantic_digest
+binding_sequence
+effective_from_ms
+status = ACTIVE | CLOSED
+closed_at_ms nullable
+close_reason nullable
 binding_semantic_digest
 ```
 
-There is one row per target EventSpec. A RuntimeScope or Universe pointer change does not rewrite it.
+There is at most one ACTIVE binding per Epoch and EventSpec. A RuntimeScope or Universe pointer
+change closes only the affected binding and never rewrites it. The successor receives the next
+`binding_sequence`; evidence aggregation cannot mix different `forward_population_binding_id`
+values.
 
-### 13.4 SignalSelectionShadow
+### 13.4 Explicit Epoch Hypothesis Bindings
+
+Epoch runtime never resolves “the current active Hypothesis.” It freezes exact immutable Specs:
+
+```text
+forward_shadow_epoch_id
+event_spec_id
+selection_semantic_id
+hypothesis_spec_id nullable for Semantic-only
+binding_role = CORE | DIAGNOSTIC | SEMANTIC_ONLY
+hypothesis_semantic_digest nullable for Semantic-only
+binding_semantic_digest
+```
+
+CPM and BRF2 each own one Core and one Diagnostic row. MPG and MI each own one `SEMANTIC_ONLY` row.
+Installing a later Catalog or `CPM_CTX_DE_V2` does not affect an existing Epoch.
+
+### 13.5 SignalSelectionShadow
 
 One Signal receives one row per Epoch:
 
 ```text
 signal_selection_shadow_id
 forward_shadow_epoch_id
+forward_population_binding_id
 signal_event_id
 selection_semantic_id
 processing_status = PENDING | CLAIMED | COMPLETED
 evaluation_status nullable until completed
+qualification_state nullable until completed
 would_select nullable
 core_hypothesis_spec_id nullable
 invalid_reason nullable
@@ -783,11 +885,21 @@ Terminal `evaluation_status`:
 
 | Status | `would_select` | Meaning |
 | --- | --- | --- |
-| EVALUATED | Required Boolean | Active Core Hypothesis calculated successfully |
+| EVALUATED | TRUE / NULL / FALSE | Core is PREFERRED / NEUTRAL / DISFAVORED |
 | UNSCORED | NULL | Semantic exists but no supported V1 Hypothesis |
 | INVALID | NULL | Core should have been evaluated but exact inputs were invalid/unavailable |
 
-### 13.5 SignalContextEvaluation
+Terminal shape:
+
+| `evaluation_status` | `qualification_state` | `would_select` |
+| --- | --- | --- |
+| EVALUATED | PREFERRED | TRUE |
+| EVALUATED | NEUTRAL | NULL |
+| EVALUATED | DISFAVORED | FALSE |
+| UNSCORED | UNSCORED | NULL |
+| INVALID | INVALID | NULL |
+
+### 13.6 SignalContextEvaluation
 
 One row per Signal and Hypothesis:
 
@@ -819,7 +931,7 @@ CPM / BRF2 = one Core + one Diagnostic child
 MPG / MI   = zero Hypothesis children + parent UNSCORED
 ```
 
-### 13.6 MarketContextSnapshot
+### 13.7 MarketContextSnapshot
 
 ```text
 market_context_snapshot_id
@@ -866,7 +978,8 @@ brc_selection_hypothesis_specs
 brc_market_context_panels
 brc_market_context_panel_members
 brc_forward_shadow_epochs
-brc_forward_shadow_epoch_event_bindings
+brc_forward_shadow_population_bindings
+brc_forward_shadow_epoch_hypothesis_bindings
 brc_signal_selection_shadow_current
 brc_signal_context_evaluations
 brc_market_context_snapshots
@@ -916,7 +1029,59 @@ NEITHER
 AMBIGUOUS
 ```
 
-### 14.2 Capacity sensitivity table
+### 14.2 Domain type separation
+
+The shared persistence table does not imply one giant nullable Domain model. Domain and repository
+ports use an explicit tagged union:
+
+```text
+LegacyExcursionSpec
+LegacyExcursionProjection
+
+SorPathObservationSpec
+SorPathObservationProjection
+
+SignalRFirstPassageSpec
+SignalRFirstPassageProjection
+```
+
+Each type owns only its valid fields and mathematical invariants. In particular:
+
+```text
+LegacyExcursionProjection.mae_r >= 0          # adverse magnitude
+SignalRFirstPassageProjection.mae_signal_r <= 0  # signed adverse excursion
+```
+
+The PostgreSQL adapter maps the tagged union to the shared row shape. Repository methods remain
+evaluation-specific:
+
+```text
+add_legacy_excursion_pending(...)
+add_sor_path_pending(...)
+add_signal_r_first_passage_pending(...)
+
+complete_legacy_excursion(...)
+complete_sor_path(...)
+complete_signal_r_first_passage(...)
+```
+
+No caller constructs a thirty-field generic `ShadowOutcomeProjection` and relies on cascading
+`if evaluation_kind` validation.
+
+FS-02 and FS-06 must audit every model, repository, query, Owner read model and test that currently
+assumes:
+
+```text
+signal_event_id -> exactly one Shadow Outcome
+```
+
+and replace it with:
+
+```text
+(signal_event_id, evaluation_kind) -> at most one Shadow Outcome
+```
+
+### 14.3 Capacity sensitivity table
 
 `brc_shadow_capacity_entry_sensitivity` owns the optional secondary comparison:
 
@@ -936,9 +1101,12 @@ created_at_ms
 It exists only when the Signal owns a formal Ticket and the Signal-R Outcome is terminal. It is not
 Settlement、Review、realized execution or simulated PnL.
 
-### 14.3 Preservation
+### 14.4 Preservation
 
 Migration must preserve every existing Shadow row byte-for-byte across all pre-existing columns.
+Before DDL, all writers are stopped and the count of
+`brc_shadow_outcomes_current.status='claimed'` must be zero. Pending、completed and unavailable rows
+are preserved and remain readable/resumable under the new release.
 It performs no backfill of old Signals into the new Forward Epoch and creates:
 
 ```text
@@ -951,7 +1119,7 @@ zero Ticket
 zero Exchange Command
 ```
 
-### 14.4 Why a new outcome table is rejected
+### 14.5 Why a new outcome table is rejected
 
 Creating `brc_signal_r_outcomes` would establish a second Signal path evidence family with separate
 claim, lease, retry and Owner-read semantics. Evolving the existing table keeps one evidence concept
@@ -1018,6 +1186,17 @@ AND signal.universe_version_id / universe_semantic_digest equals the Epoch popul
 A later StrategyVersion is not silently evaluated by a V1 Hypothesis. It becomes `INVALID` with
 `strategy_version_not_bound`, or waits for a separately installed catalog version.
 
+If a Signal carries a new valid Universe identity for an otherwise bound EventSpec:
+
+```text
+exclude the drift Signal from both old and new population evidence
+-> close only the old EventSpec population binding at that Signal boundary
+-> create successor binding effective at the next final 1h boundary
+-> retain the same exact Epoch Hypothesis bindings
+```
+
+The successor operation is one transaction and is idempotent for the exact old/new Universe pair.
+
 An out-of-panel Signal is outside the frozen research population. It is reported in Epoch coverage
 as `instrument_outside_frozen_context_panel`, but receives no V1 Hypothesis evaluation and no V1
 Signal-R Outcome. Supporting it requires a new Context Panel and evidence version; the runtime must
@@ -1043,7 +1222,7 @@ evidence without pretending a Selector exists.
 
 1. Fetch or reuse exact candidate 25-close 1h window at trigger cutoff.
 2. Calculate Directional Efficiency Core.
-3. Complete Core `would_select` from frozen bucket.
+3. Complete Core three-state qualification from the frozen bucket.
 4. Independently fetch or reuse exact MarketContextSnapshot for correlation Diagnostic.
 5. If panel correlation is invalid, write Diagnostic `INVALID`; do not invalidate valid Core.
 
@@ -1059,14 +1238,17 @@ evidence without pretending a Selector exists.
 ```text
 active Core evaluated
 -> parent EVALUATED
--> would_select = Core hypothesis_match
+-> qualification_state = PREFERRED / NEUTRAL / DISFAVORED
+-> would_select = true / null / false respectively
 
 no active Core by approved Semantic
 -> parent UNSCORED
+-> qualification_state = UNSCORED
 -> would_select = NULL
 
 Core invalid after bounded source grace
 -> parent INVALID
+-> qualification_state = INVALID
 -> would_select = NULL
 ```
 
@@ -1192,14 +1374,100 @@ The existing Observation Worker owns official Observation plus two bounded evide
 3. due Shadow Outcome resolution
 ```
 
-Scheduling rules:
+### 19.1 Deadline-aware start gate
+
+Before claiming Shadow work, the Worker reads the exact earliest scheduled official Observation:
+
+```text
+next_official_due_at_ms = MIN(due_at_ms for actionable official scopes)
+```
+
+V1 freezes typed code constants, not YAML/YML or Owner-maintained configuration:
+
+```text
+SHADOW_OFFICIAL_GUARD_MS = 30_000
+SHADOW_CONTEXT_BUDGET_MS = 20_000
+SHADOW_OUTCOME_BUDGET_MS = 10_000
+SHADOW_DB_ONLY_BUDGET_MS = 2_000
+```
+
+Shadow network I/O may start only when:
+
+```text
+available_shadow_budget_ms
+= next_official_due_at_ms - now_ms - SHADOW_OFFICIAL_GUARD_MS
+
+available_shadow_budget_ms >= required_budget_for_exact_work_kind
+```
+
+Otherwise the Worker does not claim Shadow work and returns `NO_SHADOW_BUDGET`.
+
+The complete attempt deadline is:
+
+```text
+shadow_deadline_at_ms
+= min(
+    now_ms + required_budget_for_exact_work_kind,
+    next_official_due_at_ms - SHADOW_OFFICIAL_GUARD_MS,
+)
+```
+
+If no official due time exists, the exact work-kind budget remains the timeout cap.
+
+### 19.2 Recheck after claim
+
+The Worker re-reads `next_official_due_at_ms` after acquiring a Shadow claim and before the first
+network call. If the available budget no longer passes the start gate:
+
+```text
+release claim to PENDING
+next_retry_at_ms = official due boundary + one worker poll interval
+perform zero Shadow network call
+```
+
+### 19.3 Timeout and isolation
+
+The complete 24-member Context batch or `15m -> optional 1m` Outcome sequence shares one outer
+deadline. Individual calls cannot restart or extend the budget. Deadline expiry:
+
+```text
+cancel all outstanding Shadow public calls
+release claim to PENDING
+next_retry_at_ms >= next_official_due_at_ms + 5_000
+return SHADOW_YIELDED_TO_OFFICIAL
+```
+
+The Shadow source uses a separate public-only client and dedicated bounded executor/semaphore from
+the official Observation market source. A synchronous CCXT call that cannot be physically cancelled
+may finish only inside that isolated Shadow executor; it cannot serialize or acquire the official
+market client. No later Shadow job starts while timed-out Shadow futures remain outstanding.
+
+The Worker exposes one bounded repository operation:
+
+```text
+read_next_official_observation_due_at_ms()
+```
+
+Implementation acceptance uses a production-shaped clock:
+
+```text
+Shadow Context starts shortly before a new official boundary
+-> outer deadline yields/cancels Shadow work
+-> official Scope is claimed on the next poll
+-> official close-boundary latency <= baseline SLO + 5 seconds
+```
+
+Checking official priority only at iteration start does not satisfy this contract.
+
+### 19.4 Scheduling rules
 
 1. A due official Strategy Scope has strict priority at its closed-bar deadline.
 2. Between official boundaries, Selection Shadow initialization and Outcome resolution use bounded
    round-robin fairness.
 3. One worker iteration claims at most one non-Observation work item.
-4. A Shadow network timeout never reschedules or delays the next official scope boundary.
+4. Shadow work never receives a timeout extending into `SHADOW_OFFICIAL_GUARD_MS`.
 5. Claim leases are PostgreSQL durable and restart-safe.
+6. The normal persistent Worker poll interval remains at most 5 seconds.
 
 The Worker does not perform all 24 public calls inside a database transaction.
 
@@ -1290,7 +1558,8 @@ deploy 0008 capability while stopped and flat
 -> start existing workers with Shadow enrollment disabled
 -> verify zero unexpected Shadow facts
 -> commit one immutable Epoch activation
--> effective_from = a future final 1h boundary
+-> create exact Epoch Hypothesis bindings
+-> create one future-effective population binding per EventSpec
 ```
 
 Epoch activation:
@@ -1301,6 +1570,10 @@ Epoch activation:
 - is idempotent for exact protocol/catalog/effective boundary;
 - cannot be backdated;
 - is recorded through one reviewed application command, never ad-hoc SQL.
+
+A population binding successor is scoped to one EventSpec. It closes the previous binding at a
+future final 1h boundary and creates the new exact Universe binding in the same transaction. Other
+EventSpec bindings are not changed.
 
 Whether Owner API exposes this command is an Implementation Plan decision. No TOTP is required by
 this design because the operation cannot expand exchange-write authority; authentication and exact
@@ -1314,23 +1587,35 @@ The bounded Owner surface must show:
 
 ```text
 protocol identity
-effective from
-elapsed calendar days
-complete UTC weeks
 active / closed
 input/catalog digests
+exact Epoch Hypothesis binding IDs
 ```
 
-### 24.2 Strategy status
+### 24.2 Population binding status
+
+For every target EventSpec:
+
+```text
+forward_population_binding_id
+UniverseVersion / Universe digest
+effective from / closed at
+elapsed calendar days
+complete UTC weeks
+population drift reason
+```
+
+### 24.3 Strategy status
 
 ```text
 selection semantic
 Core / Diagnostic / Semantic-only
 EVALUATED / UNSCORED / INVALID / PENDING counts
-would_select true / false counts
+PREFERRED / NEUTRAL / DISFAVORED counts
+would_select true / null / false counts
 ```
 
-### 24.3 Evidence counts
+### 24.4 Evidence counts
 
 For every Core Hypothesis and bucket:
 
@@ -1344,7 +1629,7 @@ unique_context_day_count
 unique_context_week_count
 ```
 
-### 24.4 Outcome statistics
+### 24.5 Outcome statistics
 
 ```text
 TP1_FIRST rate
@@ -1358,14 +1643,15 @@ trigger-hour-weighted effect
 LODO / LOWO sign stability
 ```
 
-Queries are bounded by exact Epoch, Strategy and Hypothesis. No dashboard performs an unbounded
-full-history scan or computes a new threshold.
+Queries are bounded by exact Epoch、population binding、Strategy and Hypothesis. No dashboard performs
+an unbounded full-history scan, mixes population binding IDs or computes a new threshold.
 
 ## 25. Forward Decision Contract
 
 ### 25.1 Minimum evidence gate
 
-A Core Hypothesis cannot be reviewed for promotion before all conditions hold:
+A Core Hypothesis and one exact `forward_population_binding_id` cannot be reviewed for promotion
+before all conditions hold:
 
 ```text
 elapsed >= 30 calendar days
@@ -1380,8 +1666,8 @@ HIGH and LOW represented in >= 2 complete UTC weeks each
 Time conditions take precedence over Event count. High Event volume in one market shock cannot finish
 the experiment early.
 
-`would_select=false` includes MID and LOW and is reported as an operational counterfactual, but it is
-not substituted for the frozen Stage-2 primary `HIGH minus LOW` estimand.
+`NEUTRAL` is never merged into `DISFAVORED` for the primary estimand. A future Production Gate may
+choose to admit MID or reject MID only after a separate design and evidence decision.
 
 ### 25.2 Frozen review classification
 
@@ -1420,7 +1706,8 @@ too few matched Tickets.
 
 ### 25.3 Checkpoints and maximum duration
 
-The first eligible review occurs only after the minimum evidence gate. Normal checkpoints are:
+The first eligible review occurs only after the minimum evidence gate. Checkpoints are measured from
+the exact population binding `effective_from_ms`:
 
 ```text
 30 calendar days
@@ -1428,10 +1715,11 @@ The first eligible review occurs only after the minimum evidence gate. Normal ch
 90 calendar days hard maximum enrollment
 ```
 
-If evidence remains insufficient or mixed at 90 days, the Epoch closes to new enrollment and the
-Hypothesis is recorded as `FORWARD_INCONCLUSIVE`. Existing pending Outcomes still complete. Continuing
-with changed Feature, cutoff, panel or rule requires a new Protocol and Epoch; V1 is not extended
-indefinitely until it looks favorable.
+If evidence remains insufficient or mixed at 90 days, that EventSpec population binding closes to new
+enrollment and the Hypothesis is recorded as `FORWARD_INCONCLUSIVE` for that exact binding. Other
+EventSpec bindings continue. Existing pending Outcomes still complete. Continuing with a changed
+Feature、cutoff、panel or rule requires a new Protocol/Epoch Hypothesis binding; changing only the
+StrategyUniverse creates a new population binding and cannot merge evidence with its predecessor.
 
 ### 25.4 Diagnostic and UNSCORED rules
 
@@ -1452,8 +1740,12 @@ indefinitely until it looks favorable.
 6. Market RV parity.
 7. Average Correlation parity and exact 276 pairs.
 8. Exact frozen cutoff and bucket parity.
-9. Diagnostic cannot produce parent `would_select`.
-10. MPG/MI are UNSCORED with no Context Feature row.
+9. HIGH/MID/LOW map exactly to PREFERRED/NEUTRAL/DISFAVORED.
+10. MID produces `would_select=NULL`, never false.
+11. Diagnostic cannot produce parent qualification or `would_select`.
+12. MPG/MI are UNSCORED with no Context Feature row.
+13. macOS/Linux raw values may differ only when canonical `1e-12` value and bucket remain equal.
+14. Explicit 24-member RV median and Pearson formula parity.
 
 ### 26.2 Signal and transaction tests
 
@@ -1464,6 +1756,9 @@ indefinitely until it looks favorable.
 5. StrategyVersion drift becomes explicit INVALID.
 6. Pre-Epoch and backdated Signals are excluded.
 7. Closed Epoch stops enrollment but not Outcome completion.
+8. Epoch freezes exact Hypothesis FKs and ignores a later active Catalog version.
+9. CPM population drift closes/replaces only CPM binding; BRF2/MPG/MI remain active.
+10. Evidence queries reject mixed `forward_population_binding_id` inputs.
 
 ### 26.3 First-passage tests
 
@@ -1492,6 +1787,9 @@ indefinitely until it looks favorable.
 7. Parent/child Evaluation shape constraints.
 8. Claim/lease/CAS recovery.
 9. Epoch active uniqueness and no backdating.
+10. Exact one ACTIVE population binding per Epoch/EventSpec.
+11. Population binding successor preserves predecessor and sequence.
+12. Epoch Hypothesis binding cardinality and immutable FK identity.
 
 ### 26.5 Full-chain and architecture tests
 
@@ -1503,6 +1801,10 @@ indefinitely until it looks favorable.
 6. No private Venue client, exchange mutation or credential loading.
 7. No fifth Worker, timer, YAML/YML or file authority.
 8. No pre-Detector Universe claim from Event-time evidence.
+9. Shadow started before an official boundary yields within its work-kind budget.
+10. Official close-boundary latency remains within baseline SLO plus 5 seconds.
+11. Signal-R uses separate Domain types and repository methods from legacy excursion/SOR path.
+12. Full-repository audit removes every one-Shadow-per-Signal assumption.
 
 ## 27. Migration And Deployment Classification
 
@@ -1534,6 +1836,9 @@ Deployment requirements:
 | PostgreSQL runtime query | Exact key or ordered `LIMIT 1` actionable selector |
 | Runtime files | Zero |
 | Exchange writes | Zero |
+| Official due-time lookup | One bounded minimum query before each Shadow start and after cancellation |
+| Shadow official guard | 30 seconds |
+| Context / Outcome total budget | 20 seconds / 10 seconds |
 
 Observation close-boundary latency remains the primary SLO. Shadow work yields immediately when a
 new official Scope becomes due.
@@ -1575,14 +1880,14 @@ After independent design approval, the Implementation Plan should use these batc
 | Task | Scope | Exit condition |
 | --- | --- | --- |
 | FS-00 | Golden, arithmetic and bucket parity | Exact Stage-2 identity and zero bucket drift |
-| FS-01 | Domain Catalog and models | Pure typed invariants GREEN |
-| FS-02 | `0008` Schema and preservation | Disposable PostgreSQL migration GREEN |
-| FS-03 | Epoch and Signal enrollment | Post-Signal independent transaction + recovery GREEN |
+| FS-01 | Domain Catalog and separate projection types | Pure typed invariants GREEN |
+| FS-02 | `0008` Schema、one-per-kind repository audit and preservation | Disposable PostgreSQL migration GREEN |
+| FS-03 | Epoch、Hypothesis binding、per-EventSpec population lifecycle and Signal enrollment | Independent transaction + scoped recovery GREEN |
 | FS-04 | Context panel and feature projection | Exact 24-member/cache/cutoff parity GREEN |
-| FS-05 | Selection Shadow parent/children | Core/Diagnostic/UNSCORED semantics GREEN |
+| FS-05 | Selection Shadow parent/children | Three-state Core、Diagnostic、UNSCORED semantics GREEN |
 | FS-06 | Signal-R Outcome and 1m drill-down | Full 48h first-passage contract GREEN |
 | FS-07 | Capacity-entry sensitivity | Exact Ticket join without execution claim |
-| FS-08 | Observation Worker fairness/recovery | No boundary delay, no fifth Worker |
+| FS-08 | Observation Worker deadline/fairness/recovery | Preemptive budget proof、no boundary delay、no fifth Worker |
 | FS-09 | Owner readonly evidence surface | Bounded Epoch/Hypothesis/block counts |
 | FS-10 | Certification and deployment package | R4 evidence; no active Epoch |
 | FS-11 | Separately authorized Forward activation | Future boundary committed; production trading unchanged |
@@ -1594,13 +1899,18 @@ The design is ready for independent review when all are explicit:
 ```text
 Event-time estimand != pre-Detector Universe claim
 Core / Diagnostic / Semantic-only separation
+PREFERRED / NEUTRAL / DISFAVORED evidence semantics
 MPG / MI UNSCORED semantics
 exact frozen features and cutoffs
 point-in-time and numeric parity contract
+explicit Epoch Hypothesis bindings
+per-EventSpec population binding lifecycle
 PostgreSQL identities and schema ownership
 Signal transaction isolation
 Observation Worker bounded ownership
+deadline-aware Shadow preemption budget
 Signal-R 15m -> 1m first passage
+separate Signal-R Domain projection and repository API
 Capacity-entry secondary-only terminology
 minimum Forward duration and cluster counts
 no trading authority
@@ -1610,10 +1920,29 @@ R4 stopped-flat future deployment boundary
 ## 33. Final Authority State
 
 ```text
-design_status = DRAFT_FOR_INDEPENDENT_REVIEW
+design_status = REVISED_FOR_FINAL_REVIEW
 implementation_authority = NONE
 forward_epoch_activation_authority = NONE
 production_context_gate_authority = NONE
 production_universe_change_authority = NONE
 exchange_write_authority_change = NONE
+```
+
+## 34. Independent Review Amendment Closure
+
+| Review item | Final design response |
+| --- | --- |
+| P0 binary HIGH vs all | Core is PREFERRED / NEUTRAL / DISFAVORED; MID remains neutral and primary evidence remains HIGH vs LOW |
+| P0 global population coupling | Protocol Epoch remains global, but EventSpec population bindings have independent lifecycle and evidence cannot mix binding IDs |
+| P0 worker preemption | Exact due-time query、work-kind budgets、30-second guard、outer cancellation deadline and production-shaped SLO test are frozen |
+| P1 aggregate Catalog authority | Epoch owns explicit immutable Semantic/Hypothesis FK bindings |
+| P1 cross-host binary64 fragility | Raw float is audit-only; quantized `1e-12` canonical value and exact bucket own economic authority |
+| P1 generic nullable projection | Shared DB table remains, but three separate Domain Spec/Projection types and evaluation-specific repository APIs are required |
+
+All amendments preserve:
+
+```text
+implementation_authority = NONE
+production_authority = NONE
+production_behavior_change = NONE
 ```
