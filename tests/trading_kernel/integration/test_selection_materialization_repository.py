@@ -957,7 +957,13 @@ async def test_gap_audit_completion_persists_positive_and_checked_negative_proof
 ) -> None:
     await _seed_materialization_context(head_template_engine)
     audit = build_pending_authority_gap_audit(
-        authority_gap_audit_id="gap-audit:materialization:test",
+        # This is the real production-shaped Audit identity.  Concatenating it
+        # with Event and Instrument identities exceeds the 160-character ID
+        # column, so the suppression primary key must be a deterministic hash.
+        authority_gap_audit_id=(
+            "gap-audit:sor-dynamic-selection-v0:1788566400000:"
+            "ENTRY_VACUUM:FALLBACK_PREVIOUS"
+        ),
         selection_spec_id=SELECTION_SPEC_ID,
         session_start_ms=SESSION_START_MS,
         gap_kind=AuthorityGapAuditKind.LATE_PRE_FENCE_CONTINUITY,
@@ -1022,6 +1028,10 @@ async def test_gap_audit_completion_persists_positive_and_checked_negative_proof
         ).scalars().all()
     assert len(suppressions) == 1
     assert suppressions[0]["exchange_instrument_id"] == SELECTED_MEMBERS[0]
+    assert len(str(suppressions[0]["trigger_suppression_id"])) <= 160
+    assert str(suppressions[0]["trigger_suppression_id"]).startswith(
+        "trigger-suppression:"
+    )
     assert events == ["STARTED", "TRIGGER_SUPPRESSED", "CHECKED_NEGATIVE", "COMPLETE"]
 
 

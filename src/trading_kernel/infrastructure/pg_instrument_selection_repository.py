@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from typing import ClassVar, Literal
 
 import sqlalchemy as sa
@@ -2831,9 +2832,11 @@ class PostgresInstrumentSelectionRepository:
             )
             if item.first_natural_trigger_at_ms is not None:
                 suppression = StrategyTriggerSuppression(
-                    trigger_suppression_id=(
-                        f"trigger-suppression:{audit.authority_gap_audit_id}:"
-                        f"{item.scope.event_spec_id}:{item.scope.exchange_instrument_id}"
+                    trigger_suppression_id=_trigger_suppression_id(
+                        authority_gap_audit_id=audit.authority_gap_audit_id,
+                        event_spec_id=item.scope.event_spec_id,
+                        exchange_instrument_id=item.scope.exchange_instrument_id,
+                        session_reference=item.session_reference,
                     ),
                     authority_gap_audit_id=audit.authority_gap_audit_id,
                     entry_vacuum_id=audit.source_entry_vacuum_id,
@@ -3258,6 +3261,22 @@ def _entry_vacuum_from_row(row: RowMapping) -> StrategyEntryVacuum:
         first_blocker=str(row["first_blocker"]),
         projection_version=int(row["projection_version"]),
     )
+
+
+def _trigger_suppression_id(
+    *,
+    authority_gap_audit_id: str,
+    event_spec_id: str,
+    exchange_instrument_id: str,
+    session_reference: str,
+) -> str:
+    """Build the bounded deterministic identity for one suppressed episode."""
+
+    identity = (
+        f"{authority_gap_audit_id}\x1f{event_spec_id}\x1f"
+        f"{exchange_instrument_id}\x1f{session_reference}"
+    )
+    return "trigger-suppression:" + sha256(identity.encode("utf-8")).hexdigest()
 
 
 def _authority_gap_audit_from_row(row: RowMapping) -> AuthorityGapAudit:
