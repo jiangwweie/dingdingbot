@@ -1082,6 +1082,36 @@ def test_fenced_regular_release_requires_compatible_batch_identity() -> None:
     assert not any(call[0] == "stop_services" for call in backend.calls)
 
 
+def test_fenced_regular_release_accepts_current_entry_authority_from_completed_batch() -> None:
+    """The external Fence, not a historical Policy bit, owns source safety.
+
+    A regular release starts from the already disabled-and-fenced source
+    Worker.  That source may legitimately retain its Owner-approved ENTRY
+    Policy until the target identity atomically installs its paused posture.
+    Its fresh *completed* Certification Batch remains the authority for the
+    source preflight; the target still has to pass the stricter compatible
+    Batch postflight before it can be promoted.
+    """
+
+    backend = FakeDeploymentBackend(
+        source_entry_authority_armed=True,
+        entry_gate_ready=True,
+    )
+
+    result = deploy_tokyo_release(backend, _plan(enable_entry=False))
+
+    assert result.status == "pass"
+    assert backend.entry_fenced is True
+    source_refresh = backend.calls.index(
+        ("refresh_active_certification_batch", CURRENT_RELEASE)
+    )
+    source_stop = backend.calls.index(("stop_services", ALL_SERVICES))
+    target_refresh = backend.calls.index(
+        ("refresh_active_certification_batch", TARGET_RELEASE)
+    )
+    assert source_refresh < source_stop < target_refresh
+
+
 def test_fenced_regular_release_requires_exact_active_universes() -> None:
     """Catches using compatible Batch history with a drifted current manifest."""
 
@@ -1325,6 +1355,7 @@ def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
     assert result.entry_enabled is True
     assert backend.calls == [
         ("read_current_release",),
+        ("entry_is_inactive_disabled_and_fenced",),
         ("install_release", TARGET_COMMIT, TARGET_RELEASE),
         ("certify_flat", TARGET_RELEASE),
         ("probe_exchange", TARGET_RELEASE),
@@ -1427,6 +1458,7 @@ def test_closure_only_release_recovers_only_the_exact_pending_ticket() -> None:
     assert result.entry_enabled is False
     assert backend.calls == [
         ("read_current_release",),
+        ("entry_is_inactive_disabled_and_fenced",),
         ("install_release", TARGET_COMMIT, TARGET_RELEASE),
         ("certify_closure", TARGET_RELEASE, ticket_id),
         ("probe_exchange", TARGET_RELEASE),
@@ -1563,6 +1595,7 @@ class FakeDeploymentBackend:
         fail_at: str | None = None,
         entry_gate_ready: bool | None = None,
         expired_certification_batch: bool = False,
+        source_entry_authority_armed: bool = False,
     ) -> None:
         self.configured_leverage = configured_leverage
         self.closure_ticket_id = closure_ticket_id
@@ -1597,6 +1630,7 @@ class FakeDeploymentBackend:
         self.warming_universe_count = warming_universe_count
         self.certification_gate_failure = certification_gate_failure
         self.expired_certification_batch = expired_certification_batch
+        self.source_entry_authority_armed = source_entry_authority_armed
         self.probe_non_flat_failure_call = probe_non_flat_failure_call
         self.drain_status = drain_status
         self.fail_at = fail_at
@@ -1669,7 +1703,8 @@ class FakeDeploymentBackend:
             },
             "owner_policy": {
                 "policy_version": 4,
-                "new_entry_submit_enabled": False,
+                "new_entry_submit_enabled": self.source_entry_authority_armed
+                and self.runtime_commit == CURRENT_COMMIT,
             },
             "registry_identity": {
                 "status": "pass",
@@ -1691,7 +1726,10 @@ class FakeDeploymentBackend:
                 "expected": SEED_IDENTITY,
                 "actual": SEED_IDENTITY,
             },
-            "compatible_certification_batch_pass": True,
+            "compatible_certification_batch_pass": not (
+                self.source_entry_authority_armed
+                and self.runtime_commit == CURRENT_COMMIT
+            ),
             "entry_promotion_counts": {
                 "active_current_universes": 8,
                 "active_instruments": 15,
