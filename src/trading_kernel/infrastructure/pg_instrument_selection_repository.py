@@ -1403,7 +1403,7 @@ class PostgresInstrumentSelectionRepository:
             .values(
                 lifecycle_state="MATERIALIZING",
                 desired_at_ms=superseded_at_ms,
-                fenced_at_ms=vacuum.fenced_at_ms,
+                fenced_at_ms=superseded_at_ms,
                 projection_version=4,
             )
         )
@@ -1488,6 +1488,8 @@ class PostgresInstrumentSelectionRepository:
                     replacement_generation.materialization_generation_id
                 ),
                 state="RECONFIGURING",
+                fenced_at_ms=superseded_at_ms,
+                drained_at_ms=superseded_at_ms,
                 first_blocker="LATEST_VALID_SELECTION",
                 projection_version=retargeted_vacuum_version,
             )
@@ -1643,7 +1645,7 @@ class PostgresInstrumentSelectionRepository:
             .values(
                 lifecycle_state="MATERIALIZING",
                 desired_at_ms=superseded_at_ms,
-                fenced_at_ms=vacuum.fenced_at_ms,
+                fenced_at_ms=superseded_at_ms,
                 projection_version=4,
             )
         )
@@ -1734,6 +1736,8 @@ class PostgresInstrumentSelectionRepository:
                     replacement_generation.materialization_generation_id
                 ),
                 state="RECONFIGURING",
+                fenced_at_ms=superseded_at_ms,
+                drained_at_ms=superseded_at_ms,
                 first_blocker="LATEST_VALID_SELECTION",
                 projection_version=retargeted_vacuum_version,
             )

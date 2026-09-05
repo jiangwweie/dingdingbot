@@ -331,7 +331,7 @@ def deploy_tokyo_release(
     _, _, current_identity = _read_release_facts(
         backend,
         plan,
-        allow_fenced_source_entry_authority=source_entry_is_fenced,
+        allow_fenced_entry_authority=source_entry_is_fenced,
     )
     _require_marker(
         backend,
@@ -837,7 +837,7 @@ def _read_release_facts(
     backend: TokyoReleaseBackend,
     plan: DeploymentPlan,
     *,
-    allow_fenced_source_entry_authority: bool = False,
+    allow_fenced_entry_authority: bool = False,
 ) -> tuple[Mapping[str, object], Mapping[str, object], dict[str, str]]:
     if plan.closure_ticket_id is not None:
         certification = backend.certify_closure(
@@ -868,9 +868,7 @@ def _read_release_facts(
                 plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
             ),
             require_entry_promotion=plan.enable_entry,
-            allow_fenced_source_entry_authority=(
-                allow_fenced_source_entry_authority
-            ),
+            allow_fenced_entry_authority=allow_fenced_entry_authority,
         ),
     )
 
@@ -914,7 +912,15 @@ def _require_target_postflight(
         )
         if actual_compatibility != expected_compatibility:
             raise DeploymentBlocked("exact release compatibility fact differs")
-    certification, _, target_identity = _read_release_facts(backend, plan)
+    certification, _, target_identity = _read_release_facts(
+        backend,
+        plan,
+        allow_fenced_entry_authority=(
+            plan.closure_ticket_id is None
+            and not plan.enable_entry
+            and backend.entry_is_inactive_disabled_and_fenced()
+        ),
+    )
     if target_identity != {
         "runtime_commit": plan.target_commit,
         "schema_revision": plan.schema_revision,
@@ -1172,7 +1178,7 @@ def _require_release_facts(
     expected_leverage: int,
     compatible_upgrade: bool = False,
     require_entry_promotion: bool = False,
-    allow_fenced_source_entry_authority: bool = False,
+    allow_fenced_entry_authority: bool = False,
 ) -> dict[str, str]:
     if certification.get("status") != "pass":
         raise DeploymentBlocked("database flat certification failed")
@@ -1194,7 +1200,7 @@ def _require_release_facts(
     else:
         batch_gate = (
             "certification_batch_pass"
-            if allow_fenced_source_entry_authority
+            if allow_fenced_entry_authority
             else "compatible_certification_batch_pass"
         )
         required_gates = (
@@ -1203,7 +1209,7 @@ def _require_release_facts(
                 batch_gate,
                 (
                     "fenced source Certification Batch failed"
-                    if allow_fenced_source_entry_authority
+                    if allow_fenced_entry_authority
                     else "compatible Certification Batch identity failed"
                 ),
             ),

@@ -2765,6 +2765,7 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
                     strategy_entry_vacuums_current.c.state,
                     strategy_entry_vacuums_current.c.source_generation_id,
                     strategy_entry_vacuums_current.c.first_blocker,
+                    strategy_entry_vacuums_current.c.fenced_at_ms,
                 ).where(
                     strategy_entry_vacuums_current.c.entry_vacuum_id
                     == "vacuum:SOR-001:1704067200000:generation"
@@ -2786,8 +2787,26 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
         "RECONFIGURING",
         superseded.materialization_generation_id,
         "LATEST_VALID_SELECTION",
+        next_session_start_ms + 3_600_001,
     )
     assert retroactive_authority_count == 0
+
+    # The first retry owns the same newest Generation.  It must progress that
+    # Generation into warming rather than trying to supersede it with an equal
+    # Session/Snapshot pair, which violates the repository's strictly-newer
+    # supersession invariant.
+    warming = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=CoordinateSelectionMaterializationRequest(
+            selection_spec_id=SELECTION_SPEC_ID,
+            strategy_group_id="SOR-001",
+            session_start_ms=next_session_start_ms,
+            worker_id="materializer:recovered-owner-pause-retry",
+        ),
+        clock_ms=_Clock(next_session_start_ms + 3_600_010),
+    )
+    assert warming.disposition is MaterializationDisposition.LONG_WARMING
+    assert warming.materialization_generation_id == superseded.materialization_generation_id
 
 
 @pytest.mark.asyncio

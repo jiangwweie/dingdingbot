@@ -1095,6 +1095,7 @@ def test_fenced_regular_release_accepts_current_entry_authority_from_completed_b
 
     backend = FakeDeploymentBackend(
         source_entry_authority_armed=True,
+        target_entry_authority_retained=True,
         entry_gate_ready=True,
     )
 
@@ -1596,6 +1597,7 @@ class FakeDeploymentBackend:
         entry_gate_ready: bool | None = None,
         expired_certification_batch: bool = False,
         source_entry_authority_armed: bool = False,
+        target_entry_authority_retained: bool = False,
     ) -> None:
         self.configured_leverage = configured_leverage
         self.closure_ticket_id = closure_ticket_id
@@ -1631,6 +1633,7 @@ class FakeDeploymentBackend:
         self.certification_gate_failure = certification_gate_failure
         self.expired_certification_batch = expired_certification_batch
         self.source_entry_authority_armed = source_entry_authority_armed
+        self.target_entry_authority_retained = target_entry_authority_retained
         self.probe_non_flat_failure_call = probe_non_flat_failure_call
         self.drain_status = drain_status
         self.fail_at = fail_at
@@ -1703,8 +1706,14 @@ class FakeDeploymentBackend:
             },
             "owner_policy": {
                 "policy_version": 4,
-                "new_entry_submit_enabled": self.source_entry_authority_armed
-                and self.runtime_commit == CURRENT_COMMIT,
+                "new_entry_submit_enabled": (
+                    self.source_entry_authority_armed
+                    and self.runtime_commit == CURRENT_COMMIT
+                )
+                or (
+                    self.target_entry_authority_retained
+                    and self.runtime_commit == TARGET_COMMIT
+                ),
             },
             "registry_identity": {
                 "status": "pass",
@@ -1727,8 +1736,14 @@ class FakeDeploymentBackend:
                 "actual": SEED_IDENTITY,
             },
             "compatible_certification_batch_pass": not (
-                self.source_entry_authority_armed
-                and self.runtime_commit == CURRENT_COMMIT
+                (
+                    self.source_entry_authority_armed
+                    and self.runtime_commit == CURRENT_COMMIT
+                )
+                or (
+                    self.target_entry_authority_retained
+                    and self.runtime_commit == TARGET_COMMIT
+                )
             ),
             "entry_promotion_counts": {
                 "active_current_universes": 8,

@@ -609,6 +609,32 @@ async def coordinate_selection_materialization_once(
             )
             if previous_generation is None:
                 return _blocked("SUPERSEDED_GENERATION_MISSING")
+            # The Owner-Pause recovery path retargets the old drained Vacuum
+            # directly to this newest Generation.  On its next cadence the
+            # Vacuum still belongs to an older Session, but its source is
+            # already the exact current Snapshot/Session.  That is ordinary
+            # materialization progress, not another supersession.
+            if (
+                previous_generation.selection_snapshot_id
+                == snapshot.snapshot.selection_snapshot_id
+                and previous_generation.session_start_ms == request.session_start_ms
+            ):
+                return await _coordinate_generation_materialization(
+                    uow=uow,
+                    generation=previous_generation,
+                    vacuum=vacuum,
+                    snapshot=snapshot.snapshot,
+                    selected_members=snapshot.selected_members,
+                    previous_long_members=long_members,
+                    previous_short_members=short_members,
+                    now_ms=now_ms,
+                    materialization_timeout_ms=_MATERIALIZATION_TIMEOUT_MS,
+                )
+            if (
+                previous_generation.session_start_ms is None
+                or previous_generation.session_start_ms >= request.session_start_ms
+            ):
+                return _blocked("SUPERSEDED_GENERATION_SESSION_CONFLICT")
             await _abandon_generation_targets(
                 uow=uow,
                 generation_id=previous_generation.materialization_generation_id,
