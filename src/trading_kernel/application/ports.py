@@ -1639,6 +1639,16 @@ class InstrumentSelectionRepository(Protocol):
         superseded_at_ms: int,
     ) -> MaterializationGeneration: ...
 
+    async def supersede_owner_paused_vacuum_with_generation(
+        self,
+        *,
+        previous_generation: MaterializationGeneration,
+        replacement_generation: MaterializationGeneration,
+        replacement_targets: tuple[MaterializationTarget, ...],
+        vacuum: StrategyEntryVacuum,
+        superseded_at_ms: int,
+    ) -> MaterializationGeneration: ...
+
     async def supersede_generation_and_resolve_valid_empty(
         self,
         *,

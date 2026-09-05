@@ -39,6 +39,7 @@ from src.trading_kernel.application.install_strategy_universe import (
 from src.trading_kernel.application.owner_control import (
     ControlMutationRequest,
     set_strategy_entry_state,
+    stage_dynamic_selection_mode,
 )
 from src.trading_kernel.application.recover_expired_dynamic_activation import (
     ExpiredDynamicActivationRecoveryStatus,
@@ -2671,6 +2672,122 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
     assert authority_count == 0
     assert after_ticket_count == before_ticket_count
     assert after_command_count == before_command_count
+
+    resumed_at_ms = SESSION_START_MS + 86_400_000 + 4 * 3_600_000
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        resumed = await set_strategy_entry_state(
+            uow,
+            strategy_group_id="SOR-001",
+            target_state=StrategyEntryState.ENABLED,
+            request=ControlMutationRequest(
+                expected_version=2,
+                reason="retry_dynamic_after_recovery",
+                idempotency_key="owner-request:expired-first-activation:resume",
+                owner_identity="owner",
+                now_ms=resumed_at_ms,
+            ),
+            authentication_strength="totp_step_up",
+        )
+    assert resumed.control_version == 3
+
+    next_session_start_ms = SESSION_START_MS + 2 * 86_400_000
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        staged = await stage_dynamic_selection_mode(
+            uow,
+            strategy_group_id="SOR-001",
+            effective_session_start_ms=next_session_start_ms,
+            request=ControlMutationRequest(
+                expected_version=2,
+                reason="retry_dynamic_after_recovery",
+                idempotency_key="owner-request:expired-first-activation:retry",
+                owner_identity="owner",
+                now_ms=resumed_at_ms,
+            ),
+            authentication_strength="totp_step_up",
+        )
+    assert staged.pending_effective_session_start_ms == next_session_start_ms
+    next_members = tuple(
+        sorted(
+            (
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[1],
+                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[3],
+            )
+        )
+    )
+    async with head_template_engine.begin() as connection:
+        await _seed_snapshot(
+            connection,
+            session_start_ms=next_session_start_ms,
+            selected_members=next_members,
+        )
+
+    superseded = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=CoordinateSelectionMaterializationRequest(
+            selection_spec_id=SELECTION_SPEC_ID,
+            strategy_group_id="SOR-001",
+            session_start_ms=next_session_start_ms,
+            worker_id="materializer:recovered-owner-pause-supersession",
+        ),
+        clock_ms=_Clock(next_session_start_ms + 3_600_000),
+    )
+
+    assert superseded.disposition is MaterializationDisposition.GENERATION_DESIRED
+    assert superseded.materialization_generation_id == (
+        f"generation:{SELECTION_SPEC_ID}:{next_session_start_ms}"
+    )
+    async with head_template_engine.connect() as connection:
+        old_generation = (
+            await connection.execute(
+                sa.select(
+                    strategy_universe_materialization_generations.c.lifecycle_state,
+                    strategy_universe_materialization_generations.c.projection_version,
+                ).where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id
+                    == generation_id
+                )
+            )
+        ).one()
+        new_generation = (
+            await connection.execute(
+                sa.select(
+                    strategy_universe_materialization_generations.c.lifecycle_state,
+                    strategy_universe_materialization_generations.c.session_start_ms,
+                ).where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id
+                    == superseded.materialization_generation_id
+                )
+            )
+        ).one()
+        retargeted_vacuum = (
+            await connection.execute(
+                sa.select(
+                    strategy_entry_vacuums_current.c.state,
+                    strategy_entry_vacuums_current.c.source_generation_id,
+                    strategy_entry_vacuums_current.c.first_blocker,
+                ).where(
+                    strategy_entry_vacuums_current.c.entry_vacuum_id
+                    == "vacuum:SOR-001:1704067200000:generation"
+                )
+            )
+        ).one()
+        retroactive_authority_count = int(
+            await connection.scalar(
+                sa.select(sa.func.count())
+                .select_from(selection_session_authorities)
+                .where(selection_session_authorities.c.session_start_ms == SESSION_START_MS)
+            )
+            or 0
+        )
+    assert old_generation[0] == "ABANDONED"
+    assert old_generation[1] == generation_version_before_recovery + 2
+    assert new_generation == ("MATERIALIZING", next_session_start_ms)
+    assert retargeted_vacuum == (
+        "RECONFIGURING",
+        superseded.materialization_generation_id,
+        "LATEST_VALID_SELECTION",
+    )
+    assert retroactive_authority_count == 0
 
 
 @pytest.mark.asyncio

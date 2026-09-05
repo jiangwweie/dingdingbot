@@ -550,6 +550,52 @@ async def coordinate_selection_materialization_once(
             )
         if (
             vacuum is not None
+            and vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED
+            and vacuum.source_generation_id is not None
+            and vacuum.session_start_ms < request.session_start_ms
+            and snapshot is not None
+            and selection_control.selection_mode is SelectionMode.STATIC_BASELINE
+            and selection_control.pending_selection_mode
+            is SelectionMode.DYNAMIC_SELECTION
+            and selection_control.pending_effective_session_start_ms
+            == request.session_start_ms
+        ):
+            previous_generation = (
+                await uow.instrument_selection.get_materialization_generation(
+                    vacuum.source_generation_id,
+                    for_update=True,
+                )
+            )
+            if previous_generation is None:
+                return _blocked("OWNER_PAUSED_GENERATION_MISSING")
+            if not snapshot.selected_members:
+                return _blocked("OWNER_PAUSED_VALID_EMPTY_REQUIRES_RESOLUTION")
+            replacement, replacement_targets = _build_pending_generation(
+                snapshot=snapshot.snapshot,
+                selected_members=snapshot.selected_members,
+                previous_pair=current_pair,
+                created_at_ms=now_ms,
+            )
+            materializing = (
+                await uow.instrument_selection.supersede_owner_paused_vacuum_with_generation(
+                    previous_generation=previous_generation,
+                    replacement_generation=replacement,
+                    replacement_targets=replacement_targets,
+                    vacuum=vacuum,
+                    superseded_at_ms=now_ms,
+                )
+            )
+            return CoordinateSelectionMaterializationResult(
+                disposition=MaterializationDisposition.GENERATION_DESIRED,
+                selection_snapshot_id=snapshot.snapshot.selection_snapshot_id,
+                materialization_generation_id=(
+                    materializing.materialization_generation_id
+                ),
+                entry_vacuum_id=vacuum.entry_vacuum_id,
+                reason_code="OWNER_PAUSE_VACUUM_SUPERSEDED_BY_NEW_SELECTION",
+            )
+        if (
+            vacuum is not None
             and vacuum.state is StrategyEntryVacuumState.RECONFIGURING
             and vacuum.source_generation_id is not None
             and vacuum.session_start_ms < request.session_start_ms
