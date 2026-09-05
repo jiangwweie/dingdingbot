@@ -30,23 +30,23 @@ different Netting Domains progress concurrently.
 | Area | Verified state |
 | --- | --- |
 | Integration branch | `dev` |
-| Verified at | `2026-09-04`; direct PostgreSQL, systemd, Owner API and Binance readonly evidence after the failed first Dynamic activation was Owner-paused |
-| Production commit | `f8abcfc816b1986a1736ca8e69e1c1bd24d934b5` |
-| Production tag | `tokyo-runtime-2026.09.04.1`; annotated, immutable and pushed |
-| Production release | `/opt/brc/releases/brc-trading-kernel-f8abcfc816b1` |
+| Verified at | `2026-09-06`; direct Tokyo PostgreSQL, systemd and Binance USDⓈ-M readonly evidence after Dynamic fallback recovery and official Entry Promotion |
+| Production commit | `4aa202fffe9ce3a939e647b627666e25e14fdb2d` |
+| Production tag | Pending a post-promotion stability review; no tag is implied by same-Schema deployment alone |
+| Production release | `/opt/brc/releases/brc-trading-kernel-4aa202fffe9c` |
 | Production-commit certification | R3 `pass`; complete unit/architecture, PostgreSQL integration, full-chain, Ruff, Mypy and diff gates passed for the exact deployed commit |
-| Deployment phase | Same-Schema stopped-flat R3 deployment completed on `0007`; target Policy v15 Certification Batches completed before final postflight, with no migration, downgrade, dual write or old writer restart |
-| PostgreSQL identity | Alembic and runtime authority identify `0007_exit_profile_authority_v1`; Registry, Policy, Seed and runtime capabilities agree with `f8abcfc8` |
+| Deployment phase | Three same-Schema R3 repairs completed on `0007`; no migration, downgrade, dual write or old writer restart occurred |
+| PostgreSQL identity | Alembic and runtime authority identify `0007_exit_profile_authority_v1`; Registry, Policy, Seed and runtime capabilities agree with `4aa202ff` |
 | History preservation | Both forward revisions preserved certified lineage; B completed exact `0006` source preservation before its `0007` runtime identity rotation |
 | StrategyUniverse deployment | Eight Universes remain Active, zero are Warming, 58 scopes are Active and the Static SOR pair remains the current pair |
-| Owner controls | Policy version `15` has `new_entry_submit_enabled=false`; Crypto `SOR-001` remains explicitly Owner-paused at Strategy Control version `4` |
-| Runtime ownership | Observation, Lifecycle and Reconciliation are active; Entry is inactive and the deployment Entry fence is present |
-| Current PostgreSQL activity | Zero active Ticket, Position, unresolved Exchange Command and open Incident |
-| Exchange postflight | Binance reports zero non-flat position domains and zero open-order domains; independent sides and Cross margin remain valid |
-| Dynamic Selection postflight | The `2026-09-01 00:00 UTC` attempt remains `ABANDONED / OWNER_PAUSED`; `EXPIRED_ACTIVATION_RECOVERED` cleared the stale pending transition, preserved Static mode and pair, and created zero retroactive Session Authority |
+| Owner controls | Policy version `16` has `new_entry_submit_enabled=true`; `SOR-001` Selection Control is `static_baseline` at version `5` |
+| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation are active/enabled; the Entry fence is absent after official Promotion |
+| Current PostgreSQL activity | One active CPM ETH Ticket is `position_protected`; no open Incident and no unknown Command outcome exist |
+| Exchange postflight | Binance reports the matching protected ETH LONG domain, no unrelated open-order domain, independent sides and Cross margin valid |
+| Dynamic Selection postflight | The authorized `2026-09-05 00:00 UTC` Dynamic attempt reached audited `FALLBACK_PREVIOUS` after materialization timeout. Static SOR pair was restored with no fabricated Dynamic Authority; a new Dynamic attempt requires a separate next-session Owner/TOTP action |
 | ExitProfile postflight | Eight immutable ExitProfiles, eight initial Bindings, eight current pointers and eight `ACTIVATED` events exist; no Profile switch/retirement side effect occurred |
-| New trading activity | The controlled close reached terminal Review for all three Tickets before deployment; the R3 deployment and Dynamic recovery created zero Ticket or Exchange Command |
-| Scope boundary | Global ENTRY and `SOR-001` remain paused. Entry resume, a new first Dynamic activation, and ExitProfile switch/retirement each remain separate exact Owner actions |
+| New trading activity | Official Entry Promotion produced `ticket:1c612dcecd76efca3c96db7c79819fad`: CPM ETH LONG, Entry/Initial Stop/TP1 accepted and Aggregate `position_protected` |
+| Scope boundary | Static Entry is live. A new Dynamic activation and any ExitProfile switch/retirement remain separate exact Owner actions |
 
 ## Owner Console R1/R2 Release
 
@@ -74,9 +74,9 @@ R3 release certification）
 | Root cause B | fallback Gap Audit ran before the first eligible `01:15 UTC` close and persisted `AUTHORITY_GAP_SOURCE_INTEGRITY_FAILED` from an invalid four-bar window |
 | Owner containment | `SOR-001` is paused at Strategy Control version `4`; the failed Generation is `ABANDONED`, its Vacuum is `OWNER_PAUSED`, and existing Tickets continue normal protection and exit |
 | Permission repair | The Owner control role now has the exact Vacuum current/event privileges required by the official Pause path; the tracked source repair is isolated on `codex/owner-console-vacuum-grant-fix` |
-| Runtime repair | `f8abcfc816b1986a1736ca8e69e1c1bd24d934b5` is deployed and R3-certified on Schema `0007_exit_profile_authority_v1` |
-| Recovery result | `recover_expired_dynamic_activation` advanced Selection Control to version `3`, cleared the exact stale pending transition, preserved the Static pair and Owner Pause, and appended `EXPIRED_ACTIVATION_RECOVERED` |
-| Current gate | Recovery is complete; Global ENTRY, Entry Worker and first Dynamic activation remain intentionally disabled pending an explicit next-session activation decision |
+| Runtime repair | `4aa202fffe9ce3a939e647b627666e25e14fdb2d` is deployed and R3-certified on Schema `0007_exit_profile_authority_v1`; it fixes Owner-Pause retarget retry/timeout handling, fenced same-Schema Certification gating and bounded trigger-suppression identities |
+| Recovery result | The recovered old Vacuum completed a bounded Gap Audit and committed `FALLBACK_PREVIOUS`; Selection Control version `5` cleared the pending Dynamic transition, retained the Static pair and recorded the exact audited Static authority |
+| Current gate | Static Entry is live and the first post-recovery CPM ETH Ticket is protected. The failed Dynamic generation is terminal and must not be revived; the next Dynamic attempt remains a new Owner/TOTP action |
 
 ## Deployment Repairs Closed
 
