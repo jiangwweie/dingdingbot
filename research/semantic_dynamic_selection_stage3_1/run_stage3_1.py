@@ -53,6 +53,9 @@ ARTIFACT_NAMES = (
     "stage3_1_dynamic_events.parquet",
     "stage3_1_dynamic_outcomes.parquet",
 )
+BASELINE_RELATIVE_PATH = (
+    "research/multi_strategy_selection/artifacts/replayed_events.parquet"
+)
 
 
 def _sha256(path: Path) -> str:
@@ -285,20 +288,8 @@ def run(
     output_dir.mkdir(parents=True, exist_ok=True)
     publish_dir.mkdir(parents=True, exist_ok=True)
     selection = build_selection_artifacts(cache_dir)
-    baseline = pd.read_parquet(
-        Path(__file__).resolve().parents[1]
-        / "semantic_dynamic_selection/artifacts/stage3_baseline_membership_events.parquet"
-    )
-    baseline = baseline.loc[baseline["cardinality"] == 16].drop(
-        columns=[
-            "cardinality",
-            "active_selection_cutoff_ms",
-            "selection_snapshot_id",
-            "selection_feature_value",
-            "selection_rank",
-            "selection_cohort",
-        ]
-    )
+    repo_root = Path(__file__).resolve().parents[2]
+    baseline = pd.read_parquet(repo_root / BASELINE_RELATIVE_PATH)
     classified = classify_baseline_events(baseline, selection.decisions)
     dynamic_events, evaluations, rank_rows = replay_dynamic_detectors(
         cache_dir,
@@ -365,7 +356,6 @@ def run(
     )
     for name in ARTIFACT_NAMES:
         shutil.copy2(output_dir / name, publish_dir / name)
-    repo_root = Path(__file__).resolve().parents[2]
     source_files = (
         "research/semantic_dynamic_selection_stage3_1/core.py",
         "research/semantic_dynamic_selection_stage3_1/selection.py",

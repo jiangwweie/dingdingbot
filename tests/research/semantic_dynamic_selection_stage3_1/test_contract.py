@@ -10,6 +10,9 @@ from research.semantic_dynamic_selection_stage3_1.core import (
     cohort_for_rank,
     persistent_leadership_score_6h,
 )
+from research.semantic_dynamic_selection_stage3_1.run_stage3_1 import (
+    BASELINE_RELATIVE_PATH,
+)
 
 
 def test_cpm_v1_uses_absolute_not_signed_directional_efficiency() -> None:
@@ -44,3 +47,9 @@ def test_mi_and_brf2_stage3_features_are_reused_unchanged() -> None:
         for index in range(72)
     )
     assert residual_extension_z_24h(candidate, market) > 0
+
+
+def test_stage3_1_reclassifies_the_original_stage2_all24_events() -> None:
+    assert BASELINE_RELATIVE_PATH == (
+        "research/multi_strategy_selection/artifacts/replayed_events.parquet"
+    )
