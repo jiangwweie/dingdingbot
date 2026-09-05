@@ -2,7 +2,7 @@
 title: EVENTSPEC_INSTRUMENT_FIT_RESEARCH_OVERVIEW
 status: CURRENT_RESEARCH_OVERVIEW
 date: 2026-08-23
-last_verified: 2026-08-25
+last_verified: 2026-09-06
 phase: P3-X
 production_authority: NONE
 ---
@@ -18,9 +18,11 @@ production_authority: NONE
 1. 同一个 **Crypto SOR v4** 在不同 Instrument 上观察到历史横截面差异；
 2. 当前冻结方法没有观察到固定 Symbol 排名的稳定样本外延续。
 
-因此项目不维护静态“好币名单”，也不直接建设通用 Selector 平台。Historical Replay
-已经通过全部冻结定量 Gate；Owner 随后决定取消独立 Forward Shadow，把下一阶段收敛为
-生产级 Dynamic Instrument Selection & Trading V0。当前主线是：
+因此项目不维护静态“好币名单”。SOR Historical Replay通过冻结定量Gate后，完成了
+SOR Dynamic Selection V0设计和实现。随后的Multi-Strategy Stage-2/2.1、Stage-3与最后一次
+Stage-3.1研究已经结束；Owner接受带provenance note的独立复核，授权进入
+**Generic Multi-Strategy Dynamic Selection V1详细设计**。进一步Feature研究关闭，
+新Generic实现及生产activation均未授权。
 
 ```text
 Strategy Thesis
@@ -32,6 +34,31 @@ Strategy Thesis
 -> Golden parity + production certification
 -> separately approved small-capital activation
 ```
+
+## Current Multi-Strategy Design Input
+
+| Strategy | Frozen Selector | Entry / Retain | Independent review boundary |
+| --- | --- | --- | --- |
+| SOR | Existing Dynamic V0 | 7 / 7 | 保持原Decimal Golden、时钟、执行与恢复语义 |
+| CPM | Absolute Directional Efficiency V1 | 16 / 16 | capture 62.6%，`TOP16_FALLBACK_CAPTURE_BELOW_FLOOR`；未证明质量改善 |
+| MPG | Persistent Leadership Score V1 | 12 / 16 | 有区分度；Outcome偏弱但样本稀疏；名单实际可为12..16 |
+| MI | Positive Impulse Recency V0 | 16 / 16 | capture 86.7%；SPARSE |
+| BRF2 | Residual Extension V0 | 16 / 16 | capture 74.4%，`TOP16_FALLBACK_CAPTURE_BELOW_FLOOR`；基本中性 |
+
+来源：[Stage-3.1冻结报告](https://github.com/jiangwweie/dingdingbot/blob/f65d72fa92580de4b8c0323f4106d5975b97f4eb/research/semantic_dynamic_selection_stage3_1/artifacts/STAGE3_1_FINAL_SEMANTIC_REVISION_REPORT.md)、
+Owner提供的独立复核与
+[追加provenance amendment](https://github.com/jiangwweie/dingdingbot/blob/42957b2091b988c53d6e03cb24639c17c54229b5/research/semantic_dynamic_selection_stage3_1/STAGE3_1_PROVENANCE_AMENDMENT.md)。
+Top16 fallback来自pre-result correction，不是原Protocol文本独自推出；原报告、Protocol、
+manifest和全部研究结果保持不变，不重跑Replay。
+
+当前设计：
+[Generic Multi-Strategy Dynamic Selection V1](2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md)。
+状态为 **DESIGN_REVIEW_REQUIRED / implementation_authority=NONE / production_authority=NONE**。
+各策略独立STATIC/DYNAMIC；MPG/MI固定Comparison24与动态Tradable集合分离。
+Event-time Context Forward Shadow保留辅助研究定位，不作为此生产选币设计的前置实现。
+
+以下SOR研究证据和P3-X表是已完成路线的历史记录；部署与当前控制事实只由
+`docs/current/MAIN_CONTROL_ROADMAP.md`拥有，不从历史阶段授权文字推导实时权限。
 
 ## Known Evidence
 
@@ -176,7 +203,7 @@ Historical Replay 的 `EMPTY` 是固定 7-slot 对照语义，不是第五个成
 的生产语义是：`Ready=1..7` 全部 Selected，`Ready=0` 记录 **`VALID_EMPTY`**，整个周期无新
 交易且不 fallback previous；该运行决策不回写 Historical Replay。
 
-### Strategy theses
+### Earlier SOR-stage strategy theses (historical)
 
 | Strategy | Selection Thesis | First candidate features |
 | --- | --- | --- |
@@ -184,9 +211,9 @@ Historical Replay 的 `EMPTY` 是固定 7-slot 对照语义，不是第五个成
 | **CPM** | Trend → Healthy Pullback → Continuation | Trend efficiency、Pullback depth、formal R geometry |
 | **BRF2** | Extension → Rejection → Failure | Rally extension、relative strength、HTF persistence |
 
-当前只实施 **SOR**。CPM/BRF2 在 SOR 抽象得到验证后再复制。MPG/MI 在动态 Tradable
-Universe 前必须先把稳定 **ComparisonUniverse** 与可交易 **StrategyUniverse** 分开，
-避免 `rank == 1` 在单成员集合中退化为恒真。
+上表是SOR阶段的早期研究方向，不是新Generic算法参数。当前冻结算法由本文件开头的
+Multi-Strategy表和Stage-3.1 evidence定义；新设计必须将稳定 **ComparisonUniverse**
+与可交易 **StrategyUniverse** 分开，避免缩小比较集合改变 `rank == 1`。
 
 ## Architecture Boundary
 
@@ -199,7 +226,7 @@ Owner Allowed Research Panel
 -> exact SOR v4 Historical Replay
 ```
 
-当前生产设计的范围是：
+已完成SOR V0生产设计的范围是（新Generic扩展见当前设计链接）：
 
 ```text
 Selection Plane
@@ -249,7 +276,7 @@ fact只作为现有Release Certification manifest的薄投影，不形成第二�
 `FALLBACK_PREVIOUS + STATIC_BASELINE`并保持mode Static；`VALID_EMPTY`只从commit向前阻止new
 ENTRY，不追溯撤销此前合法Ticket/fill或protected lifecycle。
 
-## Phase Order
+## SOR Phase History
 
 | Phase | Scope | Production effect |
 | --- | --- | --- |
@@ -275,22 +302,23 @@ ENTRY，不追溯撤销此前合法Ticket/fill或protected lifecycle。
 
 ## Current Next Step
 
-**P3-X.2 生产详细设计已经批准**：
+**复核Generic Multi-Strategy Dynamic Selection V1详细设计**：
 
 ```text
-2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md
+2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
 ```
 
-独立 Forward Shadow 文档已标记`SUPERSEDED`。Implementation Plan已经写入：
+冻结当前状态：
 
 ```text
-docs/superpowers/plans/
-2026-08-23-sor-dynamic-instrument-selection-trading-v0-implementation-plan.md
+STAGE3_1_REVIEW = ACCEPTED_WITH_PROVENANCE_NOTE
+further_feature_research = CLOSED
+generic_design_status = DESIGN_REVIEW_REQUIRED
+generic_selection_design_authority = ALLOWED_FOR_ELIGIBLE_STRATEGIES
+generic_selection_implementation_authority = NONE
+production_dynamic_activation_authority = NONE
 ```
 
-它把Schema、test-first批次、Migration、三个独立lease、continuity/Gap Audit close边界、Vacuum/
-ENTRY drain、warming/activation/fallback、release classification和rollback拆成DS-00至DS-10可验收
-Task，当前状态`PLAN_APPROVED / LOCAL_IMPLEMENTATION_COMPLETE / production_authority=NONE`。
-DS-00至DS-10本地代码、测试、认证组合和Deployment/Activation evidence package已闭合；exact
-candidate只由clean-HEAD R4 manifest识别。生产Migration执行、部署、生产Selection、Strategy
-Control、Policy与首次Dynamic activation仍无授权。
+Generic设计复核通过后编写并复核Implementation Plan，再授权相应实施范围。
+SOR已有DS-00至DS-10设计、Golden、实现与修复作为基线继续保留，不重新开启该研究。
+生产修复进入dev，研究分支保持独立，详细设计相对dev仅产生文档差异。

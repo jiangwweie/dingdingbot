@@ -39,3 +39,13 @@ The multi-asset roadmap owns the stable expansion sequence only. Venue facts,
 Universe membership, capital authority, implementation status, and deployment
 state continue to come from code, PostgreSQL, exchange facts, and
 `MAIN_CONTROL_ROADMAP.md`.
+
+## Design Review
+
+[Generic Multi-Strategy Dynamic Selection V1 detailed design](superpowers/specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md)
+is `DESIGN_REVIEW_REQUIRED`. It defines independent strategy selection using
+the accepted Stage-3.1 inputs; implementation and production activation are not
+authorized by this draft. The
+[research overview](superpowers/specs/2026-08-18-eventspec-instrument-fit-research-overview.md)
+records the evidence boundary and provenance amendment. These design/research
+documents do not extend the `docs/current` runtime-authority allowlist.
