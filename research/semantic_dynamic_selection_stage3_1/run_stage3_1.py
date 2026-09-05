@@ -282,9 +282,10 @@ def run(
     publish_dir: Path,
     *,
     protocol_commit_sha: str,
+    run_commit_sha: str,
 ) -> dict[str, object]:
-    if len(protocol_commit_sha) != 40:
-        raise ValueError("protocol commit SHA must be exact")
+    if len(protocol_commit_sha) != 40 or len(run_commit_sha) != 40:
+        raise ValueError("protocol and run commit SHAs must be exact")
     output_dir.mkdir(parents=True, exist_ok=True)
     publish_dir.mkdir(parents=True, exist_ok=True)
     selection = build_selection_artifacts(cache_dir)
@@ -369,6 +370,7 @@ def run(
         "research_status": "STAGE3_1_FINAL_SEMANTIC_REVISION_COMPLETE",
         "stage3_authority_commit": "28b47e6d219acf2a008aacce92be1bd140b98964",
         "protocol_commit_sha": protocol_commit_sha,
+        "pre_result_run_commit_sha": run_commit_sha,
         "protocol_sha256": _sha256(protocol_path),
         "market_data_manifest_sha256": _sha256(
             cache_dir / "market_data_manifest.json"
@@ -408,12 +410,14 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--publish-dir", type=Path, required=True)
     parser.add_argument("--protocol-commit-sha", required=True)
+    parser.add_argument("--run-commit-sha", required=True)
     args = parser.parse_args()
     manifest = run(
         args.cache_dir.resolve(),
         args.output_dir.resolve(),
         args.publish_dir.resolve(),
         protocol_commit_sha=args.protocol_commit_sha,
+        run_commit_sha=args.run_commit_sha,
     )
     print(json.dumps(manifest["overall"], sort_keys=True))
     return 0
