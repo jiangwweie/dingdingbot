@@ -1,6 +1,9 @@
 ---
 title: GENERIC_MULTI_STRATEGY_DYNAMIC_SELECTION_V1_IMPLEMENTATION_PLAN
 status: PLAN_REVIEW_REQUIRED
+independent_review: CONDITIONALLY_APPROVED
+required_plan_amendments: COMPLETE
+owner_confirmation: PENDING
 date: 2026-09-06
 design_authority: ../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
 implementation_plan_authority: ALLOWED
@@ -29,6 +32,8 @@ further_feature_research = CLOSED
 
 本计划完成后交独立复核，获得明确实现授权后才执行下面的RED/GREEN、创建migration文件或生成production numeric candidate。文本中的“执行/实现”均为未来Task要求。
 
+针对`4b2947e9f43fb3e2c4f165c91a957e0f20adb632`的最新独立复核已批准设计，并对Plan给出两项条件。本轮将strategy-scoped certification和Static migration neutrality并入原卡，不新增Task、不修改已批准设计主体。**Owner最新指令是“改完文档等我确认”**，因此即使amendment已完成，仍保持`implementation_authority=NONE / active_execution_scope=NONE / owner_confirmation=PENDING`，不提前执行任何卡。
+
 ## 2. 工作区、基线与已知缺口
 
 | 项目 | 直接检查的事实 | 实施含义 |
@@ -49,11 +54,11 @@ further_feature_research = CLOSED
 
 | Task | 成果 | 依赖 | 完成边界 |
 | --- | --- | --- | --- |
-| GS-00 | Numeric / semantic fixtures与BRF2 hard parity | 代码实施授权 | source/候选身份及全部cutoff可认证 |
-| GS-01 | Comparison-transition Episode纯domain | GS-00 | 不能跨comparison继承armed |
+| GS-00 | Common/SOR与各策略numeric认证矩阵 | 代码实施授权 | common baseline与每策略PASS/FAIL分开记录 |
+| GS-01 | Comparison-transition Episode纯domain | GS-00 common baseline ready | 不能跨comparison继承armed |
 | GS-02 | Generic Authority / EMPTY / membership policy纯domain | GS-01 | single/pair/non-trading精确shape |
 | GS-03 | Staleness / period / current-close纯domain | GS-02 | grace有界；hourly可交易且无追认 |
-| GS-04 | Forward schema与PG保全/约束 | GS-00..03 | 不含隐式activation或runtime cadence副作用 |
+| GS-04 | Forward schema与PG保全/约束 | GS-00 common baseline ready；GS-01..03 DONE；被安装Spec各自CERT PASS | 全family schema；只安装合格Spec；Static migration neutrality |
 | GS-05 | Generic Selection Plane | GS-04 | 截止于immutable Snapshot handoff |
 | GS-06 | Comparison与Episode Observation集成 | GS-04/05 | fixed24及rebase权威生效 |
 | GS-07 | Universe targets / Warming materialization | GS-04/05 | targets STAGED，无提前grant |
@@ -62,9 +67,9 @@ further_feature_research = CLOSED
 | GS-10 | Worker hosting / recovery / bounded reads | GS-09 | 三logical lease、公平单warming slot |
 | GS-11 | Owner API与Console | GS-08/10 | 策略独立、TOTP与可读进度 |
 | GS-12 | ≥24h equivalent churn soak | GS-09..11 | 冻结性能/机会供给门槛通过 |
-| GS-13 | Migration rehearsal / release certification /交付 | GS-00..12 | exact clean candidate、零生产动作 |
+| GS-13 | Migration rehearsal / release certification /交付 | GS-00 common/SOR PASS；GS-01..12 common及本candidate安装策略路径DONE | generic core R4 + strategy matrix、零生产动作 |
 
-编号是依赖顺序，不强制每张只能有一个commit；但没有完成前四张domain card，不进入Schema。Task的GS编号与设计验收INV编号分开，追踪表见§5。
+编号是依赖顺序，不强制每张只能有一个commit；前四卡的common/SOR与通用domain条件未完成，不进入Schema。**单个新Selector认证FAIL不等于common baseline FAIL**；后续各卡的共同实现及已通过策略分支可以继续，失败策略分支保持BLOCKED_NOT_INSTALLED。Task的GS编号与设计验收INV编号分开，追踪表见§5。
 
 ### 3.2 每卡统一合同
 
@@ -75,6 +80,48 @@ further_feature_research = CLOSED
 - **Evidence**：记录exact code SHA、测试命令与结果、fixture/source/spec digests、剩余blocker。`PARTIAL/BLOCKED`不标DONE；无测试skip偷过关。
 - **统一禁止**：Tokyo写入/部署、生产SQL、exchange writes、自动resume/activation、Feature/N/cadence搜索、资金/ExitProfile扩张、YAML配置、双写或旧schema reader。
 - **Done**：卡内证据齐全、相关Fast检查通过、`git diff --check`通过，才进入依赖卡。Release tier只在最终exact candidate跑一次。
+
+### 3.3 Strategy-scoped certification与DAG（P0-PLAN-1）
+
+GS-00输出以下完整矩阵，PASS/FAIL均须有exact candidate、输入及数值合同digest、checked范围、命令和reason；未评估不得伪装成PASS：
+
+```text
+COMMON_NUMERIC_AUTHORITY = PASS | FAIL
+SOR_GOLDEN = PASS | FAIL
+CPM_SPEC_CERT = PASS | FAIL
+MPG_SPEC_CERT = PASS | FAIL
+MI_SPEC_CERT = PASS | FAIL
+BRF2_SPEC_CERT = PASS | FAIL
+```
+
+common包含共用输入identity/canonical arithmetic/序列化/确定性和独立expected fixture来源的可信性；若shared输入digest损坏影响全部策略，不能伪称BRF2-only问题。单策略窗口/算法/集合parity失败可以归入该策略。归因必须有证据。
+
+| 结果 | 依赖后果 | 安装/运行后果 |
+| --- | --- | --- |
+| COMMON FAIL或SOR_GOLDEN FAIL | 整体STOP，不能进入GS-04或release | 不安装新能力 |
+| Common/SOR PASS，某新Spec FAIL | common baseline ready；继续common与其他已认证策略的GS-01..13 | 失败Spec不安装、不允许activation；保留该策略原Static行为 |
+| Common/SOR PASS，目标Spec PASS | 允许推进该Spec后续实施与认证分支 | 只可安装初始STATIC控制，实盘activation仍独立授权 |
+| PG/source neutrality/shared runtime回归FAIL | 共同runtime或该source cutover STOP | 不能用排除单个Selector绕过共享安全失败 |
+
+**能力支持family ≠ 安装某个Spec ≠ 批准activation。** 本Plan选择“不安装失败Spec”方案，不新增看似可用的CERTIFICATION_BLOCKED runtime Spec。失败状态保存在认证证据和只读可用性展示；现有Static StrategyGroup/Universe/交易控制继续保全。API须明确拒绝其Dynamic activation，不能自动补seed、Job或SelectionControl来绕过。
+
+每张卡可分别报告`common=DONE`、各策略`DONE/BLOCKED_NOT_INSTALLED`；失败项始终可见，不称“四策略全通过”。`GS-00_COMMON_BASELINE_READY`要求common/SOR PASS及四个策略评估矩阵已明确记录，并不要求四个SPEC_CERT全PASS。
+
+candidate的installed Spec集合、Spec digests及证据绑定在release freeze前固定，由受审typed installation定义落入PG，不是production读取报告/JSON/YAML、也不是调用方传入跳过认证的开关。更改安装集合建立新candidate，重做受影响的seed/migration/runtime/认证证据。
+
+### 3.4 逐卡SOR回归子集（P1）
+
+会修改共享SOR runtime的GS-02、GS-04、GS-05、GS-07、GS-08、GS-09、GS-10，Done必须包含`relevant SOR Golden / regression subset = PASS`。每卡在修改前固定受影响子集，失败不得拖到GS-13；GS-00/13仍分别保留完整Golden及最终认证，不要求每次小编辑重复全量Release。
+
+| 卡 | 最低相关SOR子集 |
+| --- | --- |
+| GS-02 | typed pair/EMPTY、旧hash roundtrip、Top7/member policy |
+| GS-04 | 0007 SOR lineage preservation、daily/pair约束、无migration新grant |
+| GS-05 | 原SelectionCore Golden切片、96×15m/cutoff、source failure |
+| GS-07 | LONG/SHORT serial warming、staged无权限、global slot |
+| GS-08 | atomic pair、first-close/Gap Audit、Owner-Pause retarget/fallback四类修复 |
+| GS-09 | SOR birth authority、Vacuum cancel/partial/unknown、existing Ticket保护 |
+| GS-10 | daily 01:00/01:15、三lease恢复、静态短路与SOR调度 |
 
 ## 4. Task Cards
 
@@ -94,7 +141,7 @@ further_feature_research = CLOSED
 
 **验证**：focused pure tests、full frozen BRF2 cutoff parity、SOR Golden integrity、production import architecture。数值parity不是新经济Replay；禁止运行新的Outcome/参数选择。
 
-**Done**：完整checked cutoff清单及digest、0missing、BRF2 Top16 parity100%、SOR unchanged、repeat deterministic。BRF2任一差异则该Spec certification BLOCKED；可继续不依赖其批准的通用domain分析，但不得把四策略complete写为通过或悄悄略过BRF2安装资格。选择research numeric或新translation Spec必须另行明确authority，当前无自动替代方案。
+**Done**：输出§3.3的common/SOR/四策略认证矩阵、完整checked cutoff清单及digests和确定性结果。某Spec的PASS要求其证据完整且0missing；BRF2另要求全部cutoff raw Top16 parity100%。Common/SOR任一FAIL整体STOP；仅BRF2 FAIL时标`BRF2_SPEC_CERT=FAIL / BLOCKED_NOT_INSTALLED`，common baseline ready后允许CPM/MPG/MI及通用GS-01..13继续。失败的BRF2不能被报告成PASS，也不能安装或activation。选择research numeric或新translation Spec仍需另行明确authority，无自动替代方案。
 
 ### GS-01 — Comparison-transition Episode contract
 
@@ -122,7 +169,7 @@ further_feature_research = CLOSED
 
 **验证**：纯shape/hash/serialization roundtrip；SOR旧交易pair与非交易None的canonical hash无差异；symbol级不合格不补rank17。
 
-**Done**：新的通用表示和SOR subtype边界清楚，无dummy pair，无扩大manual/TradFi/SOR权限。旧错误通用类型的最终替换路径记录，禁止成为永久双读兼容。
+**Done**：新的通用表示和SOR subtype边界清楚，无dummy pair，无扩大manual/TradFi/SOR权限。旧错误通用类型的最终替换路径记录，禁止成为永久双读兼容；§3.4相关SOR Golden/regression子集PASS。
 
 ### GS-03 — Selection staleness / period clock
 
@@ -152,14 +199,33 @@ further_feature_research = CLOSED
 
 1. 从production-shaped 0007 source，包括SOR交易与非交易authority、History、empty/pause/fallback、baseline/event lineage升级；source logical manifest逐record还原验证，不只count。
 2. pair字段归一化到exact event rows，非交易补EMPTY row；旧semantic hashes不重写。拆除旧day/pair/Top7通用constraint，保留SOR-specific CHECK强度。
-3. source current comparison与checkpoint映射不能凭NULL猜armed；迁移不发起comparison transition。member limit由trusted FK/constraint检查。
+3. source current comparison与checkpoint映射不能凭NULL猜armed；迁移不发起comparison transition，也不能因缺provenance在部署后自动rebase。必须通过下述GS-MIG-COMP-01；member limit由trusted FK/constraint检查。
 4. parent Spec/Event/side外键、exact event cardinality deferred trigger、ACTIVE/EMPTY状态一致、Digest匹配；攻击事务后必须rollback。
 5. Epoch/job/snapshot predecessor、source freshness、comparison checkpoint、唯一open Vacuum、单warming slot、bounded due indexes；role grants按现有Owner API真实role验收。
-6. 初始四Spec/STATIC controls是能力安装；无新的pending activation。SOR current/pending/source lineage保持。源若有nonterminal control operation，要求明确quiescence，不删除它来通过。
+6. Schema支持全部approved family，但按§3.3仅seed/install策略前置认证PASS的Spec及初始STATIC Selection controls。BRF2 FAIL时不安装其production Selection Spec/control，不改变其已有Static交易控制；SOR current/pending/source lineage保持，无新的pending activation。源若有nonterminal control operation，要求明确quiescence，不删除它来通过。
 
-**验证**：空库到head与exact0007升级、preservation corruption/非法shape RED、真实PG并发/deferred constraints、权限least privilege。
+**GS-MIG-COMP-01 — Static migration neutrality（P0-PLAN-2）**：
 
-**Done**：forward-only migration及source verifier本地通过，migration无运行副作用；无双写/old-table reader。当前生产操作权限仍NONE。
+在相同Static TradableUniverse、Static ComparisonUniverse、原Episode state且无Owner mode change条件下，对迁移前source和迁移后target重放**相同的第一根及后续合法Observation输入**，分别断言：
+
+```text
+Detector input parity = exact
+Episode transition parity = exact
+Signal creation parity = exact
+capability migration causes zero comparison transition / rebase / suppression
+```
+
+测试至少覆盖Static MPG ARMED、MPG TRIGGERED、MI ARMED、MI TRIGGERED，交叉覆盖`last_observed_at_ms < current runtime start`和restart。对后续false/true序列校验domain key、Episode ID、armed/triggered状态和时间、Signal创建/不创建与数量；新增provenance字段不得改变原语义字段。不能只验证迁移行数或直接调target新reducer自比。
+
+source expected结果由隔离、可处置的exact0007 reference环境实际取得，与target的同输入结果比较；旧source runner仅用于本地迁移测试，不能成为生产old-schema reader。source provenance必须有可核验的输入/比较成员/版本链，**不能仅凭last_observed早于runtime start、NULL默认值或当前名单相等推定来源**。
+
+任一已有Static MPG/MI scope缺少充分来源证据，source certification返回 **STOP / SOURCE_PROVENANCE_INSUFFICIENT**，在任何目标schema/authority写入前拒绝授权该source升级；不得猜checkpoint、迁移后自动进入REBASE_REQUIRED，或静默改写旧Episode。改变这种行为必须另行明确授权。
+
+此检查覆盖所有已有Static MPG/MI scope，**与该策略的新Selector是否通过认证/是否被安装无关**。即使BRF2-only或CPM-only capability候选，也不能借未安装MPG/MI Selector而跳过共享schema的Static行为保全。
+
+**验证**：空库到head与exact0007升级、GS-MIG-COMP-01、provenance不足源的pre-write拒绝、preservation corruption/非法shape RED、真实PG并发/deferred constraints、权限least privilege；测试BRF2证书FAIL但其余PASS的合法seed集合，以及失败Spec被强行安装时拒绝。
+
+**Done**：forward-only migration及source verifier本地通过，GS-MIG-COMP-01三类exact parity均PASS，缺源STOP可证明；仅安装认证合格Spec，migration无运行副作用；无双写/old-table reader；§3.4相关SOR子集PASS。当前生产操作权限仍NONE。
 
 ### GS-05 — Selection Plane / Snapshot handoff
 
@@ -171,7 +237,7 @@ further_feature_research = CLOSED
 
 **验证**：recording market source+真实PG；网络调用不在事务内；同输入前驱rerun same digest；worker crash/lease expiry/post-commit response loss；fresh source和fresh actual membership不可混淆。
 
-**Done**：同period唯一Snapshot及exact24 member rows、输入digest可回溯；无Universe/Generation/Vacuum/Ticket写入，Selector有独立lease。
+**Done**：同period唯一Snapshot及exact24 member rows、输入digest可回溯；无Universe/Generation/Vacuum/Ticket写入，Selector有独立lease；§3.4相关SOR子集PASS。未安装/认证失败策略不创建Selection Job或Snapshot。
 
 ### GS-06 — Comparison / Observation Episode barrier
 
@@ -191,11 +257,11 @@ further_feature_research = CLOSED
 
 **允许**：install/advance/abandon Universe应用边界、materialization repository/ports及tests。**禁止**：每策略复制warming队列、未通过proof先切current、retire previous后再尝试fallback。
 
-**RED与要求**：target数与Spec一致；BRF2 single SHORT合法；16-member Dynamic合法但manual11/SOR8非法；请求自报source-kind不能增权。所需facts/certification齐全才能STAGED，全部staged前无positive grant。临时unavailable重试到deadline，timeout不因retry刷新；保留原Vacuum source retarget修复。
+**RED与要求**：target数与Spec一致；schema/domain支持single SHORT，BRF2实际安装路径仅在其SPEC_CERT PASS时可用，未安装时必须拒绝；16-member Dynamic合法但manual11/SOR8非法；请求自报source-kind不能增权。所需facts/certification齐全才能STAGED，全部staged前无positive grant。临时unavailable重试到deadline，timeout不因retry刷新；保留原Vacuum source retarget修复。
 
 **验证**：真实PG+recording venue；全局slot冲突、partial staging、resume/abandon/reclaim、duplicate callback；零warming Signal/Ticket/Command，source eligibility不得从研究数据读。
 
-**Done**：targets可准确STAGED/ABANDONED并恢复，最终activation权限留给GS-08，无incremental warming/carry-forward新设计。
+**Done**：targets可准确STAGED/ABANDONED并恢复，最终activation权限留给GS-08，无incremental warming/carry-forward新设计；§3.4相关SOR子集PASS。
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
@@ -214,7 +280,7 @@ further_feature_research = CLOSED
 
 **验证**：PG并发事务/barrier测试+recording network；current-close先consume或先switch两种顺序、crash每个commit点、重试terminal authority；SOR近期四类bug regression。
 
-**Done**：全部新authority可trace proof/source/epoch/Event set，positive grant不能绕过rebase/stale/EMPTY/Owner；existing Ticket未变。
+**Done**：全部新authority可trace proof/source/epoch/Event set，positive grant不能绕过rebase/stale/EMPTY/Owner；existing Ticket未变；§3.4相关SOR子集PASS。
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
@@ -226,7 +292,7 @@ further_feature_research = CLOSED
 
 **验证**：从正式Selection/Observation到Ticket/Command的full-chain，不仅直接插入fixture Ticket。保留已暴露Position的Initial Stop/TP1/Runner/Exit/Settlement/Review；cancel unknown和late fill攻击测试。
 
-**Done**：unauthorized Signal/Ticket/dispatch=0、每episode最多一个Ticket、netting独立、已有退出不读取Selector；failures终态和Incident边界可复核。
+**Done**：unauthorized Signal/Ticket/dispatch=0、每episode最多一个Ticket、netting独立、已有退出不读取Selector；failures终态和Incident边界可复核；§3.4相关SOR子集PASS。
 
 ### GS-10 — Worker hosting / restart / bounded status
 
@@ -238,7 +304,7 @@ further_feature_research = CLOSED
 
 **验证**：job/Generation lease独立claim及过期回调、global queue aging、source retry预算、process restart恢复cursor/rebase/stale deadline；healthy cadence零JSON/Markdown输出。暂停一个策略不影响其他策略或已有Ticket。
 
-**Done**：有界读写与独立tick被真实调用证明；三个plane无等待链；静态无pending短路真实生效。
+**Done**：有界读写与独立tick被真实调用证明；三个plane无等待链；静态无pending及未安装Selector短路真实生效；§3.4相关SOR子集PASS。
 
 ### GS-11 — Owner API / Console
 
@@ -248,7 +314,7 @@ further_feature_research = CLOSED
 
 **RED与要求**：STATIC/DYNAMIC预览/激活/回退，typed时间；version/idempotency由UI维护，TOTP在正式应用边界验证。错误step-up不跳登录，401仅真正session失效；409刷新状态但不自动提交新权限。双击/刷新返回同operation。
 
-**验证**：实际role的API integration与浏览器UI测试；每策略independent activation、Owner pause并发、source freshness/deadline/missed-periods、EMPTY原因、comparison rebase状态、MPG12..16说明；不得绿色DYNAMIC掩盖stale或rebase阻断。
+**验证**：实际role的API integration与浏览器UI测试；每策略independent activation、Owner pause并发、source freshness/deadline/missed-periods、EMPTY原因、comparison rebase状态、MPG12..16说明；不得绿色DYNAMIC掩盖stale或rebase阻断。认证失败未安装策略显示Dynamic不可用，原Static保持，activation被拒且零side effect；不能将“不安装”显示成已认证STATIC Selector。
 
 **Done**：Owner无需curl或手填version即可完成操作并观察active/fallback/stale/pause；TOTP secrets不进入日志，0意外logout；不实际操作生产。
 
@@ -260,7 +326,7 @@ further_feature_research = CLOSED
 
 **Workload冻结**：
 
-1. 至少连续24h等效正常段：MPG24个hourly periods、MI24、CPM/BRF2各6，包含同期SOR due。固定Candidate24，MPG用冻结rank/hysteresis trace驱动约0.77 additions/removals每小时的变化量级，记录实际change count，不能以全部NO_CHANGE掩盖成本。
+1. 至少连续24h等效正常段，按candidate已认证安装集合冻结：被安装MPG24个hourly periods、MI24、CPM/BRF2各6，包含同期SOR due。固定Candidate24，MPG安装时用冻结rank/hysteresis trace驱动约0.77 additions/removals每小时的变化量级，记录实际change count，不能以全部NO_CHANGE掩盖成本。未安装策略保留Static负载，并验证零Dynamic任务；指标逐策略标明NOT_INSTALLED，不能当成已通过Dynamic soak。不得为躲避soak失败临时删掉已声明安装的策略。
 2. 合法source、足够但原Policy边界内的测试账户facts；正式Worker、真实PG、global warming slot、t→t+1延迟、signed command recording。配置snapshot在close前提交，comparison先经过实际rebase流程。控制性设置触发/不触发用于工程验证，不生成经济结论。
 3. 独立故障段覆盖长期缺1币、第二miss、fresh不同Desired连续warm失败、cancel unknown、Owner pause、Warming临时失败/timeout、restart、SOR single-leg staged、Static rollback。故障段单独报告，不混进健康p95。
 4. 加速逻辑市场时间而非把I/O/事务时延抹掉；冻结recorded request latency/timeout trace，用实际wall-time服务成本测queue/fence latency。施加与部署契约同等的1CPU/1GiB Worker资源预算（PG独立）。不具备等效资源约束时报告性能证据不充分，不用高速开发机直接宣称Tokyo SLO通过。
@@ -292,25 +358,29 @@ further_feature_research = CLOSED
 
 **准备子项（必须在final freeze之前完成）**：
 
-1. 本地0007 source→唯一target revision；空库与有terminal history、SOR正负authority、comparison/static baseline、pending quiescence案例；logical preservation/reconstruction，corruption/incompatible source拒绝。
+1. 本地0007 source→唯一target revision；空库与有terminal history、SOR正负authority、comparison/static baseline、pending quiescence案例；logical preservation/reconstruction，corruption/incompatible source拒绝。对所有已有Static MPG/MI scope重复GS-MIG-COMP-01；来源不足必须SOURCE_PROVENANCE_INSUFFICIENT，不能靠部署后rebase保持表面可运行。
 2. exact Owner角色权限、STATIC零Job/Snapshot/new Authority parent、无implicit Dynamic activation、兼容restart零Universe warming；升级失败target schema fix-forward，不启动旧schema runtime。
 3. 关闭设计§20的两项基线document authority失败：测试从硬编码旧Policy值改为实际合同的可验证结构/一致性；pending tag必须有明确未封版状态，不能被当作sealed release。不能通过改写生产事实、伪造tag、skip或删除有效assert解决。
 4. 清理被替代的错误通用day/pair/max10 tests、维护current文档与引用；保留SOR Golden和独特fault覆盖。完成Owner UI/API与新schema源码变化的release classification。
 5. 编写stopped-flat部署runbook，明确fresh advisory→停止writers→fresh authoritative facts、source/target证据、quiescence、原SOR状态保全、postflight和失败fix-forward；未来每策略activation单独Owner控制。
 
-**最终freeze与认证**：全部代码、测试、runbook修改提交成exact clean candidate C，然后执行一次完整Unit/Architecture、PG Integration、Full-chain、Ruff、Mypy、diff、Owner API/UI、source preservation、GS-00全cutoff BRF2 gate、SOR Golden/Core parity、GS-12绑定的soak认证。manifest必须绑定C、schema/Registry/Policy/Spec/数值合同、命令集、输入与artifact digests，不能复用pre-fix candidate结果。
+**最终freeze与认证**：全部代码、测试、runbook修改提交成exact clean candidate C，然后执行一次完整Unit/Architecture、PG Integration、Full-chain、Ruff、Mypy、diff、Owner API/UI、source preservation/GS-MIG-COMP-01、SOR Golden/Core parity，以及candidate已安装策略的numeric/runtime/GS-12认证。manifest绑定C、schema/Registry/Policy、installed Spec集合及每项数值合同、命令集、输入/artifact digests和未安装原因，不能复用pre-fix candidate结果。
+
+**R4聚合规则**：`generic core R4 PASS + strategy-specific certification matrix`；不要求4/4 Selector通过才可发布Generic capability。安装集合中每个策略的完整前置和runtime证据都必须PASS；未安装BRF2可以保留numeric FAIL/BLOCKED，不把失败改写成PASS，但必须证明其Spec/control未安装、Dynamic activation拒绝且既有Static行为保持。BRF2被安装时，GS-00全frozen cutoffs Top16 parity100%仍是强制gate，不能因common R4通过而豁免。
 
 GS-12 soak若不是C运行，必须证明测试生产面与依赖未变，并由certifier验证规范允许的复用；否则重跑exact C。任何代码/配置/影响测试语义的变化建立新candidate并重跑受影响证据；整套最终认证不能把失败略去。
 
-**Done**：clean candidate C、exact PASS manifest、测试portfolio无未解释失败、runbook与perstrategy控制边界明确。认证结果置于既有worktree外release evidence位置，后续纯交付摘要不变更C；不得在认证后改HEAD却宣称manifest仍对同一candidate。
+**Done**：clean candidate C、generic core exact PASS manifest、完整strategy certification/installation矩阵、所有安装策略分支PASS、全部共享runtime与Static migration neutrality PASS。未安装策略的已解释认证失败独立披露，不吞掉shared测试失败。runbook与perstrategy边界明确。认证结果置于既有worktree外release evidence位置，后续纯交付摘要不变更C；不得在认证后改HEAD却宣称manifest仍对同一candidate。
 
-最终仅可声明`LOCAL_IMPLEMENTATION_CERTIFIED / production_authority=NONE`。实际部署、flat facts、Owner activation在后续明确授权动作中处理。
+最终仅可声明`GENERIC_CORE_LOCAL_CERTIFIED + exact installed_strategy_set + strategy_certification_matrix / production_authority=NONE`；未安装分支不标实现完成。实际部署、flat facts、Owner activation在后续明确授权动作中处理。
 
 ## 5. 设计 → Task 覆盖索引
 
 | 设计不变量 / Review finding | 首次RED/GREEN | PG / Runtime证据 | 最终Gate |
 | --- | --- | --- | --- |
-| P0-4 / BRF2_NUMERIC_PARITY_GATE | GS-00 | GS-05production Selection路径 | GS-13 exact full-cutoff parity |
+| P0-PLAN-1 strategy-scoped certification/DAG | GS-00 common/SOR + perSpec matrix | GS-04合格Spec安装；GS-05..12各策略分支 | GS-13 common R4 + installation/cert matrix |
+| P0-PLAN-2 / GS-MIG-COMP-01 Static neutrality | GS-04 source/target differential RED | GS-04/06 preservation及producer | GS-13所有已有Static MPG/MI scope |
+| P0-4 / BRF2_NUMERIC_PARITY_GATE | GS-00 | GS-05已认证安装BRF2路径或未安装拒绝 | GS-13安装时exact全cutoff parity，否则显式BLOCKED_NOT_INSTALLED |
 | P0-1 / GS-COMP-01 | GS-01 | GS-06/08/09 | GS-12/13 |
 | P0-3 / INV-04/08 EMPTY shape | GS-02 | GS-04/08/09 | GS-13 preservation |
 | P0-2 / GS-STALE-01 | GS-03 | GS-05/08/09/10 | GS-12/13 |
@@ -327,8 +397,10 @@ GS-12 soak若不是C运行，必须证明测试生产面与依赖未变，并由
 
 ## 6. 计划审阅与执行终止条件
 
-本轮交付仅为文档，未实际执行GS-00 numeric translation、domain测试开发、migration或soak。计划审阅需确认：四P0的首卡顺序、Schema无运行副作用、三Plane独立、soak预算及全部Task权限。
+本轮交付仅为文档，未实际执行GS-00 numeric translation、domain测试开发、migration或soak。独立复核已接受设计、14卡结构与既定soak方向；两项Plan amendment已并入§3.3、GS-00/04/13，非阻塞SOR子集建议并入§3.4及对应Done条件。已批准设计主体不改。
 
-实现后每个策略可以独立STATIC/DYNAMIC，但不能用“独立”作为绕过未通过该策略numeric、rebase、freshness或runtime Gate的理由。任何BRF2 mismatch、SOR Golden差异、preservation失败、未知exchange outcome被盲重发、Owner pause被恢复、hourly没有合法close，都禁止以整体实现完成或release-ready结案。
+实现后每个策略可以独立STATIC/DYNAMIC，但不能用“独立”绕过未通过该策略numeric、rebase、freshness或runtime Gate。BRF2 mismatch只阻塞其安装/activation分支；common/SOR失败、Static provenance/neutrality失败、preservation失败、shared unknown盲重发、Owner pause被恢复等仍阻塞整体core/source发布。某安装策略hourly无合法close不能被“common PASS”掩盖。
 
-全部Task DONE后才能冻结本地release candidate；R4通过也不自动授权生产。当前保持 **PLAN_REVIEW_REQUIRED / active_execution_scope=NONE**。
+common任务及candidate安装策略的相关分支全部DONE后才能冻结本地release candidate；失败未安装分支须显式列出，不伪造四策略全完成。R4通过也不自动授权生产。
+
+当前 **PLAN_REVIEW_REQUIRED / required_plan_amendments=COMPLETE / owner_confirmation=PENDING / implementation_authority=NONE / active_execution_scope=NONE**。按Owner最新指令，修改文档后等待确认，不因为附件中的后续授权建议提前开始代码工作。
