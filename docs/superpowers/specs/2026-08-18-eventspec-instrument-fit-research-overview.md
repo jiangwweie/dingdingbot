@@ -53,8 +53,13 @@ manifest和全部研究结果保持不变，不重跑Replay。
 
 当前设计：
 [Generic Multi-Strategy Dynamic Selection V1](2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md)。
-状态为 **DESIGN_REVIEW_REQUIRED / implementation_authority=NONE / production_authority=NONE**。
+四项独立复核修订已纳入，状态为 **DESIGN_APPROVED / PLAN_ONLY**；
+[Implementation Plan](../plans/2026-09-06-generic-multi-strategy-dynamic-selection-v1-implementation-plan.md)
+为 **PLAN_REVIEW_REQUIRED / implementation_authority=NONE / production_authority=NONE**。
 各策略独立STATIC/DYNAMIC；MPG/MI固定Comparison24与动态Tradable集合分离。
+Comparison改变后先在新binding下观察NOT_TRIGGERED再布防；新四策略连续Selection缺失仅有一cadence
+grace；EMPTY有完整Event binding；BRF2 Decimal需全部frozen cutoffs Top16集合100% parity。
+SOR Golden和原daily失败合同不变，以上是显式工程保护而非新增收益证据。
 Event-time Context Forward Shadow保留辅助研究定位，不作为此生产选币设计的前置实现。
 
 以下SOR研究证据和P3-X表是已完成路线的历史记录；部署与当前控制事实只由
@@ -302,10 +307,10 @@ ENTRY，不追溯撤销此前合法Ticket/fill或protected lifecycle。
 
 ## Current Next Step
 
-**复核Generic Multi-Strategy Dynamic Selection V1详细设计**：
+**复核Generic Multi-Strategy Dynamic Selection V1 Implementation Plan**：
 
 ```text
-2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
+2026-09-06-generic-multi-strategy-dynamic-selection-v1-implementation-plan.md
 ```
 
 冻结当前状态：
@@ -313,12 +318,16 @@ ENTRY，不追溯撤销此前合法Ticket/fill或protected lifecycle。
 ```text
 STAGE3_1_REVIEW = ACCEPTED_WITH_PROVENANCE_NOTE
 further_feature_research = CLOSED
-generic_design_status = DESIGN_REVIEW_REQUIRED
+generic_design_status = DESIGN_APPROVED / PLAN_ONLY
+generic_plan_status = PLAN_REVIEW_REQUIRED
 generic_selection_design_authority = ALLOWED_FOR_ELIGIBLE_STRATEGIES
+implementation_plan_authority = ALLOWED
 generic_selection_implementation_authority = NONE
 production_dynamic_activation_authority = NONE
 ```
 
-Generic设计复核通过后编写并复核Implementation Plan，再授权相应实施范围。
+Generic设计已按条件复核补齐四项P0，Implementation Plan已编写；计划复核后再授权相应实施范围。
+首四卡是Numeric/semantic fixtures、Comparison-transition Episode、Generic Authority/EMPTY、
+Selection staleness/clock；domain invariant先于Schema。当前无Task执行。
 SOR已有DS-00至DS-10设计、Golden、实现与修复作为基线继续保留，不重新开启该研究。
 生产修复进入dev，研究分支保持独立，详细设计相对dev仅产生文档差异。

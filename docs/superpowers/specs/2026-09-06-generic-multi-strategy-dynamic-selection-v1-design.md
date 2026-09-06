@@ -1,6 +1,9 @@
 ---
 title: GENERIC_MULTI_STRATEGY_DYNAMIC_SELECTION_V1_DETAILED_DESIGN
-status: DESIGN_REVIEW_REQUIRED
+status: DESIGN_APPROVED
+review_resolution: FOUR_REQUIRED_AMENDMENTS_INCORPORATED
+execution_stage: PLAN_ONLY
+implementation_plan_authority: ALLOWED
 date: 2026-09-06
 design_authority: ALLOWED_FOR_ELIGIBLE_STRATEGIES
 implementation_authority: NONE
@@ -14,7 +17,7 @@ further_feature_research: CLOSED
 
 **本设计让 CPM、MPG、MI、BRF2 分别拥有真实的 Dynamic TradableUniverse，复用 SOR 的 Selection → Materialization → Trading 权威链。** 每个策略可以独立保持 STATIC、申请 DYNAMIC、暂停新增交易或回到自己的 Static baseline。
 
-本文是**待复核的目标设计**，不是已实现能力。冻结的研究算法、节奏、排名门槛不再搜索；接口形状、数据库归一化、失效与恢复机制属于本次工程设计。完成本文件不授予 Implementation、Tokyo deployment 或任何策略 activation 权限。
+本文是**已按独立复核的四项条件补齐的目标设计，状态为 DESIGN_APPROVED / PLAN_ONLY**，不是已实现能力。Owner转交的独立复核明确允许四项amendment落实后进入Implementation Plan；处理索引见§18。冻结的研究算法、节奏、排名门槛不再搜索；接口形状、数据库归一化、失效与恢复机制属于工程设计。完成本文件不授予 Implementation、Tokyo deployment 或任何策略 activation 权限。
 
 目标链始终为：
 
@@ -183,13 +186,32 @@ score_i = Σ[last24] e_i,j / sqrt(Σ[last24] e_i,j²)
 1. 原始价格/成交额字符串直接进入 Decimal；拒绝先 float 再 Decimal。
 2. SOR 复用原 **prec=38 / ROUND_HALF_EVEN**、运算顺序、canonical strings、Golden digest。
 3. 新 Spec 同样采用固定 Decimal context 38/HALF_EVEN，`ln/sqrt` 使用 Decimal。浮点仅允许研究 aggregate，不进入排名。
-4. Stage-3.1 CPM/MPG/MI 使用 Decimal，BRF2 原研究有 binary64 log/OLS/sqrt。工程精度升级不能假装逐值与旧 float 完全一致。实施首个 evidence card 冻结数值合同和逐-member diff；不重跑 Outcome、调阈值或重选 N。任何 membership 差异必须单列并复核，不能悄悄改写研究结果。
+4. Stage-3.1 CPM/MPG/MI 使用 Decimal，BRF2 原研究有 binary64 log/OLS/sqrt。实施首个evidence card必须通过§4.7的 **BRF2_NUMERIC_PARITY_GATE**，不能只写“差异人工复核”就继续认证。
 5. `source_semantic_digest` 绑定 venue、instrument、时间窗、每根 canonical OHLCV、数据归一化版本；Snapshot 冻结 cutoff、observed/committed time、Spec/algorithm/input digests。
 6. 任一所需 Candidate 缺 K 线、重复、未来 candle、断档或不一致 → 整次 `SOURCE_FAILED`；不可把失败币当 REJECT 后缩分母。
 7. 完整输入上遇到 CPM path=0、BRF2 undefined/non-finite → 整次 `COMPUTE_FAILED`，记录 exact member/reason；不依据任意 epsilon 调序。
 8. 四个新 Spec **不继承 SOR 的 20M floor**，不增加 Activity、pre-extension 等研究外 alpha gate。可交易资格使用已有明确 Product/Instrument facts，来源失败和明确不合格严格分开。
 9. 先对完整24计算 feature/rank，再与已知合格集合取交集。明确不合格成员不补位；未知资格阻塞这次 Selection，不被解释为有效零。
 10. 所需源完整、特征有定义且资格事实明确，而选中交集为0 → `VALID_EMPTY`。安全资格差异单独记录；历史 capture 数据未证明这些生产过滤的经济效果。
+
+### 4.7 BRF2_NUMERIC_PARITY_GATE（P0-4）
+
+对Stage-3.1 manifest所绑定的**全部BRF2 frozen cutoffs**，使用相同冻结原始输入，比较production Decimal candidate与冻结research binary64实现的Top16集合：
+
+```text
+checked_cutoffs == complete_frozen_cutoff_set
+missing_or_unchecked_cutoffs == 0
+for every cutoff: decimal_top16 == research_top16
+Top16 member-set parity == 100%
+```
+
+比较的是qualification之前的raw Top16决策，不能用生产资格过滤把边界差异遮掉。冻结research执行结果须与原artifact一致，再与Decimal candidate比较；禁止仅拿candidate的两次运行自比、抽样cutoff或把预期值从candidate生成。
+
+不要求score字符串bit-exact，也不要求Top16内部次序完全相同；仍保存全部score/rank及对称差集供审计。任何一个cutoff的集合不同、原输入缺失或baseline不能重建，都 **STOP BRF2 production Spec certification**。不以小误差、总体capture近似、差异币不成交为豁免。
+
+失败后只允许另行明确数值authority：保留冻结research numeric implementation，或批准独立precision-translation Spec/design amendment。**当前设计不授权自动切回binary64，也不授权把有membership差异的Decimal继续命名为原BRF2_RESIDUAL_EXTENSION_V0。** 选用research arithmetic需同时解决本文件Decimal规则的显式修订，且生产不能import research模块。
+
+这是一项工程语义parity，不重跑Outcome、收益回放、Feature/TopN搜索。GS-00先交付完整证据；GS-13对exact release candidate重复绑定同一gate。
 
 ## 5. 排名、Hysteresis 与确定性
 
@@ -268,11 +290,11 @@ period continuity是另一种proof：在精确旧set、Owner、comparison、epis
 
 grant事务必须使用新鲜数据库时钟，commit临近next-close边界时重新检查；越界则回滚并重取proof。统计同时保留nominal effective、first eligible close、实际grant和首次ENTRY时间，不能把这些时间合并后声称Live与Replay完全一致。
 
-同一close的continuity Observation与switch争用同一组authority/cursor锁，只有一方可提交该close的正式输入。若旧authority先处理，switch不可撤销其Ticket或重算该close；可能因此错过本period，按明确expiry路径恢复。该竞态必须在GS-03/GS-13验证，不能靠测试强制worker固定顺序掩盖。
+同一close的continuity Observation与switch争用同一组authority/cursor锁，只有一方可提交该close的正式输入。若旧authority先处理，switch不可撤销其Ticket或重算该close；可能因此错过本period，按明确expiry路径恢复。该竞态必须在INV-03/INV-13验证，不能靠测试强制worker固定顺序掩盖。
 
 ### 6.3 Continuity、supersession 和迟到
 
-1. 已处于 DYNAMIC 的每个 authority period 到达 `e` 时，独立于 Selection outcome 取得 exact-current-set 的 `PRE_FENCE_CONTINUITY`；上一 period authority 到期不等于允许静默用旧 grant。
+1. 已处于DYNAMIC的每个authority period到达`e`时，独立于Selection outcome评估exact-current-set的`PRE_FENCE_CONTINUITY`；四个新策略还必须满足§6.4的finite staleness budget。上一period authority到期不等于允许静默用旧grant。
 2. continuity需证明实际覆盖；迟到时按策略gap policy取得合法eligible close：SOR strict-next-close，新策略按§6.2对仍fresh且未正式处理的current close证明，否则推进到future close。Selection source失败只记录原因，不取得交易决策权。
 3. 新 Snapshot 在 `t` commit、但 `e` 未到，不 supersede 正在本期 materialize 的 Generation。只有 **effective 已到的更新 Selection** 才可接管。
 4. 同期输入冻结后不覆盖 Snapshot；发现原数据修订记 integrity incident，不改成员和 digests。
@@ -281,6 +303,40 @@ grant事务必须使用新鲜数据库时钟，commit临近next-close边界时�
 7. 回调必须携带 epoch、period、control version、Generation lease/version。旧结果只可审计，不能激活。
 8. 停机后不补发过期close的Signal；新策略仅可能按§6.2处理最新fresh且未消费的close。每轮source/compute只处理最新due cutoff及已存在待完成工作；过期period明确`EXPIRED/SUPERSEDED`，禁止无界扫描。
 9. 上一 period 为 VALID_EMPTY，则下一 period continuity 保持空，不从 dormant Universe current pointer 复活成员。新的非空成功 Selection 才能重新获得新交易权限。
+
+### 6.4 Bounded Dynamic staleness（P0-2）
+
+对**CPM/MPG/MI/BRF2**冻结 `max_consecutive_selection_miss = 1`：允许缺一次完整cadence，第二个连续due period仍无可用fresh Selection时停止新Signal/ENTRY。**SOR仍执行原Golden及daily failure合同，本次不把新增staleness规则套给SOR。**
+
+每条Dynamic grant/proof记录两组事实，不混为一个“最近更新时间”：
+
+| 字段 | 含义 | 能否刷新旧名单年龄 |
+| --- | --- | --- |
+| `latest_successful_snapshot_id/cutoff` | Selection Plane最近合法成功结果 | 单独不能 |
+| `source_snapshot_id/source_snapshot_cutoff` | 真正选出或以NO_CHANGE重新确认当前authorized membership的Snapshot | 合法grant绑定后可以 |
+| `source_snapshot_effective_at/nominal_expires_at` | 该membership来源原始period边界 | 续期时不重写 |
+| `selection_age_ms` / `selection_age_at_grant_ms` | readonly view按当前时间计算前者，immutable proof冻结grant时年龄为后者 | action-time gate必须重读时钟，不能把grant时年龄当当前年龄 |
+| `consecutive_missed_periods` | 按due period身份计算的连续Selection miss数 | 同period重复tick不重复计数 |
+| `membership_valid_until_ms` | 下述绝对宽限deadline | grant/fallback/restart不能向后滚动 |
+
+设当前membership的最近成功确认Snapshot名义生效为`e0`、cadence为`Δ`：
+
+```text
+normal period                 [e0, e0 + Δ)
+one missed cadence grace      [e0 + Δ, e0 + 2Δ)
+membership_valid_until_ms     = e0 + 2Δ
+now >= membership_valid_until_ms → block new Signal / ENTRY
+```
+
+所有新grant的`expires_at`不得超过该绝对deadline。例：MPG/MI从05:00的Snapshot生效，06:00缺新结果可grace，07:00仍未恢复必须blocked；CPM/BRF2的相同边界为05:00、09:00、13:00。比较使用action-time时钟，不能只在Coordinator正常运行时靠计数器发现过期。
+
+还必须防止“每小时都有fresh但不同的Desired，warming一直失败，旧名单却无限续期”：新Snapshot只有在effective已到、period尚未过期、ACTIVE_NEW或合法NO_CHANGE实际确认当前名单后，才能推进该名单的`source_snapshot_id`。future Snapshot不能预先刷新当前名单年龄。ordinary FALLBACK_PREVIOUS、heartbeat、前驱链更新、lease retry以及无关fresh Desired都不能重置旧名单deadline。
+
+预算耗尽标记系统抑制 **SELECTION_STALE_PAUSED**，`mode=dynamic_selection`不变，不修改Owner pause/version。所有新Signal/Claim/Ticket/ENTRY dispatch同步检查deadline；Coordinator随后以既有单Vacuum/Command路径取消未完成ENTRY并保留保护/退出，不另造第二Vacuum或主动平已有仓位。
+
+source继续恢复无需再次询问Owner：同一已授权epoch内新的fresh Snapshot、drain、materialization/NO_CHANGE、coverage proof都成功后，可自动清除系统stale抑制；不能清除Owner pause。fresh Snapshot本身不足以恢复交易。用户也可显式请求Static rollback；不自动扩大为Static名单。
+
+VALID_EMPTY有自己的成功source与非交易shape；过期只继续无交易，不从dormant pointer找回旧币。首次Static→Dynamic尚未成功仍为Static，沿用首次切换失败合同，不能捏造Dynamic staleness来源。控制面回退在§9.4所称“previous仍合法”**包括本节未过期要求**。
 
 ## 7. ComparisonUniverse 与 Detector 输入权限
 
@@ -296,7 +352,7 @@ Dynamic MPG 的六次历史 rank 和 event-time 8h rank、Dynamic MI 的 event-t
 
 现有 MPG/MI Static 比较输入取其原 Universe，未必是24。能力部署时不能悄悄把 Static rank 分母改成24。
 
-新增 immutable Comparison definition/binding：Static 从现有原比较集合构造精确引用，Dynamic绑定fixed24。最终原子activation同时切换 `Tradable Event set + comparison binding + SelectionAuthority + mode`。首次Dynamic失败完整恢复原Static比较集合；ordinary Dynamic fallback保留fixed24。回到Static使用冻结Static baseline的原比较身份。
+新增immutable Comparison definition/binding：Static从现有原比较集合构造精确引用，Dynamic绑定fixed24。最终原子activation同时切换`Tradable Event set + comparison binding + SelectionAuthority + mode`，以及§10.3的comparison-transition barrier。首次Dynamic失败且target comparison从未成为Active时，恢复原Static比较集合而不制造一次rebase；已经发生的comparison变更在Static rollback时必须再次rebase。ordinary Dynamic fallback保留fixed24。
 
 固定24的研究 rank parity 证明 Dynamic内部没有缩分母；不证明 Static与Dynamic产生同一Event流。认证分别对两种输入范围证明纯 Detector输出 parity，审计显示切换前后 comparison digest。
 
@@ -308,7 +364,7 @@ CPM/BRF2 不构造虚假的 Detector comparative payload。BRF2 market24只是 S
 
 复用原 selection spec/job/attempt/snapshot/member、generation/target/event、vacuum/audit/authority、Universe及交易lineage表。泛化它们的 period 与 Event shape，**不新建第二套 generic runtime chain**。SOR 专属参数继续放在现有 subtype；新增四种 typed Spec payload，不在原 SOR 表塞 nullable 任意参数包。
 
-`UniverseAuthorityPair` 替换为有序 `EventUniverseSet`：每项是 `(event_spec_id, position_side, universe_version_id)`；集合恰好等于 Spec event bindings。SOR仍两项且LONG先SHORT；CPM/MPG/MI一LONG；BRF2一SHORT。不能用“空SHORT”或重复LONG ID伪造pair。
+`UniverseAuthorityPair`替换为有序typed `EventUniverseSet`：每项是§8.4定义的AuthorityEventBinding；Event shape恰好等于Spec event bindings。SOR仍两项且LONG先SHORT；CPM/MPG/MI一LONG；BRF2一SHORT。ACTIVE grant引用真实Universe；EMPTY grant有明确非交易shape。不能用“空SHORT”或重复LONG ID伪造pair。
 
 ### 8.2 Schema 对象与约束
 
@@ -325,11 +381,12 @@ CPM/BRF2 不构造虚假的 Detector comparative payload。BRF2 market24只是 S
 | Member decisions | 保留来源identity；typed feature；rank/qualified/selected/reason | `(snapshot,instrument)`唯一；exact24 deferred约束；rank1..24唯一；完整分区 |
 | Snapshot payload | SOR geometry /新策略feature payload | 同family恰好一种；canonical Decimal文本可精确还原，不让 MONEY scale截断分数 |
 | Generation / targets | 前驱实际Event set、expected target digests、deadline | target count=Spec event count；1或2；single newest actionable pergroup；有界claim索引 |
-| Authority / authority-event bindings | 通用period、first close、策略typed proof、实际Event set、comparison binding | immutable authority revision；current pointer一条；grant必须有exact proof与完整Event set；新current-close proof不能被SOR接受 |
+| Authority / authority-event bindings | 通用period、first close、策略typed proof、ACTIVE/EMPTY Event bindings、comparison与source freshness | immutable revision；current pointer一条；完整Event shape；新current-close/staleness policy不能被SOR隐式接受 |
 | Baseline / baseline-event bindings | 原Static Universe引用与比较引用 | 不复制member rows；按group/version immutable；退回目标与previous-active分开 |
 | Vacuum / Gap Audit | 通用period、epoch、source Generation、策略gap kind | 同group最多1open Vacuum；lease/version；audit覆盖时间与目标集合digest必须匹配 |
 | Universe versions/current | 沿用member-only semantic digest与Generation FK | 新Dynamic成员≤16且逐Spec限定，SOR≤7；manual原上限不扩；current Event唯一 |
 | Signal / Claim / Ticket | 沿用 birth `selection_authority_id`、Universe版本；新增必要comparison identity | exact immutable lineage；历史nullable只给升级前数据，新Dynamic不可缺省 |
+| ExposureEpisode current + comparison barrier | 现有episode key上增加comparison digest/transition revision、rebase state、armed close | 不改变episode key；scope级CAS；不可拿旧comparison的ARMED发Signal；barrier变更留审计 |
 
 归一化 Event bindings分别从其父对象拥有关系：Generation baseline rows、Authority grant rows、Static baseline rows只存必要的Event→Universe引用。原 LONG/SHORT列通过受审迁移搬入对应行后删除；不同时维护两条写路径。现有 `materialization_targets` 继续是唯一target定义；不另造 linkage，实际Universe仅有Generation FK，没有Universe→Snapshot直连。
 
@@ -347,6 +404,40 @@ CPM/BRF2 不构造虚假的 Detector comparative payload。BRF2 market24只是 S
 4. **Activation**：锁control、generation、vacuum、所有Event current；重新验证Owner/Policy、epoch、due/latest、drain、certification、Gap proof、时钟；一次commit切整个Event set和comparison、authority及mode。
 5. **ENTRY**：Claim与issuance的version/CAS仍有效；dispatch在官方submit authority中重核Vacuum/Owner/current identity。control-plane锁不能替代ENTRY热路径CAS。
 6. 唯一性/shape采用FK、CHECK、deferred constraint trigger与CAS共同保证；不靠日志“确认成功”。
+
+### 8.4 VALID_EMPTY exact representation（P0-3）
+
+每条Authority对每个Spec Event都恰好存一条binding，不删除EMPTY Event行，也不制造零成员Universe：
+
+```text
+AuthorityEventBinding
+  selection_authority_id
+  event_spec_id
+  position_side
+  grant_state: ACTIVE | EMPTY
+  universe_version_id: str | NULL
+  member_set_digest: sha256
+```
+
+`canonical_empty_digest = selected_member_set_digest(())`，严格使用现有canonical payload `{"selected_exchange_instrument_ids":[]}`。ACTIVE的同一字段也hash实际canonical member list；Universe自己的semantic digest另行exact验证，不能把两个不同payload的digest混用。
+
+| Authority语义 | Event binding shape | Parent与交易约束 |
+| --- | --- | --- |
+| ACTIVE_NEW / ordinary NO_CHANGE / 可交易continuity / fallback | 全部`ACTIVE`，Universe FK非NULL、nonempty digest | 完整Spec Event集合、真实members、proof/first eligible齐全且有效 |
+| VALID_EMPTY | 全部`EMPTY`，Universe FK为NULL、canonical empty digest | exact零成员Snapshot、`blocks_new_entry=true`、grant proof/first eligible为NULL |
+| 空名单continuity、Owner暂停、SELECTION_STALE_PAUSED等非交易authority | 全部`EMPTY`，同一NULL/empty shape | parent outcome/reason明确原因；不能冒充VALID_EMPTY成功Snapshot |
+
+PK为`(authority_id,event_spec_id)`；复合FK/deferrable trigger保证parent Spec、Event、position_side匹配，交易状态全ACTIVE，非交易状态全EMPTY，禁止混合SOR LONG active/SHORT empty。CHECK实现ACTIVE iff non-NULL Universe、EMPTY iff NULL+canonical empty digest；跨表trigger验证所有Spec Event行完整且digest对应actual members。
+
+Observation必须读parent交易允许条件 **且** `grant_state=ACTIVE`，不能只看旧Universe current pointer。EMPTY不撤销历史Universe、Ticket或baseline；它只表示本Authority没有正向成员授权。
+
+迁移为原SOR非交易authority补完整EMPTY binding，原交易authority补ACTIVE binding；SOR专属旧hash序列化仍把非交易`authorized_pair`还原为None，故Golden/历史semantic hash不变。新的binding shape是无损表示，不增加SOR交易权限或staleness行为。
+
+### 8.5 Trusted UniverseMembershipPolicy（P1）
+
+不能只把全局`MAX_UNIVERSE_MEMBERS`从10改为16就结束。纯数据结构可具有16的绝对表示上界，但创建/安装/PG current-grant的真正上界由trusted source-kind、Event/Product及installed Spec决定：manual≤原10，SOR_DYNAMIC≤7，新四策略Dynamic≤16，TradFi维持原合同。Static rollback由冻结baseline及原安装policy校验。
+
+接口请求不接受`max_members`，也不能以伪造`source_kind=dynamic_selection`绕过。application从exact Generation/Spec解析policy，PG以同样的可信引用验证；GS-02/GS-04须证明caller传999或错误Spec/Event都失败。
 
 ## 9. Materialization 状态机与恢复
 
@@ -380,17 +471,17 @@ VALID_EMPTY是成功计算的有效结果：先fence和取消未完成ENTRY，�
 | 情况 | 行为 | 结果权限 |
 | --- | --- | --- |
 | pre-fence source/compute失败 | 原合法current/continuity继续 | 不冒充new activation或post-fence fallback |
-| post-fence warming永久失败/timeout | drain已清、旧set仍合法、gap proof完成后恢复 | `FALLBACK_PREVIOUS`，exact previous-active及comparison |
+| post-fence warming永久失败/timeout | drain已清、旧set及source freshness仍合法、gap proof完成后恢复 | `FALLBACK_PREVIOUS`，exact previous-active及comparison；不刷新staleness预算 |
 | 首次Static→Dynamic失败 | 恢复原Static set+comparison，产生transition-scoped proof | mode仍static；清理失败pending；不能自动重复首激活 |
 | 一个Event staged、另一个失败 | 废弃未生效targets，恢复整个previous set | SOR不能LONG新/SHORT旧 |
 | rollback到Static | 使用冻结baseline创建新的Materialization operation | 与ordinary fallback不同；不能复活retired Universe来交易 |
 | Owner pause或全局Entry暂停 | 最高优先级阻止新ENTRY授权 | fallback不得清除pause或自动resume |
-| previous非法 / drain未清 / gap缺源 | 保持Vacuum，记录首个blocker | FAILED_CLOSED，现有保护继续 |
+| previous非法 / stale预算耗尽 / drain未清 / gap缺源 | 保持或打开同一Vacuum，记录首个blocker | stale用SELECTION_STALE_PAUSED，其他FAILED_CLOSED；现有保护继续 |
 | 新due VALID_EMPTY覆盖旧Desired | 终止旧targets、drain、empty authority | 不走旧失败fallback |
 
 Static rollback使用baseline成员与comparison定义创建/认证新Universe版本，保留源baseline引用，不能把已经retired的旧current直接翻回ACTIVE。ordinary failed-switch previous仍未retire，可恢复权限，无须再复制成员。
 
-若timeout/`NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY`发生时原period已不能容纳合法close，不能在原period写`effective >= expires`的grant。旧Generation终止新目标但保留Vacuum恢复工作；Coordinator先按最新due有效Selection判定supersession/VALID_EMPTY，否则以当前period的transition-scoped recovery proof恢复exact previous set。该恢复不伪造新Snapshot或Dynamic成功，不复活过期Desired；Owner pause、drain和comparison规则继续优先。无法取得当前period合法proof时保持FAILED_CLOSED，不能无条件清Vacuum。
+若timeout/`NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY`发生时原period已不能容纳合法close，不能在原period写`effective >= expires`的grant。旧Generation终止新目标但保留Vacuum恢复工作；Coordinator先按最新due有效Selection判定supersession/VALID_EMPTY，否则仅在§6.4 budget尚未耗尽时以当前period的transition-scoped recovery proof恢复exact previous set。该恢复不伪造新Snapshot或Dynamic成功，不复活过期Desired，不刷新source Snapshot年龄；Owner pause、drain、comparison规则继续优先。超预算走SELECTION_STALE_PAUSED，其他无法取得合法proof时保持FAILED_CLOSED，不能无条件清Vacuum。
 
 ### 9.5 崩溃、重启与supersession
 
@@ -408,7 +499,7 @@ SOR继续整个UTC Session的first natural episode语义。Gap Audit先于grant�
 
 ### 10.2 CPM / MPG / MI / BRF2
 
-这些Event是 **rising_edge**，不是SOR的session_reference。研究replay在未选中期间跳过Detector，保留last episode state；不重置Universe absence/re-entry。本设计按这一边界落地：
+这些Event是 **rising_edge**，不是SOR的session_reference。研究replay在未选中期间跳过Detector，保留last episode state；不重置Universe absence/re-entry。以下普通preserve-state规则仅适用于**comparison binding未变，或已完成§10.3 rebase**的scope：
 
 1. Episode key继续为 `EventSpec + instrument + side`，不能加Snapshot、Universe、Generation或每小时period来制造新episode。
 2. 未选中期间保留既有episode state，既不伪造NOT_TRIGGERED rearm，也不新增全24的可交易Detector循环。
@@ -419,7 +510,34 @@ SOR继续整个UTC Session的first natural episode语义。Gap Audit先于grant�
 
 Generic Gap Audit记录 `RISING_EDGE_PRESERVE_STATE` coverage proof：fence interval、last authoritative observation/version、candidate set、数据完整性、实际first eligible close、comparison binding。使用current close时另附§6.2的precommitted Selection proof；**不套用SOR的“当天首次cross已发生”抑制规则**。对未选中期间的Detector结果无虚构审计结论。
 
-MPG/MI comparison binding切换可能改变Detector布尔输入；这也是正式输入权限改变，Episode identity仍不重置。新comparison不可在相同close重新写出与已committed observation矛盾的结果；activation仅在§6.2证明未被消费的合法close生效。
+MPG/MI comparison binding切换不得直接沿用旧comparison下的ARMED/TRIGGERED归因。普通`RISING_EDGE_PRESERVE_STATE`不能替代下面的`COMPARISON_BINDING_TRANSITION`；新comparison也不能在相同close重写已committed observation结果。
+
+### 10.3 COMPARISON_BINDING_TRANSITION（P0-1）
+
+只要MPG/MI有效comparison semantic digest改变，包含STATIC→DYNAMIC及DYNAMIC→STATIC，atomic activation同时安装新的`comparison_transition_revision`。每个受影响scope在该revision下从 **COMPARISON_REBASE_REQUIRED** 开始，不得直接把旧ARMED状态传给普通rising-edge reducer。
+
+```text
+target comparison active; rebase required
+  INVALID / missing  → remain REBASE_REQUIRED
+  valid TRIGGERED    → observed + suppressed; NO new Episode / Signal
+  valid NOT_TRIGGERED→ ARMED_UNDER_NEW_COMPARISON
+  later valid TRIGGERED under same binding/revision
+                    → exactly one natural new Episode, then normal admission
+```
+
+首次valid NOT_TRIGGERED必须来自**切换实际生效后**的正式Observation（其close遵守§6.2）；Warming、旧cache、historical rebase或仅模型初始化都不能给出armed证明。arm保存target digest/revision、`armed_at_close`、cursor/version；后续TRIGGERED的close必须严格大于armed close，禁止同close先false后true。
+
+保留原`EventSpec + instrument + side` episode domain key和既有immutable Episode/Ticket lineage。在原current projection扩展comparison/rebase checkpoint，必要时由Observation事务原子更新；不能通过给key加comparison创建平行Episode链。rebase期间TRIGGERED只写bounded Observation/rebase审计及cursor，不调用会新建episode的普通reducer。
+
+barrier对Spec Candidate中所有将来可能重入的scope有效：用parent transition revision和scope checkpoint比较惰性落实，未选中scope重入也不能拿更早revision的armed证明。A→B→A即使回到同一digest，也必须按**本次transition revision**重新观察NOT_TRIGGERED，不能复活上一次A的arming token。comparison未变的普通membership切换不触发rebase。
+
+从未有checkpoint的新scope遇到已发生comparison切换也按rebase-required处理。首次升级对原Static comparison的checkpoint只可由exact原输入身份的保全事实建立，不能把未知历史comparison猜成已armed；同schema重启保存原checkpoint/revision，不当成新切换。
+
+首次Dynamic失败且target comparison尚未成为Active，不发生comparison transition，原Static checkpoint保留。已经Active之后显式回到Static则重新rebase。Owner pause/stale解除不重置或跳过barrier；新的source Snapshot也不能解开它。
+
+Existing Ticket的保护/退出完全独立；即使当前episode投影在新comparison下重新布防，Netting Domain、one-Ticket-per-episode、no-add及风险约束仍由正式交易链检查。
+
+GS-COMP-01必须覆盖旧ARMED→切换→首根TRIGGERED无Episode/Signal，再NOT_TRIGGERED、后TRIGGERED只产生一次；另覆盖旧TRIGGERED、Static rollback、A→B→A、未选中后重入、INVALID、重启、same-close并发。此规则是新增的生产输入切换保护，不能声称Stage-3.1 fixed24 Replay测量过该rebase的机会损失。
 
 ## 11. Signal → Claim → Ticket → Dispatch 的权限验证
 
@@ -427,10 +545,10 @@ MPG/MI comparison binding切换可能改变Detector布尔输入；这也是正�
 
 | 边界 | 必须重核 | 失败后 |
 | --- | --- | --- |
-| Observation/Signal commit | current ACTIVE成员、close覆盖、comparison、Owner pause、无Vacuum | 无新增Signal；记录bounded原因 |
-| Claim | Signal birth/当前兼容authority、Scope、Account/风险/Domain、Binding | 正式Admission拒绝，无资金预留 |
+| Observation/Signal commit | parent+ACTIVE binding、close覆盖、comparison已armed、staleness deadline、Owner pause、无Vacuum | 无新增Signal；记录bounded原因 |
+| Claim | Signal birth/当前兼容authority、source freshness与comparison checkpoint、Scope、Account/风险/Domain、Binding | 正式Admission拒绝，无资金预留 |
 | Ticket issuance | Claim全部authority版本及current pointers的CAS | `authority_changed`，不发Ticket |
-| ENTRY dispatch | runtime/schema、最新Owner/fence/Vacuum、exact command | 官方取消/terminal路径；unknown先核对 |
+| ENTRY dispatch | runtime/schema、最新Owner/fence/Vacuum、staleness action-time deadline、exact command | 官方取消/terminal路径；unknown先核对 |
 | Existing exposed Ticket | frozen Ticket、ExitProfile、command与venue事实 | 按现有保护/退出链处理 |
 
 authority successor只有显式连续、同Event set/比较身份/合法period覆盖时才可兼容；不同成员、epoch、mode或comparison不能用新authority给旧Signal追认。跨period新Signal需本期grant；短时合法birth如何接受同period successor复用现有规则并加generic测试。
@@ -464,11 +582,21 @@ Top16扩大的是Observation/Warming scope，不是资金。full enabled状态�
 
 验收量化Selection耗时、queue/fence/warm耗时、event-time projection请求数、Observation延迟、Lifecycle/Reconciliation heartbeat、DB transaction duration和内存。若共享host不能满足原服务SLO，必须修复调度/批次，不缩Candidate或改cadence来“通过”。
 
+### 12.3 MPG hourly churn certification（Implementation Plan必需）
+
+继续full-set Warming，不预先设计incremental warming。使用**连续至少24h equivalent workload的accelerated production-shaped soak**，包含MPG 12/16 membership变化（研究mean additions/removals各约0.77/h仅作输入量级依据）、其余策略due竞争、真实PG事务、Worker lease/cadence、排队、cancel和恢复。
+
+必须输出并绑定exact workload/candidate：`selection_period_change_rate`、`generation_rate`、`p95 queue_wait`、`p95 fence→grant latency`、`vacuum_duty_cycle`、`NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY rate`、`selection-caused ENTRY cancellation count`、`missed eligible close count`。rate给numerator/denominator，p95给样本数，故障注入与正常段分开。
+
+加速只推进市场/逻辑时钟；不能把实际DB、queue、网络服务延迟也缩成0而假装满足SLO。正常段必须有每个策略实际可处理的eligible close，且不得因hourly切换形成永久zero-opportunity。queue/grant tail必须落在Spec deadline内，Safety Worker符合现有服务SLO；完整可执行门槛与计数口径由Implementation Plan的GS-12在运行前冻结，不能看结果后设置通过线。
+
+若full-set Warming过不了认证，停止该运行形态的release gate、回到性能设计修订；不得先实现未经批准的retained-member carry-forward，不通过改变Feature/cadence/TopN规避。
+
 ## 13. Owner API、Console 与控制体验
 
 ### 13.1 每策略独立控制
 
-页面展示五个策略卡：当前STATIC/DYNAMIC、pending生效时间、Spec/证据标记、Desired与actual members、首个eligible close、运行失败原因、pause状态。MPG解释“入选门槛12、保留门槛16，实际最多16”；不显示错误的固定Top12容量。
+页面展示五个策略卡：当前STATIC/DYNAMIC、pending生效时间、Spec/证据标记、Desired与actual members、首个eligible close、运行失败原因、Owner pause与系统stale状态。显示source Snapshot/cutoff、selection age、missed periods、membership deadline，以及MPG/MI COMPARISON_REBASE_REQUIRED或已armed状态；不能只给一个绿色DYNAMIC掩盖无新交易权限。MPG解释“入选门槛12、保留门槛16，实际最多16”；不显示错误的固定Top12容量。
 
 用户流程：**选择策略 → 预览下一可用生效时间/名单来源/比较集合变化 → 激活或回到STATIC → 输入一次TOTP → 看操作进度**。control version、唯一idempotency key由前端获取/生成；Owner不手填内部ID、SQL或请求体，不要求通过终端curl操作。
 
@@ -514,7 +642,7 @@ Owner pause与activate并发时，pause优先；activate可以记录pending意�
 
 迁移必须stopped、flat、preservation-gated：保存exact source schema logical manifest，转换period/Event bindings结构；原SOR语义、历史ID、semantic hashes、Snapshot内容、Ticket/Command/Profile/Binding lineage保持。结构化转换要证明每个原LONG/SHORT/Session字段可从新归一化事实无损还原；不能只比较总行数，不能假称结构改变后全表字节hash自然相同。
 
-新增四策略immutable Spec与初始STATIC controls、Comparison definitions、必要索引/权限。**零新增Job、Snapshot、Generation、Vacuum、Authority、Ticket、Command、Dynamic pending activation**。SOR已有current/pending/authority保持exact映射；源若有nonterminal materialization，则capability迁移另需该控制面quiescence证明，不能只看仓位flat就删除其durable状态。
+新增四策略immutable Spec与初始STATIC controls、Comparison definitions、必要索引/权限；增加§8.4 ACTIVE/EMPTY normalized bindings与§10.3 checkpoint表示，存量事实无损转换但不执行新的comparison transition/arming观察。**零新增Job、Snapshot、Generation、Vacuum、Authority parent、Ticket、Command、Dynamic pending activation**；存量Authority新增binding行属于表示保全，不是新grant。SOR已有current/pending/authority保持exact映射；源若有nonterminal materialization，则capability迁移另需该控制面quiescence证明，不能只看仓位flat就删除其durable状态。
 
 原day/pair/top7约束改为typed-family约束；去掉旧列/错误trigger，同时保持SOR分支约束强度。不得双写新旧表、部署旧schema reader或原地修改已提交历史migration。Owner role grants必须包含新增表的exact用途；readonly role仅SELECT、控制role仅正式控制事务所需权利，补production-shaped权限测试。
 
@@ -545,30 +673,35 @@ Owner pause与activate并发时，pause优先；activate可以记录pending意�
 
 ### 17.1 必须先有RED的工程不变量
 
+以下INV编号是设计验收ID，与Implementation Plan的GS Task编号区分。
+
 | ID | 情景 | 必须证明 |
 | --- | --- | --- |
-| GS-01 | 四Spec公式、排序、ties、undefined、原始字符串 | frozen数值合同、无未来值、rank可重建 |
-| GS-02 | MPG前驱重试、并发、failed/superseded Desired | 相同前驱与输入必同members；12..16；不读current Universe |
-| GS-03 | hourly/4h时钟、t与t+1、future Snapshot、05:00:08正常完成/迟到Snapshot | 不提前交易、不提前supersede当前due；合法current close可用；迟到选择和已消费close不能追认；hourly不永远零eligible |
-| GS-04 | 单LONG、单SHORT、SOR双Event materialization | target集合exact；不能出现mixed SOR pair |
-| GS-05 | 16成员、15成员、0成员、rank17补位诱因 | 精确数量与空规则，manual上限不被顺带扩大 |
-| GS-06 | MPG/MI rank1被排除、仅有16/23个比较窗口 | rank不重排；missing24 fail closed；8h/12h键隔离 |
-| GS-07 | Static→Dynamic→fallback/Static rollback | comparison与tradable原子切换；初次失败仍Static |
-| GS-08 | NO_CHANGE+open Pause Vacuum / latest VALID_EMPTY | 不能跳drain/proof；empty不fallback，不追溯改Ticket |
-| GS-09 | 未成交、partial、full、cancel unknown、late fill | 复用官方Vacuum保护分支；unknown无盲重发 |
-| GS-10 | 离开/重入、trigger未rearm、INVALID窗口 | Episode identity保留，最多1Ticket，不伪造rearm |
-| GS-11 | SOR first-close前audit、跨close commit、旧Vacuum retarget | 近期生产bug回归全覆盖，bounded suppression ID |
-| GS-12 | Snapshot commit/每个warming阶段/activation响应丢失重启 | durable幂等、lease隔离、timeout不刷新、terminal不复活 |
-| GS-13 | Signal→Claim→Ticket→dispatch期间switch/pause | authoritative CAS/fence生效，保护退出继续 |
-| GS-14 | 5策略due竞争、慢源、429、crash | 3 logical leases独立，global queue公平，Safety Worker SLO不退化 |
-| GS-15 | Owner无TOTP/过期码/409/双击/reload | 无绕过、无错误登出、同idempotency同operation |
-| GS-16 | 0007→目标schema保全及角色权限 | 逐logical record无损、SOR语义一致、seed无dynamic副作用 |
-| GS-17 | capability deploy与compatible restart | 不等待dynamic warming，static zero Selection job/network |
-| GS-18 | production import/path审计 | 无research/cache/Markdown authority，无YAML维护面 |
+| INV-01 | 四Spec公式、排序、ties、undefined、原始字符串 | frozen数值合同、无未来值、rank可重建 |
+| INV-02 | MPG前驱重试、并发、failed/superseded Desired | 相同前驱与输入必同members；12..16；不读current Universe |
+| INV-03 | hourly/4h时钟、t与t+1、future Snapshot、05:00:08正常完成/迟到Snapshot | 不提前交易、不提前supersede当前due；合法current close可用；迟到选择和已消费close不能追认；hourly不永远零eligible |
+| INV-04 | 单LONG、单SHORT、SOR双Event materialization | target集合exact；不能出现mixed SOR pair |
+| INV-05 | 16成员、15成员、0成员、rank17补位诱因 | 精确数量与空规则，trusted policy不被max_members/source_kind伪造 |
+| INV-06 | MPG/MI rank1被排除、仅有16/23个比较窗口 | rank不重排；missing24 fail closed；8h/12h键隔离 |
+| INV-07 | Static→Dynamic→fallback/Static rollback | comparison与tradable原子切换；初次失败仍Static |
+| INV-08 | NO_CHANGE+open Pause Vacuum / latest VALID_EMPTY | 完整EMPTY binding/NULL FK/empty digest；不能跳drain/proof；不fallback或追溯改Ticket |
+| INV-09 | 未成交、partial、full、cancel unknown、late fill | 复用官方Vacuum保护分支；unknown无盲重发 |
+| INV-10 | 离开/重入、trigger未rearm、INVALID窗口 | Episode identity保留，最多1Ticket，不伪造rearm |
+| INV-11 | SOR first-close前audit、跨close commit、旧Vacuum retarget | 近期生产bug回归全覆盖，bounded suppression ID |
+| INV-12 | Snapshot commit/每个warming阶段/activation响应丢失重启 | durable幂等、lease隔离、timeout不刷新、terminal不复活 |
+| INV-13 | Signal→Claim→Ticket→dispatch期间switch/pause/stale | authoritative CAS/fence/action-time deadline生效，保护退出继续 |
+| INV-14 | 5策略due竞争、慢源、429、crash | 3 logical leases独立，global queue公平，Safety Worker SLO不退化 |
+| INV-15 | Owner无TOTP/过期码/409/双击/reload | 无绕过、无错误登出、同idempotency同operation |
+| INV-16 | 0007→目标schema保全及角色权限 | 逐logical record无损、SOR语义一致、seed无dynamic副作用 |
+| INV-17 | capability deploy与compatible restart | 不等待dynamic warming，static zero Selection job/network |
+| INV-18 | production import/path审计 | 无research/cache/Markdown authority，无YAML维护面 |
+| GS-COMP-01 | comparison changed首根TRIGGERED、NOT_TRIGGERED再TRIGGERED、rollback及A→B→A | 新comparison/revision先armed再允许新Episode/Signal，既有Ticket不变 |
+| GS-STALE-01 | 1h/4h第一miss、第二miss、停止worker后时钟前进、fresh Desired连续warming失败 | 一cadence grace后同步block；旧名单source年龄不被刷新；mode仍Dynamic；fresh合法恢复不越Owner pause |
+| BRF2_NUMERIC_PARITY_GATE | 全部冻结cutoff，研究binary64 vs production Decimal raw Top16 | 集合100%相等；任一差异/缺源/漏检则停止BRF2 certification |
 
 ### 17.2 Golden不是新一轮Feature研究
 
-实施首卡冻结：研究输入/Spec/protocol/correction/result hashes、Decimal数值合同、exact member fixtures、SOR原Golden。新策略逐cutoff/member验证features、rank、state、前驱、digests；BRF2 float→Decimal差异单列，零掩盖。该工程parity不重跑参数搜索、收益比较、TopN或hypothesis research。
+实施首卡冻结：研究输入/Spec/protocol/correction/result hashes、Decimal数值合同、exact member fixtures、SOR原Golden。新策略逐cutoff/member验证features、rank、state、前驱、digests；BRF2执行§4.7全部cutoff **100% raw Top16 member-set parity**，任何mismatch停止Spec认证。该工程parity不重跑参数搜索、收益比较、TopN或hypothesis research。
 
 SOR沿用既有 **961×24** Production Decimal Golden、Tail3 diagnostic **1323**，并另跑runtime/迁移测试。Generic化可以改变内部normalized表示，不能改变SOR选择结果与旧hash公式、时序、failure/entry authority行为。
 
@@ -578,19 +711,32 @@ Stage-3.1 fixed-N Replay与hysteresis模拟是不同测试面；不能声称生�
 
 详细设计本轮：文档引用、authority allowlist、diff及证据digest检查。Implementation阶段：逐card focused red/green，然后Fast；exact release阶段：全Unit/Architecture、PG integration、Full-chain、migration、Ruff/Mypy、Owner UI/API、resource envelope与R4 manifest。
 
-设计批准后另出Task Cards，建议按“数值/identity evidence → generic domain/schema → Selection → Comparison/Observation → Materialization/authority → Owner Console → fault/migration/release certification”排序。该顺序不授予现在编码。
+已按本轮条件批准编写[Implementation Plan](../plans/2026-09-06-generic-multi-strategy-dynamic-selection-v1-implementation-plan.md)。首四卡固定为GS-00 Numeric/semantic fixtures、GS-01 Comparison-transition Episode、GS-02 Generic Authority/VALID_EMPTY、GS-03 Staleness/clock，先把纯domain invariant RED→GREEN，再到Schema/PG；该描述不授予现在执行这些卡。
 
-## 18. 待复核的工程决策与完成标准
+## 18. 独立复核处理与权限状态
 
-研究参数已冻结，不再提请选择。以下是本文件提出的具体工程取舍，复核可直接给出条款修订：
+Owner本轮转交的独立复核结论为`CONDITIONALLY_APPROVED`，明确四项P0写入后即可进入`DESIGN_APPROVED / PLAN_ONLY`。下表记录条件闭合，不声称修订文本又经历了额外一轮外部复核。
 
-1. **Hysteresis前驱使用Desired Snapshot链**，保持Selection与Runtime解耦；实际materialization差异公开审计。
-2. **Generic materialization不早于nominal effective，并采用precommitted Selection的current-final-close proof**；保留一小时延迟、不追认迟到选择或已消费close，避免每小时切换永远无eligible close。SOR strict-next-close完全保持。
-3. **Single Event/Pair统一成精确Event集合**，归一化原表而不复制SOR整套runtime。
-4. **rising-edge保留离场state**，不额外引入全天全24 Detector或SOR式first-cross gate。
-5. **BRF2 Decimal实现需独立工程parity**，研究binary64原报告不改写；membership差异须审计后才能作为生产Golden。
+| Review item | 落点 | 固定验证 |
+| --- | --- | --- |
+| P0-1 comparison transition | §7.2、§10.3；binding transition revision + scope rebase checkpoint | GS-COMP-01；旧ARMED不能跨comparison使用；rollback同测 |
+| P0-2 bounded Dynamic staleness | §6.4、§9.4、§11 | GS-STALE-01；一cadence grace；action-time绝对deadline；不自动Static |
+| P0-3 VALID_EMPTY shape | §8.1、§8.4、§15.1 | complete Event shape；EMPTY/NULL/empty digest；无零成员Universe |
+| P0-4 BRF2 numeric authority | §4.7、§17.2 | all frozen cutoffs；raw Top16 parity100%；任一mismatch STOP |
+| Hourly materialization cost | §12.3，计划GS-12 | ≥24h equivalent soak及八项强制指标 |
+| P1 trusted member limit | §8.5，计划GS-02/04/07 | source/Spec解析policy；拒绝caller max与伪造Dynamic |
 
-完成详细设计复核要求：以上选择无歧义，§17覆盖实施可验收边界，SOR不回退，Owner UI具备独立可用流程。随后才可标 `DESIGN_APPROVED / PLAN_ONLY` 并编写Implementation Plan；当前为 `DESIGN_REVIEW_REQUIRED`。
+独立复核已接受Desired Snapshot hysteresis前驱、current-final-close proof、Comparison24分离、SOR typed subtype和provenance；这些不重新设计。已冻结研究算法与N不变，新增staleness/rebase属于显式运行保护，不宣称被Stage-3.1测过收益。
+
+```text
+design_status = DESIGN_APPROVED
+execution_stage = PLAN_ONLY
+implementation_plan_authority = ALLOWED
+implementation_authority = NONE
+active_execution_scope = NONE
+production_dynamic_activation_authority = NONE
+further_feature_research = CLOSED
+```
 
 ## 19. 源码与研究 provenance 索引
 
@@ -620,7 +766,7 @@ CPM/BRF2 Top16 fallback并非原Protocol文本单独推出。独立复核接受�
 
 ## 20. 本次文档交付验证
 
-本轮只提交设计、研究总览和文档入口；另在独立research分支追加provenance amendment。`src/`、`migrations/`、`scripts/`、`tests/`、`deploy/`相对集成基线无本轮修改；未执行生产操作。
+首轮提交设计、研究总览和文档入口，另在独立research分支追加provenance amendment。本轮仅补四项P0及两项计划验收条款，并编写Implementation Plan。`src/`、`migrations/`、`scripts/`、`tests/`、`deploy/`相对集成基线无本轮修改；未执行GS Task、数值parity、soak或生产操作。
 
 `test_current_document_authority.py`在**未改动的dev基线**及**设计worktree**均为23 passed / 2 failed，失败完全相同：
 

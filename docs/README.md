@@ -43,9 +43,11 @@ state continue to come from code, PostgreSQL, exchange facts, and
 ## Design Review
 
 [Generic Multi-Strategy Dynamic Selection V1 detailed design](superpowers/specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md)
-is `DESIGN_REVIEW_REQUIRED`. It defines independent strategy selection using
-the accepted Stage-3.1 inputs; implementation and production activation are not
-authorized by this draft. The
+is `DESIGN_APPROVED / PLAN_ONLY` after the four required independent-review
+amendments. The
+[Implementation Plan](superpowers/plans/2026-09-06-generic-multi-strategy-dynamic-selection-v1-implementation-plan.md)
+is `PLAN_REVIEW_REQUIRED`; no implementation or production activation is
+authorized. The
 [research overview](superpowers/specs/2026-08-18-eventspec-instrument-fit-research-overview.md)
 records the evidence boundary and provenance amendment. These design/research
 documents do not extend the `docs/current` runtime-authority allowlist.
