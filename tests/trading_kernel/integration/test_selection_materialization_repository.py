@@ -123,6 +123,10 @@ from src.trading_kernel.interfaces.readonly_api import (
     SelectionRuntimeReadonlyRequest,
     get_selection_runtime_view,
 )
+from src.trading_kernel.interfaces.selection_runtime_worker import (
+    SelectionRuntimeRequest,
+    run_materialization_runtime_once,
+)
 from tests.trading_kernel.integration.universe_activation_support import (
     make_warming_ready,
 )
@@ -952,8 +956,10 @@ async def test_repository_opens_new_vacuum_after_previous_operation_is_terminal(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("repeat_conflict", (None, "trigger", "detector"))
 async def test_gap_audit_completion_persists_positive_and_checked_negative_proof(
     head_template_engine,
+    repeat_conflict: str | None,
 ) -> None:
     await _seed_materialization_context(head_template_engine)
     audit = build_pending_authority_gap_audit(
@@ -1033,6 +1039,45 @@ async def test_gap_audit_completion_persists_positive_and_checked_negative_proof
         "trigger-suppression:"
     )
     assert events == ["STARTED", "TRIGGER_SUPPRESSED", "CHECKED_NEGATIVE", "COMPLETE"]
+
+    # A late-continuity audit and a subsequent switching audit can both
+    # observe the same first trigger. Preserve one suppression per episode.
+    next_audit = audit.model_copy(update={
+        "authority_gap_audit_id": audit.authority_gap_audit_id + ":second",
+        "detector_semantic_digest": "sha256:" + "f" * 64
+        if repeat_conflict == "detector" else audit.detector_semantic_digest,
+    })
+    next_results = (
+        results[0].model_copy(update={"first_natural_trigger_at_ms":
+            SESSION_START_MS + 4_500_001 if repeat_conflict == "trigger"
+            else results[0].first_natural_trigger_at_ms}),
+        results[1],
+    )
+    next_completed = complete_authority_gap_audit(
+        next_audit, audited_through_close_time_ms=SESSION_START_MS + 5_400_000,
+        scopes=scopes, results=next_results,
+    )
+    async with head_template_engine.begin() as connection:
+        await PostgresInstrumentSelectionRepository(connection).add_pending_authority_gap_audit(next_audit)
+
+    async def complete_second():
+        async with head_template_engine.begin() as connection:
+            await PostgresInstrumentSelectionRepository(connection).complete_authority_gap_audit(
+                next_completed, results=next_results,
+                completed_at_ms=SESSION_START_MS + 5_400_001,
+            )
+    if repeat_conflict:
+        with pytest.raises(SelectionJobConflict, match="suppression evidence conflicts"):
+            await complete_second()
+    else:
+        await complete_second()
+    async with head_template_engine.connect() as connection:
+        stored = (await connection.execute(sa.select(strategy_trigger_suppressions))).mappings().all()
+        next_state = await connection.scalar(sa.select(selection_authority_gap_audits_current.c.state).where(
+            selection_authority_gap_audits_current.c.authority_gap_audit_id == next_audit.authority_gap_audit_id
+        ))
+    assert stored == suppressions
+    assert next_state == ("PENDING" if repeat_conflict else "COMPLETE")
 
 
 @pytest.mark.asyncio
@@ -1868,8 +1913,8 @@ async def test_staged_pair_activation_atomically_switches_both_sides_and_authori
 
 
 @pytest.mark.parametrize(
-    "failure_stage",
-    (
+    ("failure_stage", "first_activation"),
+    [(stage, first) for first in (False, True) for stage in (
         "retire_previous_scopes",
         "activate_target_scopes",
         "long_pointer",
@@ -1878,15 +1923,19 @@ async def test_staged_pair_activation_atomically_switches_both_sides_and_authori
         "authority_pointer",
         "generation_terminal",
         "vacuum_resolution",
-    ),
+        "selection_control",
+    ) if stage != "selection_control" or first],
 )
 @pytest.mark.asyncio
 async def test_atomic_pair_activation_failure_rolls_back_all_visible_state(
     head_template_engine,
     failure_stage: str,
+    first_activation: bool,
 ) -> None:
     generation_id, long_target_id, short_target_id = await _prepare_staged_pair(
-        head_template_engine
+        head_template_engine,
+        selection_mode="static_baseline" if first_activation else "dynamic_selection",
+        pending_selection_mode="dynamic_selection" if first_activation else None,
     )
     audit_pending = await coordinate_selection_materialization_once(
         uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
@@ -1925,12 +1974,16 @@ async def test_atomic_pair_activation_failure_rolls_back_all_visible_state(
         condition = "NEW.authority_outcome = 'ACTIVE_NEW'"
     elif failure_stage == "authority_pointer":
         table_name = "brc_selection_authority_current"
-        operation = "UPDATE"
+        operation = "INSERT OR UPDATE"
         condition = f"NEW.selection_spec_id = '{SELECTION_SPEC_ID}'"
     elif failure_stage == "generation_terminal":
         table_name = "brc_strategy_universe_materialization_generations"
         operation = "UPDATE"
         condition = "NEW.lifecycle_state = 'ACTIVE'"
+    elif failure_stage == "selection_control":
+        table_name = "brc_strategy_selection_control_current"
+        operation = "UPDATE"
+        condition = "NEW.selection_mode = 'dynamic_selection'"
     else:
         table_name = "brc_strategy_entry_vacuums_current"
         operation = "UPDATE"
@@ -2031,28 +2084,34 @@ async def test_atomic_pair_activation_failure_rolls_back_all_visible_state(
     assert vacuum_state == "RECONFIGURING"
     assert audit_state == "PENDING"
     assert active_new_count == 0
+    async with head_template_engine.connect() as connection:
+        control = (await connection.execute(sa.select(strategy_selection_control_current))).mappings().one()
+    assert control["selection_mode"] == ("static_baseline" if first_activation else "dynamic_selection")
+    assert control["pending_selection_mode"] == ("dynamic_selection" if first_activation else None)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("first_activation", (False, True))
+@pytest.mark.parametrize("member_count", (2, 7))
 async def test_coordinator_runs_serial_warming_audit_and_atomic_pair_activation(
     head_template_engine,
+    first_activation: bool,
+    member_count: int,
 ) -> None:
     changed_members = tuple(
-        sorted(
-            (
-                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[0],
-                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[2],
-            )
-        )
+        sorted(CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[2:2 + member_count])
     )
     await _seed_materialization_context(
         head_template_engine,
         selected_members=changed_members,
+        selection_mode="static_baseline" if first_activation else "dynamic_selection",
+        pending_selection_mode="dynamic_selection" if first_activation else None,
     )
-    await _seed_previous_dynamic_authority(head_template_engine)
+    if not first_activation:
+        await _seed_previous_dynamic_authority(head_template_engine)
     request = _materialization_request("materializer:serial-pair")
     clock = _Clock(SESSION_START_MS + 3_600_000)
-    for _ in range(4):
+    for _ in range(3 if first_activation else 4):
         await coordinate_selection_materialization_once(
             uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
             request=request,
@@ -2120,17 +2179,23 @@ async def test_coordinator_runs_serial_warming_audit_and_atomic_pair_activation(
     assert audit_pending.disposition is MaterializationDisposition.GAP_AUDIT_PENDING
     assert audit_pending.authority_gap_audit_id is not None
 
-    activated = await complete_pending_authority_gap_audit(
+    # Production staged both sides at 01:18 UTC, after the first eligible close.
+    activated = await run_materialization_runtime_once(
         uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
         audit_source=_CheckedNegativeAuditSource(),
-        authority_gap_audit_id=audit_pending.authority_gap_audit_id,
-        clock_ms=_Clock(SESSION_START_MS + 4_500_000),
+        request=SelectionRuntimeRequest(
+            selection_spec_id=SELECTION_SPEC_ID,
+            strategy_group_id="SOR-001",
+            worker_id="materializer:production-runtime",
+            now_ms=SESSION_START_MS + 4_725_000,
+        ),
+        clock_ms=_Clock(SESSION_START_MS + 4_725_001),
     )
     assert activated.disposition is MaterializationDisposition.ACTIVE_NEW
     repeated = await coordinate_selection_materialization_once(
         uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
         request=request,
-        clock_ms=_Clock(SESSION_START_MS + 4_500_010),
+        clock_ms=_Clock(SESSION_START_MS + 4_725_010),
     )
     assert repeated.disposition is MaterializationDisposition.ACTIVE_NEW
     assert repeated.selection_authority_id == activated.selection_authority_id
@@ -2147,6 +2212,21 @@ async def test_coordinator_runs_serial_warming_audit_and_atomic_pair_activation(
             )
         )
     assert current_ids == (str(long_target_id), str(short_target_id))
+    async with head_template_engine.connect() as connection:
+        control = (await connection.execute(
+            sa.select(strategy_selection_control_current).where(
+                strategy_selection_control_current.c.strategy_group_id == "SOR-001"
+            )
+        )).mappings().one()
+        authority = (await connection.execute(
+            sa.select(selection_session_authorities).where(
+                selection_session_authorities.c.selection_authority_id
+                == activated.selection_authority_id
+            )
+        )).mappings().one()
+    assert control["selection_mode"] == "dynamic_selection"
+    assert control["pending_selection_mode"] is None
+    assert authority["selection_mode"] == "dynamic_selection"
 
 
 @pytest.mark.parametrize(
@@ -2169,6 +2249,12 @@ async def test_materialization_timeout_falls_back_to_exact_previous_pair(
         pending_selection_mode=pending_selection_mode,
     )
     request = _materialization_request("materializer:timeout-fallback")
+    active_audit = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=request,
+        clock_ms=_Clock(SESSION_START_MS + 4_500_000),
+    )
+    assert active_audit.authority_gap_audit_id is not None
     timeout_clock = _Clock(SESSION_START_MS + 5_400_020)
 
     audit_pending = await coordinate_selection_materialization_once(
@@ -2194,6 +2280,15 @@ async def test_materialization_timeout_falls_back_to_exact_previous_pair(
             )
         )
     assert target_states == ("abandoned", "abandoned")
+    async with head_template_engine.connect() as connection:
+        obsolete_audit = (await connection.execute(
+            sa.select(selection_authority_gap_audits_current).where(
+                selection_authority_gap_audits_current.c.authority_gap_audit_id
+                == active_audit.authority_gap_audit_id
+            )
+        )).mappings().one()
+    assert obsolete_audit["state"] == "FAILED"
+    assert obsolete_audit["first_blocker"] == "ACTIVATION_REPLACED_BY_FALLBACK"
 
     fallback = await complete_pending_authority_gap_audit(
         uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
@@ -2797,7 +2892,7 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
         "RECONFIGURING",
         superseded.materialization_generation_id,
         "LATEST_VALID_SELECTION",
-        next_session_start_ms + 3_600_001,
+        SESSION_START_MS + 3_600_003,
     )
     assert retroactive_authority_count == 0
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -50,6 +51,29 @@ from src.trading_kernel.interfaces.worker_process import (
     WorkerProcessLoop,
     run_worker_process_group,
 )
+
+
+@pytest.mark.asyncio
+async def test_component_failure_reports_code_location_without_sensitive_input(monkeypatch):
+    stop = asyncio.Event()
+    monkeypatch.setattr("src.trading_kernel.interfaces.worker_process._shutdown_event", lambda: stop)
+    output = []
+
+    async def failing_tick():
+        raise ValueError("secret-account-token-must-not-be-logged")
+
+    def emit(value):
+        output.append(json.loads(value))
+        stop.set()
+
+    await run_worker_process_group(
+        (WorkerProcessLoop("materialization", failing_tick, 1, frozenset()),),
+        run_forever=True, idle_log_interval_ms=100, emit=emit,
+    )
+    assert output[0]["status"] == "tick_failed"
+    assert output[0]["error_location"]["function"] == "failing_tick"
+    assert output[0]["error_location"]["line"] > 0
+    assert "secret-account-token" not in json.dumps(output)
 
 
 def test_observation_process_exposes_three_distinct_logical_component_identities() -> None:

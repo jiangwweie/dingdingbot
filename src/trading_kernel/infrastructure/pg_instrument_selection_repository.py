@@ -1404,7 +1404,7 @@ class PostgresInstrumentSelectionRepository:
             .values(
                 lifecycle_state="MATERIALIZING",
                 desired_at_ms=superseded_at_ms,
-                fenced_at_ms=superseded_at_ms,
+                fenced_at_ms=vacuum.fenced_at_ms,
                 projection_version=4,
             )
         )
@@ -1489,8 +1489,6 @@ class PostgresInstrumentSelectionRepository:
                     replacement_generation.materialization_generation_id
                 ),
                 state="RECONFIGURING",
-                fenced_at_ms=superseded_at_ms,
-                drained_at_ms=superseded_at_ms,
                 first_blocker="LATEST_VALID_SELECTION",
                 projection_version=retargeted_vacuum_version,
             )
@@ -1646,7 +1644,7 @@ class PostgresInstrumentSelectionRepository:
             .values(
                 lifecycle_state="MATERIALIZING",
                 desired_at_ms=superseded_at_ms,
-                fenced_at_ms=superseded_at_ms,
+                fenced_at_ms=vacuum.fenced_at_ms,
                 projection_version=4,
             )
         )
@@ -1737,8 +1735,6 @@ class PostgresInstrumentSelectionRepository:
                     replacement_generation.materialization_generation_id
                 ),
                 state="RECONFIGURING",
-                fenced_at_ms=superseded_at_ms,
-                drained_at_ms=superseded_at_ms,
                 first_blocker="LATEST_VALID_SELECTION",
                 projection_version=retargeted_vacuum_version,
             )
@@ -2848,11 +2844,27 @@ class PostgresInstrumentSelectionRepository:
                     detector_semantic_digest=audit.detector_semantic_digest,
                     created_at_ms=completed_at_ms,
                 )
-                await self._connection.execute(
-                    sa.insert(strategy_trigger_suppressions).values(
+                inserted = await self._connection.execute(
+                    pg_insert(strategy_trigger_suppressions).values(
                         **suppression.model_dump(mode="json")
-                    )
+                    ).on_conflict_do_nothing(index_elements=[
+                        "event_spec_id", "exchange_instrument_id", "session_reference",
+                    ]).returning(strategy_trigger_suppressions.c.trigger_suppression_id)
                 )
+                if inserted.scalar_one_or_none() is None:
+                    existing = (await self._connection.execute(
+                        sa.select(strategy_trigger_suppressions).where(
+                            strategy_trigger_suppressions.c.event_spec_id == suppression.event_spec_id,
+                            strategy_trigger_suppressions.c.exchange_instrument_id == suppression.exchange_instrument_id,
+                            strategy_trigger_suppressions.c.session_reference == suppression.session_reference,
+                        )
+                    )).mappings().one()
+                    if (
+                        existing["first_natural_trigger_at_ms"] != suppression.first_natural_trigger_at_ms
+                        or existing["detector_semantic_digest"] != suppression.detector_semantic_digest
+                        or existing["reason_code"] != suppression.reason_code
+                    ):
+                        raise SelectionJobConflict("trigger suppression evidence conflicts")
             sequence += 1
         await self._connection.execute(
             sa.insert(selection_authority_gap_audit_events).values(

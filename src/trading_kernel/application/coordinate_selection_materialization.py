@@ -1340,6 +1340,7 @@ async def _complete_pending_authority_gap_audit(
             selection_mode=(
                 SelectionMode.STATIC_BASELINE
                 if selection_control.selection_mode is SelectionMode.STATIC_BASELINE
+                and audit.proposed_authority_outcome is AuthorityOutcome.FALLBACK_PREVIOUS
                 else SelectionMode.DYNAMIC_SELECTION
             ),
             reason_code=(
@@ -1549,7 +1550,12 @@ async def _coordinate_generation_materialization(
                 f"FALLBACK_AUDIT_{fallback_previous_audit.state.value}"
             ),
         )
-    if now_ms - vacuum.fenced_at_ms >= materialization_timeout_ms:
+    # Retargeting a continuously open Vacuum does not rewrite its original
+    # fence/drain evidence. Each replacement Generation has its own budget.
+    materialization_started_at_ms = max(
+        vacuum.fenced_at_ms, generation.desired_at_ms or generation.created_at_ms,
+    )
+    if now_ms - materialization_started_at_ms >= materialization_timeout_ms:
         return await _prepare_generation_fallback_previous(
             uow=uow,
             generation=generation,
@@ -1716,6 +1722,23 @@ async def _prepare_generation_fallback_previous(
     now_ms: int,
     reason_code: str,
 ) -> CoordinateSelectionMaterializationResult:
+    activation_audit = await uow.instrument_selection.get_authority_gap_audit(
+        _gap_audit_id(
+            spec_id=generation.selection_spec_id,
+            session_start_ms=snapshot.session_start_ms,
+            gap_kind=AuthorityGapAuditKind.ENTRY_VACUUM,
+            proposed_outcome=AuthorityOutcome.ACTIVE_NEW,
+        ),
+        for_update=True,
+    )
+    if activation_audit is not None and activation_audit.state.value == "PENDING":
+        await uow.instrument_selection.fail_authority_gap_audit(
+            fail_authority_gap_audit(
+                activation_audit,
+                first_blocker="ACTIVATION_REPLACED_BY_FALLBACK",
+            ),
+            failed_at_ms=now_ms,
+        )
     await _abandon_generation_targets(
         uow=uow,
         generation_id=generation.materialization_generation_id,

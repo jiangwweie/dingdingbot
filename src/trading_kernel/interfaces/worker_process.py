@@ -142,12 +142,21 @@ async def run_worker_process_group(
                     if status in item.idle_statuses:
                         last_idle_log_ms = monotonic_ms
             except Exception as exc:  # noqa: BLE001 - isolate one logical loop.
+                trace = exc.__traceback__
+                while trace is not None and trace.tb_next is not None:
+                    trace = trace.tb_next
+                location = None if trace is None else {
+                    "file": trace.tb_frame.f_code.co_filename.rsplit("/", 1)[-1],
+                    "function": trace.tb_frame.f_code.co_name,
+                    "line": trace.tb_lineno,
+                }
                 output(
                     json.dumps(
                         {
                             "component_id": item.component_id,
                             "status": "tick_failed",
                             "detail": type(exc).__name__,
+                            "error_location": location,
                         },
                         ensure_ascii=False,
                     )
