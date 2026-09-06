@@ -20,6 +20,7 @@ from src.trading_kernel.domain.instrument_selection import (
     INTERVAL_MS,
     SelectionSnapshot,
 )
+from src.trading_kernel.domain.strategy_universe import StrategyUniverseSourceKind
 
 
 class AuthorityOutcome(StrEnum):
@@ -552,6 +553,219 @@ class UniverseAuthorityPair(BaseModel):
         if self.long_universe_version_id == self.short_universe_version_id:
             raise ValueError("Authority LONG and SHORT Universes must be distinct")
         return self
+
+
+class AuthorityEventSetError(ValueError):
+    """An EventUniverseSet cannot represent the required authority shape."""
+
+
+class AuthorityEventGrantState(StrEnum):
+    ACTIVE = "ACTIVE"
+    EMPTY = "EMPTY"
+
+
+class AuthorityEventRequirement(BaseModel):
+    """One Event/side that a SelectionSpec requires an Authority to represent."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str
+    position_side: Literal["long", "short"]
+
+    @field_validator("event_spec_id", mode="before")
+    @classmethod
+    def _require_event_spec(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("Authority Event requirement requires EventSpec identity")
+        return normalized
+
+
+class AuthorityEventBinding(BaseModel):
+    """One explicit ACTIVE or EMPTY grant for a required Event."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str
+    position_side: Literal["long", "short"]
+    grant_state: AuthorityEventGrantState
+    universe_version_id: str | None
+    member_set_digest: str
+
+    @field_validator("event_spec_id", mode="before")
+    @classmethod
+    def _require_event_spec(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("Authority Event binding requires EventSpec identity")
+        return normalized
+
+    @field_validator("universe_version_id", mode="before")
+    @classmethod
+    def _normalize_universe_identity(cls, value: object) -> str | None:
+        normalized = str(value or "").strip()
+        return normalized or None
+
+    @field_validator("member_set_digest")
+    @classmethod
+    def _require_member_set_digest(cls, value: str) -> str:
+        return _require_sha256(value)
+
+    @model_validator(mode="after")
+    def _validate_binding(self) -> AuthorityEventBinding:
+        empty_digest = selected_member_set_digest(())
+        if self.grant_state is AuthorityEventGrantState.ACTIVE:
+            if self.universe_version_id is None:
+                raise ValueError("ACTIVE Event binding requires Universe identity")
+            if self.member_set_digest == empty_digest:
+                raise ValueError("ACTIVE Event binding forbids empty digest")
+        elif (
+            self.universe_version_id is not None
+            or self.member_set_digest != empty_digest
+        ):
+            raise ValueError("EMPTY Event binding requires NULL Universe and empty digest")
+        return self
+
+    @classmethod
+    def empty(
+        cls,
+        *,
+        event_spec_id: str,
+        position_side: Literal["long", "short"],
+    ) -> AuthorityEventBinding:
+        return cls(
+            event_spec_id=event_spec_id,
+            position_side=position_side,
+            grant_state=AuthorityEventGrantState.EMPTY,
+            universe_version_id=None,
+            member_set_digest=selected_member_set_digest(()),
+        )
+
+
+class EventUniverseSet(BaseModel):
+    """Complete ordered Event authority shape for a Generic SelectionSpec."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    bindings: tuple[AuthorityEventBinding, ...]
+
+    @model_validator(mode="after")
+    def _validate_event_set(self) -> EventUniverseSet:
+        if not self.bindings:
+            raise ValueError("EventUniverseSet requires at least one Event binding")
+        identities = tuple(
+            (item.event_spec_id, item.position_side) for item in self.bindings
+        )
+        if len(identities) != len(set(identities)):
+            raise ValueError("EventUniverseSet bindings must be unique")
+        states = {item.grant_state for item in self.bindings}
+        if len(states) != 1:
+            raise ValueError("EventUniverseSet bindings must be all ACTIVE or all EMPTY")
+        return self
+
+    @property
+    def is_trading(self) -> bool:
+        return self.bindings[0].grant_state is AuthorityEventGrantState.ACTIVE
+
+    def binding_for(self, event_spec_id: str) -> AuthorityEventBinding:
+        for binding in self.bindings:
+            if binding.event_spec_id == event_spec_id:
+                return binding
+        raise KeyError(event_spec_id)
+
+
+def build_event_universe_set(
+    *,
+    requirements: tuple[AuthorityEventRequirement, ...],
+    bindings: tuple[AuthorityEventBinding, ...],
+) -> EventUniverseSet:
+    """Build a complete Spec Event shape without dummy or missing Event rows."""
+
+    if not requirements:
+        raise AuthorityEventSetError("Authority Event requirements must be nonempty")
+    requirement_ids = tuple(
+        (item.event_spec_id, item.position_side) for item in requirements
+    )
+    if len(requirement_ids) != len(set(requirement_ids)):
+        raise AuthorityEventSetError("Authority Event requirements must be unique")
+    bindings_by_identity = {
+        (item.event_spec_id, item.position_side): item for item in bindings
+    }
+    if len(bindings_by_identity) != len(bindings):
+        raise AuthorityEventSetError("Authority Event bindings must be unique")
+    if set(bindings_by_identity) != set(requirement_ids):
+        raise AuthorityEventSetError(
+            "Authority Event bindings differ from required Spec Event shape"
+        )
+    try:
+        return EventUniverseSet(
+            bindings=tuple(bindings_by_identity[identity] for identity in requirement_ids)
+        )
+    except ValueError as exc:
+        raise AuthorityEventSetError(str(exc)) from exc
+
+
+_DYNAMIC_UNIVERSE_MEMBER_LIMITS: dict[tuple[str, str], int] = {
+    ("SOR-001", "event_spec:SOR-001:SOR-LONG:v4"): 7,
+    ("SOR-001", "event_spec:SOR-001:SOR-SHORT:v4"): 7,
+    ("CPM-RO-001", "event_spec:CPM-RO-001:CPM-LONG:v3"): 16,
+    ("MPG-001", "event_spec:MPG-001:MPG-LONG:v3"): 16,
+    ("MI-001", "event_spec:MI-001:MI-LONG:v3"): 16,
+    ("BRF2-001", "event_spec:BRF2-001:BRF2-SHORT:v3"): 16,
+}
+
+
+class TrustedUniverseMembershipPolicy(BaseModel):
+    """Trusted source/Event policy; callers never supply a numeric limit."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_kind: StrategyUniverseSourceKind
+    strategy_group_id: str
+    event_spec_id: str
+
+    @field_validator("strategy_group_id", "event_spec_id", mode="before")
+    @classmethod
+    def _require_policy_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("Universe membership policy identity must be non-blank")
+        return normalized
+
+    @property
+    def member_limit(self) -> int:
+        if self.source_kind in {
+            StrategyUniverseSourceKind.MANUAL,
+            StrategyUniverseSourceKind.STATIC_BASELINE,
+        }:
+            return 10
+        limit = _DYNAMIC_UNIVERSE_MEMBER_LIMITS.get(
+            (self.strategy_group_id, self.event_spec_id)
+        )
+        if limit is None:
+            raise AuthorityEventSetError("Dynamic Universe policy is not installed")
+        return limit
+
+    def require_member_count(self, member_count: int) -> None:
+        if not 1 <= member_count <= self.member_limit:
+            raise AuthorityEventSetError(
+                f"Universe member limit is {self.member_limit}, got {member_count}"
+            )
+
+
+def trusted_universe_membership_policy(
+    *,
+    source_kind: StrategyUniverseSourceKind,
+    strategy_group_id: str,
+    event_spec_id: str,
+) -> TrustedUniverseMembershipPolicy:
+    """Return the fixed trusted policy for a source/Event authority tuple."""
+
+    return TrustedUniverseMembershipPolicy(
+        source_kind=source_kind,
+        strategy_group_id=strategy_group_id,
+        event_spec_id=event_spec_id,
+    )
 
 
 class SelectionSessionAuthority(BaseModel):
