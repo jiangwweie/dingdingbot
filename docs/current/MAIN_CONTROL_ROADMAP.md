@@ -32,18 +32,18 @@ different Netting Domains progress concurrently.
 | Integration branch | `dev` |
 | Verified at | `2026-09-06`; direct Tokyo PostgreSQL, systemd and Binance USDⓈ-M readonly evidence after Dynamic fallback recovery and official Entry Promotion |
 | Production commit | `4aa202fffe9ce3a939e647b627666e25e14fdb2d` |
-| Production tag | Pending a post-promotion stability review; no tag is implied by same-Schema deployment alone |
+| Production tag | `tokyo-runtime-2026.09.06.1`; records the deployed software identity, not successful Dynamic activation |
 | Production release | `/opt/brc/releases/brc-trading-kernel-4aa202fffe9c` |
 | Production-commit certification | R3 `pass`; complete unit/architecture, PostgreSQL integration, full-chain, Ruff, Mypy and diff gates passed for the exact deployed commit |
 | Deployment phase | Three same-Schema R3 repairs completed on `0007`; no migration, downgrade, dual write or old writer restart occurred |
 | PostgreSQL identity | Alembic and runtime authority identify `0007_exit_profile_authority_v1`; Registry, Policy, Seed and runtime capabilities agree with `4aa202ff` |
 | History preservation | Both forward revisions preserved certified lineage; B completed exact `0006` source preservation before its `0007` runtime identity rotation |
 | StrategyUniverse deployment | Eight Universes remain Active, zero are Warming, 58 scopes are Active and the Static SOR pair remains the current pair |
-| Owner controls | Policy version `16` has `new_entry_submit_enabled=true`; `SOR-001` Selection Control is `static_baseline` at version `5` |
+| Owner controls | Policy version `16` has `new_entry_submit_enabled=true`; `SOR-001` Selection Control is `static_baseline` at version `7`, with no pending activation |
 | Runtime ownership | Observation, Entry, Lifecycle and Reconciliation are active/enabled; the Entry fence is absent after official Promotion |
-| Current PostgreSQL activity | One active CPM ETH Ticket is `position_protected`; no open Incident and no unknown Command outcome exist |
-| Exchange postflight | Binance reports the matching protected ETH LONG domain, no unrelated open-order domain, independent sides and Cross margin valid |
-| Dynamic Selection postflight | The authorized `2026-09-05 00:00 UTC` Dynamic attempt reached audited `FALLBACK_PREVIOUS` after materialization timeout. Static SOR pair was restored with no fabricated Dynamic Authority; a new Dynamic attempt requires a separate next-session Owner/TOTP action |
+| Current PostgreSQL activity | Latest readonly check: ADA SHORT Ticket `ticket:7fcc5ef4a78e55140f3a33d72ee2af2d` is `position_protected`, quantity/protected quantity both 3242; zero unresolved Command and open Incident |
+| Exchange postflight | The last deployment/promotion checked Binance flatness, independent sides, Cross margin and configured leverage. The current repair has not independently re-certified the active position at the exchange; live exposure blocks another stopped-flat deployment |
+| Dynamic Selection postflight | The `2026-09-06 00:00 UTC` attempt selected seven of 22 ready Candidates at 01:00 UTC; both targets staged at 01:18:45 UTC, then first-activation Authority validation repeatedly failed. At 01:30:10 UTC audited `FALLBACK_PREVIOUS` restored Static pair; no Dynamic activation succeeded |
 | ExitProfile postflight | Eight immutable ExitProfiles, eight initial Bindings, eight current pointers and eight `ACTIVATED` events exist; no Profile switch/retirement side effect occurred |
 | New trading activity | Official Entry Promotion produced `ticket:1c612dcecd76efca3c96db7c79819fad`: CPM ETH LONG, Entry/Initial Stop/TP1 accepted and Aggregate `position_protected` |
 | Scope boundary | Static Entry is live. A new Dynamic activation and any ExitProfile switch/retirement remain separate exact Owner actions |
