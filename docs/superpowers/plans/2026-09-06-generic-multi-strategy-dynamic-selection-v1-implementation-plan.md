@@ -8,7 +8,7 @@ date: 2026-09-06
 design_authority: ../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
 implementation_plan_authority: ALLOWED
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: GS-04
+active_execution_scope: GS-04_TO_GS-13
 production_authority: NONE
 further_feature_research: CLOSED
 ---
@@ -25,12 +25,12 @@ further_feature_research: CLOSED
 design_status = DESIGN_APPROVED / PLAN_ONLY
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = GS-04
+active_execution_scope = GS-04_TO_GS-13
 production_activation_authority = NONE
 further_feature_research = CLOSED
 ```
 
-独立复核已完成并由Owner在本任务明确授权按本计划执行本地代码与测试。GS-00至GS-03已完成，当前进入GS-04。文本中的“执行/实现”是受本计划、Task依赖和Hard Stop约束的本地工作；不授权Tokyo操作、生产migration、部署或策略activation。
+独立复核已完成并由Owner在本任务明确授权按本计划执行本地代码与测试。GS-00至GS-03已完成；Owner进一步授权连续完成GS-04至GS-13，在本地完整R4 candidate形成前不再逐卡等待确认。文本中的“执行/实现”是受本计划、Task依赖和Hard Stop约束的本地工作；不授权Tokyo操作、生产migration、部署或策略activation。
 
 针对`4b2947e9f43fb3e2c4f165c91a957e0f20adb632`的独立复核已批准设计，并对Plan给出两项条件。strategy-scoped certification和Static migration neutrality已并入原卡，不新增Task、不修改已批准设计主体。Owner随后明确要求“按文档开始执行开发测试”，故本地实施范围正式开启；执行状态由本文件头和当前Task Card管理。
 
@@ -403,4 +403,4 @@ GS-12 soak若不是C运行，必须证明测试生产面与依赖未变，并由
 
 common任务及candidate安装策略的相关分支全部DONE后才能冻结本地release candidate；失败未安装分支须显式列出，不伪造四策略全完成。R4通过也不自动授权生产。
 
-当前 **PLAN_APPROVED / required_plan_amendments=COMPLETE / owner_confirmation=GRANTED_2026-09-06 / implementation_authority=CODE_AND_TEST_ONLY / active_execution_scope=GS-04**。GS-00至GS-03的提交、测试与证据已完成；后续卡仍按依赖顺序执行。生产部署、Tokyo migration和任何策略 activation继续无授权。
+当前 **PLAN_APPROVED / required_plan_amendments=COMPLETE / owner_confirmation=GRANTED_2026-09-07 / implementation_authority=CODE_AND_TEST_ONLY / active_execution_scope=GS-04_TO_GS-13**。GS-00至GS-03的提交、测试与证据已完成；GS-04至GS-13按依赖连续执行。生产部署、Tokyo migration和任何策略 activation继续无授权。
