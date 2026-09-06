@@ -569,7 +569,40 @@ async def coordinate_selection_materialization_once(
             if previous_generation is None:
                 return _blocked("OWNER_PAUSED_GENERATION_MISSING")
             if not snapshot.selected_members:
-                return _blocked("OWNER_PAUSED_VALID_EMPTY_REQUIRES_RESOLUTION")
+                authority = _build_valid_empty_authority(
+                    selection_spec_id=spec.selection_spec_id,
+                    snapshot=snapshot.snapshot,
+                    current_authority=current_authority,
+                    owner_control_version=owner_control.control_version,
+                    created_at_ms=now_ms,
+                )
+                await uow.instrument_selection.supersede_generation_and_resolve_valid_empty(
+                    previous_generation=previous_generation,
+                    snapshot=snapshot.snapshot,
+                    vacuum=vacuum,
+                    superseded_at_ms=now_ms,
+                )
+                await uow.instrument_selection.add_authority_and_set_current(
+                    authority,
+                    expected_current_version=(
+                        None
+                        if current_authority is None
+                        else current_authority.projection_version
+                    ),
+                )
+                await uow.instrument_selection.activate_pending_selection_mode(
+                    strategy_group_id=request.strategy_group_id,
+                    expected_control_version=selection_control.control_version,
+                    expected_pending_mode=SelectionMode.DYNAMIC_SELECTION,
+                    activated_at_ms=now_ms,
+                )
+                return CoordinateSelectionMaterializationResult(
+                    disposition=MaterializationDisposition.VALID_EMPTY,
+                    selection_authority_id=authority.selection_authority_id,
+                    selection_snapshot_id=snapshot.snapshot.selection_snapshot_id,
+                    entry_vacuum_id=vacuum.entry_vacuum_id,
+                    reason_code=authority.reason_code,
+                )
             replacement, replacement_targets = _build_pending_generation(
                 snapshot=snapshot.snapshot,
                 selected_members=snapshot.selected_members,

@@ -37,6 +37,7 @@ Earlier success tests started in Dynamic mode and therefore missed first activat
 | Two audits of one episode violated suppression uniqueness | Insert once per episode, verify matching first-trigger time and detector, preserve original provenance | Matching evidence accepted; changed time or detector rolls back the second audit |
 | Retarget rewrote historical fence/drain times | Preserve original timestamps; timeout starts at max(original fence, replacement Desired time) | Recovered Owner-pause retarget progresses into warming with original fence evidence intact |
 | Worker errors exposed only exception type | Emit code filename/function/line without exception arguments or locals | Failure-isolation test proves useful location and no secret input leakage |
+| Recovered Owner Pause blocked a new VALID_EMPTY Snapshot | Resolve the drained fence and commit non-trading Dynamic authority without creating a zero-member Generation | Empty/nonempty recovery paths and missing exact recovery-event proof; the abandoned Generation remains abandoned |
 
 ## Regression boundary
 
@@ -63,3 +64,17 @@ After deployment, acceptance requires actual `ACTIVE_NEW`, Dynamic mode with no
 pending transition, the exact selected LONG/SHORT pair, completed Gap Audit,
 resolved Vacuum and no unexpected command/position mutation during the switch.
 Local certification alone cannot establish that this production acceptance passed.
+
+## Other operational limitation found during review
+
+The release/Entry promotion tooling still has Static membership assumptions:
+`certify_readonly.py` compares the active profile against
+`APPROVED_UNIVERSE_BATCHES`, `bootstrap_strategy_universes.py` validates the same
+Static manifest, and `deploy_tokyo_release.py` has fixed 15-instrument/58-scope
+checks. A successfully activated Dynamic set with additional instruments, or
+fewer than seven selected members, can fail those later maintenance gates.
+This was not the cause of the incident: the Materialization runtime does not use
+those CLI gates to activate the pair. It is a separate fail-closed maintenance
+limitation, not repaired by the Authority-mode fix. It must be adapted to the
+DB-authorized current set before a later deployment/Entry re-promotion in Dynamic
+mode; no operator should bypass it by hand-editing members or a Fence.

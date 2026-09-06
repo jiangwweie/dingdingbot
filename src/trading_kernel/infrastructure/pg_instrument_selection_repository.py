@@ -1769,17 +1769,29 @@ class PostgresInstrumentSelectionRepository:
         vacuum: StrategyEntryVacuum,
         superseded_at_ms: int,
     ) -> None:
-        if (
+        recovered_owner_pause = (
             previous_generation.lifecycle_state
-            not in {
-                MaterializationGenerationState.MATERIALIZING,
-                MaterializationGenerationState.STAGED,
-            }
+            is MaterializationGenerationState.ABANDONED
+            and vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED
+            and vacuum.first_blocker == "OWNER_PAUSED"
+        )
+        if (
+            (
+                not recovered_owner_pause
+                and previous_generation.lifecycle_state
+                not in {
+                    MaterializationGenerationState.MATERIALIZING,
+                    MaterializationGenerationState.STAGED,
+                }
+            )
             or snapshot.selected_count != 0
             or snapshot.session_start_ms is None
             or previous_generation.session_start_ms is None
             or snapshot.session_start_ms <= previous_generation.session_start_ms
-            or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING
+            or (
+                not recovered_owner_pause
+                and vacuum.state is not StrategyEntryVacuumState.RECONFIGURING
+            )
             or vacuum.source_generation_id
             != previous_generation.materialization_generation_id
             or vacuum.drained_at_ms is None
@@ -1800,6 +1812,23 @@ class PostgresInstrumentSelectionRepository:
         )
         if locked_previous != previous_generation or locked_vacuum != vacuum:
             raise SelectionJobConflict("VALID_EMPTY supersession authority changed")
+        if recovered_owner_pause:
+            recovered_event = await self._connection.scalar(
+                sa.select(
+                    sa.exists().where(
+                        strategy_universe_materialization_events.c.materialization_generation_id
+                        == previous_generation.materialization_generation_id,
+                        strategy_universe_materialization_events.c.event_sequence
+                        == previous_generation.projection_version,
+                        strategy_universe_materialization_events.c.event_type
+                        == "EXPIRED_ACTIVATION_RECOVERED",
+                    )
+                )
+            )
+            if not recovered_event:
+                raise SelectionJobConflict(
+                    "Owner-Pause VALID_EMPTY requires exact expired recovery"
+                )
         await self._fail_pending_generation_gap_audits(
             materialization_generation_id=(
                 previous_generation.materialization_generation_id
@@ -1820,8 +1849,12 @@ class PostgresInstrumentSelectionRepository:
                 == previous_generation.projection_version,
             )
             .values(
-                lifecycle_state="SUPERSEDED",
-                terminal_at_ms=superseded_at_ms,
+                lifecycle_state="ABANDONED" if recovered_owner_pause else "SUPERSEDED",
+                terminal_at_ms=(
+                    strategy_universe_materialization_generations.c.terminal_at_ms
+                    if recovered_owner_pause
+                    else superseded_at_ms
+                ),
                 lease_owner=None,
                 lease_expires_at_ms=None,
                 projection_version=next_generation_version,
@@ -1842,7 +1875,9 @@ class PostgresInstrumentSelectionRepository:
                     previous_generation.materialization_generation_id
                 ),
                 event_sequence=next_generation_version,
-                event_type="SUPERSEDED",
+                event_type="OWNER_PAUSE_SUPERSEDED"
+                if recovered_owner_pause
+                else "SUPERSEDED",
                 payload={
                     "replacement_selection_snapshot_id": (
                         snapshot.selection_snapshot_id
@@ -1860,7 +1895,7 @@ class PostgresInstrumentSelectionRepository:
             .where(
                 strategy_entry_vacuums_current.c.entry_vacuum_id
                 == vacuum.entry_vacuum_id,
-                strategy_entry_vacuums_current.c.state == "RECONFIGURING",
+                strategy_entry_vacuums_current.c.state == vacuum.state.value,
                 strategy_entry_vacuums_current.c.projection_version
                 == vacuum.projection_version,
             )
@@ -1871,14 +1906,11 @@ class PostgresInstrumentSelectionRepository:
             )
         )
         if superseded_vacuum.rowcount != 1:
-            raise SelectionJobConflict(
-                "Vacuum changed during VALID_EMPTY supersession"
-            )
+            raise SelectionJobConflict("Vacuum changed during VALID_EMPTY supersession")
         await self._connection.execute(
             sa.insert(strategy_entry_vacuum_events).values(
                 entry_vacuum_event_id=(
-                    f"vacuum-event:{vacuum.entry_vacuum_id}:"
-                    f"{superseded_vacuum_version}"
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:{superseded_vacuum_version}"
                 ),
                 entry_vacuum_id=vacuum.entry_vacuum_id,
                 event_sequence=superseded_vacuum_version,
@@ -1917,8 +1949,7 @@ class PostgresInstrumentSelectionRepository:
         await self._connection.execute(
             sa.insert(strategy_entry_vacuum_events).values(
                 entry_vacuum_event_id=(
-                    f"vacuum-event:{vacuum.entry_vacuum_id}:"
-                    f"{resolved_vacuum_version}"
+                    f"vacuum-event:{vacuum.entry_vacuum_id}:{resolved_vacuum_version}"
                 ),
                 entry_vacuum_id=vacuum.entry_vacuum_id,
                 event_sequence=resolved_vacuum_version,

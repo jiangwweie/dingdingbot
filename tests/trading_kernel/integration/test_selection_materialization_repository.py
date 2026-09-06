@@ -2597,8 +2597,11 @@ async def test_expired_gap_audit_window_never_calls_source_or_grants_authority(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("empty_snapshot", "missing_recovery"), ((False, False), (True, False), (True, True)))
 async def test_owner_paused_expired_first_activation_recovery_preserves_static_pair(
     head_template_engine,
+    empty_snapshot: bool,
+    missing_recovery: bool,
 ) -> None:
     generation_id, _long_target_id, _short_target_id = await _prepare_staged_pair(
         head_template_engine,
@@ -2811,7 +2814,7 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
             authentication_strength="totp_step_up",
         )
     assert staged.pending_effective_session_start_ms == next_session_start_ms
-    next_members = tuple(
+    next_members = () if empty_snapshot else tuple(
         sorted(
             (
                 CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[1],
@@ -2826,6 +2829,28 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
             selected_members=next_members,
         )
 
+    if missing_recovery:
+        async with head_template_engine.begin() as connection:
+            await connection.execute(sa.update(strategy_universe_materialization_generations).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id == generation_id,
+            ).values(projection_version=strategy_universe_materialization_generations.c.projection_version + 1))
+        with pytest.raises(SelectionJobConflict, match="requires exact expired recovery"):
+            await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+                request=CoordinateSelectionMaterializationRequest(
+                    selection_spec_id=SELECTION_SPEC_ID, strategy_group_id="SOR-001",
+                    session_start_ms=next_session_start_ms, worker_id="missing-recovery-proof",
+                ), clock_ms=_Clock(next_session_start_ms + 3_600_000),
+            )
+        async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+            control = await uow.instrument_selection.get_selection_control("SOR-001")
+            vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id="SOR-001", selection_spec_id=SELECTION_SPEC_ID,
+            )
+        assert control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE
+        assert vacuum is not None and vacuum.state.value == "OWNER_PAUSED"
+        return
+
     superseded = await coordinate_selection_materialization_once(
         uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
         request=CoordinateSelectionMaterializationRequest(
@@ -2837,6 +2862,23 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
         clock_ms=_Clock(next_session_start_ms + 3_600_000),
     )
 
+    if empty_snapshot:
+        assert superseded.disposition is MaterializationDisposition.VALID_EMPTY
+        async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+            control = await uow.instrument_selection.get_selection_control("SOR-001")
+            old = await uow.instrument_selection.get_materialization_generation(generation_id)
+            vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id="SOR-001", selection_spec_id=SELECTION_SPEC_ID,
+            )
+            current = await uow.instrument_selection.get_current_authority_projection(SELECTION_SPEC_ID)
+        assert control is not None and control.selection_mode is SelectionMode.DYNAMIC_SELECTION
+        assert control.pending_selection_mode is None
+        assert old is not None and old.lifecycle_state is MaterializationGenerationState.ABANDONED
+        assert vacuum is None
+        assert current is not None and current.authority.authority_outcome is AuthorityOutcome.VALID_EMPTY
+        assert current.authority.materialization_generation_id is None
+        assert current.authority.authorized_pair is None
+        return
     assert superseded.disposition is MaterializationDisposition.GENERATION_DESIRED
     assert superseded.materialization_generation_id == (
         f"generation:{SELECTION_SPEC_ID}:{next_session_start_ms}"
