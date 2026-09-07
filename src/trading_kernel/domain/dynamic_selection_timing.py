@@ -73,7 +73,9 @@ class DynamicMembershipFreshness(BaseModel):
         try:
             int(normalized[7:], 16)
         except ValueError as exc:
-            raise ValueError("Dynamic membership freshness requires canonical digest") from exc
+            raise ValueError(
+                "Dynamic membership freshness requires canonical digest"
+            ) from exc
         return normalized
 
     @model_validator(mode="after")
@@ -91,7 +93,9 @@ class DynamicMembershipFreshness(BaseModel):
             raise ValueError("Dynamic membership freshness timing is invalid")
         if self.state is DynamicMembershipState.ACTIVE:
             if self.consecutive_missed_periods != 0:
-                raise ValueError("active Dynamic membership cannot have a missed period")
+                raise ValueError(
+                    "active Dynamic membership cannot have a missed period"
+                )
         elif self.state is DynamicMembershipState.GRACE:
             if self.consecutive_missed_periods != 1:
                 raise ValueError("Dynamic grace requires exactly one missed period")
@@ -102,7 +106,12 @@ class DynamicMembershipFreshness(BaseModel):
     def allows_new_entry_at(self, now_ms: int) -> bool:
         """Apply the absolute deadline even when no Coordinator heartbeat runs."""
 
-        return now_ms < self.membership_valid_until_ms
+        return (
+            self.source_snapshot_effective_at_ms
+            <= now_ms
+            < self.membership_valid_until_ms
+            and self.state is not DynamicMembershipState.SELECTION_STALE_PAUSED
+        )
 
 
 class CurrentFinalCloseGrantProof(BaseModel):
@@ -128,6 +137,16 @@ class CurrentFinalCloseGrantProof(BaseModel):
 
     @model_validator(mode="after")
     def _validate_current_close_proof(self) -> CurrentFinalCloseGrantProof:
+        if (
+            self.source_snapshot_cutoff_at_ms != self.period.feature_cutoff_at_ms
+            or self.selection_committed_at_ms < self.source_snapshot_cutoff_at_ms
+            or self.current_final_close_time_ms % _HOUR_MS != 0
+            or self.current_final_close_time_ms
+            != self.authority_granted_at_ms // _HOUR_MS * _HOUR_MS
+        ):
+            raise ValueError(
+                "current-close proof source or latest-close identity differs"
+            )
         if self.observation_cursor_version <= 0:
             raise ValueError("current-close proof requires locked Observation cursor")
         if not (
@@ -136,8 +155,13 @@ class CurrentFinalCloseGrantProof(BaseModel):
             < self.period.period_expires_at_ms
         ):
             raise ValueError("current-close proof is outside its Selection period")
-        if self.source_snapshot_cutoff_at_ms > self.current_final_close_time_ms - _HOUR_MS:
-            raise ValueError("current-close proof requires precommitted Selection cutoff")
+        if (
+            self.source_snapshot_cutoff_at_ms
+            > self.current_final_close_time_ms - _HOUR_MS
+        ):
+            raise ValueError(
+                "current-close proof requires precommitted Selection cutoff"
+            )
         if self.selection_committed_at_ms >= self.current_final_close_time_ms:
             raise ValueError("current-close proof requires precommitted Snapshot")
         if not (
@@ -190,8 +214,16 @@ def record_dynamic_selection_miss(
 ) -> DynamicMembershipFreshness:
     """Record one due period with no usable Snapshot without rolling source age."""
 
-    _require_next_period(current=current, period=missed_period)
-    missed = current.consecutive_missed_periods + 1
+    if missed_period.cadence_hours != current.cadence_hours:
+        raise ValueError("Dynamic Selection miss cadence differs")
+    missed = (
+        missed_period.scheduled_effective_at_ms
+        - current.source_snapshot_effective_at_ms
+    ) // _cadence_ms(current.cadence_hours)
+    if missed <= 0:
+        raise ValueError("Dynamic Selection miss must follow its source period")
+    if missed <= current.consecutive_missed_periods:
+        return current
     return current.model_copy(
         update={
             "consecutive_missed_periods": missed,
@@ -216,12 +248,23 @@ def confirm_dynamic_membership_snapshot(
 
     if period.cadence_hours != current.cadence_hours:
         raise ValueError("Dynamic membership confirmation cadence differs")
+    if period.feature_cutoff_at_ms < current.source_snapshot_cutoff_at_ms:
+        raise ValueError("Dynamic membership confirmation cannot move backwards")
+    if period.feature_cutoff_at_ms == current.source_snapshot_cutoff_at_ms:
+        if (
+            source_snapshot_id != current.source_snapshot_id
+            or source_member_set_digest != current.source_member_set_digest
+        ):
+            raise ValueError("same period membership identity differs")
+        return current
     if not (
         period.scheduled_effective_at_ms
         <= confirmed_at_ms
         < period.period_expires_at_ms
     ):
-        raise ValueError("Dynamic membership Snapshot is not yet effective or is expired")
+        raise ValueError(
+            "Dynamic membership Snapshot is not yet effective or is expired"
+        )
     return build_dynamic_membership_freshness(
         source_snapshot_id=source_snapshot_id,
         source_member_set_digest=source_member_set_digest,
@@ -254,18 +297,3 @@ def _cadence_ms(cadence_hours: int) -> int:
     if cadence_hours not in {1, 4}:
         raise ValueError("Generic Selection cadence must be 1h or 4h")
     return cadence_hours * _HOUR_MS
-
-
-def _require_next_period(
-    *,
-    current: DynamicMembershipFreshness,
-    period: GenericSelectionPeriod,
-) -> None:
-    if period.cadence_hours != current.cadence_hours:
-        raise ValueError("Dynamic Selection miss cadence differs")
-    expected_effective = current.source_snapshot_effective_at_ms + (
-        _cadence_ms(current.cadence_hours)
-        * (current.consecutive_missed_periods + 1)
-    )
-    if period.scheduled_effective_at_ms != expected_effective:
-        raise ValueError("Dynamic Selection miss period is not the next due period")

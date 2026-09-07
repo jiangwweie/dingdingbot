@@ -18,6 +18,10 @@ from src.trading_kernel.application.recover_expired_dynamic_activation import (
     RecoverExpiredDynamicActivationResult,
 )
 from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
+from src.trading_kernel.domain.generic_selection_spec import (
+    GenericSelectionSpecV1,
+    SpecNumericInstallationEvidence,
+)
 from src.trading_kernel.domain.instrument_selection import (
     SOR_LONG_EVENT_SPEC_ID,
     SOR_SHORT_EVENT_SPEC_ID,
@@ -30,6 +34,7 @@ from src.trading_kernel.domain.instrument_selection import (
     SorDynamicSelectionSpecV0,
     build_sor_dynamic_selection_spec_v0,
 )
+from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.domain.selection_authority import (
     AuthorityGapAudit,
     AuthorityGapAuditKind,
@@ -50,7 +55,6 @@ from src.trading_kernel.domain.selection_authority import (
     SelectionSessionAuthority,
     SelectionSnapshotDisposition,
     StrategyTriggerSuppression,
-    UniverseAuthorityPair,
     selected_member_set_digest,
 )
 from src.trading_kernel.domain.strategy_entry_vacuum import (
@@ -58,6 +62,8 @@ from src.trading_kernel.domain.strategy_entry_vacuum import (
     StrategyEntryVacuumState,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    generic_dynamic_selection_specs_v1,
+    instrument_product_profiles,
     instrument_selection_attempts,
     instrument_selection_jobs_current,
     instrument_selection_member_decisions,
@@ -65,10 +71,13 @@ from src.trading_kernel.infrastructure.pg_models import (
     instrument_selection_spec_events,
     instrument_selection_spec_members,
     instrument_selection_specs,
+    instruments,
     runtime_release_compatibility_facts,
     selection_authority_current,
+    selection_authority_event_bindings,
     selection_authority_gap_audit_events,
     selection_authority_gap_audits_current,
+    selection_authority_projection_columns,
     selection_session_authorities,
     sor_dynamic_selection_specs_v0,
     strategy_entry_controls_current,
@@ -80,9 +89,13 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_universe_materialization_events,
     strategy_universe_materialization_generations,
     strategy_universe_materialization_targets,
+    strategy_universe_members,
     strategy_universe_versions,
     trade_aggregates,
     trade_tickets,
+)
+from src.trading_kernel.infrastructure.pg_selection_event_bindings import (
+    sor_authority_pair_from_bindings,
 )
 
 LeaseKind = Literal["selection", "materialization", "observation"]
@@ -137,6 +150,73 @@ class PostgresInstrumentSelectionRepository:
 
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
+
+    async def get_generic_spec(self, selection_spec_id: str) -> GenericSelectionSpecV1:
+        row = (await self._connection.execute(sa.select(instrument_selection_specs, generic_dynamic_selection_specs_v1)
+            .join(generic_dynamic_selection_specs_v1, generic_dynamic_selection_specs_v1.c.selection_spec_id == instrument_selection_specs.c.selection_spec_id)
+            .where(instrument_selection_specs.c.selection_spec_id == selection_spec_id,
+                   instrument_selection_specs.c.status == "active", instrument_selection_specs.c.selection_kind == "generic_dynamic_v1"))).mappings().one_or_none()
+        if row is None:
+            raise LookupError("Generic Selection Spec is not installed")
+        events = (await self._connection.execute(sa.select(instrument_selection_spec_events).where(
+            instrument_selection_spec_events.c.selection_spec_id == selection_spec_id))).mappings().all()
+        if len(events) != 1:
+            raise ValueError("Generic Selection Spec requires exact bound Event")
+        members = tuple((await self._connection.execute(sa.select(instrument_selection_spec_members.c.exchange_instrument_id)
+            .where(instrument_selection_spec_members.c.selection_spec_id == selection_spec_id)
+            .order_by(instrument_selection_spec_members.c.exchange_instrument_id))).scalars())
+        spec = GenericSelectionSpecV1.model_validate({
+            "selection_spec_id":selection_spec_id,"strategy_group_id":row["strategy_group_id"],
+            "strategy_version_id":row["strategy_version_id"],"event_spec_id":events[0]["event_spec_id"],
+            "position_side":events[0]["position_side"],"candidate_ids":members,
+            **{column.name:row[column.name] for column in generic_dynamic_selection_specs_v1.c if column.name != "selection_spec_id"},
+        })
+        if spec.algorithm_semantic_digest != row["algorithm_semantic_digest"]:
+            raise ValueError("Generic Selection Spec semantic identity differs")
+        return spec
+
+    async def install_generic_spec(self, spec: GenericSelectionSpecV1, *, installed_at_ms: int,
+                                   certification: SpecNumericInstallationEvidence) -> None:
+        """Release-owned installation; never exposed as a runtime Owner mutation."""
+        if installed_at_ms <= 0:
+            raise ValueError("invalid Spec installation time")
+        certification.require_spec(spec)
+        existing = await self._connection.scalar(sa.select(instrument_selection_specs.c.selection_spec_id).where(
+            instrument_selection_specs.c.selection_spec_id == spec.selection_spec_id))
+        if existing is not None:
+            if await self.get_generic_spec(spec.selection_spec_id) != spec:
+                raise ValueError("installed Generic Spec differs")
+            return
+        for member in spec.candidate_ids:
+            symbol = member.split(":")[1]
+            await self._connection.execute(pg_insert(instruments).values(
+                exchange_instrument_id=member,venue_id="binance-usdm",asset_class="crypto",
+                venue_symbol=symbol,contract_kind="perpetual",status="pending_certification"
+            ).on_conflict_do_nothing())
+            profile = InstrumentProductProfile(exchange_instrument_id=member,product_family="crypto_perpetual",
+                asset_class="crypto",contract_type="PERPETUAL",underlying_type="CRYPTO",
+                entry_session_policy="continuous",status="candidate")
+            await self._connection.execute(pg_insert(instrument_product_profiles).values(
+                **profile.model_dump(mode="python"),semantic_digest=profile.semantic_digest,updated_at_ms=installed_at_ms
+            ).on_conflict_do_nothing())
+            identity = (await self._connection.execute(sa.select(instruments).where(instruments.c.exchange_instrument_id==member))).mappings().one()
+            if (identity["venue_id"],identity["asset_class"],identity["venue_symbol"],identity["contract_kind"]) != ("binance-usdm","crypto",symbol,"perpetual"):
+                raise ValueError("Candidate Instrument identity conflict")
+        await self._connection.execute(sa.insert(instrument_selection_specs).values(
+            selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,
+            strategy_version_id=spec.strategy_version_id,selection_version=1,selection_kind="generic_dynamic_v1",
+            algorithm_semantic_digest=spec.algorithm_semantic_digest,status="active",installed_at_ms=installed_at_ms))
+        payload = spec.model_dump(mode="python")
+        await self._connection.execute(sa.insert(generic_dynamic_selection_specs_v1).values(
+            **{column.name:payload[column.name] for column in generic_dynamic_selection_specs_v1.c}))
+        await self._connection.execute(sa.insert(instrument_selection_spec_events).values(
+            selection_spec_id=spec.selection_spec_id,event_spec_id=spec.event_spec_id,position_side=spec.position_side))
+        await self._connection.execute(sa.insert(instrument_selection_spec_members), [
+            {"selection_spec_id":spec.selection_spec_id,"exchange_instrument_id":member} for member in spec.candidate_ids])
+        await self._connection.execute(sa.insert(strategy_selection_control_current).values(
+            strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id,
+            selection_mode="static_baseline",pending_selection_mode=None,pending_effective_session_start_ms=None,
+            pending_authorization_id=None,control_version=1,rollback_baseline_id=None,updated_at_ms=installed_at_ms))
 
     @classmethod
     def lease_namespace(cls, lease_kind: LeaseKind) -> str:
@@ -3026,6 +3106,23 @@ class PostgresInstrumentSelectionRepository:
                 _authority_values(authority)
             )
         )
+        events = (await self._connection.execute(sa.select(instrument_selection_spec_events).where(
+            instrument_selection_spec_events.c.selection_spec_id == authority.selection_spec_id
+        ))).mappings().all()
+        pair = authority.authorized_pair
+        for event in events:
+            uid = None if pair is None else (
+                pair.long_universe_version_id if event["position_side"] == "long" else pair.short_universe_version_id
+            )
+            members = tuple((await self._connection.execute(sa.select(strategy_universe_members.c.exchange_instrument_id).where(
+                strategy_universe_members.c.universe_version_id == uid
+            ).order_by(strategy_universe_members.c.exchange_instrument_id))).scalars()) if uid is not None else ()
+            await self._connection.execute(sa.insert(selection_authority_event_bindings).values(
+                selection_authority_id=authority.selection_authority_id,
+                event_spec_id=event["event_spec_id"],position_side=event["position_side"],
+                grant_state="ACTIVE" if uid is not None else "EMPTY",universe_version_id=uid,
+                member_set_digest=selected_member_set_digest(members),
+            ))
         if expected_current_version is None:
             result = await self._connection.execute(
                 pg_insert(selection_authority_current)
@@ -3079,7 +3176,7 @@ class PostgresInstrumentSelectionRepository:
     ) -> CurrentSelectionAuthority | None:
         statement = (
             sa.select(
-                selection_session_authorities,
+                *selection_authority_projection_columns(),
                 selection_authority_current.c.projection_version.label(
                     "current_projection_version"
                 ),
@@ -3107,7 +3204,6 @@ class PostgresInstrumentSelectionRepository:
 
 
 def _authority_values(authority: SelectionSessionAuthority) -> dict[str, object]:
-    pair = authority.authorized_pair
     proof = authority.grant_proof
     return {
         "selection_authority_id": authority.selection_authority_id,
@@ -3127,12 +3223,6 @@ def _authority_values(authority: SelectionSessionAuthority) -> dict[str, object]
         "materialization_generation_id": authority.materialization_generation_id,
         "owner_control_version": authority.owner_control_version,
         "authority_outcome": authority.authority_outcome.value,
-        "authorized_long_universe_version_id": (
-            None if pair is None else pair.long_universe_version_id
-        ),
-        "authorized_short_universe_version_id": (
-            None if pair is None else pair.short_universe_version_id
-        ),
         "grant_proof_kind": None if proof is None else proof.kind.value,
         "grant_predecessor_authority_id": (
             None if proof is None else proof.predecessor_authority_id
@@ -3147,16 +3237,7 @@ def _authority_values(authority: SelectionSessionAuthority) -> dict[str, object]
 
 
 def _authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
-    long_id = row["authorized_long_universe_version_id"]
-    short_id = row["authorized_short_universe_version_id"]
-    pair = (
-        None
-        if long_id is None or short_id is None
-        else UniverseAuthorityPair(
-            long_universe_version_id=str(long_id),
-            short_universe_version_id=str(short_id),
-        )
-    )
+    pair = sor_authority_pair_from_bindings(row["event_bindings"])
     proof_kind = row["grant_proof_kind"]
     proof = (
         None

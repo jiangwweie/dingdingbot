@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.trading_kernel.domain.instrument_selection import (
+    SOR_LONG_EVENT_SPEC_ID,
     SOR_SHORT_EVENT_SPEC_ID,
 )
 from src.trading_kernel.domain.selection_authority import (
@@ -25,6 +26,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     facts_current,
     instrument_certification_current,
     instrument_rules_current,
+    instrument_selection_spec_events,
     instrument_selection_specs,
     selection_authority_gap_audits_current,
     strategy_selection_control_current,
@@ -102,6 +104,10 @@ async def install_dynamic_pre_fence_authority(
                 },
             )
         )
+        for event,side in ((SOR_LONG_EVENT_SPEC_ID,"long"),(SOR_SHORT_EVENT_SPEC_ID,"short")):
+            await connection.execute(pg_insert(instrument_selection_spec_events).values(
+                selection_spec_id=SELECTION_SPEC_ID,event_spec_id=event,position_side=side
+            ).on_conflict_do_nothing())
         await connection.execute(
             pg_insert(strategy_universe_versions)
             .values(

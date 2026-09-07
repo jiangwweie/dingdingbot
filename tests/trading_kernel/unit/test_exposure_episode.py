@@ -390,6 +390,32 @@ def _checkpoint(
     )
 
 
+def test_comparison_transition_cannot_move_revision_backwards() -> None:
+    contract = _contract("MI-LONG")
+    checkpoint = _checkpoint(contract=contract, comparison_digest="sha256:"+"b"*64,
+        transition_revision=3,state=ComparisonBindingEpisodeState.REBASE_REQUIRED,
+        armed_at_ms=None,last_observed_at_ms=2000,last_detector_status=DetectorStatus.TRIGGERED)
+    with pytest.raises(ValueError,match="revision"):
+        advance_comparison_bound_exposure_episode(contract=contract,current_episode=None,
+            current_checkpoint=checkpoint,detector_status=DetectorStatus.NOT_TRIGGERED,
+            occurred_at_ms=None,observed_at_ms=3000,exchange_instrument_id=ETH,
+            comparison_binding_digest="sha256:"+"a"*64,comparison_transition_revision=2)
+
+
+def test_same_comparison_close_replay_preserves_checkpoint_version() -> None:
+    contract = _contract("MI-LONG")
+    arm = advance_comparison_bound_exposure_episode(contract=contract,current_episode=None,
+        current_checkpoint=None,detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,
+        observed_at_ms=1000,exchange_instrument_id=ETH,comparison_binding_digest="sha256:"+"a"*64,
+        comparison_transition_revision=1)
+    assert arm.episode_transition is not None
+    replay = advance_comparison_bound_exposure_episode(contract=contract,current_episode=arm.episode_transition.current,
+        current_checkpoint=arm.checkpoint,detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,
+        observed_at_ms=1000,exchange_instrument_id=ETH,comparison_binding_digest="sha256:"+"a"*64,
+        comparison_transition_revision=1)
+    assert replay.checkpoint == arm.checkpoint
+
+
 def _contract(event_id: str):
     return next(
         item for item in registered_strategy_contracts() if item.event_id == event_id

@@ -36,6 +36,23 @@ further_feature_research = CLOSED
 
 ## 2. 工作区、基线与已知缺口
 
+### 2.1 当前实施证据校正（2026-09-07）
+
+**GS-04～GS-09仍在实施中，未完成、未通过release certification。** 先前对GS-00～03的完成摘要仅对应首版component测试，不足以证明全部Task Done。本轮在继续GS-04时补齐并修复数值来源认证、Decimal排序精度、重复miss/absolute有效期、current-close时点、comparison revision回退与重试幂等问题；不能以旧摘要跳过这些前置。
+
+| 范围 | 当前已验证结果 | 仍需交付 |
+| --- | --- | --- |
+| 数值证据 | 96份原始1h ZIP哈希逐一验证；从冻结commit重建research函数并核对artifact完整排序；CPM/BRF2各463、MPG/MI各1852 cutoff的决策集合零差异；SOR961×24 Core verified | exact最终candidate再次认证，认证证据与受审安装集合绑定 |
+| GS-01/03边界补强 | 跨comparison revision旧token拒绝、same-close checkpoint幂等；miss按period计算，可重放/跨缺失period；effective前及deadline后ENTRY拒绝 | runtime cursor/Owner/freshness全链集成 |
+| GS-04迁移切片 | 本地0007→0008比较来源保全；缺源在schema写入前STOP；旧Authority pair迁至ACTIVE/EMPTY绑定、原列删除；SOR repository读取新绑定；Spec typed payload及静态安装 | period/epoch、Snapshot、Generation/rollback归一化，完整logical preservation、真实source/target首根及后续Signal差分、role grants |
+| GS-04回归 | 选定migration/materialization/entry-authority PostgreSQL回归88 passed；Unit+Architecture1137 passed；后加纯SelectionCore7 passed | 完整PG/Full-chain和source verifier升级，不是R4 PASS |
+| 纯Selection合同 | Candidate24/cutoff、公式、Desired predecessor/hysteresis、失败输入校验 | 通用Snapshot持久化和三Plane调度；GS-05未完成 |
+| GS-06～09 | 现有SOR读路径已随schema切片接线 | Generic comparison/Observation、Warming、Vacuum/authority、Claim/Ticket/dispatch完整集成未完成 |
+
+此次只创建本地可处置PG并执行测试；无Tokyo或交易所动作。0008为未发布的工作中revision，不是部署候选。旧source读取代码仅为一次性migration certification，不能进入runtime cadence。上述测试数对应当时实际执行范围，后续修改必须重验受影响面。
+
+### 2.2 初始计划基线
+
 | 项目 | 直接检查的事实 | 实施含义 |
 | --- | --- | --- |
 | 集成源码 | `dev@71757d7422a36bfbe13c214fd33b3cb3a07807cc`，含已收回的SOR恢复修复 | 实施启动重新fetch并核对新增修复；不在旧研究分支开发 |

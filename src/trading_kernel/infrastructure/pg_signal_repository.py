@@ -41,7 +41,6 @@ from src.trading_kernel.domain.selection_authority import (
     ContinuitySourceKind,
     SelectionMode,
     SelectionSessionAuthority,
-    UniverseAuthorityPair,
 )
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
@@ -64,6 +63,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_capabilities_current,
     runtime_profiles,
     runtime_scopes_current,
+    selection_authority_projection_columns,
     selection_session_authorities,
     signal_events,
     signal_fact_snapshots,
@@ -79,6 +79,9 @@ from src.trading_kernel.infrastructure.pg_models import (
 )
 from src.trading_kernel.infrastructure.pg_product_current import (
     PostgresProductCurrentRepository,
+)
+from src.trading_kernel.infrastructure.pg_selection_event_bindings import (
+    sor_authority_pair_from_bindings,
 )
 
 
@@ -1174,7 +1177,7 @@ class PostgresSignalRepository:
             raise ValueError("Selection Authority chain depth must be in [1, 64]")
         endpoints = (
             await self._connection.execute(
-                sa.select(selection_session_authorities).where(
+                sa.select(*selection_authority_projection_columns()).where(
                     selection_session_authorities.c.selection_spec_id
                     == selection_spec_id,
                     selection_session_authorities.c.selection_authority_id.in_(
@@ -1200,7 +1203,7 @@ class PostgresSignalRepository:
             return ()
         rows = (
             await self._connection.execute(
-                sa.select(selection_session_authorities)
+                sa.select(*selection_authority_projection_columns())
                 .where(
                     selection_session_authorities.c.selection_spec_id
                     == selection_spec_id,
@@ -1363,16 +1366,7 @@ def _signal_values(signal: StrategySignal) -> dict[str, object]:
 
 
 def _selection_authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
-    long_id = row["authorized_long_universe_version_id"]
-    short_id = row["authorized_short_universe_version_id"]
-    pair = (
-        None
-        if long_id is None or short_id is None
-        else UniverseAuthorityPair(
-            long_universe_version_id=str(long_id),
-            short_universe_version_id=str(short_id),
-        )
-    )
+    pair = sor_authority_pair_from_bindings(row["event_bindings"])
     proof_kind = row["grant_proof_kind"]
     proof = (
         None

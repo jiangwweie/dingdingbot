@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 import pytest
 
@@ -65,7 +65,9 @@ def test_feature_rank_is_descending_and_uses_canonical_instrument_tie_break() ->
     assert tuple(item.rank for item in ranked) == tuple(range(1, 25))
 
 
-def test_brf2_decimal_residual_extension_ranks_candidate_specific_recent_extension() -> None:
+def test_brf2_decimal_residual_extension_ranks_candidate_specific_recent_extension() -> (
+    None
+):
     from src.trading_kernel.domain.dynamic_selection_numeric import (
         rank_brf2_residual_extension_v0_decimal,
     )
@@ -87,8 +89,9 @@ def test_brf2_decimal_residual_extension_ranks_candidate_specific_recent_extensi
 
     ranked = rank_brf2_residual_extension_v0_decimal(closes_by_instrument)
 
-    assert ranked[0].exchange_instrument_id == (
-        CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[0]
+    assert (
+        ranked[0].exchange_instrument_id
+        == (CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[0])
     )
     assert ranked[0].feature_value > ranked[-1].feature_value
 
@@ -101,10 +104,31 @@ def test_brf2_decimal_requires_exact_candidate_panel() -> None:
 
     with pytest.raises(DynamicSelectionNumericError, match="exact 24"):
         rank_brf2_residual_extension_v0_decimal(
-            {
-                CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[0]: (
-                    Decimal(100),
-                )
-                * 73
-            }
+            {CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS[0]: (Decimal(100),) * 73}
         )
+
+
+def test_ranking_does_not_round_scores_in_the_callers_decimal_context() -> None:
+    from src.trading_kernel.domain.dynamic_selection_numeric import (
+        rank_dynamic_selection_features,
+    )
+
+    members = CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
+    values = dict.fromkeys(members, Decimal(0))
+    values[members[0]] = Decimal("1.0000000000000000000000000000000000001")
+    values[members[1]] = Decimal("1.0000000000000000000000000000000000002")
+    with localcontext() as context:
+        context.prec = 6
+        ranked = rank_dynamic_selection_features(values)
+    assert ranked[0].exchange_instrument_id == members[1]
+
+
+@pytest.mark.parametrize("bad", [0.1, True, "1", Decimal("NaN")])
+def test_numeric_inputs_reject_non_decimal_and_nonfinite_values(bad: object) -> None:
+    from src.trading_kernel.domain.dynamic_selection_numeric import (
+        DynamicSelectionNumericError,
+        positive_impulse_recency_12h,
+    )
+
+    with pytest.raises(DynamicSelectionNumericError):
+        positive_impulse_recency_12h((Decimal(1),) * 11 + (bad,))  # type: ignore[arg-type]

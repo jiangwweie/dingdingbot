@@ -73,6 +73,10 @@ from src.trading_kernel.domain.exit_policy import (
     ExitProfileRecord,
 )
 from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
+from src.trading_kernel.domain.generic_selection_spec import (
+    GenericSelectionSpecV1,
+    SpecNumericInstallationEvidence,
+)
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
 from src.trading_kernel.domain.instrument_certification import (
     InstrumentCertification,
@@ -1481,6 +1485,11 @@ class SelectionJobRecord(BaseModel):
 
 
 class InstrumentSelectionRepository(Protocol):
+    async def get_generic_spec(self, selection_spec_id: str) -> GenericSelectionSpecV1: ...
+
+    async def install_generic_spec(self, spec: GenericSelectionSpecV1, *, installed_at_ms: int,
+                                   certification: SpecNumericInstallationEvidence) -> None: ...
+
     @classmethod
     def lease_namespace(
         cls,

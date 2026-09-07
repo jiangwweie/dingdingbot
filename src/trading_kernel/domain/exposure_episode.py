@@ -325,6 +325,12 @@ def advance_comparison_bound_exposure_episode(
         raise ValueError("comparison Episode state identity differs")
     if current_checkpoint is not None and current_checkpoint.episode_domain_key != domain_key:
         raise ValueError("comparison checkpoint Episode identity differs")
+    if current_checkpoint is not None and (
+        comparison_transition_revision < current_checkpoint.comparison_transition_revision
+        or (comparison_transition_revision == current_checkpoint.comparison_transition_revision
+            and comparison_binding_digest != current_checkpoint.comparison_binding_digest)
+    ):
+        raise ValueError("comparison transition revision is stale or has contradictory digest")
 
     binding_changed = current_checkpoint is None or (
         current_checkpoint.comparison_binding_digest != comparison_binding_digest
@@ -332,6 +338,8 @@ def advance_comparison_bound_exposure_episode(
         != comparison_transition_revision
     )
     if binding_changed:
+        if current_episode is not None and observed_at_ms <= current_episode.last_observed_at_ms:
+            raise ValueError("comparison transition cannot reuse a consumed Episode close")
         if (
             current_checkpoint is not None
             and observed_at_ms <= current_checkpoint.last_observed_at_ms
@@ -383,6 +391,17 @@ def advance_comparison_bound_exposure_episode(
                 signal_eligible=False,
                 suppression_reason="COMPARISON_REBASE_REQUIRED",
             )
+        if current_episode is None or current_episode.last_observed_at_ms != observed_at_ms:
+            raise ValueError("comparison replay lacks matching Episode cursor")
+        replay = advance_exposure_episode(
+            contract=contract, current=current_episode, detector_status=detector_status,
+            occurred_at_ms=occurred_at_ms, observed_at_ms=observed_at_ms,
+            exchange_instrument_id=exchange_instrument_id,
+        )
+        return ComparisonBoundExposureEpisodeTransition(
+            checkpoint=current_checkpoint, episode_transition=replay,
+            signal_eligible=False, suppression_reason=None,
+        )
 
     if current_checkpoint.state is ComparisonBindingEpisodeState.REBASE_REQUIRED:
         if detector_status is DetectorStatus.TRIGGERED:
@@ -433,7 +452,7 @@ def advance_comparison_bound_exposure_episode(
     return ComparisonBoundExposureEpisodeTransition(
         checkpoint=checkpoint,
         episode_transition=episode_transition,
-        signal_eligible=detector_status is DetectorStatus.TRIGGERED,
+        signal_eligible=detector_status is DetectorStatus.TRIGGERED and episode_transition.created_new_episode,
         suppression_reason=None,
     )
 

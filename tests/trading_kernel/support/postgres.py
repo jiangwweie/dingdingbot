@@ -6,6 +6,8 @@ import os
 import re
 import subprocess
 import sys
+from functools import cache
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
@@ -83,6 +85,7 @@ class HeadTemplateCloneHarness:
     async def create_clone(self) -> tuple[str, str]:
         admin = await asyncpg.connect(TEST_POSTGRES_ADMIN_DSN)
         try:
+            await admin.execute("SELECT pg_advisory_lock(hashtextextended('brc-test-head-template',0))")
             await self._ensure_template(admin)
             database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
             assert SAFE_TEST_DATABASE.fullmatch(database_name)
@@ -113,7 +116,11 @@ class HeadTemplateCloneHarness:
                 )
             finally:
                 await template.close()
-            if revision == CURRENT_SCHEMA_REVISION:
+            fingerprint = await admin.fetchval(
+                "SELECT shobj_description(oid,'pg_database') FROM pg_database WHERE datname=$1",
+                HEAD_TEMPLATE_DATABASE,
+            )
+            if revision == CURRENT_SCHEMA_REVISION and fingerprint == head_template_source_fingerprint():
                 return
             await admin.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
@@ -123,3 +130,37 @@ class HeadTemplateCloneHarness:
             await admin.execute(f'DROP DATABASE "{HEAD_TEMPLATE_DATABASE}"')
         await admin.execute(f'CREATE DATABASE "{HEAD_TEMPLATE_DATABASE}"')
         run_alembic(_head_template_database_url(), "upgrade", "head")
+        await admin.execute(f"COMMENT ON DATABASE {HEAD_TEMPLATE_DATABASE} IS '{head_template_source_fingerprint()}'")
+
+
+@cache
+def head_template_source_fingerprint() -> str:
+    """An unreleased migration edit must invalidate same-revision test templates."""
+    digest = sha256()
+    paths = sorted((REPO_ROOT / "migrations/trading_kernel").rglob("*.py"))
+    paths += sorted((REPO_ROOT / "src/trading_kernel").rglob("*.py"))
+    paths.append(REPO_ROOT / "migrations/trading_kernel/alembic.ini")
+    for path in paths:
+        digest.update(path.relative_to(REPO_ROOT).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+async def create_empty_database() -> tuple[str, str]:
+    """Create a blank disposable database for exact-source migration tests."""
+    name = f"brc_kernel_test_{uuid4().hex[:12]}"
+    admin = await asyncpg.connect(TEST_POSTGRES_ADMIN_DSN)
+    try:
+        await admin.execute(f'CREATE DATABASE "{name}"')
+    finally:
+        await admin.close()
+    return name, async_database_url(name)
+
+
+async def drop_disposable_database(name: str) -> None:
+    admin = await asyncpg.connect(TEST_POSTGRES_ADMIN_DSN)
+    try:
+        await drop_database(admin, name)
+    finally:
+        await admin.close()

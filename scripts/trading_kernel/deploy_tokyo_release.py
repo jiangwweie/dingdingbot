@@ -42,7 +42,7 @@ from src.trading_kernel.infrastructure.runtime_identity import (
 )
 
 SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
-COMPATIBLE_SOURCE_SCHEMA_REVISION = "0006_sor_dynamic_selection_v0"
+COMPATIBLE_SOURCE_SCHEMA_REVISION = "0007_exit_profile_authority_v1"
 R4_LEGACY_PRESERVATION_DIGEST = (
     "sha256:830ed497a82630805504e9f34ba72dcafcad9164a6fc65aa2a70ae1e3c21ec34"
 )

@@ -30,8 +30,8 @@ CURRENT_COMMIT = "b" * 40
 CURRENT_RELEASE = "/opt/brc/releases/brc-trading-kernel-bbbbbbbbbbbb"
 TARGET_RELEASE = "/opt/brc/releases/brc-trading-kernel-aaaaaaaaaaaa"
 RECOVERY_RELEASE = "/opt/brc/releases/brc-trading-kernel-cccccccccccc"
-SOURCE_SCHEMA_REVISION = "0006_sor_dynamic_selection_v0"
-TARGET_SCHEMA_REVISION = "0007_exit_profile_authority_v1"
+SOURCE_SCHEMA_REVISION = "0007_exit_profile_authority_v1"
+TARGET_SCHEMA_REVISION = "0008_generic_dynamic_selection_v1"
 RELEASE_COMPATIBILITY_ID = (
     f"release-compatibility:{CURRENT_COMMIT}:{TARGET_COMMIT}"
 )

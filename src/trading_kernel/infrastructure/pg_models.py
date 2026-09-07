@@ -1034,8 +1034,6 @@ selection_session_authorities = sa.Table(
     _id("materialization_generation_id", nullable=True),
     sa.Column("owner_control_version", sa.BigInteger, nullable=False),
     sa.Column("authority_outcome", SHORT_TEXT, nullable=False),
-    _id("authorized_long_universe_version_id", nullable=True),
-    _id("authorized_short_universe_version_id", nullable=True),
     sa.Column("grant_proof_kind", SHORT_TEXT, nullable=True),
     _id("grant_predecessor_authority_id", nullable=True),
     _time("effective_from_ms"),
@@ -1069,14 +1067,6 @@ selection_session_authorities = sa.Table(
         ["materialization_generation_id"],
         ["brc_strategy_universe_materialization_generations.materialization_generation_id"],
     ),
-    sa.ForeignKeyConstraint(
-        ["authorized_long_universe_version_id"],
-        ["brc_strategy_universe_versions.universe_version_id"],
-    ),
-    sa.ForeignKeyConstraint(
-        ["authorized_short_universe_version_id"],
-        ["brc_strategy_universe_versions.universe_version_id"],
-    ),
     sa.UniqueConstraint("selection_spec_id", "session_start_ms", "authority_sequence"),
 )
 sa.Index(
@@ -1085,6 +1075,48 @@ sa.Index(
     selection_session_authorities.c.session_start_ms,
     selection_session_authorities.c.authority_sequence,
 )
+
+generic_dynamic_selection_specs_v1 = sa.Table(
+    "brc_generic_dynamic_selection_specs_v1", metadata,
+    _id("selection_spec_id", primary_key=True),
+    sa.Column("cadence_hours", sa.Integer(), nullable=False),
+    sa.Column("entry_rank", sa.Integer(), nullable=False),
+    sa.Column("retain_rank", sa.Integer(), nullable=False),
+    sa.Column("window_bars", sa.Integer(), nullable=False),
+    _time("delay_ms"),
+    sa.Column("decimal_precision", sa.Integer(), nullable=False),
+    sa.Column("decimal_rounding", sa.String(32), nullable=False),
+    sa.Column("max_consecutive_selection_miss", sa.Integer(), nullable=False),
+    _time("materialization_timeout_ms"),
+    sa.ForeignKeyConstraint(["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]),
+)
+
+selection_authority_event_bindings = sa.Table(
+    "brc_selection_authority_event_bindings", metadata,
+    _id("selection_authority_id", primary_key=True),
+    _id("event_spec_id", primary_key=True),
+    sa.Column("position_side", sa.String(16), nullable=False),
+    sa.Column("grant_state", sa.String(16), nullable=False),
+    _id("universe_version_id", nullable=True),
+    sa.Column("member_set_digest", sa.String(71), nullable=False),
+    sa.ForeignKeyConstraint(["selection_authority_id"], ["brc_selection_session_authorities.selection_authority_id"]),
+    sa.ForeignKeyConstraint(["event_spec_id"], ["brc_event_specs.event_spec_id"]),
+    sa.ForeignKeyConstraint(["universe_version_id"], ["brc_strategy_universe_versions.universe_version_id"]),
+)
+
+
+def selection_authority_projection_columns() -> tuple[sa.ColumnElement, ...]:
+    """Exact authority row plus its bounded normalized Event grant set."""
+    bindings = selection_authority_event_bindings
+    payload = sa.select(sa.func.jsonb_agg(sa.func.jsonb_build_object(
+        "event_spec_id", bindings.c.event_spec_id,
+        "position_side", bindings.c.position_side,
+        "grant_state", bindings.c.grant_state,
+        "universe_version_id", bindings.c.universe_version_id,
+        "member_set_digest", bindings.c.member_set_digest,
+    ))).where(bindings.c.selection_authority_id == selection_session_authorities.c.selection_authority_id).correlate(selection_session_authorities).scalar_subquery()
+    return (*selection_session_authorities.c, payload.label("event_bindings"))
+
 
 selection_authority_current = sa.Table(
     "brc_selection_authority_current",
@@ -1642,6 +1674,30 @@ facts_current = sa.Table(
     sa.UniqueConstraint("runtime_scope_id", "fact_definition_id"),
 )
 
+comparison_universe_definitions = sa.Table(
+    "brc_comparison_universe_definitions", metadata,
+    _id("comparison_universe_id", primary_key=True),
+    sa.Column("member_set_digest", sa.String(71), nullable=False, unique=True),
+    sa.Column("member_count", sa.Integer(), nullable=False),
+)
+comparison_universe_members = sa.Table(
+    "brc_comparison_universe_members", metadata,
+    _id("comparison_universe_id", primary_key=True),
+    _id("exchange_instrument_id", primary_key=True),
+    sa.ForeignKeyConstraint(["comparison_universe_id"], ["brc_comparison_universe_definitions.comparison_universe_id"]),
+    sa.ForeignKeyConstraint(["exchange_instrument_id"], ["brc_instruments.exchange_instrument_id"]),
+)
+comparison_binding_current = sa.Table(
+    "brc_comparison_binding_current", metadata,
+    _id("event_spec_id", primary_key=True),
+    _id("comparison_universe_id"),
+    sa.Column("comparison_transition_revision", sa.BigInteger(), nullable=False),
+    _id("source_static_universe_version_id", nullable=True),
+    sa.ForeignKeyConstraint(["event_spec_id"], ["brc_event_specs.event_spec_id"]),
+    sa.ForeignKeyConstraint(["comparison_universe_id"], ["brc_comparison_universe_definitions.comparison_universe_id"]),
+    sa.ForeignKeyConstraint(["source_static_universe_version_id"], ["brc_strategy_universe_versions.universe_version_id"]),
+)
+
 exposure_episode_current = sa.Table(
     "brc_exposure_episode_current",
     metadata,
@@ -1656,6 +1712,12 @@ exposure_episode_current = sa.Table(
     _time("rearmed_at_ms", nullable=True),
     _time("last_observed_at_ms"),
     sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.Column("comparison_binding_digest", sa.String(71), nullable=True),
+    sa.Column("comparison_transition_revision", sa.BigInteger(), nullable=True),
+    sa.Column("comparison_source_evidence_digest", sa.String(71), nullable=True),
+    _time("comparison_armed_at_ms", nullable=True),
+    _time("comparison_last_observed_at_ms", nullable=True),
+    sa.Column("comparison_last_detector_status", sa.String(32), nullable=True),
     sa.CheckConstraint(
         "position_side IN ('long', 'short')",
         name="position_side_valid",

@@ -255,7 +255,7 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
         include_tradfi=include_tradfi,
         exit_profile_catalog_digest=(
             build_exit_profile_catalog_digest()
-            if request.schema_revision == "0007_exit_profile_authority_v1"
+            if request.schema_revision in {"0007_exit_profile_authority_v1", "0008_generic_dynamic_selection_v1"}
             else None
         ),
     )
@@ -275,7 +275,7 @@ async def seed_runtime_authority(
         contracts=contracts,
         include_product_compatibility=include_tradfi,
         include_exit_profile_authority=(
-            request.schema_revision == "0007_exit_profile_authority_v1"
+            request.schema_revision in {"0007_exit_profile_authority_v1", "0008_generic_dynamic_selection_v1"}
         ),
     )
     connection = uow._require_connection()
@@ -285,6 +285,7 @@ async def seed_runtime_authority(
         "0005_tradfi_instrument_center",
         "0006_sor_dynamic_selection_v0",
         "0007_exit_profile_authority_v1",
+        "0008_generic_dynamic_selection_v1",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -302,7 +303,7 @@ async def seed_runtime_authority(
         include_tradfi=include_tradfi,
         exit_profile_catalog_digest=(
             build_exit_profile_catalog_digest()
-            if request.schema_revision == "0007_exit_profile_authority_v1"
+            if request.schema_revision in {"0007_exit_profile_authority_v1", "0008_generic_dynamic_selection_v1"}
             else None
         ),
     )
@@ -668,7 +669,7 @@ async def deploy_compatible_upgrade_identity(
         include_tradfi=True,
         exit_profile_catalog_digest=(
             build_exit_profile_catalog_digest()
-            if request.schema_revision == "0007_exit_profile_authority_v1"
+            if request.schema_revision in {"0007_exit_profile_authority_v1", "0008_generic_dynamic_selection_v1"}
             else None
         ),
     )
@@ -892,7 +893,7 @@ async def _deploy_capability_compatible_identity(
         include_tradfi=True,
         exit_profile_catalog_digest=(
             build_exit_profile_catalog_digest()
-            if request.schema_revision == "0007_exit_profile_authority_v1"
+            if request.schema_revision in {"0007_exit_profile_authority_v1", "0008_generic_dynamic_selection_v1"}
             else None
         ),
     )
@@ -1302,6 +1303,7 @@ def _schema_includes_tradfi(schema_revision: str) -> bool:
         "0005_tradfi_instrument_center",
         "0006_sor_dynamic_selection_v0",
         "0007_exit_profile_authority_v1",
+        "0008_generic_dynamic_selection_v1",
     }
 
 

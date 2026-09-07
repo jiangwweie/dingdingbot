@@ -33,12 +33,21 @@ class DynamicSelectionFeatureRank(BaseModel):
     feature_value: Decimal
     rank: int
 
+    @field_validator("feature_value", mode="before")
+    @classmethod
+    def _require_decimal_feature(cls, value: object) -> object:
+        if not isinstance(value, Decimal):
+            raise DynamicSelectionNumericError("feature value must enter as Decimal")
+        return value
+
     @field_validator("exchange_instrument_id", mode="before")
     @classmethod
     def _require_instrument(cls, value: object) -> str:
         normalized = str(value or "").strip()
         if normalized not in _EXPECTED_CANDIDATES:
-            raise DynamicSelectionNumericError("feature rank instrument is not Candidate24")
+            raise DynamicSelectionNumericError(
+                "feature rank instrument is not Candidate24"
+            )
         return normalized
 
     @model_validator(mode="after")
@@ -70,7 +79,9 @@ def persistent_leadership_score_6h(ranks: Sequence[int]) -> Decimal:
     """Return the frozen MPG V1 all-24 six-boundary leadership score."""
 
     values = tuple(ranks)
-    if len(values) != 6 or any(rank < 1 or rank > 24 for rank in values):
+    if len(values) != 6 or any(
+        type(rank) is not int or rank < 1 or rank > 24 for rank in values
+    ):
         raise DynamicSelectionNumericError("MPG ranks require six values within 1..24")
     with localcontext(DYNAMIC_SELECTION_DECIMAL_CONTEXT):
         return sum(
@@ -83,20 +94,25 @@ def positive_impulse_recency_12h(returns: Sequence[Decimal]) -> Decimal:
     """Return the frozen MI V0 positive-return time-centre score."""
 
     values = tuple(returns)
-    if len(values) != 12 or any(not value.is_finite() for value in values):
+    if len(values) != 12 or any(
+        not isinstance(value, Decimal) or not value.is_finite() for value in values
+    ):
         raise DynamicSelectionNumericError("MI returns require twelve finite values")
     with localcontext(DYNAMIC_SELECTION_DECIMAL_CONTEXT):
         positive = tuple(max(value, Decimal(0)) for value in values)
         total = sum(positive, Decimal(0))
         if total == 0:
             return Decimal(0)
-        return sum(
-            (
-                (Decimal(index) / Decimal(11)) * value
-                for index, value in enumerate(positive)
-            ),
-            Decimal(0),
-        ) / total
+        return (
+            sum(
+                (
+                    (Decimal(index) / Decimal(11)) * value
+                    for index, value in enumerate(positive)
+                ),
+                Decimal(0),
+            )
+            / total
+        )
 
 
 def rank_dynamic_selection_features(
@@ -106,7 +122,7 @@ def rank_dynamic_selection_features(
 
     _require_exact_candidate_values(values)
     ordered = tuple(
-        sorted(values.items(), key=lambda item: (-item[1], item[0]))
+        sorted(values.items(), key=lambda item: (item[1].copy_negate(), item[0]))
     )
     return tuple(
         DynamicSelectionFeatureRank(
@@ -141,14 +157,16 @@ def rank_brf2_residual_extension_v0_decimal(
     with localcontext(DYNAMIC_SELECTION_DECIMAL_CONTEXT):
         returns = {
             instrument_id: tuple(
-                (values[index] / values[index - 1]).ln()
-                for index in range(1, 73)
+                (values[index] / values[index - 1]).ln() for index in range(1, 73)
             )
             for instrument_id, values in closes.items()
         }
         market = tuple(
             sum(
-                (returns[instrument_id][index] for instrument_id in _EXPECTED_CANDIDATES),
+                (
+                    returns[instrument_id][index]
+                    for instrument_id in CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
+                ),
                 Decimal(0),
             )
             / Decimal(24)
@@ -164,17 +182,20 @@ def rank_brf2_residual_extension_v0_decimal(
             raise DynamicSelectionNumericError("BRF2 market variance is zero")
 
         scores: dict[str, Decimal] = {}
-        for instrument_id in _EXPECTED_CANDIDATES:
+        for instrument_id in CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS:
             candidate_returns = returns[instrument_id]
             candidate_mean = sum(candidate_returns, Decimal(0)) / Decimal(72)
-            beta = sum(
-                (
-                    (candidate_returns[index] - candidate_mean)
-                    * centered_market[index]
-                    for index in range(72)
-                ),
-                Decimal(0),
-            ) / market_sum_squares
+            beta = (
+                sum(
+                    (
+                        (candidate_returns[index] - candidate_mean)
+                        * centered_market[index]
+                        for index in range(72)
+                    ),
+                    Decimal(0),
+                )
+                / market_sum_squares
+            )
             alpha = candidate_mean - beta * market_mean
             residuals = tuple(
                 candidate_returns[index] - alpha - beta * market[index]
@@ -189,7 +210,9 @@ def rank_brf2_residual_extension_v0_decimal(
                 raise DynamicSelectionNumericError(
                     f"BRF2 residual variance is zero: {instrument_id}"
                 )
-            scores[instrument_id] = sum(recent, Decimal(0)) / residual_sum_squares.sqrt()
+            scores[instrument_id] = (
+                sum(recent, Decimal(0)) / residual_sum_squares.sqrt()
+            )
         return rank_dynamic_selection_features(scores)
 
 
@@ -204,13 +227,21 @@ def _positive_decimal_window(
         raise DynamicSelectionNumericError(
             f"{label} requires exactly {expected_count} values"
         )
-    if any(not value.is_finite() or value <= 0 for value in normalized):
+    if any(
+        not isinstance(value, Decimal) or not value.is_finite() or value <= 0
+        for value in normalized
+    ):
         raise DynamicSelectionNumericError(f"{label} requires finite positive values")
     return normalized
 
 
 def _require_exact_candidate_values(values: Mapping[str, Decimal]) -> None:
     if set(values) != _EXPECTED_CANDIDATES:
-        raise DynamicSelectionNumericError("feature ranking requires exact 24 Candidate24 members")
-    if any(not value.is_finite() for value in values.values()):
+        raise DynamicSelectionNumericError(
+            "feature ranking requires exact 24 Candidate24 members"
+        )
+    if any(
+        not isinstance(value, Decimal) or not value.is_finite()
+        for value in values.values()
+    ):
         raise DynamicSelectionNumericError("feature ranking requires finite values")

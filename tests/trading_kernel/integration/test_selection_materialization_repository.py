@@ -97,6 +97,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_release_compatibility_facts,
     runtime_scopes_current,
     selection_authority_current,
+    selection_authority_event_bindings,
     selection_authority_gap_audit_events,
     selection_authority_gap_audits_current,
     selection_session_authorities,
@@ -2355,14 +2356,18 @@ async def test_materialization_timeout_falls_back_to_exact_previous_pair(
                 sa.select(
                     selection_session_authorities.c.authority_outcome,
                     selection_session_authorities.c.selection_mode,
-                    selection_session_authorities.c.authorized_long_universe_version_id,
-                    selection_session_authorities.c.authorized_short_universe_version_id,
                 ).where(
                     selection_session_authorities.c.selection_authority_id
                     == fallback.selection_authority_id
                 )
             )
         ).one()
+        event_bindings = tuple((await connection.execute(sa.select(
+            selection_authority_event_bindings.c.position_side,
+            selection_authority_event_bindings.c.universe_version_id,
+            selection_authority_event_bindings.c.grant_state,
+        ).where(selection_authority_event_bindings.c.selection_authority_id == fallback.selection_authority_id)
+        .order_by(selection_authority_event_bindings.c.position_side))).all())
         control_row = (
             await connection.execute(
                 sa.select(strategy_selection_control_current).where(
@@ -2380,9 +2385,8 @@ async def test_materialization_timeout_falls_back_to_exact_previous_pair(
     assert authority_row == (
         "FALLBACK_PREVIOUS",
         expected_authority_mode,
-        LONG_UNIVERSE_ID,
-        SHORT_UNIVERSE_ID,
     )
+    assert event_bindings == (("long",LONG_UNIVERSE_ID,"ACTIVE"),("short",SHORT_UNIVERSE_ID,"ACTIVE"))
     assert control_row["selection_mode"] == expected_authority_mode
     assert control_row["pending_selection_mode"] is None
     assert control_row["pending_effective_session_start_ms"] is None
@@ -3896,11 +3900,22 @@ async def test_on_time_continuity_rejects_predecessor_pair_drift(
     head_template_engine,
 ) -> None:
     await _seed_materialization_context(head_template_engine)
+    alternate_long = "universe:sor-long:historical-drift"
+    async with head_template_engine.begin() as connection:
+        row = dict((await connection.execute(sa.select(strategy_universe_versions).where(
+            strategy_universe_versions.c.universe_version_id == LONG_UNIVERSE_ID))).mappings().one())
+        row.update(universe_version_id=alternate_long, universe_version=99, lifecycle_state="retired",
+                   retired_at_ms=row["activated_at_ms"]+1)
+        await connection.execute(sa.insert(strategy_universe_versions).values(**row))
+        members = tuple((await connection.execute(sa.select(strategy_universe_members.c.exchange_instrument_id).where(
+            strategy_universe_members.c.universe_version_id == LONG_UNIVERSE_ID))).scalars())
+        await connection.execute(sa.insert(strategy_universe_members),[
+            {"universe_version_id":alternate_long,"exchange_instrument_id":member} for member in members])
     await _seed_previous_dynamic_authority(
         head_template_engine,
         authorized_pair=UniverseAuthorityPair(
-            long_universe_version_id=SHORT_UNIVERSE_ID,
-            short_universe_version_id=LONG_UNIVERSE_ID,
+            long_universe_version_id=alternate_long,
+            short_universe_version_id=SHORT_UNIVERSE_ID,
         ),
     )
 
@@ -3912,6 +3927,14 @@ async def test_on_time_continuity_rejects_predecessor_pair_drift(
 
     assert result.disposition is MaterializationDisposition.BLOCKED
     assert result.reason_code == "DYNAMIC_PREDECESSOR_AUTHORITY_DRIFT"
+
+
+@pytest.mark.asyncio
+async def test_authority_rejects_swapped_event_universes_at_commit(head_template_engine) -> None:
+    await _seed_materialization_context(head_template_engine)
+    with pytest.raises(DBAPIError, match="Spec Event binding shape"):
+        await _seed_previous_dynamic_authority(head_template_engine, authorized_pair=UniverseAuthorityPair(
+            long_universe_version_id=SHORT_UNIVERSE_ID,short_universe_version_id=LONG_UNIVERSE_ID))
 
 
 @pytest.mark.asyncio
