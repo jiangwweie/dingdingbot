@@ -93,6 +93,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     instrument_certification_current,
     instrument_product_profiles,
     instruments,
+    materialization_generation_projection_columns,
     monitor_current,
     owner_policy_current,
     runtime_profiles,
@@ -907,7 +908,7 @@ class PostgresStrategyUniverseRepository:
             )
         generation = (
             await self._connection.execute(
-                sa.select(strategy_universe_materialization_generations)
+                sa.select(*materialization_generation_projection_columns())
                 .where(
                     strategy_universe_materialization_generations.c.materialization_generation_id
                     == generation_id
@@ -1072,7 +1073,7 @@ class PostgresStrategyUniverseRepository:
         ).mappings().one_or_none()
         generation = (
             await self._connection.execute(
-                sa.select(strategy_universe_materialization_generations)
+                sa.select(*materialization_generation_projection_columns())
                 .where(
                     strategy_universe_materialization_generations.c.materialization_generation_id
                     == generation_id
@@ -1438,7 +1439,7 @@ class PostgresStrategyUniverseRepository:
         ).mappings().one_or_none()
         generation = (
             await self._connection.execute(
-                sa.select(strategy_universe_materialization_generations)
+                sa.select(*materialization_generation_projection_columns())
                 .where(
                     strategy_universe_materialization_generations.c.materialization_generation_id
                     == generation_id

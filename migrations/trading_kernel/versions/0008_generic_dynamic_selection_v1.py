@@ -29,6 +29,7 @@ DIGEST = sa.String(71)
 def upgrade() -> None:
     bind = op.get_bind()
     _require_flat_quiescent_source(bind)
+    _require_legacy_event_baseline_source(bind)
     proofs = certify_0007_static_comparison_sources_sync(bind)
     _comparison_tables()
     _episode_provenance()
@@ -45,10 +46,190 @@ def upgrade() -> None:
     _selection_epoch_lineage()
     _typed_selection_snapshots(bind)
     _selection_job_epochs()
+    _materialization_event_baselines(bind)
 
 
 def downgrade() -> None:
     raise RuntimeError("0008_generic_dynamic_selection_v1 is fix-forward only")
+
+
+def _require_legacy_event_baseline_source(bind: sa.Connection) -> None:
+    """Certify the only source pair family before any target DDL; never guess comparison provenance."""
+    for table, prefix in (("brc_strategy_universe_materialization_generations", "previous"),
+                          ("brc_strategy_selection_rollback_baselines", "source")):
+        invalid = bind.scalar(sa.text(f"""
+            SELECT EXISTS(SELECT 1 FROM {table} p
+              CROSS JOIN LATERAL (VALUES('long',p.{prefix}_long_universe_version_id),('short',p.{prefix}_short_universe_version_id)) r(side,uid)
+              LEFT JOIN brc_strategy_universe_versions u ON u.universe_version_id=r.uid
+              LEFT JOIN brc_event_specs e ON e.event_spec_id=u.event_spec_id
+              WHERE p.strategy_group_id<>'SOR-001' OR u.universe_version_id IS NULL
+                OR e.position_side IS DISTINCT FROM r.side OR u.strategy_group_id IS DISTINCT FROM p.strategy_group_id
+                OR e.strategy_version_id IS DISTINCT FROM p.strategy_version_id)
+        """))
+        if invalid:
+            raise RuntimeError(f"BASELINE_SOURCE_MISMATCH:{table}")
+
+
+def _materialization_event_baselines(bind: sa.Connection) -> None:
+    generations = "brc_strategy_universe_materialization_generations"
+    baselines = "brc_strategy_selection_rollback_baselines"
+    previous = "brc_materialization_generation_event_baselines"
+    rollback = "brc_selection_rollback_baseline_events"
+    empty = "sha256:" + hashlib.sha256(b'{"selected_exchange_instrument_ids":[]}').hexdigest()
+    op.execute(sa.text("""
+        CREATE FUNCTION brc_selected_universe_member_digest_v1(target text) RETURNS text LANGUAGE SQL STABLE AS $$
+          SELECT 'sha256:' || encode(sha256(convert_to('{"selected_exchange_instrument_ids":[' ||
+            coalesce(string_agg(to_json(exchange_instrument_id)::text,',' ORDER BY exchange_instrument_id COLLATE "C"),'') || ']}','UTF8')),'hex')
+          FROM brc_strategy_universe_members WHERE universe_version_id=target
+        $$
+    """))
+    op.create_table(previous,
+        sa.Column("materialization_generation_id", ID, nullable=False),
+        sa.Column("event_spec_id", ID, nullable=False),
+        sa.Column("position_side", sa.String(16), nullable=False),
+        sa.Column("grant_state", sa.String(16), nullable=False),
+        sa.Column("universe_version_id", ID, nullable=True),
+        sa.Column("member_set_digest", DIGEST, nullable=False),
+        sa.Column("comparison_universe_id", ID, nullable=True),
+        sa.PrimaryKeyConstraint("materialization_generation_id", "event_spec_id"),
+        sa.UniqueConstraint("materialization_generation_id", "position_side", name="uq_brc_generation_baseline_side"),
+        sa.ForeignKeyConstraint(["materialization_generation_id"], [f"{generations}.materialization_generation_id"]),
+        sa.ForeignKeyConstraint(["event_spec_id"], ["brc_event_specs.event_spec_id"]),
+        sa.ForeignKeyConstraint(["universe_version_id"], ["brc_strategy_universe_versions.universe_version_id"]),
+        sa.ForeignKeyConstraint(["comparison_universe_id"], ["brc_comparison_universe_definitions.comparison_universe_id"]),
+        sa.CheckConstraint("position_side IN ('long','short')", name="ck_brc_generation_baseline_side"),
+        sa.CheckConstraint("member_set_digest ~ '^sha256:[0-9a-f]{64}$'", name="ck_brc_generation_baseline_digest"),
+        sa.CheckConstraint(f"(grant_state='ACTIVE' AND universe_version_id IS NOT NULL AND member_set_digest<>'{empty}') OR "
+            f"(grant_state='EMPTY' AND universe_version_id IS NULL AND member_set_digest='{empty}')", name="ck_brc_generation_baseline_grant"),
+    )
+    op.create_table(rollback,
+        sa.Column("rollback_baseline_id", ID, nullable=False),
+        sa.Column("event_spec_id", ID, nullable=False),
+        sa.Column("position_side", sa.String(16), nullable=False),
+        sa.Column("universe_version_id", ID, nullable=False),
+        sa.Column("comparison_universe_id", ID, nullable=True),
+        sa.PrimaryKeyConstraint("rollback_baseline_id", "event_spec_id"),
+        sa.UniqueConstraint("rollback_baseline_id", "position_side", name="uq_brc_rollback_baseline_side"),
+        sa.ForeignKeyConstraint(["rollback_baseline_id"], [f"{baselines}.rollback_baseline_id"]),
+        sa.ForeignKeyConstraint(["event_spec_id"], ["brc_event_specs.event_spec_id"]),
+        sa.ForeignKeyConstraint(["universe_version_id"], ["brc_strategy_universe_versions.universe_version_id"]),
+        sa.ForeignKeyConstraint(["comparison_universe_id"], ["brc_comparison_universe_definitions.comparison_universe_id"]),
+        sa.CheckConstraint("position_side IN ('long','short')", name="ck_brc_rollback_baseline_side"),
+    )
+    for suffix, side in (("long", "long"), ("short", "short")):
+        bind.execute(sa.text(f"""
+            INSERT INTO {previous} SELECT g.materialization_generation_id,u.event_spec_id,:side,'ACTIVE',u.universe_version_id,
+              brc_selected_universe_member_digest_v1(u.universe_version_id),NULL
+            FROM {generations} g JOIN brc_strategy_universe_versions u ON u.universe_version_id=g.previous_{suffix}_universe_version_id
+        """), {"side": side})
+        bind.execute(sa.text(f"""
+            INSERT INTO {rollback} SELECT b.rollback_baseline_id,u.event_spec_id,:side,u.universe_version_id,NULL
+            FROM {baselines} b JOIN brc_strategy_universe_versions u ON u.universe_version_id=b.source_{suffix}_universe_version_id
+        """), {"side": side})
+    op.drop_column(generations, "previous_long_universe_version_id")
+    op.drop_column(generations, "previous_short_universe_version_id")
+    op.drop_column(baselines, "source_long_universe_version_id")
+    op.drop_column(baselines, "source_short_universe_version_id")
+    op.drop_constraint("ck_brc_materialization_generation_source_shape", generations, type_="check")
+    op.create_check_constraint("ck_brc_materialization_generation_source_shape", generations,
+        "(selection_mode='dynamic_selection' AND selection_snapshot_id IS NOT NULL AND rollback_baseline_id IS NULL "
+        "AND session_start_ms IS NOT NULL AND desired_member_count BETWEEN 1 AND 16) OR "
+        "(selection_mode='static_baseline' AND selection_snapshot_id IS NULL AND rollback_baseline_id IS NOT NULL "
+        "AND session_start_ms IS NULL AND desired_member_count BETWEEN 1 AND 10)")
+    op.execute(sa.text("""
+        CREATE OR REPLACE FUNCTION brc_validate_materialization_generation_targets() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE gid text; sid text; expected integer; actual integer; matching integer;
+        BEGIN
+          gid := COALESCE(NEW.materialization_generation_id,OLD.materialization_generation_id);
+          SELECT selection_spec_id INTO sid FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
+          IF NOT FOUND THEN RETURN NULL; END IF;
+          SELECT count(*) INTO expected FROM brc_instrument_selection_spec_events WHERE selection_spec_id=sid;
+          SELECT count(*),count(e.event_spec_id) INTO actual,matching FROM brc_strategy_universe_materialization_targets t
+            LEFT JOIN brc_instrument_selection_spec_events e ON e.selection_spec_id=sid AND e.event_spec_id=t.event_spec_id AND e.position_side=t.position_side
+            WHERE t.materialization_generation_id=gid;
+          IF expected NOT IN (1,2) OR actual<>expected OR matching<>expected THEN
+            RAISE EXCEPTION 'Materialization Generation requires exact bound Event targets';
+          END IF;
+          RETURN NULL;
+        END; $$
+    """))
+    op.execute(sa.text("""
+        CREATE FUNCTION brc_validate_generation_baseline_v1() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE gid text; g brc_strategy_universe_materialization_generations%ROWTYPE;
+                spec brc_instrument_selection_specs%ROWTYPE; expected integer; actual integer; matching integer; states integer;
+        BEGIN
+          gid := NEW.materialization_generation_id;
+          SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
+          SELECT * INTO spec FROM brc_instrument_selection_specs WHERE selection_spec_id=g.selection_spec_id;
+          IF g.strategy_group_id<>spec.strategy_group_id OR g.strategy_version_id<>spec.strategy_version_id
+             OR (spec.selection_kind='sor_dynamic_v0' AND g.selection_mode='dynamic_selection' AND g.desired_member_count>7) THEN
+            RAISE EXCEPTION 'Generation Spec identity or member limit mismatch';
+          END IF;
+          SELECT count(*) INTO expected FROM brc_instrument_selection_spec_events WHERE selection_spec_id=g.selection_spec_id;
+          SELECT count(*),count(e.event_spec_id),count(DISTINCT b.grant_state) INTO actual,matching,states
+            FROM brc_materialization_generation_event_baselines b LEFT JOIN brc_instrument_selection_spec_events e
+              ON e.selection_spec_id=g.selection_spec_id AND e.event_spec_id=b.event_spec_id AND e.position_side=b.position_side
+            WHERE b.materialization_generation_id=gid;
+          IF expected NOT IN (1,2) OR actual<>expected OR matching<>expected OR states<>1 THEN
+            RAISE EXCEPTION 'Generation requires exact previous Event set';
+          END IF;
+          IF EXISTS (SELECT 1 FROM brc_materialization_generation_event_baselines b
+            LEFT JOIN brc_strategy_universe_versions u ON u.universe_version_id=b.universe_version_id
+            LEFT JOIN brc_event_specs e ON e.event_spec_id=u.event_spec_id
+            WHERE b.materialization_generation_id=gid AND (
+              (b.grant_state='ACTIVE' AND (u.event_spec_id IS DISTINCT FROM b.event_spec_id OR u.strategy_group_id<>g.strategy_group_id
+                OR e.strategy_version_id<>g.strategy_version_id OR b.member_set_digest<>brc_selected_universe_member_digest_v1(b.universe_version_id)))
+              OR ((g.strategy_group_id IN ('MPG-001','MI-001')) <> (b.comparison_universe_id IS NOT NULL)))) THEN
+            RAISE EXCEPTION 'Generation previous Universe/digest/comparison mismatch';
+          END IF;
+          RETURN NULL;
+        END; $$
+    """))
+    op.execute(sa.text("""
+        CREATE FUNCTION brc_validate_rollback_baseline_v1() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE bid text; b brc_strategy_selection_rollback_baselines%ROWTYPE; expected integer; actual integer; matching integer;
+        BEGIN
+          bid := NEW.rollback_baseline_id;
+          SELECT * INTO b FROM brc_strategy_selection_rollback_baselines WHERE rollback_baseline_id=bid;
+          SELECT count(*) INTO expected FROM brc_event_specs WHERE strategy_version_id=b.strategy_version_id;
+          SELECT count(*),count(e.event_spec_id) INTO actual,matching FROM brc_selection_rollback_baseline_events r
+            LEFT JOIN brc_event_specs e ON e.strategy_version_id=b.strategy_version_id AND e.event_spec_id=r.event_spec_id AND e.position_side=r.position_side
+            WHERE r.rollback_baseline_id=bid;
+          IF expected NOT IN (1,2) OR actual<>expected OR matching<>expected THEN RAISE EXCEPTION 'Static baseline requires exact Event set'; END IF;
+          IF EXISTS (SELECT 1 FROM brc_selection_rollback_baseline_events r JOIN brc_strategy_universe_versions u ON u.universe_version_id=r.universe_version_id
+            JOIN brc_event_specs e ON e.event_spec_id=u.event_spec_id
+            WHERE r.rollback_baseline_id=bid AND (u.event_spec_id<>r.event_spec_id OR u.strategy_group_id<>b.strategy_group_id OR e.strategy_version_id<>b.strategy_version_id
+              OR ((b.strategy_group_id IN ('MPG-001','MI-001'))<>(r.comparison_universe_id IS NOT NULL)))) THEN
+            RAISE EXCEPTION 'Static baseline Universe/comparison mismatch';
+          END IF;
+          RETURN NULL;
+        END; $$
+    """))
+    for table in (generations, previous):
+        op.execute(sa.text(f"CREATE CONSTRAINT TRIGGER trg_{table}_baseline_v1 AFTER INSERT OR UPDATE ON {table} "
+            "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brc_validate_generation_baseline_v1()"))
+    for table in (baselines, rollback):
+        op.execute(sa.text(f"CREATE CONSTRAINT TRIGGER trg_{table}_events_v1 AFTER INSERT ON {table} "
+            "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brc_validate_rollback_baseline_v1()"))
+    for table in (previous, rollback):
+        op.execute(sa.text(f"CREATE TRIGGER trg_{table}_immutable BEFORE UPDATE OR DELETE ON {table} "
+            "FOR EACH ROW EXECUTE FUNCTION brc_reject_immutable_selection_fact_mutation()"))
+    op.execute(sa.text("""
+        CREATE FUNCTION brc_preserve_generation_source_identity_v1() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF ROW(NEW.materialization_generation_id,NEW.selection_spec_id,NEW.strategy_group_id,NEW.strategy_version_id,
+              NEW.selection_mode,NEW.selection_snapshot_id,NEW.rollback_baseline_id,NEW.session_start_ms,
+              NEW.desired_member_count,NEW.semantic_digest,NEW.created_at_ms)
+             IS DISTINCT FROM ROW(OLD.materialization_generation_id,OLD.selection_spec_id,OLD.strategy_group_id,OLD.strategy_version_id,
+              OLD.selection_mode,OLD.selection_snapshot_id,OLD.rollback_baseline_id,OLD.session_start_ms,
+              OLD.desired_member_count,OLD.semantic_digest,OLD.created_at_ms) THEN
+            RAISE EXCEPTION 'Generation source identity is immutable';
+          END IF;
+          RETURN NEW;
+        END; $$
+    """))
+    op.execute(sa.text(f"CREATE TRIGGER trg_generation_source_identity_v1 BEFORE UPDATE ON {generations} "
+        "FOR EACH ROW EXECUTE FUNCTION brc_preserve_generation_source_identity_v1()"))
 
 
 def _selection_job_epochs() -> None:
@@ -352,7 +533,7 @@ def _require_flat_quiescent_source(bind: sa.Connection) -> None:
         "brc_strategy_universe_versions, brc_strategy_universe_current, "
         "brc_runtime_scopes_current, brc_exposure_episode_current, "
         "brc_comparative_projection_current, brc_facts_current, brc_readiness_current, "
-        "brc_strategy_selection_control_current, brc_strategy_universe_materialization_generations, "
+        "brc_strategy_selection_control_current, brc_strategy_universe_materialization_generations, brc_strategy_selection_rollback_baselines, "
         "brc_strategy_entry_vacuums_current IN SHARE ROW EXCLUSIVE MODE"
     ))
     predicates = {

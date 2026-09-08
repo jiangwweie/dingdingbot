@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,67 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 TARGET_REVISION = "0008_generic_dynamic_selection_v1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_source", [False, True])
+async def test_static_sor_baseline_has_exact_pair_and_hash_reconstruction_after_migration(invalid_source: bool) -> None:
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    try:
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(account_id="baseline-source",runtime_commit="a"*40,
+                schema_revision="0007_exit_profile_authority_v1",seeded_at_ms=NOW_MS-1000))
+        for side in ("LONG", "SHORT"):
+            event = f"event_spec:SOR-001:SOR-{side}:v4"
+            async with PostgresKernelUnitOfWork(engine) as uow:
+                installed = await install_strategy_universe(uow, UniverseInstallRequest(event_spec_id=event,
+                    runtime_profile_id=RUNTIME_PROFILE_ID,owner_policy_id=OWNER_POLICY_ID,exchange_instrument_ids=(ETH,),installed_at_ms=NOW_MS-500))
+            assert installed.universe is not None
+            universe = installed.universe
+            async with engine.begin() as conn:
+                await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:now WHERE universe_version_id=:uid"),
+                    {"now":NOW_MS,"uid":universe.universe_version_id})
+                await conn.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='active',entry_enabled=true,observation_enabled=true,warm_closed_bar_time_ms=:closed,"
+                    "warm_completed_at_ms=:now,warm_readiness_digest=:digest,warm_valid_until_ms=:valid WHERE universe_version_id=:uid"),
+                    {"uid":universe.universe_version_id,"closed":NOW_MS-3600000,"now":NOW_MS,"digest":"sha256:"+"1"*64,"valid":NOW_MS+3600000})
+                await conn.execute(sa.text("INSERT INTO brc_strategy_universe_current VALUES(:event,:uid,:digest,'active',1,:now)"),
+                    {"event":event,"uid":universe.universe_version_id,"digest":universe.semantic_digest,"now":NOW_MS})
+        # This frozen migration helper is test-only source construction, never a runtime old-schema reader.
+        source_migration = importlib.import_module("migrations.trading_kernel.versions.0006_sor_dynamic_selection_v0")
+        async with engine.begin() as conn:
+            savepoint = await conn.begin_nested()
+            baseline_id = await conn.run_sync(lambda sync: source_migration._capture_rollback_baseline(sync, now_ms=NOW_MS))
+            before = dict((await conn.execute(sa.text("SELECT * FROM brc_strategy_selection_rollback_baselines WHERE rollback_baseline_id=:id"), {"id":baseline_id})).mappings().one())
+            if invalid_source:
+                await savepoint.rollback()
+                before["source_long_universe_version_id"],before["source_short_universe_version_id"] = before["source_short_universe_version_id"],before["source_long_universe_version_id"]
+                await conn.execute(sa.text("INSERT INTO brc_strategy_selection_rollback_baselines VALUES(:rollback_baseline_id,:strategy_group_id,:strategy_version_id,"
+                    ":source_long_universe_version_id,:source_short_universe_version_id,:semantic_digest,:captured_at_ms)"), before)
+            else:
+                await savepoint.commit()
+        if invalid_source:
+            with pytest.raises(AssertionError, match="BASELINE_SOURCE_MISMATCH"):
+                await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+            async with engine.connect() as conn:
+                assert await conn.scalar(sa.text("SELECT version_num FROM alembic_version")) == "0007_exit_profile_authority_v1"
+                assert await conn.scalar(sa.text("SELECT to_regclass('brc_materialization_generation_event_baselines')")) is None
+            return
+        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+        await engine.dispose()
+        async with engine.connect() as conn:
+            after = dict((await conn.execute(sa.text("SELECT * FROM brc_strategy_selection_rollback_baselines WHERE rollback_baseline_id=:id"), {"id":baseline_id})).mappings().one())
+            rows = (await conn.execute(sa.text("SELECT * FROM brc_selection_rollback_baseline_events WHERE rollback_baseline_id=:id ORDER BY position_side"), {"id":baseline_id})).mappings().all()
+            assert len(rows) == 2
+            reconstructed = {**after, **{f"source_{row['position_side']}_universe_version_id":row["universe_version_id"] for row in rows}}
+            assert reconstructed == before
+            assert all(row["comparison_universe_id"] is None for row in rows)
+            for table in ("brc_strategy_universe_materialization_generations", "brc_instrument_selection_snapshots", "brc_selection_session_authorities"):
+                assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
 
 
 def test_alembic_import_root_is_the_selected_worktree_not_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

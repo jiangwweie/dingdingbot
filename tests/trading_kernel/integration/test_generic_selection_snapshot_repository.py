@@ -9,10 +9,15 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.trading_kernel.application.install_strategy_universe import (
+    UniverseInstallRequest,
+    install_strategy_universe,
+)
 from src.trading_kernel.application.run_instrument_selection import (
     RunInstrumentSelectionRequest,
     run_instrument_selection_once,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.generic_selection_core import (
     GenericSelectionInput,
     compute_generic_selection,
@@ -25,6 +30,7 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionJobClaim,
     SelectionJobFailure,
 )
+from src.trading_kernel.domain.selection_authority import selected_member_set_digest
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
     SelectionJobConflict,
 )
@@ -412,6 +418,58 @@ async def test_control_cannot_point_at_another_strategys_selection_spec(database
             await conn.execute(sa.update(strategy_selection_control_current).where(
                 strategy_selection_control_current.c.strategy_group_id == "MI-001",
             ).values(selection_spec_id=inputs("MPG-001").spec.selection_spec_id))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_generic_generation_schema_uses_one_exact_previous_event_without_fake_pair(database: AsyncEngine, group: str) -> None:
+    source = inputs(group)
+    snapshot = compute_generic_selection(source)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(snapshot, decision_at_ms=source.decision_at_ms, source_observed_at_ms=source.source_observed_at_ms)
+        installed = await install_strategy_universe(uow, UniverseInstallRequest(
+            event_spec_id=source.spec.event_spec_id, runtime_profile_id="tiny-live-v1", owner_policy_id="policy-main",
+            exchange_instrument_ids=source.spec.candidate_ids[:1], installed_at_ms=CUTOFF-1,
+        ))
+    assert installed.universe is not None
+    uid = installed.universe.universe_version_id
+    comparison_id = None
+    async with database.begin() as conn:
+        # A schema prerequisite, not a Warming/Owner activation certification.
+        await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:now WHERE universe_version_id=:uid"), {"now": CUTOFF, "uid": uid})
+        await conn.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='active',entry_enabled=true,observation_enabled=true,warm_closed_bar_time_ms=:closed,"
+            "warm_completed_at_ms=:now,warm_readiness_digest=:digest,warm_valid_until_ms=:valid WHERE universe_version_id=:uid"),
+            {"uid":uid,"closed":CUTOFF-HOUR,"now":CUTOFF,"digest":"sha256:"+"1"*64,"valid":CUTOFF+2*HOUR})
+        if group in {"MPG-001", "MI-001"}:
+            digest = canonical_digest({"exchange_instrument_ids": source.spec.candidate_ids[:1]})
+            comparison_id = "comparison:" + digest[7:]
+            await conn.execute(sa.text("INSERT INTO brc_comparison_universe_definitions VALUES(:cid,:digest,1)"), {"cid": comparison_id, "digest": digest})
+            await conn.execute(sa.text("INSERT INTO brc_comparison_universe_members VALUES(:cid,:member)"), {"cid": comparison_id, "member": source.spec.candidate_ids[0]})
+        await conn.execute(sa.text("""
+            INSERT INTO brc_strategy_universe_materialization_generations
+            (materialization_generation_id,selection_spec_id,strategy_group_id,strategy_version_id,selection_mode,selection_snapshot_id,
+             rollback_baseline_id,session_start_ms,desired_member_count,semantic_digest,lifecycle_state,projection_version,created_at_ms)
+            VALUES('generation:single',:spec,:sg,:version,'dynamic_selection',:snapshot,NULL,:cutoff,:count,:digest,'PENDING',1,:now)
+        """), {"spec":source.spec.selection_spec_id,"sg":group,"version":source.spec.strategy_version_id,
+            "snapshot":snapshot.selection_snapshot_id,"cutoff":CUTOFF,"count":len(snapshot.selected_members),"digest":"sha256:"+"a"*64,"now":CUTOFF+HOUR+1})
+        await conn.execute(sa.text("""
+            INSERT INTO brc_strategy_universe_materialization_targets VALUES('generation:single',:event,:side,:digest,:ordinal)
+        """), {"event":source.spec.event_spec_id,"side":source.spec.position_side,"digest":snapshot.member_set_digest,"ordinal":1 if source.spec.position_side=="long" else 2})
+        await conn.execute(sa.text("""
+            INSERT INTO brc_materialization_generation_event_baselines VALUES('generation:single',:event,:side,'ACTIVE',:uid,:digest,:comparison)
+        """), {"event":source.spec.event_spec_id,"side":source.spec.position_side,"uid":uid,
+            "digest":selected_member_set_digest(source.spec.candidate_ids[:1]),"comparison":comparison_id})
+    async with database.connect() as conn:
+        rows = (await conn.execute(sa.text("SELECT * FROM brc_materialization_generation_event_baselines"))).mappings().all()
+        assert len(rows)==1 and rows[0]["event_spec_id"]==source.spec.event_spec_id
+        assert rows[0]["universe_version_id"]==uid and rows[0]["comparison_universe_id"]==comparison_id
+    with pytest.raises(sa.exc.DBAPIError, match="immutable"):
+        async with database.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_materialization_generation_event_baselines SET universe_version_id=:uid"), {"uid":uid})
+    if group == "CPM-RO-001":
+        with pytest.raises(sa.exc.DBAPIError, match="Generation source identity is immutable"):
+            async with database.begin() as conn:
+                await conn.execute(sa.text("UPDATE brc_strategy_universe_materialization_generations SET semantic_digest=:digest"), {"digest":"sha256:"+"b"*64})
 
 
 @pytest.mark.asyncio

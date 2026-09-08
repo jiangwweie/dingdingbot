@@ -613,8 +613,6 @@ strategy_selection_rollback_baselines = sa.Table(
     _id("rollback_baseline_id", primary_key=True),
     _id("strategy_group_id"),
     _id("strategy_version_id"),
-    _id("source_long_universe_version_id"),
-    _id("source_short_universe_version_id"),
     sa.Column("semantic_digest", LONG_TEXT, nullable=False),
     _time("captured_at_ms"),
     sa.ForeignKeyConstraint(
@@ -623,19 +621,7 @@ strategy_selection_rollback_baselines = sa.Table(
     sa.ForeignKeyConstraint(
         ["strategy_version_id"], ["brc_strategy_versions.strategy_version_id"]
     ),
-    sa.ForeignKeyConstraint(
-        ["source_long_universe_version_id"],
-        ["brc_strategy_universe_versions.universe_version_id"],
-    ),
-    sa.ForeignKeyConstraint(
-        ["source_short_universe_version_id"],
-        ["brc_strategy_universe_versions.universe_version_id"],
-    ),
     sa.UniqueConstraint("strategy_group_id", "strategy_version_id"),
-    sa.CheckConstraint(
-        "source_long_universe_version_id <> source_short_universe_version_id",
-        name="pair_distinct",
-    ),
     sa.CheckConstraint(
         "semantic_digest ~ '^sha256:[0-9a-f]{64}$'", name="semantic_digest_valid"
     ),
@@ -850,8 +836,6 @@ strategy_universe_materialization_generations = sa.Table(
     _id("selection_snapshot_id", nullable=True),
     _id("rollback_baseline_id", nullable=True),
     _time("session_start_ms", nullable=True),
-    _id("previous_long_universe_version_id"),
-    _id("previous_short_universe_version_id"),
     sa.Column("desired_member_count", sa.Integer, nullable=False),
     sa.Column("semantic_digest", LONG_TEXT, nullable=False),
     sa.Column("lifecycle_state", SHORT_TEXT, nullable=False),
@@ -876,14 +860,6 @@ strategy_universe_materialization_generations = sa.Table(
         ["rollback_baseline_id"],
         ["brc_strategy_selection_rollback_baselines.rollback_baseline_id"],
     ),
-    sa.ForeignKeyConstraint(
-        ["previous_long_universe_version_id"],
-        ["brc_strategy_universe_versions.universe_version_id"],
-    ),
-    sa.ForeignKeyConstraint(
-        ["previous_short_universe_version_id"],
-        ["brc_strategy_universe_versions.universe_version_id"],
-    ),
     sa.UniqueConstraint("selection_spec_id", "session_start_ms", "selection_mode"),
     sa.UniqueConstraint("selection_snapshot_id"),
 )
@@ -895,6 +871,43 @@ sa.Index(
         ("PENDING", "DESIRED", "DRAINING_ENTRY", "MATERIALIZING", "STAGED")
     ),
 )
+
+materialization_generation_event_baselines = sa.Table(
+    "brc_materialization_generation_event_baselines", metadata,
+    _id("materialization_generation_id", primary_key=True), _id("event_spec_id", primary_key=True),
+    sa.Column("position_side", sa.String(16), nullable=False),
+    sa.Column("grant_state", sa.String(16), nullable=False), _id("universe_version_id", nullable=True),
+    sa.Column("member_set_digest", sa.String(71), nullable=False), _id("comparison_universe_id", nullable=True),
+    sa.ForeignKeyConstraint(["materialization_generation_id"], ["brc_strategy_universe_materialization_generations.materialization_generation_id"]),
+    sa.ForeignKeyConstraint(["event_spec_id"], ["brc_event_specs.event_spec_id"]),
+    sa.ForeignKeyConstraint(["universe_version_id"], ["brc_strategy_universe_versions.universe_version_id"]),
+    sa.ForeignKeyConstraint(["comparison_universe_id"], ["brc_comparison_universe_definitions.comparison_universe_id"]),
+    sa.UniqueConstraint("materialization_generation_id", "position_side"),
+)
+
+selection_rollback_baseline_events = sa.Table(
+    "brc_selection_rollback_baseline_events", metadata,
+    _id("rollback_baseline_id", primary_key=True), _id("event_spec_id", primary_key=True),
+    sa.Column("position_side", sa.String(16), nullable=False), _id("universe_version_id"),
+    _id("comparison_universe_id", nullable=True),
+    sa.ForeignKeyConstraint(["rollback_baseline_id"], ["brc_strategy_selection_rollback_baselines.rollback_baseline_id"]),
+    sa.ForeignKeyConstraint(["event_spec_id"], ["brc_event_specs.event_spec_id"]),
+    sa.ForeignKeyConstraint(["universe_version_id"], ["brc_strategy_universe_versions.universe_version_id"]),
+    sa.ForeignKeyConstraint(["comparison_universe_id"], ["brc_comparison_universe_definitions.comparison_universe_id"]),
+    sa.UniqueConstraint("rollback_baseline_id", "position_side"),
+)
+
+
+def materialization_generation_projection_columns() -> tuple[sa.ColumnElement, ...]:
+    """Current Event rows projected into SOR's frozen pair serialization."""
+    baselines = materialization_generation_event_baselines
+    root = strategy_universe_materialization_generations
+    references = tuple(sa.select(baselines.c.universe_version_id).where(
+        baselines.c.materialization_generation_id == root.c.materialization_generation_id,
+        baselines.c.position_side == side,
+    ).correlate(root).scalar_subquery().label(f"previous_{side}_universe_version_id") for side in ("long", "short"))
+    return (*root.c, *references)
+
 
 strategy_universe_materialization_targets = sa.Table(
     "brc_strategy_universe_materialization_targets",

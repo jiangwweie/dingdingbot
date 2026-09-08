@@ -332,6 +332,17 @@ async def test_selection_runtime_readonly_projects_one_exact_period_without_writ
                 ),
             ),
         )
+        previous_events = (await connection.execute(sa.text(
+            "SELECT event_spec_id,position_side,universe_version_id FROM brc_materialization_generation_event_baselines "
+            "WHERE materialization_generation_id=:gid ORDER BY position_side"
+        ), {"gid": generation.materialization_generation_id})).mappings().all()
+        assert [(row["event_spec_id"], row["universe_version_id"]) for row in previous_events] == [
+            (SOR_LONG_EVENT_SPEC_ID, LONG_UNIVERSE_ID), (SOR_SHORT_EVENT_SPEC_ID, SHORT_UNIVERSE_ID),
+        ]
+        assert await repository.get_materialization_generation(generation.materialization_generation_id) == generation
+        columns = await connection.run_sync(lambda conn: {column["name"] for column in sa.inspect(conn).get_columns("brc_strategy_universe_materialization_generations")})
+        assert "previous_long_universe_version_id" not in columns
+        assert "previous_short_universe_version_id" not in columns
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
                 **vacuum.model_dump(mode="json")
@@ -3766,7 +3777,7 @@ async def test_fallback_transaction_crossing_first_close_rolls_back_grant(
 
 
 @pytest.mark.asyncio
-async def test_pending_generation_is_abandoned_when_frozen_previous_pair_drifts(
+async def test_actual_current_pair_drift_blocks_before_pending_generation_reuse(
     head_template_engine,
 ) -> None:
     changed_members = tuple(
@@ -3798,31 +3809,43 @@ async def test_pending_generation_is_abandoned_when_frozen_previous_pair_drifts(
 
     drifted_long_id = "universe:materialization:long:drifted"
     async with head_template_engine.begin() as connection:
+        previous_scopes = (await connection.execute(sa.select(runtime_scopes_current).where(
+            runtime_scopes_current.c.universe_version_id == LONG_UNIVERSE_ID))).mappings().all()
+        old_digest = await connection.scalar(sa.select(strategy_universe_versions.c.semantic_digest).where(
+            strategy_universe_versions.c.universe_version_id == LONG_UNIVERSE_ID))
+        await connection.execute(sa.update(strategy_universe_versions).where(
+            strategy_universe_versions.c.universe_version_id == LONG_UNIVERSE_ID,
+        ).values(lifecycle_state="retired", retired_at_ms=SESSION_START_MS+3_600_003))
+        await connection.execute(sa.update(runtime_scopes_current).where(
+            runtime_scopes_current.c.universe_version_id == LONG_UNIVERSE_ID,
+        ).values(lifecycle_state="retired", observation_enabled=False, entry_enabled=False))
         await connection.execute(
             sa.insert(strategy_universe_versions).values(
                 universe_version_id=drifted_long_id,
                 strategy_group_id="SOR-001",
                 event_spec_id=SOR_LONG_EVENT_SPEC_ID,
                 universe_version=99,
-                semantic_digest="sha256:" + "7" * 64,
-                lifecycle_state="retired",
+                semantic_digest=old_digest,
+                lifecycle_state="active",
                 source_kind="manual",
                 materialization_generation_id=None,
                 installed_at_ms=SESSION_START_MS - 10_000,
                 activated_at_ms=SESSION_START_MS - 9_000,
-                retired_at_ms=SESSION_START_MS - 8_000,
+                retired_at_ms=None,
                 abandoned_at_ms=None,
                 abandon_reason_code=None,
             )
         )
-        await connection.execute(
-            sa.update(strategy_universe_materialization_generations)
-            .where(
-                strategy_universe_materialization_generations.c.materialization_generation_id
-                == pending.materialization_generation_id
-            )
-            .values(previous_long_universe_version_id=drifted_long_id)
-        )
+        await connection.execute(sa.insert(strategy_universe_members), [
+            {"universe_version_id": drifted_long_id, "exchange_instrument_id": member} for member in SELECTED_MEMBERS
+        ])
+        await connection.execute(sa.insert(runtime_scopes_current), [
+            {**dict(scope), "runtime_scope_id": scope["runtime_scope_id"]+":drifted", "universe_version_id": drifted_long_id}
+            for scope in previous_scopes
+        ])
+        await connection.execute(sa.update(strategy_universe_current).where(
+            strategy_universe_current.c.event_spec_id == SOR_LONG_EVENT_SPEC_ID,
+        ).values(universe_version_id=drifted_long_id, activation_generation=2))
 
     result = await coordinate_selection_materialization_once(
         uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
@@ -3836,9 +3859,9 @@ async def test_pending_generation_is_abandoned_when_frozen_previous_pair_drifts(
     )
 
     assert result.disposition is MaterializationDisposition.BLOCKED
-    assert result.reason_code == "GENERATION_PREVIOUS_PAIR_DRIFT"
+    assert result.reason_code == "DYNAMIC_PREDECESSOR_AUTHORITY_DRIFT"
     assert retry.disposition is MaterializationDisposition.BLOCKED
-    assert retry.reason_code == "GENERATION_ABANDONED"
+    assert retry.reason_code == "DYNAMIC_PREDECESSOR_AUTHORITY_DRIFT"
     async with head_template_engine.connect() as connection:
         state = await connection.scalar(
             sa.select(
@@ -3848,7 +3871,12 @@ async def test_pending_generation_is_abandoned_when_frozen_previous_pair_drifts(
                 == pending.materialization_generation_id
             )
         )
-    assert state == "ABANDONED"
+    assert state == "PENDING"
+    async with head_template_engine.connect() as connection:
+        assert await connection.scalar(sa.text(
+            "SELECT universe_version_id FROM brc_materialization_generation_event_baselines "
+            "WHERE materialization_generation_id=:gid AND position_side='long'"
+        ), {"gid":pending.materialization_generation_id}) == LONG_UNIVERSE_ID
 
 
 @pytest.mark.asyncio

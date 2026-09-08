@@ -84,6 +84,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     instrument_selection_spec_members,
     instrument_selection_specs,
     instruments,
+    materialization_generation_event_baselines,
+    materialization_generation_projection_columns,
     runtime_release_compatibility_facts,
     selection_authority_current,
     selection_authority_event_bindings,
@@ -962,7 +964,7 @@ class PostgresInstrumentSelectionRepository:
 
         generation = (
             await self._connection.execute(
-                sa.select(strategy_universe_materialization_generations)
+                sa.select(*materialization_generation_projection_columns())
                 .where(
                     strategy_universe_materialization_generations.c.materialization_generation_id
                     == request.materialization_generation_id
@@ -1238,6 +1240,18 @@ class PostgresInstrumentSelectionRepository:
                 _materialization_generation_values(generation)
             )
         )
+        for event_id, side, universe_id in (
+            (SOR_LONG_EVENT_SPEC_ID, "long", generation.previous_long_universe_version_id),
+            (SOR_SHORT_EVENT_SPEC_ID, "short", generation.previous_short_universe_version_id),
+        ):
+            members = tuple((await self._connection.execute(sa.select(strategy_universe_members.c.exchange_instrument_id).where(
+                strategy_universe_members.c.universe_version_id == universe_id,
+            ).order_by(strategy_universe_members.c.exchange_instrument_id))).scalars())
+            await self._connection.execute(sa.insert(materialization_generation_event_baselines).values(
+                materialization_generation_id=generation.materialization_generation_id, event_spec_id=event_id,
+                position_side=side, grant_state="ACTIVE", universe_version_id=universe_id,
+                member_set_digest=selected_member_set_digest(members), comparison_universe_id=None,
+            ))
         await self._connection.execute(
             sa.insert(strategy_universe_materialization_targets),
             [
@@ -1272,7 +1286,7 @@ class PostgresInstrumentSelectionRepository:
         *,
         for_update: bool = False,
     ) -> MaterializationGeneration | None:
-        statement = sa.select(strategy_universe_materialization_generations).where(
+        statement = sa.select(*materialization_generation_projection_columns()).where(
             strategy_universe_materialization_generations.c.selection_snapshot_id
             == selection_snapshot_id
         )
@@ -1292,7 +1306,7 @@ class PostgresInstrumentSelectionRepository:
     ) -> MaterializationGeneration | None:
         row = (
             await self._connection.execute(
-                sa.select(strategy_universe_materialization_generations)
+                sa.select(*materialization_generation_projection_columns())
                 .where(
                     strategy_universe_materialization_generations.c.strategy_group_id
                     == strategy_group_id,
@@ -1312,7 +1326,7 @@ class PostgresInstrumentSelectionRepository:
         *,
         for_update: bool = False,
     ) -> MaterializationGeneration | None:
-        statement = sa.select(strategy_universe_materialization_generations).where(
+        statement = sa.select(*materialization_generation_projection_columns()).where(
             strategy_universe_materialization_generations.c.materialization_generation_id
             == materialization_generation_id
         )
@@ -1331,7 +1345,7 @@ class PostgresInstrumentSelectionRepository:
         for_update: bool = False,
     ) -> MaterializationGeneration | None:
         statement = (
-            sa.select(strategy_universe_materialization_generations)
+            sa.select(*materialization_generation_projection_columns())
             .where(
                 strategy_universe_materialization_generations.c.strategy_group_id
                 == strategy_group_id,
@@ -1384,7 +1398,7 @@ class PostgresInstrumentSelectionRepository:
             raise ValueError("Materialization lease timing must be positive")
         row = (
             await self._connection.execute(
-                sa.select(strategy_universe_materialization_generations)
+                sa.select(*materialization_generation_projection_columns())
                 .where(
                     strategy_universe_materialization_generations.c.selection_spec_id
                     == selection_spec_id,
@@ -1476,7 +1490,7 @@ class PostgresInstrumentSelectionRepository:
     ) -> MaterializationGeneration:
         row = (
             await self._connection.execute(
-                sa.select(strategy_universe_materialization_generations)
+                sa.select(*materialization_generation_projection_columns())
                 .where(
                     strategy_universe_materialization_generations.c.materialization_generation_id
                     == materialization_generation_id
@@ -1545,7 +1559,7 @@ class PostgresInstrumentSelectionRepository:
             raise ValueError("abandoned Generation requires reason")
         row = (
             await self._connection.execute(
-                sa.select(strategy_universe_materialization_generations)
+                sa.select(*materialization_generation_projection_columns())
                 .where(
                     strategy_universe_materialization_generations.c.materialization_generation_id
                     == materialization_generation_id
@@ -3547,12 +3561,6 @@ def _materialization_generation_values(
         "selection_snapshot_id": generation.selection_snapshot_id,
         "rollback_baseline_id": generation.rollback_baseline_id,
         "session_start_ms": generation.session_start_ms,
-        "previous_long_universe_version_id": (
-            generation.previous_long_universe_version_id
-        ),
-        "previous_short_universe_version_id": (
-            generation.previous_short_universe_version_id
-        ),
         "desired_member_count": generation.desired_member_count,
         "semantic_digest": generation.semantic_digest,
         "lifecycle_state": generation.lifecycle_state.value,
@@ -3572,6 +3580,8 @@ def _materialization_generation_values(
 def _materialization_generation_from_row(
     row: RowMapping,
 ) -> MaterializationGeneration:
+    if row["strategy_group_id"] != "SOR-001":
+        raise SelectionJobConflict("Generic Generation requires Event-set runtime decoding")
     return MaterializationGeneration(
         materialization_generation_id=str(row["materialization_generation_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
