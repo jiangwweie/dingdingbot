@@ -15,7 +15,10 @@ from src.trading_kernel.domain.dynamic_selection_numeric import (
     rank_dynamic_selection_features,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
-from src.trading_kernel.domain.generic_selection_spec import GenericSelectionSpecV1
+from src.trading_kernel.domain.generic_selection_spec import (
+    GenericSelectionSpecV1,
+    generic_selection_spec,
+)
 
 HOUR_MS=3600000
 
@@ -57,6 +60,22 @@ class GenericSelectionMemberDecision(BaseModel):
     retained: bool
     input_window_digest: str
 
+    @field_validator("feature_value",mode="before")
+    @classmethod
+    def _feature_decimal(cls,value: object) -> object:
+        if isinstance(value,float):
+            raise TypeError("feature cannot enter through binary64")
+        return value
+
+    @model_validator(mode="after")
+    def _valid_decision(self) -> GenericSelectionMemberDecision:
+        if not self.feature_value.is_finite() or not 1<=self.stable_rank<=24:
+            raise ValueError("invalid feature/rank")
+        _require_digest(self.input_window_digest)
+        if (not self.qualified and (self.selected or self.retained)) or self.retained and not self.selected:
+            raise ValueError("invalid member qualification/retention")
+        return self
+
 
 class GenericSelectionSnapshotV1(BaseModel):
     model_config=ConfigDict(frozen=True,extra="forbid")
@@ -73,6 +92,38 @@ class GenericSelectionSnapshotV1(BaseModel):
     predecessor_member_digest: str | None
     members: tuple[GenericSelectionMemberDecision,...]
     source_semantic_digest: str
+
+    @model_validator(mode="after")
+    def _snapshot_contract(self) -> GenericSelectionSnapshotV1:
+        spec=generic_selection_spec(self.strategy_group_id)
+        if self.selection_spec_id!=spec.selection_spec_id or self.spec_semantic_digest!=spec.algorithm_semantic_digest:
+            raise ValueError("snapshot Spec identity differs")
+        t=self.feature_cutoff_at_ms
+        if not self.selection_epoch_id.strip() or t<=0 or t%(spec.cadence_hours*HOUR_MS):
+            raise ValueError("invalid snapshot period/epoch")
+        if self.effective_from_ms!=t+HOUR_MS or self.expires_at_ms!=t+(spec.cadence_hours+1)*HOUR_MS or self.committed_at_ms<t:
+            raise ValueError("invalid snapshot time")
+        expected_id="selection:"+canonical_digest({"spec":self.selection_spec_id,"epoch":self.selection_epoch_id,"cutoff":t})[7:]
+        if self.selection_snapshot_id!=expected_id:
+            raise ValueError("snapshot ID differs from epoch/period")
+        if (self.predecessor_snapshot_id is None)!=(self.predecessor_member_digest is None):
+            raise ValueError("incomplete predecessor identity")
+        if self.predecessor_snapshot_id==self.selection_snapshot_id:
+            raise ValueError("snapshot cannot precede itself")
+        if self.predecessor_member_digest is not None:
+            _require_digest(self.predecessor_member_digest)
+        _require_digest(self.source_semantic_digest)
+        if tuple(sorted(member.exchange_instrument_id for member in self.members))!=spec.candidate_ids:
+            raise ValueError("snapshot requires complete Candidate24")
+        ranked=tuple(sorted(self.members,key=lambda member:(member.feature_value.copy_negate(),member.exchange_instrument_id)))
+        if self.members!=ranked or tuple(member.stable_rank for member in ranked)!=tuple(range(1,25)):
+            raise ValueError("snapshot ranking differs from frozen order")
+        for member in ranked:
+            expected_selected=member.qualified and (member.stable_rank<=spec.entry_rank or member.retained)
+            if (member.selected!=expected_selected or member.selected and member.stable_rank>spec.retain_rank
+                or member.retained and self.predecessor_snapshot_id is None):
+                raise ValueError("snapshot membership exceeds frozen admission/retention")
+        return self
 
     @property
     def selected_members(self) -> tuple[str,...]:
@@ -124,6 +175,11 @@ class GenericSelectionInput(BaseModel):
         ):
             raise ValueError("Selection predecessor epoch/spec/time mismatch")
         return self
+
+
+def _require_digest(value: str) -> None:
+    if len(value)!=71 or not value.startswith("sha256:") or any(ch not in "0123456789abcdef" for ch in value[7:]):
+        raise ValueError("invalid canonical SHA-256 identity")
 
 
 def compute_generic_selection(source: GenericSelectionInput) -> GenericSelectionSnapshotV1:

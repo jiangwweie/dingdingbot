@@ -73,3 +73,16 @@ def test_source_integrity_requires_exact_point_in_time_candidate24(defect: str) 
         windows[0]=windows[0].model_copy(update={"closed_at_ms":tuple(times)})
     with pytest.raises(ValueError):
         compute_generic_selection(source.model_copy(update={"member_windows":tuple(windows)}))
+
+
+@pytest.mark.parametrize("defect", ["member_count", "duplicate_rank", "wrong_id", "extra_selected"])
+def test_snapshot_cannot_supply_forged_hysteresis_memory(defect: str) -> None:
+    source=inputs("MPG-001")
+    snapshot=compute_generic_selection(source)
+    payload=snapshot.model_dump(mode="python")
+    if defect=="member_count": payload["members"]=payload["members"][:-1]
+    elif defect=="duplicate_rank": payload["members"][1]["stable_rank"]=1
+    elif defect=="wrong_id": payload["selection_snapshot_id"]="selection:forged"
+    else: payload["members"][-1]["selected"]=True
+    with pytest.raises(ValueError):
+        type(snapshot).model_validate(payload)
