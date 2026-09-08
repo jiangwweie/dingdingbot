@@ -646,6 +646,7 @@ strategy_selection_control_current = sa.Table(
     metadata,
     _id("strategy_group_id", primary_key=True),
     _id("selection_spec_id"),
+    _id("selection_epoch_id", nullable=True),
     sa.Column("selection_mode", SHORT_TEXT, nullable=False),
     sa.Column("pending_selection_mode", SHORT_TEXT, nullable=True),
     _time("pending_effective_session_start_ms", nullable=True),
@@ -678,6 +679,10 @@ instrument_selection_jobs_current = sa.Table(
     metadata,
     _id("selection_job_id", primary_key=True),
     _id("selection_spec_id"),
+    sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"),
+    sa.Column("selection_control_version", sa.BigInteger, nullable=True),
+    _id("predecessor_snapshot_id", nullable=True),
+    sa.Column("predecessor_member_digest", sa.String(71), nullable=True),
     _time("session_start_ms"),
     _time("scheduled_at_ms"),
     _time("feature_cutoff_at_ms"),
@@ -697,7 +702,7 @@ instrument_selection_jobs_current = sa.Table(
         ["selection_snapshot_id"],
         ["brc_instrument_selection_snapshots.selection_snapshot_id"],
     ),
-    sa.UniqueConstraint("selection_spec_id", "session_start_ms"),
+    sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "session_start_ms"),
     sa.CheckConstraint(
         "state IN ('DUE', 'CLAIMED', 'SNAPSHOT_READY', 'SOURCE_FAILED', "
         "'COMPUTE_FAILED')",
@@ -721,6 +726,10 @@ instrument_selection_attempts = sa.Table(
     _id("selection_attempt_id", primary_key=True),
     _id("selection_job_id"),
     _id("selection_spec_id"),
+    sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"),
+    sa.Column("selection_control_version", sa.BigInteger, nullable=True),
+    _id("predecessor_snapshot_id", nullable=True),
+    sa.Column("predecessor_member_digest", sa.String(71), nullable=True),
     _time("session_start_ms"),
     sa.Column("worker_id", SHORT_TEXT, nullable=False),
     sa.Column("attempt_number", sa.Integer, nullable=False),
@@ -736,7 +745,7 @@ instrument_selection_attempts = sa.Table(
     sa.ForeignKeyConstraint(
         ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
     ),
-    sa.UniqueConstraint("selection_spec_id", "session_start_ms", "attempt_number"),
+    sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "session_start_ms", "attempt_number"),
 )
 
 instrument_selection_snapshots = sa.Table(

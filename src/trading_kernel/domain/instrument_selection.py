@@ -236,6 +236,12 @@ class SelectionSnapshot(BaseModel):
         return self
 
 
+def selection_job_identity(selection_spec_id: str, period_anchor_ms: int, selection_epoch_id: str = "sor-v0") -> str:
+    if selection_epoch_id == "sor-v0":
+        return f"selection-job:{selection_spec_id}:{period_anchor_ms}"
+    return "selection-job:" + _semantic_digest({"spec": selection_spec_id, "epoch": selection_epoch_id, "cutoff": period_anchor_ms})[7:]
+
+
 class SelectionJobClaim(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -247,10 +253,14 @@ class SelectionJobClaim(BaseModel):
     projection_version: int
     started_at_ms: int
     lease_expires_at_ms: int
+    selection_epoch_id: str = "sor-v0"
+    selection_control_version: int | None = None
+    predecessor_snapshot_id: str | None = None
+    predecessor_member_digest: str | None = None
 
     @model_validator(mode="after")
     def _validate_claim(self) -> SelectionJobClaim:
-        expected_id = f"selection-job:{self.selection_spec_id}:{self.session_start_ms}"
+        expected_id = selection_job_identity(self.selection_spec_id, self.session_start_ms, self.selection_epoch_id)
         if self.selection_job_id != expected_id:
             raise ValueError("Selection Job identity is not canonical")
         if not self.worker_id.strip():
@@ -259,6 +269,17 @@ class SelectionJobClaim(BaseModel):
             raise ValueError("Selection Job versions must be positive")
         if self.lease_expires_at_ms <= self.started_at_ms:
             raise ValueError("Selection Job lease must expire after claim")
+        if not self.selection_epoch_id.strip():
+            raise ValueError("Selection Job requires exact epoch")
+        if self.selection_epoch_id == "sor-v0":
+            if any(value is not None for value in (self.selection_control_version, self.predecessor_snapshot_id, self.predecessor_member_digest)):
+                raise ValueError("SOR Job retains frozen non-hysteretic claim")
+        elif self.selection_control_version is None or self.selection_control_version <= 0:
+            raise ValueError("Generic Job requires Selection control version")
+        if (self.predecessor_snapshot_id is None) != (self.predecessor_member_digest is None):
+            raise ValueError("Selection Job predecessor is incomplete")
+        if self.predecessor_member_digest is not None:
+            _require_sha256(self.predecessor_member_digest)
         return self
 
 

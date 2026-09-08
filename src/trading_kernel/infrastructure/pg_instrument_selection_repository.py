@@ -18,6 +18,9 @@ from src.trading_kernel.application.recover_expired_dynamic_activation import (
     RecoverExpiredDynamicActivationResult,
 )
 from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
+from src.trading_kernel.domain.dynamic_selection_timing import (
+    build_generic_selection_period,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.generic_selection_core import (
     GenericSelectionMemberDecision,
@@ -38,6 +41,7 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionSnapshot,
     SorDynamicSelectionSpecV0,
     build_sor_dynamic_selection_spec_v0,
+    selection_job_identity,
 )
 from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.domain.selection_authority import (
@@ -417,19 +421,100 @@ class PostgresInstrumentSelectionRepository:
         now_ms: int,
         lease_duration_ms: int,
     ) -> SelectionJobClaim | SelectionJobFailure | SelectionSnapshot:
-        if now_ms < period.feature_cutoff_at_ms:
+        result = await self._claim_selection_job_row(
+            selection_spec_id=spec.selection_spec_id, period_anchor_ms=period.session_start_ms,
+            scheduled_at_ms=period.decision_boundary_ms, feature_cutoff_at_ms=period.feature_cutoff_at_ms,
+            worker_id=worker_id, now_ms=now_ms, lease_duration_ms=lease_duration_ms,
+        )
+        return await self._get_snapshot(result) if isinstance(result, str) else result
+
+    @staticmethod
+    def _generic_control_allows(control: SelectionControl | None, spec_id: str, epoch: str, cutoff: int) -> bool:
+        if control is None or control.selection_spec_id != spec_id or control.selection_epoch_id != epoch:
+            return False
+        if control.pending_selection_mode is not None:
+            boundary = control.pending_effective_session_start_ms
+            if boundary is not None and cutoff >= boundary:
+                return control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+        return control.selection_mode is SelectionMode.DYNAMIC_SELECTION
+
+    async def claim_generic_selection_job(
+        self, *, selection_spec_id: str, selection_epoch_id: str, feature_cutoff_at_ms: int,
+        worker_id: str, now_ms: int, lease_duration_ms: int,
+    ) -> SelectionJobClaim | SelectionJobFailure | GenericSelectionSnapshotV1 | None:
+        spec = await self.get_generic_spec(selection_spec_id)
+        period = build_generic_selection_period(feature_cutoff_at_ms=feature_cutoff_at_ms, cadence_hours=spec.cadence_hours)
+        control = await self.get_selection_control(spec.strategy_group_id, for_update=True)
+        if not self._generic_control_allows(control, selection_spec_id, selection_epoch_id, feature_cutoff_at_ms) or now_ms >= period.period_expires_at_ms:
+            return None
+        assert control is not None
+        previous_id = await self._connection.scalar(sa.select(instrument_selection_snapshots.c.selection_snapshot_id).where(
+            instrument_selection_snapshots.c.selection_spec_id == selection_spec_id,
+            instrument_selection_snapshots.c.selection_epoch_id == selection_epoch_id,
+            instrument_selection_snapshots.c.feature_cutoff_at_ms < feature_cutoff_at_ms,
+        ).order_by(instrument_selection_snapshots.c.feature_cutoff_at_ms.desc()).limit(1))
+        previous = None if previous_id is None else await self.get_generic_snapshot(previous_id)
+        result = await self._claim_selection_job_row(
+            selection_spec_id=selection_spec_id, period_anchor_ms=feature_cutoff_at_ms,
+            scheduled_at_ms=feature_cutoff_at_ms, feature_cutoff_at_ms=feature_cutoff_at_ms,
+            worker_id=worker_id, now_ms=now_ms, lease_duration_ms=lease_duration_ms,
+            selection_epoch_id=selection_epoch_id, selection_control_version=control.control_version,
+            predecessor_snapshot_id=None if previous is None else previous.selection_snapshot_id,
+            predecessor_member_digest=None if previous is None else previous.member_set_digest,
+        )
+        return await self.get_generic_snapshot(result) if isinstance(result, str) else result
+
+    async def complete_generic_selection_snapshot(
+        self, *, claim: SelectionJobClaim, snapshot: GenericSelectionSnapshotV1,
+        source_observed_at_ms: int, completed_at_ms: int,
+    ) -> None:
+        claim = SelectionJobClaim.model_validate(claim.model_dump(mode="python"))
+        snapshot = GenericSelectionSnapshotV1.model_validate(snapshot.model_dump(mode="python"))
+        spec = await self.get_generic_spec(claim.selection_spec_id)
+        control = await self.get_selection_control(spec.strategy_group_id, for_update=True)
+        if (not self._generic_control_allows(control, claim.selection_spec_id, claim.selection_epoch_id, claim.session_start_ms)
+            or control is None or control.control_version != claim.selection_control_version):
+            raise SelectionJobConflict("Selection control or epoch changed during source read")
+        if (snapshot.selection_spec_id != claim.selection_spec_id or snapshot.selection_epoch_id != claim.selection_epoch_id
+            or snapshot.feature_cutoff_at_ms != claim.session_start_ms or snapshot.committed_at_ms != completed_at_ms
+            or snapshot.predecessor_snapshot_id != claim.predecessor_snapshot_id
+            or snapshot.predecessor_member_digest != claim.predecessor_member_digest
+            or source_observed_at_ms < claim.started_at_ms or completed_at_ms >= snapshot.expires_at_ms):
+            raise SelectionJobConflict("Generic Snapshot differs from claimed epoch/period/predecessor/time")
+        row = await self._locked_job(claim)
+        if row["state"] == "SNAPSHOT_READY":
+            if (await self.get_generic_snapshot(row["selection_snapshot_id"])) == snapshot:
+                return
+            raise SelectionJobConflict("Generic Snapshot digest conflicts")
+        self._require_live_claim(row, claim, completed_at_ms=completed_at_ms)
+        await self.save_generic_snapshot(snapshot, decision_at_ms=claim.session_start_ms, source_observed_at_ms=source_observed_at_ms)
+        await self._append_attempt(claim=claim, outcome=SelectionAttemptOutcome.SNAPSHOT_READY, reason_code=None,
+            source_member_count=24, source_digest=snapshot.source_semantic_digest, completed_at_ms=completed_at_ms)
+        await self._mark_snapshot_ready(claim, snapshot.selection_snapshot_id, completed_at_ms)
+
+    async def _claim_selection_job_row(
+        self, *, selection_spec_id: str, period_anchor_ms: int, scheduled_at_ms: int,
+        feature_cutoff_at_ms: int, worker_id: str, now_ms: int, lease_duration_ms: int,
+        selection_epoch_id: str = "sor-v0", selection_control_version: int | None = None,
+        predecessor_snapshot_id: str | None = None, predecessor_member_digest: str | None = None,
+    ) -> SelectionJobClaim | SelectionJobFailure | str:
+        if now_ms < feature_cutoff_at_ms:
             raise ValueError("Selection Job cannot be claimed before feature cutoff")
         if lease_duration_ms <= 0:
             raise ValueError("Selection Job lease duration must be positive")
-        job_id = f"selection-job:{spec.selection_spec_id}:{period.session_start_ms}"
+        job_id = selection_job_identity(selection_spec_id, period_anchor_ms, selection_epoch_id)
         await self._connection.execute(
             pg_insert(instrument_selection_jobs_current)
             .values(
                 selection_job_id=job_id,
-                selection_spec_id=spec.selection_spec_id,
-                session_start_ms=period.session_start_ms,
-                scheduled_at_ms=period.decision_boundary_ms,
-                feature_cutoff_at_ms=period.feature_cutoff_at_ms,
+                selection_spec_id=selection_spec_id,
+                session_start_ms=period_anchor_ms,
+                scheduled_at_ms=scheduled_at_ms,
+                feature_cutoff_at_ms=feature_cutoff_at_ms,
+                selection_epoch_id=selection_epoch_id,
+                selection_control_version=selection_control_version,
+                predecessor_snapshot_id=predecessor_snapshot_id,
+                predecessor_member_digest=predecessor_member_digest,
                 state="DUE",
                 selection_snapshot_id=None,
                 first_blocker=None,
@@ -443,6 +528,7 @@ class PostgresInstrumentSelectionRepository:
             .on_conflict_do_nothing(
                 index_elements=[
                     instrument_selection_jobs_current.c.selection_spec_id,
+                    instrument_selection_jobs_current.c.selection_epoch_id,
                     instrument_selection_jobs_current.c.session_start_ms,
                 ]
             )
@@ -452,9 +538,10 @@ class PostgresInstrumentSelectionRepository:
                 sa.select(instrument_selection_jobs_current)
                 .where(
                     instrument_selection_jobs_current.c.selection_spec_id
-                    == spec.selection_spec_id,
+                    == selection_spec_id,
+                    instrument_selection_jobs_current.c.selection_epoch_id == selection_epoch_id,
                     instrument_selection_jobs_current.c.session_start_ms
-                    == period.session_start_ms,
+                    == period_anchor_ms,
                 )
                 .with_for_update()
             )
@@ -464,7 +551,7 @@ class PostgresInstrumentSelectionRepository:
             snapshot_id = row["selection_snapshot_id"]
             if snapshot_id is None:
                 raise SelectionJobConflict("ready Selection Job has no Snapshot")
-            return await self._get_snapshot(str(snapshot_id))
+            return str(snapshot_id)
         if state in {"SOURCE_FAILED", "COMPUTE_FAILED"} and row[
             "next_retry_at_ms"
         ] is None:
@@ -506,19 +593,26 @@ class PostgresInstrumentSelectionRepository:
                 lease_expires_at_ms=lease_expires,
                 projection_version=next_version,
                 updated_at_ms=now_ms,
+                selection_control_version=selection_control_version,
+                predecessor_snapshot_id=predecessor_snapshot_id,
+                predecessor_member_digest=predecessor_member_digest,
             )
         )
         if result.rowcount != 1:
             raise SelectionJobConflict("Selection Job projection version changed")
         return SelectionJobClaim(
             selection_job_id=job_id,
-            selection_spec_id=spec.selection_spec_id,
-            session_start_ms=period.session_start_ms,
+            selection_spec_id=selection_spec_id,
+            session_start_ms=period_anchor_ms,
             worker_id=worker_id,
             attempt_number=attempt_number,
             projection_version=next_version,
             started_at_ms=now_ms,
             lease_expires_at_ms=lease_expires,
+            selection_epoch_id=selection_epoch_id,
+            selection_control_version=selection_control_version,
+            predecessor_snapshot_id=predecessor_snapshot_id,
+            predecessor_member_digest=predecessor_member_digest,
         )
 
     async def complete_selection_snapshot(
@@ -572,6 +666,9 @@ class PostgresInstrumentSelectionRepository:
             source_digest=snapshot.source_semantic_digest,
             completed_at_ms=completed_at_ms,
         )
+        await self._mark_snapshot_ready(claim, snapshot.selection_snapshot_id, completed_at_ms)
+
+    async def _mark_snapshot_ready(self, claim: SelectionJobClaim, selection_snapshot_id: str, completed_at_ms: int) -> None:
         result = await self._connection.execute(
             sa.update(instrument_selection_jobs_current)
             .where(
@@ -584,7 +681,7 @@ class PostgresInstrumentSelectionRepository:
             )
             .values(
                 state="SNAPSHOT_READY",
-                selection_snapshot_id=snapshot.selection_snapshot_id,
+                selection_snapshot_id=selection_snapshot_id,
                 first_blocker=None,
                 next_retry_at_ms=None,
                 lease_owner=None,
@@ -650,6 +747,7 @@ class PostgresInstrumentSelectionRepository:
         *,
         selection_spec_id: str,
         session_start_ms: int,
+        selection_epoch_id: str = "sor-v0",
     ) -> SelectionJobRecord | None:
         row = (
             await self._connection.execute(
@@ -657,6 +755,7 @@ class PostgresInstrumentSelectionRepository:
                 .where(
                     instrument_selection_jobs_current.c.selection_spec_id
                     == selection_spec_id,
+                    instrument_selection_jobs_current.c.selection_epoch_id == selection_epoch_id,
                     instrument_selection_jobs_current.c.session_start_ms
                     == session_start_ms,
                 )
@@ -692,9 +791,15 @@ class PostgresInstrumentSelectionRepository:
             or str(row["lease_owner"]) != claim.worker_id
             or int(row["projection_version"]) != claim.projection_version
             or int(row["attempt_count"]) != claim.attempt_number
+            or row["selection_epoch_id"] != claim.selection_epoch_id
+            or row["selection_control_version"] != claim.selection_control_version
+            or row["predecessor_snapshot_id"] != claim.predecessor_snapshot_id
+            or row["predecessor_member_digest"] != claim.predecessor_member_digest
         ):
             raise SelectionJobConflict("Selection Job claim identity changed")
-        if completed_at_ms > int(row["lease_expires_at_ms"]):
+        if completed_at_ms < claim.started_at_ms or completed_at_ms > int(row["lease_expires_at_ms"]) or (
+            claim.selection_epoch_id != "sor-v0" and completed_at_ms == int(row["lease_expires_at_ms"])
+        ):
             raise SelectionJobConflict("Selection Job lease expired before completion")
 
     async def _append_attempt(
@@ -712,10 +817,16 @@ class PostgresInstrumentSelectionRepository:
                 selection_attempt_id=(
                     f"selection-attempt:{claim.selection_spec_id}:"
                     f"{claim.session_start_ms}:{claim.attempt_number}"
+                ) if claim.selection_epoch_id == "sor-v0" else (
+                    "selection-attempt:" + canonical_digest({"job": claim.selection_job_id, "attempt": claim.attempt_number})[7:]
                 ),
                 selection_job_id=claim.selection_job_id,
                 selection_spec_id=claim.selection_spec_id,
                 session_start_ms=claim.session_start_ms,
+                selection_epoch_id=claim.selection_epoch_id,
+                selection_control_version=claim.selection_control_version,
+                predecessor_snapshot_id=claim.predecessor_snapshot_id,
+                predecessor_member_digest=claim.predecessor_member_digest,
                 worker_id=claim.worker_id,
                 attempt_number=claim.attempt_number,
                 started_at_ms=claim.started_at_ms,
@@ -3401,6 +3512,7 @@ def _selection_control_from_row(row: RowMapping) -> SelectionControl:
         control_version=int(row["control_version"]),
         rollback_baseline_id=row["rollback_baseline_id"],
         updated_at_ms=int(row["updated_at_ms"]),
+        selection_epoch_id=row["selection_epoch_id"],
     )
 
 

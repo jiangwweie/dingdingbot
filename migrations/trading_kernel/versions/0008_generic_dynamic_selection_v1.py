@@ -44,10 +44,97 @@ def upgrade() -> None:
     _generic_spec_payload_table()
     _selection_epoch_lineage()
     _typed_selection_snapshots(bind)
+    _selection_job_epochs()
 
 
 def downgrade() -> None:
     raise RuntimeError("0008_generic_dynamic_selection_v1 is fix-forward only")
+
+
+def _selection_job_epochs() -> None:
+    control = "brc_strategy_selection_control_current"
+    jobs = "brc_instrument_selection_jobs_current"
+    attempts = "brc_instrument_selection_attempts"
+    snapshots = "brc_instrument_selection_snapshots"
+    op.add_column(control, sa.Column("selection_epoch_id", ID, nullable=True))
+    for table in (jobs, attempts):
+        op.add_column(table, sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"))
+        op.add_column(table, sa.Column("selection_control_version", sa.BigInteger(), nullable=True))
+        op.add_column(table, sa.Column("predecessor_snapshot_id", ID, nullable=True))
+        op.add_column(table, sa.Column("predecessor_member_digest", DIGEST, nullable=True))
+        op.create_foreign_key(f"fk_{table}_predecessor", table, snapshots,
+            ["predecessor_snapshot_id"], ["selection_snapshot_id"])
+        op.create_check_constraint(f"ck_{table}_epoch_shape", table,
+            "(selection_epoch_id='sor-v0' AND selection_control_version IS NULL AND predecessor_snapshot_id IS NULL AND predecessor_member_digest IS NULL) OR "
+            "(selection_epoch_id<>'sor-v0' AND length(trim(selection_epoch_id))>0 AND selection_control_version IS NOT NULL AND selection_control_version>0 AND "
+            "((predecessor_snapshot_id IS NULL AND predecessor_member_digest IS NULL) OR "
+            "(predecessor_snapshot_id IS NOT NULL AND predecessor_member_digest IS NOT NULL AND predecessor_member_digest ~ '^sha256:[0-9a-f]{64}$')))")
+    op.drop_constraint("uq_brc_instrument_selection_jobs_current_period", jobs, type_="unique")
+    op.create_unique_constraint("uq_brc_instrument_selection_jobs_current_period", jobs,
+        ["selection_spec_id", "selection_epoch_id", "session_start_ms"])
+    op.drop_constraint("uq_brc_instrument_selection_attempts_period_number", attempts, type_="unique")
+    op.create_unique_constraint("uq_brc_instrument_selection_attempts_period_number", attempts,
+        ["selection_spec_id", "selection_epoch_id", "session_start_ms", "attempt_number"])
+    op.create_unique_constraint("uq_brc_selection_job_epoch_identity", jobs,
+        ["selection_job_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"])
+    op.create_foreign_key("fk_brc_selection_attempt_job_epoch", attempts, jobs,
+        ["selection_job_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"],
+        ["selection_job_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"])
+    op.create_unique_constraint("uq_brc_selection_snapshot_job_identity", snapshots,
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"])
+    op.create_foreign_key("fk_brc_selection_job_snapshot_epoch", jobs, snapshots,
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"],
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"])
+    op.execute(sa.text("""
+        CREATE FUNCTION brc_validate_selection_control_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE kind text; spec_group text; cadence integer; needs_epoch boolean;
+        BEGIN
+          SELECT selection_kind,strategy_group_id INTO kind,spec_group FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
+          IF spec_group IS DISTINCT FROM NEW.strategy_group_id THEN RAISE EXCEPTION 'Selection Control parent Spec mismatch'; END IF;
+          IF kind='sor_dynamic_v0' THEN
+            IF NEW.selection_epoch_id IS NOT NULL THEN RAISE EXCEPTION 'SOR Control cannot carry Generic epoch'; END IF;
+            RETURN NEW;
+          END IF;
+          needs_epoch := NEW.selection_mode='dynamic_selection' OR coalesce(NEW.pending_selection_mode='dynamic_selection',false);
+          IF needs_epoch THEN
+            IF NEW.selection_epoch_id IS NULL OR NEW.selection_epoch_id='sor-v0' OR length(trim(NEW.selection_epoch_id))=0 THEN
+              RAISE EXCEPTION 'Generic Dynamic Control requires epoch';
+            END IF;
+          ELSIF NEW.selection_epoch_id IS NOT NULL THEN RAISE EXCEPTION 'Static Generic Control cannot retain epoch'; END IF;
+          SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=NEW.selection_spec_id;
+          IF NEW.pending_effective_session_start_ms IS NOT NULL AND NEW.pending_effective_session_start_ms % (cadence*3600000::bigint)<>0 THEN
+            RAISE EXCEPTION 'Generic pending Control requires exact period';
+          END IF;
+          RETURN NEW;
+        END; $$
+    """))
+    op.execute(sa.text(f"CREATE TRIGGER trg_selection_control_epoch_v1 BEFORE INSERT OR UPDATE ON {control} "
+        "FOR EACH ROW EXECUTE FUNCTION brc_validate_selection_control_epoch_v1()"))
+    op.execute(sa.text("""
+        CREATE FUNCTION brc_validate_selection_job_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE kind text; cadence integer;
+        BEGIN
+          SELECT selection_kind INTO kind FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
+          IF TG_OP='UPDATE' AND (NEW.selection_job_id<>OLD.selection_job_id OR NEW.selection_spec_id<>OLD.selection_spec_id
+             OR NEW.selection_epoch_id<>OLD.selection_epoch_id OR NEW.session_start_ms<>OLD.session_start_ms
+             OR NEW.feature_cutoff_at_ms<>OLD.feature_cutoff_at_ms OR NEW.scheduled_at_ms<>OLD.scheduled_at_ms) THEN
+            RAISE EXCEPTION 'Selection Job period identity is immutable';
+          END IF;
+          IF kind='sor_dynamic_v0' THEN
+            IF NEW.selection_epoch_id<>'sor-v0' THEN RAISE EXCEPTION 'SOR Job cannot carry Generic epoch'; END IF;
+            RETURN NEW;
+          END IF;
+          SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=NEW.selection_spec_id;
+          IF NEW.selection_epoch_id='sor-v0' OR NEW.feature_cutoff_at_ms<>NEW.session_start_ms
+             OR NEW.scheduled_at_ms<>NEW.session_start_ms OR NEW.session_start_ms<=0
+             OR NEW.session_start_ms % (cadence*3600000::bigint)<>0 THEN
+            RAISE EXCEPTION 'Generic Job requires exact epoch/period';
+          END IF;
+          RETURN NEW;
+        END; $$
+    """))
+    op.execute(sa.text(f"CREATE TRIGGER trg_selection_job_epoch_v1 BEFORE INSERT OR UPDATE ON {jobs} "
+        "FOR EACH ROW EXECUTE FUNCTION brc_validate_selection_job_epoch_v1()"))
 
 
 def _typed_selection_snapshots(bind: sa.Connection) -> None:

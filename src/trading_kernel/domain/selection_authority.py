@@ -14,6 +14,7 @@ from pydantic import (
     model_validator,
 )
 
+from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import (
     DAY_MS,
     HOUR_MS,
@@ -264,6 +265,7 @@ class SelectionControl(BaseModel):
     control_version: int
     rollback_baseline_id: str | None
     updated_at_ms: int
+    selection_epoch_id: str | None = None
 
     @field_validator("strategy_group_id", "selection_spec_id", mode="before")
     @classmethod
@@ -296,11 +298,20 @@ class SelectionControl(BaseModel):
             raise ValueError("Selection Control pending transition shape is incomplete")
         if self.control_version <= 0 or self.updated_at_ms <= 0:
             raise ValueError("Selection Control version and time must be positive")
+        cadence = DAY_MS if self.strategy_group_id == "SOR-001" else generic_selection_spec(self.strategy_group_id).cadence_hours * HOUR_MS
         if (
             self.pending_effective_session_start_ms is not None
-            and self.pending_effective_session_start_ms % DAY_MS != 0
+            and self.pending_effective_session_start_ms % cadence != 0
         ):
-            raise ValueError("pending Selection mode must target exact UTC Session")
+            raise ValueError("pending Selection mode must target exact UTC period")
+        if self.strategy_group_id == "SOR-001":
+            if self.selection_epoch_id is not None:
+                raise ValueError("SOR Control keeps frozen Session identity")
+        elif self.selection_mode is SelectionMode.DYNAMIC_SELECTION or self.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION:
+            if not self.selection_epoch_id or not self.selection_epoch_id.strip() or self.selection_epoch_id == "sor-v0":
+                raise ValueError("Generic Dynamic Control requires explicit epoch")
+        elif self.selection_epoch_id is not None:
+            raise ValueError("Static Generic Control cannot retain Dynamic epoch")
         return self
 
 

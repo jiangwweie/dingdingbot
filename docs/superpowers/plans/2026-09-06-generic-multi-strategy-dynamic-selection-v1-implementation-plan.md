@@ -44,9 +44,9 @@ further_feature_research = CLOSED
 | --- | --- | --- |
 | 数值证据 | 96份原始1h ZIP哈希逐一验证；从冻结commit重建research函数并核对artifact完整排序；CPM/BRF2各463、MPG/MI各1852 cutoff的决策集合零差异；SOR961×24 Core verified | exact最终candidate再次认证，认证证据与受审安装集合绑定 |
 | GS-01/03边界补强 | 跨comparison revision旧token拒绝、same-close checkpoint幂等；miss按period计算，可重放/跨缺失period；effective前及deadline后ENTRY拒绝 | runtime cursor/Owner/freshness全链集成 |
-| GS-04迁移切片 | 本地0007→0008比较来源保全；缺源在schema写入前STOP；旧Authority pair迁至ACTIVE/EMPTY绑定、原列删除；Spec typed payload及静态安装；原Snapshot/member表增加family与epoch/predecessor、精确Generic feature存储，保留SOR专用约束 | Job/Attempt epoch、Generation/rollback归一化，完整logical preservation、真实source/target首根及后续Signal差分、role grants |
-| GS-04回归 | 最新Snapshot PostgreSQL 23 passed；migration/materialization 84 passed；SOR Runner 2 passed；Unit+Architecture 1149 passed；改动生产模块Ruff/Mypy通过 | 完整PG/Full-chain和source verifier升级，不是R4 PASS |
-| 纯Selection合同与持久化 | Candidate24/cutoff、公式、Desired predecessor/hysteresis；四策略exact roundtrip、EMPTY不补位；锁定Spec进行前驱CAS、同period冲突提交仅一份；直接SQL的epoch/digest/rank/count/window/family/retained/source-time负例拒绝 | Job/lease与epoch控制权接线，直接SQL并发分叉/跨事务链认证、三Plane调度；GS-05未完成 |
+| GS-04迁移切片 | 本地0007→0008比较来源保全；缺源在schema写入前STOP；旧Authority pair迁至ACTIVE/EMPTY绑定、原列删除；Spec typed payload及静态安装；原Snapshot/member表增加family与epoch/predecessor、精确Generic feature存储；Job/Attempt按spec+epoch+period唯一、Snapshot/Attempt复合FK、Control epoch及parent Spec校验，保留SOR专用约束 | Generation/rollback归一化，完整logical preservation、真实source/target首根及后续Signal差分、role grants、Owner epoch正式转换边界 |
+| GS-04回归 | 本轮分批：Snapshot/Job+迁移+materialization+SOR Runner PostgreSQL 116 passed，随后新增恢复专项3 passed及Control专项3 passed（后者含2个已测case）；Unit+Architecture 1149 passed；Ruff及全生产源码Mypy通过 | 完整PG/Full-chain和source verifier升级，不是R4 PASS；上述命令不能相加冒充互不重复的完整release计数 |
+| 纯Selection合同与持久化 | Candidate24/cutoff、公式、Desired predecessor/hysteresis；四策略exact roundtrip、EMPTY不补位；锁定Spec进行前驱CAS；共享Job lease/完成/失败逻辑；Generic commit再验Control version、epoch、lease、前驱与有效期；Static零Job；源失败不推进前驱，新epoch不继承旧Job | 正式Runner/source adapter，完整OHLCV及资格provenance输入digest；Job EXPIRED/SUPERSEDED终态与bounded调度；直接SQL并发分叉/跨事务链认证、三Plane调度；GS-05未完成 |
 | GS-06～09 | 现有SOR读路径已随schema切片接线 | Generic comparison/Observation、Warming、Vacuum/authority、Claim/Ticket/dispatch完整集成未完成 |
 
 此次只创建本地可处置PG并执行测试；无Tokyo或交易所动作。0008为未发布的工作中revision，不是部署候选。旧source读取代码仅为一次性migration certification，不能进入runtime cadence。上述测试数对应当时实际执行范围，后续修改必须重验受影响面。
@@ -54,6 +54,8 @@ further_feature_research = CLOSED
 本次Snapshot持久化切片以`d34f4f948e7d6adccb8e92bf213f8a70b2c48ebd`为父提交。测试命令为`.venv/bin/python -m pytest <targets> -q -o addopts=--tb=short`，targets分别是`test_generic_selection_snapshot_repository.py`、`test_generic_dynamic_selection_migration.py + test_selection_materialization_repository.py`、`test_instrument_selection_runner.py`及完整`unit + architecture`目录。共享测试输入已移至`tests/trading_kernel/support/generic_selection.py`，不让测试模块互相成为fixture API。
 
 Generic Snapshot/member semantic digest改为固定Decimal38上下文中的数值规范化，消除PostgreSQL将`-0`读为`0`、指数形式转为普通数字导致的虚假digest冲突；负零、正指数及38位精度已有真实PG回归。仅未发布Generic事实编码发生修正，SOR Golden和研究artifact不改写，公式/排名/成员集不变；最终candidate仍必须重新认证。本切片沿用共享存储字段`session_start_ms`：SOR含义保持原UTC session，Generic映射精确feature cutoff/period anchor；没有双字段写入或第二套Snapshot表。
+
+后续Job/epoch切片以`96be356022cff59f680a28c2fbd3128b9f006f5d`为父提交，沿用上述PG targets并增加同模块内claim/complete/恢复测试。Generic与SOR复用`_claim_selection_job_row`、`_mark_snapshot_ready`、`_append_attempt`及原表，不增加第二条job队列。Generic Source失败保持明确失败结果，不能写为EMPTY；过期lease接管后旧callback被拒。这里的Dynamic Control测试是本地repository prerequisite，由隔离fixture建立，不是Owner API/TOTP/首次activation验收，也不形成任何交易授权。
 
 ### 2.2 初始计划基线
 

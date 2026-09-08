@@ -16,12 +16,20 @@ from src.trading_kernel.domain.generic_selection_core import (
 from src.trading_kernel.domain.generic_selection_spec import (
     SpecNumericInstallationEvidence,
 )
+from src.trading_kernel.domain.instrument_selection import (
+    SelectionAttemptOutcome,
+    SelectionJobClaim,
+    SelectionJobFailure,
+)
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
     SelectionJobConflict,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    instrument_selection_attempts,
+    instrument_selection_jobs_current,
     instrument_selection_member_decisions,
     instrument_selection_snapshots,
+    strategy_selection_control_current,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
@@ -213,3 +221,184 @@ async def test_pg_decimal_representation_does_not_change_semantic_identity(datab
         loaded = await uow.instrument_selection.get_generic_snapshot(snapshot.selection_snapshot_id)
         assert loaded == snapshot
         assert loaded.semantic_digest == snapshot.semantic_digest
+
+
+async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1") -> None:
+    # Isolated repository prerequisite, not an Owner API/activation acceptance.
+    async with database.begin() as conn:
+        await conn.execute(sa.update(strategy_selection_control_current).where(
+            strategy_selection_control_current.c.strategy_group_id == group,
+        ).values(selection_mode="dynamic_selection", selection_epoch_id=epoch, control_version=2))
+
+
+@pytest.mark.asyncio
+async def test_static_generic_selection_claim_short_circuits_without_job(database: AsyncEngine) -> None:
+    source = inputs("MPG-001")
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:1",
+            feature_cutoff_at_ms=CUTOFF, worker_id="selection:test", now_ms=CUTOFF + 1, lease_duration_ms=1000,
+        ) is None
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(instrument_selection_jobs_current)) == 0
+
+
+@pytest.mark.asyncio
+async def test_generic_job_commits_attempt_snapshot_and_epoch_atomically(database: AsyncEngine) -> None:
+    source = inputs("MPG-001")
+    await enable_epoch(database, "MPG-001")
+    async with PostgresKernelUnitOfWork(database) as uow:
+        claim = await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=source.spec.selection_spec_id, selection_epoch_id=source.selection_epoch_id,
+            feature_cutoff_at_ms=CUTOFF, worker_id="selection:test", now_ms=CUTOFF + 1, lease_duration_ms=1000,
+        )
+    snapshot = compute_generic_selection(source)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.complete_generic_selection_snapshot(
+            claim=claim, snapshot=snapshot, source_observed_at_ms=source.source_observed_at_ms,
+            completed_at_ms=source.committed_at_ms,
+        )
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=source.spec.selection_spec_id, selection_epoch_id=source.selection_epoch_id,
+            feature_cutoff_at_ms=CUTOFF, worker_id="selection:replay", now_ms=CUTOFF + 30, lease_duration_ms=1000,
+        ) == snapshot
+    async with database.connect() as conn:
+        job = (await conn.execute(sa.select(instrument_selection_jobs_current))).mappings().one()
+        attempt = (await conn.execute(sa.select(instrument_selection_attempts))).mappings().one()
+        assert job["state"] == "SNAPSHOT_READY"
+        assert job["selection_snapshot_id"] == snapshot.selection_snapshot_id
+        assert job["selection_epoch_id"] == attempt["selection_epoch_id"] == "epoch:1"
+        assert attempt["outcome"] == "SNAPSHOT_READY"
+        assert attempt["source_digest"] == snapshot.source_semantic_digest
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defect", ["epoch_changed", "control_changed", "lease_expired", "lease_reclaimed", "predecessor_changed"])
+async def test_generic_completion_revalidates_claim_control_epoch_and_predecessor(database: AsyncEngine, defect: str) -> None:
+    source = inputs("MPG-001")
+    await enable_epoch(database, "MPG-001")
+    # Claim a later period with no predecessor; a late older result may commit while market I/O runs.
+    if defect == "predecessor_changed":
+        source = next_input(source).model_copy(update={"predecessor_snapshot": None})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        claim = await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=source.spec.selection_spec_id, selection_epoch_id=source.selection_epoch_id,
+            feature_cutoff_at_ms=source.feature_cutoff_at_ms, worker_id="selection:old", now_ms=source.feature_cutoff_at_ms + 1, lease_duration_ms=1000,
+        )
+    if defect in {"epoch_changed", "control_changed"}:
+        async with database.begin() as conn:
+            await conn.execute(sa.update(strategy_selection_control_current).where(
+                strategy_selection_control_current.c.strategy_group_id == "MPG-001",
+            ).values(control_version=3, selection_epoch_id="epoch:2" if defect == "epoch_changed" else "epoch:1"))
+    elif defect == "lease_reclaimed":
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.claim_generic_selection_job(
+                selection_spec_id=source.spec.selection_spec_id, selection_epoch_id=source.selection_epoch_id,
+                feature_cutoff_at_ms=source.feature_cutoff_at_ms, worker_id="selection:new", now_ms=source.feature_cutoff_at_ms + 1001, lease_duration_ms=1000,
+            )
+    elif defect == "predecessor_changed":
+        earlier_source = inputs("MPG-001")
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.save_generic_snapshot(compute_generic_selection(earlier_source), decision_at_ms=earlier_source.decision_at_ms, source_observed_at_ms=earlier_source.source_observed_at_ms)
+    completed_at = source.feature_cutoff_at_ms + (1001 if defect == "lease_expired" else 20)
+    source = source.model_copy(update={"committed_at_ms": completed_at})
+    with pytest.raises(SelectionJobConflict):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.complete_generic_selection_snapshot(
+                claim=claim, snapshot=compute_generic_selection(source), source_observed_at_ms=source.source_observed_at_ms,
+                completed_at_ms=completed_at,
+            )
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(instrument_selection_attempts)) == 0
+
+
+@pytest.mark.asyncio
+async def test_generic_failed_source_is_not_empty_and_does_not_advance_desired(database: AsyncEngine) -> None:
+    source = inputs("MI-001")
+    await enable_epoch(database, "MI-001")
+    async with PostgresKernelUnitOfWork(database) as uow:
+        claim = await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:1",
+            feature_cutoff_at_ms=CUTOFF, worker_id="source:failed", now_ms=CUTOFF + 1, lease_duration_ms=1000,
+        )
+    assert isinstance(claim, SelectionJobClaim)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.complete_selection_failure(
+            claim=claim, outcome=SelectionAttemptOutcome.SOURCE_FAILED, reason_code="SOURCE_INCOMPLETE",
+            source_member_count=23, source_digest=None, completed_at_ms=CUTOFF + 20,
+        )
+    async with PostgresKernelUnitOfWork(database) as uow:
+        replay = await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:1",
+            feature_cutoff_at_ms=CUTOFF, worker_id="source:replay", now_ms=CUTOFF + 30, lease_duration_ms=1000,
+        )
+        assert isinstance(replay, SelectionJobFailure)
+        assert replay.outcome == "SOURCE_FAILED"
+        later = await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:1",
+            feature_cutoff_at_ms=CUTOFF + HOUR, worker_id="source:next", now_ms=CUTOFF + HOUR + 1, lease_duration_ms=1000,
+        )
+        assert isinstance(later, SelectionJobClaim)
+        assert later.predecessor_snapshot_id is None
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(instrument_selection_snapshots)) == 0
+        attempts = (await conn.execute(sa.select(instrument_selection_attempts))).mappings().all()
+        assert len(attempts) == 1 and attempts[0]["outcome"] == "SOURCE_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_same_period_in_new_epoch_does_not_reuse_old_job_or_hysteresis(database: AsyncEngine) -> None:
+    source = inputs("MPG-001")
+    await enable_epoch(database, "MPG-001")
+    async with PostgresKernelUnitOfWork(database) as uow:
+        original = await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:1",
+            feature_cutoff_at_ms=CUTOFF, worker_id="epoch:old", now_ms=CUTOFF + 1, lease_duration_ms=1000,
+        )
+    # A new Owner transition is represented only as a repository prerequisite here.
+    await enable_epoch(database, "MPG-001", "epoch:2")
+    async with PostgresKernelUnitOfWork(database) as uow:
+        fresh = await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:2",
+            feature_cutoff_at_ms=CUTOFF, worker_id="epoch:new", now_ms=CUTOFF + 2, lease_duration_ms=1000,
+        )
+        assert isinstance(original, SelectionJobClaim) and isinstance(fresh, SelectionJobClaim)
+        assert fresh.selection_job_id != original.selection_job_id
+        assert fresh.predecessor_snapshot_id is None
+        assert await uow.instrument_selection.get_selection_job(selection_spec_id=source.spec.selection_spec_id, session_start_ms=CUTOFF, selection_epoch_id="epoch:2") is not None
+
+
+@pytest.mark.asyncio
+async def test_generic_claim_rejects_live_lease_then_reclaims_without_stale_completion(database: AsyncEngine) -> None:
+    source = inputs("BRF2-001")
+    await enable_epoch(database, "BRF2-001")
+    arguments = {"selection_spec_id": source.spec.selection_spec_id, "selection_epoch_id": "epoch:1",
+        "feature_cutoff_at_ms": CUTOFF, "lease_duration_ms": 1000}
+    async with PostgresKernelUnitOfWork(database) as uow:
+        original = await uow.instrument_selection.claim_generic_selection_job(**arguments, worker_id="claim:old", now_ms=CUTOFF + 1)
+    assert isinstance(original, SelectionJobClaim)
+    with pytest.raises(SelectionJobConflict, match="live lease"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.claim_generic_selection_job(**arguments, worker_id="claim:early", now_ms=CUTOFF + 20)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        fresh = await uow.instrument_selection.claim_generic_selection_job(**arguments, worker_id="claim:new", now_ms=CUTOFF + 1001)
+    assert isinstance(fresh, SelectionJobClaim)
+    assert fresh.attempt_number == 2 and fresh.projection_version == original.projection_version + 1
+    source = source.model_copy(update={"source_observed_at_ms": CUTOFF + 1010, "committed_at_ms": CUTOFF + 1020})
+    snapshot = compute_generic_selection(source)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.complete_generic_selection_snapshot(claim=fresh, snapshot=snapshot,
+            source_observed_at_ms=source.source_observed_at_ms, completed_at_ms=source.committed_at_ms)
+    async with database.connect() as conn:
+        attempt = (await conn.execute(sa.select(instrument_selection_attempts))).mappings().one()
+        assert attempt["attempt_number"] == 2 and attempt["worker_id"] == "claim:new"
+
+
+@pytest.mark.asyncio
+async def test_control_cannot_point_at_another_strategys_selection_spec(database: AsyncEngine) -> None:
+    with pytest.raises(sa.exc.DBAPIError, match="Control.*Spec"):
+        async with database.begin() as conn:
+            await conn.execute(sa.update(strategy_selection_control_current).where(
+                strategy_selection_control_current.c.strategy_group_id == "MI-001",
+            ).values(selection_spec_id=inputs("MPG-001").spec.selection_spec_id))
