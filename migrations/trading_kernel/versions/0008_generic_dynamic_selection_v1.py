@@ -42,10 +42,157 @@ def upgrade() -> None:
             "key": proof.episode_domain_key, "version": proof.episode_projection_version})
     _authority_event_bindings(bind)
     _generic_spec_payload_table()
+    _selection_epoch_lineage()
+    _typed_selection_snapshots(bind)
 
 
 def downgrade() -> None:
     raise RuntimeError("0008_generic_dynamic_selection_v1 is fix-forward only")
+
+
+def _typed_selection_snapshots(bind: sa.Connection) -> None:
+    """One fact chain, with explicit family-specific validation, not fake ORs."""
+    snapshots = "brc_instrument_selection_snapshots"
+    members = "brc_instrument_selection_member_decisions"
+    geometry = ("or_high", "or_low", "or_width", "pre_or_atr14", "pre_or_width_atr14",
+                "trailing_24h_quote_volume", "or_geometry_valid", "atr_valid", "activity_valid")
+    for table, suffixes in ((snapshots, ("count_valid", "time_valid")),
+                            (members, ("window_valid", "numeric_valid", "reason_valid", "rank_shape"))):
+        op.add_column(table, sa.Column("selection_family", sa.String(40), nullable=False, server_default="sor_dynamic_v0"))
+        op.create_check_constraint(f"ck_{table}_family", table,
+                                   "selection_family IN ('sor_dynamic_v0','generic_dynamic_v1')")
+        existing = {c["name"]: c["sqltext"] for c in sa.inspect(bind).get_check_constraints(table)}
+        for suffix in suffixes:
+            name = f"ck_{table}_{suffix}"
+            expression = existing[name]
+            op.drop_constraint(name, table, type_="check")
+            op.create_check_constraint(name, table,
+                f"selection_family <> 'sor_dynamic_v0' OR COALESCE(({expression}),false)")
+    for column in geometry:
+        op.alter_column(members, column, nullable=True)
+    op.add_column(members, sa.Column("feature_value", sa.Numeric(), nullable=True))
+    op.add_column(members, sa.Column("retained", sa.Boolean(), nullable=True))
+    sor_shape = " AND ".join(f"{column} IS NOT NULL" for column in geometry)
+    generic_shape = " AND ".join(f"{column} IS NULL" for column in geometry)
+    op.create_check_constraint("ck_brc_selection_member_family_payload", members,
+        f"(selection_family='sor_dynamic_v0' AND {sor_shape} AND feature_value IS NULL AND retained IS NULL) OR "
+        f"(selection_family='generic_dynamic_v1' AND {generic_shape} AND feature_value IS NOT NULL "
+        "AND feature_value NOT IN ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric) "
+        "AND retained IS NOT NULL AND stable_rank IS NOT NULL AND stable_rank BETWEEN 1 AND 24 "
+        "AND primary_reason IS NULL AND secondary_reasons='[]'::jsonb "
+        "AND (NOT selected OR selection_ready) AND (NOT retained OR selected) "
+        "AND member_state=CASE WHEN selected THEN 'SELECTED' WHEN selection_ready THEN 'NOT_SELECTED' ELSE 'INELIGIBLE' END)")
+    op.create_unique_constraint("uq_brc_selection_snapshot_family", snapshots,
+        ["selection_snapshot_id", "selection_spec_id", "selection_family", "session_start_ms", "feature_cutoff_at_ms"])
+    op.create_foreign_key("fk_brc_selection_member_parent_identity", members, snapshots,
+        ["selection_snapshot_id", "selection_spec_id", "selection_family", "session_start_ms", "feature_cutoff_at_ms"],
+        ["selection_snapshot_id", "selection_spec_id", "selection_family", "session_start_ms", "feature_cutoff_at_ms"])
+    op.drop_constraint("uq_brc_instrument_selection_snapshots_period", snapshots, type_="unique")
+    op.create_unique_constraint("uq_brc_instrument_selection_snapshots_period", snapshots,
+        ["selection_spec_id", "selection_epoch_id", "session_start_ms"])
+    op.create_index("ix_brc_selection_snapshot_epoch_latest", snapshots,
+        ["selection_spec_id", "selection_epoch_id", "feature_cutoff_at_ms"])
+    op.execute(sa.text("""
+        CREATE FUNCTION brc_validate_typed_selection_snapshot_v1() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE s brc_instrument_selection_snapshots%ROWTYPE;
+                spec brc_instrument_selection_specs%ROWTYPE;
+                payload brc_generic_dynamic_selection_specs_v1%ROWTYPE;
+                actual_ready integer; actual_selected integer; prior_id text;
+        BEGIN
+          SELECT * INTO s FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=NEW.selection_snapshot_id;
+          SELECT * INTO spec FROM brc_instrument_selection_specs WHERE selection_spec_id=s.selection_spec_id;
+          IF s.selection_family<>spec.selection_kind OR s.strategy_group_id<>spec.strategy_group_id
+             OR s.strategy_version_id<>spec.strategy_version_id THEN
+            RAISE EXCEPTION 'Selection Snapshot parent Spec identity mismatch';
+          END IF;
+          IF s.selection_family='sor_dynamic_v0' THEN RETURN NULL; END IF;
+          SELECT * INTO payload FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=s.selection_spec_id;
+          IF NOT FOUND THEN RAISE EXCEPTION 'Generic Spec not installed'; END IF;
+          IF s.feature_cutoff_at_ms<>s.session_start_ms OR s.session_start_ms<=0
+             OR s.session_start_ms % (payload.cadence_hours*3600000::bigint)<>0
+             OR s.eligibility_not_before_ms<>s.feature_cutoff_at_ms+3600000
+             OR s.expires_at_ms<>s.eligibility_not_before_ms+payload.cadence_hours*3600000::bigint
+             OR s.decision_at_ms<s.feature_cutoff_at_ms OR s.source_observed_at_ms<s.decision_at_ms
+             OR s.created_at_ms<s.source_observed_at_ms THEN
+            RAISE EXCEPTION 'Generic Snapshot time mismatch';
+          END IF;
+          SELECT count(*) FILTER (WHERE selection_ready),count(*) FILTER (WHERE selected)
+          INTO actual_ready,actual_selected FROM brc_instrument_selection_member_decisions WHERE selection_snapshot_id=s.selection_snapshot_id;
+          IF s.candidate_count<>24 OR s.ready_count<>actual_ready OR s.selected_count<>actual_selected
+             OR s.selected_count>payload.retain_rank THEN RAISE EXCEPTION 'Generic Snapshot count mismatch'; END IF;
+          SELECT selection_snapshot_id INTO prior_id FROM brc_instrument_selection_snapshots
+          WHERE selection_spec_id=s.selection_spec_id AND selection_epoch_id=s.selection_epoch_id
+            AND feature_cutoff_at_ms<s.feature_cutoff_at_ms
+          ORDER BY feature_cutoff_at_ms DESC LIMIT 1;
+          IF prior_id IS DISTINCT FROM s.predecessor_snapshot_id THEN
+            RAISE EXCEPTION 'Selection predecessor is not latest Desired Snapshot';
+          END IF;
+          IF EXISTS (
+            SELECT 1 FROM (
+              SELECT m.*,row_number() OVER (ORDER BY feature_value DESC,exchange_instrument_id COLLATE "C") AS expected_rank
+              FROM brc_instrument_selection_member_decisions m WHERE selection_snapshot_id=s.selection_snapshot_id
+            ) ranked WHERE stable_rank<>expected_rank
+              OR input_window_end_ms<>s.feature_cutoff_at_ms
+              OR input_window_start_ms<>s.feature_cutoff_at_ms-(payload.window_bars-1)*3600000::bigint
+              OR retained IS DISTINCT FROM (selection_ready AND stable_rank<=payload.retain_rank AND EXISTS (
+                SELECT 1 FROM brc_instrument_selection_member_decisions p
+                WHERE p.selection_snapshot_id=s.predecessor_snapshot_id AND p.exchange_instrument_id=ranked.exchange_instrument_id AND p.selected))
+              OR selected IS DISTINCT FROM (selection_ready AND (stable_rank<=payload.entry_rank OR retained))
+          ) THEN RAISE EXCEPTION 'Generic Snapshot ranking/retention/window mismatch'; END IF;
+          RETURN NULL;
+        END; $$
+    """))
+    for table in (snapshots, members):
+        op.execute(sa.text(f"CREATE CONSTRAINT TRIGGER trg_{table}_typed_v1 AFTER INSERT ON {table} "
+            "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brc_validate_typed_selection_snapshot_v1()"))
+
+
+def _selection_epoch_lineage() -> None:
+    """Selection memory belongs to Snapshot lineage, never the Active Universe."""
+    table = "brc_instrument_selection_snapshots"
+    op.add_column(table, sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"))
+    op.add_column(table, sa.Column("predecessor_snapshot_id", ID, nullable=True))
+    op.add_column(table, sa.Column("predecessor_member_digest", DIGEST, nullable=True))
+    op.create_foreign_key("fk_brc_selection_snapshot_predecessor", table, table,
+                          ["predecessor_snapshot_id"], ["selection_snapshot_id"])
+    op.create_check_constraint("ck_brc_selection_snapshot_predecessor_shape", table,
+        "(predecessor_snapshot_id IS NULL AND predecessor_member_digest IS NULL) OR "
+        "(predecessor_snapshot_id IS NOT NULL AND predecessor_snapshot_id <> selection_snapshot_id "
+        "AND predecessor_member_digest IS NOT NULL AND predecessor_member_digest ~ '^sha256:[0-9a-f]{64}$')")
+    op.execute(sa.text("""
+        CREATE FUNCTION brc_validate_selection_predecessor_v1() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE kind text; prior brc_instrument_selection_snapshots%ROWTYPE; expected_digest text;
+        BEGIN
+          SELECT selection_kind INTO kind FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
+          IF kind='sor_dynamic_v0' THEN
+            IF NEW.selection_epoch_id<>'sor-v0' OR NEW.predecessor_snapshot_id IS NOT NULL THEN
+              RAISE EXCEPTION 'SOR Snapshot must retain its frozen non-hysteretic identity';
+            END IF;
+            RETURN NULL;
+          END IF;
+          IF NEW.selection_epoch_id='sor-v0' OR length(trim(NEW.selection_epoch_id))=0 THEN
+            RAISE EXCEPTION 'Generic Snapshot requires an explicit Selection epoch';
+          END IF;
+          IF NEW.predecessor_snapshot_id IS NULL THEN RETURN NULL; END IF;
+          SELECT * INTO prior FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=NEW.predecessor_snapshot_id;
+          IF NOT FOUND OR prior.selection_spec_id<>NEW.selection_spec_id
+             OR prior.selection_epoch_id<>NEW.selection_epoch_id
+             OR prior.feature_cutoff_at_ms>=NEW.feature_cutoff_at_ms
+             OR prior.created_at_ms>NEW.created_at_ms THEN
+            RAISE EXCEPTION 'Selection predecessor Spec/epoch/time mismatch';
+          END IF;
+          SELECT 'sha256:' || encode(sha256(convert_to(
+            '{"selected_exchange_instrument_ids":[' || coalesce(string_agg(to_json(exchange_instrument_id)::text,',' ORDER BY exchange_instrument_id),'') || ']}', 'UTF8')),'hex')
+          INTO expected_digest FROM brc_instrument_selection_member_decisions
+          WHERE selection_snapshot_id=NEW.predecessor_snapshot_id AND selected;
+          IF expected_digest<>NEW.predecessor_member_digest THEN
+            RAISE EXCEPTION 'Selection predecessor member digest mismatch';
+          END IF;
+          RETURN NULL;
+        END; $$
+    """))
+    op.execute(sa.text(f"CREATE CONSTRAINT TRIGGER trg_selection_predecessor_v1 AFTER INSERT ON {table} "
+                       "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brc_validate_selection_predecessor_v1()"))
 
 
 def _generic_spec_payload_table() -> None:

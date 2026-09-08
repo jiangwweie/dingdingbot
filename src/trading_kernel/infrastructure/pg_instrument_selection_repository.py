@@ -18,6 +18,11 @@ from src.trading_kernel.application.recover_expired_dynamic_activation import (
     RecoverExpiredDynamicActivationResult,
 )
 from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.generic_selection_core import (
+    GenericSelectionMemberDecision,
+    GenericSelectionSnapshotV1,
+)
 from src.trading_kernel.domain.generic_selection_spec import (
     GenericSelectionSpecV1,
     SpecNumericInstallationEvidence,
@@ -150,6 +155,104 @@ class PostgresInstrumentSelectionRepository:
 
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
+
+    async def get_generic_snapshot(self, selection_snapshot_id: str) -> GenericSelectionSnapshotV1:
+        row = (await self._connection.execute(sa.select(instrument_selection_snapshots).where(
+            instrument_selection_snapshots.c.selection_snapshot_id == selection_snapshot_id,
+            instrument_selection_snapshots.c.selection_family == "generic_dynamic_v1",
+        ))).mappings().one_or_none()
+        if row is None:
+            raise SelectionJobConflict("Generic Selection Snapshot does not exist")
+        spec = await self.get_generic_spec(row["selection_spec_id"])
+        rows = (await self._connection.execute(sa.select(instrument_selection_member_decisions).where(
+            instrument_selection_member_decisions.c.selection_snapshot_id == selection_snapshot_id,
+        ).order_by(instrument_selection_member_decisions.c.stable_rank))).mappings().all()
+        members = tuple(GenericSelectionMemberDecision(
+            exchange_instrument_id=member["exchange_instrument_id"], feature_value=member["feature_value"],
+            stable_rank=member["stable_rank"], qualified=member["selection_ready"], selected=member["selected"],
+            retained=member["retained"], input_window_digest=member["input_window_digest"],
+        ) for member in rows)
+        if any(member.semantic_digest != row["member_semantic_digest"] for member, row in zip(members, rows, strict=True)):
+            raise SelectionJobConflict("Generic member semantic digest differs")
+        snapshot = GenericSelectionSnapshotV1(
+            selection_snapshot_id=selection_snapshot_id, selection_spec_id=spec.selection_spec_id,
+            strategy_group_id=spec.strategy_group_id, spec_semantic_digest=spec.algorithm_semantic_digest,
+            selection_epoch_id=row["selection_epoch_id"], feature_cutoff_at_ms=row["feature_cutoff_at_ms"],
+            effective_from_ms=row["eligibility_not_before_ms"], expires_at_ms=row["expires_at_ms"],
+            committed_at_ms=row["created_at_ms"], predecessor_snapshot_id=row["predecessor_snapshot_id"],
+            predecessor_member_digest=row["predecessor_member_digest"], members=members,
+            source_semantic_digest=row["source_semantic_digest"],
+        )
+        if snapshot.semantic_digest != row["selection_semantic_digest"]:
+            raise SelectionJobConflict("Generic Snapshot semantic digest differs")
+        return snapshot
+
+    async def save_generic_snapshot(self, snapshot: GenericSelectionSnapshotV1, *,
+                                    decision_at_ms: int, source_observed_at_ms: int) -> None:
+        """Commit Desired facts only; caller owns the Selection job transaction."""
+        snapshot = GenericSelectionSnapshotV1.model_validate(snapshot.model_dump(mode="python"))
+        spec = await self.get_generic_spec(snapshot.selection_spec_id)
+        if not snapshot.feature_cutoff_at_ms <= decision_at_ms <= source_observed_at_ms <= snapshot.committed_at_ms:
+            raise ValueError("Generic Snapshot decision/source/commit time mismatch")
+        # Serialize a Spec's Desired lineage, never a Universe or trading lane.
+        await self._connection.execute(sa.select(instrument_selection_specs.c.selection_spec_id).where(
+            instrument_selection_specs.c.selection_spec_id == spec.selection_spec_id,
+        ).with_for_update())
+        existing = (await self._connection.execute(sa.select(instrument_selection_snapshots).where(
+            instrument_selection_snapshots.c.selection_spec_id == spec.selection_spec_id,
+            instrument_selection_snapshots.c.selection_epoch_id == snapshot.selection_epoch_id,
+            instrument_selection_snapshots.c.session_start_ms == snapshot.feature_cutoff_at_ms,
+        ))).mappings().one_or_none()
+        if existing is not None:
+            if (await self.get_generic_snapshot(existing["selection_snapshot_id"]) != snapshot
+                or existing["decision_at_ms"] != decision_at_ms or existing["source_observed_at_ms"] != source_observed_at_ms):
+                raise SelectionJobConflict("Generic Snapshot period already committed with different facts")
+            return
+        prior_row = (await self._connection.execute(sa.select(instrument_selection_snapshots).where(
+            instrument_selection_snapshots.c.selection_spec_id == spec.selection_spec_id,
+            instrument_selection_snapshots.c.selection_epoch_id == snapshot.selection_epoch_id,
+        ).order_by(instrument_selection_snapshots.c.feature_cutoff_at_ms.desc()).limit(1))).mappings().one_or_none()
+        if prior_row is None:
+            if snapshot.predecessor_snapshot_id is not None:
+                raise SelectionJobConflict("Selection predecessor does not exist")
+        else:
+            prior = await self.get_generic_snapshot(prior_row["selection_snapshot_id"])
+            if (prior.selection_snapshot_id != snapshot.predecessor_snapshot_id
+                or prior.member_set_digest != snapshot.predecessor_member_digest
+                or prior.feature_cutoff_at_ms >= snapshot.feature_cutoff_at_ms
+                or prior.committed_at_ms > snapshot.committed_at_ms):
+                raise SelectionJobConflict("Selection predecessor changed or epoch/time differs")
+        previous = set() if prior_row is None else set(prior.selected_members)
+        for member in snapshot.members:
+            expected_retained = member.qualified and member.stable_rank <= spec.retain_rank and member.exchange_instrument_id in previous
+            if member.retained != expected_retained:
+                raise SelectionJobConflict("Selection retention differs from previous Desired Snapshot")
+        await self._connection.execute(sa.insert(instrument_selection_snapshots).values(
+            selection_snapshot_id=snapshot.selection_snapshot_id, selection_spec_id=spec.selection_spec_id,
+            strategy_group_id=spec.strategy_group_id, strategy_version_id=spec.strategy_version_id,
+            selection_family="generic_dynamic_v1", selection_epoch_id=snapshot.selection_epoch_id,
+            session_start_ms=snapshot.feature_cutoff_at_ms, decision_at_ms=decision_at_ms,
+            feature_cutoff_at_ms=snapshot.feature_cutoff_at_ms, eligibility_not_before_ms=snapshot.effective_from_ms,
+            expires_at_ms=snapshot.expires_at_ms, candidate_count=24, ready_count=snapshot.ready_count,
+            selected_count=len(snapshot.selected_members), source_observed_at_ms=source_observed_at_ms,
+            source_semantic_digest=snapshot.source_semantic_digest, selection_semantic_digest=snapshot.semantic_digest,
+            created_at_ms=snapshot.committed_at_ms, predecessor_snapshot_id=snapshot.predecessor_snapshot_id,
+            predecessor_member_digest=snapshot.predecessor_member_digest,
+        ))
+        await self._connection.execute(sa.insert(instrument_selection_member_decisions), [{
+            "selection_snapshot_id": snapshot.selection_snapshot_id,
+            "member_decision_id": "selection-member:" + canonical_digest({"snapshot": snapshot.selection_snapshot_id, "member": member.exchange_instrument_id})[7:],
+            "selection_spec_id": spec.selection_spec_id, "session_start_ms": snapshot.feature_cutoff_at_ms,
+            "feature_cutoff_at_ms": snapshot.feature_cutoff_at_ms,
+            "input_window_start_ms": snapshot.feature_cutoff_at_ms - (spec.window_bars - 1) * 3600000,
+            "input_window_end_ms": snapshot.feature_cutoff_at_ms,
+            "exchange_instrument_id": member.exchange_instrument_id, "input_window_digest": member.input_window_digest,
+            "selection_family": "generic_dynamic_v1", "source_status": "READY",
+            "feature_value": member.feature_value, "retained": member.retained,
+            "selection_ready": member.qualified, "primary_reason": None, "secondary_reasons": [],
+            "stable_rank": member.stable_rank, "member_state": "SELECTED" if member.selected else "NOT_SELECTED" if member.qualified else "INELIGIBLE",
+            "selected": member.selected, "member_semantic_digest": member.semantic_digest,
+        } for member in snapshot.members])
 
     async def get_generic_spec(self, selection_spec_id: str) -> GenericSelectionSpecV1:
         row = (await self._connection.execute(sa.select(instrument_selection_specs, generic_dynamic_selection_specs_v1)
@@ -637,7 +740,7 @@ class PostgresInstrumentSelectionRepository:
         ).mappings().one_or_none()
         if row is None:
             raise SelectionJobConflict("Selection Snapshot does not exist")
-        return SelectionSnapshot.model_validate(dict(row))
+        return SelectionSnapshot.model_validate({key:row[key] for key in SelectionSnapshot.model_fields})
 
     async def get_selection_control(
         self,
@@ -964,7 +1067,7 @@ class PostgresInstrumentSelectionRepository:
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         if row is None:
             return None
-        snapshot = SelectionSnapshot.model_validate(dict(row))
+        snapshot = SelectionSnapshot.model_validate({key:row[key] for key in SelectionSnapshot.model_fields})
         members = tuple(
             str(item)
             for item in (

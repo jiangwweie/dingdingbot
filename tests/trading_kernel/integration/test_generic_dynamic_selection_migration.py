@@ -273,6 +273,10 @@ async def test_certified_spec_installation_is_static_and_does_not_create_runtime
                 await uow.instrument_selection.install_generic_spec(spec,installed_at_ms=NOW_MS+2,certification=certificate)
         async with engine.connect() as conn:
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_generic_dynamic_selection_specs_v1")) == 4
+            columns = await conn.run_sync(lambda sync: {
+                column["name"] for column in sa.inspect(sync).get_columns("brc_instrument_selection_snapshots")
+            })
+            assert {"selection_epoch_id", "predecessor_snapshot_id", "predecessor_member_digest"} <= columns
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_control_current WHERE selection_mode<>'static_baseline' OR pending_selection_mode IS NOT NULL")) == 0
             for table in ("brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots","brc_strategy_universe_materialization_generations","brc_selection_session_authorities","brc_trade_tickets","brc_exchange_commands"):
                 assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0

@@ -758,6 +758,11 @@ instrument_selection_snapshots = sa.Table(
     sa.Column("source_semantic_digest", LONG_TEXT, nullable=False),
     sa.Column("selection_semantic_digest", LONG_TEXT, nullable=False),
     _time("created_at_ms"),
+    sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"),
+    sa.Column("selection_family", sa.String(40), nullable=False, server_default="sor_dynamic_v0"),
+    _id("predecessor_snapshot_id", nullable=True),
+    sa.Column("predecessor_member_digest", sa.String(71), nullable=True),
+    sa.ForeignKeyConstraint(["predecessor_snapshot_id"], ["brc_instrument_selection_snapshots.selection_snapshot_id"]),
     sa.ForeignKeyConstraint(
         ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
     ),
@@ -767,7 +772,7 @@ instrument_selection_snapshots = sa.Table(
     sa.ForeignKeyConstraint(
         ["strategy_version_id"], ["brc_strategy_versions.strategy_version_id"]
     ),
-    sa.UniqueConstraint("selection_spec_id", "session_start_ms"),
+    sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "session_start_ms"),
     sa.UniqueConstraint("selection_snapshot_id", "selection_semantic_digest"),
 )
 
@@ -784,15 +789,18 @@ instrument_selection_member_decisions = sa.Table(
     _id("exchange_instrument_id"),
     sa.Column("input_window_digest", LONG_TEXT, nullable=False),
     sa.Column("source_status", SHORT_TEXT, nullable=False),
-    sa.Column("or_high", SELECTION_DECIMAL, nullable=False),
-    sa.Column("or_low", SELECTION_DECIMAL, nullable=False),
-    sa.Column("or_width", SELECTION_DECIMAL, nullable=False),
-    sa.Column("pre_or_atr14", SELECTION_DECIMAL, nullable=False),
-    sa.Column("pre_or_width_atr14", SELECTION_DECIMAL, nullable=False),
-    sa.Column("trailing_24h_quote_volume", SELECTION_DECIMAL, nullable=False),
-    sa.Column("or_geometry_valid", sa.Boolean, nullable=False),
-    sa.Column("atr_valid", sa.Boolean, nullable=False),
-    sa.Column("activity_valid", sa.Boolean, nullable=False),
+    sa.Column("selection_family", sa.String(40), nullable=False, server_default="sor_dynamic_v0"),
+    sa.Column("feature_value", SELECTION_DECIMAL, nullable=True),
+    sa.Column("retained", sa.Boolean, nullable=True),
+    sa.Column("or_high", SELECTION_DECIMAL, nullable=True),
+    sa.Column("or_low", SELECTION_DECIMAL, nullable=True),
+    sa.Column("or_width", SELECTION_DECIMAL, nullable=True),
+    sa.Column("pre_or_atr14", SELECTION_DECIMAL, nullable=True),
+    sa.Column("pre_or_width_atr14", SELECTION_DECIMAL, nullable=True),
+    sa.Column("trailing_24h_quote_volume", SELECTION_DECIMAL, nullable=True),
+    sa.Column("or_geometry_valid", sa.Boolean, nullable=True),
+    sa.Column("atr_valid", sa.Boolean, nullable=True),
+    sa.Column("activity_valid", sa.Boolean, nullable=True),
     sa.Column("selection_ready", sa.Boolean, nullable=False),
     sa.Column("primary_reason", SHORT_TEXT, nullable=True),
     _json("secondary_reasons"),

@@ -17,7 +17,7 @@ further_feature_research: CLOSED
 
 ## 1. 目标、权限与来源
 
-**本计划将已批准设计拆成GS-00至GS-13共14张可验收Task Card。当前只编写计划，全部Task均未开始执行。** Owner转交的独立复核允许四项P0修订落实后进入Plan；不授予CODE_AND_TEST、Tokyo操作或策略activation。
+**本计划将已批准设计拆成GS-00至GS-13共14张可验收Task Card；当前已经进入获授权的本地代码与测试阶段。** 初始独立复核只允许修订设计与计划，随后Owner明确授予本地实施权限；Tokyo操作、部署或策略activation仍未授权。实际完成度以§2.1证据台账为准。
 
 规范来源为[详细设计](../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md)，特别是§4.7、§6.4、§8.4、§10.3四项amendment。设计§18记录条件批准及处理结果；研究出处见设计§19与Stage-3.1 provenance amendment。Task条款不得覆盖冻结Feature、N、cadence、SOR Golden、资金、ExitProfile或Owner控制边界。
 
@@ -30,13 +30,13 @@ production_activation_authority = NONE
 further_feature_research = CLOSED
 ```
 
-独立复核已完成并由Owner在本任务明确授权按本计划执行本地代码与测试。GS-00至GS-03已完成；Owner进一步授权连续完成GS-04至GS-13，在本地完整R4 candidate形成前不再逐卡等待确认。文本中的“执行/实现”是受本计划、Task依赖和Hard Stop约束的本地工作；不授权Tokyo操作、生产migration、部署或策略activation。
+独立复核已完成并由Owner在本任务明确授权按本计划执行本地代码与测试。GS-00至GS-03已有数值及domain组件证据，但不以早期摘要代替全部Task Done；Owner进一步授权连续完成GS-04至GS-13，当前目标聚焦GS-04至GS-09，在本地完整R4 candidate形成前不再逐卡等待确认。文本中的“执行/实现”是受本计划、Task依赖和Hard Stop约束的本地工作；不授权Tokyo操作、生产migration、部署或策略activation。
 
 针对`4b2947e9f43fb3e2c4f165c91a957e0f20adb632`的独立复核已批准设计，并对Plan给出两项条件。strategy-scoped certification和Static migration neutrality已并入原卡，不新增Task、不修改已批准设计主体。Owner随后明确要求“按文档开始执行开发测试”，故本地实施范围正式开启；执行状态由本文件头和当前Task Card管理。
 
 ## 2. 工作区、基线与已知缺口
 
-### 2.1 当前实施证据校正（2026-09-07）
+### 2.1 当前实施证据校正（2026-09-08）
 
 **GS-04～GS-09仍在实施中，未完成、未通过release certification。** 先前对GS-00～03的完成摘要仅对应首版component测试，不足以证明全部Task Done。本轮在继续GS-04时补齐并修复数值来源认证、Decimal排序精度、重复miss/absolute有效期、current-close时点、comparison revision回退与重试幂等问题；不能以旧摘要跳过这些前置。
 
@@ -44,12 +44,16 @@ further_feature_research = CLOSED
 | --- | --- | --- |
 | 数值证据 | 96份原始1h ZIP哈希逐一验证；从冻结commit重建research函数并核对artifact完整排序；CPM/BRF2各463、MPG/MI各1852 cutoff的决策集合零差异；SOR961×24 Core verified | exact最终candidate再次认证，认证证据与受审安装集合绑定 |
 | GS-01/03边界补强 | 跨comparison revision旧token拒绝、same-close checkpoint幂等；miss按period计算，可重放/跨缺失period；effective前及deadline后ENTRY拒绝 | runtime cursor/Owner/freshness全链集成 |
-| GS-04迁移切片 | 本地0007→0008比较来源保全；缺源在schema写入前STOP；旧Authority pair迁至ACTIVE/EMPTY绑定、原列删除；SOR repository读取新绑定；Spec typed payload及静态安装 | period/epoch、Snapshot、Generation/rollback归一化，完整logical preservation、真实source/target首根及后续Signal差分、role grants |
-| GS-04回归 | 选定migration/materialization/entry-authority PostgreSQL回归88 passed；Unit+Architecture1137 passed；后加纯SelectionCore7 passed | 完整PG/Full-chain和source verifier升级，不是R4 PASS |
-| 纯Selection合同 | Candidate24/cutoff、公式、Desired predecessor/hysteresis、失败输入校验 | 通用Snapshot持久化和三Plane调度；GS-05未完成 |
+| GS-04迁移切片 | 本地0007→0008比较来源保全；缺源在schema写入前STOP；旧Authority pair迁至ACTIVE/EMPTY绑定、原列删除；Spec typed payload及静态安装；原Snapshot/member表增加family与epoch/predecessor、精确Generic feature存储，保留SOR专用约束 | Job/Attempt epoch、Generation/rollback归一化，完整logical preservation、真实source/target首根及后续Signal差分、role grants |
+| GS-04回归 | 最新Snapshot PostgreSQL 23 passed；migration/materialization 84 passed；SOR Runner 2 passed；Unit+Architecture 1149 passed；改动生产模块Ruff/Mypy通过 | 完整PG/Full-chain和source verifier升级，不是R4 PASS |
+| 纯Selection合同与持久化 | Candidate24/cutoff、公式、Desired predecessor/hysteresis；四策略exact roundtrip、EMPTY不补位；锁定Spec进行前驱CAS、同period冲突提交仅一份；直接SQL的epoch/digest/rank/count/window/family/retained/source-time负例拒绝 | Job/lease与epoch控制权接线，直接SQL并发分叉/跨事务链认证、三Plane调度；GS-05未完成 |
 | GS-06～09 | 现有SOR读路径已随schema切片接线 | Generic comparison/Observation、Warming、Vacuum/authority、Claim/Ticket/dispatch完整集成未完成 |
 
 此次只创建本地可处置PG并执行测试；无Tokyo或交易所动作。0008为未发布的工作中revision，不是部署候选。旧source读取代码仅为一次性migration certification，不能进入runtime cadence。上述测试数对应当时实际执行范围，后续修改必须重验受影响面。
+
+本次Snapshot持久化切片以`d34f4f948e7d6adccb8e92bf213f8a70b2c48ebd`为父提交。测试命令为`.venv/bin/python -m pytest <targets> -q -o addopts=--tb=short`，targets分别是`test_generic_selection_snapshot_repository.py`、`test_generic_dynamic_selection_migration.py + test_selection_materialization_repository.py`、`test_instrument_selection_runner.py`及完整`unit + architecture`目录。共享测试输入已移至`tests/trading_kernel/support/generic_selection.py`，不让测试模块互相成为fixture API。
+
+Generic Snapshot/member semantic digest改为固定Decimal38上下文中的数值规范化，消除PostgreSQL将`-0`读为`0`、指数形式转为普通数字导致的虚假digest冲突；负零、正指数及38位精度已有真实PG回归。仅未发布Generic事实编码发生修正，SOR Golden和研究artifact不改写，公式/排名/成员集不变；最终candidate仍必须重新认证。本切片沿用共享存储字段`session_start_ms`：SOR含义保持原UTC session，Generic映射精确feature cutoff/period anchor；没有双字段写入或第二套Snapshot表。
 
 ### 2.2 初始计划基线
 
@@ -420,4 +424,4 @@ GS-12 soak若不是C运行，必须证明测试生产面与依赖未变，并由
 
 common任务及candidate安装策略的相关分支全部DONE后才能冻结本地release candidate；失败未安装分支须显式列出，不伪造四策略全完成。R4通过也不自动授权生产。
 
-当前 **PLAN_APPROVED / required_plan_amendments=COMPLETE / owner_confirmation=GRANTED_2026-09-07 / implementation_authority=CODE_AND_TEST_ONLY / active_execution_scope=GS-04_TO_GS-13**。GS-00至GS-03的提交、测试与证据已完成；GS-04至GS-13按依赖连续执行。生产部署、Tokyo migration和任何策略 activation继续无授权。
+当前 **PLAN_APPROVED / required_plan_amendments=COMPLETE / owner_confirmation=GRANTED_2026-09-07 / implementation_authority=CODE_AND_TEST_ONLY / active_execution_scope=GS-04_TO_GS-13**。当前执行目标为GS-04至GS-09；各卡完成度以§2.1及卡内Done验收为准，不以初始组件摘要宣称全卡完成。生产部署、Tokyo migration和任何策略 activation继续无授权。

@@ -76,6 +76,11 @@ class GenericSelectionMemberDecision(BaseModel):
             raise ValueError("invalid member qualification/retention")
         return self
 
+    @property
+    def semantic_digest(self) -> str:
+        with localcontext(DYNAMIC_SELECTION_DECIMAL_CONTEXT):
+            return canonical_digest(self.model_dump(mode="python"))
+
 
 class GenericSelectionSnapshotV1(BaseModel):
     model_config=ConfigDict(frozen=True,extra="forbid")
@@ -140,7 +145,8 @@ class GenericSelectionSnapshotV1(BaseModel):
     @property
     def semantic_digest(self) -> str:
         with localcontext(DYNAMIC_SELECTION_DECIMAL_CONTEXT):
-            return canonical_digest(self.model_dump(mode="json"))
+            # Decimal semantic value, not driver-specific exponent/negative-zero text.
+            return canonical_digest(self.model_dump(mode="python"))
 
 
 class GenericSelectionInput(BaseModel):
