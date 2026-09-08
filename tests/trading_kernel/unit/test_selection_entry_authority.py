@@ -310,7 +310,7 @@ def _control(selection_mode: SelectionMode) -> SelectionControl:
         selection_spec_id=SELECTION_SPEC_ID,
         selection_mode=selection_mode,
         pending_selection_mode=None,
-        pending_effective_session_start_ms=None,
+        pending_effective_period_anchor_ms=None,
         pending_authorization_id=None,
         control_version=1,
         rollback_baseline_id=None,

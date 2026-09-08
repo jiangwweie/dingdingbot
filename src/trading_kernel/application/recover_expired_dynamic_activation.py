@@ -119,7 +119,7 @@ async def recover_expired_dynamic_activation(
         selection_control.selection_spec_id != request.selection_spec_id
         or selection_control.selection_mode is not SelectionMode.STATIC_BASELINE
         or selection_control.pending_selection_mode is not SelectionMode.DYNAMIC_SELECTION
-        or selection_control.pending_effective_session_start_ms
+        or selection_control.pending_effective_period_anchor_ms
         != request.session_start_ms
         or selection_control.pending_authorization_id is None
         or selection_control.control_version

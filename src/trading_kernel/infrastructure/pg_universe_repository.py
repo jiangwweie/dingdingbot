@@ -1541,8 +1541,8 @@ class PostgresStrategyUniverseRepository:
             selection_control is not None
             and selection_control["selection_mode"] == "static_baseline"
             and selection_control["pending_selection_mode"] == "dynamic_selection"
-            and selection_control["pending_effective_session_start_ms"]
-            == generation["session_start_ms"]
+            and selection_control["pending_effective_period_anchor_ms"]
+            == generation["period_anchor_ms"]
             and selection_control["pending_authorization_id"] is not None
         )
         dynamic_previous_restore = bool(
@@ -1711,7 +1711,7 @@ class PostgresStrategyUniverseRepository:
                 )
                 .values(
                     pending_selection_mode=None,
-                    pending_effective_session_start_ms=None,
+                    pending_effective_period_anchor_ms=None,
                     pending_authorization_id=None,
                     control_version=int(selection_control["control_version"]) + 1,
                     updated_at_ms=request.attempted_at_ms,

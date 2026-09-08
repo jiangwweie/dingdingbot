@@ -74,6 +74,11 @@ from src.trading_kernel.domain.exit_policy import (
 )
 from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
 from src.trading_kernel.domain.generic_selection_core import GenericSelectionSnapshotV1
+from src.trading_kernel.domain.generic_selection_jobs import (
+    GenericSelectionJobClaim,
+    SelectionJobLease,
+    selection_job_identity,
+)
 from src.trading_kernel.domain.generic_selection_spec import (
     GenericSelectionSpecV1,
     SpecNumericInstallationEvidence,
@@ -90,7 +95,6 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionPeriod,
     SelectionSnapshot,
     SorDynamicSelectionSpecV0,
-    selection_job_identity,
 )
 from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.owner_control import (
@@ -1442,7 +1446,7 @@ class SelectionJobRecord(BaseModel):
 
     selection_job_id: str
     selection_spec_id: str
-    session_start_ms: int
+    period_anchor_ms: int
     scheduled_at_ms: int
     feature_cutoff_at_ms: int
     state: Literal[
@@ -1467,7 +1471,7 @@ class SelectionJobRecord(BaseModel):
 
     @model_validator(mode="after")
     def _validate_job(self) -> SelectionJobRecord:
-        expected_id = selection_job_identity(self.selection_spec_id, self.session_start_ms, self.selection_epoch_id)
+        expected_id = selection_job_identity(self.selection_spec_id, self.period_anchor_ms, self.selection_epoch_id)
         if self.selection_job_id != expected_id:
             raise ValueError("Selection Job identity is not canonical")
         if self.attempt_count < 0 or self.projection_version <= 0:
@@ -1500,10 +1504,10 @@ class InstrumentSelectionRepository(Protocol):
     async def claim_generic_selection_job(
         self, *, selection_spec_id: str, selection_epoch_id: str, feature_cutoff_at_ms: int,
         worker_id: str, now_ms: int, lease_duration_ms: int,
-    ) -> SelectionJobClaim | SelectionJobFailure | GenericSelectionSnapshotV1 | None: ...
+    ) -> GenericSelectionJobClaim | SelectionJobFailure | GenericSelectionSnapshotV1 | None: ...
 
     async def complete_generic_selection_snapshot(
-        self, *, claim: SelectionJobClaim, snapshot: GenericSelectionSnapshotV1,
+        self, *, claim: GenericSelectionJobClaim, snapshot: GenericSelectionSnapshotV1,
         source_observed_at_ms: int, completed_at_ms: int,
     ) -> None: ...
 
@@ -1542,7 +1546,7 @@ class InstrumentSelectionRepository(Protocol):
     async def complete_selection_failure(
         self,
         *,
-        claim: SelectionJobClaim,
+        claim: SelectionJobLease,
         outcome: SelectionAttemptOutcome,
         reason_code: str,
         source_member_count: int,
@@ -1554,7 +1558,7 @@ class InstrumentSelectionRepository(Protocol):
         self,
         *,
         selection_spec_id: str,
-        session_start_ms: int,
+        period_anchor_ms: int,
         selection_epoch_id: str = "sor-v0",
     ) -> SelectionJobRecord | None: ...
 

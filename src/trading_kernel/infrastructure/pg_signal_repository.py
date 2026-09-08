@@ -1197,7 +1197,7 @@ class PostgresSignalRepository:
         if birth is None or current is None:
             return ()
         if (
-            int(birth["session_start_ms"]) != int(current["session_start_ms"])
+            int(birth["period_anchor_ms"]) != int(current["period_anchor_ms"])
             or int(birth["authority_sequence"]) > int(current["authority_sequence"])
         ):
             return ()
@@ -1207,8 +1207,8 @@ class PostgresSignalRepository:
                 .where(
                     selection_session_authorities.c.selection_spec_id
                     == selection_spec_id,
-                    selection_session_authorities.c.session_start_ms
-                    == int(birth["session_start_ms"]),
+                    selection_session_authorities.c.period_anchor_ms
+                    == int(birth["period_anchor_ms"]),
                     selection_session_authorities.c.authority_sequence.between(
                         int(birth["authority_sequence"]),
                         int(current["authority_sequence"]),
@@ -1380,7 +1380,7 @@ def _selection_authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
     return SelectionSessionAuthority(
         selection_authority_id=str(row["selection_authority_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
-        session_start_ms=int(row["session_start_ms"]),
+        session_start_ms=int(row["period_anchor_ms"]),
         decision_boundary_ms=int(row["decision_boundary_ms"]),
         authority_sequence=int(row["authority_sequence"]),
         selection_mode=SelectionMode(str(row["selection_mode"])),

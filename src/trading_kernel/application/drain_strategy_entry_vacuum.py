@@ -604,7 +604,7 @@ async def _complete_entry_drain(
     if (
         control.selection_mode is SelectionMode.STATIC_BASELINE
         and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-        and control.pending_effective_session_start_ms == vacuum.session_start_ms
+        and control.pending_effective_period_anchor_ms == vacuum.session_start_ms
     ):
         await uow.instrument_selection.activate_pending_selection_mode(
             strategy_group_id=request.strategy_group_id,

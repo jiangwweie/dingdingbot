@@ -92,7 +92,7 @@ async def open_strategy_entry_vacuum(
                 selection_spec_id=SELECTION_SPEC_ID,
                 selection_mode="dynamic_selection",
                 pending_selection_mode=None,
-                pending_effective_session_start_ms=None,
+                pending_effective_period_anchor_ms=None,
                 pending_authorization_id=None,
                 control_version=1,
                 rollback_baseline_id=None,
@@ -106,7 +106,7 @@ async def open_strategy_entry_vacuum(
                     "selection_spec_id": SELECTION_SPEC_ID,
                     "selection_mode": "dynamic_selection",
                     "pending_selection_mode": None,
-                    "pending_effective_session_start_ms": None,
+                    "pending_effective_period_anchor_ms": None,
                     "pending_authorization_id": None,
                     "control_version": 1,
                     "rollback_baseline_id": None,
@@ -116,7 +116,7 @@ async def open_strategy_entry_vacuum(
         )
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json")
+                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
             )
         )
         await connection.execute(

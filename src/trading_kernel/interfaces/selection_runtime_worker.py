@@ -146,7 +146,7 @@ async def run_selection_runtime_once(
             )
         if (
             control.pending_selection_mode is not SelectionMode.DYNAMIC_SELECTION
-            or control.pending_effective_session_start_ms != session_start_ms
+            or control.pending_effective_period_anchor_ms != session_start_ms
         ):
             return SelectionRuntimeResult(
                 status=SelectionRuntimeStatus.BLOCKED,
@@ -158,7 +158,7 @@ async def run_selection_runtime_once(
         market_source=market_source,
         request=RunInstrumentSelectionRequest(
             selection_spec_id=request.selection_spec_id,
-            session_start_ms=session_start_ms,
+            period_anchor_ms=session_start_ms,
             worker_id=request.worker_id,
             max_concurrency=request.max_concurrency,
         ),

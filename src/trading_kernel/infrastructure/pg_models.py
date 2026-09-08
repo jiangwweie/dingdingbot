@@ -635,7 +635,7 @@ strategy_selection_control_current = sa.Table(
     _id("selection_epoch_id", nullable=True),
     sa.Column("selection_mode", SHORT_TEXT, nullable=False),
     sa.Column("pending_selection_mode", SHORT_TEXT, nullable=True),
-    _time("pending_effective_session_start_ms", nullable=True),
+    _time("pending_effective_period_anchor_ms", nullable=True),
     _id("pending_authorization_id", nullable=True),
     sa.Column("control_version", sa.BigInteger, nullable=False),
     _id("rollback_baseline_id", nullable=True),
@@ -669,7 +669,7 @@ instrument_selection_jobs_current = sa.Table(
     sa.Column("selection_control_version", sa.BigInteger, nullable=True),
     _id("predecessor_snapshot_id", nullable=True),
     sa.Column("predecessor_member_digest", sa.String(71), nullable=True),
-    _time("session_start_ms"),
+    _time("period_anchor_ms"),
     _time("scheduled_at_ms"),
     _time("feature_cutoff_at_ms"),
     sa.Column("state", SHORT_TEXT, nullable=False),
@@ -688,7 +688,7 @@ instrument_selection_jobs_current = sa.Table(
         ["selection_snapshot_id"],
         ["brc_instrument_selection_snapshots.selection_snapshot_id"],
     ),
-    sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "session_start_ms"),
+    sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "period_anchor_ms"),
     sa.CheckConstraint(
         "state IN ('DUE', 'CLAIMED', 'SNAPSHOT_READY', 'SOURCE_FAILED', "
         "'COMPUTE_FAILED')",
@@ -716,7 +716,7 @@ instrument_selection_attempts = sa.Table(
     sa.Column("selection_control_version", sa.BigInteger, nullable=True),
     _id("predecessor_snapshot_id", nullable=True),
     sa.Column("predecessor_member_digest", sa.String(71), nullable=True),
-    _time("session_start_ms"),
+    _time("period_anchor_ms"),
     sa.Column("worker_id", SHORT_TEXT, nullable=False),
     sa.Column("attempt_number", sa.Integer, nullable=False),
     _time("started_at_ms"),
@@ -731,7 +731,7 @@ instrument_selection_attempts = sa.Table(
     sa.ForeignKeyConstraint(
         ["selection_spec_id"], ["brc_instrument_selection_specs.selection_spec_id"]
     ),
-    sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "session_start_ms", "attempt_number"),
+    sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "period_anchor_ms", "attempt_number"),
 )
 
 instrument_selection_snapshots = sa.Table(
@@ -741,7 +741,7 @@ instrument_selection_snapshots = sa.Table(
     _id("selection_spec_id"),
     _id("strategy_group_id"),
     _id("strategy_version_id"),
-    _time("session_start_ms"),
+    _time("period_anchor_ms"),
     _time("decision_at_ms"),
     _time("feature_cutoff_at_ms"),
     _time("eligibility_not_before_ms"),
@@ -767,7 +767,7 @@ instrument_selection_snapshots = sa.Table(
     sa.ForeignKeyConstraint(
         ["strategy_version_id"], ["brc_strategy_versions.strategy_version_id"]
     ),
-    sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "session_start_ms"),
+    sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "period_anchor_ms"),
     sa.UniqueConstraint("selection_snapshot_id", "selection_semantic_digest"),
 )
 
@@ -777,7 +777,7 @@ instrument_selection_member_decisions = sa.Table(
     _id("selection_snapshot_id"),
     _id("member_decision_id"),
     _id("selection_spec_id"),
-    _time("session_start_ms"),
+    _time("period_anchor_ms"),
     _time("feature_cutoff_at_ms"),
     _time("input_window_start_ms"),
     _time("input_window_end_ms"),
@@ -835,7 +835,7 @@ strategy_universe_materialization_generations = sa.Table(
     sa.Column("selection_mode", SHORT_TEXT, nullable=False),
     _id("selection_snapshot_id", nullable=True),
     _id("rollback_baseline_id", nullable=True),
-    _time("session_start_ms", nullable=True),
+    _time("period_anchor_ms", nullable=True),
     sa.Column("desired_member_count", sa.Integer, nullable=False),
     sa.Column("semantic_digest", LONG_TEXT, nullable=False),
     sa.Column("lifecycle_state", SHORT_TEXT, nullable=False),
@@ -860,7 +860,7 @@ strategy_universe_materialization_generations = sa.Table(
         ["rollback_baseline_id"],
         ["brc_strategy_selection_rollback_baselines.rollback_baseline_id"],
     ),
-    sa.UniqueConstraint("selection_spec_id", "session_start_ms", "selection_mode"),
+    sa.UniqueConstraint("selection_spec_id", "period_anchor_ms", "selection_mode"),
     sa.UniqueConstraint("selection_snapshot_id"),
 )
 sa.Index(
@@ -949,7 +949,7 @@ strategy_entry_vacuums_current = sa.Table(
     _id("entry_vacuum_id", primary_key=True),
     _id("strategy_group_id"),
     _id("selection_spec_id"),
-    _time("session_start_ms"),
+    _time("period_anchor_ms"),
     _id("source_generation_id", nullable=True),
     sa.Column("state", SHORT_TEXT, nullable=False),
     _time("fenced_at_ms"),
@@ -1005,7 +1005,7 @@ selection_authority_gap_audits_current = sa.Table(
     metadata,
     _id("authority_gap_audit_id", primary_key=True),
     _id("selection_spec_id"),
-    _time("session_start_ms"),
+    _time("period_anchor_ms"),
     sa.Column("gap_kind", SHORT_TEXT, nullable=False),
     _id("source_entry_vacuum_id", nullable=True),
     _id("source_generation_id", nullable=True),
@@ -1053,7 +1053,7 @@ selection_session_authorities = sa.Table(
     metadata,
     _id("selection_authority_id", primary_key=True),
     _id("selection_spec_id"),
-    _time("session_start_ms"),
+    _time("period_anchor_ms"),
     _time("decision_boundary_ms"),
     sa.Column("authority_sequence", sa.BigInteger, nullable=False),
     sa.Column("selection_mode", SHORT_TEXT, nullable=False),
@@ -1099,12 +1099,12 @@ selection_session_authorities = sa.Table(
         ["materialization_generation_id"],
         ["brc_strategy_universe_materialization_generations.materialization_generation_id"],
     ),
-    sa.UniqueConstraint("selection_spec_id", "session_start_ms", "authority_sequence"),
+    sa.UniqueConstraint("selection_spec_id", "period_anchor_ms", "authority_sequence"),
 )
 sa.Index(
     "ix_brc_selection_session_authorities_period",
     selection_session_authorities.c.selection_spec_id,
-    selection_session_authorities.c.session_start_ms,
+    selection_session_authorities.c.period_anchor_ms,
     selection_session_authorities.c.authority_sequence,
 )
 

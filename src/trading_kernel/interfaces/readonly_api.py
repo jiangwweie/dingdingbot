@@ -156,7 +156,7 @@ class SelectionRuntimeReadonlyView(BaseModel):
             raise ValueError("Selection Control differs from readonly scope")
         if self.selection_job is not None and (
             self.selection_job.selection_spec_id != self.selection_spec_id
-            or self.selection_job.session_start_ms != self.session_start_ms
+            or self.selection_job.period_anchor_ms != self.session_start_ms
         ):
             raise ValueError("Selection Job differs from readonly period")
         if self.snapshot_disposition is not None:
@@ -231,7 +231,7 @@ async def get_selection_runtime_view(
     control = await repository.get_selection_control(request.strategy_group_id)
     job = await repository.get_selection_job(
         selection_spec_id=request.selection_spec_id,
-        session_start_ms=request.session_start_ms,
+        period_anchor_ms=request.session_start_ms,
     )
     snapshot = await repository.get_snapshot_disposition(
         selection_spec_id=request.selection_spec_id,

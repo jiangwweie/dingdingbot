@@ -62,7 +62,7 @@ async def test_runner_commits_snapshot_attempt_and_exact_24_members_atomically(
         market_source=source,
         request=RunInstrumentSelectionRequest(
             selection_spec_id=SELECTION_SPEC_ID,
-            session_start_ms=SESSION_START_MS,
+            period_anchor_ms=SESSION_START_MS,
             worker_id="selection-worker:integration",
         ),
         clock_ms=_Clock(SESSION_START_MS + 60 * 60 * 1000),
@@ -113,7 +113,7 @@ async def test_runner_commits_snapshot_attempt_and_exact_24_members_atomically(
         market_source=source,
         request=RunInstrumentSelectionRequest(
             selection_spec_id=SELECTION_SPEC_ID,
-            session_start_ms=SESSION_START_MS,
+            period_anchor_ms=SESSION_START_MS,
             worker_id="selection-worker:integration:rerun",
         ),
         clock_ms=_Clock(SESSION_START_MS + 2 * 60 * 60 * 1000),
@@ -204,7 +204,7 @@ async def test_one_missing_candidate_persists_failure_and_zero_snapshot(
         market_source=source,
         request=RunInstrumentSelectionRequest(
             selection_spec_id=SELECTION_SPEC_ID,
-            session_start_ms=SESSION_START_MS,
+            period_anchor_ms=SESSION_START_MS,
             worker_id="selection-worker:failure",
         ),
         clock_ms=_Clock(SESSION_START_MS + 60 * 60 * 1000),

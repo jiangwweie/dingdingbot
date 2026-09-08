@@ -26,6 +26,13 @@ from src.trading_kernel.domain.generic_selection_core import (
     GenericSelectionMemberDecision,
     GenericSelectionSnapshotV1,
 )
+from src.trading_kernel.domain.generic_selection_jobs import (
+    GenericSelectionJobClaim,
+    SelectionJobLease,
+    job_period_anchor,
+    job_selection_epoch,
+    selection_job_identity,
+)
 from src.trading_kernel.domain.generic_selection_source import (
     GenericSelectionQualification,
 )
@@ -44,7 +51,6 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionSnapshot,
     SorDynamicSelectionSpecV0,
     build_sor_dynamic_selection_spec_v0,
-    selection_job_identity,
 )
 from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.domain.selection_authority import (
@@ -214,7 +220,7 @@ class PostgresInstrumentSelectionRepository:
         existing = (await self._connection.execute(sa.select(instrument_selection_snapshots).where(
             instrument_selection_snapshots.c.selection_spec_id == spec.selection_spec_id,
             instrument_selection_snapshots.c.selection_epoch_id == snapshot.selection_epoch_id,
-            instrument_selection_snapshots.c.session_start_ms == snapshot.feature_cutoff_at_ms,
+            instrument_selection_snapshots.c.period_anchor_ms == snapshot.feature_cutoff_at_ms,
         ))).mappings().one_or_none()
         if existing is not None:
             if (await self.get_generic_snapshot(existing["selection_snapshot_id"]) != snapshot
@@ -244,7 +250,7 @@ class PostgresInstrumentSelectionRepository:
             selection_snapshot_id=snapshot.selection_snapshot_id, selection_spec_id=spec.selection_spec_id,
             strategy_group_id=spec.strategy_group_id, strategy_version_id=spec.strategy_version_id,
             selection_family="generic_dynamic_v1", selection_epoch_id=snapshot.selection_epoch_id,
-            session_start_ms=snapshot.feature_cutoff_at_ms, decision_at_ms=decision_at_ms,
+            period_anchor_ms=snapshot.feature_cutoff_at_ms, decision_at_ms=decision_at_ms,
             feature_cutoff_at_ms=snapshot.feature_cutoff_at_ms, eligibility_not_before_ms=snapshot.effective_from_ms,
             expires_at_ms=snapshot.expires_at_ms, candidate_count=24, ready_count=snapshot.ready_count,
             selected_count=len(snapshot.selected_members), source_observed_at_ms=source_observed_at_ms,
@@ -255,7 +261,7 @@ class PostgresInstrumentSelectionRepository:
         await self._connection.execute(sa.insert(instrument_selection_member_decisions), [{
             "selection_snapshot_id": snapshot.selection_snapshot_id,
             "member_decision_id": "selection-member:" + canonical_digest({"snapshot": snapshot.selection_snapshot_id, "member": member.exchange_instrument_id})[7:],
-            "selection_spec_id": spec.selection_spec_id, "session_start_ms": snapshot.feature_cutoff_at_ms,
+            "selection_spec_id": spec.selection_spec_id, "period_anchor_ms": snapshot.feature_cutoff_at_ms,
             "feature_cutoff_at_ms": snapshot.feature_cutoff_at_ms,
             "input_window_start_ms": snapshot.feature_cutoff_at_ms - spec.window_bars * 3600000,
             "input_window_end_ms": snapshot.feature_cutoff_at_ms,
@@ -343,7 +349,7 @@ class PostgresInstrumentSelectionRepository:
             {"selection_spec_id":spec.selection_spec_id,"exchange_instrument_id":member} for member in spec.candidate_ids])
         await self._connection.execute(sa.insert(strategy_selection_control_current).values(
             strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id,
-            selection_mode="static_baseline",pending_selection_mode=None,pending_effective_session_start_ms=None,
+            selection_mode="static_baseline",pending_selection_mode=None,pending_effective_period_anchor_ms=None,
             pending_authorization_id=None,control_version=1,rollback_baseline_id=None,updated_at_ms=installed_at_ms))
 
     @classmethod
@@ -447,6 +453,8 @@ class PostgresInstrumentSelectionRepository:
             scheduled_at_ms=period.decision_boundary_ms, feature_cutoff_at_ms=period.feature_cutoff_at_ms,
             worker_id=worker_id, now_ms=now_ms, lease_duration_ms=lease_duration_ms,
         )
+        if isinstance(result, GenericSelectionJobClaim):
+            raise SelectionJobConflict("SOR cannot consume a Generic claim")
         return await self._get_snapshot(result) if isinstance(result, str) else result
 
     @staticmethod
@@ -454,7 +462,7 @@ class PostgresInstrumentSelectionRepository:
         if control is None or control.selection_spec_id != spec_id or control.selection_epoch_id != epoch:
             return False
         if control.pending_selection_mode is not None:
-            boundary = control.pending_effective_session_start_ms
+            boundary = control.pending_effective_period_anchor_ms
             if boundary is not None and cutoff >= boundary:
                 return control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
         return control.selection_mode is SelectionMode.DYNAMIC_SELECTION
@@ -462,7 +470,7 @@ class PostgresInstrumentSelectionRepository:
     async def claim_generic_selection_job(
         self, *, selection_spec_id: str, selection_epoch_id: str, feature_cutoff_at_ms: int,
         worker_id: str, now_ms: int, lease_duration_ms: int,
-    ) -> SelectionJobClaim | SelectionJobFailure | GenericSelectionSnapshotV1 | None:
+    ) -> GenericSelectionJobClaim | SelectionJobFailure | GenericSelectionSnapshotV1 | None:
         spec = await self.get_generic_spec(selection_spec_id)
         period = build_generic_selection_period(feature_cutoff_at_ms=feature_cutoff_at_ms, cadence_hours=spec.cadence_hours)
         control = await self.get_selection_control(spec.strategy_group_id, for_update=True)
@@ -483,21 +491,23 @@ class PostgresInstrumentSelectionRepository:
             predecessor_snapshot_id=None if previous is None else previous.selection_snapshot_id,
             predecessor_member_digest=None if previous is None else previous.member_set_digest,
         )
+        if isinstance(result, SelectionJobClaim):
+            raise SelectionJobConflict("Generic Selection cannot consume a SOR claim")
         return await self.get_generic_snapshot(result) if isinstance(result, str) else result
 
     async def complete_generic_selection_snapshot(
-        self, *, claim: SelectionJobClaim, snapshot: GenericSelectionSnapshotV1,
+        self, *, claim: GenericSelectionJobClaim, snapshot: GenericSelectionSnapshotV1,
         source_observed_at_ms: int, completed_at_ms: int,
     ) -> None:
-        claim = SelectionJobClaim.model_validate(claim.model_dump(mode="python"))
+        claim = GenericSelectionJobClaim.model_validate(claim.model_dump(mode="python"))
         snapshot = GenericSelectionSnapshotV1.model_validate(snapshot.model_dump(mode="python"))
         spec = await self.get_generic_spec(claim.selection_spec_id)
         control = await self.get_selection_control(spec.strategy_group_id, for_update=True)
-        if (not self._generic_control_allows(control, claim.selection_spec_id, claim.selection_epoch_id, claim.session_start_ms)
+        if (not self._generic_control_allows(control, claim.selection_spec_id, job_selection_epoch(claim), job_period_anchor(claim))
             or control is None or control.control_version != claim.selection_control_version):
             raise SelectionJobConflict("Selection control or epoch changed during source read")
-        if (snapshot.selection_spec_id != claim.selection_spec_id or snapshot.selection_epoch_id != claim.selection_epoch_id
-            or snapshot.feature_cutoff_at_ms != claim.session_start_ms or snapshot.committed_at_ms != completed_at_ms
+        if (snapshot.selection_spec_id != claim.selection_spec_id or snapshot.selection_epoch_id != job_selection_epoch(claim)
+            or snapshot.feature_cutoff_at_ms != job_period_anchor(claim) or snapshot.committed_at_ms != completed_at_ms
             or snapshot.predecessor_snapshot_id != claim.predecessor_snapshot_id
             or snapshot.predecessor_member_digest != claim.predecessor_member_digest
             or source_observed_at_ms < claim.started_at_ms or completed_at_ms >= snapshot.expires_at_ms):
@@ -508,7 +518,7 @@ class PostgresInstrumentSelectionRepository:
                 return
             raise SelectionJobConflict("Generic Snapshot digest conflicts")
         self._require_live_claim(row, claim, completed_at_ms=completed_at_ms)
-        await self.save_generic_snapshot(snapshot, decision_at_ms=claim.session_start_ms, source_observed_at_ms=source_observed_at_ms)
+        await self.save_generic_snapshot(snapshot, decision_at_ms=job_period_anchor(claim), source_observed_at_ms=source_observed_at_ms)
         await self._append_attempt(claim=claim, outcome=SelectionAttemptOutcome.SNAPSHOT_READY, reason_code=None,
             source_member_count=24, source_digest=snapshot.source_semantic_digest, completed_at_ms=completed_at_ms)
         await self._mark_snapshot_ready(claim, snapshot.selection_snapshot_id, completed_at_ms)
@@ -518,7 +528,7 @@ class PostgresInstrumentSelectionRepository:
         feature_cutoff_at_ms: int, worker_id: str, now_ms: int, lease_duration_ms: int,
         selection_epoch_id: str = "sor-v0", selection_control_version: int | None = None,
         predecessor_snapshot_id: str | None = None, predecessor_member_digest: str | None = None,
-    ) -> SelectionJobClaim | SelectionJobFailure | str:
+    ) -> SelectionJobLease | SelectionJobFailure | str:
         if now_ms < feature_cutoff_at_ms:
             raise ValueError("Selection Job cannot be claimed before feature cutoff")
         if lease_duration_ms <= 0:
@@ -529,7 +539,7 @@ class PostgresInstrumentSelectionRepository:
             .values(
                 selection_job_id=job_id,
                 selection_spec_id=selection_spec_id,
-                session_start_ms=period_anchor_ms,
+                period_anchor_ms=period_anchor_ms,
                 scheduled_at_ms=scheduled_at_ms,
                 feature_cutoff_at_ms=feature_cutoff_at_ms,
                 selection_epoch_id=selection_epoch_id,
@@ -550,7 +560,7 @@ class PostgresInstrumentSelectionRepository:
                 index_elements=[
                     instrument_selection_jobs_current.c.selection_spec_id,
                     instrument_selection_jobs_current.c.selection_epoch_id,
-                    instrument_selection_jobs_current.c.session_start_ms,
+                    instrument_selection_jobs_current.c.period_anchor_ms,
                 ]
             )
         )
@@ -561,7 +571,7 @@ class PostgresInstrumentSelectionRepository:
                     instrument_selection_jobs_current.c.selection_spec_id
                     == selection_spec_id,
                     instrument_selection_jobs_current.c.selection_epoch_id == selection_epoch_id,
-                    instrument_selection_jobs_current.c.session_start_ms
+                    instrument_selection_jobs_current.c.period_anchor_ms
                     == period_anchor_ms,
                 )
                 .with_for_update()
@@ -621,10 +631,16 @@ class PostgresInstrumentSelectionRepository:
         )
         if result.rowcount != 1:
             raise SelectionJobConflict("Selection Job projection version changed")
-        return SelectionJobClaim(
+        if selection_epoch_id == "sor-v0":
+            return SelectionJobClaim(selection_job_id=job_id, selection_spec_id=selection_spec_id,
+                session_start_ms=period_anchor_ms, worker_id=worker_id, attempt_number=attempt_number,
+                projection_version=next_version, started_at_ms=now_ms, lease_expires_at_ms=lease_expires)
+        if selection_control_version is None:
+            raise SelectionJobConflict("Generic claim requires control authority")
+        return GenericSelectionJobClaim(
             selection_job_id=job_id,
             selection_spec_id=selection_spec_id,
-            session_start_ms=period_anchor_ms,
+            period_anchor_ms=period_anchor_ms,
             worker_id=worker_id,
             attempt_number=attempt_number,
             projection_version=next_version,
@@ -656,7 +672,7 @@ class PostgresInstrumentSelectionRepository:
         snapshot = computation.snapshot
         await self._connection.execute(
             sa.insert(instrument_selection_snapshots).values(
-                snapshot.model_dump()
+                **snapshot.model_dump(exclude={"session_start_ms"}), period_anchor_ms=snapshot.session_start_ms,
             )
         )
         await self._connection.execute(
@@ -664,8 +680,9 @@ class PostgresInstrumentSelectionRepository:
             [
                 {
                     **decision.model_dump(
-                        exclude={"primary_reason", "member_state"}
+                        exclude={"primary_reason", "member_state", "session_start_ms"}
                     ),
+                    "period_anchor_ms": decision.session_start_ms,
                     "primary_reason": (
                         None
                         if decision.primary_reason is None
@@ -689,7 +706,7 @@ class PostgresInstrumentSelectionRepository:
         )
         await self._mark_snapshot_ready(claim, snapshot.selection_snapshot_id, completed_at_ms)
 
-    async def _mark_snapshot_ready(self, claim: SelectionJobClaim, selection_snapshot_id: str, completed_at_ms: int) -> None:
+    async def _mark_snapshot_ready(self, claim: SelectionJobLease, selection_snapshot_id: str, completed_at_ms: int) -> None:
         result = await self._connection.execute(
             sa.update(instrument_selection_jobs_current)
             .where(
@@ -717,7 +734,7 @@ class PostgresInstrumentSelectionRepository:
     async def complete_selection_failure(
         self,
         *,
-        claim: SelectionJobClaim,
+        claim: SelectionJobLease,
         outcome: SelectionAttemptOutcome,
         reason_code: str,
         source_member_count: int,
@@ -767,7 +784,7 @@ class PostgresInstrumentSelectionRepository:
         self,
         *,
         selection_spec_id: str,
-        session_start_ms: int,
+        period_anchor_ms: int,
         selection_epoch_id: str = "sor-v0",
     ) -> SelectionJobRecord | None:
         row = (
@@ -777,15 +794,15 @@ class PostgresInstrumentSelectionRepository:
                     instrument_selection_jobs_current.c.selection_spec_id
                     == selection_spec_id,
                     instrument_selection_jobs_current.c.selection_epoch_id == selection_epoch_id,
-                    instrument_selection_jobs_current.c.session_start_ms
-                    == session_start_ms,
+                    instrument_selection_jobs_current.c.period_anchor_ms
+                    == period_anchor_ms,
                 )
                 .limit(1)
             )
         ).mappings().one_or_none()
         return None if row is None else SelectionJobRecord.model_validate(dict(row))
 
-    async def _locked_job(self, claim: SelectionJobClaim) -> RowMapping:
+    async def _locked_job(self, claim: SelectionJobLease) -> RowMapping:
         row = (
             await self._connection.execute(
                 sa.select(instrument_selection_jobs_current)
@@ -803,7 +820,7 @@ class PostgresInstrumentSelectionRepository:
     @staticmethod
     def _require_live_claim(
         row: RowMapping,
-        claim: SelectionJobClaim,
+        claim: SelectionJobLease,
         *,
         completed_at_ms: int,
     ) -> None:
@@ -812,21 +829,21 @@ class PostgresInstrumentSelectionRepository:
             or str(row["lease_owner"]) != claim.worker_id
             or int(row["projection_version"]) != claim.projection_version
             or int(row["attempt_count"]) != claim.attempt_number
-            or row["selection_epoch_id"] != claim.selection_epoch_id
-            or row["selection_control_version"] != claim.selection_control_version
-            or row["predecessor_snapshot_id"] != claim.predecessor_snapshot_id
-            or row["predecessor_member_digest"] != claim.predecessor_member_digest
+            or row["selection_epoch_id"] != job_selection_epoch(claim)
+            or row["selection_control_version"] != (claim.selection_control_version if isinstance(claim, GenericSelectionJobClaim) else None)
+            or row["predecessor_snapshot_id"] != (claim.predecessor_snapshot_id if isinstance(claim, GenericSelectionJobClaim) else None)
+            or row["predecessor_member_digest"] != (claim.predecessor_member_digest if isinstance(claim, GenericSelectionJobClaim) else None)
         ):
             raise SelectionJobConflict("Selection Job claim identity changed")
         if completed_at_ms < claim.started_at_ms or completed_at_ms > int(row["lease_expires_at_ms"]) or (
-            claim.selection_epoch_id != "sor-v0" and completed_at_ms == int(row["lease_expires_at_ms"])
+            job_selection_epoch(claim) != "sor-v0" and completed_at_ms == int(row["lease_expires_at_ms"])
         ):
             raise SelectionJobConflict("Selection Job lease expired before completion")
 
     async def _append_attempt(
         self,
         *,
-        claim: SelectionJobClaim,
+        claim: SelectionJobLease,
         outcome: SelectionAttemptOutcome,
         reason_code: str | None,
         source_member_count: int,
@@ -837,17 +854,17 @@ class PostgresInstrumentSelectionRepository:
             sa.insert(instrument_selection_attempts).values(
                 selection_attempt_id=(
                     f"selection-attempt:{claim.selection_spec_id}:"
-                    f"{claim.session_start_ms}:{claim.attempt_number}"
-                ) if claim.selection_epoch_id == "sor-v0" else (
+                    f"{job_period_anchor(claim)}:{claim.attempt_number}"
+                ) if job_selection_epoch(claim) == "sor-v0" else (
                     "selection-attempt:" + canonical_digest({"job": claim.selection_job_id, "attempt": claim.attempt_number})[7:]
                 ),
                 selection_job_id=claim.selection_job_id,
                 selection_spec_id=claim.selection_spec_id,
-                session_start_ms=claim.session_start_ms,
-                selection_epoch_id=claim.selection_epoch_id,
-                selection_control_version=claim.selection_control_version,
-                predecessor_snapshot_id=claim.predecessor_snapshot_id,
-                predecessor_member_digest=claim.predecessor_member_digest,
+                period_anchor_ms=job_period_anchor(claim),
+                selection_epoch_id=job_selection_epoch(claim),
+                selection_control_version=claim.selection_control_version if isinstance(claim, GenericSelectionJobClaim) else None,
+                predecessor_snapshot_id=claim.predecessor_snapshot_id if isinstance(claim, GenericSelectionJobClaim) else None,
+                predecessor_member_digest=claim.predecessor_member_digest if isinstance(claim, GenericSelectionJobClaim) else None,
                 worker_id=claim.worker_id,
                 attempt_number=claim.attempt_number,
                 started_at_ms=claim.started_at_ms,
@@ -872,7 +889,7 @@ class PostgresInstrumentSelectionRepository:
         ).mappings().one_or_none()
         if row is None:
             raise SelectionJobConflict("Selection Snapshot does not exist")
-        return SelectionSnapshot.model_validate({key:row[key] for key in SelectionSnapshot.model_fields})
+        return SelectionSnapshot.model_validate({key:row["period_anchor_ms" if key == "session_start_ms" else key] for key in SelectionSnapshot.model_fields})
 
     async def get_selection_control(
         self,
@@ -910,7 +927,7 @@ class PostgresInstrumentSelectionRepository:
             .values(
                 selection_mode=expected_pending_mode.value,
                 pending_selection_mode=None,
-                pending_effective_session_start_ms=None,
+                pending_effective_period_anchor_ms=None,
                 pending_authorization_id=None,
                 control_version=expected_control_version + 1,
                 updated_at_ms=activated_at_ms,
@@ -946,7 +963,7 @@ class PostgresInstrumentSelectionRepository:
             )
             .values(
                 pending_selection_mode=pending_mode.value,
-                pending_effective_session_start_ms=effective_session_start_ms,
+                pending_effective_period_anchor_ms=effective_session_start_ms,
                 pending_authorization_id=authorization_id,
                 control_version=expected_control_version + 1,
                 updated_at_ms=updated_at_ms,
@@ -1033,7 +1050,7 @@ class PostgresInstrumentSelectionRepository:
                 .where(
                     selection_session_authorities.c.selection_spec_id
                     == request.selection_spec_id,
-                    selection_session_authorities.c.session_start_ms
+                    selection_session_authorities.c.period_anchor_ms
                     == request.session_start_ms,
                 )
             )
@@ -1066,7 +1083,7 @@ class PostgresInstrumentSelectionRepository:
             or selection_control is None
             or generation["strategy_group_id"] != request.strategy_group_id
             or generation["selection_spec_id"] != request.selection_spec_id
-            or generation["session_start_ms"] != request.session_start_ms
+            or generation["period_anchor_ms"] != request.session_start_ms
             or generation["lifecycle_state"] != "ABANDONED"
             or generation["previous_long_universe_version_id"]
             != request.expected_long_universe_version_id
@@ -1074,12 +1091,12 @@ class PostgresInstrumentSelectionRepository:
             != request.expected_short_universe_version_id
             or vacuum["strategy_group_id"] != request.strategy_group_id
             or vacuum["selection_spec_id"] != request.selection_spec_id
-            or vacuum["session_start_ms"] != request.session_start_ms
+            or vacuum["period_anchor_ms"] != request.session_start_ms
             or vacuum["source_generation_id"]
             != request.materialization_generation_id
             or vacuum["state"] != "OWNER_PAUSED"
             or audit["selection_spec_id"] != request.selection_spec_id
-            or audit["session_start_ms"] != request.session_start_ms
+            or audit["period_anchor_ms"] != request.session_start_ms
             or audit["source_generation_id"]
             != request.materialization_generation_id
             or audit["source_entry_vacuum_id"] != request.entry_vacuum_id
@@ -1091,7 +1108,7 @@ class PostgresInstrumentSelectionRepository:
             or selection_control["selection_spec_id"] != request.selection_spec_id
             or selection_control["selection_mode"] != "static_baseline"
             or selection_control["pending_selection_mode"] != "dynamic_selection"
-            or selection_control["pending_effective_session_start_ms"]
+            or selection_control["pending_effective_period_anchor_ms"]
             != request.session_start_ms
             or selection_control["pending_authorization_id"] is None
             or selection_control["control_version"]
@@ -1119,12 +1136,12 @@ class PostgresInstrumentSelectionRepository:
                 == "static_baseline",
                 strategy_selection_control_current.c.pending_selection_mode
                 == "dynamic_selection",
-                strategy_selection_control_current.c.pending_effective_session_start_ms
+                strategy_selection_control_current.c.pending_effective_period_anchor_ms
                 == request.session_start_ms,
             )
             .values(
                 pending_selection_mode=None,
-                pending_effective_session_start_ms=None,
+                pending_effective_period_anchor_ms=None,
                 pending_authorization_id=None,
                 control_version=next_control_version,
                 updated_at_ms=request.recovered_at_ms,
@@ -1192,14 +1209,14 @@ class PostgresInstrumentSelectionRepository:
     ) -> SelectionSnapshotDisposition | None:
         statement = sa.select(instrument_selection_snapshots).where(
             instrument_selection_snapshots.c.selection_spec_id == selection_spec_id,
-            instrument_selection_snapshots.c.session_start_ms == session_start_ms,
+            instrument_selection_snapshots.c.period_anchor_ms == session_start_ms,
         )
         if for_update:
             statement = statement.with_for_update(of=instrument_selection_snapshots)
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         if row is None:
             return None
-        snapshot = SelectionSnapshot.model_validate({key:row[key] for key in SelectionSnapshot.model_fields})
+        snapshot = SelectionSnapshot.model_validate({key:row["period_anchor_ms" if key == "session_start_ms" else key] for key in SelectionSnapshot.model_fields})
         members = tuple(
             str(item)
             for item in (
@@ -1312,7 +1329,7 @@ class PostgresInstrumentSelectionRepository:
                     == strategy_group_id,
                     strategy_universe_materialization_generations.c.selection_spec_id
                     == selection_spec_id,
-                    strategy_universe_materialization_generations.c.session_start_ms
+                    strategy_universe_materialization_generations.c.period_anchor_ms
                     == session_start_ms,
                 )
                 .limit(1)
@@ -1362,7 +1379,7 @@ class PostgresInstrumentSelectionRepository:
                 ),
             )
             .order_by(
-                strategy_universe_materialization_generations.c.session_start_ms.desc(),
+                strategy_universe_materialization_generations.c.period_anchor_ms.desc(),
                 strategy_universe_materialization_generations.c.created_at_ms.desc(),
             )
             .limit(2)
@@ -1402,7 +1419,7 @@ class PostgresInstrumentSelectionRepository:
                 .where(
                     strategy_universe_materialization_generations.c.selection_spec_id
                     == selection_spec_id,
-                    strategy_universe_materialization_generations.c.session_start_ms
+                    strategy_universe_materialization_generations.c.period_anchor_ms
                     == session_start_ms,
                     strategy_universe_materialization_generations.c.lifecycle_state.in_(
                         (
@@ -2558,7 +2575,7 @@ class PostgresInstrumentSelectionRepository:
                     == strategy_group_id,
                     strategy_entry_vacuums_current.c.selection_spec_id
                     == selection_spec_id,
-                    strategy_entry_vacuums_current.c.session_start_ms
+                    strategy_entry_vacuums_current.c.period_anchor_ms
                     == session_start_ms,
                 )
                 .order_by(
@@ -2602,7 +2619,7 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Generation changed before Vacuum fence")
         await self._connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json")
+                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
             )
         )
         for sequence, event_type in ((1, "OPEN"), (2, "DRAINING_ENTRY")):
@@ -2666,7 +2683,7 @@ class PostgresInstrumentSelectionRepository:
             raise ValueError("VALID_EMPTY intent requires an open generation-free Vacuum")
         await self._connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json")
+                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
             )
         )
         await self._connection.execute(
@@ -2702,7 +2719,7 @@ class PostgresInstrumentSelectionRepository:
             return existing
         await self._connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json")
+                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
             )
         )
         await self._connection.execute(
@@ -3023,7 +3040,7 @@ class PostgresInstrumentSelectionRepository:
             raise ValueError("new Authority Gap Audit must be PENDING")
         await self._connection.execute(
             sa.insert(selection_authority_gap_audits_current).values(
-                **audit.model_dump(mode="json")
+                **audit.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=audit.session_start_ms,
             )
         )
         await self._connection.execute(
@@ -3076,7 +3093,7 @@ class PostgresInstrumentSelectionRepository:
                 .where(
                     selection_authority_gap_audits_current.c.selection_spec_id
                     == selection_spec_id,
-                    selection_authority_gap_audits_current.c.session_start_ms
+                    selection_authority_gap_audits_current.c.period_anchor_ms
                     == session_start_ms,
                 )
                 .order_by(
@@ -3455,7 +3472,7 @@ def _authority_values(authority: SelectionSessionAuthority) -> dict[str, object]
     return {
         "selection_authority_id": authority.selection_authority_id,
         "selection_spec_id": authority.selection_spec_id,
-        "session_start_ms": authority.session_start_ms,
+        "period_anchor_ms": authority.session_start_ms,
         "decision_boundary_ms": authority.decision_boundary_ms,
         "authority_sequence": authority.authority_sequence,
         "selection_mode": authority.selection_mode.value,
@@ -3498,7 +3515,7 @@ def _authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
     return SelectionSessionAuthority(
         selection_authority_id=str(row["selection_authority_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
-        session_start_ms=int(row["session_start_ms"]),
+        session_start_ms=int(row["period_anchor_ms"]),
         decision_boundary_ms=int(row["decision_boundary_ms"]),
         authority_sequence=int(row["authority_sequence"]),
         selection_mode=SelectionMode(str(row["selection_mode"])),
@@ -3536,10 +3553,10 @@ def _selection_control_from_row(row: RowMapping) -> SelectionControl:
         pending_selection_mode=(
             None if pending_mode is None else SelectionMode(str(pending_mode))
         ),
-        pending_effective_session_start_ms=(
+        pending_effective_period_anchor_ms=(
             None
-            if row["pending_effective_session_start_ms"] is None
-            else int(row["pending_effective_session_start_ms"])
+            if row["pending_effective_period_anchor_ms"] is None
+            else int(row["pending_effective_period_anchor_ms"])
         ),
         pending_authorization_id=row["pending_authorization_id"],
         control_version=int(row["control_version"]),
@@ -3560,7 +3577,7 @@ def _materialization_generation_values(
         "selection_mode": generation.selection_mode.value,
         "selection_snapshot_id": generation.selection_snapshot_id,
         "rollback_baseline_id": generation.rollback_baseline_id,
-        "session_start_ms": generation.session_start_ms,
+        "period_anchor_ms": generation.session_start_ms,
         "desired_member_count": generation.desired_member_count,
         "semantic_digest": generation.semantic_digest,
         "lifecycle_state": generation.lifecycle_state.value,
@@ -3591,7 +3608,7 @@ def _materialization_generation_from_row(
         selection_snapshot_id=row["selection_snapshot_id"],
         rollback_baseline_id=row["rollback_baseline_id"],
         session_start_ms=(
-            None if row["session_start_ms"] is None else int(row["session_start_ms"])
+            None if row["period_anchor_ms"] is None else int(row["period_anchor_ms"])
         ),
         previous_long_universe_version_id=str(
             row["previous_long_universe_version_id"]
@@ -3616,7 +3633,7 @@ def _entry_vacuum_from_row(row: RowMapping) -> StrategyEntryVacuum:
         entry_vacuum_id=str(row["entry_vacuum_id"]),
         strategy_group_id=str(row["strategy_group_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
-        session_start_ms=int(row["session_start_ms"]),
+        session_start_ms=int(row["period_anchor_ms"]),
         source_generation_id=row["source_generation_id"],
         state=StrategyEntryVacuumState(str(row["state"])),
         fenced_at_ms=int(row["fenced_at_ms"]),
@@ -3651,7 +3668,7 @@ def _authority_gap_audit_from_row(row: RowMapping) -> AuthorityGapAudit:
     return AuthorityGapAudit(
         authority_gap_audit_id=str(row["authority_gap_audit_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
-        session_start_ms=int(row["session_start_ms"]),
+        session_start_ms=int(row["period_anchor_ms"]),
         gap_kind=AuthorityGapAuditKind(str(row["gap_kind"])),
         source_entry_vacuum_id=row["source_entry_vacuum_id"],
         source_generation_id=row["source_generation_id"],

@@ -301,7 +301,7 @@ async def test_selection_runtime_readonly_projects_one_exact_period_without_writ
             sa.insert(instrument_selection_jobs_current).values(
                 selection_job_id=f"selection-job:{SELECTION_SPEC_ID}:{SESSION_START_MS}",
                 selection_spec_id=SELECTION_SPEC_ID,
-                session_start_ms=SESSION_START_MS,
+                period_anchor_ms=SESSION_START_MS,
                 scheduled_at_ms=SESSION_START_MS + 3_600_000,
                 feature_cutoff_at_ms=SESSION_START_MS + 3_600_000,
                 state="SNAPSHOT_READY",
@@ -345,7 +345,7 @@ async def test_selection_runtime_readonly_projects_one_exact_period_without_writ
         assert "previous_short_universe_version_id" not in columns
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json")
+                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
             )
         )
         await repository.add_pending_authority_gap_audit(pending_audit)
@@ -820,7 +820,7 @@ async def test_valid_empty_rejects_generation_free_vacuum_with_wrong_intent(
     async with head_template_engine.begin() as connection:
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json")
+                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
             )
         )
 
@@ -881,7 +881,7 @@ async def test_valid_empty_is_non_retroactive_for_protected_ticket(
     async with head_template_engine.begin() as connection:
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json")
+                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
             )
         )
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:
@@ -950,7 +950,7 @@ async def test_repository_opens_new_vacuum_after_previous_operation_is_terminal(
     async with head_template_engine.begin() as connection:
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **previous.model_dump(mode="json")
+                **previous.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=previous.session_start_ms,
             )
         )
         repository = PostgresInstrumentSelectionRepository(connection)
@@ -1132,10 +1132,10 @@ async def test_coordinator_creates_continuity_then_no_change_from_durable_snapsh
                 sa.text(
                     "SELECT authority_sequence, authority_outcome "
                     "FROM brc_selection_session_authorities "
-                    "WHERE session_start_ms = :session_start_ms "
+                    "WHERE period_anchor_ms = :period_anchor_ms "
                     "ORDER BY authority_sequence"
                 ),
-                {"session_start_ms": SESSION_START_MS},
+                {"period_anchor_ms": SESSION_START_MS},
             )
         ).all()
     assert rows == [(1, "PRE_FENCE_CONTINUITY"), (2, "NO_CHANGE")]
@@ -1178,9 +1178,9 @@ async def test_late_continuity_stages_and_completes_exact_gap_audit_before_grant
                     "SELECT authority_outcome, authority_gap_audit_id, "
                     "grant_proof_kind, first_eligible_close_time_ms "
                     "FROM brc_selection_session_authorities "
-                    "WHERE session_start_ms = :session_start_ms"
+                    "WHERE period_anchor_ms = :period_anchor_ms"
                 ),
-                {"session_start_ms": SESSION_START_MS},
+                {"period_anchor_ms": SESSION_START_MS},
             )
         ).one()
     assert row == (
@@ -2400,7 +2400,7 @@ async def test_materialization_timeout_falls_back_to_exact_previous_pair(
     assert event_bindings == (("long",LONG_UNIVERSE_ID,"ACTIVE"),("short",SHORT_UNIVERSE_ID,"ACTIVE"))
     assert control_row["selection_mode"] == expected_authority_mode
     assert control_row["pending_selection_mode"] is None
-    assert control_row["pending_effective_session_start_ms"] is None
+    assert control_row["pending_effective_period_anchor_ms"] is None
     assert control_row["pending_authorization_id"] is None
 
 
@@ -2463,7 +2463,7 @@ async def test_pre_first_close_fallback_audit_stays_pending_without_source_call(
         authority_count = await connection.scalar(
             sa.select(sa.func.count())
             .select_from(selection_session_authorities)
-            .where(selection_session_authorities.c.session_start_ms == SESSION_START_MS)
+            .where(selection_session_authorities.c.period_anchor_ms == SESSION_START_MS)
         )
     assert audit_state == "PENDING"
     assert authority_count == 0
@@ -2605,7 +2605,7 @@ async def test_expired_gap_audit_window_never_calls_source_or_grants_authority(
         authority_count = await connection.scalar(
             sa.select(sa.func.count())
             .select_from(selection_session_authorities)
-            .where(selection_session_authorities.c.session_start_ms == SESSION_START_MS)
+            .where(selection_session_authorities.c.period_anchor_ms == SESSION_START_MS)
         )
     assert audit_state == "PENDING"
     assert authority_count == 0
@@ -2767,7 +2767,7 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
             await connection.scalar(
                 sa.select(sa.func.count())
                 .select_from(selection_session_authorities)
-                .where(selection_session_authorities.c.session_start_ms == SESSION_START_MS)
+                .where(selection_session_authorities.c.period_anchor_ms == SESSION_START_MS)
             )
             or 0
         )
@@ -2781,7 +2781,7 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
         )
     assert control["selection_mode"] == "static_baseline"
     assert control["pending_selection_mode"] is None
-    assert control["pending_effective_session_start_ms"] is None
+    assert control["pending_effective_period_anchor_ms"] is None
     assert control["pending_authorization_id"] is None
     assert control["control_version"] == 2
     assert generation == (
@@ -2828,7 +2828,7 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
             ),
             authentication_strength="totp_step_up",
         )
-    assert staged.pending_effective_session_start_ms == next_session_start_ms
+    assert staged.pending_effective_period_anchor_ms == next_session_start_ms
     next_members = () if empty_snapshot else tuple(
         sorted(
             (
@@ -2914,7 +2914,7 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
             await connection.execute(
                 sa.select(
                     strategy_universe_materialization_generations.c.lifecycle_state,
-                    strategy_universe_materialization_generations.c.session_start_ms,
+                    strategy_universe_materialization_generations.c.period_anchor_ms,
                 ).where(
                     strategy_universe_materialization_generations.c.materialization_generation_id
                     == superseded.materialization_generation_id
@@ -2938,7 +2938,7 @@ async def test_owner_paused_expired_first_activation_recovery_preserves_static_p
             await connection.scalar(
                 sa.select(sa.func.count())
                 .select_from(selection_session_authorities)
-                .where(selection_session_authorities.c.session_start_ms == SESSION_START_MS)
+                .where(selection_session_authorities.c.period_anchor_ms == SESSION_START_MS)
             )
             or 0
         )
@@ -3286,7 +3286,7 @@ async def test_newer_valid_snapshot_supersedes_unactivated_generation_without_fa
                         strategy_universe_materialization_generations.c.materialization_generation_id,
                         strategy_universe_materialization_generations.c.lifecycle_state,
                     ).order_by(
-                        strategy_universe_materialization_generations.c.session_start_ms
+                        strategy_universe_materialization_generations.c.period_anchor_ms
                     )
                 )
             ).all()
@@ -4053,7 +4053,7 @@ async def test_gap_audit_window_expiry_does_not_commit_proof_or_authority(
                 sa.select(sa.func.count())
                 .select_from(selection_session_authorities)
                 .where(
-                    selection_session_authorities.c.session_start_ms
+                    selection_session_authorities.c.period_anchor_ms
                     == SESSION_START_MS
                 )
             )
@@ -4150,7 +4150,7 @@ async def test_gap_audit_missing_scope_result_is_persisted_failed_without_author
                 sa.select(sa.func.count())
                 .select_from(selection_session_authorities)
                 .where(
-                    selection_session_authorities.c.session_start_ms
+                    selection_session_authorities.c.period_anchor_ms
                     == SESSION_START_MS
                 )
             )
@@ -4274,7 +4274,7 @@ async def test_gap_audit_source_failure_is_durable_and_never_checked_negative(
                 sa.select(sa.func.count())
                 .select_from(selection_session_authorities)
                 .where(
-                    selection_session_authorities.c.session_start_ms
+                    selection_session_authorities.c.period_anchor_ms
                     == SESSION_START_MS
                 )
             )
@@ -4547,7 +4547,7 @@ async def _seed_materialization_context(
                 selection_spec_id=SELECTION_SPEC_ID,
                 selection_mode=selection_mode,
                 pending_selection_mode=pending_selection_mode,
-                pending_effective_session_start_ms=(
+                pending_effective_period_anchor_ms=(
                     SESSION_START_MS if pending_selection_mode is not None else None
                 ),
                 pending_authorization_id=(
@@ -4700,7 +4700,7 @@ async def _seed_snapshot(
             selection_spec_id=SELECTION_SPEC_ID,
             strategy_group_id="SOR-001",
             strategy_version_id="sgv:SOR-001:v4",
-            session_start_ms=session_start_ms,
+            period_anchor_ms=session_start_ms,
             decision_at_ms=session_start_ms + 3_600_000,
             feature_cutoff_at_ms=session_start_ms + 3_600_000,
             eligibility_not_before_ms=session_start_ms + 4_500_000,
@@ -4721,7 +4721,7 @@ async def _seed_snapshot(
                 "selection_snapshot_id": snapshot_id,
                 "member_decision_id": f"member:{session_start_ms}:{index}",
                 "selection_spec_id": SELECTION_SPEC_ID,
-                "session_start_ms": session_start_ms,
+                "period_anchor_ms": session_start_ms,
                 "feature_cutoff_at_ms": session_start_ms + 3_600_000,
                 "input_window_start_ms": session_start_ms - 82_800_000,
                 "input_window_end_ms": session_start_ms + 3_600_000,

@@ -23,20 +23,22 @@ from src.trading_kernel.domain.generic_selection_core import (
     GenericSelectionSnapshotV1,
     compute_generic_selection,
 )
+from src.trading_kernel.domain.generic_selection_jobs import (
+    SelectionJobLease,
+    selection_job_identity,
+)
 from src.trading_kernel.domain.generic_selection_source import (
     GenericSelectionMemberWindow,
 )
 from src.trading_kernel.domain.instrument_selection import (
     HOUR_MS,
     SelectionAttemptOutcome,
-    SelectionJobClaim,
     SelectionJobFailure,
     SelectionSnapshot,
     SelectionSourceIntegrityError,
     SelectionSourceWindow,
     build_sor_dynamic_selection_period,
     run_sor_dynamic_selection_v0,
-    selection_job_identity,
 )
 
 DEFAULT_SELECTION_CONCURRENCY = 6
@@ -47,7 +49,7 @@ class RunInstrumentSelectionRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     selection_spec_id: str
-    session_start_ms: int
+    period_anchor_ms: int
     worker_id: str
     max_concurrency: int = DEFAULT_SELECTION_CONCURRENCY
     lease_duration_ms: int = DEFAULT_SELECTION_LEASE_MS
@@ -101,7 +103,7 @@ async def run_instrument_selection_once(
         return await _run_generic_selection_once(uow_factory=uow_factory, market_source=market_source, request=request, clock_ms=clock_ms)
 
     period = build_sor_dynamic_selection_period(
-        session_start_ms=request.session_start_ms
+        session_start_ms=request.period_anchor_ms
     )
     claimed_at_ms = clock_ms()
     async with uow_factory() as uow:
@@ -249,7 +251,7 @@ async def _read_source_windows(
 async def _persist_failure(
     *,
     uow_factory: UnitOfWorkFactory,
-    claim: SelectionJobClaim,
+    claim: SelectionJobLease,
     outcome: SelectionAttemptOutcome,
     reason_code: str,
     source_member_count: int,
@@ -271,14 +273,14 @@ async def _run_generic_selection_once(
     *, uow_factory: UnitOfWorkFactory, market_source: InstrumentSelectionMarketSource,
     request: RunInstrumentSelectionRequest, clock_ms: Callable[[], int],
 ) -> RunInstrumentSelectionResult:
-    job_id = selection_job_identity(request.selection_spec_id, request.session_start_ms, request.selection_epoch_id)
+    job_id = selection_job_identity(request.selection_spec_id, request.period_anchor_ms, request.selection_epoch_id)
     async with uow_factory() as uow:
         try:
             spec = await uow.instrument_selection.get_generic_spec(request.selection_spec_id)
         except LookupError:
             return RunInstrumentSelectionResult(outcome="NOT_INSTALLED", selection_job_id=job_id)
         claimed = await uow.instrument_selection.claim_generic_selection_job(selection_spec_id=spec.selection_spec_id,
-            selection_epoch_id=request.selection_epoch_id, feature_cutoff_at_ms=request.session_start_ms,
+            selection_epoch_id=request.selection_epoch_id, feature_cutoff_at_ms=request.period_anchor_ms,
             worker_id=request.worker_id, now_ms=clock_ms(), lease_duration_ms=request.lease_duration_ms)
         if claimed is None:
             return RunInstrumentSelectionResult(outcome="NOT_DUE", selection_job_id=job_id)
@@ -304,9 +306,9 @@ async def _run_generic_selection_once(
             try:
                 async with semaphore:
                     candles = await market_source.fetch_generic_selection_klines(GenericSelectionKlineRequest.model_validate({
-                        "exchange_instrument_id": member, "feature_cutoff_at_ms": request.session_start_ms, "expected_bars": spec.window_bars,
+                        "exchange_instrument_id": member, "feature_cutoff_at_ms": request.period_anchor_ms, "expected_bars": spec.window_bars,
                     }))
-                if len(candles) != spec.window_bars or candles[-1].close_time_ms != request.session_start_ms:
+                if len(candles) != spec.window_bars or candles[-1].close_time_ms != request.period_anchor_ms:
                     raise SelectionSourceIntegrityError("Generic member window is incomplete at cutoff")
                 windows[member] = GenericSelectionMemberWindow(exchange_instrument_id=member, candles=candles,
                     qualification=qualification_by_member[member])
@@ -318,7 +320,7 @@ async def _run_generic_selection_once(
             raise SelectionSourceIntegrityError(_source_failure_reason(errors))
         observed_at_ms = clock_ms()
         source = GenericSelectionInput(spec=spec, selection_epoch_id=request.selection_epoch_id,
-            feature_cutoff_at_ms=request.session_start_ms, decision_at_ms=request.session_start_ms,
+            feature_cutoff_at_ms=request.period_anchor_ms, decision_at_ms=request.period_anchor_ms,
             source_observed_at_ms=observed_at_ms, committed_at_ms=observed_at_ms,
             member_windows=tuple(windows[m] for m in spec.candidate_ids), predecessor_snapshot=predecessor)
     except Exception as exc:  # noqa: BLE001 - no source failure may become EMPTY
@@ -349,7 +351,7 @@ def _source_failure_reason(errors: dict[str, Exception]) -> str:
 
 
 def _failure_result(
-    claim: SelectionJobClaim,
+    claim: SelectionJobLease,
     outcome: Literal["SOURCE_FAILED", "COMPUTE_FAILED"],
     reason_code: str,
 ) -> RunInstrumentSelectionResult:

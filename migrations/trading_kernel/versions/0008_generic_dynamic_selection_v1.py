@@ -31,6 +31,7 @@ def upgrade() -> None:
     _require_flat_quiescent_source(bind)
     _require_legacy_event_baseline_source(bind)
     proofs = certify_0007_static_comparison_sources_sync(bind)
+    _rename_period_storage()
     _comparison_tables()
     _episode_provenance()
     _bind_static_comparison(bind)
@@ -51,6 +52,19 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError("0008_generic_dynamic_selection_v1 is fix-forward only")
+
+
+def _rename_period_storage() -> None:
+    """Rename the shared clock without changing any frozen SOR values or hashes."""
+    for table in (
+        "brc_instrument_selection_jobs_current", "brc_instrument_selection_attempts",
+        "brc_instrument_selection_snapshots", "brc_instrument_selection_member_decisions",
+        "brc_strategy_universe_materialization_generations", "brc_strategy_entry_vacuums_current",
+        "brc_selection_authority_gap_audits_current", "brc_selection_session_authorities",
+    ):
+        op.alter_column(table, "session_start_ms", new_column_name="period_anchor_ms")
+    op.alter_column("brc_strategy_selection_control_current", "pending_effective_session_start_ms",
+        new_column_name="pending_effective_period_anchor_ms")
 
 
 def _require_legacy_event_baseline_source(bind: sa.Connection) -> None:
@@ -133,9 +147,9 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
     op.drop_constraint("ck_brc_materialization_generation_source_shape", generations, type_="check")
     op.create_check_constraint("ck_brc_materialization_generation_source_shape", generations,
         "(selection_mode='dynamic_selection' AND selection_snapshot_id IS NOT NULL AND rollback_baseline_id IS NULL "
-        "AND session_start_ms IS NOT NULL AND desired_member_count BETWEEN 1 AND 16) OR "
+        "AND period_anchor_ms IS NOT NULL AND desired_member_count BETWEEN 1 AND 16) OR "
         "(selection_mode='static_baseline' AND selection_snapshot_id IS NULL AND rollback_baseline_id IS NOT NULL "
-        "AND session_start_ms IS NULL AND desired_member_count BETWEEN 1 AND 10)")
+        "AND period_anchor_ms IS NULL AND desired_member_count BETWEEN 1 AND 10)")
     op.execute(sa.text("""
         CREATE OR REPLACE FUNCTION brc_validate_materialization_generation_targets() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE gid text; sid text; expected integer; actual integer; matching integer;
@@ -218,10 +232,10 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
         CREATE FUNCTION brc_preserve_generation_source_identity_v1() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
           IF ROW(NEW.materialization_generation_id,NEW.selection_spec_id,NEW.strategy_group_id,NEW.strategy_version_id,
-              NEW.selection_mode,NEW.selection_snapshot_id,NEW.rollback_baseline_id,NEW.session_start_ms,
+              NEW.selection_mode,NEW.selection_snapshot_id,NEW.rollback_baseline_id,NEW.period_anchor_ms,
               NEW.desired_member_count,NEW.semantic_digest,NEW.created_at_ms)
              IS DISTINCT FROM ROW(OLD.materialization_generation_id,OLD.selection_spec_id,OLD.strategy_group_id,OLD.strategy_version_id,
-              OLD.selection_mode,OLD.selection_snapshot_id,OLD.rollback_baseline_id,OLD.session_start_ms,
+              OLD.selection_mode,OLD.selection_snapshot_id,OLD.rollback_baseline_id,OLD.period_anchor_ms,
               OLD.desired_member_count,OLD.semantic_digest,OLD.created_at_ms) THEN
             RAISE EXCEPTION 'Generation source identity is immutable';
           END IF;
@@ -252,20 +266,20 @@ def _selection_job_epochs() -> None:
             "(predecessor_snapshot_id IS NOT NULL AND predecessor_member_digest IS NOT NULL AND predecessor_member_digest ~ '^sha256:[0-9a-f]{64}$')))")
     op.drop_constraint("uq_brc_instrument_selection_jobs_current_period", jobs, type_="unique")
     op.create_unique_constraint("uq_brc_instrument_selection_jobs_current_period", jobs,
-        ["selection_spec_id", "selection_epoch_id", "session_start_ms"])
+        ["selection_spec_id", "selection_epoch_id", "period_anchor_ms"])
     op.drop_constraint("uq_brc_instrument_selection_attempts_period_number", attempts, type_="unique")
     op.create_unique_constraint("uq_brc_instrument_selection_attempts_period_number", attempts,
-        ["selection_spec_id", "selection_epoch_id", "session_start_ms", "attempt_number"])
+        ["selection_spec_id", "selection_epoch_id", "period_anchor_ms", "attempt_number"])
     op.create_unique_constraint("uq_brc_selection_job_epoch_identity", jobs,
-        ["selection_job_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"])
+        ["selection_job_id", "selection_spec_id", "selection_epoch_id", "period_anchor_ms"])
     op.create_foreign_key("fk_brc_selection_attempt_job_epoch", attempts, jobs,
-        ["selection_job_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"],
-        ["selection_job_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"])
+        ["selection_job_id", "selection_spec_id", "selection_epoch_id", "period_anchor_ms"],
+        ["selection_job_id", "selection_spec_id", "selection_epoch_id", "period_anchor_ms"])
     op.create_unique_constraint("uq_brc_selection_snapshot_job_identity", snapshots,
-        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"])
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "period_anchor_ms"])
     op.create_foreign_key("fk_brc_selection_job_snapshot_epoch", jobs, snapshots,
-        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"],
-        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "session_start_ms"])
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "period_anchor_ms"],
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "period_anchor_ms"])
     op.execute(sa.text("""
         CREATE FUNCTION brc_validate_selection_control_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE kind text; spec_group text; cadence integer; needs_epoch boolean;
@@ -283,7 +297,7 @@ def _selection_job_epochs() -> None:
             END IF;
           ELSIF NEW.selection_epoch_id IS NOT NULL THEN RAISE EXCEPTION 'Static Generic Control cannot retain epoch'; END IF;
           SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=NEW.selection_spec_id;
-          IF NEW.pending_effective_session_start_ms IS NOT NULL AND NEW.pending_effective_session_start_ms % (cadence*3600000::bigint)<>0 THEN
+          IF NEW.pending_effective_period_anchor_ms IS NOT NULL AND NEW.pending_effective_period_anchor_ms % (cadence*3600000::bigint)<>0 THEN
             RAISE EXCEPTION 'Generic pending Control requires exact period';
           END IF;
           RETURN NEW;
@@ -297,7 +311,7 @@ def _selection_job_epochs() -> None:
         BEGIN
           SELECT selection_kind INTO kind FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
           IF TG_OP='UPDATE' AND (NEW.selection_job_id<>OLD.selection_job_id OR NEW.selection_spec_id<>OLD.selection_spec_id
-             OR NEW.selection_epoch_id<>OLD.selection_epoch_id OR NEW.session_start_ms<>OLD.session_start_ms
+             OR NEW.selection_epoch_id<>OLD.selection_epoch_id OR NEW.period_anchor_ms<>OLD.period_anchor_ms
              OR NEW.feature_cutoff_at_ms<>OLD.feature_cutoff_at_ms OR NEW.scheduled_at_ms<>OLD.scheduled_at_ms) THEN
             RAISE EXCEPTION 'Selection Job period identity is immutable';
           END IF;
@@ -306,9 +320,9 @@ def _selection_job_epochs() -> None:
             RETURN NEW;
           END IF;
           SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=NEW.selection_spec_id;
-          IF NEW.selection_epoch_id='sor-v0' OR NEW.feature_cutoff_at_ms<>NEW.session_start_ms
-             OR NEW.scheduled_at_ms<>NEW.session_start_ms OR NEW.session_start_ms<=0
-             OR NEW.session_start_ms % (cadence*3600000::bigint)<>0 THEN
+          IF NEW.selection_epoch_id='sor-v0' OR NEW.feature_cutoff_at_ms<>NEW.period_anchor_ms
+             OR NEW.scheduled_at_ms<>NEW.period_anchor_ms OR NEW.period_anchor_ms<=0
+             OR NEW.period_anchor_ms % (cadence*3600000::bigint)<>0 THEN
             RAISE EXCEPTION 'Generic Job requires exact epoch/period';
           END IF;
           RETURN NEW;
@@ -356,13 +370,13 @@ def _typed_selection_snapshots(bind: sa.Connection) -> None:
         "AND (NOT selected OR selection_ready) AND (NOT retained OR selected) "
         "AND member_state=CASE WHEN selected THEN 'SELECTED' WHEN selection_ready THEN 'NOT_SELECTED' ELSE 'INELIGIBLE' END)")
     op.create_unique_constraint("uq_brc_selection_snapshot_family", snapshots,
-        ["selection_snapshot_id", "selection_spec_id", "selection_family", "session_start_ms", "feature_cutoff_at_ms"])
+        ["selection_snapshot_id", "selection_spec_id", "selection_family", "period_anchor_ms", "feature_cutoff_at_ms"])
     op.create_foreign_key("fk_brc_selection_member_parent_identity", members, snapshots,
-        ["selection_snapshot_id", "selection_spec_id", "selection_family", "session_start_ms", "feature_cutoff_at_ms"],
-        ["selection_snapshot_id", "selection_spec_id", "selection_family", "session_start_ms", "feature_cutoff_at_ms"])
+        ["selection_snapshot_id", "selection_spec_id", "selection_family", "period_anchor_ms", "feature_cutoff_at_ms"],
+        ["selection_snapshot_id", "selection_spec_id", "selection_family", "period_anchor_ms", "feature_cutoff_at_ms"])
     op.drop_constraint("uq_brc_instrument_selection_snapshots_period", snapshots, type_="unique")
     op.create_unique_constraint("uq_brc_instrument_selection_snapshots_period", snapshots,
-        ["selection_spec_id", "selection_epoch_id", "session_start_ms"])
+        ["selection_spec_id", "selection_epoch_id", "period_anchor_ms"])
     op.create_index("ix_brc_selection_snapshot_epoch_latest", snapshots,
         ["selection_spec_id", "selection_epoch_id", "feature_cutoff_at_ms"])
     op.execute(sa.text("""
@@ -381,8 +395,8 @@ def _typed_selection_snapshots(bind: sa.Connection) -> None:
           IF s.selection_family='sor_dynamic_v0' THEN RETURN NULL; END IF;
           SELECT * INTO payload FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=s.selection_spec_id;
           IF NOT FOUND THEN RAISE EXCEPTION 'Generic Spec not installed'; END IF;
-          IF s.feature_cutoff_at_ms<>s.session_start_ms OR s.session_start_ms<=0
-             OR s.session_start_ms % (payload.cadence_hours*3600000::bigint)<>0
+          IF s.feature_cutoff_at_ms<>s.period_anchor_ms OR s.period_anchor_ms<=0
+             OR s.period_anchor_ms % (payload.cadence_hours*3600000::bigint)<>0
              OR s.eligibility_not_before_ms<>s.feature_cutoff_at_ms+3600000
              OR s.expires_at_ms<>s.eligibility_not_before_ms+payload.cadence_hours*3600000::bigint
              OR s.decision_at_ms<s.feature_cutoff_at_ms OR s.source_observed_at_ms<s.decision_at_ms

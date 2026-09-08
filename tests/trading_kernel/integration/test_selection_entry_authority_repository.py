@@ -66,7 +66,7 @@ async def test_signal_repository_detects_vacuum_or_control_interruption(
                 entry_vacuum_id="vacuum:selection-entry-authority:test",
                 strategy_group_id="SOR-001",
                 selection_spec_id=SELECTION_SPEC_ID,
-                session_start_ms=SESSION_START_MS,
+                period_anchor_ms=SESSION_START_MS,
                 source_generation_id=None,
                 state="VALID_EMPTY",
                 fenced_at_ms=FIRST_ELIGIBLE_CLOSE_MS + 15,

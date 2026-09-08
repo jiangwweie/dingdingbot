@@ -59,6 +59,47 @@ TARGET_REVISION = "0008_generic_dynamic_selection_v1"
 
 
 @pytest.mark.asyncio
+async def test_period_column_rename_preserves_existing_sor_job_and_attempt_facts() -> None:
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    anchor = 1_704_067_200_000
+    jid = f"selection-job:sor-dynamic-selection-v0:{anchor}"
+    try:
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0005_tradfi_instrument_center")
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(account_id="period-source", runtime_commit="a"*40,
+                schema_revision="0005_tradfi_instrument_center", seeded_at_ms=anchor))
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("""
+                INSERT INTO brc_instrument_selection_jobs_current
+                (selection_job_id,selection_spec_id,session_start_ms,scheduled_at_ms,feature_cutoff_at_ms,state,
+                 selection_snapshot_id,first_blocker,attempt_count,next_retry_at_ms,lease_owner,lease_expires_at_ms,projection_version,updated_at_ms)
+                VALUES(:jid,'sor-dynamic-selection-v0',:anchor,:cutoff,:cutoff,'SOURCE_FAILED',NULL,'SOURCE_INCOMPLETE',1,NULL,NULL,NULL,3,:done)
+            """), {"jid":jid,"anchor":anchor,"cutoff":anchor+3600000,"done":anchor+3600010})
+            await conn.execute(sa.text("""
+                INSERT INTO brc_instrument_selection_attempts
+                (selection_attempt_id,selection_job_id,selection_spec_id,session_start_ms,worker_id,attempt_number,
+                 started_at_ms,completed_at_ms,outcome,reason_code,source_member_count,source_digest)
+                VALUES('attempt:source',:jid,'sor-dynamic-selection-v0',:anchor,'source-worker',1,:start,:done,'SOURCE_FAILED','SOURCE_INCOMPLETE',23,NULL)
+            """), {"jid":jid,"anchor":anchor,"start":anchor+3600000,"done":anchor+3600010})
+            before = {table: dict((await conn.execute(sa.text(f"SELECT * FROM {table}"))).mappings().one()) for table in (
+                "brc_instrument_selection_jobs_current", "brc_instrument_selection_attempts")}
+        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+        await engine.dispose()
+        async with engine.connect() as conn:
+            for table, original in before.items():
+                row = (await conn.execute(sa.text(f"SELECT * FROM {table}"))).mappings().one()
+                assert {key: row["period_anchor_ms" if key=="session_start_ms" else key] for key in original} == original
+                assert row["selection_epoch_id"] == "sor-v0"
+                assert "session_start_ms" not in row
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots")) == 0
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("invalid_source", [False, True])
 async def test_static_sor_baseline_has_exact_pair_and_hash_reconstruction_after_migration(invalid_source: bool) -> None:
     name, url = await create_empty_database()
@@ -339,6 +380,14 @@ async def test_certified_spec_installation_is_static_and_does_not_create_runtime
                 column["name"] for column in sa.inspect(sync).get_columns("brc_instrument_selection_snapshots")
             })
             assert {"selection_epoch_id", "predecessor_snapshot_id", "predecessor_member_digest"} <= columns
+            for table in ("brc_instrument_selection_jobs_current", "brc_instrument_selection_attempts",
+                "brc_instrument_selection_snapshots", "brc_instrument_selection_member_decisions",
+                "brc_strategy_universe_materialization_generations", "brc_strategy_entry_vacuums_current",
+                "brc_selection_authority_gap_audits_current", "brc_selection_session_authorities"):
+                period_columns = await conn.run_sync(lambda sync, name=table: {
+                    c["name"] for c in sa.inspect(sync).get_columns(name)
+                })
+                assert "period_anchor_ms" in period_columns and "session_start_ms" not in period_columns
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_control_current WHERE selection_mode<>'static_baseline' OR pending_selection_mode IS NOT NULL")) == 0
             for table in ("brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots","brc_strategy_universe_materialization_generations","brc_selection_session_authorities","brc_trade_tickets","brc_exchange_commands"):
                 assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0

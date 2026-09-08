@@ -144,7 +144,7 @@ async def test_first_dynamic_activation_stages_next_utc_session_with_owner_autho
             return current.model_copy(
                 update={
                     "pending_selection_mode": SelectionMode.DYNAMIC_SELECTION,
-                    "pending_effective_session_start_ms": kwargs[
+                    "pending_effective_period_anchor_ms": kwargs[
                         "effective_session_start_ms"
                     ],
                     "pending_authorization_id": kwargs["authorization_id"],
@@ -174,7 +174,7 @@ async def test_first_dynamic_activation_stages_next_utc_session_with_owner_autho
 
     assert staged.selection_mode is SelectionMode.STATIC_BASELINE
     assert staged.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-    assert staged.pending_effective_session_start_ms == 1_800_057_600_000
+    assert staged.pending_effective_period_anchor_ms == 1_800_057_600_000
     assert owner_controls.authorization is not None
     assert owner_controls.authorization.purpose == "selection_mode_change"
     assert owner_controls.authorization.authentication_strength == "totp_step_up"
@@ -442,7 +442,7 @@ def _selection_control() -> SelectionControl:
         selection_spec_id="sor-dynamic-selection-v0",
         selection_mode=SelectionMode.STATIC_BASELINE,
         pending_selection_mode=None,
-        pending_effective_session_start_ms=None,
+        pending_effective_period_anchor_ms=None,
         pending_authorization_id=None,
         control_version=1,
         rollback_baseline_id="rollback-baseline:SOR-001:pre-dynamic-v0",

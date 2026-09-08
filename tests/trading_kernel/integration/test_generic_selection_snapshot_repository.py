@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
@@ -22,12 +22,12 @@ from src.trading_kernel.domain.generic_selection_core import (
     GenericSelectionInput,
     compute_generic_selection,
 )
+from src.trading_kernel.domain.generic_selection_jobs import GenericSelectionJobClaim
 from src.trading_kernel.domain.generic_selection_spec import (
     SpecNumericInstallationEvidence,
 )
 from src.trading_kernel.domain.instrument_selection import (
     SelectionAttemptOutcome,
-    SelectionJobClaim,
     SelectionJobFailure,
 )
 from src.trading_kernel.domain.selection_authority import selected_member_set_digest
@@ -54,35 +54,23 @@ from tests.trading_kernel.support.generic_selection import (
     qualify_window,
     shift_window,
 )
-from tests.trading_kernel.support.postgres import (
-    create_empty_database,
-    drop_disposable_database,
-    run_alembic,
-)
 
 
 @pytest_asyncio.fixture
-async def database() -> AsyncIterator[AsyncEngine]:
-    name, url = await create_empty_database()
-    engine = create_async_engine(url)
-    try:
-        await asyncio.to_thread(run_alembic, url, "upgrade", CURRENT_SCHEMA_REVISION)
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(
-                account_id="generic-snapshot", runtime_commit="a" * 40,
-                schema_revision=CURRENT_SCHEMA_REVISION, seeded_at_ms=CUTOFF - HOUR,
+async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngine]:
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(
+            account_id="generic-snapshot", runtime_commit="a" * 40,
+            schema_revision=CURRENT_SCHEMA_REVISION, seeded_at_ms=CUTOFF - HOUR,
+        ))
+        for group in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"):
+            spec = inputs(group).spec
+            await uow.instrument_selection.install_generic_spec(spec, installed_at_ms=CUTOFF, certification=SpecNumericInstallationEvidence(
+                selection_spec_id=spec.selection_spec_id, algorithm_semantic_digest=spec.algorithm_semantic_digest,
+                checked_cutoffs=463 if spec.cadence_hours == 4 else 1852, mismatch_count=0, source_archive_count=96,
+                reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb", common_numeric_authority="PASS", sor_golden="PASS", spec_cert="PASS",
             ))
-            for group in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"):
-                spec = inputs(group).spec
-                await uow.instrument_selection.install_generic_spec(spec, installed_at_ms=CUTOFF, certification=SpecNumericInstallationEvidence(
-                    selection_spec_id=spec.selection_spec_id, algorithm_semantic_digest=spec.algorithm_semantic_digest,
-                    checked_cutoffs=463 if spec.cadence_hours == 4 else 1852, mismatch_count=0, source_archive_count=96,
-                    reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb", common_numeric_authority="PASS", sor_golden="PASS", spec_cert="PASS",
-                ))
-        yield engine
-    finally:
-        await engine.dispose()
-        await drop_disposable_database(name)
+    yield head_template_engine
 
 
 @pytest.mark.asyncio
@@ -184,11 +172,11 @@ async def test_direct_sql_cannot_bypass_snapshot_family_and_lineage_constraints(
         parent = dict((await conn.execute(sa.select(instrument_selection_snapshots))).mappings().one())
         members = [dict(row) for row in (await conn.execute(sa.select(instrument_selection_member_decisions))).mappings()]
     parent.update(selection_snapshot_id="selection:sql-child", predecessor_snapshot_id=first.selection_snapshot_id, predecessor_member_digest=first.member_set_digest)
-    for key in ("session_start_ms", "decision_at_ms", "feature_cutoff_at_ms", "eligibility_not_before_ms", "expires_at_ms", "source_observed_at_ms", "created_at_ms"):
+    for key in ("period_anchor_ms", "decision_at_ms", "feature_cutoff_at_ms", "eligibility_not_before_ms", "expires_at_ms", "source_observed_at_ms", "created_at_ms"):
         parent[key] += HOUR
     for member in members:
         member.update(selection_snapshot_id=parent["selection_snapshot_id"], member_decision_id=member["member_decision_id"] + ":next", retained=member["selected"])
-        for key in ("session_start_ms", "feature_cutoff_at_ms", "input_window_start_ms", "input_window_end_ms"):
+        for key in ("period_anchor_ms", "feature_cutoff_at_ms", "input_window_start_ms", "input_window_end_ms"):
             member[key] += HOUR
     if defect == "wrong_epoch": parent["selection_epoch_id"] = "epoch:2"
     elif defect == "wrong_digest": parent["predecessor_member_digest"] = "sha256:" + "f" * 64
@@ -338,7 +326,7 @@ async def test_generic_failed_source_is_not_empty_and_does_not_advance_desired(d
             selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:1",
             feature_cutoff_at_ms=CUTOFF, worker_id="source:failed", now_ms=CUTOFF + 1, lease_duration_ms=1000,
         )
-    assert isinstance(claim, SelectionJobClaim)
+    assert isinstance(claim, GenericSelectionJobClaim)
     async with PostgresKernelUnitOfWork(database) as uow:
         await uow.instrument_selection.complete_selection_failure(
             claim=claim, outcome=SelectionAttemptOutcome.SOURCE_FAILED, reason_code="SOURCE_INCOMPLETE",
@@ -355,7 +343,7 @@ async def test_generic_failed_source_is_not_empty_and_does_not_advance_desired(d
             selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:1",
             feature_cutoff_at_ms=CUTOFF + HOUR, worker_id="source:next", now_ms=CUTOFF + HOUR + 1, lease_duration_ms=1000,
         )
-        assert isinstance(later, SelectionJobClaim)
+        assert isinstance(later, GenericSelectionJobClaim)
         assert later.predecessor_snapshot_id is None
     async with database.connect() as conn:
         assert await conn.scalar(sa.select(sa.func.count()).select_from(instrument_selection_snapshots)) == 0
@@ -379,10 +367,10 @@ async def test_same_period_in_new_epoch_does_not_reuse_old_job_or_hysteresis(dat
             selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:2",
             feature_cutoff_at_ms=CUTOFF, worker_id="epoch:new", now_ms=CUTOFF + 2, lease_duration_ms=1000,
         )
-        assert isinstance(original, SelectionJobClaim) and isinstance(fresh, SelectionJobClaim)
+        assert isinstance(original, GenericSelectionJobClaim) and isinstance(fresh, GenericSelectionJobClaim)
         assert fresh.selection_job_id != original.selection_job_id
         assert fresh.predecessor_snapshot_id is None
-        assert await uow.instrument_selection.get_selection_job(selection_spec_id=source.spec.selection_spec_id, session_start_ms=CUTOFF, selection_epoch_id="epoch:2") is not None
+        assert await uow.instrument_selection.get_selection_job(selection_spec_id=source.spec.selection_spec_id, period_anchor_ms=CUTOFF, selection_epoch_id="epoch:2") is not None
 
 
 @pytest.mark.asyncio
@@ -393,13 +381,13 @@ async def test_generic_claim_rejects_live_lease_then_reclaims_without_stale_comp
         "feature_cutoff_at_ms": CUTOFF, "lease_duration_ms": 1000}
     async with PostgresKernelUnitOfWork(database) as uow:
         original = await uow.instrument_selection.claim_generic_selection_job(**arguments, worker_id="claim:old", now_ms=CUTOFF + 1)
-    assert isinstance(original, SelectionJobClaim)
+    assert isinstance(original, GenericSelectionJobClaim)
     with pytest.raises(SelectionJobConflict, match="live lease"):
         async with PostgresKernelUnitOfWork(database) as uow:
             await uow.instrument_selection.claim_generic_selection_job(**arguments, worker_id="claim:early", now_ms=CUTOFF + 20)
     async with PostgresKernelUnitOfWork(database) as uow:
         fresh = await uow.instrument_selection.claim_generic_selection_job(**arguments, worker_id="claim:new", now_ms=CUTOFF + 1001)
-    assert isinstance(fresh, SelectionJobClaim)
+    assert isinstance(fresh, GenericSelectionJobClaim)
     assert fresh.attempt_number == 2 and fresh.projection_version == original.projection_version + 1
     source = source.model_copy(update={"source_observed_at_ms": CUTOFF + 1010, "committed_at_ms": CUTOFF + 1020})
     snapshot = compute_generic_selection(source)
@@ -448,7 +436,7 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
         await conn.execute(sa.text("""
             INSERT INTO brc_strategy_universe_materialization_generations
             (materialization_generation_id,selection_spec_id,strategy_group_id,strategy_version_id,selection_mode,selection_snapshot_id,
-             rollback_baseline_id,session_start_ms,desired_member_count,semantic_digest,lifecycle_state,projection_version,created_at_ms)
+             rollback_baseline_id,period_anchor_ms,desired_member_count,semantic_digest,lifecycle_state,projection_version,created_at_ms)
             VALUES('generation:single',:spec,:sg,:version,'dynamic_selection',:snapshot,NULL,:cutoff,:count,:digest,'PENDING',1,:now)
         """), {"spec":source.spec.selection_spec_id,"sg":group,"version":source.spec.strategy_version_id,
             "snapshot":snapshot.selection_snapshot_id,"cutoff":CUTOFF,"count":len(snapshot.selected_members),"digest":"sha256:"+"a"*64,"now":CUTOFF+HOUR+1})
@@ -533,7 +521,7 @@ async def test_generic_runner_uses_full_source_outside_transaction_and_ends_at_s
         return timestamp
 
     request = RunInstrumentSelectionRequest(selection_spec_id=source_input.spec.selection_spec_id,
-        selection_epoch_id="epoch:1", session_start_ms=CUTOFF, worker_id="runner:generic")
+        selection_epoch_id="epoch:1", period_anchor_ms=CUTOFF, worker_id="runner:generic")
     market = Market()
     factory = lambda: ObservedUow(database)
     skipped = await run_instrument_selection_once(uow_factory=factory, market_source=market, request=request, clock_ms=clock)

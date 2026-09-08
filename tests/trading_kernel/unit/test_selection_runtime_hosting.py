@@ -134,7 +134,7 @@ async def test_pending_dynamic_selection_runtime_runs_only_for_its_exact_session
     control = _selection_control().model_copy(
         update={
             "pending_selection_mode": SelectionMode.DYNAMIC_SELECTION,
-            "pending_effective_session_start_ms": session_start_ms,
+            "pending_effective_period_anchor_ms": session_start_ms,
             "pending_authorization_id": "owner-authorization:selection:test",
         }
     )
@@ -572,9 +572,9 @@ class _ReadonlySelectionRepository:
         self,
         *,
         selection_spec_id: str,
-        session_start_ms: int,
+        period_anchor_ms: int,
     ):
-        self.calls.append(("job", selection_spec_id, session_start_ms))
+        self.calls.append(("job", selection_spec_id, period_anchor_ms))
 
     async def get_snapshot_disposition(
         self,
@@ -650,7 +650,7 @@ def _selection_control() -> SelectionControl:
         selection_spec_id="sor-dynamic-selection-v0",
         selection_mode=SelectionMode.STATIC_BASELINE,
         pending_selection_mode=None,
-        pending_effective_session_start_ms=None,
+        pending_effective_period_anchor_ms=None,
         pending_authorization_id=None,
         control_version=1,
         rollback_baseline_id="rollback-baseline:SOR-001:pre-dynamic-v0",

@@ -12,7 +12,10 @@ from src.trading_kernel.domain.selection_authority import (
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
     PostgresInstrumentSelectionRepository,
 )
-from src.trading_kernel.infrastructure.pg_models import instrument_selection_specs
+from src.trading_kernel.infrastructure.pg_models import (
+    instrument_selection_spec_events,
+    instrument_selection_specs,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
@@ -48,6 +51,10 @@ async def test_authority_and_current_pointer_round_trip_atomically(
                 installed_at_ms=1_704_067_200_000,
             )
         )
+        await connection.execute(sa.insert(instrument_selection_spec_events), [
+            {"selection_spec_id": "sor-dynamic-selection-v0", "event_spec_id": f"event_spec:SOR-001:SOR-{side.upper()}:v4", "position_side": side}
+            for side in ("long", "short")
+        ])
     authority = SelectionSessionAuthority(
         selection_authority_id="authority:test:1",
         selection_spec_id="sor-dynamic-selection-v0",

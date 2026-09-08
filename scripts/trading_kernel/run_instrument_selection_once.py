@@ -49,7 +49,7 @@ async def _run(args: argparse.Namespace) -> int:
             market_source=market_source,
             request=RunInstrumentSelectionRequest(
                 selection_spec_id=args.selection_spec_id,
-                session_start_ms=args.session_start_ms,
+                period_anchor_ms=args.session_start_ms,
                 worker_id=args.worker_id,
                 max_concurrency=args.max_concurrency,
             ),

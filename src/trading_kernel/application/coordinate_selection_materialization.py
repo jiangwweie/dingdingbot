@@ -557,7 +557,7 @@ async def coordinate_selection_materialization_once(
             and selection_control.selection_mode is SelectionMode.STATIC_BASELINE
             and selection_control.pending_selection_mode
             is SelectionMode.DYNAMIC_SELECTION
-            and selection_control.pending_effective_session_start_ms
+            and selection_control.pending_effective_period_anchor_ms
             == request.session_start_ms
         ):
             previous_generation = (
@@ -791,7 +791,7 @@ async def coordinate_selection_materialization_once(
             selection_mode=selection_control.selection_mode,
             pending_selection_mode=selection_control.pending_selection_mode,
             pending_effective_session_start_ms=(
-                selection_control.pending_effective_session_start_ms
+                selection_control.pending_effective_period_anchor_ms
             ),
             owner_entry_state=owner_control.entry_state,
             current_long_members=long_members,
@@ -2231,7 +2231,7 @@ def _selection_control_allows_gap_completion(
         or (
             control.selection_mode is SelectionMode.STATIC_BASELINE
             and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-            and control.pending_effective_session_start_ms == session_start_ms
+            and control.pending_effective_period_anchor_ms == session_start_ms
             and control.pending_authorization_id is not None
         )
     )

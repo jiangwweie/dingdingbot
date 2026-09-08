@@ -395,7 +395,7 @@ async def read_controls(request: Request) -> ControlsResponse:
                     else dynamic_selection.pending_selection_mode.value
                 ),
                 "pending_effective_session_start_ms": (
-                    dynamic_selection.pending_effective_session_start_ms
+                    dynamic_selection.pending_effective_period_anchor_ms
                 ),
                 "control_version": dynamic_selection.control_version,
             },

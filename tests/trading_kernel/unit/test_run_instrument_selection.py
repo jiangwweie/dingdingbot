@@ -168,7 +168,7 @@ async def test_runner_performs_all_network_io_outside_transactions() -> None:
         market_source=source,
         request=RunInstrumentSelectionRequest(
             selection_spec_id=SELECTION_SPEC_ID,
-            session_start_ms=SESSION_START_MS,
+            period_anchor_ms=SESSION_START_MS,
             worker_id="selection-worker:test",
         ),
         clock_ms=_Clock(SESSION_START_MS + 60 * 60 * 1000),
@@ -194,7 +194,7 @@ async def test_runner_records_whole_attempt_failure_and_zero_snapshot() -> None:
         market_source=source,
         request=RunInstrumentSelectionRequest(
             selection_spec_id=SELECTION_SPEC_ID,
-            session_start_ms=SESSION_START_MS,
+            period_anchor_ms=SESSION_START_MS,
             worker_id="selection-worker:test",
         ),
         clock_ms=_Clock(SESSION_START_MS + 60 * 60 * 1000),

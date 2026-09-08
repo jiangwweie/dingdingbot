@@ -260,7 +260,7 @@ class SelectionControl(BaseModel):
     selection_spec_id: str
     selection_mode: SelectionMode
     pending_selection_mode: SelectionMode | None
-    pending_effective_session_start_ms: int | None
+    pending_effective_period_anchor_ms: int | None
     pending_authorization_id: str | None
     control_version: int
     rollback_baseline_id: str | None
@@ -289,7 +289,7 @@ class SelectionControl(BaseModel):
     def _validate_selection_control(self) -> SelectionControl:
         pending_values = (
             self.pending_selection_mode,
-            self.pending_effective_session_start_ms,
+            self.pending_effective_period_anchor_ms,
             self.pending_authorization_id,
         )
         if any(value is None for value in pending_values) != all(
@@ -300,8 +300,8 @@ class SelectionControl(BaseModel):
             raise ValueError("Selection Control version and time must be positive")
         cadence = DAY_MS if self.strategy_group_id == "SOR-001" else generic_selection_spec(self.strategy_group_id).cadence_hours * HOUR_MS
         if (
-            self.pending_effective_session_start_ms is not None
-            and self.pending_effective_session_start_ms % cadence != 0
+            self.pending_effective_period_anchor_ms is not None
+            and self.pending_effective_period_anchor_ms % cadence != 0
         ):
             raise ValueError("pending Selection mode must target exact UTC period")
         if self.strategy_group_id == "SOR-001":

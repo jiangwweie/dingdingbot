@@ -235,7 +235,7 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
             )
             assert selection.selection_mode is SelectionMode.STATIC_BASELINE
             assert selection.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-            assert selection.pending_effective_session_start_ms == 1_800_057_600_000
+            assert selection.pending_effective_period_anchor_ms == 1_800_057_600_000
 
         assert await load_dynamic_selection_candidate_probe_manifest(database_url) == tuple(
             sorted(

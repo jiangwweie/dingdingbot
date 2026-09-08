@@ -44,8 +44,8 @@ further_feature_research = CLOSED
 | --- | --- | --- |
 | 数值证据 | 96份原始1h ZIP哈希逐一验证；从冻结commit重建research函数并核对artifact完整排序；CPM/BRF2各463、MPG/MI各1852 cutoff的决策集合零差异；SOR961×24 Core verified | exact最终candidate再次认证，认证证据与受审安装集合绑定 |
 | GS-01/03边界补强 | 跨comparison revision旧token拒绝、same-close checkpoint幂等；miss按period计算，可重放/跨缺失period；effective前及deadline后ENTRY拒绝 | runtime cursor/Owner/freshness全链集成 |
-| GS-04迁移切片 | 本地0007→0008比较来源保全；缺源在schema写入前STOP；Authority、Generation previous及Static baseline的pair列迁至Event引用行后删除；Spec typed payload及静态安装；Snapshot/member typed事实；Job/Attempt epoch及复合FK；Control/Generation来源身份与Event shape校验，保留SOR≤7，新Generic单Event Schema容纳≤16 | 通用`period_anchor_ms`迁移；Generic Generation epoch/source/运行时模型；完整logical preservation、真实source/target首根及后续Signal差分、role grants、Owner epoch正式转换边界 |
-| GS-04/05回归 | 上轮源适配器/PG组合152 passed；本轮相关PG132 passed，后加baseline来源正负例2 passed；Generation identity guard后四策略Schema4 passed、SOR Materialization77 passed；Unit+Architecture1168 passed；Ruff及全生产源码Mypy通过 | 完整PG/Full-chain和source verifier升级，不是R4 PASS；分批数字有重叠，不能相加冒充完整release计数 |
+| GS-04迁移切片 | 本地0007→0008比较来源保全；缺源在schema写入前STOP；Authority、Generation previous及Static baseline的pair列迁至Event引用行后删除；8张通用表迁为`period_anchor_ms`、Control pending period列迁移；Spec typed payload及静态安装；Job/Attempt epoch与复合FK；Control/Generation身份和Event shape校验，保留SOR≤7，新Generic单Event Schema容纳≤16 | Generic Generation epoch/source/运行时模型；完整logical preservation、真实source/target首根及后续Signal差分、role grants、Owner epoch正式转换边界 |
+| GS-04/05回归 | 最新相关PG139 passed；Generic迁移9 passed，后加旧SOR Job/Attempt逐字段保全1 passed；Unit+Architecture1169 passed；Golden来源/输入完整性与Core961×24 parity均通过；Ruff及源码/脚本Mypy通过 | 完整PG/Full-chain和source verifier升级，不是R4 PASS；分批数字有重叠，不能相加冒充完整release计数 |
 | 纯Selection合同与持久化 | Candidate24/cutoff、公式、Desired predecessor/hysteresis；四策略exact roundtrip、EMPTY不补位；锁定Spec进行前驱CAS；共享Job lease/完成/失败逻辑；Generic commit再验Control version、epoch、lease、前驱与有效期；Static零Job；源失败不推进前驱，新epoch不继承旧Job；正式Runner Spec dispatch、raw public 1h OHLCV、Product资格事实与digest，取数在事务外 | Job EXPIRED/SUPERSEDED终态与bounded调度、source retry/lease fault完整认证；直接SQL并发分叉/跨事务链认证、三Plane调度；GS-05未完成 |
 | GS-06～09 | 现有SOR读路径已随schema切片接线 | Generic comparison/Observation、Warming、Vacuum/authority、Claim/Ticket/dispatch完整集成未完成 |
 
@@ -53,7 +53,7 @@ further_feature_research = CLOSED
 
 本次Snapshot持久化切片以`d34f4f948e7d6adccb8e92bf213f8a70b2c48ebd`为父提交。测试命令为`.venv/bin/python -m pytest <targets> -q -o addopts=--tb=short`，targets分别是`test_generic_selection_snapshot_repository.py`、`test_generic_dynamic_selection_migration.py + test_selection_materialization_repository.py`、`test_instrument_selection_runner.py`及完整`unit + architecture`目录。共享测试输入已移至`tests/trading_kernel/support/generic_selection.py`，不让测试模块互相成为fixture API。
 
-Generic Snapshot/member semantic digest改为固定Decimal38上下文中的数值规范化，消除PostgreSQL将`-0`读为`0`、指数形式转为普通数字导致的虚假digest冲突；负零、正指数及38位精度已有真实PG回归。仅未发布Generic事实编码发生修正，SOR Golden和研究artifact不改写，公式/排名/成员集不变；最终candidate仍必须重新认证。**时间字段偏差校正：当前暂用`session_start_ms`表示Generic cutoff只属于未完成实现，不能作为最终设计。冻结设计§8.2要求通用身份迁为`period_anchor_ms`，仅SOR subtype还原原Session序列化；这项迁移仍须完成，不允许靠台账文字改写设计。**
+Generic Snapshot/member semantic digest改为固定Decimal38上下文中的数值规范化，消除PostgreSQL将`-0`读为`0`、指数形式转为普通数字导致的虚假digest冲突；负零、正指数及38位精度已有真实PG回归。仅未发布Generic事实编码发生修正，SOR Golden和研究artifact不改写，公式/排名/成员集不变；最终candidate仍必须重新认证。**时间字段偏差已在实现中修正：8张通用表只存`period_anchor_ms`，Control只存`pending_effective_period_anchor_ms`；没有旧列、双写或schema fallback。通用Job record、Generic Claim及Runner request采用period字段，SOR专属Snapshot/Authority/Claim在序列化边界保留冻结Session语义。**
 
 后续Job/epoch切片以`96be356022cff59f680a28c2fbd3128b9f006f5d`为父提交，沿用上述PG targets并增加同模块内claim/complete/恢复测试。Generic与SOR复用`_claim_selection_job_row`、`_mark_snapshot_ready`、`_append_attempt`及原表，不增加第二条job队列。Generic Source失败保持明确失败结果，不能写为EMPTY；过期lease接管后旧callback被拒。这里的Dynamic Control测试是本地repository prerequisite，由隔离fixture建立，不是Owner API/TOTP/首次activation验收，也不形成任何交易授权。
 
@@ -64,6 +64,12 @@ Generic Snapshot/member semantic digest改为固定Decimal38上下文中的数�
 Event baseline归一化切片以`085ca0db`为父提交：Generation previous与Static rollback各自拥有不可变Event→Universe引用，不复制member rows；previous支持ACTIVE/EMPTY、member digest和必要comparison引用。原四个LONG/SHORT列已从物理Schema删除，SOR通过当前Event行还原其已有pair序列化，不读取旧schema。Root Generation的source identity不可改写，lease/lifecycle仍按原CAS推进。Static SOR baseline用冻结0006 helper在本地0007源构造，0008后逐字段还原含原semantic hash；错置方向的源引用在目标DDL前以`BASELINE_SOURCE_MISMATCH`拒绝。此证据仅覆盖所述baseline，不替代全量Generation/Ticket/History source manifest。
 
 四个新策略均有单Event Schema正例与previous引用不可变负例，MPG/MI携带比较定义引用，BRF2没有伪造LONG。该测试的Active Universe是隔离schema prerequisite，不是Warming或Owner activation认证。Generic Generation暂不能由SOR pair decoder消费，显式拒绝，待通用运行时模型接线。旧“修改冻结previous pair”的测试已改为实际current Universe漂移；系统先以`DYNAMIC_PREDECESSOR_AUTHORITY_DRIFT`阻断，冻结的Generation引用保持不变，未放松生产约束。
+
+Period迁移切片以`4ab456c2`为父提交。ALTER COLUMN保留原值、ID、hash、索引/约束关系；本地0007已有SOR失败Job/Attempt在0008后逐字段还原，新增epoch默认值仅为`sor-v0`，不新建Snapshot。PG模型及执行查询均不再引用旧物理Session列；SOR专属DTO通过显式值映射读写新列，既有SOR Owner API字段仍由其专属view输出。新Generic Claim放在`generic_selection_jobs.py`，与仍使用的SOR Claim共用一个Job表和lease实现，不形成第二执行链。
+
+本次曾发现通用Job变更导致Golden整文件来源hash失败；未改写Golden或校验器。现将SOR `instrument_selection.py`保持为Golden所冻结的原始源码（其SOR Claim仍被正式路径使用），Generic Job类型独立，严格来源hash检查重新通过。`verify_sor_dynamic_selection_golden.py verify --verify-inputs`与`verify_sor_dynamic_selection_core_parity.py`均验证同一961×24 artifact；没有跳过来源门槛。Generic PG fixture改用现有每测试独立的head-template clone，保留隔离与全部断言，避免每个case重复执行完整迁移。
+
+本轮139项PG命令覆盖Generic Snapshot/Job/Runner、SOR Runner、Materialization、Entry Authority和Vacuum drain；迁移与来源验证另跑。历史0005→0006测试中当前runtime对旧schema的调用仍需在source/release测试维护中分离，不增加旧schema运行兼容。上述结果不代替完整source manifest与GS-06～09的Generic运行时验收。
 
 ### 2.2 初始计划基线
 

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from src.trading_kernel.application.run_instrument_selection import (
+    RunInstrumentSelectionRequest,
+)
 from src.trading_kernel.domain.dynamic_selection_timing import (
     DynamicMembershipState,
     build_current_final_close_grant_proof,
@@ -9,6 +12,13 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     build_generic_selection_period,
     confirm_dynamic_membership_snapshot,
     record_dynamic_selection_miss,
+)
+from src.trading_kernel.domain.generic_selection_jobs import (
+    GenericSelectionJobClaim,
+    selection_job_identity,
+)
+from src.trading_kernel.domain.instrument_selection import (
+    SelectionJobClaim,
 )
 
 
@@ -42,6 +52,27 @@ def test_one_hour_membership_allows_one_missed_period_but_not_two() -> None:
     assert first_miss.allows_new_entry_at(6 * 60 * 60 * 1000 - 1) is True
     assert second_miss.state is DynamicMembershipState.SELECTION_STALE_PAUSED
     assert second_miss.allows_new_entry_at(7 * 60 * 60 * 1000) is False
+
+
+def test_shared_selection_clock_has_no_session_alias_and_preserves_sor_job_id() -> None:
+    anchor = 1_704_067_200_000
+    spec_id = "sor-dynamic-selection-v0"
+    claim = SelectionJobClaim(selection_job_id=selection_job_identity(spec_id, anchor), selection_spec_id=spec_id,
+        session_start_ms=anchor, worker_id="clock-test", attempt_number=1, projection_version=2,
+        started_at_ms=anchor+3_600_000, lease_expires_at_ms=anchor+3_600_001)
+    assert claim.selection_job_id == f"selection-job:{spec_id}:{anchor}"
+    assert claim.session_start_ms == anchor
+    generic_id = "MI_POSITIVE_IMPULSE_RECENCY_V0"
+    generic = GenericSelectionJobClaim(selection_job_id=selection_job_identity(generic_id, anchor, "epoch:1"),
+        selection_spec_id=generic_id, period_anchor_ms=anchor, worker_id="clock-test", attempt_number=1, projection_version=2,
+        started_at_ms=anchor+1, lease_expires_at_ms=anchor+1000, selection_epoch_id="epoch:1", selection_control_version=1)
+    assert generic.period_anchor_ms == anchor and "session_start_ms" not in generic.model_dump()
+    request = RunInstrumentSelectionRequest(selection_spec_id=spec_id, period_anchor_ms=anchor, worker_id="clock-test")
+    assert request.period_anchor_ms == anchor
+    payload = request.model_dump()
+    payload["session_start_ms"] = payload.pop("period_anchor_ms")
+    with pytest.raises(ValueError):
+        RunInstrumentSelectionRequest.model_validate(payload)
 
 
 def test_fresh_snapshot_cannot_refresh_membership_before_effective_period() -> None:
