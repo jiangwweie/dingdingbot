@@ -26,6 +26,9 @@ from src.trading_kernel.domain.generic_selection_core import (
     GenericSelectionMemberDecision,
     GenericSelectionSnapshotV1,
 )
+from src.trading_kernel.domain.generic_selection_source import (
+    GenericSelectionQualification,
+)
 from src.trading_kernel.domain.generic_selection_spec import (
     GenericSelectionSpecV1,
     SpecNumericInstallationEvidence,
@@ -175,9 +178,13 @@ class PostgresInstrumentSelectionRepository:
             exchange_instrument_id=member["exchange_instrument_id"], feature_value=member["feature_value"],
             stable_rank=member["stable_rank"], qualified=member["selection_ready"], selected=member["selected"],
             retained=member["retained"], input_window_digest=member["input_window_digest"],
+            qualification=GenericSelectionQualification.model_validate(member["qualification_fact"]),
         ) for member in rows)
         if any(member.semantic_digest != row["member_semantic_digest"] for member, row in zip(members, rows, strict=True)):
             raise SelectionJobConflict("Generic member semantic digest differs")
+        if any(member.qualification_semantic_digest != row["qualification_semantic_digest"] or member.qualification_reason != row["primary_reason"]
+               for member, row in zip(members, rows, strict=True)):
+            raise SelectionJobConflict("Generic qualification fact digest or reason differs")
         snapshot = GenericSelectionSnapshotV1(
             selection_snapshot_id=selection_snapshot_id, selection_spec_id=spec.selection_spec_id,
             strategy_group_id=spec.strategy_group_id, spec_semantic_digest=spec.algorithm_semantic_digest,
@@ -248,12 +255,14 @@ class PostgresInstrumentSelectionRepository:
             "member_decision_id": "selection-member:" + canonical_digest({"snapshot": snapshot.selection_snapshot_id, "member": member.exchange_instrument_id})[7:],
             "selection_spec_id": spec.selection_spec_id, "session_start_ms": snapshot.feature_cutoff_at_ms,
             "feature_cutoff_at_ms": snapshot.feature_cutoff_at_ms,
-            "input_window_start_ms": snapshot.feature_cutoff_at_ms - (spec.window_bars - 1) * 3600000,
+            "input_window_start_ms": snapshot.feature_cutoff_at_ms - spec.window_bars * 3600000,
             "input_window_end_ms": snapshot.feature_cutoff_at_ms,
             "exchange_instrument_id": member.exchange_instrument_id, "input_window_digest": member.input_window_digest,
             "selection_family": "generic_dynamic_v1", "source_status": "READY",
             "feature_value": member.feature_value, "retained": member.retained,
-            "selection_ready": member.qualified, "primary_reason": None, "secondary_reasons": [],
+            "selection_ready": member.qualified, "primary_reason": member.qualification_reason, "secondary_reasons": [],
+            "qualification_fact": member.qualification.model_dump(mode="json"),
+            "qualification_semantic_digest": member.qualification_semantic_digest,
             "stable_rank": member.stable_rank, "member_state": "SELECTED" if member.selected else "NOT_SELECTED" if member.qualified else "INELIGIBLE",
             "selected": member.selected, "member_semantic_digest": member.semantic_digest,
         } for member in snapshot.members])
@@ -281,6 +290,16 @@ class PostgresInstrumentSelectionRepository:
         if spec.algorithm_semantic_digest != row["algorithm_semantic_digest"]:
             raise ValueError("Generic Selection Spec semantic identity differs")
         return spec
+
+    async def get_selection_product_profiles(self, selection_spec_id: str) -> tuple[InstrumentProductProfile, ...]:
+        rows = (await self._connection.execute(sa.select(instrument_product_profiles).join(
+            instrument_selection_spec_members, instrument_selection_spec_members.c.exchange_instrument_id == instrument_product_profiles.c.exchange_instrument_id,
+        ).where(instrument_selection_spec_members.c.selection_spec_id == selection_spec_id)
+            .order_by(instrument_product_profiles.c.exchange_instrument_id).limit(24))).mappings().all()
+        profiles = tuple(InstrumentProductProfile.model_validate({key: row[key] for key in InstrumentProductProfile.model_fields}) for row in rows)
+        if any(profile.semantic_digest != row["semantic_digest"] for profile, row in zip(profiles, rows, strict=True)):
+            raise ValueError("Selection Product profile semantic digest differs")
+        return profiles
 
     async def install_generic_spec(self, spec: GenericSelectionSpecV1, *, installed_at_ms: int,
                                    certification: SpecNumericInstallationEvidence) -> None:

@@ -10,7 +10,12 @@ from typing import Protocol
 
 from src.trading_kernel.application.market_ports import (
     ClosedCandleRequest,
+    GenericSelectionKlineRequest,
     SelectionKlineRequest,
+)
+from src.trading_kernel.domain.generic_selection_source import (
+    GenericSelectionCandle,
+    GenericSelectionQualification,
 )
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
@@ -22,7 +27,10 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionSourceIntegrityError,
 )
 from src.trading_kernel.domain.market import ClosedCandle, Timeframe
-from src.trading_kernel.domain.product import ProductSessionSnapshot
+from src.trading_kernel.domain.product import (
+    InstrumentProductProfile,
+    ProductSessionSnapshot,
+)
 from src.trading_kernel.infrastructure.binance_product_snapshot import (
     parse_binance_product_snapshots,
 )
@@ -150,6 +158,43 @@ class CcxtBinancePublicMarketSource:
             )
         return klines
 
+    async def fetch_generic_selection_klines(self, request: GenericSelectionKlineRequest) -> tuple[GenericSelectionCandle, ...]:
+        request = GenericSelectionKlineRequest.model_validate(request.model_dump())
+        identity = parse_binance_usdm_instrument_id(request.exchange_instrument_id)
+        response = await self._raw_public(self._exchange.fapiPublicGetKlines, {
+            "symbol": identity.symbol, "interval": "1h", "startTime": request.input_window_start_ms,
+            "endTime": request.feature_cutoff_at_ms - 1, "limit": request.expected_bars,
+        })
+        if not isinstance(response, list) or len(response) != request.expected_bars:
+            raise SelectionSourceIntegrityError("Generic Selection source window is incomplete")
+        candles = tuple(_parse_generic_selection_row(row) for row in response)
+        if tuple(c.open_time_ms for c in candles) != tuple(request.input_window_start_ms + i * 3600000 for i in range(request.expected_bars)):
+            raise SelectionSourceIntegrityError("Generic Selection source has duplicate, future or irregular candles")
+        return candles
+
+    async def fetch_generic_selection_qualifications(
+        self, *, event_spec_id: str, product_profiles: tuple[InstrumentProductProfile, ...], observed_at_ms: int,
+    ) -> tuple[GenericSelectionQualification, ...]:
+        if len(product_profiles) != 24 or len({p.exchange_instrument_id for p in product_profiles}) != 24:
+            raise SelectionSourceIntegrityError("Generic qualification requires complete Candidate24 profiles")
+        response = await self._raw_public(self._exchange.fapiPublicGetExchangeInfo, {})
+        if not isinstance(response, Mapping) or not isinstance(response.get("symbols"), list):
+            raise SelectionSourceIntegrityError("Generic qualification lacks venue product facts")
+        requested = {parse_binance_usdm_instrument_id(p.exchange_instrument_id).symbol for p in product_profiles}
+        selected = [row for row in response["symbols"] if isinstance(row, Mapping) and row.get("symbol") in requested]
+        if len(selected) != 24 or len({row["symbol"] for row in selected}) != 24:
+            raise SelectionSourceIntegrityError("Generic qualification has missing or duplicate venue members")
+        by_symbol = {row["symbol"]: row for row in selected}
+        result = []
+        for profile in product_profiles:
+            row = by_symbol[parse_binance_usdm_instrument_id(profile.exchange_instrument_id).symbol]
+            result.append(GenericSelectionQualification.model_validate({
+                "event_spec_id": event_spec_id, "product_profile": profile,
+                "venue_contract_type": row.get("contractType"), "venue_margin_asset": row.get("marginAsset"),
+                "venue_status": row.get("status"), "observed_at_ms": observed_at_ms,
+            }))
+        return tuple(result)
+
     async def fetch_product_sessions(
         self,
         exchange_instrument_ids: tuple[str, ...],
@@ -262,3 +307,15 @@ def _parse_selection_row(row: object) -> SelectionKline:
         close=Decimal(row[4]),
         quote_volume=Decimal(row[7]),
     )
+
+
+def _parse_generic_selection_row(row: object) -> GenericSelectionCandle:
+    if not isinstance(row, (list, tuple)) or len(row) < 8:
+        raise SelectionSourceIntegrityError("Generic raw Kline row is malformed")
+    if any(not isinstance(row[i], str) for i in (1, 2, 3, 4, 5, 7)):
+        raise SelectionSourceIntegrityError("Generic raw OHLCV must enter from decimal strings")
+    if type(row[0]) is not int or type(row[6]) is not int or row[6] != row[0] + 3600000 - 1:
+        raise SelectionSourceIntegrityError("Generic raw Kline close boundary is invalid")
+    return GenericSelectionCandle(open_time_ms=row[0], close_time_ms=row[6]+1,
+        open=Decimal(row[1]), high=Decimal(row[2]), low=Decimal(row[3]), close=Decimal(row[4]),
+        base_volume=Decimal(row[5]), quote_volume=Decimal(row[7]))

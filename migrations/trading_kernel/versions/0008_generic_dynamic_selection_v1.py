@@ -159,14 +159,19 @@ def _typed_selection_snapshots(bind: sa.Connection) -> None:
         op.alter_column(members, column, nullable=True)
     op.add_column(members, sa.Column("feature_value", sa.Numeric(), nullable=True))
     op.add_column(members, sa.Column("retained", sa.Boolean(), nullable=True))
+    op.add_column(members, sa.Column("qualification_fact", sa.dialects.postgresql.JSONB(), nullable=True))
+    op.add_column(members, sa.Column("qualification_semantic_digest", DIGEST, nullable=True))
     sor_shape = " AND ".join(f"{column} IS NOT NULL" for column in geometry)
     generic_shape = " AND ".join(f"{column} IS NULL" for column in geometry)
     op.create_check_constraint("ck_brc_selection_member_family_payload", members,
-        f"(selection_family='sor_dynamic_v0' AND {sor_shape} AND feature_value IS NULL AND retained IS NULL) OR "
+        f"(selection_family='sor_dynamic_v0' AND {sor_shape} AND feature_value IS NULL AND retained IS NULL AND qualification_fact IS NULL AND qualification_semantic_digest IS NULL) OR "
         f"(selection_family='generic_dynamic_v1' AND {generic_shape} AND feature_value IS NOT NULL "
         "AND feature_value NOT IN ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric) "
         "AND retained IS NOT NULL AND stable_rank IS NOT NULL AND stable_rank BETWEEN 1 AND 24 "
-        "AND primary_reason IS NULL AND secondary_reasons='[]'::jsonb "
+        "AND qualification_fact IS NOT NULL AND jsonb_typeof(qualification_fact)='object' "
+        "AND qualification_semantic_digest IS NOT NULL AND qualification_semantic_digest ~ '^sha256:[0-9a-f]{64}$' "
+        "AND ((selection_ready AND primary_reason IS NULL) OR (NOT selection_ready AND primary_reason IS NOT NULL AND primary_reason IN "
+        "('PRODUCT_PROFILE_INCOMPATIBLE','VENUE_PRODUCT_INCOMPATIBLE','VENUE_NOT_TRADING'))) AND secondary_reasons='[]'::jsonb "
         "AND (NOT selected OR selection_ready) AND (NOT retained OR selected) "
         "AND member_state=CASE WHEN selected THEN 'SELECTED' WHEN selection_ready THEN 'NOT_SELECTED' ELSE 'INELIGIBLE' END)")
     op.create_unique_constraint("uq_brc_selection_snapshot_family", snapshots,
@@ -220,7 +225,7 @@ def _typed_selection_snapshots(bind: sa.Connection) -> None:
               FROM brc_instrument_selection_member_decisions m WHERE selection_snapshot_id=s.selection_snapshot_id
             ) ranked WHERE stable_rank<>expected_rank
               OR input_window_end_ms<>s.feature_cutoff_at_ms
-              OR input_window_start_ms<>s.feature_cutoff_at_ms-(payload.window_bars-1)*3600000::bigint
+              OR input_window_start_ms<>s.feature_cutoff_at_ms-payload.window_bars*3600000::bigint
               OR retained IS DISTINCT FROM (selection_ready AND stable_rank<=payload.retain_rank AND EXISTS (
                 SELECT 1 FROM brc_instrument_selection_member_decisions p
                 WHERE p.selection_snapshot_id=s.predecessor_snapshot_id AND p.exchange_instrument_id=ranked.exchange_instrument_id AND p.selected))

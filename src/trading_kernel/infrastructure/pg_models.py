@@ -801,6 +801,8 @@ instrument_selection_member_decisions = sa.Table(
     sa.Column("selection_family", sa.String(40), nullable=False, server_default="sor_dynamic_v0"),
     sa.Column("feature_value", SELECTION_DECIMAL, nullable=True),
     sa.Column("retained", sa.Boolean, nullable=True),
+    sa.Column("qualification_fact", JSONB, nullable=True),
+    sa.Column("qualification_semantic_digest", sa.String(71), nullable=True),
     sa.Column("or_high", SELECTION_DECIMAL, nullable=True),
     sa.Column("or_low", SELECTION_DECIMAL, nullable=True),
     sa.Column("or_width", SELECTION_DECIMAL, nullable=True),

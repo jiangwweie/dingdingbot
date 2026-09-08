@@ -9,6 +9,10 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.trading_kernel.application.run_instrument_selection import (
+    RunInstrumentSelectionRequest,
+    run_instrument_selection_once,
+)
 from src.trading_kernel.domain.generic_selection_core import (
     GenericSelectionInput,
     compute_generic_selection,
@@ -37,7 +41,13 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
-from tests.trading_kernel.support.generic_selection import CUTOFF, HOUR, inputs
+from tests.trading_kernel.support.generic_selection import (
+    CUTOFF,
+    HOUR,
+    inputs,
+    qualify_window,
+    shift_window,
+)
 from tests.trading_kernel.support.postgres import (
     create_empty_database,
     drop_disposable_database,
@@ -94,7 +104,7 @@ def next_input(source: GenericSelectionInput) -> GenericSelectionInput:
         "decision_at_ms": source.decision_at_ms + step,
         "source_observed_at_ms": source.source_observed_at_ms + step,
         "committed_at_ms": source.committed_at_ms + step,
-        "member_windows": tuple(member.model_copy(update={"closed_at_ms": tuple(t + step for t in member.closed_at_ms)}) for member in source.member_windows),
+        "member_windows": tuple(shift_window(member, step) for member in source.member_windows),
         "predecessor_snapshot": compute_generic_selection(source),
     })
 
@@ -141,7 +151,7 @@ async def test_snapshot_predecessor_is_exact_latest_desired_not_active_universe(
 @pytest.mark.asyncio
 async def test_conflicting_same_period_writers_commit_exactly_one_snapshot(database: AsyncEngine) -> None:
     source = inputs("CPM-RO-001")
-    other = source.model_copy(update={"member_windows": tuple(m.model_copy(update={"qualified": False}) for m in source.member_windows)})
+    other = source.model_copy(update={"member_windows": tuple(qualify_window(m, False) for m in source.member_windows)})
 
     async def persist(candidate: GenericSelectionInput) -> str:
         try:
@@ -195,7 +205,7 @@ async def test_direct_sql_cannot_bypass_snapshot_family_and_lineage_constraints(
 async def test_generic_snapshot_empty_preserves_qualification_without_backfill(database: AsyncEngine) -> None:
     source = inputs("CPM-RO-001")
     source = source.model_copy(update={"member_windows": tuple(
-        member.model_copy(update={"qualified": index >= 16}) for index, member in enumerate(source.member_windows)
+        qualify_window(member, index >= 16) for index, member in enumerate(source.member_windows)
     )})
     snapshot = compute_generic_selection(source)
     async with PostgresKernelUnitOfWork(database) as uow:
@@ -402,3 +412,105 @@ async def test_control_cannot_point_at_another_strategys_selection_spec(database
             await conn.execute(sa.update(strategy_selection_control_current).where(
                 strategy_selection_control_current.c.strategy_group_id == "MI-001",
             ).values(selection_spec_id=inputs("MPG-001").spec.selection_spec_id))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group,defect", [("CPM-RO-001", None), ("MPG-001", None), ("MI-001", None), ("BRF2-001", None),
+    ("CPM-RO-001", "missing"), ("CPM-RO-001", "empty"), ("CPM-RO-001", "flat"), ("CPM-RO-001", "unknown"), ("CPM-RO-001", "control_changed")])
+async def test_generic_runner_uses_full_source_outside_transaction_and_ends_at_snapshot(database: AsyncEngine, group: str, defect: str | None) -> None:
+    source_input = inputs(group)
+    if defect == "empty":
+        source_input = source_input.model_copy(update={"member_windows": tuple(qualify_window(w, False) for w in source_input.member_windows)})
+    elif defect == "flat":
+        source_input = source_input.model_copy(update={"member_windows": tuple(w.model_copy(update={"candles": tuple(
+            c.model_copy(update={"close": Decimal(100)}) for c in w.candles)}) for w in source_input.member_windows)})
+    calls: list[str] = []
+    active_transactions = 0
+
+    class ObservedUow(PostgresKernelUnitOfWork):
+        async def __aenter__(self):
+            nonlocal active_transactions
+            entered = await super().__aenter__()
+            active_transactions += 1
+            return entered
+
+        async def __aexit__(self, *args):
+            nonlocal active_transactions
+            try:
+                return await super().__aexit__(*args)
+            finally:
+                active_transactions -= 1
+
+    class Market:
+        async def fetch_selection_klines(self, request):
+            raise AssertionError("Generic cannot read SOR's 15m input")
+
+        async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
+            assert active_transactions == 0
+            assert event_spec_id == source_input.spec.event_spec_id and len(product_profiles) == 24
+            calls.append("qualification")
+            if defect == "unknown":
+                raise ValueError("qualification unavailable")
+            return tuple(w.qualification.model_copy(update={"observed_at_ms": observed_at_ms}) for w in source_input.member_windows)
+
+        async def fetch_generic_selection_klines(self, request):
+            assert active_transactions == 0
+            assert request.feature_cutoff_at_ms == CUTOFF and request.expected_bars == source_input.spec.window_bars
+            calls.append(request.exchange_instrument_id)
+            candles = next(w.candles for w in source_input.member_windows if w.exchange_instrument_id == request.exchange_instrument_id)
+            if request.exchange_instrument_id == source_input.spec.candidate_ids[0]:
+                if defect == "missing":
+                    return candles[:-1]
+                if defect == "control_changed":
+                    async with database.begin() as conn:
+                        await conn.execute(sa.update(strategy_selection_control_current).where(
+                            strategy_selection_control_current.c.strategy_group_id == group).values(control_version=3))
+            return candles
+
+    timestamp = CUTOFF
+
+    def clock() -> int:
+        nonlocal timestamp
+        timestamp += 1
+        return timestamp
+
+    request = RunInstrumentSelectionRequest(selection_spec_id=source_input.spec.selection_spec_id,
+        selection_epoch_id="epoch:1", session_start_ms=CUTOFF, worker_id="runner:generic")
+    market = Market()
+    factory = lambda: ObservedUow(database)
+    skipped = await run_instrument_selection_once(uow_factory=factory, market_source=market, request=request, clock_ms=clock)
+    assert skipped.outcome == "NOT_DUE" and calls == []
+    await enable_epoch(database, group)
+    if defect == "control_changed":
+        with pytest.raises(SelectionJobConflict, match="control"):
+            await run_instrument_selection_once(uow_factory=factory, market_source=market, request=request, clock_ms=clock)
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.select(sa.func.count()).select_from(instrument_selection_snapshots)) == 0
+        return
+    result = await run_instrument_selection_once(uow_factory=factory, market_source=market, request=request, clock_ms=clock)
+    if defect in {"missing", "unknown", "flat"}:
+        assert result.outcome == ("COMPUTE_FAILED" if defect == "flat" else "SOURCE_FAILED")
+        call_count = len(calls)
+        replay = await run_instrument_selection_once(uow_factory=factory, market_source=market, request=request, clock_ms=clock)
+        assert replay.outcome == result.outcome and len(calls) == call_count
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.select(sa.func.count()).select_from(instrument_selection_snapshots)) == 0
+            attempt = (await conn.execute(sa.select(instrument_selection_attempts))).mappings().one()
+            assert attempt["source_member_count"] == (0 if defect == "unknown" else 23 if defect == "missing" else 24)
+            if defect == "flat":
+                assert attempt["source_digest"].startswith("sha256:")
+                assert source_input.spec.candidate_ids[0] in attempt["reason_code"]
+        return
+    assert result.outcome == "SNAPSHOT_READY"
+    assert len(calls) == 25
+    replay = await run_instrument_selection_once(uow_factory=factory, market_source=market, request=request, clock_ms=clock)
+    assert replay.outcome == "ALREADY_READY" and len(calls) == 25
+    async with PostgresKernelUnitOfWork(database) as uow:
+        snapshot = await uow.instrument_selection.get_generic_snapshot(result.selection_snapshot_id)
+        assert snapshot.selected_members == compute_generic_selection(source_input).selected_members
+        if defect == "empty":
+            assert snapshot.selected_members == () and snapshot.ready_count == 0
+        assert all(member.qualification_semantic_digest.startswith("sha256:") for member in snapshot.members)
+    async with database.connect() as conn:
+        for table in ("brc_strategy_universe_materialization_generations", "brc_selection_session_authorities", "brc_trade_tickets", "brc_exchange_commands"):
+            assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0

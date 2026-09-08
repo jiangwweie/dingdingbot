@@ -9,11 +9,13 @@ import pytest
 
 from src.trading_kernel.application.market_ports import (
     ClosedCandleRequest,
+    GenericSelectionKlineRequest,
     SelectionKlineRequest,
 )
 from src.trading_kernel.infrastructure.binance_public_market_source import (
     CcxtBinancePublicMarketSource,
 )
+from tests.trading_kernel.support.generic_selection import CUTOFF, HOUR, inputs
 
 
 class FakeExchange:
@@ -209,6 +211,59 @@ async def test_selection_source_uses_raw_quote_volume_not_base_volume() -> None:
             "limit": 96,
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defect", [None, "float", "duplicate", "future", "missing"])
+async def test_generic_selection_reads_exact_raw_hourly_ohlcv(defect: str | None) -> None:
+    rows = [[CUTOFF-(25-i)*HOUR, "100", "101", "99", "100.12345678901234567890123456789012345",
+        "7", CUTOFF-(24-i)*HOUR-1, "700"] for i in range(25)]
+    if defect == "float": rows[0][4] = 100.1
+    elif defect == "duplicate": rows[-1] = rows[0]
+    elif defect == "future": rows[-1][6] += 1
+    elif defect == "missing": rows.pop()
+    exchange = RawKlineExchange(rows)
+    source = CcxtBinancePublicMarketSource(exchange=exchange, timeout_seconds=1)
+    request = GenericSelectionKlineRequest(exchange_instrument_id=inputs("CPM-RO-001").spec.candidate_ids[0],
+        feature_cutoff_at_ms=CUTOFF, expected_bars=25)
+    if defect:
+        with pytest.raises((ValueError, TypeError, RuntimeError)):
+            await source.fetch_generic_selection_klines(request)
+    else:
+        candles = await source.fetch_generic_selection_klines(request)
+        assert str(candles[0].close) == rows[0][4]
+        assert candles[0].base_volume == 7 and candles[0].quote_volume == 700
+        assert candles[-1].close_time_ms == CUTOFF
+    assert exchange.raw_calls[0]["interval"] == "1h"
+    assert exchange.raw_calls[0]["startTime"] == CUTOFF - 25 * HOUR
+    assert exchange.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defect", [None, "inactive", "unknown", "missing", "duplicate"])
+async def test_generic_qualification_separates_known_ineligible_from_unknown(defect: str | None) -> None:
+    selection_input = inputs("MPG-001")
+    rows = [{"symbol": w.exchange_instrument_id.split(":")[1], "contractType": "PERPETUAL", "marginAsset": "USDT", "status": "TRADING"}
+        for w in selection_input.member_windows]
+    if defect == "inactive": rows[0]["status"] = "PENDING_TRADING"
+    elif defect == "unknown": rows[0].pop("status")
+    elif defect == "missing": rows.pop()
+    elif defect == "duplicate": rows[-1] = rows[0]
+
+    class QualificationExchange(FakeExchange):
+        async def fapiPublicGetExchangeInfo(self, params=None):
+            return {"symbols": rows}
+
+    source = CcxtBinancePublicMarketSource(exchange=QualificationExchange([]), timeout_seconds=1)
+    arguments = {"event_spec_id": selection_input.spec.event_spec_id,
+        "product_profiles": tuple(w.qualification.product_profile for w in selection_input.member_windows), "observed_at_ms": CUTOFF + 1}
+    if defect in {"unknown", "missing", "duplicate"}:
+        with pytest.raises((ValueError, RuntimeError)):
+            await source.fetch_generic_selection_qualifications(**arguments)
+    else:
+        qualifications = await source.fetch_generic_selection_qualifications(**arguments)
+        assert len(qualifications) == 24
+        assert qualifications[0].reason == ("VENUE_NOT_TRADING" if defect == "inactive" else None)
 
 
 @pytest.mark.asyncio

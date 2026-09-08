@@ -45,8 +45,8 @@ further_feature_research = CLOSED
 | 数值证据 | 96份原始1h ZIP哈希逐一验证；从冻结commit重建research函数并核对artifact完整排序；CPM/BRF2各463、MPG/MI各1852 cutoff的决策集合零差异；SOR961×24 Core verified | exact最终candidate再次认证，认证证据与受审安装集合绑定 |
 | GS-01/03边界补强 | 跨comparison revision旧token拒绝、same-close checkpoint幂等；miss按period计算，可重放/跨缺失period；effective前及deadline后ENTRY拒绝 | runtime cursor/Owner/freshness全链集成 |
 | GS-04迁移切片 | 本地0007→0008比较来源保全；缺源在schema写入前STOP；旧Authority pair迁至ACTIVE/EMPTY绑定、原列删除；Spec typed payload及静态安装；原Snapshot/member表增加family与epoch/predecessor、精确Generic feature存储；Job/Attempt按spec+epoch+period唯一、Snapshot/Attempt复合FK、Control epoch及parent Spec校验，保留SOR专用约束 | Generation/rollback归一化，完整logical preservation、真实source/target首根及后续Signal差分、role grants、Owner epoch正式转换边界 |
-| GS-04回归 | 本轮分批：Snapshot/Job+迁移+materialization+SOR Runner PostgreSQL 116 passed，随后新增恢复专项3 passed及Control专项3 passed（后者含2个已测case）；Unit+Architecture 1149 passed；Ruff及全生产源码Mypy通过 | 完整PG/Full-chain和source verifier升级，不是R4 PASS；上述命令不能相加冒充互不重复的完整release计数 |
-| 纯Selection合同与持久化 | Candidate24/cutoff、公式、Desired predecessor/hysteresis；四策略exact roundtrip、EMPTY不补位；锁定Spec进行前驱CAS；共享Job lease/完成/失败逻辑；Generic commit再验Control version、epoch、lease、前驱与有效期；Static零Job；源失败不推进前驱，新epoch不继承旧Job | 正式Runner/source adapter，完整OHLCV及资格provenance输入digest；Job EXPIRED/SUPERSEDED终态与bounded调度；直接SQL并发分叉/跨事务链认证、三Plane调度；GS-05未完成 |
+| GS-04/05回归 | 最新源适配器与相关PG组合152 passed（含unit适配器用例，不是152项纯PG）；Unit+Architecture 1168 passed；Ruff及全生产源码Mypy通过 | 完整PG/Full-chain和source verifier升级，不是R4 PASS；上述命令不能相加冒充互不重复的完整release计数 |
+| 纯Selection合同与持久化 | Candidate24/cutoff、公式、Desired predecessor/hysteresis；四策略exact roundtrip、EMPTY不补位；锁定Spec进行前驱CAS；共享Job lease/完成/失败逻辑；Generic commit再验Control version、epoch、lease、前驱与有效期；Static零Job；源失败不推进前驱，新epoch不继承旧Job；正式Runner Spec dispatch、raw public 1h OHLCV、Product资格事实与digest，取数在事务外 | Job EXPIRED/SUPERSEDED终态与bounded调度、source retry/lease fault完整认证；直接SQL并发分叉/跨事务链认证、三Plane调度；GS-05未完成 |
 | GS-06～09 | 现有SOR读路径已随schema切片接线 | Generic comparison/Observation、Warming、Vacuum/authority、Claim/Ticket/dispatch完整集成未完成 |
 
 此次只创建本地可处置PG并执行测试；无Tokyo或交易所动作。0008为未发布的工作中revision，不是部署候选。旧source读取代码仅为一次性migration certification，不能进入runtime cadence。上述测试数对应当时实际执行范围，后续修改必须重验受影响面。
@@ -56,6 +56,10 @@ further_feature_research = CLOSED
 Generic Snapshot/member semantic digest改为固定Decimal38上下文中的数值规范化，消除PostgreSQL将`-0`读为`0`、指数形式转为普通数字导致的虚假digest冲突；负零、正指数及38位精度已有真实PG回归。仅未发布Generic事实编码发生修正，SOR Golden和研究artifact不改写，公式/排名/成员集不变；最终candidate仍必须重新认证。本切片沿用共享存储字段`session_start_ms`：SOR含义保持原UTC session，Generic映射精确feature cutoff/period anchor；没有双字段写入或第二套Snapshot表。
 
 后续Job/epoch切片以`96be356022cff59f680a28c2fbd3128b9f006f5d`为父提交，沿用上述PG targets并增加同模块内claim/complete/恢复测试。Generic与SOR复用`_claim_selection_job_row`、`_mark_snapshot_ready`、`_append_attempt`及原表，不增加第二条job队列。Generic Source失败保持明确失败结果，不能写为EMPTY；过期lease接管后旧callback被拒。这里的Dynamic Control测试是本地repository prerequisite，由隔离fixture建立，不是Owner API/TOTP/首次activation验收，也不形成任何交易授权。
+
+源数据/Runner切片以`57fbc584`为父提交，替换未发布Generic的close-only输入：每个窗口绑定完整raw OHLCV（含base/quote volume）、venue/instrument、normalization version及明确资格事实。输入十进制规范化不执行算术，不受ambient precision影响；feature公式和排名仍使用冻结Decimal38。资格复用现有Event ProductCompatibility/Profile，并结合public exchangeInfo明确的contract/margin/status；缺失或未知事实整次SOURCE_FAILED，已知不合格取交集、不补位、不继承SOR 20M floor。资格事实及digest/reason保存在原member表的typed JSONB/列中；不是文件authority。Generic `input_window_start_ms`修正为完整首根K线的open boundary（cutoff减bars×1h），SOR96×15m合同不变。
+
+`run_instrument_selection_once`通过epoch dispatch进入Generic分支，复用原UoW/Job/Attempt边界，独立加载Candidate Product profiles，不读Current Universe或Signal。四策略正式Runner→PG测试证明source I/O不在事务内、重放不再取数、终点只有Snapshot；另覆盖缺源、未知资格、有效空集、CPM path=0与source读取期间Control改变。计算失败冻结完整source digest及具体成员reason。当前9个Runner场景均通过，但尚未作为resident worker完整调度/交易链验收。组合152项命令覆盖`unit/test_binance_public_market_source.py`、`unit/test_generic_selection_source.py`及前述4个PG模块；全部测试本地运行，无外部行情请求或生产操作。
 
 ### 2.2 初始计划基线
 

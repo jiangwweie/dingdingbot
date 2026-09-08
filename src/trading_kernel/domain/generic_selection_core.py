@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.dynamic_selection_numeric import (
     DYNAMIC_SELECTION_DECIMAL_CONTEXT,
+    DynamicSelectionNumericError,
     absolute_directional_efficiency_24h,
     persistent_leadership_score_6h,
     positive_impulse_recency_12h,
@@ -15,39 +16,17 @@ from src.trading_kernel.domain.dynamic_selection_numeric import (
     rank_dynamic_selection_features,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.generic_selection_source import (
+    GenericSelectionMemberWindow,
+    GenericSelectionQualification,
+    QualificationReason,
+)
 from src.trading_kernel.domain.generic_selection_spec import (
     GenericSelectionSpecV1,
     generic_selection_spec,
 )
 
 HOUR_MS=3600000
-
-
-class GenericSelectionMemberWindow(BaseModel):
-    model_config=ConfigDict(frozen=True,extra="forbid")
-    exchange_instrument_id: str
-    closed_at_ms: tuple[int,...]
-    closes: tuple[Decimal,...]
-    qualified: bool
-
-    @field_validator("closes",mode="before")
-    @classmethod
-    def _decimal_only(cls,value: object) -> object:
-        if not isinstance(value,(tuple,list)) or any(not isinstance(item,Decimal) for item in value):
-            raise ValueError("source closes must enter as Decimal")
-        return value
-
-    @model_validator(mode="after")
-    def _window(self) -> GenericSelectionMemberWindow:
-        if not self.closed_at_ms or len(self.closed_at_ms)!=len(self.closes):
-            raise ValueError("incomplete Selection window")
-        if any(not close.is_finite() or close<=0 for close in self.closes):
-            raise ValueError("invalid source price")
-        if any(time<=0 or time%HOUR_MS for time in self.closed_at_ms):
-            raise ValueError("noncanonical Selection close")
-        if any(b-a!=HOUR_MS for a,b in zip(self.closed_at_ms,self.closed_at_ms[1:])):
-            raise ValueError("noncontiguous Selection source")
-        return self
 
 
 class GenericSelectionMemberDecision(BaseModel):
@@ -59,6 +38,7 @@ class GenericSelectionMemberDecision(BaseModel):
     selected: bool
     retained: bool
     input_window_digest: str
+    qualification: GenericSelectionQualification
 
     @field_validator("feature_value",mode="before")
     @classmethod
@@ -72,9 +52,21 @@ class GenericSelectionMemberDecision(BaseModel):
         if not self.feature_value.is_finite() or not 1<=self.stable_rank<=24:
             raise ValueError("invalid feature/rank")
         _require_digest(self.input_window_digest)
+        if self.qualification.product_profile.exchange_instrument_id != self.exchange_instrument_id:
+            raise ValueError("member qualification instrument differs")
+        if self.qualified != (self.qualification_reason is None):
+            raise ValueError("member qualification reason differs")
         if (not self.qualified and (self.selected or self.retained)) or self.retained and not self.selected:
             raise ValueError("invalid member qualification/retention")
         return self
+
+    @property
+    def qualification_reason(self) -> QualificationReason | None:
+        return self.qualification.reason
+
+    @property
+    def qualification_semantic_digest(self) -> str:
+        return self.qualification.semantic_digest
 
     @property
     def semantic_digest(self) -> str:
@@ -124,6 +116,9 @@ class GenericSelectionSnapshotV1(BaseModel):
         if self.members!=ranked or tuple(member.stable_rank for member in ranked)!=tuple(range(1,25)):
             raise ValueError("snapshot ranking differs from frozen order")
         for member in ranked:
+            if (member.qualification.event_spec_id != spec.event_spec_id
+                or not t <= member.qualification.observed_at_ms <= self.committed_at_ms):
+                raise ValueError("snapshot qualification Event/time differs")
             expected_selected=member.qualified and (member.stable_rank<=spec.entry_rank or member.retained)
             if (member.selected!=expected_selected or member.selected and member.stable_rank>spec.retain_rank
                 or member.retained and self.predecessor_snapshot_id is None):
@@ -160,6 +155,11 @@ class GenericSelectionInput(BaseModel):
     member_windows: tuple[GenericSelectionMemberWindow,...]
     predecessor_snapshot: GenericSelectionSnapshotV1 | None
 
+    @property
+    def source_semantic_digest(self) -> str:
+        windows = {window.exchange_instrument_id: window for window in self.member_windows}
+        return canonical_digest(tuple((member, windows[member].input_window_digest) for member in self.spec.candidate_ids))
+
     @model_validator(mode="after")
     def _exact_source(self) -> GenericSelectionInput:
         t=self.feature_cutoff_at_ms
@@ -173,6 +173,9 @@ class GenericSelectionInput(BaseModel):
         for window in self.member_windows:
             if window.closed_at_ms!=expected_times:
                 raise ValueError("Selection source gap, future candle or wrong cutoff")
+            if (window.qualification.event_spec_id != self.spec.event_spec_id
+                or not t <= window.qualification.observed_at_ms <= self.source_observed_at_ms):
+                raise ValueError("Selection qualification is stale or belongs to another Event")
         prior=self.predecessor_snapshot
         if prior is not None and (
             prior.selection_epoch_id!=self.selection_epoch_id or prior.selection_spec_id!=self.spec.selection_spec_id
@@ -207,7 +210,12 @@ def compute_generic_selection(source: GenericSelectionInput) -> GenericSelection
                         histories[member].append(rank)
                 values={m:persistent_leadership_score_6h(histories[m]) for m in spec.candidate_ids}
             elif spec.strategy_group_id=="CPM-RO-001":
-                values={m:absolute_directional_efficiency_24h(windows[m].closes) for m in spec.candidate_ids}
+                values = {}
+                for m in spec.candidate_ids:
+                    try:
+                        values[m] = absolute_directional_efficiency_24h(windows[m].closes)
+                    except DynamicSelectionNumericError as exc:
+                        raise DynamicSelectionNumericError(f"{m}:{exc}") from exc
             else:
                 values={m:positive_impulse_recency_12h(tuple(b/a-1 for a,b in zip(windows[m].closes,windows[m].closes[1:]))) for m in spec.candidate_ids}
             ranked=rank_dynamic_selection_features(values)
@@ -216,7 +224,8 @@ def compute_generic_selection(source: GenericSelectionInput) -> GenericSelection
             qualified=windows[rank.exchange_instrument_id].qualified,
             selected=windows[rank.exchange_instrument_id].qualified and (rank.rank<=spec.entry_rank or rank.exchange_instrument_id in previous and rank.rank<=spec.retain_rank),
             retained=windows[rank.exchange_instrument_id].qualified and rank.exchange_instrument_id in previous and rank.rank<=spec.retain_rank,
-            input_window_digest=canonical_digest(windows[rank.exchange_instrument_id].model_dump(mode="json")),
+            input_window_digest=windows[rank.exchange_instrument_id].input_window_digest,
+            qualification=windows[rank.exchange_instrument_id].qualification,
         ) for rank in ranked)
         identity=canonical_digest({"spec":spec.selection_spec_id,"epoch":source.selection_epoch_id,"cutoff":source.feature_cutoff_at_ms})
         return GenericSelectionSnapshotV1(
@@ -227,5 +236,5 @@ def compute_generic_selection(source: GenericSelectionInput) -> GenericSelection
             expires_at_ms=source.feature_cutoff_at_ms+(1+spec.cadence_hours)*HOUR_MS,
             committed_at_ms=source.committed_at_ms,predecessor_snapshot_id=None if prior is None else prior.selection_snapshot_id,
             predecessor_member_digest=None if prior is None else prior.member_set_digest,members=decisions,
-            source_semantic_digest=canonical_digest(tuple((m,canonical_digest(windows[m].model_dump(mode="json"))) for m in spec.candidate_ids)),
+            source_semantic_digest=source.source_semantic_digest,
         )

@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.generic_selection_source import (
+    GenericSelectionCandle,
+    GenericSelectionQualification,
+)
+from src.trading_kernel.domain.instrument_identity import (
+    parse_binance_usdm_instrument_id,
+)
 from src.trading_kernel.domain.instrument_selection import (
     INTERVAL_MS,
     SelectionKline,
 )
 from src.trading_kernel.domain.market import ClosedCandle, Timeframe
-from src.trading_kernel.domain.product import ProductSessionSnapshot
+from src.trading_kernel.domain.product import (
+    InstrumentProductProfile,
+    ProductSessionSnapshot,
+)
 
 
 class ClosedCandleRequest(BaseModel):
@@ -88,6 +98,25 @@ class SelectionKlineRequest(BaseModel):
         return self
 
 
+class GenericSelectionKlineRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_instrument_id: str
+    feature_cutoff_at_ms: int
+    expected_bars: Literal[13, 14, 25, 73]
+
+    @model_validator(mode="after")
+    def _exact_window(self) -> GenericSelectionKlineRequest:
+        parse_binance_usdm_instrument_id(self.exchange_instrument_id)
+        if self.feature_cutoff_at_ms % 3600000 or self.feature_cutoff_at_ms < self.expected_bars * 3600000:
+            raise ValueError("Generic Selection requires exact bounded hourly window")
+        return self
+
+    @property
+    def input_window_start_ms(self) -> int:
+        return self.feature_cutoff_at_ms - self.expected_bars * 3600000
+
+
 class PublicMarketSource(Protocol):
     async def fetch_closed_candles(
         self,
@@ -108,3 +137,9 @@ class InstrumentSelectionMarketSource(Protocol):
         self,
         request: SelectionKlineRequest,
     ) -> tuple[SelectionKline, ...]: ...
+
+    async def fetch_generic_selection_klines(self, request: GenericSelectionKlineRequest) -> tuple[GenericSelectionCandle, ...]: ...
+
+    async def fetch_generic_selection_qualifications(
+        self, *, event_spec_id: str, product_profiles: tuple[InstrumentProductProfile, ...], observed_at_ms: int,
+    ) -> tuple[GenericSelectionQualification, ...]: ...
