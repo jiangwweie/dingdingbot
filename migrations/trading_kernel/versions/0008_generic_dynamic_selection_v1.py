@@ -90,6 +90,20 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
     previous = "brc_materialization_generation_event_baselines"
     rollback = "brc_selection_rollback_baseline_events"
     empty = "sha256:" + hashlib.sha256(b'{"selected_exchange_instrument_ids":[]}').hexdigest()
+    op.add_column(generations, sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"))
+    op.add_column(generations, sa.Column("selection_control_version", sa.BigInteger(), nullable=True))
+    op.add_column(generations, sa.Column("lease_epoch", sa.BigInteger(), nullable=False, server_default="0"))
+    op.drop_constraint("uq_brc_strategy_universe_materialization_generation_period", generations, type_="unique")
+    op.create_unique_constraint("uq_brc_strategy_universe_materialization_generation_period", generations,
+        ["selection_spec_id", "selection_epoch_id", "period_anchor_ms", "selection_mode"])
+    op.create_foreign_key("fk_brc_generation_snapshot_epoch", generations, "brc_instrument_selection_snapshots",
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "period_anchor_ms"],
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "period_anchor_ms"])
+    op.create_check_constraint("ck_brc_generation_epoch_shape", generations,
+        "lease_epoch>=0 AND ((selection_epoch_id='sor-v0' AND selection_control_version IS NULL) OR "
+        "(selection_epoch_id<>'sor-v0' AND length(trim(selection_epoch_id))>0 AND selection_control_version IS NOT NULL AND selection_control_version>0))")
+    op.create_index("uq_brc_generic_generation_actionable_group", generations, ["strategy_group_id"], unique=True,
+        postgresql_where=sa.text("selection_epoch_id<>'sor-v0' AND lifecycle_state IN ('PENDING','DESIRED','DRAINING_ENTRY','MATERIALIZING','STAGED')"))
     op.execute(sa.text("""
         CREATE FUNCTION brc_selected_universe_member_digest_v1(target text) RETURNS text LANGUAGE SQL STABLE AS $$
           SELECT 'sha256:' || encode(sha256(convert_to('{"selected_exchange_instrument_ids":[' ||
@@ -105,6 +119,7 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
         sa.Column("universe_version_id", ID, nullable=True),
         sa.Column("member_set_digest", DIGEST, nullable=False),
         sa.Column("comparison_universe_id", ID, nullable=True),
+        sa.Column("comparison_transition_revision", sa.BigInteger(), nullable=True),
         sa.PrimaryKeyConstraint("materialization_generation_id", "event_spec_id"),
         sa.UniqueConstraint("materialization_generation_id", "position_side", name="uq_brc_generation_baseline_side"),
         sa.ForeignKeyConstraint(["materialization_generation_id"], [f"{generations}.materialization_generation_id"]),
@@ -113,6 +128,9 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
         sa.ForeignKeyConstraint(["comparison_universe_id"], ["brc_comparison_universe_definitions.comparison_universe_id"]),
         sa.CheckConstraint("position_side IN ('long','short')", name="ck_brc_generation_baseline_side"),
         sa.CheckConstraint("member_set_digest ~ '^sha256:[0-9a-f]{64}$'", name="ck_brc_generation_baseline_digest"),
+        sa.CheckConstraint("(comparison_universe_id IS NULL AND comparison_transition_revision IS NULL) OR "
+            "(comparison_universe_id IS NOT NULL AND comparison_transition_revision IS NOT NULL AND comparison_transition_revision>=0)",
+            name="ck_brc_generation_baseline_comparison"),
         sa.CheckConstraint(f"(grant_state='ACTIVE' AND universe_version_id IS NOT NULL AND member_set_digest<>'{empty}') OR "
             f"(grant_state='EMPTY' AND universe_version_id IS NULL AND member_set_digest='{empty}')", name="ck_brc_generation_baseline_grant"),
     )
@@ -133,7 +151,7 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
     for suffix, side in (("long", "long"), ("short", "short")):
         bind.execute(sa.text(f"""
             INSERT INTO {previous} SELECT g.materialization_generation_id,u.event_spec_id,:side,'ACTIVE',u.universe_version_id,
-              brc_selected_universe_member_digest_v1(u.universe_version_id),NULL
+              brc_selected_universe_member_digest_v1(u.universe_version_id),NULL,NULL
             FROM {generations} g JOIN brc_strategy_universe_versions u ON u.universe_version_id=g.previous_{suffix}_universe_version_id
         """), {"side": side})
         bind.execute(sa.text(f"""
@@ -170,14 +188,30 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
     op.execute(sa.text("""
         CREATE FUNCTION brc_validate_generation_baseline_v1() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE gid text; g brc_strategy_universe_materialization_generations%ROWTYPE;
-                spec brc_instrument_selection_specs%ROWTYPE; expected integer; actual integer; matching integer; states integer;
+                spec brc_instrument_selection_specs%ROWTYPE; s brc_instrument_selection_snapshots%ROWTYPE;
+                expected integer; actual integer; matching integer; states integer; target_digest text;
         BEGIN
           gid := NEW.materialization_generation_id;
           SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
           SELECT * INTO spec FROM brc_instrument_selection_specs WHERE selection_spec_id=g.selection_spec_id;
           IF g.strategy_group_id<>spec.strategy_group_id OR g.strategy_version_id<>spec.strategy_version_id
-             OR (spec.selection_kind='sor_dynamic_v0' AND g.selection_mode='dynamic_selection' AND g.desired_member_count>7) THEN
+             OR (spec.selection_kind='sor_dynamic_v0' AND (g.selection_epoch_id<>'sor-v0' OR (g.selection_mode='dynamic_selection' AND g.desired_member_count>7)))
+             OR (spec.selection_kind='generic_dynamic_v1' AND g.selection_epoch_id='sor-v0') THEN
             RAISE EXCEPTION 'Generation Spec identity or member limit mismatch';
+          END IF;
+          IF spec.selection_kind='generic_dynamic_v1' AND g.selection_mode='dynamic_selection' THEN
+            SELECT * INTO s FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=g.selection_snapshot_id;
+            IF NOT FOUND OR s.selection_spec_id<>g.selection_spec_id OR s.selection_epoch_id<>g.selection_epoch_id
+               OR s.period_anchor_ms<>g.period_anchor_ms OR s.selected_count<>g.desired_member_count
+               OR g.created_at_ms<s.eligibility_not_before_ms OR g.created_at_ms>=s.expires_at_ms THEN
+              RAISE EXCEPTION 'Generation Snapshot epoch/period/count/time mismatch';
+            END IF;
+            SELECT 'sha256:' || encode(sha256(convert_to('{"selected_exchange_instrument_ids":[' ||
+              coalesce(string_agg(to_json(exchange_instrument_id)::text,',' ORDER BY exchange_instrument_id COLLATE "C"),'') || ']}','UTF8')),'hex')
+            INTO target_digest FROM brc_instrument_selection_member_decisions WHERE selection_snapshot_id=s.selection_snapshot_id AND selected;
+            IF EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_targets WHERE materialization_generation_id=gid AND expected_member_set_digest<>target_digest) THEN
+              RAISE EXCEPTION 'Generation target digest differs from Snapshot';
+            END IF;
           END IF;
           SELECT count(*) INTO expected FROM brc_instrument_selection_spec_events WHERE selection_spec_id=g.selection_spec_id;
           SELECT count(*),count(e.event_spec_id),count(DISTINCT b.grant_state) INTO actual,matching,states
@@ -233,10 +267,10 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
         BEGIN
           IF ROW(NEW.materialization_generation_id,NEW.selection_spec_id,NEW.strategy_group_id,NEW.strategy_version_id,
               NEW.selection_mode,NEW.selection_snapshot_id,NEW.rollback_baseline_id,NEW.period_anchor_ms,
-              NEW.desired_member_count,NEW.semantic_digest,NEW.created_at_ms)
+              NEW.desired_member_count,NEW.semantic_digest,NEW.created_at_ms,NEW.selection_epoch_id,NEW.selection_control_version)
              IS DISTINCT FROM ROW(OLD.materialization_generation_id,OLD.selection_spec_id,OLD.strategy_group_id,OLD.strategy_version_id,
               OLD.selection_mode,OLD.selection_snapshot_id,OLD.rollback_baseline_id,OLD.period_anchor_ms,
-              OLD.desired_member_count,OLD.semantic_digest,OLD.created_at_ms) THEN
+              OLD.desired_member_count,OLD.semantic_digest,OLD.created_at_ms,OLD.selection_epoch_id,OLD.selection_control_version) THEN
             RAISE EXCEPTION 'Generation source identity is immutable';
           END IF;
           RETURN NEW;

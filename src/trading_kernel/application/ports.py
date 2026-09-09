@@ -73,6 +73,10 @@ from src.trading_kernel.domain.exit_policy import (
     ExitProfileRecord,
 )
 from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
+from src.trading_kernel.domain.generic_materialization import (
+    GenericMaterializationGeneration,
+    GenericMaterializationLeaseClaim,
+)
 from src.trading_kernel.domain.generic_selection_core import GenericSelectionSnapshotV1
 from src.trading_kernel.domain.generic_selection_jobs import (
     GenericSelectionJobClaim,
@@ -1495,6 +1499,18 @@ class SelectionJobRecord(BaseModel):
 
 
 class InstrumentSelectionRepository(Protocol):
+    async def get_generic_materialization_generation(self, materialization_generation_id: str, *,
+        for_update: bool = False) -> GenericMaterializationGeneration | None: ...
+
+    async def add_generic_pending_materialization_generation(self,
+        generation: GenericMaterializationGeneration) -> GenericMaterializationGeneration: ...
+
+    async def claim_generic_materialization_generation(self, materialization_generation_id: str, *,
+        worker_id: str, now_ms: int, lease_duration_ms: int) -> GenericMaterializationLeaseClaim: ...
+
+    async def release_generic_materialization_generation_lease(self, materialization_generation_id: str, *,
+        worker_id: str, lease_epoch: int) -> bool: ...
+
     async def get_generic_spec(self, selection_spec_id: str) -> GenericSelectionSpecV1: ...
 
     async def get_selection_product_profiles(self, selection_spec_id: str) -> tuple[InstrumentProductProfile, ...]: ...

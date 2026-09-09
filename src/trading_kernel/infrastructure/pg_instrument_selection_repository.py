@@ -22,6 +22,11 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     build_generic_selection_period,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.generic_materialization import (
+    GenericMaterializationGeneration,
+    GenericMaterializationLeaseClaim,
+    MaterializationEventBaseline,
+)
 from src.trading_kernel.domain.generic_selection_core import (
     GenericSelectionMemberDecision,
     GenericSelectionSnapshotV1,
@@ -80,6 +85,7 @@ from src.trading_kernel.domain.strategy_entry_vacuum import (
     StrategyEntryVacuumState,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    comparison_binding_current,
     generic_dynamic_selection_specs_v1,
     instrument_product_profiles,
     instrument_selection_attempts,
@@ -1297,6 +1303,160 @@ class PostgresInstrumentSelectionRepository:
             )
         )
 
+    async def get_generic_materialization_generation(
+        self, materialization_generation_id: str, *, for_update: bool = False,
+    ) -> GenericMaterializationGeneration | None:
+        statement = sa.select(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id == materialization_generation_id)
+        if for_update:
+            statement = statement.with_for_update(of=strategy_universe_materialization_generations)
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        if row["rollback_baseline_id"] is not None:
+            raise SelectionJobConflict("Dynamic Generation cannot decode a rollback source")
+        spec = await self.get_generic_spec(row["selection_spec_id"])
+        previous = (await self._connection.execute(sa.select(materialization_generation_event_baselines).where(
+            materialization_generation_event_baselines.c.materialization_generation_id == materialization_generation_id,
+        ).order_by(materialization_generation_event_baselines.c.event_spec_id))).mappings().all()
+        generation = GenericMaterializationGeneration.model_validate({
+            **{key:row[key] for key in GenericMaterializationGeneration.model_fields if key!="previous_events"},
+            "previous_events":tuple(MaterializationEventBaseline.model_validate({key:event[key] for key in MaterializationEventBaseline.model_fields}) for event in previous),
+        })
+        if generation.strategy_group_id!=spec.strategy_group_id or generation.semantic_digest!=row["semantic_digest"]:
+            raise SelectionJobConflict("Generic Generation semantic identity differs")
+        return generation
+
+    async def add_generic_pending_materialization_generation(
+        self, generation: GenericMaterializationGeneration,
+    ) -> GenericMaterializationGeneration:
+        generation = GenericMaterializationGeneration.model_validate(generation.model_dump())
+        if generation.lifecycle_state is not MaterializationGenerationState.PENDING or generation.lease_owner is not None or generation.lease_epoch!=0:
+            raise SelectionJobConflict("new Generic Generation must be unclaimed PENDING")
+        control = await self.get_selection_control(generation.strategy_group_id, for_update=True)
+        if (not self._generic_control_allows(control, generation.selection_spec_id, generation.selection_epoch_id, generation.period_anchor_ms)
+            or control is None or control.control_version!=generation.selection_control_version):
+            raise SelectionJobConflict("Generation Selection control/epoch changed")
+        snapshot = await self.get_generic_snapshot(generation.selection_snapshot_id)
+        if (len(snapshot.selected_members)!=generation.desired_member_count or snapshot.committed_at_ms>generation.created_at_ms
+            or snapshot.selection_epoch_id!=generation.selection_epoch_id or snapshot.feature_cutoff_at_ms!=generation.period_anchor_ms):
+            raise SelectionJobConflict("Generation differs from immutable Snapshot")
+        existing = await self.get_generic_materialization_generation(generation.materialization_generation_id, for_update=True)
+        if existing is not None:
+            if existing.semantic_digest!=generation.semantic_digest:
+                raise SelectionJobConflict("Generation already exists with different frozen facts")
+            return existing
+        actionable = (await self._connection.execute(sa.select(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.strategy_group_id==generation.strategy_group_id,
+            strategy_universe_materialization_generations.c.lifecycle_state.in_(("PENDING","DESIRED","DRAINING_ENTRY","MATERIALIZING","STAGED")),
+        ).limit(2).with_for_update())).mappings().all()
+        if len(actionable)>1:
+            raise SelectionJobConflict("multiple actionable Generic Generations")
+        superseded: list[GenericMaterializationGeneration] = []
+        for row in actionable:
+            prior_generation = await self.get_generic_materialization_generation(row["materialization_generation_id"])
+            if (prior_generation is None or prior_generation.lifecycle_state is not MaterializationGenerationState.PENDING
+                or prior_generation.fenced_at_ms is not None or prior_generation.period_anchor_ms>=generation.period_anchor_ms):
+                raise SelectionJobConflict("existing Generation requires coordinated handoff")
+            superseded.append(prior_generation)
+        for previous in generation.previous_events:
+            if previous.grant_state.value == "ACTIVE":
+                current = (await self._connection.execute(sa.select(strategy_universe_current).where(
+                    strategy_universe_current.c.event_spec_id==previous.event_spec_id,
+                ).with_for_update(of=strategy_universe_current))).mappings().one_or_none()
+                if current is None or current["universe_version_id"]!=previous.universe_version_id:
+                    raise SelectionJobConflict("Generation previous current Universe changed")
+                members = tuple((await self._connection.execute(sa.select(strategy_universe_members.c.exchange_instrument_id).where(
+                    strategy_universe_members.c.universe_version_id==previous.universe_version_id,
+                ).order_by(strategy_universe_members.c.exchange_instrument_id).limit(17))).scalars())
+                if len(members)>16 or selected_member_set_digest(members)!=previous.member_set_digest:
+                    raise SelectionJobConflict("Generation previous members changed")
+            else:
+                state = await self._connection.scalar(sa.select(selection_authority_event_bindings.c.grant_state).join(
+                    selection_authority_current, selection_authority_current.c.selection_authority_id==selection_authority_event_bindings.c.selection_authority_id,
+                ).where(selection_authority_current.c.selection_spec_id==generation.selection_spec_id,
+                    selection_authority_event_bindings.c.event_spec_id==previous.event_spec_id))
+                if state!="EMPTY":
+                    raise SelectionJobConflict("Generation previous EMPTY authority is not current")
+            if previous.comparison_universe_id is not None:
+                comparison = (await self._connection.execute(sa.select(comparison_binding_current).where(
+                    comparison_binding_current.c.event_spec_id==previous.event_spec_id,
+                ).with_for_update())).mappings().one_or_none()
+                if comparison is None or (comparison["comparison_universe_id"],comparison["comparison_transition_revision"])!=(previous.comparison_universe_id,previous.comparison_transition_revision):
+                    raise SelectionJobConflict("Generation previous comparison changed")
+        # All business validation precedes mutation, including supersession.
+        values = generation.model_dump(mode="json",exclude={"previous_events"})
+        for prior_generation in superseded:
+            changed = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==prior_generation.materialization_generation_id,
+                strategy_universe_materialization_generations.c.projection_version==prior_generation.projection_version,
+            ).values(lifecycle_state="SUPERSEDED",terminal_at_ms=generation.created_at_ms,
+                projection_version=prior_generation.projection_version+1,lease_owner=None,lease_expires_at_ms=None))
+            if changed.rowcount!=1:
+                raise SelectionJobConflict("pending Generation changed before supersession")
+            sequence = int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
+                strategy_universe_materialization_events.c.materialization_generation_id==prior_generation.materialization_generation_id)) or 0)+1
+            await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id="materialization-event:"+canonical_digest({"generation":prior_generation.materialization_generation_id,"sequence":sequence})[7:],
+                materialization_generation_id=prior_generation.materialization_generation_id,event_sequence=sequence,event_type="SUPERSEDED",
+                payload={"replacement_generation_id":generation.materialization_generation_id,"reason_code":"NEWER_EFFECTIVE_SELECTION"},occurred_at_ms=generation.created_at_ms))
+        await self._connection.execute(sa.insert(strategy_universe_materialization_generations).values(
+            **values,rollback_baseline_id=None,semantic_digest=generation.semantic_digest))
+        await self._connection.execute(sa.insert(materialization_generation_event_baselines),[
+            {"materialization_generation_id":generation.materialization_generation_id,**event.model_dump(mode="json")}
+            for event in generation.previous_events])
+        await self._connection.execute(sa.insert(strategy_universe_materialization_targets),[
+            {"materialization_generation_id":generation.materialization_generation_id,"event_spec_id":event.event_spec_id,
+                "position_side":event.position_side,"materialization_order":1 if event.position_side=="long" else 2,
+                "expected_member_set_digest":snapshot.member_set_digest}
+            for event in generation.previous_events])
+        await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+            materialization_event_id="materialization-event:"+canonical_digest({"generation":generation.materialization_generation_id,"sequence":1})[7:],
+            materialization_generation_id=generation.materialization_generation_id,event_sequence=1,event_type="PENDING",
+            payload={"selection_snapshot_id":generation.selection_snapshot_id,"selection_epoch_id":generation.selection_epoch_id,
+                "desired_member_count":generation.desired_member_count},occurred_at_ms=generation.created_at_ms))
+        return generation
+
+    async def claim_generic_materialization_generation(
+        self, materialization_generation_id: str, *, worker_id: str, now_ms: int, lease_duration_ms: int,
+    ) -> GenericMaterializationLeaseClaim:
+        initial = await self.get_generic_materialization_generation(materialization_generation_id)
+        if initial is None:
+            return GenericMaterializationLeaseClaim(status=MaterializationGenerationClaimStatus.NO_GENERATION)
+        control = await self.get_selection_control(initial.strategy_group_id, for_update=True)
+        generation = await self.get_generic_materialization_generation(materialization_generation_id, for_update=True)
+        if generation is None or generation.lifecycle_state not in {
+            MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED,MaterializationGenerationState.DRAINING_ENTRY,
+            MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED,
+        }:
+            return GenericMaterializationLeaseClaim(status=MaterializationGenerationClaimStatus.NO_GENERATION)
+        spec = await self.get_generic_spec(generation.selection_spec_id)
+        if (not self._generic_control_allows(control,generation.selection_spec_id,generation.selection_epoch_id,generation.period_anchor_ms)
+            or control is None or control.control_version!=generation.selection_control_version):
+            raise SelectionJobConflict("Generic Generation control/epoch changed")
+        if not generation.created_at_ms<=now_ms<generation.period_anchor_ms+(1+spec.cadence_hours)*3600000:
+            raise SelectionJobConflict("Generic Generation is outside eligible source period")
+        row = (await self._connection.execute(sa.select(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id==materialization_generation_id))).mappings().one()
+        acquired = await self._acquire_materialization_lease(row,worker_id=worker_id,now_ms=now_ms,
+            lease_duration_ms=lease_duration_ms,strict_owner=True)
+        refreshed = await self.get_generic_materialization_generation(materialization_generation_id)
+        return GenericMaterializationLeaseClaim(status=MaterializationGenerationClaimStatus.CLAIMED if acquired else MaterializationGenerationClaimStatus.LEASE_HELD,
+            generation=refreshed)
+
+    async def release_generic_materialization_generation_lease(
+        self, materialization_generation_id: str, *, worker_id: str, lease_epoch: int,
+    ) -> bool:
+        if not worker_id.strip() or lease_epoch<=0:
+            raise ValueError("Generic lease release requires an exact fencing token")
+        changed = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id==materialization_generation_id,
+            strategy_universe_materialization_generations.c.selection_epoch_id!="sor-v0",
+            strategy_universe_materialization_generations.c.lease_owner==worker_id,
+            strategy_universe_materialization_generations.c.lease_epoch==lease_epoch,
+        ).values(lease_owner=None,lease_expires_at_ms=None))
+        return changed.rowcount==1
+
     async def get_materialization_generation_for_snapshot(
         self,
         selection_snapshot_id: str,
@@ -1441,12 +1601,7 @@ class PostgresInstrumentSelectionRepository:
         generation = _materialization_generation_from_row(row)
         existing_owner = row["lease_owner"]
         existing_expiry = row["lease_expires_at_ms"]
-        if (
-            existing_owner is not None
-            and str(existing_owner) != normalized_worker_id
-            and existing_expiry is not None
-            and int(existing_expiry) > now_ms
-        ):
+        if not await self._acquire_materialization_lease(row,worker_id=normalized_worker_id,now_ms=now_ms,lease_duration_ms=lease_duration_ms,strict_owner=False):
             return MaterializationGenerationLeaseClaim(
                 status=MaterializationGenerationClaimStatus.LEASE_HELD,
                 generation=generation,
@@ -1454,29 +1609,40 @@ class PostgresInstrumentSelectionRepository:
                 lease_expires_at_ms=int(existing_expiry),
             )
         lease_expires_at_ms = now_ms + lease_duration_ms
-        updated = await self._connection.execute(
-            sa.update(strategy_universe_materialization_generations)
-            .where(
-                strategy_universe_materialization_generations.c.materialization_generation_id
-                == generation.materialization_generation_id,
-                strategy_universe_materialization_generations.c.lifecycle_state
-                == generation.lifecycle_state.value,
-                strategy_universe_materialization_generations.c.projection_version
-                == generation.projection_version,
-            )
-            .values(
-                lease_owner=normalized_worker_id,
-                lease_expires_at_ms=lease_expires_at_ms,
-            )
-        )
-        if updated.rowcount != 1:
-            raise SelectionJobConflict("Materialization Generation lease changed")
         return MaterializationGenerationLeaseClaim(
             status=MaterializationGenerationClaimStatus.CLAIMED,
             generation=generation,
             lease_owner=normalized_worker_id,
             lease_expires_at_ms=lease_expires_at_ms,
         )
+
+    async def _acquire_materialization_lease(self, row: RowMapping, *, worker_id: str, now_ms: int,
+                                           lease_duration_ms: int, strict_owner: bool) -> bool:
+        if not worker_id.strip() or now_ms<=0 or lease_duration_ms<=0:
+            raise ValueError("Materialization lease identity/timing is invalid")
+        if (row["lease_owner"] is not None and row["lease_expires_at_ms"] is not None and row["lease_expires_at_ms"]>now_ms
+            and (strict_owner or row["lease_owner"]!=worker_id)):
+            return False
+        updated = await self._connection.execute(
+            sa.update(strategy_universe_materialization_generations)
+            .where(
+                strategy_universe_materialization_generations.c.materialization_generation_id
+                == row["materialization_generation_id"],
+                strategy_universe_materialization_generations.c.lifecycle_state
+                == row["lifecycle_state"],
+                strategy_universe_materialization_generations.c.projection_version
+                == row["projection_version"],
+                strategy_universe_materialization_generations.c.lease_epoch==row["lease_epoch"],
+            )
+            .values(
+                lease_owner=worker_id,
+                lease_expires_at_ms=now_ms+lease_duration_ms,
+                lease_epoch=row["lease_epoch"]+1 if strict_owner else row["lease_epoch"],
+            )
+        )
+        if updated.rowcount != 1:
+            raise SelectionJobConflict("Materialization Generation lease changed")
+        return True
 
     async def release_materialization_generation_lease(
         self,
@@ -1494,6 +1660,7 @@ class PostgresInstrumentSelectionRepository:
                 == materialization_generation_id,
                 strategy_universe_materialization_generations.c.lease_owner
                 == normalized_worker_id,
+                strategy_universe_materialization_generations.c.selection_epoch_id=="sor-v0",
             )
             .values(lease_owner=None, lease_expires_at_ms=None)
         )

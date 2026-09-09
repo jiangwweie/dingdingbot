@@ -830,6 +830,9 @@ strategy_universe_materialization_generations = sa.Table(
     metadata,
     _id("materialization_generation_id", primary_key=True),
     _id("selection_spec_id"),
+    sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"),
+    sa.Column("selection_control_version", sa.BigInteger, nullable=True),
+    sa.Column("lease_epoch", sa.BigInteger, nullable=False, server_default="0"),
     _id("strategy_group_id"),
     _id("strategy_version_id"),
     sa.Column("selection_mode", SHORT_TEXT, nullable=False),
@@ -860,7 +863,7 @@ strategy_universe_materialization_generations = sa.Table(
         ["rollback_baseline_id"],
         ["brc_strategy_selection_rollback_baselines.rollback_baseline_id"],
     ),
-    sa.UniqueConstraint("selection_spec_id", "period_anchor_ms", "selection_mode"),
+    sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "period_anchor_ms", "selection_mode"),
     sa.UniqueConstraint("selection_snapshot_id"),
 )
 sa.Index(
@@ -872,12 +875,18 @@ sa.Index(
     ),
 )
 
+sa.Index("uq_brc_generic_generation_actionable_group",
+    strategy_universe_materialization_generations.c.strategy_group_id, unique=True,
+    postgresql_where=sa.and_(strategy_universe_materialization_generations.c.selection_epoch_id!="sor-v0",
+        strategy_universe_materialization_generations.c.lifecycle_state.in_(("PENDING","DESIRED","DRAINING_ENTRY","MATERIALIZING","STAGED"))))
+
 materialization_generation_event_baselines = sa.Table(
     "brc_materialization_generation_event_baselines", metadata,
     _id("materialization_generation_id", primary_key=True), _id("event_spec_id", primary_key=True),
     sa.Column("position_side", sa.String(16), nullable=False),
     sa.Column("grant_state", sa.String(16), nullable=False), _id("universe_version_id", nullable=True),
     sa.Column("member_set_digest", sa.String(71), nullable=False), _id("comparison_universe_id", nullable=True),
+    sa.Column("comparison_transition_revision", sa.BigInteger, nullable=True),
     sa.ForeignKeyConstraint(["materialization_generation_id"], ["brc_strategy_universe_materialization_generations.materialization_generation_id"]),
     sa.ForeignKeyConstraint(["event_spec_id"], ["brc_event_specs.event_spec_id"]),
     sa.ForeignKeyConstraint(["universe_version_id"], ["brc_strategy_universe_versions.universe_version_id"]),

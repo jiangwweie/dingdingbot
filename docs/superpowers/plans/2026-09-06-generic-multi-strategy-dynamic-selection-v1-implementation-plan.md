@@ -44,10 +44,16 @@ further_feature_research = CLOSED
 | --- | --- | --- |
 | 数值证据 | 96份原始1h ZIP哈希逐一验证；从冻结commit重建research函数并核对artifact完整排序；CPM/BRF2各463、MPG/MI各1852 cutoff的决策集合零差异；SOR961×24 Core verified | exact最终candidate再次认证，认证证据与受审安装集合绑定 |
 | GS-01/03边界补强 | 跨comparison revision旧token拒绝、same-close checkpoint幂等；miss按period计算，可重放/跨缺失period；effective前及deadline后ENTRY拒绝 | runtime cursor/Owner/freshness全链集成 |
-| GS-04迁移切片 | 本地0007→0008比较来源保全；缺源在schema写入前STOP；Authority、Generation previous及Static baseline的pair列迁至Event引用行后删除；8张通用表迁为`period_anchor_ms`、Control pending period列迁移；Spec typed payload及静态安装；Job/Attempt epoch与复合FK；Control/Generation身份和Event shape校验，保留SOR≤7，新Generic单Event Schema容纳≤16 | Generic Generation epoch/source/运行时模型；完整logical preservation、真实source/target首根及后续Signal差分、role grants、Owner epoch正式转换边界 |
+| GS-04迁移切片 | 本地0007→0008比较来源保全；缺源在schema写入前STOP；Authority、Generation previous及Static baseline的pair列迁至Event引用行后删除；8张通用表迁为`period_anchor_ms`；Job/Generation epoch与Snapshot复合FK；Generation Source count/time与target digest校验、Generic单actionable索引；保留SOR≤7 | 完整logical preservation、真实source/target首根及后续Signal差分、role grants、Owner epoch正式转换边界；Generic Generation完整状态机 |
 | GS-04/05回归 | 最新相关PG139 passed；Generic迁移9 passed，后加旧SOR Job/Attempt逐字段保全1 passed；Unit+Architecture1169 passed；Golden来源/输入完整性与Core961×24 parity均通过；Ruff及源码/脚本Mypy通过 | 完整PG/Full-chain和source verifier升级，不是R4 PASS；分批数字有重叠，不能相加冒充完整release计数 |
 | 纯Selection合同与持久化 | Candidate24/cutoff、公式、Desired predecessor/hysteresis；四策略exact roundtrip、EMPTY不补位；锁定Spec进行前驱CAS；共享Job lease/完成/失败逻辑；Generic commit再验Control version、epoch、lease、前驱与有效期；Static零Job；源失败不推进前驱，新epoch不继承旧Job；正式Runner Spec dispatch、raw public 1h OHLCV、Product资格事实与digest，取数在事务外 | Job EXPIRED/SUPERSEDED终态与bounded调度、source retry/lease fault完整认证；直接SQL并发分叉/跨事务链认证、三Plane调度；GS-05未完成 |
 | GS-06～09 | 现有SOR读路径已随schema切片接线 | Generic comparison/Observation、Warming、Vacuum/authority、Claim/Ticket/dispatch完整集成未完成 |
+
+2026-09-09 Generic Generation切片（父提交`4bf00b34`）：新增typed Generic Generation与previous Event baseline，明确Snapshot/epoch/control/period身份、comparison transition revision与不可变semantic digest；按原Generation/target/event表原子存储，不保存第二份Snapshot或成员集。四策略创建/精确读取/重复响应幂等已通过。PG在Generic分支校验Snapshot epoch、period、数量、effective时点和target member digest，SOR分支原约束保留。
+
+本切片复用共享`_acquire_materialization_lease`，Generic通过递增`lease_epoch`拒绝同worker重复取得活跃lease，过期后旧token不能释放新lease；原SOR lease行为保持。新effective Snapshot可原子supersede尚未fence的PENDING，冻结previous set/hash不变；所有业务验证先于写入，新previous不合法时旧Generation保持PENDING。DESIRED及已fence的切换仍需后续Coordinator完成，不在此处猜测drain/fallback。当前Model/ports/repository已接线，尚未完成Generic Worker/activation链。
+
+本次验证：`test_generic_selection_snapshot_repository.py + test_selection_materialization_repository.py + test_generic_dynamic_selection_migration.py`组合134 passed；后补同模块Generic Generation专项4 passed；`unit + architecture`1174 passed；typed Generation专项5 passed；Ruff与全生产源码Mypy通过。上述结果有重复，不能相加当作独立用例总量。新增测试证明epoch/ID绑定、单Event/比较shape、EMPTY不建Generation、幂等、过期period拒绝、token释放及失败supersession无副作用。GS-04～09整体仍未完成，无Tokyo或交易所动作。
 
 此次只创建本地可处置PG并执行测试；无Tokyo或交易所动作。0008为未发布的工作中revision，不是部署候选。旧source读取代码仅为一次性migration certification，不能进入runtime cadence。上述测试数对应当时实际执行范围，后续修改必须重验受影响面。
 
