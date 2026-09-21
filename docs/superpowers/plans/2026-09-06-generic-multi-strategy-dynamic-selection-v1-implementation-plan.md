@@ -45,21 +45,21 @@ Owner提供的SOR事故链作为回归需求来源，而非本轮重新取得的
 
 ### 2.1 当前实施证据校正（2026-09-08）
 
-#### 1h+范围收缩建议审计（2026-09-21，时钟修改待Owner裁决）
+#### 1h+范围收缩建议审计（2026-09-21，双时钟已获Owner确认）
 
 最新Owner附件提出以1h+单Event为主线、SOR仅保留兼容与历史保全。此处记录范围方向，不把附件中的“SOR已暂停”当成本轮生产实测事实，不执行pause/retire或删除策略代码。当前已经进入GS-04～09实施，不能回写成“GS-04尚未开始”。
 
 | Amendment | 接受方向／实施边界 | 当前状态 |
 | --- | --- | --- |
 | AMEND-1 | Common numeric、shared authority、PG/Ticket/history preservation仍整体BLOCK；只有可证明隔离的SOR-specific失败才能标SOR_COMPAT_BLOCKED，不得通过skip把共享失败改名为隔离失败 | 接受分层方向；现有certifier/安装证书仍须显式修订并补隔离测试后才可采用新gate，不能仅凭本段放行 |
-| AMEND-2 | Generic真实authority gap可考虑future-close-only + Episode rebase，不默认重放缺口；不能混同正常切换的precommitted current-final-close | 待Owner确认适用范围，暂不替换设计§6.2 |
-| AMEND-3 | 300s queue/fence指标降为warning方向可接受；timeout不刷新、无starvation、正确cancel及真实missed-close ledger仍强制；vacuum duty阈值未明确取消，暂保留 | 与AMEND-2一起解决hourly机会窗口；既有soak硬门槛在正式修订前仍有效，禁止测后放宽 |
+| AMEND-2 | 正常切换保留precommitted current-final-close；真正gap/materialization failure/recovery强制future-close-only + Episode rebase，不默认重放缺口 | OWNER_CONFIRMED；以设计§6.2 HOURLY_CLOSE_CONSUMPTION_RULE为准；实现验收尚未完成 |
+| AMEND-3 | 300s queue/fence降为warning；timeout不刷新、无starvation、正确cancel、正常路径不漏close及恢复不追认仍为hard gate；vacuum duty阈值未取消 | OWNER_CONFIRMED；GS-12表已修订，禁止后续测后放宽其他硬约束 |
 | AMEND-4 | Generic以single LONG/SHORT、1h观察为默认；SOR pair/session/15m为隔离策略subtype；Selection cadence仍CPM/BRF2 4h、MPG/MI 1h | 与既有实现方向一致，不将所有Selection cadence改成1h，不新建第二执行链 |
 | AMEND-5 | 薄离线Evidence Contract已列GS-09/13；增加Comparison revision、Claim和terminal reason的明确追踪，默认采用1h closed path并保留同bar歧义 | 接受；不增加在线服务、不要求额外经济研究Gate |
 
 **必须先解决的时钟冲突**：MPG/MI周期为`[t+1h,t+2h)`，现行切换在`e=t+1h`后开始fence/warm。若一律“grant后下一未来close”，例如05:00:08完成却等06:00，06:00已是本period expiry；连续小时切换会没有可交易close。单纯把300s降为warning不能修复此问题；不得自动延长source/Authority有效期、提前warming、降低cadence或从missed-close统计剔除真实遗漏。
 
-建议裁决：正常切换继续用已预提交Snapshot、最新fresh且未消费close的既有proof；**仅真正authority gap/失败恢复**采用future-close-only + authority-recovery revision rebase，失败period明确记录miss并在后续合法period恢复。其rebase不得伪造Comparison变更，非比较策略CPM/BRF2也必须有恢复身份；首次NOT_TRIGGERED必须发生于恢复权限生效后。若Owner选择所有切换都future-only，则必须先修订小时生效/到期时序并证明存在交易窗口，而非只改Plan一句话。该决定仅暂停受影响的clock/activation改写，现有schema、member policy和来源测试仍可继续；整个目标保持active，部署继续无授权。
+Owner已确认：正常切换继续用已预提交Snapshot、最新fresh且未消费close的既有proof；**仅真正authority gap/失败恢复**采用future-close-only + authority-recovery revision rebase，失败period明确记录miss并在后续合法period恢复。其rebase不得伪造Comparison变更，非比较策略CPM/BRF2也必须有恢复身份；首次NOT_TRIGGERED必须来自恢复权限生效后的未来合法close。慢切换不等于gap；是否连续必须由durable transition/cursor/provenance证明，不能只看耗时或由调用方自报。时钟修改的等待解除，按此二分合同继续本地实现；部署继续无授权。
 
 GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（不适用策略标NOT_APPLICABLE）→Signal→CapacityClaim→Ticket`、terminal reason和费用/funding来源。1h path只给bar-level first passage；实际entry/exit时间必须用fill，不能把交易发生前的整根bar极值冒充持仓MAE/MFE。entry/exit所在bar缺更细路径时标边界不确定，退出后路径从明确cutoff/horizon观察，不虚构精确先后。
 
@@ -350,6 +350,7 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 7. **GS-08-SOR-INCIDENT-01**：`now < first eligible close`时Gap Audit不得调用market replay，保持pending；用recording source证明零调用，不能靠构造4根OR后的空path绕过。
 8. **GS-08-SOR-INCIDENT-02**：expired session不得伪造retroactive Authority。首次Dynamic失败只走正式recovery/supersession，保留previous Static pair及`selection_mode=static_baseline`；failed Audit不能无限卡住后续合法恢复。测试覆盖failed Audit、重启、新period与Owner pause交叉路径，禁止以直接SQL修复作为运行方案。
+9. **GS-08-HOURLY-CLOCK-01**：NORMAL证明完整时，05:00:08可消费05:00最新未消费close；8秒/30秒/2分钟延迟不能仅按耗时变成RECOVERY。迟到Snapshot、已消费close、freshness失效、commit越界拒绝。RECOVERY原因一旦成立，禁止恢复后降级NORMAL追认；future-close-only与独立recovery revision rebase必须覆盖四策略，先未来合法NOT_TRIGGERED再更晚TRIGGERED。首个未来close不小于expiry时记录NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY及miss，零新Signal/Ticket；下一合法period才能恢复。SOR保持专属Gap Audit路径。
 
 **验证**：PG并发事务/barrier测试+recording network；current-close先consume或先switch两种顺序、crash每个commit点、重试terminal authority；SOR近期四类bug regression。
 
@@ -418,14 +419,14 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 | --- | --- | --- |
 | `selection_period_change_rate` | Desired与上一Desired不同的periods / 成功periods | 与冻结workload一致；必须覆盖真实非空changes |
 | `generation_rate` | new Generation / due periods | 与状态机预期一致；同snapshot不重复generation，NO_CHANGE不制造generation |
-| `p95 queue_wait` | due且可执行到取得global slot的实际等待，报告样本N | ≤300秒；全体健康请求无starvation |
-| `p95 fence→grant latency` | 首次fence到合法grant的实际elapsed，deadline不重设 | ≤300秒；所有健康切换在1800秒timeout及period expiry内完成 |
+| `p95 queue_wait` | due且可执行到取得global slot的实际等待，报告样本N | 300秒为SLO warning；hard gate仍为无starvation、正常路径不漏合法close |
+| `p95 fence→grant latency` | 首次fence到合法grant的实际elapsed，deadline不重设 | 300秒为SLO warning；原1800秒timeout、freshness及period expiry仍为hard gate |
 | `vacuum_duty_cycle` | 每策略健康观察区间open Vacuum的时间并集 / 该区间 | 每策略≤10%；报告逻辑时间与实际elapsed计量映射 |
 | `NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY rate` | 此原因未激活的due target periods / 健康target periods | =0；各策略至少实际处理一个有权close，不能全程只有计划时间 |
 | `selection-caused ENTRY cancellation count` | exact Vacuum归因的ENTRY cancel命令/结果计数 | 等于workload中命中条件的预期数，无重复取消/无unrelated command；已暴露保护不被取消 |
 | `missed eligible close count` | 健康数据/控制下因Selection工程延迟未处理的目标Event close数 | =0；逐close ledger，预期rebase抑制/自然NOT_TRIGGERED另列，不能用其掩盖延迟 |
 
-300秒/10%是**本计划提出的工程验收预算**，不来自研究alpha、不表示已测通过；计划复核前公开固定，执行时不得看结果后放宽。恢复/故障段要求stale按精确deadline触发、保护与Reconciliation按原契约推进，不要求故障期间假装零遗漏。
+300秒原为工程预算，Owner于2026-09-21明确降为performance SLO warning；不作为额外release硬闸门，不因该指标单独引入并行warming/incremental materialization。vacuum duty 10%及其他未修改预算仍保留，执行时不得看结果后放宽。正常路径仍要求零遗漏合法close，恢复/故障段按真实ledger记录机会损失并要求零过去close追认；stale按精确deadline触发，保护与Reconciliation按原契约推进，不要求故障期间假装零遗漏。
 
 另验证部署契约resource门槛：共享Worker≤1GiB上限、idle memory<80%、代表性idle CPU<10%及原5s/2s/2s/5s cadence、无旧新writer重叠。分别记录正常业务tick延迟与注入网络等待，不将poll间隔错误等同于所有网络操作完成时间。
 

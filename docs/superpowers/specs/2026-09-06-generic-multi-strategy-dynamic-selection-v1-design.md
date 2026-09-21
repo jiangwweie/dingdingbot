@@ -274,6 +274,16 @@ e: 建立当前period continuity；未来Snapshot成为due
 
 新策略不在 `e` 之前开启切换 Vacuum；Selection 预取是纯市场数据准备，不是 StrategyUniverse Warming。这样冻结的一小时延迟不被提前交易消除，也不会人为制造整小时交易真空。
 
+#### HOURLY_CLOSE_CONSUMPTION_RULE（Owner冻结，2026-09-21）
+
+以下二分规则优先于本文中把Generic恢复笼统称为Gap Audit/coverage proof的旧表述。SOR专属Gap Audit、first-cross suppression和pair/session合同不变。
+
+- **NORMAL_TRANSITION**：同一可证明连续的正常transition，Snapshot在close前已提交，cutoff、epoch/comparison正确，close为最新fresh且未消费；满足下列既有proof条件后可以消费current close。8秒、30秒、2分钟或超过300秒的延迟本身不构成gap；但不能突破原timeout、source freshness、period expiry。正常切换自身的Vacuum须在grant同事务中已drained并resolve，不允许其他未解决Vacuum、stale或Owner pause。
+- **RECOVERY_TRANSITION**：真正authority gap、materialization timeout/failure、failed recovery、stale source、Vacuum interruption、crash后无法证明连续性或comparison provenance断裂，必须future-close-only并进入Episode REBASE_REQUIRED。对该恢复链，恢复时已经过去的close永久不得用于新Signal；不能把错误清除后重新标NORMAL来消费它。
+- 恢复的first eligible close严格晚于恢复grant commit，且小于该合法period expiry；事务跨close边界须重验。没有这样的close则`NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY`，记录真实missed-close ledger并等待后续合法period，不延长旧Authority/source年龄、不伪造追溯权限。
+- recovery revision是独立可追踪的恢复身份；Comparison实际未变时不伪造comparison revision。CPM/BRF2同样需要Episode恢复屏障。只有恢复生效后的未来合法NOT_TRIGGERED可以重新armed，随后更晚close的TRIGGERED才能发Signal；无效输入、warming、历史replay或同close false/true不能解锁。
+- 正常路径不漏合法close、故障路径不追认、deadline不因retry刷新、无starvation、正确ENTRY cancellation仍为hard gates。300秒queue/fence指标仅为performance SLO warning，不单独阻塞release，不驱动并行warming等架构扩张；实际freshness/expiry约束不因warning化而放宽。
+
 **小时策略不能机械使用SOR的“grant之后下一个close”公式。** 例如05:00:08完成后把首个close推到06:00，同时05:00这一period在06:00到期，会让每次小时切换都没有可交易close。新策略采用下述明确的工程规则，SOR原逻辑不变。
 
 新策略允许授权**最新且仍fresh的final close `c`**，即正常Worker在close之后处理这根刚收完的K线，而实际Signal/ENTRY始终在grant commit之后发生。需要全部成立：
@@ -508,7 +518,7 @@ SOR继续整个UTC Session的first natural episode语义。Gap Audit先于grant�
 5. 资格/数据INVALID不能当NOT_TRIGGERED；保持state，等待当前合法观察。
 6. Warming只产生就绪Fact与certification，不发布Signal、不消耗正式episode状态；warm结束只能在§6.2合法close上正式观察，不能补发过期或早于eligible close的Signal。
 
-Generic Gap Audit记录 `RISING_EDGE_PRESERVE_STATE` coverage proof：fence interval、last authoritative observation/version、candidate set、数据完整性、实际first eligible close、comparison binding。使用current close时另附§6.2的precommitted Selection proof；**不套用SOR的“当天首次cross已发生”抑制规则**。对未选中期间的Detector结果无虚构审计结论。
+Generic正常切换记录 `RISING_EDGE_PRESERVE_STATE` continuity proof：transition/fence interval、last authoritative observation/version、candidate set、数据完整性、实际first eligible close、comparison binding；消费current close必须另附§6.2的precommitted Selection proof。真正gap/失败恢复遵循`HOURLY_CLOSE_CONSUMPTION_RULE`的future-close-only + recovery rebase，不要求重放缺口内所有candles，也不借coverage audit追认刚过去的close。**不套用SOR的“当天首次cross已发生”抑制规则**，对未选中期间的Detector结果无虚构审计结论。
 
 MPG/MI comparison binding切换不得直接沿用旧comparison下的ARMED/TRIGGERED归因。普通`RISING_EDGE_PRESERVE_STATE`不能替代下面的`COMPARISON_BINDING_TRANSITION`；新comparison也不能在相同close重写已committed observation结果。
 
