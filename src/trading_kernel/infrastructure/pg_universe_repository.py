@@ -908,16 +908,6 @@ class PostgresStrategyUniverseRepository:
                 current=None,
                 reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT",
             )
-        if target["lifecycle_state"] == "staged":
-            return UniverseActivationResult(
-                status=UniverseActivationStatus.STAGED,
-                reason_code=None,
-                event_spec_id=str(target["event_spec_id"]),
-                universe_version_id=request.universe_version_id,
-                previous_universe_version_id=None,
-                activation_generation=None,
-                activated_at_ms=None,
-            )
         generation = (
             await self._connection.execute(
                 sa.select(*materialization_generation_projection_columns())
@@ -939,6 +929,43 @@ class PostgresStrategyUniverseRepository:
                 current=None,
                 reason_code="DYNAMIC_GENERATION_STATE_CONFLICT",
             )
+        spec = (await self._connection.execute(sa.select(instrument_selection_specs).where(
+            instrument_selection_specs.c.selection_spec_id == generation["selection_spec_id"],
+        ))).mappings().one_or_none()
+        expected_events = tuple((await self._connection.execute(sa.select(
+            instrument_selection_spec_events.c.event_spec_id).where(
+                instrument_selection_spec_events.c.selection_spec_id == generation["selection_spec_id"],
+            ).order_by(instrument_selection_spec_events.c.event_spec_id).limit(3))).scalars())
+        if spec is None or spec["status"] != "active" or target["event_spec_id"] not in expected_events or (
+            (spec["selection_kind"] == "generic_dynamic_v1" and len(expected_events) != 1)
+            or (spec["selection_kind"] == "sor_dynamic_v0" and len(expected_events) != 2)
+        ):
+            return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT")
+        if spec["selection_kind"] == "generic_dynamic_v1":
+            control = (await self._connection.execute(sa.select(strategy_selection_control_current).where(
+                strategy_selection_control_current.c.strategy_group_id == generation["strategy_group_id"],
+            ).with_for_update())).mappings().one_or_none()
+            if control is None or control["selection_spec_id"] != generation["selection_spec_id"] or (
+                control["selection_epoch_id"] != generation["selection_epoch_id"]
+                or control["control_version"] != generation["selection_control_version"]
+            ):
+                return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_CONTROL_CHANGED")
+            snapshot = (await self._connection.execute(sa.select(instrument_selection_snapshots).where(
+                instrument_selection_snapshots.c.selection_snapshot_id == generation["selection_snapshot_id"],
+            ))).mappings().one_or_none()
+            if snapshot is None or not snapshot["eligibility_not_before_ms"] <= request.attempted_at_ms < snapshot["expires_at_ms"]:
+                return _not_ready_activation(target=target,current=None,reason_code="GENERATION_SOURCE_PERIOD_EXPIRED")
+            if request.materialization_lease_owner is None or request.materialization_lease_epoch is None or (
+                generation["lease_owner"] != request.materialization_lease_owner
+                or generation["lease_epoch"] != request.materialization_lease_epoch
+                or generation["lease_expires_at_ms"] is None
+                or generation["lease_expires_at_ms"] <= request.attempted_at_ms
+            ):
+                return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_LEASE_CHANGED")
+        if target["lifecycle_state"] == "staged":
+            return UniverseActivationResult(status=UniverseActivationStatus.STAGED,reason_code=None,
+                event_spec_id=str(target["event_spec_id"]),universe_version_id=request.universe_version_id,
+                previous_universe_version_id=None,activation_generation=None,activated_at_ms=None)
         event = (
             await self._connection.execute(
                 sa.select(
@@ -962,7 +989,7 @@ class PostgresStrategyUniverseRepository:
                 and event["status"] == "active"
                 and event["timeframe"] in {"15m", "1h"}
             ),
-            comparative_event=False,
+            comparative_event=bool(event is not None and event["event_id"] in {"MPG-LONG", "MI-LONG"}),
             expected_lifecycle="warming",
             event=event,
         )
@@ -1009,19 +1036,17 @@ class PostgresStrategyUniverseRepository:
         )
         if version.rowcount != 1:
             raise UniverseInstallConflict("DYNAMIC_STAGING_CONFLICT")
-        staged_count = int(
-            await self._connection.scalar(
-                sa.select(sa.func.count())
-                .select_from(strategy_universe_versions)
+        staged_events = tuple((await self._connection.execute(
+                sa.select(strategy_universe_versions.c.event_spec_id)
                 .where(
                     strategy_universe_versions.c.materialization_generation_id
                     == generation_id,
                     strategy_universe_versions.c.lifecycle_state == "staged",
-                )
-            )
-            or 0
-        )
-        if staged_count == 2:
+                ).order_by(strategy_universe_versions.c.event_spec_id).limit(3)
+            )).scalars())
+        if len(staged_events) != len(set(staged_events)) or not set(staged_events).issubset(expected_events):
+            raise UniverseInstallConflict("DYNAMIC_GENERATION_STAGE_CONFLICT")
+        if staged_events == expected_events:
             generation_update = await self._connection.execute(
                 sa.update(strategy_universe_materialization_generations)
                 .where(
@@ -1039,15 +1064,22 @@ class PostgresStrategyUniverseRepository:
             )
             if generation_update.rowcount != 1:
                 raise UniverseInstallConflict("DYNAMIC_GENERATION_STAGE_CONFLICT")
+            event_sequence = int(await self._connection.scalar(sa.select(
+                strategy_universe_materialization_events.c.event_sequence).where(
+                    strategy_universe_materialization_events.c.materialization_generation_id == generation_id,
+                ).order_by(strategy_universe_materialization_events.c.event_sequence.desc()).limit(1)) or 0) + 1
+            if spec["selection_kind"] == "sor_dynamic_v0":
+                # SOR activation still owns its frozen sequence-6 event.
+                event_sequence = 5
             await self._connection.execute(
                 sa.insert(strategy_universe_materialization_events).values(
                     materialization_event_id=(
-                        f"materialization-event:{generation_id}:5"
+                        f"materialization-event:{generation_id}:{event_sequence}"
                     ),
                     materialization_generation_id=generation_id,
-                    event_sequence=5,
+                    event_sequence=event_sequence,
                     event_type="STAGED",
-                    payload={"staged_universe_count": 2},
+                    payload={"staged_universe_count": len(staged_events)},
                     occurred_at_ms=request.attempted_at_ms,
                 )
             )
@@ -2170,34 +2202,19 @@ class PostgresStrategyUniverseRepository:
             }
             if len(warm_close_times) == 1:
                 closed_bar_time_ms = next(iter(warm_close_times))
-                member_set_digest = comparative_member_set_digest(
-                    members
-                )
-                projection_row = (
-                    await self._connection.execute(
-                        sa.select(comparative_projection_current)
-                        .where(
-                            comparative_projection_current.c.event_spec_id
-                            == target["event_spec_id"],
-                            comparative_projection_current.c.universe_version_id
-                            == universe_version_id,
-                            comparative_projection_current.c.closed_bar_time_ms
-                            == closed_bar_time_ms,
-                            comparative_projection_current.c.member_set_digest
-                            == member_set_digest,
-                        )
-                        .with_for_update(
-                            of=comparative_projection_current
-                        )
-                        .limit(1)
+                try:
+                    source = await self.get_comparative_source(event_spec_id=target["event_spec_id"],
+                        universe_version_id=universe_version_id)
+                    projection = await self.get_comparative_projection(
+                        event_spec_id=target["event_spec_id"], universe_version_id=universe_version_id,
+                        closed_bar_time_ms=closed_bar_time_ms,
+                        member_set_digest=comparative_member_set_digest(source.exchange_instrument_ids),
+                        comparison_transition_revision=source.comparison_transition_revision,
                     )
-                ).mappings().one_or_none()
-                comparative_projection_is_complete = (
-                    _ready_comparative_projection_is_valid(
-                        projection_row,
-                        attempted_at_ms=attempted_at_ms,
-                    )
-                )
+                    comparative_projection_is_complete = isinstance(projection, ComparativeUniverseProjection) and (
+                        projection.observed_at_ms <= attempted_at_ms < projection.valid_until_ms)
+                except (RuntimeError, ValueError):
+                    comparative_projection_is_complete = False
         return UniverseActivationReadiness(
             target_lifecycle_is_valid=(
                 target["lifecycle_state"] == expected_lifecycle
@@ -4008,36 +4025,6 @@ def _not_ready_activation(
         ),
         activated_at_ms=None,
     )
-
-
-def _ready_comparative_projection_is_valid(
-    row: RowMapping | None,
-    *,
-    attempted_at_ms: int,
-) -> bool:
-    if (
-        row is None
-        or row["projection_status"] != "ready"
-        or row["failure_reason"] is not None
-        or int(row["valid_until_ms"]) <= attempted_at_ms
-    ):
-        return False
-    try:
-        ComparativeUniverseProjection.model_validate(
-            {
-                **dict(row["projection"]),
-                "event_spec_id": row["event_spec_id"],
-                "universe_version_id": row["universe_version_id"],
-                "member_set_digest": row["member_set_digest"],
-                "closed_bar_time_ms": row["closed_bar_time_ms"],
-                "observed_at_ms": row["observed_at_ms"],
-                "valid_until_ms": row["valid_until_ms"],
-                "projection_version": row["projection_version"],
-            }
-        )
-    except ValidationError:
-        return False
-    return True
 
 
 def _universe_version_id(event_spec_id: str, universe_version: int) -> str:

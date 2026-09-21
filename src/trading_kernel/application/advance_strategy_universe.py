@@ -133,6 +133,8 @@ class UniverseActivationRequest(BaseModel):
     attempted_at_ms: int
     operation: UniverseActivationOperation = UniverseActivationOperation.AUTO
     materialization_generation_id: str | None = None
+    materialization_lease_owner: str | None = None
+    materialization_lease_epoch: int | None = None
     paired_universe_version_id: str | None = None
     selection_authority: SelectionSessionAuthority | None = None
 
@@ -153,6 +155,7 @@ class UniverseActivationRequest(BaseModel):
 
     @field_validator(
         "materialization_generation_id",
+        "materialization_lease_owner",
         "paired_universe_version_id",
         mode="before",
     )
@@ -163,6 +166,12 @@ class UniverseActivationRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_operation_shape(self) -> UniverseActivationRequest:
+        if (self.materialization_lease_owner is None) != (self.materialization_lease_epoch is None):
+            raise ValueError("materialization lease token must be complete")
+        if self.materialization_lease_epoch is not None and (
+            self.materialization_lease_epoch <= 0 or self.operation is not UniverseActivationOperation.STAGE_DYNAMIC
+        ):
+            raise ValueError("materialization lease token is only valid for Dynamic staging")
         if (
             self.operation is UniverseActivationOperation.STAGE_DYNAMIC
             and self.materialization_generation_id is None

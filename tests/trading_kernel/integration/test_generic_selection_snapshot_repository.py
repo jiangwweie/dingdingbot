@@ -9,6 +9,12 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from src.trading_kernel.application.advance_strategy_universe import (
+    UniverseActivationOperation,
+    UniverseActivationRequest,
+    UniverseActivationStatus,
+    advance_strategy_universe,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     install_strategy_universe,
@@ -69,6 +75,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
+from tests.trading_kernel.integration.universe_activation_support import (
+    make_warming_ready,
+)
 from tests.trading_kernel.support.generic_selection import (
     CUTOFF,
     HOUR,
@@ -710,6 +719,7 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
         # The synthetic cache-row checks below use another fixture timestamp.
         async with database.begin() as conn:
             await conn.execute(sa.text("DELETE FROM brc_comparative_projection_current"))
+        await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id)
         candles = mpg_long_snapshot().candles_1h if group=="MPG-001" else mi_long_snapshot().candles_1h
         close = candles[-1].close_time_ms
         for members in (source.spec.candidate_ids,snapshot.selected_members):
@@ -766,10 +776,87 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
             saved = await uow.strategy_universes.save_comparative_projection(refreshed)
             assert saved.comparison_transition_revision == 1
             assert saved.projection_version == 2
+    else:
+        await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id)
     with pytest.raises(sa.exc.DBAPIError, match="Universe trusted member limit"):
         async with database.begin() as conn:
             await conn.execute(sa.text("INSERT INTO brc_strategy_universe_members(universe_version_id,exchange_instrument_id) VALUES(:uid,:member)"),
                 [{"uid":uid,"member":member} for member in source.spec.candidate_ids[1:11]])
+
+
+async def _assert_generic_target_stages(database, source, generation, uid):
+    # Stage-readiness prerequisites only: Coordinator fence/drain is not mocked
+    # as completed by this test. No activation or positive grant is requested.
+    close = generation.created_at_ms - 1
+    await make_warming_ready(database, universe_version_id=uid,
+        warm_closed_bar_time_ms=close, valid_until_ms=close+HOUR)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        lease = await uow.instrument_selection.claim_generic_materialization_generation(
+            generation.materialization_generation_id,worker_id="stage-worker",now_ms=close+10,lease_duration_ms=HOUR//2)
+    assert lease.generation is not None
+    request = UniverseActivationRequest(universe_version_id=uid, attempted_at_ms=close+30_004,
+        operation=UniverseActivationOperation.STAGE_DYNAMIC,
+        materialization_lease_owner="stage-worker", materialization_lease_epoch=lease.generation.lease_epoch,
+        materialization_generation_id=generation.materialization_generation_id)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        stale_lease = await advance_strategy_universe(uow, request.model_copy(update={"materialization_lease_epoch":lease.generation.lease_epoch+1}))
+    assert stale_lease.reason_code == "DYNAMIC_GENERATION_LEASE_CHANGED"
+    if source.spec.strategy_group_id in {"MPG-001", "MI-001"}:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            missing = await advance_strategy_universe(uow, request)
+        assert missing.status == UniverseActivationStatus.NOT_READY
+        assert missing.reason_code == "COMPARATIVE_PROJECTION_INCOMPLETE"
+        template = mpg_long_snapshot() if source.spec.strategy_group_id == "MPG-001" else mi_long_snapshot()
+        delta = close-template.trigger_candle_close_time_ms
+        candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+        projection = build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,
+            universe_version_id=uid, strategy_group_id=source.spec.strategy_group_id,
+            exchange_instrument_ids=source.spec.candidate_ids, closed_bar_time_ms=close,
+            lookback_bars=8 if source.spec.strategy_group_id=="MPG-001" else 12,
+            freshness_window_ms=HOUR, member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in source.spec.candidate_ids))
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.strategy_universes.save_comparative_projection(projection)
+    async with database.connect() as conn:
+        previous = await conn.scalar(sa.text("SELECT universe_version_id FROM brc_strategy_universe_current WHERE event_spec_id=:event"), {"event":source.spec.event_spec_id})
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='temporarily_unavailable',blocker_code='readonly_facts_unavailable' WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"), {"uid":uid})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        waiting = await advance_strategy_universe(uow, request)
+    assert waiting.reason_code == "CERTIFICATION_TEMPORARILY_UNAVAILABLE"
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=:gid"), {"gid":generation.materialization_generation_id}) == "MATERIALIZING"
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='eligible',blocker_code=NULL WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"), {"uid":uid})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        staged = await advance_strategy_universe(uow, request)
+    assert staged.status == UniverseActivationStatus.STAGED
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await advance_strategy_universe(uow, request) == staged
+        lease_expired = await advance_strategy_universe(uow, request.model_copy(update={"attempted_at_ms":close+HOUR//2+11}))
+        assert lease_expired.reason_code == "DYNAMIC_GENERATION_LEASE_CHANGED"
+        expired = await advance_strategy_universe(uow, request.model_copy(update={"attempted_at_ms":close+source.spec.cadence_hours*HOUR}))
+        assert expired.reason_code == "GENERATION_SOURCE_PERIOD_EXPIRED"
+    async with PostgresKernelUnitOfWork(database) as uow:
+        reclaimed = await uow.instrument_selection.claim_generic_materialization_generation(
+            generation.materialization_generation_id, worker_id="stage-worker",
+            now_ms=close+HOUR//2+12, lease_duration_ms=60_000)
+    assert reclaimed.generation is not None
+    assert reclaimed.generation.lease_epoch == lease.generation.lease_epoch + 1
+    callback = request.model_copy(update={"attempted_at_ms":close+HOUR//2+13})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert (await advance_strategy_universe(uow, callback)).reason_code == "DYNAMIC_GENERATION_LEASE_CHANGED"
+        assert await advance_strategy_universe(uow, callback.model_copy(update={"materialization_lease_epoch":reclaimed.generation.lease_epoch})) == staged
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=:gid"), {"gid":generation.materialization_generation_id}) == "STAGED"
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 0
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND (entry_enabled OR observation_enabled)"), {"uid":uid}) == 0
+        assert await conn.scalar(sa.text("SELECT universe_version_id FROM brc_strategy_universe_current WHERE event_spec_id=:event"), {"event":source.spec.event_spec_id}) == previous
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='STAGED'"), {"gid":generation.materialization_generation_id}) == 1
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_strategy_selection_control_current SET control_version=control_version+1 WHERE selection_spec_id=:spec"), {"spec":source.spec.selection_spec_id})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        stale = await advance_strategy_universe(uow, request)
+    assert stale.reason_code == "DYNAMIC_GENERATION_CONTROL_CHANGED"
 
 
 @pytest.mark.asyncio
