@@ -43,7 +43,7 @@ further_feature_research = CLOSED
 
 Owner提供的SOR事故链作为回归需求来源，而非本轮重新取得的生产事实：temporary certification被误判永久失败、过早Gap Audit、failed Audit卡住切换。其工程不变量现明确列入GS-07/08。Static migration neutrality、comparison rebase与24h-equivalent soak保持不变；实盘验证不能豁免工程安全验收。
 
-### 2.1 当前实施证据校正（2026-09-08）
+### 2.1 当前实施证据校正（2026-09-21）
 
 #### 1h+范围收缩建议审计（2026-09-21，双时钟已获Owner确认）
 
@@ -73,6 +73,12 @@ GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（�
 | GS-04/05回归 | 最新相关PG139 passed；Generic迁移9 passed，后加旧SOR Job/Attempt逐字段保全1 passed；Unit+Architecture1169 passed；Golden来源/输入完整性与Core961×24 parity均通过；Ruff及源码/脚本Mypy通过 | 完整PG/Full-chain和source verifier升级，不是R4 PASS；分批数字有重叠，不能相加冒充完整release计数 |
 | 纯Selection合同与持久化 | Candidate24/cutoff、公式、Desired predecessor/hysteresis；四策略exact roundtrip、EMPTY不补位；锁定Spec进行前驱CAS；共享Job lease/完成/失败逻辑；Generic commit再验Control version、epoch、lease、前驱与有效期；Static零Job；源失败不推进前驱，新epoch不继承旧Job；正式Runner Spec dispatch、raw public 1h OHLCV、Product资格事实与digest，取数在事务外 | Job EXPIRED/SUPERSEDED终态与bounded调度、source retry/lease fault完整认证；直接SQL并发分叉/跨事务链认证、三Plane调度；GS-05未完成 |
 | GS-06～09 | 现有SOR读路径已随schema切片接线 | Generic comparison/Observation、Warming、Vacuum/authority、Claim/Ticket/dispatch完整集成未完成 |
+
+2026-09-21实施补充：Universe表示层上界16，manual/Static及Owner配置入口仍限10；Generation-owned安装从已安装Spec、Snapshot及精确target解析limit/成员数量/有效期，SOR Dynamic仍限7，Generic按retain_rank≤16。PG member trigger保留原Product compatibility校验并从Generation/Spec解析同样的trusted limit，直接SQL扩充manual到11失败。四策略经正式installer生成warming Universe（12或16），不创建positive authority；测试中的MATERIALIZING为明确repository prerequisite，不能当作Vacuum/drain/Warming完成证据。
+
+双时钟纯组件新增`HourlyRecoveryClosePlan`：恢复只规划严格未来且小于expiry的close，commit跨界拒绝；无可用close输出NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY，固定要求rebase。正常CurrentFinalCloseGrantProof不因8秒/30秒/2分钟延迟改变语义。尚未完成durable recovery revision、Episode rebase与Coordinator接线，不宣称GS-08-HOURLY-CLOCK-01全链已通过。
+
+本轮验证使用Docker `dingdingbot-pg`的独立可处置测试库：Universe安装/Schema/Generic仓库组合51 passed；SOR Materialization与Generic migration87 passed；Unit/Architecture1180 passed，后补Owner请求上限和时钟专项24 passed（有重叠）；Ruff、源码/脚本Mypy通过。计划与设计双时钟冻结见提交`b025ac0d`。生产未修改，部署权限仍NONE。
 
 2026-09-09 Generic Generation切片（父提交`4bf00b34`）：新增typed Generic Generation与previous Event baseline，明确Snapshot/epoch/control/period身份、comparison transition revision与不可变semantic digest；按原Generation/target/event表原子存储，不保存第二份Snapshot或成员集。四策略创建/精确读取/重复响应幂等已通过。PG在Generic分支校验Snapshot epoch、period、数量、effective时点和target member digest，SOR分支原约束保留。
 

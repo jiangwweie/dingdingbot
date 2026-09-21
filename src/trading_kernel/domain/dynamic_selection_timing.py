@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -36,6 +37,61 @@ class GenericSelectionPeriod(BaseModel):
         ):
             raise ValueError("Generic Selection period timing is invalid")
         return self
+
+
+HourlyRecoveryReason = Literal[
+    "AUTHORITY_GAP", "MATERIALIZATION_FAILURE", "MATERIALIZATION_TIMEOUT",
+    "FAILED_RECOVERY", "STALE_SOURCE", "VACUUM_INTERRUPTION",
+    "UNPROVEN_CRASH_CONTINUITY", "COMPARISON_PROVENANCE_LOST",
+]
+
+
+class HourlyRecoveryClosePlan(BaseModel):
+    """Fail-closed recovery clock plan, never an Entry grant or arming proof."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    recovery_id: str
+    recovery_revision: int
+    reason: HourlyRecoveryReason
+    period: GenericSelectionPeriod
+    evaluated_at_ms: int
+    status: Literal["FUTURE_CLOSE_REBASE_REQUIRED", "NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY"]
+    first_eligible_close_time_ms: int | None
+    episode_rebase_required: Literal[True] = True
+
+    @model_validator(mode="after")
+    def _validate_recovery_clock(self) -> HourlyRecoveryClosePlan:
+        if not self.recovery_id.strip() or len(self.recovery_id)>160 or self.recovery_revision<=0:
+            raise ValueError("recovery requires durable identity and revision")
+        if self.evaluated_at_ms<self.period.scheduled_effective_at_ms:
+            raise ValueError("recovery period is not effective")
+        first = (self.evaluated_at_ms//_HOUR_MS+1)*_HOUR_MS
+        if first>=self.period.period_expires_at_ms:
+            if self.status!="NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY" or self.first_eligible_close_time_ms is not None:
+                raise ValueError("recovery cannot invent an eligible close before expiry")
+        elif self.status!="FUTURE_CLOSE_REBASE_REQUIRED" or self.first_eligible_close_time_ms!=first:
+            raise ValueError("recovery requires the next strictly future close")
+        return self
+
+
+def plan_hourly_recovery_close(*, recovery_id: str, recovery_revision: int, reason: HourlyRecoveryReason,
+                              period: GenericSelectionPeriod, evaluated_at_ms: int) -> HourlyRecoveryClosePlan:
+    first = (evaluated_at_ms//_HOUR_MS+1)*_HOUR_MS
+    eligible = first<period.period_expires_at_ms
+    return HourlyRecoveryClosePlan(recovery_id=recovery_id,recovery_revision=recovery_revision,reason=reason,
+        period=period,evaluated_at_ms=evaluated_at_ms,
+        status="FUTURE_CLOSE_REBASE_REQUIRED" if eligible else "NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY",
+        first_eligible_close_time_ms=first if eligible else None)
+
+
+def require_hourly_recovery_commit(plan: HourlyRecoveryClosePlan, *, committed_at_ms: int) -> None:
+    """Caller must use fresh commit-time facts and persist recovery rebase atomically."""
+    plan = HourlyRecoveryClosePlan.model_validate(plan.model_dump())
+    if plan.status=="NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY":
+        raise ValueError("NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY")
+    first = plan.first_eligible_close_time_ms
+    if first is None or not plan.evaluated_at_ms<=committed_at_ms<first<plan.period.period_expires_at_ms:
+        raise ValueError("recovery commit crossed its future-close boundary; replan required")
 
 
 class DynamicMembershipFreshness(BaseModel):

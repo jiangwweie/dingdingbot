@@ -48,10 +48,54 @@ def upgrade() -> None:
     _typed_selection_snapshots(bind)
     _selection_job_epochs()
     _materialization_event_baselines(bind)
+    _trusted_universe_member_limit()
 
 
 def downgrade() -> None:
     raise RuntimeError("0008_generic_dynamic_selection_v1 is fix-forward only")
+
+
+def _trusted_universe_member_limit() -> None:
+    op.execute(sa.text("""
+      CREATE OR REPLACE FUNCTION brc_enforce_universe_member_limit() RETURNS trigger LANGUAGE plpgsql AS $$
+      DECLARE identity_compatible boolean; u brc_strategy_universe_versions%ROWTYPE;
+        g brc_strategy_universe_materialization_generations%ROWTYPE;
+        spec brc_instrument_selection_specs%ROWTYPE; member_limit integer := 10;
+      BEGIN
+        SELECT * INTO u FROM brc_strategy_universe_versions WHERE universe_version_id=NEW.universe_version_id FOR UPDATE;
+        SELECT i.venue_id='binance-usdm' AND i.asset_class IN ('crypto','equity')
+          AND i.venue_symbol ~ '^[A-Z0-9]+USDT$' AND i.contract_kind='perpetual'
+          AND i.exchange_instrument_id='binance-usdm'||chr(58)||i.venue_symbol||chr(58)||'perpetual'
+          AND p.asset_class=i.asset_class AND p.status IN ('candidate','active')
+          AND p.entry_session_policy<>'reference_only' AND p.product_family=c.product_family
+          AND p.asset_class=c.asset_class AND p.contract_type=c.contract_type
+          AND p.underlying_type=c.underlying_type AND p.margin_asset=c.margin_asset
+        INTO identity_compatible FROM brc_instruments i JOIN brc_instrument_product_profiles p USING(exchange_instrument_id)
+          JOIN brc_event_product_compatibility c ON c.event_spec_id=u.event_spec_id
+          WHERE i.exchange_instrument_id=NEW.exchange_instrument_id;
+        IF identity_compatible IS DISTINCT FROM true THEN
+          RAISE EXCEPTION 'strategy universe member product compatibility mismatch' USING ERRCODE='23514',CONSTRAINT='ck_brc_universe_member_product';
+        END IF;
+        IF u.source_kind='dynamic_selection' THEN
+          SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=u.materialization_generation_id;
+          IF NOT FOUND OR g.selection_mode<>'dynamic_selection' OR g.strategy_group_id<>u.strategy_group_id THEN
+            RAISE EXCEPTION 'Universe trusted Generation identity mismatch';
+          END IF;
+          SELECT s.* INTO spec FROM brc_instrument_selection_specs s JOIN brc_instrument_selection_spec_events e USING(selection_spec_id)
+            WHERE s.selection_spec_id=g.selection_spec_id AND e.event_spec_id=u.event_spec_id AND s.status='active';
+          IF NOT FOUND THEN RAISE EXCEPTION 'Universe trusted Spec identity mismatch'; END IF;
+          IF spec.selection_kind='sor_dynamic_v0' THEN member_limit:=7;
+          ELSIF spec.selection_kind='generic_dynamic_v1' THEN
+            SELECT retain_rank INTO member_limit FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=spec.selection_spec_id;
+          ELSE RAISE EXCEPTION 'Universe trusted Spec kind mismatch'; END IF;
+          IF member_limit IS NULL OR member_limit>16 THEN RAISE EXCEPTION 'Universe trusted member limit unavailable'; END IF;
+        END IF;
+        IF (SELECT count(*) FROM brc_strategy_universe_members WHERE universe_version_id=NEW.universe_version_id)>=member_limit THEN
+          RAISE EXCEPTION 'Universe trusted member limit exceeded: %',member_limit USING ERRCODE='23514',CONSTRAINT='ck_brc_universe_members_trusted_limit';
+        END IF;
+        RETURN NEW;
+      END; $$
+    """))
 
 
 def _rename_period_storage() -> None:

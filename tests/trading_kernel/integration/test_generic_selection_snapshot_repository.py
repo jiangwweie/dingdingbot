@@ -503,6 +503,23 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
             assert retired.lifecycle_state.value=="SUPERSEDED"
             assert retired.previous_events==generation.previous_events
             assert retired.semantic_digest==generation.semantic_digest
+        generation, snapshot = later, later_snapshot
+    # Installation prerequisite only; Coordinator Vacuum/drain remains separately required.
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_strategy_universe_materialization_generations SET lifecycle_state='MATERIALIZING' WHERE materialization_generation_id=:gid"),
+            {"gid":generation.materialization_generation_id})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        target = await install_strategy_universe(uow, UniverseInstallRequest(
+            event_spec_id=source.spec.event_spec_id,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
+            exchange_instrument_ids=snapshot.selected_members,source_kind="dynamic_selection",
+            materialization_generation_id=generation.materialization_generation_id,expected_member_set_digest=snapshot.member_set_digest,
+            installed_at_ms=generation.created_at_ms+1))
+        assert target.universe is not None and target.universe.exchange_instrument_ids==snapshot.selected_members
+        assert target.lifecycle_state=="warming"
+    with pytest.raises(sa.exc.DBAPIError, match="Universe trusted member limit"):
+        async with database.begin() as conn:
+            await conn.execute(sa.text("INSERT INTO brc_strategy_universe_members(universe_version_id,exchange_instrument_id) VALUES(:uid,:member)"),
+                [{"uid":uid,"member":member} for member in source.spec.candidate_ids[1:11]])
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,15 @@ def test_universe_canonicalizes_member_order_without_creating_priority() -> None
     assert "priority" not in StrategyUniverseVersion.model_fields
 
 
+def test_owner_configuration_keeps_ten_member_limit() -> None:
+    from src.trading_kernel.application.install_strategy_universe import (
+        UniverseConfigurationRequest,
+    )
+    with pytest.raises(ValidationError, match="ten"):
+        UniverseConfigurationRequest(runtime_profile_id="tiny-live-v1",event_id="CPM-LONG",
+            exchange_instrument_ids=tuple(f"binance-usdm:ASSET{index}USDT:perpetual" for index in range(11)),installed_at_ms=1000)
+
+
 def test_universe_digest_is_independent_of_submission_order_and_version_identity() -> None:
     first = _universe(
         (
@@ -51,7 +60,7 @@ def test_universe_digest_is_independent_of_submission_order_and_version_identity
     "members",
     (
         (),
-        tuple(f"binance-usdm:ASSET{index}USDT:perpetual" for index in range(11)),
+        tuple(f"binance-usdm:ASSET{index}USDT:perpetual" for index in range(17)),
         (
             "binance-usdm:BTCUSDT:perpetual",
             "binance-usdm:BTCUSDT:perpetual",

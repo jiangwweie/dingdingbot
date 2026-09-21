@@ -16,6 +16,7 @@ from src.trading_kernel.domain.instrument_identity import (
 from src.trading_kernel.domain.owner_control import OwnerAuthorization
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.strategy_universe import (
+    MAX_MANUAL_UNIVERSE_MEMBERS,
     MAX_UNIVERSE_MEMBERS,
     StrategyUniverseLifecycleState,
     StrategyUniverseVersion,
@@ -77,7 +78,7 @@ class UniverseInstallRequest(BaseModel):
             )
         members: tuple[object, ...] = tuple(value)
         if not 1 <= len(members) <= MAX_UNIVERSE_MEMBERS:
-            raise ValueError("Universe install requires between one and ten members")
+            raise ValueError("Universe representation requires between one and sixteen members")
         if len(set(members)) != len(members):
             raise ValueError("Universe install members must be unique")
         if any(not isinstance(member, str) for member in members):
@@ -120,6 +121,8 @@ class UniverseInstallRequest(BaseModel):
 
     @model_validator(mode="after")
     def _require_materialization_shape(self) -> UniverseInstallRequest:
+        if self.source_kind != "dynamic_selection" and len(self.exchange_instrument_ids)>MAX_MANUAL_UNIVERSE_MEMBERS:
+            raise ValueError("manual/static Universe install requires at most ten members")
         generation_values = (
             self.materialization_generation_id,
             self.expected_member_set_digest,
@@ -155,7 +158,10 @@ class UniverseConfigurationRequest(BaseModel):
     @field_validator("exchange_instrument_ids", mode="before")
     @classmethod
     def _canonical_members(cls, value: object) -> tuple[str, ...]:
-        return UniverseInstallRequest._canonical_members(value)
+        members = UniverseInstallRequest._canonical_members(value)
+        if len(members)>MAX_MANUAL_UNIVERSE_MEMBERS:
+            raise ValueError("Owner Universe configuration requires at most ten members")
+        return members
 
     @field_validator("installed_at_ms")
     @classmethod

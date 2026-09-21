@@ -13,7 +13,8 @@ from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
 
-MAX_UNIVERSE_MEMBERS = 10
+MAX_UNIVERSE_MEMBERS = 16
+MAX_MANUAL_UNIVERSE_MEMBERS = 10
 
 
 class StrategyUniverseLifecycleState(StrEnum):
@@ -97,7 +98,7 @@ class StrategyUniverseVersion(BaseModel):
     def _validate_members_and_digest(self) -> StrategyUniverseVersion:
         members = self.exchange_instrument_ids
         if not 1 <= len(members) <= MAX_UNIVERSE_MEMBERS:
-            raise ValueError("universe requires between one and ten members")
+            raise ValueError("universe representation requires between one and sixteen members")
         if tuple(sorted(members)) != members:
             raise ValueError("universe members must be canonical sorted")
         if len(set(members)) != len(members):

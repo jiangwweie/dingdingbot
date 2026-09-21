@@ -88,10 +88,13 @@ from src.trading_kernel.infrastructure.pg_models import (
     comparative_projection_current,
     event_product_compatibility,
     event_specs,
+    generic_dynamic_selection_specs_v1,
     instrument_certification_batch_members,
     instrument_certification_batches,
     instrument_certification_current,
     instrument_product_profiles,
+    instrument_selection_snapshots,
+    instrument_selection_specs,
     instruments,
     materialization_generation_projection_columns,
     monitor_current,
@@ -235,6 +238,7 @@ class PostgresStrategyUniverseRepository:
         self,
         request: UniverseInstallRequest,
     ) -> UniverseInstallResult:
+        request = UniverseInstallRequest.model_validate(request.model_dump())
         await self._lock_installs()
         authority = await self._load_authority(request)
         requested = build_strategy_universe(
@@ -3533,8 +3537,7 @@ class PostgresStrategyUniverseRepository:
         generation = (
             await self._connection.execute(
                 sa.select(
-                    strategy_universe_materialization_generations.c.strategy_group_id,
-                    strategy_universe_materialization_generations.c.lifecycle_state,
+                    strategy_universe_materialization_generations,
                 )
                 .where(
                     strategy_universe_materialization_generations.c.materialization_generation_id
@@ -3572,6 +3575,35 @@ class PostgresStrategyUniverseRepository:
             existing is None or existing["lifecycle_state"] != "staged"
         ):
             raise UniverseInstallConflict("GENERATION_TARGET_AUTHORITY_CONFLICT")
+        if request.source_kind != generation["selection_mode"]:
+            raise UniverseInstallConflict("GENERATION_SOURCE_KIND_CONFLICT")
+        spec = (await self._connection.execute(sa.select(instrument_selection_specs).where(
+            instrument_selection_specs.c.selection_spec_id==generation["selection_spec_id"],
+        ))).mappings().one_or_none()
+        if spec is None or spec["status"]!="active" or spec["strategy_group_id"]!=generation["strategy_group_id"]:
+            raise UniverseInstallConflict("GENERATION_SPEC_AUTHORITY_CONFLICT")
+        limit = 10
+        if request.source_kind=="dynamic_selection":
+            if spec["selection_kind"]=="sor_dynamic_v0":
+                limit = 7
+            elif spec["selection_kind"]=="generic_dynamic_v1":
+                payload = (await self._connection.execute(sa.select(generic_dynamic_selection_specs_v1).where(
+                    generic_dynamic_selection_specs_v1.c.selection_spec_id==spec["selection_spec_id"],
+                ))).mappings().one_or_none()
+                snapshot = (await self._connection.execute(sa.select(instrument_selection_snapshots).where(
+                    instrument_selection_snapshots.c.selection_snapshot_id==generation["selection_snapshot_id"],
+                ))).mappings().one_or_none()
+                if payload is None or snapshot is None or snapshot["selection_spec_id"]!=spec["selection_spec_id"]:
+                    raise UniverseInstallConflict("GENERATION_SPEC_AUTHORITY_CONFLICT")
+                limit = int(payload["retain_rank"])
+                if not snapshot["eligibility_not_before_ms"]<=request.installed_at_ms<snapshot["expires_at_ms"]:
+                    raise UniverseInstallConflict("GENERATION_SOURCE_PERIOD_EXPIRED")
+                if len(request.exchange_instrument_ids)!=snapshot["selected_count"]:
+                    raise UniverseInstallConflict("GENERATION_SOURCE_MEMBER_COUNT_CONFLICT")
+            else:
+                raise UniverseInstallConflict("GENERATION_SPEC_AUTHORITY_CONFLICT")
+        if not 1<=len(request.exchange_instrument_ids)<=limit:
+            raise UniverseInstallConflict("GENERATION_MEMBER_LIMIT_EXCEEDED")
         if (
             target["expected_member_set_digest"] != expected_digest
             or selected_member_set_digest(request.exchange_instrument_ids)
