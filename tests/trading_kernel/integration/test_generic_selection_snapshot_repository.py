@@ -252,6 +252,37 @@ async def test_static_generic_selection_claim_short_circuits_without_job(databas
 
 
 @pytest.mark.asyncio
+async def test_installed_fixed24_comparison_does_not_activate_it(database: AsyncEngine) -> None:
+    source = inputs("MPG-001")
+    digest = canonical_digest({"exchange_instrument_ids":source.spec.candidate_ids})
+    comparison_id = "comparison:"+digest[7:]
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_comparison_universe_members WHERE comparison_universe_id=:id"), {"id":comparison_id}) == 24
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_comparison_binding_current")) == 0
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_comparison_universe_binding(source.spec.event_spec_id) is None
+    async with database.begin() as conn:
+        # Activation is a separate future full-chain contract, not performed by Spec installation.
+        await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:id,1,NULL)"),
+            {"event":source.spec.event_spec_id,"id":comparison_id})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        binding = await uow.instrument_selection.get_comparison_universe_binding(source.spec.event_spec_id)
+        assert binding.exchange_instrument_ids == source.spec.candidate_ids
+        assert binding.comparison_transition_revision == 1
+    shrunk = source.spec.candidate_ids[:-1]
+    shrunk_digest = canonical_digest({"exchange_instrument_ids":shrunk})
+    shrunk_id = "comparison:"+shrunk_digest[7:]
+    async with database.begin() as conn:
+        await conn.execute(sa.text("INSERT INTO brc_comparison_universe_definitions VALUES(:id,:digest,23)"), {"id":shrunk_id,"digest":shrunk_digest})
+        await conn.execute(sa.text("INSERT INTO brc_comparison_universe_members VALUES(:id,:member)"), [{"id":shrunk_id,"member":member} for member in shrunk])
+        await conn.execute(sa.text("UPDATE brc_comparison_binding_current SET comparison_universe_id=:id,comparison_transition_revision=2 WHERE event_spec_id=:event"),
+            {"id":shrunk_id,"event":source.spec.event_spec_id})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        with pytest.raises(ValueError, match="exact Candidate24"):
+            await uow.instrument_selection.get_comparison_universe_binding(source.spec.event_spec_id)
+
+
+@pytest.mark.asyncio
 async def test_generic_job_commits_attempt_snapshot_and_epoch_atomically(database: AsyncEngine) -> None:
     source = inputs("MPG-001")
     await enable_epoch(database, "MPG-001")

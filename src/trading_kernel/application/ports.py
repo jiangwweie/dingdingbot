@@ -62,6 +62,7 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandPayload,
     SetLeverageCommandResult,
 )
+from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.events import TradeEvent
@@ -1499,6 +1500,8 @@ class SelectionJobRecord(BaseModel):
 
 
 class InstrumentSelectionRepository(Protocol):
+    async def get_comparison_universe_binding(self, event_spec_id: str, *, for_update: bool = False) -> ComparisonUniverseBinding | None: ...
+
     async def get_generic_materialization_generation(self, materialization_generation_id: str, *,
         for_update: bool = False) -> GenericMaterializationGeneration | None: ...
 

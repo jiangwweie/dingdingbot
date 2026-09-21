@@ -18,6 +18,7 @@ from src.trading_kernel.application.recover_expired_dynamic_activation import (
     RecoverExpiredDynamicActivationResult,
 )
 from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
+from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
 from src.trading_kernel.domain.dynamic_selection_timing import (
     build_generic_selection_period,
 )
@@ -86,6 +87,8 @@ from src.trading_kernel.domain.strategy_entry_vacuum import (
 )
 from src.trading_kernel.infrastructure.pg_models import (
     comparison_binding_current,
+    comparison_universe_definitions,
+    comparison_universe_members,
     generic_dynamic_selection_specs_v1,
     instrument_product_profiles,
     instrument_selection_attempts,
@@ -315,6 +318,32 @@ class PostgresInstrumentSelectionRepository:
             raise ValueError("Selection Product profile semantic digest differs")
         return profiles
 
+    async def get_comparison_universe_binding(self, event_spec_id: str, *, for_update: bool = False) -> ComparisonUniverseBinding | None:
+        statement = sa.select(comparison_binding_current, comparison_universe_definitions.c.member_set_digest,
+            comparison_universe_definitions.c.member_count).join(comparison_universe_definitions,
+                comparison_universe_definitions.c.comparison_universe_id==comparison_binding_current.c.comparison_universe_id
+            ).where(comparison_binding_current.c.event_spec_id==event_spec_id)
+        if for_update:
+            statement = statement.with_for_update(of=comparison_binding_current)
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        members = tuple((await self._connection.execute(sa.select(comparison_universe_members.c.exchange_instrument_id).where(
+            comparison_universe_members.c.comparison_universe_id==row["comparison_universe_id"],
+        ).order_by(comparison_universe_members.c.exchange_instrument_id).limit(25))).scalars())
+        if len(members)!=row["member_count"]:
+            raise SelectionJobConflict("comparison definition cardinality differs")
+        binding = ComparisonUniverseBinding(event_spec_id=event_spec_id,comparison_universe_id=row["comparison_universe_id"],
+            member_set_digest=row["member_set_digest"],exchange_instrument_ids=members,
+            comparison_transition_revision=row["comparison_transition_revision"],source_static_universe_version_id=row["source_static_universe_version_id"])
+        if binding.source_static_universe_version_id is not None:
+            original_members = tuple((await self._connection.execute(sa.select(strategy_universe_members.c.exchange_instrument_id).where(
+                strategy_universe_members.c.universe_version_id==binding.source_static_universe_version_id,
+            ).order_by(strategy_universe_members.c.exchange_instrument_id).limit(11))).scalars())
+            if original_members!=members:
+                raise SelectionJobConflict("Static comparison differs from its source Universe")
+        return binding
+
     async def install_generic_spec(self, spec: GenericSelectionSpecV1, *, installed_at_ms: int,
                                    certification: SpecNumericInstallationEvidence) -> None:
         """Release-owned installation; never exposed as a runtime Owner mutation."""
@@ -353,6 +382,14 @@ class PostgresInstrumentSelectionRepository:
             selection_spec_id=spec.selection_spec_id,event_spec_id=spec.event_spec_id,position_side=spec.position_side))
         await self._connection.execute(sa.insert(instrument_selection_spec_members), [
             {"selection_spec_id":spec.selection_spec_id,"exchange_instrument_id":member} for member in spec.candidate_ids])
+        if spec.strategy_group_id in {"MPG-001","MI-001"}:
+            digest = canonical_digest({"exchange_instrument_ids":spec.candidate_ids})
+            comparison_id = "comparison:"+digest[7:]
+            await self._connection.execute(pg_insert(comparison_universe_definitions).values(
+                comparison_universe_id=comparison_id,member_set_digest=digest,member_count=24).on_conflict_do_nothing())
+            await self._connection.execute(pg_insert(comparison_universe_members).values([
+                {"comparison_universe_id":comparison_id,"exchange_instrument_id":member} for member in spec.candidate_ids
+            ]).on_conflict_do_nothing())
         await self._connection.execute(sa.insert(strategy_selection_control_current).values(
             strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id,
             selection_mode="static_baseline",pending_selection_mode=None,pending_effective_period_anchor_ms=None,
