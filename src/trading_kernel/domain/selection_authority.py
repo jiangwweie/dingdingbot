@@ -10,10 +10,17 @@ from typing import Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     field_validator,
     model_validator,
 )
 
+from src.trading_kernel.domain.dynamic_selection_timing import (
+    CurrentFinalCloseGrantProof,
+    DynamicMembershipFreshness,
+    DynamicMembershipState,
+    GenericSelectionPeriod,
+)
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import (
     DAY_MS,
@@ -777,6 +784,117 @@ def trusted_universe_membership_policy(
         strategy_group_id=strategy_group_id,
         event_spec_id=event_spec_id,
     )
+
+
+class GenericSelectionAuthority(BaseModel):
+    """Normal/empty Generic authority contract; persistence remains the shared chain.
+
+    Recovery and continuity must supply their own typed proofs, not masquerade
+    as normal ACTIVE_NEW/NO_CHANGE grants.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    selection_authority_id: str
+    selection_spec_id: str
+    strategy_group_id: str
+    selection_epoch_id: str
+    selection_mode: Literal["dynamic_selection"] = "dynamic_selection"
+    selection_snapshot_id: str
+    materialization_generation_id: str | None = None
+    authority_sequence: int = Field(gt=0)
+    owner_control_version: int = Field(gt=0)
+    selection_control_version: int = Field(gt=0)
+    period: GenericSelectionPeriod
+    authority_outcome: Literal["ACTIVE_NEW", "NO_CHANGE", "VALID_EMPTY"]
+    event_binding: AuthorityEventBinding
+    current_close_proof: CurrentFinalCloseGrantProof | None
+    membership_freshness: DynamicMembershipFreshness | None
+    comparison_universe_id: str | None = None
+    comparison_transition_revision: int | None = None
+    effective_from_ms: int
+    created_at_ms: int
+
+    @field_validator("selection_authority_id", "selection_spec_id", "strategy_group_id", "selection_epoch_id", "selection_snapshot_id")
+    @classmethod
+    def _identity(cls, value: str) -> str:
+        if not value.strip() or len(value)>160:
+            raise ValueError("Generic Authority requires bounded identity")
+        return value.strip()
+
+    @field_validator("materialization_generation_id", "comparison_universe_id")
+    @classmethod
+    def _optional_identity(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or value != value.strip() or len(value)>160):
+            raise ValueError("Generic Authority optional identity is invalid")
+        return value
+
+    @property
+    def blocks_new_entry(self) -> bool:
+        return self.authority_outcome == "VALID_EMPTY"
+
+    @property
+    def allows_existing_ticket_lifecycle(self) -> bool:
+        return True
+
+    @property
+    def rewrites_existing_lineage(self) -> bool:
+        return False
+
+    @property
+    def expires_at_ms(self) -> int:
+        return self.period.period_expires_at_ms
+
+    @property
+    def first_eligible_close_time_ms(self) -> int | None:
+        return None if self.current_close_proof is None else self.current_close_proof.current_final_close_time_ms
+
+    @property
+    def semantic_digest(self) -> str:
+        return _semantic_digest(self.model_dump(mode="json"))
+
+    @model_validator(mode="after")
+    def _validate_generic_authority(self) -> GenericSelectionAuthority:
+        spec = generic_selection_spec(self.strategy_group_id)
+        if self.selection_spec_id != spec.selection_spec_id or self.period.cadence_hours != spec.cadence_hours:
+            raise ValueError("Generic Authority Spec/period differs")
+        if (self.event_binding.event_spec_id,self.event_binding.position_side) != (spec.event_spec_id,spec.position_side):
+            raise ValueError("Generic Authority Event binding differs")
+        if not self.period.scheduled_effective_at_ms <= self.effective_from_ms < self.period.period_expires_at_ms or self.created_at_ms != self.effective_from_ms:
+            raise ValueError("Generic Authority must freeze its actual commit boundary")
+        if (self.comparison_universe_id is None) != (self.comparison_transition_revision is None):
+            raise ValueError("Generic Authority comparison identity is incomplete")
+        comparative = self.strategy_group_id in {"MPG-001", "MI-001"}
+        if not comparative and self.comparison_universe_id is not None:
+            raise ValueError("non-comparative Authority forbids comparison identity")
+        if self.comparison_transition_revision is not None and self.comparison_transition_revision < 0:
+            raise ValueError("Generic comparison revision is invalid")
+        if self.blocks_new_entry:
+            if self.event_binding.grant_state is not AuthorityEventGrantState.EMPTY or self.current_close_proof is not None or self.membership_freshness is not None:
+                raise ValueError("VALID_EMPTY forbids positive trading proof")
+            return self
+        if self.event_binding.grant_state is not AuthorityEventGrantState.ACTIVE:
+            raise ValueError("normal Generic Authority requires ACTIVE Event")
+        if self.authority_outcome == "ACTIVE_NEW" and (
+            self.materialization_generation_id is None or not self.materialization_generation_id.strip()
+            or len(self.materialization_generation_id)>160
+        ):
+            raise ValueError("ACTIVE_NEW requires its materialization Generation")
+        if comparative and (self.comparison_universe_id != "comparison:"+_semantic_digest({"exchange_instrument_ids":spec.candidate_ids})[7:]
+            or self.comparison_transition_revision is None or self.comparison_transition_revision <= 0):
+            raise ValueError("Generic trading comparison requires fixed24 and positive revision")
+        proof = self.current_close_proof
+        fresh = self.membership_freshness
+        if proof is None or proof.period != self.period or proof.selection_snapshot_id != self.selection_snapshot_id or proof.authority_granted_at_ms != self.effective_from_ms:
+            raise ValueError("Generic Authority current-close proof differs")
+        if fresh is None or fresh.state is not DynamicMembershipState.ACTIVE or fresh.consecutive_missed_periods != 0 or (
+            fresh.source_snapshot_id != self.selection_snapshot_id
+            or fresh.source_member_set_digest != self.event_binding.member_set_digest
+            or fresh.source_snapshot_cutoff_at_ms != self.period.feature_cutoff_at_ms
+            or fresh.source_snapshot_effective_at_ms != self.period.scheduled_effective_at_ms
+            or fresh.cadence_hours != self.period.cadence_hours
+        ):
+            raise ValueError("Generic Authority source freshness differs")
+        return self
 
 
 class SelectionSessionAuthority(BaseModel):
