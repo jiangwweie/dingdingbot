@@ -2539,8 +2539,15 @@ class PostgresStrategyUniverseRepository:
             raise RuntimeError("comparative projection authority changed")
         return persisted
 
+    async def get_comparative_member_ids(
+        self, *, event_spec_id: str, universe_version_id: str,
+    ) -> tuple[str, ...]:
+        return await self._require_comparative_member_authority(
+            event_spec_id=event_spec_id, universe_version_id=universe_version_id,
+        )
+
     async def _require_comparative_member_authority(self, *, event_spec_id: str, universe_version_id: str,
-                                                    member_set_digest: str, for_update: bool = False) -> None:
+                                                    member_set_digest: str | None = None, for_update: bool = False) -> tuple[str, ...]:
         statement = sa.select(strategy_universe_versions).where(
             strategy_universe_versions.c.universe_version_id==universe_version_id,
             strategy_universe_versions.c.event_spec_id==event_spec_id,
@@ -2569,7 +2576,8 @@ class PostgresStrategyUniverseRepository:
             ).order_by(strategy_universe_members.c.exchange_instrument_id).limit(11))).scalars())
             if not 1<=len(members)<=10:
                 raise ComparativeProjectionAuthorityChanged("comparative Static source member count differs")
-        if comparative_member_set_digest(members)!=member_set_digest:
+        authoritative_digest = comparative_member_set_digest(members)
+        if member_set_digest is not None and authoritative_digest!=member_set_digest:
             raise ComparativeProjectionAuthorityChanged("comparative member authority changed")
         if universe["lifecycle_state"]=="active":
             binding_statement = sa.select(comparison_binding_current,
@@ -2582,10 +2590,11 @@ class PostgresStrategyUniverseRepository:
             if binding is None:
                 if universe["source_kind"]=="dynamic_selection":
                     raise ComparativeProjectionAuthorityChanged("comparative Dynamic binding is missing")
-            elif binding["member_set_digest"]!=member_set_digest or (
+            elif binding["member_set_digest"]!=authoritative_digest or (
                 binding["source_static_universe_version_id"] is not None and binding["source_static_universe_version_id"]!=universe_version_id
             ):
                 raise ComparativeProjectionAuthorityChanged("comparative current binding changed")
+        return members
 
     async def claim_due_instrument_certification(
         self,

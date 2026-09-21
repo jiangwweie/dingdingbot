@@ -339,10 +339,15 @@ async def observe_strategy_scope(
         comparative_lookback_bars = _comparative_lookback_bars(contract)
         comparative_projection: ComparativeUniverseProjection | None = None
         comparative_digest = None
+        comparison_member_ids = observation_universe.exchange_instrument_ids
         if comparative_lookback_bars is not None:
             try:
+                comparison_member_ids = await uow.strategy_universes.get_comparative_member_ids(
+                    event_spec_id=scope.event_spec_id,
+                    universe_version_id=scope.universe_version_id,
+                )
                 comparative_digest = comparative_member_set_digest(
-                    observation_universe.exchange_instrument_ids
+                    comparison_member_ids
                 )
                 comparative_outcome = (
                     await uow.strategy_universes.get_comparative_projection(
@@ -424,7 +429,7 @@ async def observe_strategy_scope(
                     scope=scope,
                     trigger_ms=request.trigger_candle_close_time_ms,
                     universe_member_ids=(
-                        observation_universe.exchange_instrument_ids
+                        comparison_member_ids
                     ),
                     member_set_digest=comparative_digest,
                     lookback_bars=comparative_lookback_bars,
@@ -436,7 +441,7 @@ async def observe_strategy_scope(
             contract,
             scope,
             request.trigger_candle_close_time_ms,
-            observation_universe.exchange_instrument_ids,
+            comparison_member_ids,
             comparative_projection=comparative_projection,
             product_session=product_session,
         )

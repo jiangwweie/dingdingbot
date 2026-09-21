@@ -46,7 +46,11 @@ from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
 )
-from src.trading_kernel.domain.strategy_universe import StrategyUniverseVersion
+from src.trading_kernel.domain.strategy_universe import (
+    MAX_MANUAL_UNIVERSE_MEMBERS,
+    MAX_UNIVERSE_MEMBERS,
+    StrategyUniverseVersion,
+)
 from src.trading_kernel.infrastructure.pg_models import (
     event_required_facts,
     event_specs,
@@ -858,6 +862,7 @@ class PostgresSignalRepository:
                 strategy_universe_versions.c.semantic_digest,
                 strategy_universe_versions.c.lifecycle_state,
                 strategy_universe_versions.c.installed_at_ms,
+                strategy_universe_versions.c.source_kind,
                 strategy_universe_members.c.exchange_instrument_id,
             )
             .join(
@@ -890,14 +895,21 @@ class PostgresSignalRepository:
                 ),
             )
             .order_by(strategy_universe_members.c.exchange_instrument_id)
-            .limit(11)
+            .limit(MAX_UNIVERSE_MEMBERS + 1)
         )
         rows = result.mappings().all()
         if not rows:
             return None
-        if len(rows) > 10:
-            raise RuntimeError("observation Universe exceeds ten members")
         first = rows[0]
+        # Installed Dynamic membership is constrained by the trusted Spec FK
+        # and database member-limit trigger; manual/Static remains capped at ten.
+        maximum = (
+            MAX_UNIVERSE_MEMBERS
+            if first["source_kind"] == "dynamic_selection"
+            else MAX_MANUAL_UNIVERSE_MEMBERS
+        )
+        if len(rows) > maximum:
+            raise RuntimeError("observation Universe exceeds its member limit")
         if any(
             row["event_spec_id"] != first["event_spec_id"]
             or row["universe_version_id"] != first["universe_version_id"]

@@ -13,6 +13,11 @@ from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     install_strategy_universe,
 )
+from src.trading_kernel.application.observe_strategy_scope import (
+    ObservationRequest,
+    ObservationStatus,
+    observe_strategy_scope,
+)
 from src.trading_kernel.application.project_comparative_universe import (
     ComparativeMemberWindow,
     ComparativeProjectionAuthorityChanged,
@@ -557,6 +562,73 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
         assert target.universe is not None and target.universe.exchange_instrument_ids==snapshot.selected_members
         assert target.lifecycle_state=="warming"
     if group in {"MPG-001","MI-001"}:
+        # Real Observation must fetch all Candidate24, not the tradable target.
+        template = mpg_long_snapshot() if group == "MPG-001" else mi_long_snapshot()
+        close_at = snapshot.effective_from_ms
+        offset = close_at - template.trigger_candle_close_time_ms
+
+        class ComparisonMarket:
+            def __init__(self, missing_member=None):
+                self.hourly_members = []
+                self.missing_member = missing_member
+
+            async def fetch_closed_candles(self, request):
+                if request.timeframe == "1h":
+                    self.hourly_members.append(request.exchange_instrument_id)
+                    if request.exchange_instrument_id == self.missing_member:
+                        return ()
+                candles = template.candles_1h if request.timeframe == "1h" else template.candles_4h
+                return tuple(c.model_copy(update={
+                    "open_time_ms": c.open_time_ms + offset,
+                    "close_time_ms": c.close_time_ms + offset,
+                }) for c in candles)[-request.limit:]
+
+        async with database.connect() as conn:
+            scope_ids = tuple((await conn.scalars(sa.text(
+                "SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+                "WHERE universe_version_id=:uid ORDER BY runtime_scope_id"
+            ), {"uid": target.universe.universe_version_id})).all())
+        assert len(scope_ids) == len(snapshot.selected_members)
+        scope_id = scope_ids[0]
+        excluded = next(m for m in source.spec.candidate_ids if m not in snapshot.selected_members)
+        request = ObservationRequest(runtime_scope_id=scope_id, runtime_commit="a"*40,
+            schema_revision=CURRENT_SCHEMA_REVISION, trigger_candle_close_time_ms=close_at,
+            attempted_at_ms=generation.created_at_ms+2)
+        missing = await observe_strategy_scope(
+            lambda: PostgresKernelUnitOfWork(database), ComparisonMarket(excluded), request,
+        )
+        assert missing.status == ObservationStatus.INVALID
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text(
+                "SELECT warm_closed_bar_time_ms FROM brc_runtime_scopes_current WHERE runtime_scope_id=:sid"
+            ), {"sid": scope_id}) is None
+        market = ComparisonMarket()
+        observed = await observe_strategy_scope(
+            lambda: PostgresKernelUnitOfWork(database), market,
+            request.model_copy(update={"attempted_at_ms": generation.created_at_ms+30_003}),
+        )
+        assert observed.status == ObservationStatus.WARMED, observed
+        for other_scope_id in scope_ids[1:]:
+            other = await observe_strategy_scope(
+                lambda: PostgresKernelUnitOfWork(database), market,
+                request.model_copy(update={"runtime_scope_id": other_scope_id,
+                    "attempted_at_ms": generation.created_at_ms+30_003}),
+            )
+            assert other.status == ObservationStatus.WARMED, other
+        # All tradable scopes share one complete comparison fetch per close.
+        assert tuple(sorted(market.hourly_members)) == source.spec.candidate_ids
+        async with database.connect() as conn:
+            for table in ("brc_signal_events", "brc_exposure_episode_current", "brc_trade_tickets", "brc_exchange_commands"):
+                assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
+            assert await conn.scalar(sa.text(
+                "SELECT comparison_transition_revision FROM brc_comparison_binding_current WHERE event_spec_id=:event"
+            ), {"event": source.spec.event_spec_id}) == 0
+            assert await conn.scalar(sa.text(
+                "SELECT source_static_universe_version_id FROM brc_comparison_binding_current WHERE event_spec_id=:event"
+            ), {"event": source.spec.event_spec_id}) == uid
+        # The synthetic cache-row checks below use another fixture timestamp.
+        async with database.begin() as conn:
+            await conn.execute(sa.text("DELETE FROM brc_comparative_projection_current"))
         candles = mpg_long_snapshot().candles_1h if group=="MPG-001" else mi_long_snapshot().candles_1h
         close = candles[-1].close_time_ms
         for members in (source.spec.candidate_ids,snapshot.selected_members):

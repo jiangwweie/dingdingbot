@@ -1392,6 +1392,10 @@ class StrategyUniverseRepository(Protocol):
         request: AbandonStrategyUniverseRequest,
     ) -> None: ...
 
+    async def get_comparative_member_ids(
+        self, *, event_spec_id: str, universe_version_id: str,
+    ) -> tuple[str, ...]: ...
+
     async def get_comparative_projection(
         self,
         *,
