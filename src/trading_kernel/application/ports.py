@@ -76,7 +76,11 @@ from src.trading_kernel.domain.exit_policy import (
     ExitProfile,
     ExitProfileRecord,
 )
-from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
+from src.trading_kernel.domain.exposure_episode import (
+    ComparisonBindingEpisodeCheckpoint,
+    ComparisonBoundExposureEpisodeTransition,
+    ExposureEpisodeState,
+)
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     GenericMaterializationLeaseClaim,
@@ -1070,6 +1074,14 @@ class SignalRepository(Protocol):
         state: ExposureEpisodeState,
         *,
         expected_version: int,
+    ) -> None: ...
+
+    async def get_comparison_episode_checkpoint(self, episode_domain_key: str) -> ComparisonBindingEpisodeCheckpoint | None: ...
+
+    async def save_comparison_episode_transition(
+        self, transition: ComparisonBoundExposureEpisodeTransition, *,
+        event_spec_id: str, exchange_instrument_id: str, position_side: Literal["long", "short"],
+        expected_episode_version: int, expected_checkpoint_version: int,
     ) -> None: ...
 
     async def get_next_ready(

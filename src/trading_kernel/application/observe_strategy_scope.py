@@ -42,6 +42,7 @@ from src.trading_kernel.application.project_shadow_outcome import (
 from src.trading_kernel.domain.comparison_universe import comparative_lookback_bars
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.exposure_episode import (
+    advance_comparison_bound_exposure_episode,
     advance_exposure_episode,
     build_episode_domain_key,
 )
@@ -583,27 +584,52 @@ async def observe_strategy_scope(
             )
         exposure_episode_id = None
         if contract.episode_policy == "rising_edge":
-            episode_transition = advance_exposure_episode(
-                contract=contract,
-                current=current_episode,
-                detector_status=detector_result.status,
-                occurred_at_ms=(
-                    detector_result.occurred_at_ms
-                    if detector_result.status is DetectorStatus.TRIGGERED
-                    else None
-                ),
-                observed_at_ms=request.trigger_candle_close_time_ms,
-                exchange_instrument_id=scope.exchange_instrument_id,
-            )
-            if episode_transition.current is not current_episode:
-                await uow.signals.save_exposure_episode(
-                    episode_transition.current,
-                    expected_version=(
-                        0
-                        if current_episode is None
-                        else current_episode.projection_version
-                    ),
+            if comparison_revision > 0 and comparative_digest is not None:
+                checkpoint = await uow.signals.get_comparison_episode_checkpoint(
+                    build_episode_domain_key(event_spec_id=contract.event_spec_id,
+                        exchange_instrument_id=scope.exchange_instrument_id, position_side=contract.position_side))
+                comparison_transition = advance_comparison_bound_exposure_episode(
+                    contract=contract, current_episode=current_episode, current_checkpoint=checkpoint,
+                    detector_status=detector_result.status,
+                    occurred_at_ms=detector_result.occurred_at_ms if detector_result.status is DetectorStatus.TRIGGERED else None,
+                    observed_at_ms=request.trigger_candle_close_time_ms, exchange_instrument_id=scope.exchange_instrument_id,
+                    comparison_binding_digest=comparative_digest, comparison_transition_revision=comparison_revision,
                 )
+                await uow.signals.save_comparison_episode_transition(comparison_transition,
+                    event_spec_id=contract.event_spec_id, exchange_instrument_id=scope.exchange_instrument_id,
+                    position_side=contract.position_side,
+                    expected_episode_version=0 if current_episode is None else current_episode.projection_version,
+                    expected_checkpoint_version=0 if checkpoint is None else checkpoint.projection_version)
+                if comparison_transition.episode_transition is None:
+                    await _save_observation_blocker(uow, scope=scope,
+                        blocker="COMPARISON_REBASE_REQUIRED", detector_reason="COMPARISON_REBASE_REQUIRED",
+                        updated_at_ms=request.trigger_candle_close_time_ms)
+                    return ObservationResult(status=ObservationStatus.NO_SIGNAL, runtime_scope_id=scope.runtime_scope_id,
+                        event_spec_id=contract.event_spec_id, detector_reason="COMPARISON_REBASE_REQUIRED",
+                        signal_event_id=None, current_fact_count=len(persisted_facts))
+                episode_transition = comparison_transition.episode_transition
+            else:
+                episode_transition = advance_exposure_episode(
+                    contract=contract,
+                    current=current_episode,
+                    detector_status=detector_result.status,
+                    occurred_at_ms=(
+                        detector_result.occurred_at_ms
+                        if detector_result.status is DetectorStatus.TRIGGERED
+                        else None
+                    ),
+                    observed_at_ms=request.trigger_candle_close_time_ms,
+                    exchange_instrument_id=scope.exchange_instrument_id,
+                )
+                if episode_transition.current is not current_episode:
+                    await uow.signals.save_exposure_episode(
+                        episode_transition.current,
+                        expected_version=(
+                            0
+                            if current_episode is None
+                            else current_episode.projection_version
+                        ),
+                    )
             exposure_episode_id = episode_transition.exposure_episode_id
         if detector_result.status is DetectorStatus.NOT_TRIGGERED:
             await uow.signals.save_readiness(

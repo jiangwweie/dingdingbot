@@ -1765,6 +1765,16 @@ exposure_episode_current = sa.Table(
     _time("comparison_armed_at_ms", nullable=True),
     _time("comparison_last_observed_at_ms", nullable=True),
     sa.Column("comparison_last_detector_status", sa.String(32), nullable=True),
+    sa.Column("comparison_checkpoint_version", sa.BigInteger, nullable=True),
+    sa.CheckConstraint(
+        "comparison_checkpoint_version IS NULL OR COALESCE((comparison_checkpoint_version > 0 "
+        "AND comparison_transition_revision > 0 AND comparison_last_observed_at_ms > 0 "
+        "AND comparison_last_detector_status IN ('triggered', 'not_triggered') "
+        "AND event_spec_id IN ('event_spec:MPG-001:MPG-LONG:v3','event_spec:MI-001:MI-LONG:v3') "
+        "AND ((comparison_armed_at_ms IS NULL AND comparison_last_detector_status='triggered') OR "
+        "(comparison_armed_at_ms > 0 AND comparison_armed_at_ms <= comparison_last_observed_at_ms))), false)",
+        name="comparison_checkpoint_shape",
+    ),
     sa.CheckConstraint(
         "position_side IN ('long', 'short')",
         name="position_side_valid",
@@ -1774,7 +1784,7 @@ exposure_episode_current = sa.Table(
         name="episode_policy_valid",
     ),
     sa.CheckConstraint(
-        "state IN ('armed', 'triggered')",
+        "state IN ('armed', 'triggered', 'comparison_rebase_required')",
         name="state_valid",
     ),
     sa.CheckConstraint(
@@ -1789,7 +1799,10 @@ exposure_episode_current = sa.Table(
         "(state = 'triggered' AND exposure_episode_id IS NOT NULL "
         "AND triggered_at_ms IS NOT NULL AND triggered_at_ms > 0) OR "
         "(state = 'armed' AND exposure_episode_id IS NULL "
-        "AND triggered_at_ms IS NULL)",
+        "AND triggered_at_ms IS NULL) OR "
+        "(state = 'comparison_rebase_required' AND exposure_episode_id IS NULL "
+        "AND triggered_at_ms IS NULL AND rearmed_at_ms IS NULL "
+        "AND comparison_checkpoint_version IS NOT NULL)",
         name="state_shape_valid",
     ),
     sa.ForeignKeyConstraint(

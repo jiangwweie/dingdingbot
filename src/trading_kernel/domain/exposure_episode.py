@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.strategy_registry import RegisteredStrategyContract
 
-EpisodeState = Literal["armed", "triggered"]
+EpisodeState = Literal["armed", "triggered", "comparison_rebase_required"]
 
 
 class ExposureEpisodeState(BaseModel):
@@ -56,6 +56,8 @@ class ExposureEpisodeState(BaseModel):
                 raise ValueError("Episode trigger time must be positive")
         elif self.exposure_episode_id is not None or self.triggered_at_ms is not None:
             raise ValueError("armed Episode forbids active identity and trigger time")
+        if self.state == "comparison_rebase_required" and self.rearmed_at_ms is not None:
+            raise ValueError("comparison rebase cursor must not fabricate an arm")
         return self
 
 
@@ -207,6 +209,8 @@ def advance_exposure_episode(
         position_side=contract.position_side,
     )
     if current is not None:
+        if current.state == "comparison_rebase_required" and detector_status is DetectorStatus.TRIGGERED:
+            raise ValueError("comparison rebase requires a valid NOT_TRIGGERED before an Episode")
         if (
             current.episode_domain_key != domain_key
             or current.event_spec_id != contract.event_spec_id
@@ -233,7 +237,7 @@ def advance_exposure_episode(
     version = 1 if current is None else current.projection_version + 1
     rearmed_at_ms = None if current is None else current.rearmed_at_ms
     if detector_status is DetectorStatus.NOT_TRIGGERED:
-        if current is None or current.state == "triggered":
+        if current is None or current.state != "armed":
             rearmed_at_ms = observed_at_ms
         state = ExposureEpisodeState(
             episode_domain_key=domain_key,

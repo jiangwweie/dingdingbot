@@ -712,8 +712,25 @@ def _episode_provenance() -> None:
         sa.Column("comparison_armed_at_ms", sa.BigInteger(), nullable=True),
         sa.Column("comparison_last_observed_at_ms", sa.BigInteger(), nullable=True),
         sa.Column("comparison_last_detector_status", sa.String(32), nullable=True),
+        sa.Column("comparison_checkpoint_version", sa.BigInteger(), nullable=True),
     ):
         op.add_column("brc_exposure_episode_current", column)
+    op.drop_constraint("ck_brc_episode_state", "brc_exposure_episode_current", type_="check")
+    op.drop_constraint("ck_brc_episode_state_shape", "brc_exposure_episode_current", type_="check")
+    op.create_check_constraint("state_valid", "brc_exposure_episode_current",
+        "state IN ('armed', 'triggered', 'comparison_rebase_required')")
+    op.create_check_constraint("state_shape_valid", "brc_exposure_episode_current",
+        "(state = 'triggered' AND exposure_episode_id IS NOT NULL AND triggered_at_ms IS NOT NULL AND triggered_at_ms > 0) OR "
+        "(state = 'armed' AND exposure_episode_id IS NULL AND triggered_at_ms IS NULL) OR "
+        "(state = 'comparison_rebase_required' AND exposure_episode_id IS NULL AND triggered_at_ms IS NULL "
+        "AND rearmed_at_ms IS NULL AND comparison_checkpoint_version IS NOT NULL)")
+    op.create_check_constraint("comparison_checkpoint_shape", "brc_exposure_episode_current",
+        "comparison_checkpoint_version IS NULL OR COALESCE((comparison_checkpoint_version > 0 "
+        "AND comparison_transition_revision > 0 AND comparison_last_observed_at_ms > 0 "
+        "AND comparison_last_detector_status IN ('triggered', 'not_triggered') "
+        "AND event_spec_id IN ('event_spec:MPG-001:MPG-LONG:v3','event_spec:MI-001:MI-LONG:v3') "
+        "AND ((comparison_armed_at_ms IS NULL AND comparison_last_detector_status='triggered') OR "
+        "(comparison_armed_at_ms > 0 AND comparison_armed_at_ms <= comparison_last_observed_at_ms))), false)")
     op.create_check_constraint("ck_brc_episode_comparison_provenance_shape", "brc_exposure_episode_current",
         "COALESCE((comparison_binding_digest IS NULL AND comparison_transition_revision IS NULL "
         "AND comparison_source_evidence_digest IS NULL AND comparison_armed_at_ms IS NULL "

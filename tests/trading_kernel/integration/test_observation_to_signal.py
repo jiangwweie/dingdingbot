@@ -20,6 +20,7 @@ from src.trading_kernel.application.observe_strategy_scope import (
     ObservationStatus,
     observe_strategy_scope,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.market import ClosedCandle, MarketSnapshot
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
@@ -99,6 +100,7 @@ from tests.trading_kernel.unit.detectors.fixtures import (
     cpm_flat_snapshot,
     cpm_long_snapshot,
     flat_candles,
+    mpg_flat_snapshot,
     mpg_long_snapshot,
     sor_snapshot,
 )
@@ -146,6 +148,60 @@ class TimeoutMarketSource:
         request: ClosedCandleRequest,
     ) -> tuple[ClosedCandle, ...]:
         raise TimeoutError(f"timed out: {request.exchange_instrument_id}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["MPG", "MI"])
+async def test_comparison_rebase_is_enforced_by_real_observation(observation_engine: AsyncEngine, group: str) -> None:
+    await _seed_six_scopes(observation_engine)
+    event = f"event_spec:{group}-001:{group}-LONG:v3"
+    members = tuple(sorted((SOL, OP, AVAX, SUI)))
+    digest = canonical_digest({"exchange_instrument_ids":members})
+    cid = "comparison:"+digest[7:]
+    async with observation_engine.begin() as conn:
+        await conn.execute(sa.update(runtime_capabilities_current).values(schema_revision=CURRENT_SCHEMA_REVISION))
+        uid = await conn.scalar(sa.select(strategy_universe_current.c.universe_version_id).where(strategy_universe_current.c.event_spec_id==event))
+        await conn.execute(sa.text("INSERT INTO brc_comparison_universe_definitions VALUES(:cid,:digest,4)"), {"cid":cid,"digest":digest})
+        await conn.execute(sa.text("INSERT INTO brc_comparison_universe_members VALUES(:cid,:member)"), [{"cid":cid,"member":m} for m in members])
+        await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:cid,1,:uid)"), {"event":event,"cid":cid,"uid":uid})
+    results = []
+    for step, triggered in enumerate((True, False, True, True, False, True)):
+        if step == 3:
+            async with observation_engine.begin() as conn:
+                await conn.execute(sa.text("UPDATE brc_comparison_binding_current SET comparison_transition_revision=2 WHERE event_spec_id=:event"), {"event":event})
+        delta = step*3_600_000
+        base = _shift_snapshot(mpg_long_snapshot() if triggered else mpg_flat_snapshot(), delta_ms=delta)
+        peers = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in flat_candles(13,3_600_000))
+        source = FakeMarketSource({(SOL,"1h"):base.candles_1h,(SOL,"4h"):base.candles_4h,
+            **{(m,"1h"):peers for m in members if m!=SOL}})
+        request = ObservationRequest(runtime_scope_id=f"scope-{group.lower()}-sol-long",runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=NOW_MS+delta)
+        if step == 2:
+            concurrent = await asyncio.gather(*(observe_strategy_scope(
+                lambda: PostgresKernelUnitOfWork(observation_engine),source,request) for _ in range(2)))
+            assert {r.status for r in concurrent} == {ObservationStatus.SIGNAL_CREATED, ObservationStatus.DUPLICATE_SIGNAL}
+            assert concurrent[0].signal_event_id == concurrent[1].signal_event_id
+            result = next(r for r in concurrent if r.status == ObservationStatus.SIGNAL_CREATED)
+        else:
+            result = await observe_strategy_scope(lambda: PostgresKernelUnitOfWork(observation_engine),source,request)
+        results.append(result)
+        if step in (0,3):
+            assert result.status == ObservationStatus.NO_SIGNAL, result
+            assert result.detector_reason == "COMPARISON_REBASE_REQUIRED"
+        elif step in (1,4):
+            assert result.status == ObservationStatus.NO_SIGNAL, result
+        else:
+            assert result.status == ObservationStatus.SIGNAL_CREATED, result
+        repeated = await observe_strategy_scope(lambda: PostgresKernelUnitOfWork(observation_engine),source,
+            ObservationRequest(runtime_scope_id=f"scope-{group.lower()}-sol-long",runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=NOW_MS+delta))
+        assert repeated.status == (ObservationStatus.DUPLICATE_SIGNAL if step in (2,5) else ObservationStatus.NO_SIGNAL)
+        assert repeated.signal_event_id == result.signal_event_id
+    assert results[2].signal_event_id != results[5].signal_event_id
+    async with observation_engine.connect() as conn:
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(signal_events)) == 2
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current")) == 1
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(exchange_commands)) == 0
 
 
 @pytest.mark.asyncio

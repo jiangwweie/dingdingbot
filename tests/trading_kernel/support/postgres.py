@@ -114,6 +114,10 @@ class HeadTemplateCloneHarness:
                 revision = await template.fetchval(
                     "SELECT version_num FROM alembic_version"
                 )
+            except asyncpg.UndefinedTableError:
+                # A failed transactional migration may leave an empty disposable
+                # template. Rebuild it instead of wedging subsequent test runs.
+                revision = None
             finally:
                 await template.close()
             fingerprint = await admin.fetchval(

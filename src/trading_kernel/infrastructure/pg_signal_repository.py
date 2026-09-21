@@ -29,7 +29,13 @@ from src.trading_kernel.application.ports import (
 )
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
-from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
+from src.trading_kernel.domain.exposure_episode import (
+    ComparisonBindingEpisodeCheckpoint,
+    ComparisonBindingEpisodeState,
+    ComparisonBoundExposureEpisodeTransition,
+    ExposureEpisodeState,
+    build_episode_domain_key,
+)
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
     ProductSessionSnapshot,
@@ -52,6 +58,8 @@ from src.trading_kernel.domain.strategy_universe import (
     StrategyUniverseVersion,
 )
 from src.trading_kernel.infrastructure.pg_models import (
+    comparison_binding_current,
+    comparison_universe_definitions,
     event_required_facts,
     event_specs,
     exposure_episode_current,
@@ -258,6 +266,82 @@ class PostgresSignalRepository:
             )
         if result.rowcount != 1:
             raise RuntimeError("Exposure Episode authority changed")
+
+    async def get_comparison_episode_checkpoint(self, episode_domain_key: str) -> ComparisonBindingEpisodeCheckpoint | None:
+        row = (await self._connection.execute(sa.select(exposure_episode_current).where(
+            exposure_episode_current.c.episode_domain_key == episode_domain_key,
+        ))).mappings().one_or_none()
+        if row is None or row["comparison_checkpoint_version"] is None:
+            return None
+        return ComparisonBindingEpisodeCheckpoint(
+            episode_domain_key=episode_domain_key,
+            comparison_binding_digest=row["comparison_binding_digest"],
+            comparison_transition_revision=row["comparison_transition_revision"],
+            state=ComparisonBindingEpisodeState.REBASE_REQUIRED if row["comparison_armed_at_ms"] is None else ComparisonBindingEpisodeState.ARMED_UNDER_BINDING,
+            armed_at_ms=row["comparison_armed_at_ms"], last_observed_at_ms=row["comparison_last_observed_at_ms"],
+            last_detector_status=row["comparison_last_detector_status"], projection_version=row["comparison_checkpoint_version"],
+        )
+
+    async def save_comparison_episode_transition(
+        self, transition: ComparisonBoundExposureEpisodeTransition, *,
+        event_spec_id: str, exchange_instrument_id: str, position_side: Literal["long", "short"],
+        expected_episode_version: int, expected_checkpoint_version: int,
+    ) -> None:
+        checkpoint = transition.checkpoint
+        key = build_episode_domain_key(event_spec_id=event_spec_id,
+            exchange_instrument_id=exchange_instrument_id, position_side=position_side)
+        if key != checkpoint.episode_domain_key:
+            raise ValueError("comparison checkpoint domain identity differs")
+        binding = (await self._connection.execute(sa.select(comparison_binding_current,
+            comparison_universe_definitions.c.member_set_digest).join(comparison_universe_definitions,
+                comparison_universe_definitions.c.comparison_universe_id == comparison_binding_current.c.comparison_universe_id,
+            ).where(comparison_binding_current.c.event_spec_id == event_spec_id)
+            .with_for_update(of=comparison_binding_current))).mappings().one_or_none()
+        if binding is None or binding["comparison_transition_revision"] != checkpoint.comparison_transition_revision or binding["member_set_digest"] != checkpoint.comparison_binding_digest:
+            raise RuntimeError("comparison binding authority changed")
+        current = await self.lock_exposure_episode(key)
+        previous = await self.get_comparison_episode_checkpoint(key)
+        if (0 if current is None else current.projection_version) != expected_episode_version or (
+            0 if previous is None else previous.projection_version) != expected_checkpoint_version:
+            raise RuntimeError("comparison Episode version changed")
+        proposed = None if transition.episode_transition is None else transition.episode_transition.current
+        if checkpoint == previous:
+            if proposed is not None and proposed != current:
+                raise RuntimeError("comparison replay Episode differs")
+            return
+        if checkpoint.projection_version != expected_checkpoint_version + 1:
+            raise ValueError("comparison checkpoint version is not monotonic")
+        if previous is not None and checkpoint.last_observed_at_ms <= previous.last_observed_at_ms:
+            raise ValueError("comparison checkpoint close is not monotonic")
+        if proposed is not None:
+            if proposed.episode_domain_key != key or proposed.projection_version != expected_episode_version + 1:
+                raise ValueError("comparison Episode transition identity/version differs")
+            state = proposed
+        elif current is not None:
+            state = current
+        else:
+            state = ExposureEpisodeState(episode_domain_key=key, event_spec_id=event_spec_id,
+                exchange_instrument_id=exchange_instrument_id, position_side=position_side,
+                state="comparison_rebase_required", exposure_episode_id=None, triggered_at_ms=None,
+                rearmed_at_ms=None, last_observed_at_ms=checkpoint.last_observed_at_ms, projection_version=1)
+        values = {**state.model_dump(mode="python"),
+            "comparison_binding_digest": checkpoint.comparison_binding_digest,
+            "comparison_transition_revision": checkpoint.comparison_transition_revision,
+            "comparison_armed_at_ms": checkpoint.armed_at_ms,
+            "comparison_last_observed_at_ms": checkpoint.last_observed_at_ms,
+            "comparison_last_detector_status": checkpoint.last_detector_status.value,
+            "comparison_checkpoint_version": checkpoint.projection_version}
+        if current is None:
+            result = await self._connection.execute(pg_insert(exposure_episode_current).values(**values)
+                .on_conflict_do_nothing(index_elements=[exposure_episode_current.c.episode_domain_key]))
+        else:
+            result = await self._connection.execute(sa.update(exposure_episode_current).where(
+                exposure_episode_current.c.episode_domain_key == key,
+                exposure_episode_current.c.projection_version == expected_episode_version,
+                sa.func.coalesce(exposure_episode_current.c.comparison_checkpoint_version, 0) == expected_checkpoint_version,
+            ).values(**values))
+        if result.rowcount != 1:
+            raise RuntimeError("comparison Episode authority changed")
 
     async def get_next_ready(self, *, now_ms: int) -> StrategySignal | None:
         return await self._get_next_candidate_ready(

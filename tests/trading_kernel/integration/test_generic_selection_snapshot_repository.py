@@ -28,7 +28,13 @@ from src.trading_kernel.application.run_instrument_selection import (
     RunInstrumentSelectionRequest,
     run_instrument_selection_once,
 )
+from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.exposure_episode import (
+    advance_comparison_bound_exposure_episode,
+    advance_exposure_episode,
+    build_episode_domain_key,
+)
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     MaterializationEventBaseline,
@@ -46,6 +52,7 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionJobFailure,
 )
 from src.trading_kernel.domain.selection_authority import selected_member_set_digest
+from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
     SelectionJobConflict,
 )
@@ -90,6 +97,79 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
                 reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb", common_numeric_authority="PASS", sor_golden="PASS", spec_cert="PASS",
             ))
     yield head_template_engine
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
+@pytest.mark.parametrize("initial", [None, DetectorStatus.NOT_TRIGGERED, DetectorStatus.TRIGGERED])
+async def test_comparison_checkpoint_persists_without_fabricating_episode(
+    database: AsyncEngine, group: str, initial: DetectorStatus | None,
+) -> None:
+    spec = inputs(group).spec
+    contract = strategy_contract_for(spec.event_spec_id)
+    member = spec.candidate_ids[0]
+    digest = canonical_digest({"exchange_instrument_ids": spec.candidate_ids})
+    key = build_episode_domain_key(event_spec_id=spec.event_spec_id,
+        exchange_instrument_id=member, position_side=spec.position_side)
+    async with database.begin() as conn:
+        await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:cid,1,NULL)"),
+            {"event": spec.event_spec_id, "cid": "comparison:"+digest[7:]})
+    if initial is not None:
+        old = advance_exposure_episode(contract=contract, current=None, detector_status=initial,
+            occurred_at_ms=500 if initial is DetectorStatus.TRIGGERED else None,
+            observed_at_ms=500, exchange_instrument_id=member)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.signals.save_exposure_episode(old.current, expected_version=0)
+    last_episode_id = None
+    for revision in (1, 2):
+        if revision == 2:
+            async with database.begin() as conn:
+                await conn.execute(sa.text("UPDATE brc_comparison_binding_current SET comparison_transition_revision=2 WHERE event_spec_id=:event"), {"event":spec.event_spec_id})
+        for step, status in enumerate((DetectorStatus.TRIGGERED, DetectorStatus.NOT_TRIGGERED, DetectorStatus.TRIGGERED)):
+            close = ((revision-1)*3 + step+1)*1000
+            async with PostgresKernelUnitOfWork(database) as uow:
+                current = await uow.signals.lock_exposure_episode(key)
+                checkpoint = await uow.signals.get_comparison_episode_checkpoint(key)
+                transition = advance_comparison_bound_exposure_episode(
+                    contract=contract, current_episode=current, current_checkpoint=checkpoint,
+                    detector_status=status, occurred_at_ms=close if status is DetectorStatus.TRIGGERED else None,
+                    observed_at_ms=close, exchange_instrument_id=member,
+                    comparison_binding_digest=digest, comparison_transition_revision=revision)
+                if revision == 2 and step == 0:
+                    stale_transition = transition
+                    stale_episode_version = current.projection_version
+                    stale_checkpoint_version = checkpoint.projection_version
+                await uow.signals.save_comparison_episode_transition(
+                    transition, event_spec_id=spec.event_spec_id, exchange_instrument_id=member,
+                    position_side=spec.position_side,
+                    expected_episode_version=0 if current is None else current.projection_version,
+                    expected_checkpoint_version=0 if checkpoint is None else checkpoint.projection_version)
+            # A new transaction stands in for restarting the Observation process.
+            async with PostgresKernelUnitOfWork(database) as uow:
+                recovered = await uow.signals.get_comparison_episode_checkpoint(key)
+                assert recovered == transition.checkpoint
+                persisted = await uow.signals.lock_exposure_episode(key)
+            assert persisted is not None
+            if step == 0:
+                assert not transition.signal_eligible
+                assert persisted.exposure_episode_id == (None if current is None else current.exposure_episode_id)
+                if current is None:
+                    assert persisted.state == "comparison_rebase_required"
+            elif step == 1:
+                assert persisted.state == "armed" and persisted.exposure_episode_id is None
+            else:
+                assert transition.signal_eligible and persisted.exposure_episode_id is not None
+                assert persisted.exposure_episode_id != last_episode_id
+                last_episode_id = persisted.exposure_episode_id
+    with pytest.raises(RuntimeError, match="version changed"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.signals.save_comparison_episode_transition(stale_transition,
+                event_spec_id=spec.event_spec_id, exchange_instrument_id=member, position_side=spec.position_side,
+                expected_episode_version=stale_episode_version, expected_checkpoint_version=stale_checkpoint_version)
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current")) == 1
+        for table in ("brc_signal_events", "brc_trade_tickets", "brc_exchange_commands"):
+            assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
 
 
 @pytest.mark.asyncio

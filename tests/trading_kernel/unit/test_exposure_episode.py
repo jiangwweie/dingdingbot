@@ -6,6 +6,7 @@ from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.exposure_episode import (
     ComparisonBindingEpisodeCheckpoint,
     ComparisonBindingEpisodeState,
+    ExposureEpisodeState,
     advance_comparison_bound_exposure_episode,
     advance_exposure_episode,
     build_episode_domain_key,
@@ -13,6 +14,28 @@ from src.trading_kernel.domain.exposure_episode import (
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 
 ETH = "binance-usdm:ETHUSDT:perpetual"
+
+
+def test_unarmed_comparison_cursor_cannot_create_an_episode() -> None:
+    contract = _contract("MPG-LONG")
+    cursor = ExposureEpisodeState(
+        episode_domain_key=build_episode_domain_key(event_spec_id=contract.event_spec_id,
+            exchange_instrument_id=ETH, position_side=contract.position_side),
+        event_spec_id=contract.event_spec_id, exchange_instrument_id=ETH,
+        position_side=contract.position_side, state="comparison_rebase_required",
+        exposure_episode_id=None, triggered_at_ms=None, rearmed_at_ms=None,
+        last_observed_at_ms=1000, projection_version=1,
+    )
+    with pytest.raises(ValueError, match="rebase"):
+        advance_exposure_episode(contract=contract, current=cursor,
+            detector_status=DetectorStatus.TRIGGERED, occurred_at_ms=2000,
+            observed_at_ms=2000, exchange_instrument_id=ETH)
+    armed = advance_exposure_episode(contract=contract, current=cursor,
+        detector_status=DetectorStatus.NOT_TRIGGERED, occurred_at_ms=None,
+        observed_at_ms=2000, exchange_instrument_id=ETH)
+    assert armed.current.state == "armed"
+    assert armed.current.rearmed_at_ms == 2000
+    assert armed.current.exposure_episode_id is None
 
 
 def test_continuous_trigger_reuses_one_rising_edge_episode() -> None:
