@@ -62,7 +62,10 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandPayload,
     SetLeverageCommandResult,
 )
-from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
+from src.trading_kernel.domain.comparison_universe import (
+    ComparisonObservationSource,
+    ComparisonUniverseBinding,
+)
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.events import TradeEvent
@@ -1392,9 +1395,9 @@ class StrategyUniverseRepository(Protocol):
         request: AbandonStrategyUniverseRequest,
     ) -> None: ...
 
-    async def get_comparative_member_ids(
-        self, *, event_spec_id: str, universe_version_id: str,
-    ) -> tuple[str, ...]: ...
+    async def get_comparative_source(
+        self, *, event_spec_id: str, universe_version_id: str, for_update: bool = False,
+    ) -> ComparisonObservationSource: ...
 
     async def get_comparative_projection(
         self,
@@ -1403,6 +1406,7 @@ class StrategyUniverseRepository(Protocol):
         universe_version_id: str,
         closed_bar_time_ms: int,
         member_set_digest: str,
+        comparison_transition_revision: int = 0,
     ) -> ComparativeProjectionOutcome | None: ...
 
     async def save_comparative_projection(

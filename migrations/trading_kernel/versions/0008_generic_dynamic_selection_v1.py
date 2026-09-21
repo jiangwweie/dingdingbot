@@ -645,6 +645,11 @@ def _require_flat_quiescent_source(bind: sa.Connection) -> None:
 
 
 def _comparison_tables() -> None:
+    op.add_column("brc_comparative_projection_current", sa.Column(
+        "comparison_transition_revision", sa.BigInteger(), nullable=False, server_default="0",
+    ))
+    op.create_check_constraint("comparison_revision_valid", "brc_comparative_projection_current",
+        "comparison_transition_revision >= 0")
     op.create_table(
         "brc_comparison_universe_definitions",
         sa.Column("comparison_universe_id", ID, primary_key=True),

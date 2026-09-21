@@ -21,6 +21,7 @@ from src.trading_kernel.application.observe_strategy_scope import (
 from src.trading_kernel.application.project_comparative_universe import (
     ComparativeMemberWindow,
     ComparativeProjectionAuthorityChanged,
+    build_comparative_projection_failure,
     build_comparative_universe_projection,
 )
 from src.trading_kernel.application.run_instrument_selection import (
@@ -644,6 +645,47 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
                 with pytest.raises(ComparativeProjectionAuthorityChanged, match="member"):
                     async with PostgresKernelUnitOfWork(database) as uow:
                         await uow.strategy_universes.save_comparative_projection(projection)
+        # Same membership after an authority transition must not revive an old fetch.
+        static_projection = build_comparative_universe_projection(
+            event_spec_id=source.spec.event_spec_id, universe_version_id=uid,
+            strategy_group_id=group, exchange_instrument_ids=source.spec.candidate_ids[:1],
+            closed_bar_time_ms=close, lookback_bars=8 if group=="MPG-001" else 12,
+            freshness_window_ms=3600000, member_windows=(ComparativeMemberWindow(
+                exchange_instrument_id=source.spec.candidate_ids[0], candles_1h=candles),),
+        )
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.strategy_universes.save_comparative_projection(static_projection)
+        async with database.begin() as conn:
+            await conn.execute(sa.text(
+                "UPDATE brc_comparison_binding_current SET comparison_transition_revision=1 WHERE event_spec_id=:event"
+            ), {"event": source.spec.event_spec_id})
+        with pytest.raises(ComparativeProjectionAuthorityChanged, match="revision"):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.strategy_universes.save_comparative_projection(static_projection)
+        with pytest.raises(ComparativeProjectionAuthorityChanged, match="revision"):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.strategy_universes.get_comparative_projection(
+                    event_spec_id=source.spec.event_spec_id, universe_version_id=uid,
+                    member_set_digest=static_projection.member_set_digest,
+                    closed_bar_time_ms=close,
+                )
+        stale_failure = build_comparative_projection_failure(
+            event_spec_id=source.spec.event_spec_id, universe_version_id=uid,
+            member_set_digest=static_projection.member_set_digest, closed_bar_time_ms=close,
+            observed_at_ms=close, reason_code="comparative_market_temporarily_unavailable",
+        )
+        with pytest.raises(ComparativeProjectionAuthorityChanged, match="revision"):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.strategy_universes.save_comparative_projection_failure(stale_failure)
+        refreshed = static_projection.model_copy(update={"comparison_transition_revision": 1})
+        async with PostgresKernelUnitOfWork(database) as uow:
+            current_source = await uow.strategy_universes.get_comparative_source(
+                event_spec_id=source.spec.event_spec_id, universe_version_id=uid,
+            )
+            assert current_source.comparison_transition_revision == 1
+            saved = await uow.strategy_universes.save_comparative_projection(refreshed)
+            assert saved.comparison_transition_revision == 1
+            assert saved.projection_version == 2
     with pytest.raises(sa.exc.DBAPIError, match="Universe trusted member limit"):
         async with database.begin() as conn:
             await conn.execute(sa.text("INSERT INTO brc_strategy_universe_members(universe_version_id,exchange_instrument_id) VALUES(:uid,:member)"),

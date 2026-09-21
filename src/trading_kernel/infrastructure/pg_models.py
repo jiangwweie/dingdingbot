@@ -1421,6 +1421,7 @@ comparative_projection_current = sa.Table(
     _time("observed_at_ms"),
     _time("valid_until_ms"),
     sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.Column("comparison_transition_revision", sa.BigInteger, nullable=False, server_default="0"),
     sa.PrimaryKeyConstraint("event_spec_id", "universe_version_id"),
     sa.ForeignKeyConstraint(
         ["universe_version_id"],
@@ -1446,6 +1447,7 @@ comparative_projection_current = sa.Table(
         "projection_version > 0",
         name="projection_version_positive",
     ),
+    sa.CheckConstraint("comparison_transition_revision >= 0", name="comparison_revision_valid"),
 )
 
 sa.Index(

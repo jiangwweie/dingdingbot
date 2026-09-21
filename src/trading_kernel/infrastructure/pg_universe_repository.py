@@ -57,6 +57,7 @@ from src.trading_kernel.application.reconciliation_scheduler import (
     ReconciliationActionCandidate,
     ReconciliationActionKind,
 )
+from src.trading_kernel.domain.comparison_universe import ComparisonObservationSource
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
     CertificationBatchMemberResult,
@@ -2361,6 +2362,7 @@ class PostgresStrategyUniverseRepository:
         universe_version_id: str,
         closed_bar_time_ms: int,
         member_set_digest: str,
+        comparison_transition_revision: int = 0,
     ) -> ComparativeProjectionOutcome | None:
         row = (
             await self._connection.execute(
@@ -2373,13 +2375,15 @@ class PostgresStrategyUniverseRepository:
                     == closed_bar_time_ms,
                     comparative_projection_current.c.member_set_digest
                     == member_set_digest,
+                    comparative_projection_current.c.comparison_transition_revision == comparison_transition_revision,
                 )
             )
         ).mappings().one_or_none()
         if row is None:
             return None
         await self._require_comparative_member_authority(event_spec_id=event_spec_id,
-            universe_version_id=universe_version_id,member_set_digest=member_set_digest)
+            universe_version_id=universe_version_id,member_set_digest=member_set_digest,
+            comparison_transition_revision=comparison_transition_revision)
         try:
             authoritative = {
                 **dict(row["projection"]),
@@ -2389,6 +2393,7 @@ class PostgresStrategyUniverseRepository:
                 "closed_bar_time_ms": row["closed_bar_time_ms"],
                 "observed_at_ms": row["observed_at_ms"],
                 "projection_version": row["projection_version"],
+                "comparison_transition_revision": row["comparison_transition_revision"],
             }
             if row["projection_status"] == "ready":
                 return ComparativeUniverseProjection.model_validate(
@@ -2420,11 +2425,13 @@ class PostgresStrategyUniverseRepository:
         projection: ComparativeUniverseProjection,
     ) -> ComparativeUniverseProjection:
         await self._require_comparative_member_authority(event_spec_id=projection.event_spec_id,
-            universe_version_id=projection.universe_version_id,member_set_digest=projection.member_set_digest,for_update=True)
+            universe_version_id=projection.universe_version_id,member_set_digest=projection.member_set_digest,for_update=True,
+            comparison_transition_revision=projection.comparison_transition_revision)
         statement = (
             pg_insert(comparative_projection_current)
             .values(
                 event_spec_id=projection.event_spec_id,
+                comparison_transition_revision=projection.comparison_transition_revision,
                 universe_version_id=projection.universe_version_id,
                 closed_bar_time_ms=projection.closed_bar_time_ms,
                 member_set_digest=projection.member_set_digest,
@@ -2442,6 +2449,7 @@ class PostgresStrategyUniverseRepository:
                 ],
                 set_={
                     "closed_bar_time_ms": projection.closed_bar_time_ms,
+                    "comparison_transition_revision": projection.comparison_transition_revision,
                     "member_set_digest": projection.member_set_digest,
                     "projection_status": "ready",
                     "failure_reason": None,
@@ -2453,6 +2461,7 @@ class PostgresStrategyUniverseRepository:
                     ),
                 },
                 where=sa.or_(
+                    comparative_projection_current.c.comparison_transition_revision < projection.comparison_transition_revision,
                     comparative_projection_current.c.closed_bar_time_ms
                     < projection.closed_bar_time_ms,
                     sa.and_(
@@ -2470,6 +2479,7 @@ class PostgresStrategyUniverseRepository:
             universe_version_id=projection.universe_version_id,
             closed_bar_time_ms=projection.closed_bar_time_ms,
             member_set_digest=projection.member_set_digest,
+            comparison_transition_revision=projection.comparison_transition_revision,
         )
         if not isinstance(persisted, ComparativeUniverseProjection):
             raise ComparativeProjectionAuthorityChanged(
@@ -2482,11 +2492,13 @@ class PostgresStrategyUniverseRepository:
         failure: ComparativeProjectionFailure,
     ) -> ComparativeProjectionOutcome:
         await self._require_comparative_member_authority(event_spec_id=failure.event_spec_id,
-            universe_version_id=failure.universe_version_id,member_set_digest=failure.member_set_digest,for_update=True)
+            universe_version_id=failure.universe_version_id,member_set_digest=failure.member_set_digest,for_update=True,
+            comparison_transition_revision=failure.comparison_transition_revision)
         statement = (
             pg_insert(comparative_projection_current)
             .values(
                 event_spec_id=failure.event_spec_id,
+                comparison_transition_revision=failure.comparison_transition_revision,
                 universe_version_id=failure.universe_version_id,
                 closed_bar_time_ms=failure.closed_bar_time_ms,
                 member_set_digest=failure.member_set_digest,
@@ -2504,6 +2516,7 @@ class PostgresStrategyUniverseRepository:
                 ],
                 set_={
                     "closed_bar_time_ms": failure.closed_bar_time_ms,
+                    "comparison_transition_revision": failure.comparison_transition_revision,
                     "member_set_digest": failure.member_set_digest,
                     "projection_status": "unavailable",
                     "failure_reason": failure.reason_code,
@@ -2515,6 +2528,7 @@ class PostgresStrategyUniverseRepository:
                     ),
                 },
                 where=sa.or_(
+                    comparative_projection_current.c.comparison_transition_revision < failure.comparison_transition_revision,
                     comparative_projection_current.c.closed_bar_time_ms
                     < failure.closed_bar_time_ms,
                     sa.and_(
@@ -2534,20 +2548,22 @@ class PostgresStrategyUniverseRepository:
             universe_version_id=failure.universe_version_id,
             closed_bar_time_ms=failure.closed_bar_time_ms,
             member_set_digest=failure.member_set_digest,
+            comparison_transition_revision=failure.comparison_transition_revision,
         )
         if persisted is None:
             raise RuntimeError("comparative projection authority changed")
         return persisted
 
-    async def get_comparative_member_ids(
-        self, *, event_spec_id: str, universe_version_id: str,
-    ) -> tuple[str, ...]:
+    async def get_comparative_source(
+        self, *, event_spec_id: str, universe_version_id: str, for_update: bool = False,
+    ) -> ComparisonObservationSource:
         return await self._require_comparative_member_authority(
-            event_spec_id=event_spec_id, universe_version_id=universe_version_id,
+            event_spec_id=event_spec_id, universe_version_id=universe_version_id, for_update=for_update,
         )
 
     async def _require_comparative_member_authority(self, *, event_spec_id: str, universe_version_id: str,
-                                                    member_set_digest: str | None = None, for_update: bool = False) -> tuple[str, ...]:
+                                                    member_set_digest: str | None = None, for_update: bool = False,
+                                                    comparison_transition_revision: int | None = None) -> ComparisonObservationSource:
         statement = sa.select(strategy_universe_versions).where(
             strategy_universe_versions.c.universe_version_id==universe_version_id,
             strategy_universe_versions.c.event_spec_id==event_spec_id,
@@ -2579,6 +2595,7 @@ class PostgresStrategyUniverseRepository:
         authoritative_digest = comparative_member_set_digest(members)
         if member_set_digest is not None and authoritative_digest!=member_set_digest:
             raise ComparativeProjectionAuthorityChanged("comparative member authority changed")
+        revision = 0
         if universe["lifecycle_state"]=="active":
             binding_statement = sa.select(comparison_binding_current,
                 comparison_universe_definitions.c.member_set_digest).join(comparison_universe_definitions,
@@ -2594,7 +2611,11 @@ class PostgresStrategyUniverseRepository:
                 binding["source_static_universe_version_id"] is not None and binding["source_static_universe_version_id"]!=universe_version_id
             ):
                 raise ComparativeProjectionAuthorityChanged("comparative current binding changed")
-        return members
+            if binding is not None:
+                revision = binding["comparison_transition_revision"]
+        if comparison_transition_revision is not None and comparison_transition_revision != revision:
+            raise ComparativeProjectionAuthorityChanged("comparative transition revision changed")
+        return ComparisonObservationSource(exchange_instrument_ids=members, comparison_transition_revision=revision)
 
     async def claim_due_instrument_certification(
         self,

@@ -1,11 +1,19 @@
 """Immutable comparison membership, independent of tradable Universe capacity."""
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_selection import (
     CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS,
 )
+
+
+class ComparisonObservationSource(BaseModel):
+    """Frozen membership and transition token captured before market I/O."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    exchange_instrument_ids: tuple[str, ...]
+    comparison_transition_revision: int = Field(ge=0)
 
 
 class ComparisonUniverseBinding(BaseModel):

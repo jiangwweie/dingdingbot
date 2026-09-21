@@ -11,7 +11,7 @@ from decimal import Decimal
 from threading import Lock
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.trading_kernel.application.market_ports import (
     ClosedCandleRequest,
@@ -41,7 +41,7 @@ class _ProjectionLockState:
 
 _PROJECTION_LOCKS_GUARD = Lock()
 _PROJECTION_LOCKS: dict[
-    tuple[str, str, int, str],
+    tuple[str, str, int, str, int],
     _ProjectionLockState,
 ] = {}
 
@@ -86,6 +86,7 @@ class ComparativeUniverseProjection(BaseModel):
     observed_at_ms: int
     valid_until_ms: int
     projection_version: int = 1
+    comparison_transition_revision: int = Field(default=0, ge=0)
 
     @field_validator(
         "event_spec_id",
@@ -179,6 +180,7 @@ class ComparativeProjectionFailure(BaseModel):
     observed_at_ms: int
     retry_after_ms: int
     projection_version: int = 1
+    comparison_transition_revision: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def _validate_failure(self) -> ComparativeProjectionFailure:
@@ -232,6 +234,7 @@ def build_comparative_projection_failure(
     member_set_digest: str,
     closed_bar_time_ms: int,
     observed_at_ms: int,
+    comparison_transition_revision: int = 0,
     reason_code: Literal[
         "comparative_projection_incomplete",
         "comparative_market_temporarily_unavailable",
@@ -245,6 +248,7 @@ def build_comparative_projection_failure(
         reason_code=reason_code,
         observed_at_ms=observed_at_ms,
         retry_after_ms=observed_at_ms + COMPARATIVE_FAILURE_RETRY_MS,
+        comparison_transition_revision=comparison_transition_revision,
     )
 
 
@@ -255,6 +259,7 @@ async def serialize_comparative_projection(
     universe_version_id: str,
     closed_bar_time_ms: int,
     member_set_digest: str,
+    comparison_transition_revision: int = 0,
 ) -> AsyncIterator[None]:
     """Coalesce same-process projector work; PostgreSQL remains authority."""
 
@@ -263,6 +268,7 @@ async def serialize_comparative_projection(
         universe_version_id,
         closed_bar_time_ms,
         member_set_digest,
+        comparison_transition_revision,
     )
     with _PROJECTION_LOCKS_GUARD:
         state = _PROJECTION_LOCKS.get(key)

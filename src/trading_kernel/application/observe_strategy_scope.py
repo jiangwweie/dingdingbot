@@ -339,13 +339,17 @@ async def observe_strategy_scope(
         comparative_lookback_bars = _comparative_lookback_bars(contract)
         comparative_projection: ComparativeUniverseProjection | None = None
         comparative_digest = None
+        comparative_source = None
+        comparison_revision = 0
         comparison_member_ids = observation_universe.exchange_instrument_ids
         if comparative_lookback_bars is not None:
             try:
-                comparison_member_ids = await uow.strategy_universes.get_comparative_member_ids(
+                comparative_source = await uow.strategy_universes.get_comparative_source(
                     event_spec_id=scope.event_spec_id,
                     universe_version_id=scope.universe_version_id,
                 )
+                comparison_member_ids = comparative_source.exchange_instrument_ids
+                comparison_revision = comparative_source.comparison_transition_revision
                 comparative_digest = comparative_member_set_digest(
                     comparison_member_ids
                 )
@@ -357,6 +361,7 @@ async def observe_strategy_scope(
                             request.trigger_candle_close_time_ms
                         ),
                         member_set_digest=comparative_digest,
+                        comparison_transition_revision=comparison_revision,
                     )
                 )
                 if isinstance(
@@ -434,6 +439,7 @@ async def observe_strategy_scope(
                     member_set_digest=comparative_digest,
                     lookback_bars=comparative_lookback_bars,
                     attempted_at_ms=attempted_at_ms,
+                    comparison_transition_revision=comparison_revision,
                 )
             )
         snapshot = await _load_market_snapshot(
@@ -494,6 +500,17 @@ async def observe_strategy_scope(
                 reason="warm_facts_invalid",
             )
     async with uow_factory() as uow:
+        if comparative_source is not None:
+            try:
+                current_comparison = await uow.strategy_universes.get_comparative_source(
+                    event_spec_id=scope.event_spec_id, universe_version_id=scope.universe_version_id,
+                    for_update=True,
+                )
+                if current_comparison != comparative_source:
+                    raise ComparativeProjectionAuthorityChanged("comparative transition revision changed")
+            except ComparativeProjectionAuthorityChanged:
+                return _invalid_observation(request, event_spec_id=scope.event_spec_id,
+                    reason="comparative_projection_invalid")
         if detector_result.status is DetectorStatus.INVALID:
             await _save_observation_blocker(
                 uow,
@@ -837,12 +854,14 @@ async def _get_or_create_comparative_projection(
     member_set_digest: str,
     lookback_bars: int,
     attempted_at_ms: int,
+    comparison_transition_revision: int,
 ) -> ComparativeUniverseProjection:
     async with serialize_comparative_projection(
         event_spec_id=scope.event_spec_id,
         universe_version_id=scope.universe_version_id,
         closed_bar_time_ms=trigger_ms,
         member_set_digest=member_set_digest,
+        comparison_transition_revision=comparison_transition_revision,
     ):
         async with uow_factory() as uow:
             persisted = (
@@ -851,6 +870,7 @@ async def _get_or_create_comparative_projection(
                     universe_version_id=scope.universe_version_id,
                     closed_bar_time_ms=trigger_ms,
                     member_set_digest=member_set_digest,
+                    comparison_transition_revision=comparison_transition_revision,
                 )
             )
         if isinstance(persisted, ComparativeUniverseProjection):
@@ -879,6 +899,7 @@ async def _get_or_create_comparative_projection(
                 member_set_digest=member_set_digest,
                 closed_bar_time_ms=trigger_ms,
                 observed_at_ms=attempted_at_ms,
+                comparison_transition_revision=comparison_transition_revision,
                 reason_code=(
                     "comparative_projection_incomplete"
                     if isinstance(exc, ValueError)
@@ -898,7 +919,7 @@ async def _get_or_create_comparative_projection(
             raise RuntimeError("comparative projection unavailable") from exc
         async with uow_factory() as uow:
             return await uow.strategy_universes.save_comparative_projection(
-                projected
+                projected.model_copy(update={"comparison_transition_revision": comparison_transition_revision})
             )
 
 
