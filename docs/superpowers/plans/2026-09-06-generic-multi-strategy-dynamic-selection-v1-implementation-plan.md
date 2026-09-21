@@ -11,6 +11,7 @@ implementation_authority: CODE_AND_TEST_ONLY
 active_execution_scope: GS-04_TO_GS-13
 production_authority: NONE
 further_feature_research: CLOSED
+owner_amendments: ACCEPTED_2026-09-21
 ---
 
 # Generic Multi-Strategy Dynamic Selection V1 — Implementation Plan
@@ -35,6 +36,12 @@ further_feature_research = CLOSED
 针对`4b2947e9f43fb3e2c4f165c91a957e0f20adb632`的独立复核已批准设计，并对Plan给出两项条件。strategy-scoped certification和Static migration neutrality已并入原卡，不新增Task、不修改已批准设计主体。Owner随后明确要求“按文档开始执行开发测试”，故本地实施范围正式开启；执行状态由本文件头和当前Task Card管理。
 
 ## 2. 工作区、基线与已知缺口
+
+### Owner amendment（2026-09-21）
+
+本轮接受Owner转交的A～D建议，不重设计架构，不回滚前置工作。当前源码已进入GS-04～09实施，不能按转交建议中的早期时间点重置为“刚进入GS-04”，也不能把GS-00～03的组件证据自动提升为全卡完成。`PLAN_APPROVED / CODE_AND_TEST_ONLY / production_authority=NONE`保持，完成度仍由下面台账及逐卡验收证据决定。
+
+Owner提供的SOR事故链作为回归需求来源，而非本轮重新取得的生产事实：temporary certification被误判永久失败、过早Gap Audit、failed Audit卡住切换。其工程不变量现明确列入GS-07/08。Static migration neutrality、comparison rebase与24h-equivalent soak保持不变；实盘验证不能豁免工程安全验收。
 
 ### 2.1 当前实施证据校正（2026-09-08）
 
@@ -302,6 +309,8 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 **RED与要求**：target数与Spec一致；schema/domain支持single SHORT，BRF2实际安装路径仅在其SPEC_CERT PASS时可用，未安装时必须拒绝；16-member Dynamic合法但manual11/SOR8非法；请求自报source-kind不能增权。所需facts/certification齐全才能STAGED，全部staged前无positive grant。临时unavailable重试到deadline，timeout不因retry刷新；保留原Vacuum source retarget修复。
 
+**GS-07-SOR-INCIDENT-01（必须显式验收）**：`temporarily_unavailable`属于retryable，不能压成`CERTIFICATION_NOT_ELIGIBLE`后立即fallback；`owner_action_required`属于non-transient，可进入受现有条件约束的fallback，不代表可越过Owner pause或drain。任何retry、重启或重新取得lease不得刷新原materialization deadline。测试需从真实certification结果经Coordinator到Generation/Vacuum断言状态及原deadline，而非只测枚举分类。
+
 **验证**：真实PG+recording venue；全局slot冲突、partial staging、resume/abandon/reclaim、duplicate callback；零warming Signal/Ticket/Command，source eligibility不得从研究数据读。
 
 **Done**：targets可准确STAGED/ABANDONED并恢复，最终activation权限留给GS-08，无incremental warming/carry-forward新设计；§3.4相关SOR子集PASS。
@@ -321,6 +330,9 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 5. firstStatic失败保持mode Static和原comparison checkpoint；已Active后Static rollback是真comparison transition。Owner pause最高，普通fallback不清pause/refresh年龄。
 6. 老Vacuum已指向本期Generation则继续materialization；新effective Snapshot、empty、old lease callback、period过期严格supersede；source过期无合法proof保持blocked。
 
+7. **GS-08-SOR-INCIDENT-01**：`now < first eligible close`时Gap Audit不得调用market replay，保持pending；用recording source证明零调用，不能靠构造4根OR后的空path绕过。
+8. **GS-08-SOR-INCIDENT-02**：expired session不得伪造retroactive Authority。首次Dynamic失败只走正式recovery/supersession，保留previous Static pair及`selection_mode=static_baseline`；failed Audit不能无限卡住后续合法恢复。测试覆盖failed Audit、重启、新period与Owner pause交叉路径，禁止以直接SQL修复作为运行方案。
+
 **验证**：PG并发事务/barrier测试+recording network；current-close先consume或先switch两种顺序、crash每个commit点、重试terminal authority；SOR近期四类bug regression。
 
 **Done**：全部新authority可trace proof/source/epoch/Event set，positive grant不能绕过rebase/stale/EMPTY/Owner；existing Ticket未变；§3.4相关SOR子集PASS。
@@ -336,6 +348,14 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 **验证**：从正式Selection/Observation到Ticket/Command的full-chain，不仅直接插入fixture Ticket。保留已暴露Position的Initial Stop/TP1/Runner/Exit/Settlement/Review；cancel unknown和late fill攻击测试。
 
 **Done**：unauthorized Signal/Ticket/dispatch=0、每episode最多一个Ticket、netting独立、已有退出不读取Selector；failures终态和Incident边界可复核；§3.4相关SOR子集PASS。
+
+#### GS-09-LIVE-EVIDENCE-01 — 最小实盘证据合同
+
+本卡核对并补足immutable lineage，不建立新交易链、不新增GS-14。每个新Dynamic Ticket应可exact追溯：SelectionSpec/版本、Snapshot及member feature/rank/资格、Signal及trigger close、entry Command/实际fill时间价格数量、原始Initial Stop、冻结ExitProfile/Binding、TP1/Runner/Exit/Settlement时间与数量、terminal time。复用现有FK与append-only事实，不为展示复制一套authority。缺失历史字段明确标记`EVIDENCE_INCOMPLETE`，禁止猜测或改写旧Ticket。
+
+独立离线projector在GS-13交付：`Ticket immutable facts + closed market path → MAE/MFE、0.5/1/2/3/5R first passage、time_to_levels、realized R、runner capture`。不读未来行情作交易输入，不参与实时ENTRY/FinalGate，不阻塞保护/退出；projection失败不得暂停交易。复用已有market-path/projector能力，先盘点再补最小缺口；不新增常驻service、研究调参或Shadow上线等待。
+
+计算合同必须可复算：R分母固定为实际entry VWAP到原始Initial Stop的方向化距离，禁止用移动止损重设R；realized R包含实际fill、费用和可取得的funding并明确缺项。first passage使用exclusive closed-bar时间；同一根K同时触及止损和盈利level标记`AMBIGUOUS_INTRABAR`，不猜先后。数据缺口/截尾明确标注；退出后path horizon为显式versioned参数并记录cutoff，未观察满窗口不当成未触及。runner理论excursion与实际runner净收益分开展示，capture分母/剩余数量明确，零分母为未定义。输出绑定Ticket、path/source digest、projector version、horizon，rerun确定性相同；报告为display-only。
 
 ### GS-10 — Worker hosting / restart / bounded status
 
@@ -406,6 +426,9 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 3. 关闭设计§20的两项基线document authority失败：测试从硬编码旧Policy值改为实际合同的可验证结构/一致性；pending tag必须有明确未封版状态，不能被当作sealed release。不能通过改写生产事实、伪造tag、skip或删除有效assert解决。
 4. 清理被替代的错误通用day/pair/max10 tests、维护current文档与引用；保留SOR Golden和独特fault覆盖。完成Owner UI/API与新schema源码变化的release classification。
 5. 编写stopped-flat部署runbook，明确fresh advisory→停止writers→fresh authoritative facts、source/target证据、quiescence、原SOR状态保全、postflight和失败fix-forward；未来每策略activation单独Owner控制。
+6. 交付GS-09-LIVE-EVIDENCE-01的最小离线projector及测试：LONG/SHORT、partial fill、TP1/Runner、费用、同bar双触及、缺口、窗口截尾和退出后右尾；从正式Ticket链读取，不仅用手填收益fixture。保证每笔样本具有可重建事实，不宣称已实现自动持续行情采集或额外研究服务。
+
+**技术可激活边界（无额外经济Gate）**：对目标策略，`SPEC_CERT PASS + generic runtime PASS + exact R4 PASS + authorized deployment/postflight PASS`意味着`TECHNICALLY_ELIGIBLE_FOR_OWNER_LIVE_ACTIVATION`。Owner可在既有资金/风险边界内直接小资金Dynamic实盘，不另要求经济评审、盈利显著性、追加Replay或等待一段Shadow。Owner activation/TOTP是防误操作的正式控制动作，不是第二次研究审批；不能自动激活，不能越过fresh action-time facts、stopped-flat部署、Owner pause或其他交易硬闸门。本任务仍在部署前等待Owner确认，计划文字不构成部署授权。
 
 **最终freeze与认证**：全部代码、测试、runbook修改提交成exact clean candidate C，然后执行一次完整Unit/Architecture、PG Integration、Full-chain、Ruff、Mypy、diff、Owner API/UI、source preservation/GS-MIG-COMP-01、SOR Golden/Core parity，以及candidate已安装策略的numeric/runtime/GS-12认证。manifest绑定C、schema/Registry/Policy、installed Spec集合及每项数值合同、命令集、输入/artifact digests和未安装原因，不能复用pre-fix candidate结果。
 
