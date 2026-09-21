@@ -78,6 +78,8 @@ GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（�
 
 双时钟纯组件新增`HourlyRecoveryClosePlan`：恢复只规划严格未来且小于expiry的close，commit跨界拒绝；无可用close输出NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY，固定要求rebase。正常CurrentFinalCloseGrantProof不因8秒/30秒/2分钟延迟改变语义。尚未完成durable recovery revision、Episode rebase与Coordinator接线，不宣称GS-08-HOURLY-CLOCK-01全链已通过。
 
+Recovery rebase纯组件补充：`AuthorityRecoveryCheckpoint`沿用原episode_domain_key，只记录独立recovery identity/revision及未来arming/cursor，不生成新Episode ID、不修改Comparison revision。它只决定是否可调用既有Episode reducer，不能替代当前Authority/Owner/epoch/freshness验证。已验证先TRIGGERED抑制、未来NOT_TRIGGERED解锁、更晚TRIGGERED、同close幂等/矛盾拒绝、revision回退/换代不能继承旧arm、无效输入与伪造arming拒绝；定向10 passed，完整Unit/Architecture1185 passed，Ruff/Mypy通过。PG checkpoint持久化与正式Observation接线尚未实现；后续还必须证明hourly失败period损失机会后能在合法后续period恢复，不能反复NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY造成永久暂停。
+
 本轮验证使用Docker `dingdingbot-pg`的独立可处置测试库：Universe安装/Schema/Generic仓库组合51 passed；SOR Materialization与Generic migration87 passed；Unit/Architecture1180 passed，后补Owner请求上限和时钟专项24 passed（有重叠）；Ruff、源码/脚本Mypy通过。计划与设计双时钟冻结见提交`b025ac0d`。生产未修改，部署权限仍NONE。
 
 2026-09-09 Generic Generation切片（父提交`4bf00b34`）：新增typed Generic Generation与previous Event baseline，明确Snapshot/epoch/control/period身份、comparison transition revision与不可变semantic digest；按原Generation/target/event表原子存储，不保存第二份Snapshot或成员集。四策略创建/精确读取/重复响应幂等已通过。PG在Generic分支校验Snapshot epoch、period、数量、effective时点和target member digest，SOR分支原约束保留。
