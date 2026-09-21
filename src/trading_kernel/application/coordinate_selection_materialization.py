@@ -31,6 +31,10 @@ from src.trading_kernel.application.install_strategy_universe import (
     install_strategy_universe,
 )
 from src.trading_kernel.application.ports import KernelUnitOfWork, UnitOfWorkFactory
+from src.trading_kernel.domain.generic_materialization import (
+    GenericMaterializationGeneration,
+    MaterializationEventBaseline,
+)
 from src.trading_kernel.domain.instrument_selection import (
     INTERVAL_MS,
     SOR_LONG_EVENT_SPEC_ID,
@@ -39,6 +43,7 @@ from src.trading_kernel.domain.instrument_selection import (
 )
 from src.trading_kernel.domain.owner_control import StrategyEntryState
 from src.trading_kernel.domain.selection_authority import (
+    AuthorityEventGrantState,
     AuthorityGapAudit,
     AuthorityGapAuditKind,
     AuthorityGapScope,
@@ -225,6 +230,19 @@ class CoordinateGenericGenerationRequest(BaseModel):
         return value.strip()
 
 
+class CoordinateGenericSnapshotRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    selection_snapshot_id: str
+    worker_id: str
+
+    @field_validator("selection_snapshot_id", "worker_id")
+    @classmethod
+    def _identity(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Generic Snapshot handoff identity must be non-blank")
+        return value.strip()
+
+
 class CoordinateSelectionMaterializationResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -379,12 +397,14 @@ def plan_selection_materialization(
 async def coordinate_selection_materialization_once(
     *,
     uow_factory: UnitOfWorkFactory,
-    request: CoordinateSelectionMaterializationRequest | CoordinateGenericGenerationRequest,
+    request: CoordinateSelectionMaterializationRequest | CoordinateGenericGenerationRequest | CoordinateGenericSnapshotRequest,
     clock_ms: Callable[[], int],
 ) -> CoordinateSelectionMaterializationResult:
     """Advance exactly one no-network materialization state from PostgreSQL facts."""
 
     now_ms = clock_ms()
+    if isinstance(request, CoordinateGenericSnapshotRequest):
+        return await _coordinate_generic_snapshot(uow_factory=uow_factory,request=request,now_ms=now_ms)
     if isinstance(request, CoordinateGenericGenerationRequest):
         return await _coordinate_generic_generation(uow_factory=uow_factory,request=request,now_ms=now_ms)
     async with uow_factory() as uow:
@@ -1084,6 +1104,72 @@ async def coordinate_selection_materialization_once(
             ),
             entry_vacuum_id=None if vacuum is None else vacuum.entry_vacuum_id,
         )
+
+
+async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
+    request: CoordinateGenericSnapshotRequest, now_ms: int) -> CoordinateSelectionMaterializationResult:
+    async with uow_factory() as uow:
+        snapshot = await uow.instrument_selection.get_generic_snapshot(request.selection_snapshot_id)
+        generation_id = GenericMaterializationGeneration.id_for_snapshot(snapshot.selection_snapshot_id)
+        existing = await uow.instrument_selection.get_generic_materialization_generation(generation_id)
+        if existing is None:
+            owner = await uow.owner_controls.get_strategy_control(snapshot.strategy_group_id,for_update=True)
+            if owner is None:
+                return _blocked("MATERIALIZATION_CONTROL_MISSING")
+            if owner.entry_state is StrategyEntryState.PAUSED:
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED,
+                    selection_snapshot_id=snapshot.selection_snapshot_id)
+            control = await uow.instrument_selection.get_selection_control(snapshot.strategy_group_id,for_update=True)
+            if control is None or control.selection_spec_id != snapshot.selection_spec_id:
+                return _blocked("GENERIC_SELECTION_CONTROL_CHANGED")
+            if control.selection_mode is SelectionMode.DISABLED:
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.DISABLED)
+            if control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not (
+                control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+                and control.pending_effective_period_anchor_ms == snapshot.feature_cutoff_at_ms
+            ):
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.STATIC_BASELINE)
+            if control.selection_epoch_id != snapshot.selection_epoch_id:
+                return _blocked("GENERIC_SELECTION_EPOCH_CHANGED")
+            if now_ms < snapshot.effective_from_ms:
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.NOT_DUE)
+            if now_ms >= snapshot.expires_at_ms:
+                return _blocked("GENERIC_SNAPSHOT_PERIOD_EXPIRED")
+            if now_ms < snapshot.committed_at_ms:
+                return _blocked("GENERIC_SNAPSHOT_COMMIT_IS_FUTURE")
+            prior_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,for_update=True)
+            if prior_vacuum is not None:
+                return _blocked("GENERIC_PRIOR_VACUUM_REQUIRES_SUPERSESSION")
+            if not snapshot.selected_members:
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.VALID_EMPTY_INTENT,
+                    selection_snapshot_id=snapshot.selection_snapshot_id)
+            spec = await uow.instrument_selection.get_generic_spec(snapshot.selection_spec_id)
+            current = await uow.strategy_universes.get_current(spec.event_spec_id)
+            if current is None:
+                return _blocked("GENERIC_PREVIOUS_UNIVERSE_MISSING")
+            members = await uow.signals.get_observation_universe_members(event_spec_id=spec.event_spec_id,
+                universe_version_id=current.universe_version_id)
+            if members is None or members.semantic_digest != current.semantic_digest:
+                return _blocked("GENERIC_PREVIOUS_UNIVERSE_CHANGED")
+            if members.exchange_instrument_ids == snapshot.selected_members:
+                return _blocked("GENERIC_NO_CHANGE_AUTHORITY_REQUIRED")
+            comparison = None
+            if snapshot.strategy_group_id in {"MPG-001", "MI-001"}:
+                comparison = await uow.instrument_selection.get_comparison_universe_binding(spec.event_spec_id,for_update=True)
+                if comparison is None:
+                    return _blocked("GENERIC_COMPARISON_BASELINE_MISSING")
+            generation = GenericMaterializationGeneration.build(snapshot=snapshot,selection_control_version=control.control_version,
+                created_at_ms=now_ms,previous_events=(MaterializationEventBaseline(event_spec_id=spec.event_spec_id,
+                    position_side=spec.position_side,grant_state=AuthorityEventGrantState.ACTIVE,universe_version_id=current.universe_version_id,
+                    member_set_digest=selected_member_set_digest(members.exchange_instrument_ids),
+                    comparison_universe_id=None if comparison is None else comparison.comparison_universe_id,
+                    comparison_transition_revision=None if comparison is None else comparison.comparison_transition_revision),))
+            await uow.instrument_selection.add_generic_pending_materialization_generation(generation)
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_PENDING,
+                selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation_id)
+    return await _coordinate_generic_generation(uow_factory=uow_factory,
+        request=CoordinateGenericGenerationRequest(materialization_generation_id=generation_id,worker_id=request.worker_id),now_ms=now_ms)
 
 
 async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,

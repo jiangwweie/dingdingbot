@@ -119,11 +119,15 @@ class GenericMaterializationGeneration(BaseModel):
         if not snapshot.selected_members:
             raise ValueError("valid empty Selection has no Generation")
         spec = generic_selection_spec(snapshot.strategy_group_id)
-        return cls(materialization_generation_id="generation:"+canonical_digest({"snapshot":snapshot.selection_snapshot_id})[7:],
+        return cls(materialization_generation_id=cls.id_for_snapshot(snapshot.selection_snapshot_id),
             selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,strategy_version_id=spec.strategy_version_id,
             selection_snapshot_id=snapshot.selection_snapshot_id,selection_epoch_id=snapshot.selection_epoch_id,
             selection_control_version=selection_control_version,period_anchor_ms=snapshot.feature_cutoff_at_ms,
             desired_member_count=len(snapshot.selected_members),previous_events=previous_events,created_at_ms=created_at_ms)
+
+    @staticmethod
+    def id_for_snapshot(selection_snapshot_id: str) -> str:
+        return "generation:"+canonical_digest({"snapshot":selection_snapshot_id})[7:]
 
 
 class GenericMaterializationLeaseClaim(BaseModel):

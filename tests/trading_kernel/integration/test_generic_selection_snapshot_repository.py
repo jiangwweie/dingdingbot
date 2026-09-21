@@ -21,6 +21,7 @@ from src.trading_kernel.application.advance_strategy_universe import (
 )
 from src.trading_kernel.application.coordinate_selection_materialization import (
     CoordinateGenericGenerationRequest,
+    CoordinateGenericSnapshotRequest,
     MaterializationDisposition,
     coordinate_selection_materialization_once,
 )
@@ -220,6 +221,10 @@ async def test_generic_snapshot_exact_roundtrip_and_idempotent_handoff(database:
         assert loaded == snapshot
         assert loaded.semantic_digest == snapshot.semantic_digest
         await uow.instrument_selection.save_generic_snapshot(snapshot, decision_at_ms=source.decision_at_ms, source_observed_at_ms=source.source_observed_at_ms)
+    static = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="static-handoff"),
+        clock_ms=lambda:snapshot.effective_from_ms+1)
+    assert static.disposition == MaterializationDisposition.STATIC_BASELINE
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_member_decisions")) == 24
         for table in ("brc_strategy_universe_materialization_generations", "brc_selection_session_authorities", "brc_trade_tickets", "brc_exchange_commands"):
@@ -608,8 +613,15 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
         previous_events=(MaterializationEventBaseline(event_spec_id=source.spec.event_spec_id,position_side=source.spec.position_side,
             grant_state="ACTIVE",universe_version_id=uid,member_set_digest=selected_member_set_digest(source.spec.candidate_ids[:1]),
             comparison_universe_id=comparison_id,comparison_transition_revision=0 if comparison_id else None),))
-    async with PostgresKernelUnitOfWork(database) as uow:
-        assert await uow.instrument_selection.add_generic_pending_materialization_generation(generation) == generation
+    snapshot_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="snapshot-coordinator")
+    early = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=snapshot_request,clock_ms=lambda:snapshot.effective_from_ms-1)
+    assert early.disposition == MaterializationDisposition.NOT_DUE
+    handed_off = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=snapshot_request,
+        clock_ms=lambda:generation.created_at_ms)
+    assert handed_off.disposition == MaterializationDisposition.GENERATION_PENDING
+    assert handed_off.materialization_generation_id == generation.materialization_generation_id
     async with PostgresKernelUnitOfWork(database) as uow:
         assert await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id) == generation
         assert await uow.instrument_selection.add_generic_pending_materialization_generation(generation) == generation
@@ -666,7 +678,7 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
             assert retired.previous_events==generation.previous_events
             assert retired.semantic_digest==generation.semantic_digest
         generation, snapshot = later, later_snapshot
-    coordinator_request = CoordinateGenericGenerationRequest(materialization_generation_id=generation.materialization_generation_id,
+    coordinator_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,
         worker_id="generic-coordinator")
     async with database.begin() as conn:
         await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' WHERE strategy_group_id=:group"), {"group":group})
