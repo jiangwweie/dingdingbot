@@ -869,6 +869,8 @@ class GenericSelectionAuthority(BaseModel):
         if self.comparison_transition_revision is not None and self.comparison_transition_revision < 0:
             raise ValueError("Generic comparison revision is invalid")
         if self.blocks_new_entry:
+            if self.materialization_generation_id is not None:
+                raise ValueError("VALID_EMPTY forbids a materialization Generation")
             if self.event_binding.grant_state is not AuthorityEventGrantState.EMPTY or self.current_close_proof is not None or self.membership_freshness is not None:
                 raise ValueError("VALID_EMPTY forbids positive trading proof")
             return self

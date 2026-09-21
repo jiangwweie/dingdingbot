@@ -43,8 +43,11 @@ def test_generic_authority_binds_exact_event_period_and_precommitted_close(group
         with pytest.raises(ValueError):
             GenericSelectionAuthority.model_validate({**authority.model_dump(),**changes})
     empty = GenericSelectionAuthority.model_validate({**authority.model_dump(),"authority_outcome":"VALID_EMPTY",
+        "materialization_generation_id":None,
         "event_binding":AuthorityEventBinding.empty(event_spec_id=spec.event_spec_id,position_side=spec.position_side),
         "current_close_proof":None,"membership_freshness":None})
     assert empty.blocks_new_entry and empty.first_eligible_close_time_ms is None
     with pytest.raises(ValueError):
         GenericSelectionAuthority.model_validate({**empty.model_dump(),"event_binding":binding})
+    with pytest.raises(ValueError, match="Generation"):
+        GenericSelectionAuthority.model_validate({**empty.model_dump(),"materialization_generation_id":"generation:wrong"})
