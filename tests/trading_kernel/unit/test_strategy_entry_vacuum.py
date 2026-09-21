@@ -40,6 +40,11 @@ def test_entry_vacuum_is_a_forward_only_new_entry_fence() -> None:
     assert vacuum.rewrites_existing_lineage is False
 
 
+def test_sor_vacuum_cannot_claim_another_strategy_group() -> None:
+    with pytest.raises(ValidationError, match="identity"):
+        StrategyEntryVacuum.model_validate({**_vacuum().model_dump(), "strategy_group_id":"CPM-RO-001"})
+
+
 def test_entry_vacuum_rejects_terminal_state_without_resolution_time() -> None:
     with pytest.raises(ValidationError, match="terminal Vacuum requires resolution time"):
         _vacuum(state=StrategyEntryVacuumState.VALID_EMPTY)

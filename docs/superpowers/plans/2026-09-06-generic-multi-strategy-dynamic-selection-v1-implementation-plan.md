@@ -369,6 +369,8 @@ Generic fence事务增量：复用`open_generation_entry_vacuum`及原Vacuum/eve
 
 Generic空ENTRY drain增量：共享`mark_entry_vacuum_drained`按真实Generation类型读取单Event或SOR subtype，并在任何drain更新前锁定、核对完整Vacuum行，拒绝伪造/过时输入。四策略测试已改为正式`drain_strategy_entry_vacuum_once→RECONFIGURING/MATERIALIZING→install`，删除直接UPDATE MATERIALIZING前置；无新的drain链。此处没有待撤ENTRY，不能代替Generic有单取消/部分成交/未知结果/旧Ticket保护的full-chain验收，也不等于Coordinator自动调度或最终Authority完成。四策略专项4 passed；Unit/Architecture1190 passed，全源码Mypy通过，生产未修改。
 
+有单drain审计补充：现有`support/selection_vacuum.py`的Spec来源固定SOR，不能只换StrategyGroup就当作Generic验收。共享Vacuum模型现明确拒绝SOR Spec与非SOR group混用，SOR有单drain与Vacuum单测合计21 passed。Generic有单测试必须安装对应真实Spec、使用合法Ticket身份，仍待补齐，不计为已验收。
+
 **实施增量（未Done）**：共享`StrategyEntryVacuum`模型及调用方统一使用`period_anchor_ms`，与现有物理字段一致，无旧名alias/双字段；SOR保留day边界，Generic校验已冻结Spec的1h/4h cadence。四策略非midnight Vacuum经现有Owner-pause repository写入及读回通过，不建立第二Vacuum/drain路径。此证据不等于Generic Coordinator的DESIRED→fence→drain已接通。受影响回归另外暴露历史0003 source verifier从当前metadata误读取新增comparison列；仍需修复准确的source manifest，不允许以旧schema runtime fallback绕过。生产未修改，全部GS完成状态不变。
 
 **允许**：materialization coordinator、authority/Vacuum/audit repos、typed proof/ports、Owner pause integration及状态机tests。**禁止**：Network I/O置于DB transaction；不经官方grant直接改Universe current。
