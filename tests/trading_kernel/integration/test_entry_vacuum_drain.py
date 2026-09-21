@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+import sqlalchemy as sa
 
 from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandRequest,
@@ -38,14 +39,22 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
+from src.trading_kernel.domain.exit_policy import registered_event_exit_bindings
+from src.trading_kernel.domain.generic_selection_spec import (
+    SpecNumericInstallationEvidence,
+    generic_selection_spec,
+)
+from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
-from src.trading_kernel.domain.ticket import TradeTicket
+from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
+from src.trading_kernel.domain.ticket import TradeTicket, build_ticket_id
 from src.trading_kernel.domain.venue_truth import (
     UnknownRecoveryStatus,
     VenueLookupStatus,
     VenueOrderTruth,
     VenueTruthSnapshot,
 )
+from src.trading_kernel.infrastructure.pg_models import strategy_entry_vacuums_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
@@ -192,18 +201,54 @@ class ConcurrentVacuumPositionSource(RecordingVacuumPositionSource):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group", [None, "CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
 async def test_prepared_entry_is_superseded_and_releases_all_admission_authority(
-    dispatch_engine,
+    dispatch_engine, group: str | None,
 ) -> None:
     ticket = make_ticket()
-    await seed_policy(dispatch_engine)
+    if group is not None:
+        spec = generic_selection_spec(group)
+        runtime = ticket.identity.runtime.model_copy(update={"strategy_group_id":spec.strategy_group_id,
+            "strategy_version_id":spec.strategy_version_id,"event_spec_id":spec.event_spec_id})
+        domain = ticket.identity.netting_domain.model_copy(update={"position_side":spec.position_side})
+        identity = TicketIdentity(**{**ticket.identity.model_dump(),"runtime":runtime,"netting_domain":domain,
+            "ticket_id":build_ticket_id(signal_event_id=ticket.identity.signal_event_id,runtime=runtime,netting_domain=domain)})
+        binding = next(b for b in registered_event_exit_bindings() if b.event_spec_id == spec.event_spec_id)
+        ticket = TradeTicket.model_validate({**ticket.model_dump(),"identity":identity,
+            "exposure_family":"rally_failure_short" if spec.position_side == "short" else "long_continuation","family_ticket_limit":1,
+            "initial_stop_price":Decimal(61000) if spec.position_side == "short" else ticket.initial_stop_price,
+            "take_profit_prices":(Decimal(58000),) if spec.position_side == "short" else ticket.take_profit_prices,
+            "exit_policy_id":binding.exit_profile_id,"exit_policy_semantic_hash":binding.exit_profile_semantic_hash,
+            "exit_binding_id":binding.exit_binding_id,"exit_binding_semantic_hash":binding.binding_semantic_hash,
+            "pre_tp1_reclaim_price":None,"exposure_session_end_ms":None})
+    await seed_policy(dispatch_engine,event_spec_id=ticket.identity.runtime.event_spec_id)
     await issue(dispatch_engine, ticket)
-    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        issued_ticket = await uow.tickets.get(ticket.identity.ticket_id)
+        assert issued_ticket is not None
+        assert issued_ticket.identity == ticket.identity
+    if group is not None:
+        async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+            await uow.instrument_selection.install_generic_spec(spec,installed_at_ms=2_000,
+                certification=SpecNumericInstallationEvidence(selection_spec_id=spec.selection_spec_id,
+                    algorithm_semantic_digest=spec.algorithm_semantic_digest,checked_cutoffs=463 if spec.cadence_hours==4 else 1852,mismatch_count=0,
+                    source_archive_count=96,reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb",
+                    common_numeric_authority="PASS",sor_golden="PASS",spec_cert="PASS"))
+        # Exact negative-fence prerequisite; this test starts at an issued Ticket,
+        # not at the Selection/Coordinator producer boundary.
+        vacuum = StrategyEntryVacuum(entry_vacuum_id=f"vacuum:{group}:prepared",strategy_group_id=spec.strategy_group_id,
+            selection_spec_id=spec.selection_spec_id,period_anchor_ms=100*3_600_000,source_generation_id=None,
+            state="DRAINING_ENTRY",fenced_at_ms=101*3_600_000,drained_at_ms=None,resolved_at_ms=None,
+            first_blocker="TEST_SELECTION_RECONFIGURATION",projection_version=1)
+        async with dispatch_engine.begin() as conn:
+            await conn.execute(sa.insert(strategy_entry_vacuums_current).values(**vacuum.model_dump(mode="json")))
+    else:
+        vacuum = await open_entry_vacuum(dispatch_engine, ticket)
 
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         result = await drain_strategy_entry_vacuum_once(
             uow,
-            _request(ticket, now_ms=vacuum.fenced_at_ms + 1),
+            _request(ticket, now_ms=vacuum.fenced_at_ms + 1).model_copy(update={"selection_spec_id":vacuum.selection_spec_id}),
         )
 
     assert result.status is VacuumDrainStatus.PREPARED_ENTRY_SUPERSEDED
@@ -231,6 +276,10 @@ async def test_prepared_entry_is_superseded_and_releases_all_admission_authority
     assert exposure is not None and exposure.active_ticket_count == 0
     assert lane is not None and lane.ticket_id is None
     assert domain_active is False
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        terminal_ticket = await uow.tickets.get(ticket.identity.ticket_id)
+        assert terminal_ticket is not None and terminal_ticket.status.value == "entry_rejected"
+        assert terminal_ticket.model_dump(exclude={"status"}) == issued_ticket.model_dump(exclude={"status"})
 
 
 @pytest.mark.asyncio

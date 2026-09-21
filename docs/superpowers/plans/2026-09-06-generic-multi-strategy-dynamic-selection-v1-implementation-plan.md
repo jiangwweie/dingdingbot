@@ -371,6 +371,8 @@ Generic空ENTRY drain增量：共享`mark_entry_vacuum_drained`按真实Generati
 
 有单drain审计补充：现有`support/selection_vacuum.py`的Spec来源固定SOR，不能只换StrategyGroup就当作Generic验收。共享Vacuum模型现明确拒绝SOR Spec与非SOR group混用，SOR有单drain与Vacuum单测合计21 passed。Generic有单测试必须安装对应真实Spec、使用合法Ticket身份，仍待补齐，不计为已验收。
 
+Generic prepared-ENTRY验收增量：CPM/MPG/MI/BRF2使用对应注册Event、ExitProfile Binding、方向（含BRF2 SHORT）与正式安装的Generic Spec，先经issue_ticket签发，再设置明确的负向Vacuum前置并调用正式drain。prepared ENTRY变为SUPERSEDED，Ticket进入entry_rejected，Reservation/lane/Netting Domain释放，冻结Ticket字段（除状态）保持不变。保留原SOR分支，五分支专项通过。测试从已签发Ticket开始，未证明Selection/Coordinator自然产出该Ticket；未覆盖Generic已发送未成交、部分成交及unknown cancel，不能升级为GS-08/09 full-chain完成。
+
 **实施增量（未Done）**：共享`StrategyEntryVacuum`模型及调用方统一使用`period_anchor_ms`，与现有物理字段一致，无旧名alias/双字段；SOR保留day边界，Generic校验已冻结Spec的1h/4h cadence。四策略非midnight Vacuum经现有Owner-pause repository写入及读回通过，不建立第二Vacuum/drain路径。此证据不等于Generic Coordinator的DESIRED→fence→drain已接通。受影响回归另外暴露历史0003 source verifier从当前metadata误读取新增comparison列；仍需修复准确的source manifest，不允许以旧schema runtime fallback绕过。生产未修改，全部GS完成状态不变。
 
 **允许**：materialization coordinator、authority/Vacuum/audit repos、typed proof/ports、Owner pause integration及状态机tests。**禁止**：Network I/O置于DB transaction；不经官方grant直接改Universe current。
