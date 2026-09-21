@@ -200,13 +200,7 @@ class ConcurrentVacuumPositionSource(RecordingVacuumPositionSource):
         return snapshot
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("group", [None, "CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-@pytest.mark.parametrize("sent", [False, True, "unknown"])
-async def test_entry_vacuum_clears_prepared_or_zero_fill_entry(
-    dispatch_engine, group: str | None, sent: bool | str,
-) -> None:
-    ticket = make_ticket()
+def _ticket_for_group(ticket: TradeTicket, group: str | None) -> TradeTicket:
     if group is not None:
         spec = generic_selection_spec(group)
         runtime = ticket.identity.runtime.model_copy(update={"strategy_group_id":spec.strategy_group_id,
@@ -217,20 +211,17 @@ async def test_entry_vacuum_clears_prepared_or_zero_fill_entry(
         binding = next(b for b in registered_event_exit_bindings() if b.event_spec_id == spec.event_spec_id)
         ticket = TradeTicket.model_validate({**ticket.model_dump(),"identity":identity,
             "exposure_family":"rally_failure_short" if spec.position_side == "short" else "long_continuation","family_ticket_limit":1,
-            "initial_stop_price":Decimal(61000) if spec.position_side == "short" else ticket.initial_stop_price,
-            "take_profit_prices":(Decimal(58000),) if spec.position_side == "short" else ticket.take_profit_prices,
+            "initial_stop_price":2*ticket.entry_reference_price-ticket.initial_stop_price if spec.position_side == "short" else ticket.initial_stop_price,
+            "take_profit_prices":tuple(2*ticket.entry_reference_price-price for price in ticket.take_profit_prices) if spec.position_side == "short" else ticket.take_profit_prices,
             "exit_policy_id":binding.exit_profile_id,"exit_policy_semantic_hash":binding.exit_profile_semantic_hash,
             "exit_binding_id":binding.exit_binding_id,"exit_binding_semantic_hash":binding.binding_semantic_hash,
             "pre_tp1_reclaim_price":None,"exposure_session_end_ms":None})
-    await seed_policy(dispatch_engine,event_spec_id=ticket.identity.runtime.event_spec_id)
-    await issue(dispatch_engine, ticket)
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        issued_ticket = await uow.tickets.get(ticket.identity.ticket_id)
-        assert issued_ticket is not None
-        assert issued_ticket.identity == ticket.identity
-    if sent:
-        await dispatch_for_ticket(dispatch_engine,AcceptingVenue(dispatch_engine),ticket.identity.ticket_id,now_ms=1_100)
+    return ticket
+
+
+async def _open_group_vacuum(dispatch_engine, ticket, group):
     if group is not None:
+        spec = generic_selection_spec(group)
         async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
             await uow.instrument_selection.install_generic_spec(spec,installed_at_ms=2_000,
                 certification=SpecNumericInstallationEvidence(selection_spec_id=spec.selection_spec_id,
@@ -248,11 +239,31 @@ async def test_entry_vacuum_clears_prepared_or_zero_fill_entry(
     else:
         vacuum = await open_entry_vacuum(dispatch_engine, ticket)
 
+    return vacuum
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", [None, "CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+@pytest.mark.parametrize("sent", [False, True, "unknown"])
+async def test_entry_vacuum_clears_prepared_or_zero_fill_entry(
+    dispatch_engine, group: str | None, sent: bool | str,
+) -> None:
+    ticket = _ticket_for_group(make_ticket(), group)
+    await seed_policy(dispatch_engine,event_spec_id=ticket.identity.runtime.event_spec_id)
+    await issue(dispatch_engine, ticket)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        issued_ticket = await uow.tickets.get(ticket.identity.ticket_id)
+        assert issued_ticket is not None
+        assert issued_ticket.identity == ticket.identity
+    if sent:
+        await dispatch_for_ticket(dispatch_engine,AcceptingVenue(dispatch_engine),ticket.identity.ticket_id,now_ms=1_100)
+    vacuum = await _open_group_vacuum(dispatch_engine, ticket, group)
+
     if sent == "unknown":
         await _assert_unknown_cancel(dispatch_engine,ticket,vacuum)
-        return
-    if sent:
+    elif sent:
         await _assert_zero_fill_cancel(dispatch_engine,ticket,vacuum)
+    if sent:
         async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
             terminal_ticket = await uow.tickets.get(ticket.identity.ticket_id)
             assert terminal_ticket is not None and terminal_ticket.status.value == "entry_reconciled_absent"
@@ -709,14 +720,33 @@ async def _assert_unknown_cancel(
     assert [command.generation for command in cancel_commands] == [1, 2]
     assert cancel_commands[0].status is ExchangeCommandStatus.RECONCILED_ABSENT
     assert cancel_commands[1].status is ExchangeCommandStatus.PREPARED
+    await dispatch_for_ticket(dispatch_engine,KindAwareAcceptingVenue(),ticket.identity.ticket_id,
+        now_ms=vacuum.fenced_at_ms+6)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        waiting = await drain_strategy_entry_vacuum_once(uow,_request(ticket,now_ms=vacuum.fenced_at_ms+7))
+        assert waiting.status == VacuumDrainStatus.POSITION_FACTS_REQUIRED
+        absent = await drain_strategy_entry_vacuum_once(uow,_request(ticket,now_ms=vacuum.fenced_at_ms+8,
+            position_snapshot=_position_snapshot(ticket,quantity=Decimal(0),average_entry_price=None,
+                open_entry_order=False,observed_at_ms=vacuum.fenced_at_ms+8)))
+        assert absent.status == VacuumDrainStatus.ORDER_ABSENCE_RECORDED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        closed = await drain_strategy_entry_vacuum_once(uow,_request(ticket,now_ms=vacuum.fenced_at_ms+9))
+        assert closed.status == VacuumDrainStatus.ZERO_FILL_CLOSED
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+        assert reservation is not None and reservation.status == "released"
+        assert not await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
+        final_commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        assert sum(c.kind == ExchangeCommandKind.ENTRY for c in final_commands) == 1
+        assert sum(c.kind == ExchangeCommandKind.CANCEL_ORDER for c in final_commands) == 2
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group", [None, "CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
 async def test_retained_partial_keeps_original_capacity_until_protected(
-    dispatch_engine,
+    dispatch_engine, group: str | None,
 ) -> None:
     ticket, vacuum, partial_qty = await _reach_retained_partial_pending(
-        dispatch_engine
+        dispatch_engine, group=group,
     )
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
@@ -779,11 +809,12 @@ async def test_retained_partial_keeps_original_capacity_until_protected(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group", [None, "CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
 async def test_retained_partial_initial_stop_rejection_requires_controlled_flatten(
-    dispatch_engine,
+    dispatch_engine, group: str | None,
 ) -> None:
     ticket, vacuum, partial_qty = await _reach_retained_partial_pending(
-        dispatch_engine
+        dispatch_engine, group=group,
     )
 
     rejected = await dispatch_one_command(
@@ -898,11 +929,19 @@ async def _commands(engine, ticket):
         )
 
 
-async def _reach_retained_partial_pending(engine):
-    ticket = _retained_partial_ticket()
+async def _reach_retained_partial_pending(engine, *, group: str | None = None, splittable: bool = True):
+    ticket = _ticket_for_group(_retained_partial_ticket(), group)
+    if group == "MPG-001" and splittable:
+        # 33% of two quantity steps rounds to zero. Use four filled steps
+        # out of six requested to exercise a legally splittable retained fill.
+        ticket = TradeTicket.model_validate({**ticket.model_dump(),
+            "quantity":Decimal("0.006"),"notional":Decimal(360),
+            "planned_stop_risk_budget":Decimal(6),"post_fill_stop_risk_limit":Decimal("6.6"),
+            "reserved_margin":Decimal(72),"risk_at_stop":Decimal(6),
+            "take_profit_quantities":(Decimal("0.001"),)})
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
-    await seed_policy(engine)
+    await seed_policy(engine,event_spec_id=ticket.identity.runtime.event_spec_id)
     await issue(engine, ticket, ticket_margin_budget=Decimal(90))
     await _seed_instrument_rules(engine, ticket)
     await dispatch_for_ticket(
@@ -911,8 +950,8 @@ async def _reach_retained_partial_pending(engine):
         ticket.identity.ticket_id,
         now_ms=1_100,
     )
-    vacuum = await open_entry_vacuum(engine, ticket)
-    partial_qty = Decimal("0.002")
+    vacuum = await _open_group_vacuum(engine, ticket, group)
+    partial_qty = Decimal("0.004") if group == "MPG-001" and splittable else Decimal("0.002")
     partial_open = _position_snapshot(
         ticket,
         quantity=partial_qty,
@@ -957,8 +996,24 @@ async def _reach_retained_partial_pending(engine):
             uow,
             _request(ticket, now_ms=vacuum.fenced_at_ms + 4),
         )
-    assert retained.status is VacuumDrainStatus.PARTIAL_RETAINED_PROTECTION_REQUESTED
+    assert retained.status is (VacuumDrainStatus.PARTIAL_RETAINED_PROTECTION_REQUESTED
+        if splittable else VacuumDrainStatus.PARTIAL_FLATTEN_REQUESTED)
     return ticket, vacuum, partial_qty
+
+
+@pytest.mark.asyncio
+async def test_mpg_unsplittable_partial_requests_exact_controlled_flatten(dispatch_engine) -> None:
+    ticket, _vacuum, quantity = await _reach_retained_partial_pending(dispatch_engine,group="MPG-001",splittable=False)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert aggregate is not None and aggregate.status == AggregateStatus.CONTROLLED_FLATTEN_PENDING
+        assert aggregate.position_qty == quantity
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+        assert reservation is not None and reservation.status == "active"
+        assert await uow.instrument_selection.entry_vacuum_has_drain_blockers(strategy_group_id="MPG-001")
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        exits = [c for c in commands if c.kind == ExchangeCommandKind.CONTROLLED_FLATTEN]
+        assert len(exits) == 1 and exits[0].payload.quantity == quantity
 
 
 def _retained_partial_ticket() -> TradeTicket:

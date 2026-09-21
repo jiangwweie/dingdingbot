@@ -377,6 +377,8 @@ Generic已发送零成交验收增量：同一合法Ticket/Spec前置扩展为�
 
 Generic unknown-cancel增量：上述矩阵加入unknown分支并合并旧独立SOR用例；五策略经过CANCEL派发超时、WAITING_UNKNOWN_OUTCOME、正式recover_unknown_command确认target仍open、随后才生成CANCEL generation 2。unknown期间再次调用dispatcher得到NO_COMMAND且禁止任何venue execute，SHORT使用sell事实。该分支证明安全重试边界，不声明第二次取消后的最终关闭或部分成交保护已经验收；Generic partial与自然producer→Ticket仍待完成。
 
+Generic drain闭环补充：unknown分支现继续派发generation 2、确认订单消失、ZERO_FILL_CLOSED并验证Reservation/Netting Domain释放及冻结Ticket字段保全。合法Ticket/Spec构造抽为复用夹具，部分成交保留和Initial Stop拒绝分支扩展至四个Generic及SOR；保护前原占用不释放，保护后仓位/Reservation保留，未保护或拒绝进入受控退出。MPG按冻结33% TP1比例，0.002成交/0.001步长无法拆分，单独断言精确数量CONTROLLED_FLATTEN且不释放占用；合法保留夹具改为0.006请求/0.004成交，不改变策略参数。测试仍从已签发Ticket与显式Vacuum前置开始，不等于自然Selection→Ticket或最终Generic activation验收。
+
 **实施增量（未Done）**：共享`StrategyEntryVacuum`模型及调用方统一使用`period_anchor_ms`，与现有物理字段一致，无旧名alias/双字段；SOR保留day边界，Generic校验已冻结Spec的1h/4h cadence。四策略非midnight Vacuum经现有Owner-pause repository写入及读回通过，不建立第二Vacuum/drain路径。此证据不等于Generic Coordinator的DESIRED→fence→drain已接通。受影响回归另外暴露历史0003 source verifier从当前metadata误读取新增comparison列；仍需修复准确的source manifest，不允许以旧schema runtime fallback绕过。生产未修改，全部GS完成状态不变。
 
 **允许**：materialization coordinator、authority/Vacuum/audit repos、typed proof/ports、Owner pause integration及状态机tests。**禁止**：Network I/O置于DB transaction；不经官方grant直接改Universe current。
