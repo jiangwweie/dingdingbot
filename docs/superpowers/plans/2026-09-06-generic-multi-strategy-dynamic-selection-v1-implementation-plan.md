@@ -45,6 +45,24 @@ Owner提供的SOR事故链作为回归需求来源，而非本轮重新取得的
 
 ### 2.1 当前实施证据校正（2026-09-08）
 
+#### 1h+范围收缩建议审计（2026-09-21，时钟修改待Owner裁决）
+
+最新Owner附件提出以1h+单Event为主线、SOR仅保留兼容与历史保全。此处记录范围方向，不把附件中的“SOR已暂停”当成本轮生产实测事实，不执行pause/retire或删除策略代码。当前已经进入GS-04～09实施，不能回写成“GS-04尚未开始”。
+
+| Amendment | 接受方向／实施边界 | 当前状态 |
+| --- | --- | --- |
+| AMEND-1 | Common numeric、shared authority、PG/Ticket/history preservation仍整体BLOCK；只有可证明隔离的SOR-specific失败才能标SOR_COMPAT_BLOCKED，不得通过skip把共享失败改名为隔离失败 | 接受分层方向；现有certifier/安装证书仍须显式修订并补隔离测试后才可采用新gate，不能仅凭本段放行 |
+| AMEND-2 | Generic真实authority gap可考虑future-close-only + Episode rebase，不默认重放缺口；不能混同正常切换的precommitted current-final-close | 待Owner确认适用范围，暂不替换设计§6.2 |
+| AMEND-3 | 300s queue/fence指标降为warning方向可接受；timeout不刷新、无starvation、正确cancel及真实missed-close ledger仍强制；vacuum duty阈值未明确取消，暂保留 | 与AMEND-2一起解决hourly机会窗口；既有soak硬门槛在正式修订前仍有效，禁止测后放宽 |
+| AMEND-4 | Generic以single LONG/SHORT、1h观察为默认；SOR pair/session/15m为隔离策略subtype；Selection cadence仍CPM/BRF2 4h、MPG/MI 1h | 与既有实现方向一致，不将所有Selection cadence改成1h，不新建第二执行链 |
+| AMEND-5 | 薄离线Evidence Contract已列GS-09/13；增加Comparison revision、Claim和terminal reason的明确追踪，默认采用1h closed path并保留同bar歧义 | 接受；不增加在线服务、不要求额外经济研究Gate |
+
+**必须先解决的时钟冲突**：MPG/MI周期为`[t+1h,t+2h)`，现行切换在`e=t+1h`后开始fence/warm。若一律“grant后下一未来close”，例如05:00:08完成却等06:00，06:00已是本period expiry；连续小时切换会没有可交易close。单纯把300s降为warning不能修复此问题；不得自动延长source/Authority有效期、提前warming、降低cadence或从missed-close统计剔除真实遗漏。
+
+建议裁决：正常切换继续用已预提交Snapshot、最新fresh且未消费close的既有proof；**仅真正authority gap/失败恢复**采用future-close-only + authority-recovery revision rebase，失败period明确记录miss并在后续合法period恢复。其rebase不得伪造Comparison变更，非比较策略CPM/BRF2也必须有恢复身份；首次NOT_TRIGGERED必须发生于恢复权限生效后。若Owner选择所有切换都future-only，则必须先修订小时生效/到期时序并证明存在交易窗口，而非只改Plan一句话。该决定仅暂停受影响的clock/activation改写，现有schema、member policy和来源测试仍可继续；整个目标保持active，部署继续无授权。
+
+GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（不适用策略标NOT_APPLICABLE）→Signal→CapacityClaim→Ticket`、terminal reason和费用/funding来源。1h path只给bar-level first passage；实际entry/exit时间必须用fill，不能把交易发生前的整根bar极值冒充持仓MAE/MFE。entry/exit所在bar缺更细路径时标边界不确定，退出后路径从明确cutoff/horizon观察，不虚构精确先后。
+
 **GS-04～GS-09仍在实施中，未完成、未通过release certification。** 先前对GS-00～03的完成摘要仅对应首版component测试，不足以证明全部Task Done。本轮在继续GS-04时补齐并修复数值来源认证、Decimal排序精度、重复miss/absolute有效期、current-close时点、comparison revision回退与重试幂等问题；不能以旧摘要跳过这些前置。
 
 | 范围 | 当前已验证结果 | 仍需交付 |
