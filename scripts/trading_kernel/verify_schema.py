@@ -134,6 +134,25 @@ _DYNAMIC_SELECTION_ADDITIVE_EXISTING_TABLES = frozenset(
         "brc_instrument_product_profiles",
     }
 )
+_GENERIC_SELECTION_TABLES = frozenset({
+    "brc_generic_dynamic_selection_specs_v1",
+    "brc_comparison_universe_definitions",
+    "brc_comparison_universe_members",
+    "brc_comparison_binding_current",
+    "brc_selection_authority_event_bindings",
+    "brc_materialization_generation_event_baselines",
+    "brc_selection_rollback_baseline_events",
+})
+_GENERIC_PRE_DYNAMIC_ADDED_COLUMNS = {
+    "brc_comparative_projection_current": ("comparison_transition_revision",),
+    "brc_exposure_episode_current": (
+        "comparison_binding_digest", "comparison_transition_revision",
+        "comparison_source_evidence_digest", "comparison_armed_at_ms",
+        "comparison_last_observed_at_ms", "comparison_last_detector_status",
+        "comparison_checkpoint_version",
+    ),
+}
+
 _EXIT_PROFILE_TABLES = frozenset(
     {
         "brc_event_exit_profile_bindings",
@@ -1492,6 +1511,7 @@ def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
         | _TRADFI_INSTRUMENT_TABLES
         | _DYNAMIC_SELECTION_TABLES
         | _EXIT_PROFILE_TABLES
+        | _GENERIC_SELECTION_TABLES
     }
 
 
@@ -1503,6 +1523,7 @@ def _source_0004_table_columns() -> dict[str, tuple[str, ...]]:
         not in _TRADFI_INSTRUMENT_TABLES
         | _DYNAMIC_SELECTION_TABLES
         | _EXIT_PROFILE_TABLES
+        | _GENERIC_SELECTION_TABLES
     }
 
 
@@ -1513,9 +1534,10 @@ def _source_0005_table_columns() -> dict[str, tuple[str, ...]]:
             for column in table.c
             if column.name not in _DYNAMIC_SELECTION_ADDED_COLUMNS.get(table.name, ())
             and column.name not in _EXIT_PROFILE_ADDED_COLUMNS.get(table.name, ())
+            and column.name not in _GENERIC_PRE_DYNAMIC_ADDED_COLUMNS.get(table.name, ())
         )
         for table in sorted(metadata.tables.values(), key=lambda item: item.name)
-        if table.name not in _DYNAMIC_SELECTION_TABLES | _EXIT_PROFILE_TABLES
+        if table.name not in _DYNAMIC_SELECTION_TABLES | _EXIT_PROFILE_TABLES | _GENERIC_SELECTION_TABLES
     }
 
 
@@ -1532,7 +1554,8 @@ def _source_0006_table_columns() -> dict[str, tuple[str, ...]]:
 
 
 def _source_columns_before_tradfi(table: sa.Table) -> tuple[str, ...]:
-    columns = tuple(table.c.keys())
+    columns = tuple(column.name for column in table.c
+        if column.name not in _GENERIC_PRE_DYNAMIC_ADDED_COLUMNS.get(table.name, ()))
     if table.name != "brc_shadow_outcomes_current":
         return columns
     return tuple(name for name in columns if name not in _TRADFI_SHADOW_COLUMNS)

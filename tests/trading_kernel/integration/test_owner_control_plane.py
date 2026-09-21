@@ -14,6 +14,9 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from scripts.trading_kernel.verify_schema import (
+    _source_0003_table_columns,
+    _source_0004_table_columns,
+    _source_0005_table_columns,
     _verify_compatible_source,
     _verify_preservation,
 )
@@ -35,8 +38,36 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
+from tests.trading_kernel.support.postgres import (
+    create_empty_database,
+    drop_disposable_database,
+    run_alembic,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("revision,source_columns", [
+    ("0004_owner_control_plane", _source_0004_table_columns),
+    ("0005_tradfi_instrument_center", _source_0005_table_columns),
+])
+async def test_preservation_inventory_matches_exact_source_schema(revision, source_columns) -> None:
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    try:
+        run_alembic(url, "upgrade", revision)
+        async with engine.connect() as conn:
+            actual = await conn.run_sync(lambda connection: {
+                table: {column["name"] for column in sa.inspect(connection).get_columns(table)}
+                for table in sa.inspect(connection).get_table_names() if table != "alembic_version"
+            })
+        assert {table: set(columns) for table, columns in source_columns().items()} == actual
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
+
+
 ADMIN_DSN = os.getenv(
     "BRC_TEST_POSTGRES_ADMIN_URL",
     "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
@@ -166,6 +197,14 @@ async def test_flat_0003_upgrade_seeds_controls_and_pauses_entry() -> None:
         _run_alembic(database_url, "0003_portfolio_admission_observability")
         engine = create_async_engine(database_url)
         try:
+            async with engine.connect() as connection:
+                actual = await connection.run_sync(lambda conn: {
+                    name: tuple(column["name"] for column in sa.inspect(conn).get_columns(name))
+                    for name in sa.inspect(conn).get_table_names() if name != "alembic_version"
+                })
+                assert {name: set(columns) for name, columns in _source_0003_table_columns().items()} == {
+                    name: set(columns) for name, columns in actual.items()
+                }
             async with PostgresKernelUnitOfWork(engine) as uow:
                 await seed_runtime_authority(
                     uow,
