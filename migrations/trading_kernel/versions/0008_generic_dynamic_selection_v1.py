@@ -650,6 +650,11 @@ def _comparison_tables() -> None:
     ))
     op.create_check_constraint("comparison_revision_valid", "brc_comparative_projection_current",
         "comparison_transition_revision >= 0")
+    op.drop_index("ix_brc_comparative_projection_current_lookup", table_name="brc_comparative_projection_current")
+    op.execute(sa.text("CREATE INDEX ix_brc_comparative_projection_current_lookup "
+        "ON brc_comparative_projection_current(event_spec_id, member_set_digest, "
+        "comparison_transition_revision, closed_bar_time_ms, projection_status, "
+        "projection_version DESC, universe_version_id)"))
     op.create_table(
         "brc_comparison_universe_definitions",
         sa.Column("comparison_universe_id", ID, primary_key=True),

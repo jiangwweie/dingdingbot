@@ -57,7 +57,10 @@ from src.trading_kernel.application.reconciliation_scheduler import (
     ReconciliationActionCandidate,
     ReconciliationActionKind,
 )
-from src.trading_kernel.domain.comparison_universe import ComparisonObservationSource
+from src.trading_kernel.domain.comparison_universe import (
+    ComparisonObservationSource,
+    comparative_lookback_bars,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
     CertificationBatchMemberResult,
@@ -2369,14 +2372,16 @@ class PostgresStrategyUniverseRepository:
                 sa.select(comparative_projection_current).where(
                     comparative_projection_current.c.event_spec_id
                     == event_spec_id,
-                    comparative_projection_current.c.universe_version_id
-                    == universe_version_id,
                     comparative_projection_current.c.closed_bar_time_ms
                     == closed_bar_time_ms,
                     comparative_projection_current.c.member_set_digest
                     == member_set_digest,
                     comparative_projection_current.c.comparison_transition_revision == comparison_transition_revision,
-                )
+                ).order_by(
+                    comparative_projection_current.c.projection_status,
+                    comparative_projection_current.c.projection_version.desc(),
+                    comparative_projection_current.c.universe_version_id,
+                ).limit(1)
             )
         ).mappings().one_or_none()
         if row is None:
@@ -2388,7 +2393,9 @@ class PostgresStrategyUniverseRepository:
             authoritative = {
                 **dict(row["projection"]),
                 "event_spec_id": row["event_spec_id"],
-                "universe_version_id": row["universe_version_id"],
+                # Storage retains the fetch origin; the consumer has separately
+                # passed current Universe/member/revision authority above.
+                "universe_version_id": universe_version_id,
                 "member_set_digest": row["member_set_digest"],
                 "closed_bar_time_ms": row["closed_bar_time_ms"],
                 "observed_at_ms": row["observed_at_ms"],
@@ -2396,12 +2403,15 @@ class PostgresStrategyUniverseRepository:
                 "comparison_transition_revision": row["comparison_transition_revision"],
             }
             if row["projection_status"] == "ready":
-                return ComparativeUniverseProjection.model_validate(
+                projection = ComparativeUniverseProjection.model_validate(
                     {
                         **authoritative,
                         "valid_until_ms": row["valid_until_ms"],
                     }
                 )
+                if projection.comparative_strength.lookback_bars != comparative_lookback_bars(event_spec_id):
+                    raise ComparativeProjectionAuthorityChanged("comparative lookback differs from Event contract")
+                return projection
             if row["projection_status"] == "unavailable":
                 return ComparativeProjectionFailure.model_validate(
                     {
@@ -2424,9 +2434,21 @@ class PostgresStrategyUniverseRepository:
         self,
         projection: ComparativeUniverseProjection,
     ) -> ComparativeUniverseProjection:
+        if projection.comparative_strength.lookback_bars != comparative_lookback_bars(projection.event_spec_id):
+            raise ComparativeProjectionAuthorityChanged("comparative lookback differs from Event contract")
+        await self._lock_comparative_write(projection)
         await self._require_comparative_member_authority(event_spec_id=projection.event_spec_id,
             universe_version_id=projection.universe_version_id,member_set_digest=projection.member_set_digest,for_update=True,
             comparison_transition_revision=projection.comparison_transition_revision)
+        cached = await self.get_comparative_projection(
+            event_spec_id=projection.event_spec_id, universe_version_id=projection.universe_version_id,
+            closed_bar_time_ms=projection.closed_bar_time_ms, member_set_digest=projection.member_set_digest,
+            comparison_transition_revision=projection.comparison_transition_revision,
+        )
+        if isinstance(cached, ComparativeUniverseProjection):
+            if cached.member_windows != projection.member_windows or cached.comparative_strength != projection.comparative_strength:
+                raise ComparativeProjectionAuthorityChanged("comparative source conflicts for exact cache identity")
+            return cached
         statement = (
             pg_insert(comparative_projection_current)
             .values(
@@ -2491,9 +2513,19 @@ class PostgresStrategyUniverseRepository:
         self,
         failure: ComparativeProjectionFailure,
     ) -> ComparativeProjectionOutcome:
+        await self._lock_comparative_write(failure)
         await self._require_comparative_member_authority(event_spec_id=failure.event_spec_id,
             universe_version_id=failure.universe_version_id,member_set_digest=failure.member_set_digest,for_update=True,
             comparison_transition_revision=failure.comparison_transition_revision)
+        cached = await self.get_comparative_projection(
+            event_spec_id=failure.event_spec_id, universe_version_id=failure.universe_version_id,
+            closed_bar_time_ms=failure.closed_bar_time_ms, member_set_digest=failure.member_set_digest,
+            comparison_transition_revision=failure.comparison_transition_revision,
+        )
+        if isinstance(cached, ComparativeUniverseProjection):
+            return cached
+        if isinstance(cached, ComparativeProjectionFailure) and cached.is_active(attempted_at_ms=failure.observed_at_ms):
+            return cached
         statement = (
             pg_insert(comparative_projection_current)
             .values(
@@ -2553,6 +2585,15 @@ class PostgresStrategyUniverseRepository:
         if persisted is None:
             raise RuntimeError("comparative projection authority changed")
         return persisted
+
+    async def _lock_comparative_write(self, outcome: ComparativeProjectionOutcome) -> None:
+        # Serialize only equal input identities, including cross-process fetches.
+        # The original row remains provenance; a new Universe does not duplicate it.
+        key = canonical_digest({"event": outcome.event_spec_id,
+            "members": outcome.member_set_digest, "revision": outcome.comparison_transition_revision,
+            "close": outcome.closed_bar_time_ms})
+        await self._connection.execute(sa.select(sa.func.pg_advisory_xact_lock(
+            sa.func.hashtextextended("comparative-cache:" + key, 0))))
 
     async def get_comparative_source(
         self, *, event_spec_id: str, universe_version_id: str, for_update: bool = False,

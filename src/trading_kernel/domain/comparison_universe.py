@@ -8,6 +8,14 @@ from src.trading_kernel.domain.instrument_selection import (
 )
 
 
+def comparative_lookback_bars(event_spec_id: str) -> int | None:
+    """Frozen Detector input geometry, not a configurable selection threshold."""
+    return {
+        "event_spec:MPG-001:MPG-LONG:v3": 8,
+        "event_spec:MI-001:MI-LONG:v3": 12,
+    }.get(event_spec_id)
+
+
 class ComparisonObservationSource(BaseModel):
     """Frozen membership and transition token captured before market I/O."""
 

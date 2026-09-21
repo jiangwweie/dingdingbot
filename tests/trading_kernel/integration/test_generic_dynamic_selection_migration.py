@@ -371,6 +371,14 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
         await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
         await engine.dispose()  # Stopped cutover discards source prepared statements.
         async with engine.connect() as conn:
+            preserved_cache = (await conn.execute(sa.text(
+                "SELECT * FROM brc_comparative_projection_current"
+            ))).mappings().one()
+            assert preserved_cache["universe_version_id"] == universe.universe_version_id
+            assert preserved_cache["member_set_digest"] == projection.member_set_digest
+            assert preserved_cache["projection"] == projection.model_dump(mode="json")
+            assert preserved_cache["comparison_transition_revision"] == 0
+            assert preserved_cache["projection_version"] == 1
             target_row = (await conn.execute(sa.text("SELECT * FROM brc_exposure_episode_current"))).mappings().one()
             assert {key: target_row[key] for key in type(episode).model_fields} == episode.model_dump()
             assert target_row["comparison_transition_revision"] == 0

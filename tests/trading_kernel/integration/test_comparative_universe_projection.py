@@ -65,14 +65,15 @@ MEMBERS = tuple(sorted((ETH, OP, SOL)))
 
 
 @pytest.mark.asyncio
-async def test_projection_cannot_shrink_the_authoritative_static_member_set(projection_engine: AsyncEngine) -> None:
+@pytest.mark.parametrize("defect", ["reduced_members", "wrong_lookback"])
+async def test_projection_cannot_change_the_authoritative_comparison(projection_engine: AsyncEngine, defect: str) -> None:
     uid = await _universe_version_id(projection_engine)
-    reduced = MEMBERS[:1]
+    reduced = MEMBERS[:1] if defect == "reduced_members" else MEMBERS
     projection = build_comparative_universe_projection(event_spec_id=CONTRACT.event_spec_id,universe_version_id=uid,
         strategy_group_id=CONTRACT.strategy_group_id,exchange_instrument_ids=reduced,closed_bar_time_ms=NOW_MS,
-        lookback_bars=8,freshness_window_ms=CONTRACT.freshness_window_ms,
+        lookback_bars=8 if defect == "reduced_members" else 12,freshness_window_ms=CONTRACT.freshness_window_ms,
         member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=mpg_long_snapshot().candles_1h) for m in reduced))
-    with pytest.raises(ComparativeProjectionAuthorityChanged, match="member"):
+    with pytest.raises(ComparativeProjectionAuthorityChanged, match="member|lookback"):
         async with PostgresKernelUnitOfWork(projection_engine) as uow:
             await uow.strategy_universes.save_comparative_projection(projection)
 
@@ -193,6 +194,21 @@ async def test_projection_round_trips_only_for_exact_key_and_digest(
     assert exact is not None
     assert exact.projection_version == 1
 
+    conflicting = build_comparative_universe_projection(
+        event_spec_id=projection.event_spec_id, universe_version_id=universe_version_id,
+        strategy_group_id=CONTRACT.strategy_group_id, exchange_instrument_ids=MEMBERS,
+        closed_bar_time_ms=NOW_MS, lookback_bars=8,
+        freshness_window_ms=CONTRACT.freshness_window_ms,
+        member_windows=tuple(ComparativeMemberWindow(
+            exchange_instrument_id=member, candles_1h=tuple(c.model_copy(update={
+                "open": c.open*2, "high": c.high*2, "low": c.low*2, "close": c.close*2,
+            }) for c in candles),
+        ) for member in MEMBERS),
+    )
+    with pytest.raises(ComparativeProjectionAuthorityChanged, match="source conflicts"):
+        async with PostgresKernelUnitOfWork(projection_engine) as uow:
+            await uow.strategy_universes.save_comparative_projection(conflicting)
+
     # Reading a cached projection must work in an actual readonly transaction.
     async with projection_engine.connect() as connection:
         await connection.execute(sa.text("SET TRANSACTION READ ONLY"))
@@ -236,6 +252,33 @@ async def test_projection_round_trips_only_for_exact_key_and_digest(
                     await uow.strategy_universes.save_comparative_projection(projection)
                 else:
                     await uow.strategy_universes.save_comparative_projection_failure(failure)
+
+    # Identical comparison input can serve a new tradable Universe. The old
+    # row remains source provenance, never grants authority to its old target.
+    async with PostgresKernelUnitOfWork(projection_engine) as uow:
+        replacement = await install_strategy_universe(uow, UniverseInstallRequest(
+            event_spec_id=CONTRACT.event_spec_id, runtime_profile_id=RUNTIME_PROFILE_ID,
+            owner_policy_id=OWNER_POLICY_ID, exchange_instrument_ids=MEMBERS,
+            installed_at_ms=NOW_MS + 1,
+        ))
+    assert replacement.universe is not None
+    async with PostgresKernelUnitOfWork(projection_engine) as uow:
+        shared = await uow.strategy_universes.get_comparative_projection(
+            event_spec_id=projection.event_spec_id,
+            universe_version_id=replacement.universe.universe_version_id,
+            closed_bar_time_ms=projection.closed_bar_time_ms,
+            member_set_digest=projection.member_set_digest,
+        )
+    assert shared is not None
+    assert shared.universe_version_id == replacement.universe.universe_version_id
+    assert shared.member_windows == projection.member_windows
+    async with PostgresKernelUnitOfWork(projection_engine) as uow:
+        repeated = await uow.strategy_universes.save_comparative_projection(
+            projection.model_copy(update={"universe_version_id": replacement.universe.universe_version_id})
+        )
+        assert repeated == shared
+    async with projection_engine.connect() as connection:
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(comparative_projection_current)) == 1
 
 
 @pytest.mark.asyncio

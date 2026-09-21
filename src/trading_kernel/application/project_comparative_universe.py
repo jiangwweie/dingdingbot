@@ -41,7 +41,7 @@ class _ProjectionLockState:
 
 _PROJECTION_LOCKS_GUARD = Lock()
 _PROJECTION_LOCKS: dict[
-    tuple[str, str, int, str, int],
+    tuple[str, int, str, int],
     _ProjectionLockState,
 ] = {}
 
@@ -256,7 +256,6 @@ def build_comparative_projection_failure(
 async def serialize_comparative_projection(
     *,
     event_spec_id: str,
-    universe_version_id: str,
     closed_bar_time_ms: int,
     member_set_digest: str,
     comparison_transition_revision: int = 0,
@@ -265,7 +264,6 @@ async def serialize_comparative_projection(
 
     key = (
         event_spec_id,
-        universe_version_id,
         closed_bar_time_ms,
         member_set_digest,
         comparison_transition_revision,

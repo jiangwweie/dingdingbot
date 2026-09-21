@@ -1453,8 +1453,12 @@ comparative_projection_current = sa.Table(
 sa.Index(
     "ix_brc_comparative_projection_current_lookup",
     comparative_projection_current.c.event_spec_id,
-    comparative_projection_current.c.universe_version_id,
+    comparative_projection_current.c.member_set_digest,
+    comparative_projection_current.c.comparison_transition_revision,
     comparative_projection_current.c.closed_bar_time_ms,
+    comparative_projection_current.c.projection_status,
+    comparative_projection_current.c.projection_version.desc(),
+    comparative_projection_current.c.universe_version_id,
 )
 
 instrument_rules_current = sa.Table(

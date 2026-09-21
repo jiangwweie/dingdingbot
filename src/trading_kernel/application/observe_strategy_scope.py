@@ -39,6 +39,7 @@ from src.trading_kernel.application.project_comparative_universe import (
 from src.trading_kernel.application.project_shadow_outcome import (
     pending_shadow_spec_for_strategy_observation,
 )
+from src.trading_kernel.domain.comparison_universe import comparative_lookback_bars
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.exposure_episode import (
     advance_exposure_episode,
@@ -336,13 +337,13 @@ async def observe_strategy_scope(
                 )
             selection_authority_id = selection.selection_authority_id
         product_session: ProductSessionSnapshot | None = None
-        comparative_lookback_bars = _comparative_lookback_bars(contract)
+        comparison_lookback = comparative_lookback_bars(contract.event_spec_id)
         comparative_projection: ComparativeUniverseProjection | None = None
         comparative_digest = None
         comparative_source = None
         comparison_revision = 0
         comparison_member_ids = observation_universe.exchange_instrument_ids
-        if comparative_lookback_bars is not None:
+        if comparison_lookback is not None:
             try:
                 comparative_source = await uow.strategy_universes.get_comparative_source(
                     event_spec_id=scope.event_spec_id,
@@ -422,7 +423,7 @@ async def observe_strategy_scope(
             async with uow_factory() as uow:
                 await uow.signals.upsert_product_sessions(product_snapshots)
         if (
-            comparative_lookback_bars is not None
+            comparison_lookback is not None
             and comparative_projection is None
             and comparative_digest is not None
         ):
@@ -437,7 +438,7 @@ async def observe_strategy_scope(
                         comparison_member_ids
                     ),
                     member_set_digest=comparative_digest,
-                    lookback_bars=comparative_lookback_bars,
+                    lookback_bars=comparison_lookback,
                     attempted_at_ms=attempted_at_ms,
                     comparison_transition_revision=comparison_revision,
                 )
@@ -786,8 +787,8 @@ async def _load_market_snapshot(
             product_session=product_session,
         )
 
-    comparative_lookback_bars = _comparative_lookback_bars(contract)
-    if comparative_lookback_bars is not None:
+    comparison_lookback = comparative_lookback_bars(contract.event_spec_id)
+    if comparison_lookback is not None:
         if comparative_projection is None:
             raise ValueError("comparative projection is unavailable")
         expected_digest = comparative_member_set_digest(
@@ -799,6 +800,7 @@ async def _load_market_snapshot(
             != scope.universe_version_id
             or comparative_projection.closed_bar_time_ms != trigger_ms
             or comparative_projection.member_set_digest != expected_digest
+            or comparative_projection.comparative_strength.lookback_bars != comparison_lookback
         ):
             raise ValueError("comparative projection identity mismatch")
         candidate_candles = comparative_projection.candles_for(
@@ -858,7 +860,6 @@ async def _get_or_create_comparative_projection(
 ) -> ComparativeUniverseProjection:
     async with serialize_comparative_projection(
         event_spec_id=scope.event_spec_id,
-        universe_version_id=scope.universe_version_id,
         closed_bar_time_ms=trigger_ms,
         member_set_digest=member_set_digest,
         comparison_transition_revision=comparison_transition_revision,
@@ -921,16 +922,6 @@ async def _get_or_create_comparative_projection(
             return await uow.strategy_universes.save_comparative_projection(
                 projected.model_copy(update={"comparison_transition_revision": comparison_transition_revision})
             )
-
-
-def _comparative_lookback_bars(
-    contract: RegisteredStrategyContract,
-) -> int | None:
-    if contract.event_id == "MPG-LONG":
-        return 8
-    if contract.event_id == "MI-LONG":
-        return 12
-    return None
 
 
 async def _fetch(
