@@ -202,8 +202,9 @@ class ConcurrentVacuumPositionSource(RecordingVacuumPositionSource):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", [None, "CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-async def test_prepared_entry_is_superseded_and_releases_all_admission_authority(
-    dispatch_engine, group: str | None,
+@pytest.mark.parametrize("sent", [False, True])
+async def test_entry_vacuum_clears_prepared_or_zero_fill_entry(
+    dispatch_engine, group: str | None, sent: bool,
 ) -> None:
     ticket = make_ticket()
     if group is not None:
@@ -227,6 +228,8 @@ async def test_prepared_entry_is_superseded_and_releases_all_admission_authority
         issued_ticket = await uow.tickets.get(ticket.identity.ticket_id)
         assert issued_ticket is not None
         assert issued_ticket.identity == ticket.identity
+    if sent:
+        await dispatch_for_ticket(dispatch_engine,AcceptingVenue(dispatch_engine),ticket.identity.ticket_id,now_ms=1_100)
     if group is not None:
         async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
             await uow.instrument_selection.install_generic_spec(spec,installed_at_ms=2_000,
@@ -244,6 +247,14 @@ async def test_prepared_entry_is_superseded_and_releases_all_admission_authority
             await conn.execute(sa.insert(strategy_entry_vacuums_current).values(**vacuum.model_dump(mode="json")))
     else:
         vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+
+    if sent:
+        await _assert_zero_fill_cancel(dispatch_engine,ticket,vacuum)
+        async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+            terminal_ticket = await uow.tickets.get(ticket.identity.ticket_id)
+            assert terminal_ticket is not None and terminal_ticket.status.value == "entry_reconciled_absent"
+            assert terminal_ticket.model_dump(exclude={"status"}) == issued_ticket.model_dump(exclude={"status"})
+        return
 
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         result = await drain_strategy_entry_vacuum_once(
@@ -282,20 +293,9 @@ async def test_prepared_entry_is_superseded_and_releases_all_admission_authority
         assert terminal_ticket.model_dump(exclude={"status"}) == issued_ticket.model_dump(exclude={"status"})
 
 
-@pytest.mark.asyncio
-async def test_zero_fill_cancel_waits_for_durable_dispatch_and_order_absence(
-    dispatch_engine,
+async def _assert_zero_fill_cancel(
+    dispatch_engine, ticket, vacuum,
 ) -> None:
-    ticket = make_ticket()
-    await seed_policy(dispatch_engine)
-    await issue(dispatch_engine, ticket)
-    await dispatch_for_ticket(
-        dispatch_engine,
-        AcceptingVenue(dispatch_engine),
-        ticket.identity.ticket_id,
-        now_ms=1_100,
-    )
-    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
     open_order_snapshot = _position_snapshot(
         ticket,
         quantity=Decimal(0),
@@ -384,6 +384,10 @@ async def test_zero_fill_cancel_waits_for_durable_dispatch_and_order_absence(
     assert aggregate.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
     assert reservation is not None and reservation.status == "released"
     assert domain_active is False
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        final_commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        assert [command.kind for command in final_commands].count(ExchangeCommandKind.ENTRY) == 1
+        assert [command.kind for command in final_commands].count(ExchangeCommandKind.CANCEL_ORDER) == 1
 
 
 @pytest.mark.asyncio
@@ -833,7 +837,8 @@ def _request(
 ) -> DrainStrategyEntryVacuumRequest:
     return DrainStrategyEntryVacuumRequest(
         strategy_group_id=ticket.identity.runtime.strategy_group_id,
-        selection_spec_id=SELECTION_SPEC_ID,
+        selection_spec_id=(SELECTION_SPEC_ID if ticket.identity.runtime.strategy_group_id == "SOR-001"
+            else generic_selection_spec(ticket.identity.runtime.strategy_group_id).selection_spec_id),
         now_ms=now_ms,
         ticket_id=ticket.identity.ticket_id,
         position_snapshot=position_snapshot,
