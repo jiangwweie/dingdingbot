@@ -1702,6 +1702,44 @@ class PostgresInstrumentSelectionRepository:
             .values(lease_owner=None, lease_expires_at_ms=None)
         )
 
+    async def mark_generic_materialization_generation_desired(
+        self, materialization_generation_id: str, *, worker_id: str, lease_epoch: int,
+        expected_projection_version: int, desired_at_ms: int,
+    ) -> GenericMaterializationGeneration:
+        initial = await self.get_generic_materialization_generation(materialization_generation_id)
+        if initial is None:
+            raise SelectionJobConflict("Generic Generation does not exist")
+        control = await self.get_selection_control(initial.strategy_group_id, for_update=True)
+        current = await self.get_generic_materialization_generation(materialization_generation_id, for_update=True)
+        if current is None or control is None or control.control_version != current.selection_control_version or not self._generic_control_allows(
+            control,current.selection_spec_id,current.selection_epoch_id,current.period_anchor_ms):
+            raise SelectionJobConflict("Generic Generation control/epoch changed")
+        spec = await self.get_generic_spec(current.selection_spec_id)
+        if not current.created_at_ms <= desired_at_ms < current.period_anchor_ms+(1+spec.cadence_hours)*3600000:
+            raise SelectionJobConflict("Generic Generation source period expired")
+        if not worker_id.strip() or lease_epoch <= 0 or current.lease_owner != worker_id or current.lease_epoch != lease_epoch or (
+            current.lease_expires_at_ms is None or current.lease_expires_at_ms <= desired_at_ms):
+            raise SelectionJobConflict("Generic Generation lease changed")
+        if current.lifecycle_state is MaterializationGenerationState.DESIRED and current.projection_version in {
+            expected_projection_version, expected_projection_version+1}:
+            return current
+        if current.lifecycle_state is not MaterializationGenerationState.PENDING or current.projection_version != expected_projection_version:
+            raise SelectionJobConflict("Generic Generation state/version changed")
+        desired = GenericMaterializationGeneration.model_validate({**current.model_dump(),
+            "lifecycle_state":"DESIRED","desired_at_ms":desired_at_ms,"projection_version":expected_projection_version+1})
+        updated = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id == materialization_generation_id,
+            strategy_universe_materialization_generations.c.projection_version == expected_projection_version,
+            strategy_universe_materialization_generations.c.lifecycle_state == "PENDING",
+        ).values(lifecycle_state="DESIRED",desired_at_ms=desired_at_ms,projection_version=desired.projection_version))
+        if updated.rowcount != 1:
+            raise SelectionJobConflict("Generic Generation version changed")
+        await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+            materialization_event_id="materialization-event:"+canonical_digest({"generation":materialization_generation_id,"sequence":2})[7:],
+            materialization_generation_id=materialization_generation_id,event_sequence=2,event_type="DESIRED",
+            payload={"projection_version":desired.projection_version,"lease_epoch":lease_epoch},occurred_at_ms=desired_at_ms))
+        return desired
+
     async def mark_materialization_generation_desired(
         self,
         materialization_generation_id: str,

@@ -363,6 +363,8 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 **目标**：把前三类domain约束组合成durable新交易authority状态机。
 
+Generic准备事务增量：现有Selection repository新增typed `PENDING→DESIRED` 写边界，锁定Control/Generation并校验epoch、Control version、source period、lease owner/epoch/expiry，CAS更新并追加唯一DESIRED event。四策略集成用例开始通过正式claim→desired，不再跳过该步骤；错误lease拒绝、重复调用保持首次desired时间。后续MATERIALIZING仍是明确标注的测试前置，不能据此宣称fence/drain或Coordinator已完成。
+
 **实施增量（未Done）**：共享`StrategyEntryVacuum`模型及调用方统一使用`period_anchor_ms`，与现有物理字段一致，无旧名alias/双字段；SOR保留day边界，Generic校验已冻结Spec的1h/4h cadence。四策略非midnight Vacuum经现有Owner-pause repository写入及读回通过，不建立第二Vacuum/drain路径。此证据不等于Generic Coordinator的DESIRED→fence→drain已接通。受影响回归另外暴露历史0003 source verifier从当前metadata误读取新增comparison列；仍需修复准确的source manifest，不允许以旧schema runtime fallback绕过。生产未修改，全部GS完成状态不变。
 
 **允许**：materialization coordinator、authority/Vacuum/audit repos、typed proof/ports、Owner pause integration及状态机tests。**禁止**：Network I/O置于DB transaction；不经官方grant直接改Universe current。

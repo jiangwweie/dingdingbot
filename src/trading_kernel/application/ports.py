@@ -1685,6 +1685,11 @@ class InstrumentSelectionRepository(Protocol):
         session_start_ms: int,
     ) -> MaterializationGeneration | None: ...
 
+    async def mark_generic_materialization_generation_desired(
+        self, materialization_generation_id: str, *, worker_id: str, lease_epoch: int,
+        expected_projection_version: int, desired_at_ms: int,
+    ) -> GenericMaterializationGeneration: ...
+
     async def mark_materialization_generation_desired(
         self,
         materialization_generation_id: str,
