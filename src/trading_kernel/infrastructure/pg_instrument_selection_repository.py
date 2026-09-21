@@ -2836,6 +2836,8 @@ class PostgresInstrumentSelectionRepository:
         vacuum: StrategyEntryVacuum,
         *,
         expected_generation_version: int,
+        worker_id: str | None = None,
+        lease_epoch: int | None = None,
     ) -> None:
         if (
             vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY
@@ -2845,10 +2847,21 @@ class PostgresInstrumentSelectionRepository:
             raise ValueError(
                 "Generation Vacuum must include OPEN and DRAINING_ENTRY projections"
             )
-        generation = await self.get_materialization_generation(
-            vacuum.source_generation_id,
-            for_update=True,
-        )
+        generation: MaterializationGeneration | GenericMaterializationGeneration | None
+        anchor: int | None
+        if vacuum.strategy_group_id != "SOR-001":
+            initial = await self.get_generic_materialization_generation(vacuum.source_generation_id)
+            if initial is None or initial.lifecycle_state is not MaterializationGenerationState.DESIRED:
+                raise SelectionJobConflict("Generic Generation is not DESIRED before fence")
+            if worker_id is None or lease_epoch is None:
+                raise SelectionJobConflict("Generic Generation fence requires lease authority")
+            generation = await self.mark_generic_materialization_generation_desired(
+                vacuum.source_generation_id,worker_id=worker_id,lease_epoch=lease_epoch,
+                expected_projection_version=expected_generation_version,desired_at_ms=vacuum.fenced_at_ms)
+            anchor = generation.period_anchor_ms
+        else:
+            generation = await self.get_materialization_generation(vacuum.source_generation_id,for_update=True)
+            anchor = None if generation is None else generation.session_start_ms
         if (
             generation is None
             or generation.lifecycle_state
@@ -2856,7 +2869,7 @@ class PostgresInstrumentSelectionRepository:
             or generation.projection_version != expected_generation_version
             or generation.strategy_group_id != vacuum.strategy_group_id
             or generation.selection_spec_id != vacuum.selection_spec_id
-            or generation.session_start_ms != vacuum.period_anchor_ms
+            or anchor != vacuum.period_anchor_ms
         ):
             raise SelectionJobConflict("Generation changed before Vacuum fence")
         await self._connection.execute(

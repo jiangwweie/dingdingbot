@@ -1790,6 +1790,8 @@ class InstrumentSelectionRepository(Protocol):
         vacuum: StrategyEntryVacuum,
         *,
         expected_generation_version: int,
+        worker_id: str | None = None,
+        lease_epoch: int | None = None,
     ) -> None: ...
 
     async def get_current_entry_vacuum(

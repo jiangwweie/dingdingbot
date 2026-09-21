@@ -684,8 +684,28 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
             expected_projection_version=preparation.generation.projection_version,
             desired_at_ms=generation.created_at_ms+3)
         assert repeated == desired
+        fence = StrategyEntryVacuum(entry_vacuum_id="vacuum:"+generation.materialization_generation_id,
+            strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,
+            period_anchor_ms=generation.period_anchor_ms,source_generation_id=generation.materialization_generation_id,
+            state="DRAINING_ENTRY",fenced_at_ms=generation.created_at_ms+3,drained_at_ms=None,resolved_at_ms=None,
+            first_blocker="ENTRY_DRAIN_REQUIRED",projection_version=2)
+        with pytest.raises(SelectionJobConflict, match="lease changed"):
+            await uow.instrument_selection.open_generation_entry_vacuum(fence,
+                expected_generation_version=desired.projection_version,
+                worker_id="prepare-worker",lease_epoch=preparation.generation.lease_epoch+1)
+        assert await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
+        await uow.instrument_selection.open_generation_entry_vacuum(fence,
+            expected_generation_version=desired.projection_version,
+            worker_id="prepare-worker",lease_epoch=preparation.generation.lease_epoch)
         assert await uow.instrument_selection.release_generic_materialization_generation_lease(
             generation.materialization_generation_id,worker_id="prepare-worker",lease_epoch=preparation.generation.lease_epoch)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) == fence
+        draining = await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)
+        assert draining is not None and draining.lifecycle_state.value == "DRAINING_ENTRY"
+        assert draining.fenced_at_ms == fence.fenced_at_ms
     # Remaining installation prerequisite only; Coordinator Vacuum/drain is not yet supplied here.
     async with database.begin() as conn:
         await conn.execute(sa.text("UPDATE brc_strategy_universe_materialization_generations SET lifecycle_state='MATERIALIZING' WHERE materialization_generation_id=:gid"),
