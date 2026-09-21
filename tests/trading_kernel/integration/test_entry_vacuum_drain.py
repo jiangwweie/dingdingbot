@@ -202,9 +202,9 @@ class ConcurrentVacuumPositionSource(RecordingVacuumPositionSource):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", [None, "CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-@pytest.mark.parametrize("sent", [False, True])
+@pytest.mark.parametrize("sent", [False, True, "unknown"])
 async def test_entry_vacuum_clears_prepared_or_zero_fill_entry(
-    dispatch_engine, group: str | None, sent: bool,
+    dispatch_engine, group: str | None, sent: bool | str,
 ) -> None:
     ticket = make_ticket()
     if group is not None:
@@ -248,6 +248,9 @@ async def test_entry_vacuum_clears_prepared_or_zero_fill_entry(
     else:
         vacuum = await open_entry_vacuum(dispatch_engine, ticket)
 
+    if sent == "unknown":
+        await _assert_unknown_cancel(dispatch_engine,ticket,vacuum)
+        return
     if sent:
         await _assert_zero_fill_cancel(dispatch_engine,ticket,vacuum)
         async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
@@ -586,20 +589,9 @@ async def test_reconciliation_vacuum_relocks_after_network_and_does_not_duplicat
     ]
 
 
-@pytest.mark.asyncio
-async def test_unknown_vacuum_cancel_blocks_then_reconciles_before_retry(
-    dispatch_engine,
+async def _assert_unknown_cancel(
+    dispatch_engine, ticket, vacuum,
 ) -> None:
-    ticket = make_ticket()
-    await seed_policy(dispatch_engine)
-    await issue(dispatch_engine, ticket)
-    await dispatch_for_ticket(
-        dispatch_engine,
-        AcceptingVenue(dispatch_engine),
-        ticket.identity.ticket_id,
-        now_ms=1_100,
-    )
-    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
     open_snapshot = _position_snapshot(
         ticket,
         quantity=Decimal(0),
@@ -640,6 +632,16 @@ async def test_unknown_vacuum_cancel_blocks_then_reconciles_before_retry(
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCEL_OUTCOME_UNKNOWN
 
+    class MustNotDispatch:
+        async def execute(self, request):
+            raise AssertionError("unknown cancel must not be blindly resent")
+
+    no_resend = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),MustNotDispatch(),
+        DispatchCommandRequest(worker_id="unknown-retry",ticket_id=ticket.identity.ticket_id,
+            now_ms=vacuum.fenced_at_ms+3,lease_until_ms=vacuum.fenced_at_ms+5_003,timeout_seconds=1))
+    assert no_resend.status == DispatchCommandStatus.NO_COMMAND
+
     commands_before = await _commands(dispatch_engine, ticket)
     unknown_cancel = next(
         command
@@ -658,7 +660,7 @@ async def test_unknown_vacuum_cancel_blocks_then_reconciles_before_retry(
                         ticket.identity.netting_domain.exchange_instrument_id
                     ),
                     position_side=ticket.identity.netting_domain.position_side,
-                    order_side="buy",
+                    order_side="buy" if ticket.identity.netting_domain.position_side == "long" else "sell",
                     quantity=ticket.quantity,
                     reduce_only=False,
                     order_namespace="regular",
