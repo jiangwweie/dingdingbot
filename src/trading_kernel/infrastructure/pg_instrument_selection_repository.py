@@ -2818,12 +2818,12 @@ class PostgresInstrumentSelectionRepository:
             or generation.projection_version != expected_generation_version
             or generation.strategy_group_id != vacuum.strategy_group_id
             or generation.selection_spec_id != vacuum.selection_spec_id
-            or generation.session_start_ms != vacuum.session_start_ms
+            or generation.session_start_ms != vacuum.period_anchor_ms
         ):
             raise SelectionJobConflict("Generation changed before Vacuum fence")
         await self._connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
+                **vacuum.model_dump(mode="json"),
             )
         )
         for sequence, event_type in ((1, "OPEN"), (2, "DRAINING_ENTRY")):
@@ -2887,7 +2887,7 @@ class PostgresInstrumentSelectionRepository:
             raise ValueError("VALID_EMPTY intent requires an open generation-free Vacuum")
         await self._connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
+                **vacuum.model_dump(mode="json"),
             )
         )
         await self._connection.execute(
@@ -2923,7 +2923,7 @@ class PostgresInstrumentSelectionRepository:
             return existing
         await self._connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
+                **vacuum.model_dump(mode="json"),
             )
         )
         await self._connection.execute(
@@ -3837,7 +3837,7 @@ def _entry_vacuum_from_row(row: RowMapping) -> StrategyEntryVacuum:
         entry_vacuum_id=str(row["entry_vacuum_id"]),
         strategy_group_id=str(row["strategy_group_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
-        session_start_ms=int(row["period_anchor_ms"]),
+        period_anchor_ms=int(row["period_anchor_ms"]),
         source_generation_id=row["source_generation_id"],
         state=StrategyEntryVacuumState(str(row["state"])),
         fenced_at_ms=int(row["fenced_at_ms"]),

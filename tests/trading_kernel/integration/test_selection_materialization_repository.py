@@ -221,7 +221,7 @@ async def test_selection_runtime_readonly_projects_one_exact_period_without_writ
         entry_vacuum_id="vacuum:SOR-001:1704067200000:readonly",
         strategy_group_id="SOR-001",
         selection_spec_id=SELECTION_SPEC_ID,
-        session_start_ms=SESSION_START_MS,
+        period_anchor_ms=SESSION_START_MS,
         source_generation_id=generation.materialization_generation_id,
         state="DRAINING_ENTRY",
         fenced_at_ms=SESSION_START_MS + 3_600_010,
@@ -345,7 +345,7 @@ async def test_selection_runtime_readonly_projects_one_exact_period_without_writ
         assert "previous_short_universe_version_id" not in columns
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
+                **vacuum.model_dump(mode="json"),
             )
         )
         await repository.add_pending_authority_gap_audit(pending_audit)
@@ -650,7 +650,7 @@ async def test_repository_persists_valid_empty_intent_vacuum_without_authority(
         entry_vacuum_id="vacuum:SOR-001:1704067200000:valid-empty",
         strategy_group_id="SOR-001",
         selection_spec_id=SELECTION_SPEC_ID,
-        session_start_ms=SESSION_START_MS,
+        period_anchor_ms=SESSION_START_MS,
         source_generation_id=None,
         state="OPEN",
         fenced_at_ms=SESSION_START_MS + 3_600_010,
@@ -704,7 +704,7 @@ async def test_valid_empty_finalizes_vacuum_authority_and_pending_mode_atomicall
         entry_vacuum_id="vacuum:SOR-001:1704067200000:valid-empty-final",
         strategy_group_id="SOR-001",
         selection_spec_id=SELECTION_SPEC_ID,
-        session_start_ms=SESSION_START_MS,
+        period_anchor_ms=SESSION_START_MS,
         source_generation_id=None,
         state="OPEN",
         fenced_at_ms=SESSION_START_MS + 3_600_010,
@@ -808,7 +808,7 @@ async def test_valid_empty_rejects_generation_free_vacuum_with_wrong_intent(
         entry_vacuum_id="vacuum:SOR-001:1704067200000:wrong-intent",
         strategy_group_id="SOR-001",
         selection_spec_id=SELECTION_SPEC_ID,
-        session_start_ms=SESSION_START_MS,
+        period_anchor_ms=SESSION_START_MS,
         source_generation_id=None,
         state="DRAINING_ENTRY",
         fenced_at_ms=SESSION_START_MS + 3_600_010,
@@ -820,7 +820,7 @@ async def test_valid_empty_rejects_generation_free_vacuum_with_wrong_intent(
     async with head_template_engine.begin() as connection:
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
+                **vacuum.model_dump(mode="json"),
             )
         )
 
@@ -869,7 +869,7 @@ async def test_valid_empty_is_non_retroactive_for_protected_ticket(
         entry_vacuum_id="vacuum:SOR-001:1704067200000:protected-ticket",
         strategy_group_id="SOR-001",
         selection_spec_id=SELECTION_SPEC_ID,
-        session_start_ms=SESSION_START_MS,
+        period_anchor_ms=SESSION_START_MS,
         source_generation_id=None,
         state="DRAINING_ENTRY",
         fenced_at_ms=SESSION_START_MS + 3_600_010,
@@ -881,7 +881,7 @@ async def test_valid_empty_is_non_retroactive_for_protected_ticket(
     async with head_template_engine.begin() as connection:
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
+                **vacuum.model_dump(mode="json"),
             )
         )
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:
@@ -924,7 +924,7 @@ async def test_repository_opens_new_vacuum_after_previous_operation_is_terminal(
         entry_vacuum_id="vacuum:SOR-001:previous:valid-empty",
         strategy_group_id="SOR-001",
         selection_spec_id=SELECTION_SPEC_ID,
-        session_start_ms=SESSION_START_MS - 86_400_000,
+        period_anchor_ms=SESSION_START_MS - 86_400_000,
         source_generation_id=None,
         state="VALID_EMPTY",
         fenced_at_ms=SESSION_START_MS - 82_800_000,
@@ -937,7 +937,7 @@ async def test_repository_opens_new_vacuum_after_previous_operation_is_terminal(
         entry_vacuum_id="vacuum:SOR-001:current:valid-empty",
         strategy_group_id="SOR-001",
         selection_spec_id=SELECTION_SPEC_ID,
-        session_start_ms=SESSION_START_MS,
+        period_anchor_ms=SESSION_START_MS,
         source_generation_id=None,
         state="OPEN",
         fenced_at_ms=SESSION_START_MS + 3_600_010,
@@ -950,7 +950,7 @@ async def test_repository_opens_new_vacuum_after_previous_operation_is_terminal(
     async with head_template_engine.begin() as connection:
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **previous.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=previous.session_start_ms,
+                **previous.model_dump(mode="json"),
             )
         )
         repository = PostgresInstrumentSelectionRepository(connection)

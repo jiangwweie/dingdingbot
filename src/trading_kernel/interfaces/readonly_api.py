@@ -179,7 +179,7 @@ class SelectionRuntimeReadonlyView(BaseModel):
         if any(
             vacuum.strategy_group_id != self.strategy_group_id
             or vacuum.selection_spec_id != self.selection_spec_id
-            or vacuum.session_start_ms != self.session_start_ms
+            or vacuum.period_anchor_ms != self.session_start_ms
             for vacuum in self.entry_vacuums
         ):
             raise ValueError("Entry Vacuum differs from readonly period")

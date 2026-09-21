@@ -59,7 +59,7 @@ async def open_strategy_entry_vacuum(
         entry_vacuum_id=entry_vacuum_id,
         strategy_group_id=strategy_group_id,
         selection_spec_id=SELECTION_SPEC_ID,
-        session_start_ms=SESSION_START_MS,
+        period_anchor_ms=SESSION_START_MS,
         source_generation_id=None,
         state=state,
         fenced_at_ms=fenced_at_ms,
@@ -116,7 +116,7 @@ async def open_strategy_entry_vacuum(
         )
         await connection.execute(
             sa.insert(strategy_entry_vacuums_current).values(
-                **vacuum.model_dump(mode="json", exclude={"session_start_ms"}), period_anchor_ms=vacuum.session_start_ms,
+                **vacuum.model_dump(mode="json"),
             )
         )
         await connection.execute(

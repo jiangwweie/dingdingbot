@@ -426,7 +426,7 @@ async def coordinate_selection_materialization_once(
                         ),
                         strategy_group_id=request.strategy_group_id,
                         selection_spec_id=spec.selection_spec_id,
-                        session_start_ms=request.session_start_ms,
+                        period_anchor_ms=request.session_start_ms,
                         source_generation_id=None,
                         state=StrategyEntryVacuumState.OPEN,
                         fenced_at_ms=now_ms,
@@ -552,7 +552,7 @@ async def coordinate_selection_materialization_once(
             vacuum is not None
             and vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED
             and vacuum.source_generation_id is not None
-            and vacuum.session_start_ms < request.session_start_ms
+            and vacuum.period_anchor_ms < request.session_start_ms
             and snapshot is not None
             and selection_control.selection_mode is SelectionMode.STATIC_BASELINE
             and selection_control.pending_selection_mode
@@ -631,7 +631,7 @@ async def coordinate_selection_materialization_once(
             vacuum is not None
             and vacuum.state is StrategyEntryVacuumState.RECONFIGURING
             and vacuum.source_generation_id is not None
-            and vacuum.session_start_ms < request.session_start_ms
+            and vacuum.period_anchor_ms < request.session_start_ms
             and snapshot is not None
         ):
             previous_generation = (
@@ -913,7 +913,7 @@ async def coordinate_selection_materialization_once(
                     ),
                     strategy_group_id=request.strategy_group_id,
                     selection_spec_id=spec.selection_spec_id,
-                    session_start_ms=request.session_start_ms,
+                    period_anchor_ms=request.session_start_ms,
                     source_generation_id=None,
                     state=StrategyEntryVacuumState.OPEN,
                     fenced_at_ms=now_ms,
@@ -1020,7 +1020,7 @@ async def coordinate_selection_materialization_once(
                     ),
                     strategy_group_id=request.strategy_group_id,
                     selection_spec_id=spec.selection_spec_id,
-                    session_start_ms=request.session_start_ms,
+                    period_anchor_ms=request.session_start_ms,
                     source_generation_id=existing.materialization_generation_id,
                     state=StrategyEntryVacuumState.DRAINING_ENTRY,
                     fenced_at_ms=now_ms,

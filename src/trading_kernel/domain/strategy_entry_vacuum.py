@@ -11,6 +11,7 @@ from pydantic import (
     model_validator,
 )
 
+from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import DAY_MS
 
 
@@ -32,7 +33,7 @@ class StrategyEntryVacuum(BaseModel):
     entry_vacuum_id: str
     strategy_group_id: str
     selection_spec_id: str
-    session_start_ms: int
+    period_anchor_ms: int
     source_generation_id: str | None
     state: StrategyEntryVacuumState
     fenced_at_ms: int
@@ -78,8 +79,15 @@ class StrategyEntryVacuum(BaseModel):
 
     @model_validator(mode="after")
     def _validate_vacuum(self) -> StrategyEntryVacuum:
-        if self.session_start_ms <= 0 or self.session_start_ms % DAY_MS != 0:
-            raise ValueError("Strategy Entry Vacuum session must be exact 00:00 UTC")
+        if self.selection_spec_id == "sor-dynamic-selection-v0":
+            interval = DAY_MS
+        else:
+            spec = generic_selection_spec(self.strategy_group_id)
+            if spec.selection_spec_id != self.selection_spec_id:
+                raise ValueError("Vacuum Selection Spec identity differs")
+            interval = spec.cadence_hours * 3_600_000
+        if self.period_anchor_ms <= 0 or self.period_anchor_ms % interval != 0:
+            raise ValueError("Strategy Entry Vacuum period must match its Spec clock")
         if self.fenced_at_ms <= 0 or self.projection_version <= 0:
             raise ValueError("Vacuum fence time and projection version must be positive")
         if self.drained_at_ms is not None and self.drained_at_ms < self.fenced_at_ms:

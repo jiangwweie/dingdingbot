@@ -531,7 +531,7 @@ async def _complete_entry_drain(
 
     snapshot = await uow.instrument_selection.get_snapshot_disposition(
         selection_spec_id=request.selection_spec_id,
-        session_start_ms=vacuum.session_start_ms,
+        session_start_ms=vacuum.period_anchor_ms,
         for_update=True,
     )
     control = await uow.instrument_selection.get_selection_control(
@@ -560,17 +560,17 @@ async def _complete_entry_drain(
     sequence = (
         1
         if current is None
-        or current.authority.session_start_ms != vacuum.session_start_ms
+        or current.authority.session_start_ms != vacuum.period_anchor_ms
         else current.authority.authority_sequence + 1
     )
     authority = SelectionSessionAuthority(
         selection_authority_id=(
             f"selection-authority:{request.selection_spec_id}:"
-            f"{vacuum.session_start_ms}:{sequence}"
+            f"{vacuum.period_anchor_ms}:{sequence}"
         ),
         selection_spec_id=request.selection_spec_id,
-        session_start_ms=vacuum.session_start_ms,
-        decision_boundary_ms=vacuum.session_start_ms + 4 * INTERVAL_MS,
+        session_start_ms=vacuum.period_anchor_ms,
+        decision_boundary_ms=vacuum.period_anchor_ms + 4 * INTERVAL_MS,
         authority_sequence=sequence,
         selection_mode=SelectionMode.DYNAMIC_SELECTION,
         selection_snapshot_id=snapshot.snapshot.selection_snapshot_id,
@@ -586,7 +586,7 @@ async def _complete_entry_drain(
         grant_proof=None,
         effective_from_ms=request.now_ms,
         first_eligible_close_time_ms=None,
-        expires_at_ms=vacuum.session_start_ms + 100 * INTERVAL_MS,
+        expires_at_ms=vacuum.period_anchor_ms + 100 * INTERVAL_MS,
         reason_code="NO_SELECTION_READY_MEMBERS",
         created_at_ms=request.now_ms,
     )
@@ -604,7 +604,7 @@ async def _complete_entry_drain(
     if (
         control.selection_mode is SelectionMode.STATIC_BASELINE
         and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-        and control.pending_effective_period_anchor_ms == vacuum.session_start_ms
+        and control.pending_effective_period_anchor_ms == vacuum.period_anchor_ms
     ):
         await uow.instrument_selection.activate_pending_selection_mode(
             strategy_group_id=request.strategy_group_id,

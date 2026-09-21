@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.strategy_entry_vacuum import (
     StrategyEntryVacuum,
     StrategyEntryVacuumState,
@@ -14,6 +15,21 @@ from src.trading_kernel.domain.strategy_universe import (
     advance_strategy_universe_lifecycle,
     strategy_universe_allows_signal,
 )
+
+
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+def test_generic_vacuum_uses_spec_period_instead_of_utc_midnight(group: str) -> None:
+    spec = generic_selection_spec(group)
+    anchor = 100*3_600_000
+    vacuum = StrategyEntryVacuum(entry_vacuum_id="vacuum:generic", strategy_group_id=group,
+        selection_spec_id=spec.selection_spec_id, period_anchor_ms=anchor,
+        source_generation_id="generation:generic", state=StrategyEntryVacuumState.DRAINING_ENTRY,
+        fenced_at_ms=anchor+3_600_001, drained_at_ms=None, resolved_at_ms=None,
+        first_blocker="ENTRY_DRAIN_REQUIRED", projection_version=2)
+    assert vacuum.period_anchor_ms == anchor
+    assert vacuum.blocks_new_entry and not vacuum.blocks_existing_ticket_lifecycle
+    with pytest.raises(ValidationError, match="period"):
+        StrategyEntryVacuum.model_validate({**vacuum.model_dump(), "period_anchor_ms": anchor+1})
 
 
 def test_entry_vacuum_is_a_forward_only_new_entry_fence() -> None:
@@ -51,7 +67,7 @@ def test_valid_empty_may_preserve_prior_generation_provenance() -> None:
         entry_vacuum_id="vacuum:SOR-001:1704067200000",
         strategy_group_id="SOR-001",
         selection_spec_id="sor-dynamic-selection-v0",
-        session_start_ms=1_704_067_200_000,
+        period_anchor_ms=1_704_067_200_000,
         source_generation_id="generation:superseded-before-empty",
         state=StrategyEntryVacuumState.VALID_EMPTY,
         fenced_at_ms=1_704_070_800_000,
@@ -110,7 +126,7 @@ def _vacuum(
         entry_vacuum_id="vacuum:SOR-001:1704067200000",
         strategy_group_id="SOR-001",
         selection_spec_id="sor-dynamic-selection-v0",
-        session_start_ms=1_704_067_200_000,
+        period_anchor_ms=1_704_067_200_000,
         source_generation_id=None,
         state=state,
         fenced_at_ms=1_704_070_800_000,

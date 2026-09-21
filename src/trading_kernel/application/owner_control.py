@@ -223,7 +223,7 @@ async def set_strategy_entry_state(
                     ),
                     strategy_group_id=strategy_group_id,
                     selection_spec_id=selection_control.selection_spec_id,
-                    session_start_ms=session_start_ms,
+                    period_anchor_ms=session_start_ms,
                     source_generation_id=None,
                     state=StrategyEntryVacuumState.OPEN,
                     fenced_at_ms=request.now_ms,

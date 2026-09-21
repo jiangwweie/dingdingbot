@@ -58,6 +58,7 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionJobFailure,
 )
 from src.trading_kernel.domain.selection_authority import selected_member_set_digest
+from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
     SelectionJobConflict,
@@ -106,6 +107,23 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
                 reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb", common_numeric_authority="PASS", sor_golden="PASS", spec_cert="PASS",
             ))
     yield head_template_engine
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_generic_vacuum_roundtrips_hourly_period(database: AsyncEngine, group: str) -> None:
+    spec = inputs(group).spec
+    vacuum = StrategyEntryVacuum(entry_vacuum_id="vacuum:"+group, strategy_group_id=group,
+        selection_spec_id=spec.selection_spec_id, period_anchor_ms=CUTOFF,
+        source_generation_id=None,state="OPEN",fenced_at_ms=CUTOFF+HOUR+1,
+        drained_at_ms=None,resolved_at_ms=None,first_blocker="OWNER_PAUSED",projection_version=1)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.open_owner_paused_entry_vacuum(vacuum)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        loaded = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group,selection_spec_id=spec.selection_spec_id)
+        assert loaded is not None and loaded.period_anchor_ms == CUTOFF
+        assert loaded.blocks_new_entry and not loaded.blocks_existing_ticket_lifecycle
 
 
 @pytest.mark.asyncio
