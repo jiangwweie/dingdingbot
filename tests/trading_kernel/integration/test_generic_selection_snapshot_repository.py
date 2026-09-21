@@ -13,6 +13,11 @@ from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     install_strategy_universe,
 )
+from src.trading_kernel.application.project_comparative_universe import (
+    ComparativeMemberWindow,
+    ComparativeProjectionAuthorityChanged,
+    build_comparative_universe_projection,
+)
 from src.trading_kernel.application.run_instrument_selection import (
     RunInstrumentSelectionRequest,
     run_instrument_selection_once,
@@ -57,6 +62,10 @@ from tests.trading_kernel.support.generic_selection import (
     inputs,
     qualify_window,
     shift_window,
+)
+from tests.trading_kernel.unit.detectors.fixtures import (
+    mi_long_snapshot,
+    mpg_long_snapshot,
 )
 
 
@@ -547,6 +556,22 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
             installed_at_ms=generation.created_at_ms+1))
         assert target.universe is not None and target.universe.exchange_instrument_ids==snapshot.selected_members
         assert target.lifecycle_state=="warming"
+    if group in {"MPG-001","MI-001"}:
+        candles = mpg_long_snapshot().candles_1h if group=="MPG-001" else mi_long_snapshot().candles_1h
+        close = candles[-1].close_time_ms
+        for members in (source.spec.candidate_ids,snapshot.selected_members):
+            projection = build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,
+                universe_version_id=target.universe.universe_version_id,strategy_group_id=group,
+                exchange_instrument_ids=members,closed_bar_time_ms=close,lookback_bars=8 if group=="MPG-001" else 12,
+                freshness_window_ms=3600000,member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in members))
+            if len(members)==24:
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    saved = await uow.strategy_universes.save_comparative_projection(projection)
+                    assert len(saved.member_windows)==24
+            else:
+                with pytest.raises(ComparativeProjectionAuthorityChanged, match="member"):
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        await uow.strategy_universes.save_comparative_projection(projection)
     with pytest.raises(sa.exc.DBAPIError, match="Universe trusted member limit"):
         async with database.begin() as conn:
             await conn.execute(sa.text("INSERT INTO brc_strategy_universe_members(universe_version_id,exchange_instrument_id) VALUES(:uid,:member)"),

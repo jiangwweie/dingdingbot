@@ -76,6 +76,8 @@ GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（�
 
 GS-06比较边界准备：`ComparisonUniverseBinding`从独立definition/member/current表读取，不以TradableUniverse N构造Dynamic分母；Dynamic必须exact Candidate24及正transition revision，Static必须匹配其source Static Universe成员。安装已认证MPG/MI Spec只准备不可变fixed24定义，不改current binding、不触发rebase或activation。PG测试证明安装时binding为零、显式绑定后读到24、缩成23即拒绝。当前projection缓存仍按旧交易Universe key，Observation仍未调用新reader；必须完成缓存身份迁移、绑定CAS及真实producer rebase后才能声称GS-06 Done。本次相关PG58 passed、Unit/Architecture1185 passed，Ruff/Mypy通过，生产未修改。
 
+GS-06缓存成员权威增量：比较projection读取及ready/unavailable回写均校验所属Universe和成员来源；Static不得缩小原比较集合，Generic warming必须使用所绑定已安装Spec的全部24个Candidate，而非Selected12/16。正式abandon后旧缓存及迟到回调均拒绝；读取在PostgreSQL只读事务内通过，不取得写锁。0007迁移来源夹具改为测试专用、显式0007列的插入，不调用0008比较仓储，也不增加runtime旧schema fallback。相关migration/projection/Generic repository组合61 passed；补充abandon/只读断言后projection模块3 passed；Unit/Architecture1185 passed。上述计数有重叠，不构成R4或GS-06 Done。cache revision/ABA、独立缓存key、真实Observation及Episode rebase接线仍待完成，Static source/target真实producer差分仍未完成。
+
 2026-09-21实施补充：Universe表示层上界16，manual/Static及Owner配置入口仍限10；Generation-owned安装从已安装Spec、Snapshot及精确target解析limit/成员数量/有效期，SOR Dynamic仍限7，Generic按retain_rank≤16。PG member trigger保留原Product compatibility校验并从Generation/Spec解析同样的trusted limit，直接SQL扩充manual到11失败。四策略经正式installer生成warming Universe（12或16），不创建positive authority；测试中的MATERIALIZING为明确repository prerequisite，不能当作Vacuum/drain/Warming完成证据。
 
 双时钟纯组件新增`HourlyRecoveryClosePlan`：恢复只规划严格未来且小于expiry的close，commit跨界拒绝；无可用close输出NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY，固定要求rebase。正常CurrentFinalCloseGrantProof不因8秒/30秒/2分钟延迟改变语义。尚未完成durable recovery revision、Episode rebase与Coordinator接线，不宣称GS-08-HOURLY-CLOCK-01全链已通过。

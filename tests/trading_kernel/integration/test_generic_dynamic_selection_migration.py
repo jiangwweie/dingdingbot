@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
@@ -19,6 +20,7 @@ from src.trading_kernel.application.produce_strategy_signal import (
 )
 from src.trading_kernel.application.project_comparative_universe import (
     ComparativeMemberWindow,
+    ComparativeUniverseProjection,
     build_comparative_universe_projection,
 )
 from src.trading_kernel.domain.detector import DetectorStatus
@@ -56,6 +58,35 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 TARGET_REVISION = "0008_generic_dynamic_selection_v1"
+
+
+async def _insert_0007_comparison_source(
+    engine: AsyncEngine, projection: ComparativeUniverseProjection
+) -> None:
+    """Construct source evidence, never invoke target repositories on old schema."""
+    async with engine.begin() as conn:
+        assert await conn.scalar(sa.text("SELECT version_num FROM alembic_version")) == (
+            "0007_exit_profile_authority_v1"
+        )
+        await conn.execute(
+            sa.text("""
+                INSERT INTO brc_comparative_projection_current
+                (event_spec_id, universe_version_id, closed_bar_time_ms,
+                 member_set_digest, projection_status, failure_reason, projection,
+                 observed_at_ms, valid_until_ms, projection_version)
+                VALUES (:event, :universe, :closed, :digest, 'ready', NULL,
+                        CAST(:payload AS jsonb), :observed, :valid, 1)
+            """),
+            {
+                "event": projection.event_spec_id,
+                "universe": projection.universe_version_id,
+                "closed": projection.closed_bar_time_ms,
+                "digest": projection.member_set_digest,
+                "payload": json.dumps(projection.model_dump(mode="json")),
+                "observed": projection.observed_at_ms,
+                "valid": projection.valid_until_ms,
+            },
+        )
 
 
 @pytest.mark.asyncio
@@ -299,7 +330,7 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
                 fact_summary={},
                 updated_at_ms=NOW_MS,
             )
-            await uow.strategy_universes.save_comparative_projection(projection)
+        await _insert_0007_comparison_source(engine, projection)
         async with engine.connect() as conn:
             await conn.execute(sa.text("SET TRANSACTION READ ONLY"))
             proofs = await certify_0007_static_comparison_sources(conn)
@@ -336,8 +367,7 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
             await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
         async with engine.connect() as conn:
             assert await conn.scalar(sa.text("SELECT to_regclass('brc_comparison_universe_definitions')")) is None
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            await uow.strategy_universes.save_comparative_projection(projection)
+        await _insert_0007_comparison_source(engine, projection)
         await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
         await engine.dispose()  # Stopped cutover discards source prepared statements.
         async with engine.connect() as conn:

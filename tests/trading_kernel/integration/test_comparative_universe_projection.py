@@ -10,6 +10,10 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.trading_kernel.application.abandon_strategy_universe import (
+    AbandonStrategyUniverseRequest,
+    abandon_strategy_universe,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     install_strategy_universe,
@@ -17,6 +21,7 @@ from src.trading_kernel.application.install_strategy_universe import (
 from src.trading_kernel.application.project_comparative_universe import (
     ComparativeMemberWindow,
     ComparativeProjectionAuthorityChanged,
+    build_comparative_projection_failure,
     build_comparative_universe_projection,
 )
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
@@ -26,6 +31,9 @@ from src.trading_kernel.infrastructure.pg_models import (
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
+)
+from src.trading_kernel.infrastructure.pg_universe_repository import (
+    PostgresStrategyUniverseRepository,
 )
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     OWNER_POLICY_ID,
@@ -54,6 +62,19 @@ CONTRACT = next(
     if contract.event_id == "MPG-LONG"
 )
 MEMBERS = tuple(sorted((ETH, OP, SOL)))
+
+
+@pytest.mark.asyncio
+async def test_projection_cannot_shrink_the_authoritative_static_member_set(projection_engine: AsyncEngine) -> None:
+    uid = await _universe_version_id(projection_engine)
+    reduced = MEMBERS[:1]
+    projection = build_comparative_universe_projection(event_spec_id=CONTRACT.event_spec_id,universe_version_id=uid,
+        strategy_group_id=CONTRACT.strategy_group_id,exchange_instrument_ids=reduced,closed_bar_time_ms=NOW_MS,
+        lookback_bars=8,freshness_window_ms=CONTRACT.freshness_window_ms,
+        member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=mpg_long_snapshot().candles_1h) for m in reduced))
+    with pytest.raises(ComparativeProjectionAuthorityChanged, match="member"):
+        async with PostgresKernelUnitOfWork(projection_engine) as uow:
+            await uow.strategy_universes.save_comparative_projection(projection)
 
 
 @pytest_asyncio.fixture
@@ -171,6 +192,50 @@ async def test_projection_round_trips_only_for_exact_key_and_digest(
     assert projection_rows == 1
     assert exact is not None
     assert exact.projection_version == 1
+
+    # Reading a cached projection must work in an actual readonly transaction.
+    async with projection_engine.connect() as connection:
+        await connection.execute(sa.text("SET TRANSACTION READ ONLY"))
+        repository = PostgresStrategyUniverseRepository(connection)
+        assert await repository.get_comparative_projection(
+            event_spec_id=projection.event_spec_id,
+            universe_version_id=projection.universe_version_id,
+            closed_bar_time_ms=projection.closed_bar_time_ms,
+            member_set_digest=projection.member_set_digest,
+        ) == projection
+
+    # A late fetch callback cannot keep reading or writing an abandoned target.
+    async with PostgresKernelUnitOfWork(projection_engine) as uow:
+        await abandon_strategy_universe(
+            uow,
+            AbandonStrategyUniverseRequest(
+                universe_version_id=universe_version_id,
+                reason_code="test_target_superseded",
+                attempted_at_ms=NOW_MS,
+            ),
+        )
+    failure = build_comparative_projection_failure(
+        event_spec_id=projection.event_spec_id,
+        universe_version_id=projection.universe_version_id,
+        member_set_digest=projection.member_set_digest,
+        closed_bar_time_ms=projection.closed_bar_time_ms,
+        observed_at_ms=NOW_MS,
+        reason_code="comparative_market_temporarily_unavailable",
+    )
+    for operation in ("read", "ready", "unavailable"):
+        with pytest.raises(ComparativeProjectionAuthorityChanged, match="eligible"):
+            async with PostgresKernelUnitOfWork(projection_engine) as uow:
+                if operation == "read":
+                    await uow.strategy_universes.get_comparative_projection(
+                        event_spec_id=projection.event_spec_id,
+                        universe_version_id=projection.universe_version_id,
+                        closed_bar_time_ms=projection.closed_bar_time_ms,
+                        member_set_digest=projection.member_set_digest,
+                    )
+                elif operation == "ready":
+                    await uow.strategy_universes.save_comparative_projection(projection)
+                else:
+                    await uow.strategy_universes.save_comparative_projection_failure(failure)
 
 
 @pytest.mark.asyncio
