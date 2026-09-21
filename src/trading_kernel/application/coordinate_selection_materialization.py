@@ -20,6 +20,11 @@ from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationStatus,
     advance_strategy_universe,
 )
+from src.trading_kernel.application.drain_strategy_entry_vacuum import (
+    DrainStrategyEntryVacuumRequest,
+    VacuumDrainStatus,
+    drain_strategy_entry_vacuum_once,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     UniverseInstallStatus,
@@ -44,6 +49,7 @@ from src.trading_kernel.domain.selection_authority import (
     ContinuitySourceKind,
     CurrentSelectionAuthority,
     MaterializationGeneration,
+    MaterializationGenerationClaimStatus,
     MaterializationGenerationState,
     MaterializationTarget,
     SelectionControl,
@@ -80,6 +86,8 @@ class MaterializationDisposition(StrEnum):
     VALID_EMPTY = "VALID_EMPTY"
     GENERATION_PENDING = "GENERATION_PENDING"
     GENERATION_DESIRED = "GENERATION_DESIRED"
+    GENERATION_MATERIALIZING = "GENERATION_MATERIALIZING"
+    GENERATION_LEASE_HELD = "GENERATION_LEASE_HELD"
     LONG_WARMING = "LONG_WARMING"
     SHORT_WARMING = "SHORT_WARMING"
     PAIR_STAGED = "PAIR_STAGED"
@@ -199,6 +207,20 @@ class CoordinateSelectionMaterializationRequest(BaseModel):
         if not normalized:
             raise ValueError("Materialization Coordinator identity must be non-blank")
         return normalized
+
+
+class CoordinateGenericGenerationRequest(BaseModel):
+    """Advance one DB-owned Generic Generation; no caller-supplied membership."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    materialization_generation_id: str
+    worker_id: str
+
+    @field_validator("materialization_generation_id", "worker_id")
+    @classmethod
+    def _identity(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Generic Coordinator identity must be non-blank")
+        return value.strip()
 
 
 class CoordinateSelectionMaterializationResult(BaseModel):
@@ -355,12 +377,14 @@ def plan_selection_materialization(
 async def coordinate_selection_materialization_once(
     *,
     uow_factory: UnitOfWorkFactory,
-    request: CoordinateSelectionMaterializationRequest,
+    request: CoordinateSelectionMaterializationRequest | CoordinateGenericGenerationRequest,
     clock_ms: Callable[[], int],
 ) -> CoordinateSelectionMaterializationResult:
     """Advance exactly one no-network materialization state from PostgreSQL facts."""
 
     now_ms = clock_ms()
+    if isinstance(request, CoordinateGenericGenerationRequest):
+        return await _coordinate_generic_generation(uow_factory=uow_factory,request=request,now_ms=now_ms)
     async with uow_factory() as uow:
         spec = await uow.instrument_selection.get_active_spec(
             request.selection_spec_id
@@ -1058,6 +1082,60 @@ async def coordinate_selection_materialization_once(
             ),
             entry_vacuum_id=None if vacuum is None else vacuum.entry_vacuum_id,
         )
+
+
+async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
+    request: CoordinateGenericGenerationRequest, now_ms: int) -> CoordinateSelectionMaterializationResult:
+    async with uow_factory() as uow:
+        initial = await uow.instrument_selection.get_generic_materialization_generation(request.materialization_generation_id)
+        if initial is None:
+            return _blocked("GENERIC_GENERATION_MISSING")
+        owner = await uow.owner_controls.get_strategy_control(initial.strategy_group_id,for_update=True)
+        if owner is None:
+            return _blocked("MATERIALIZATION_CONTROL_MISSING")
+        if owner.entry_state is StrategyEntryState.PAUSED:
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED,
+                materialization_generation_id=initial.materialization_generation_id)
+        claim = await uow.instrument_selection.claim_generic_materialization_generation(
+            initial.materialization_generation_id,worker_id=request.worker_id,now_ms=now_ms,lease_duration_ms=30_000)
+        if claim.status is MaterializationGenerationClaimStatus.LEASE_HELD:
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_LEASE_HELD,
+                materialization_generation_id=initial.materialization_generation_id,reason_code="GENERIC_GENERATION_LEASE_UNAVAILABLE")
+        if claim.status is not MaterializationGenerationClaimStatus.CLAIMED or claim.generation is None:
+            return _blocked("GENERIC_GENERATION_NOT_ACTIONABLE")
+        generation = claim.generation
+        try:
+            identity = {"materialization_generation_id":generation.materialization_generation_id,
+                "selection_snapshot_id":generation.selection_snapshot_id}
+            if generation.lifecycle_state is MaterializationGenerationState.PENDING:
+                await uow.instrument_selection.mark_generic_materialization_generation_desired(
+                    generation.materialization_generation_id,worker_id=request.worker_id,
+                    lease_epoch=generation.lease_epoch,expected_projection_version=generation.projection_version,
+                    desired_at_ms=now_ms)
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,**identity)
+            if generation.lifecycle_state is MaterializationGenerationState.DESIRED:
+                vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                    strategy_group_id=generation.strategy_group_id,selection_spec_id=generation.selection_spec_id,for_update=True)
+                if vacuum is None:
+                    vacuum = StrategyEntryVacuum(entry_vacuum_id="vacuum:"+generation.materialization_generation_id,
+                        strategy_group_id=generation.strategy_group_id,selection_spec_id=generation.selection_spec_id,
+                        period_anchor_ms=generation.period_anchor_ms,source_generation_id=generation.materialization_generation_id,
+                        state=StrategyEntryVacuumState.DRAINING_ENTRY,fenced_at_ms=now_ms,drained_at_ms=None,resolved_at_ms=None,
+                        first_blocker="ENTRY_DRAIN_REQUIRED",projection_version=2)
+                    await uow.instrument_selection.open_generation_entry_vacuum(vacuum,
+                        expected_generation_version=generation.projection_version,worker_id=request.worker_id,lease_epoch=generation.lease_epoch)
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                    entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
+            if generation.lifecycle_state is MaterializationGenerationState.DRAINING_ENTRY:
+                result = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+                    strategy_group_id=generation.strategy_group_id,selection_spec_id=generation.selection_spec_id,now_ms=now_ms))
+                return CoordinateSelectionMaterializationResult(disposition=(MaterializationDisposition.GENERATION_MATERIALIZING
+                    if result.status is VacuumDrainStatus.ENTRY_DRAINED else MaterializationDisposition.WAITING_VACUUM),
+                    entry_vacuum_id=result.entry_vacuum_id,reason_code=result.reason_code or result.status.value,**identity)
+            return _blocked("GENERIC_TARGET_MATERIALIZATION_REQUIRED")
+        finally:
+            await uow.instrument_selection.release_generic_materialization_generation_lease(
+                generation.materialization_generation_id,worker_id=request.worker_id,lease_epoch=generation.lease_epoch)
 
 
 class _AuthorityGrantWindowExpired(RuntimeError):

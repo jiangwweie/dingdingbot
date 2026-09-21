@@ -15,10 +15,10 @@ from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationStatus,
     advance_strategy_universe,
 )
-from src.trading_kernel.application.drain_strategy_entry_vacuum import (
-    DrainStrategyEntryVacuumRequest,
-    VacuumDrainStatus,
-    drain_strategy_entry_vacuum_once,
+from src.trading_kernel.application.coordinate_selection_materialization import (
+    CoordinateGenericGenerationRequest,
+    MaterializationDisposition,
+    coordinate_selection_materialization_once,
 )
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
@@ -662,11 +662,28 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
             assert retired.previous_events==generation.previous_events
             assert retired.semantic_digest==generation.semantic_digest
         generation, snapshot = later, later_snapshot
+    coordinator_request = CoordinateGenericGenerationRequest(materialization_generation_id=generation.materialization_generation_id,
+        worker_id="generic-coordinator")
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' WHERE strategy_group_id=:group"), {"group":group})
+    paused = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=coordinator_request,clock_ms=lambda:generation.created_at_ms+1)
+    assert paused.disposition == MaterializationDisposition.OWNER_PAUSED
+    async with database.begin() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_entry_vacuums_current")) == 0
+        await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='enabled' WHERE strategy_group_id=:group"), {"group":group})
+    prepared = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=coordinator_request,clock_ms=lambda:generation.created_at_ms+1)
+    assert prepared.disposition == MaterializationDisposition.GENERATION_DESIRED
     async with PostgresKernelUnitOfWork(database) as uow:
         preparation = await uow.instrument_selection.claim_generic_materialization_generation(
             generation.materialization_generation_id,worker_id="prepare-worker",
-            now_ms=generation.created_at_ms+1,lease_duration_ms=HOUR//2)
+            now_ms=generation.created_at_ms+2,lease_duration_ms=HOUR//2)
     assert preparation.generation is not None
+    held = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=coordinator_request,clock_ms=lambda:generation.created_at_ms+2)
+    assert held.disposition == MaterializationDisposition.GENERATION_LEASE_HELD
+    assert held.reason_code == "GENERIC_GENERATION_LEASE_UNAVAILABLE"
     with pytest.raises(SelectionJobConflict, match="lease changed"):
         async with PostgresKernelUnitOfWork(database) as uow:
             await uow.instrument_selection.mark_generic_materialization_generation_desired(
@@ -681,7 +698,7 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
             expected_projection_version=preparation.generation.projection_version,
             desired_at_ms=generation.created_at_ms+2)
     assert desired.lifecycle_state.value == "DESIRED"
-    assert desired.desired_at_ms == generation.created_at_ms+2
+    assert desired.desired_at_ms == generation.created_at_ms+1
     async with PostgresKernelUnitOfWork(database) as uow:
         repeated = await uow.instrument_selection.mark_generic_materialization_generation_desired(
             generation.materialization_generation_id,worker_id="prepare-worker",
@@ -700,11 +717,11 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
                 worker_id="prepare-worker",lease_epoch=preparation.generation.lease_epoch+1)
         assert await uow.instrument_selection.get_current_entry_vacuum(
             strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
-        await uow.instrument_selection.open_generation_entry_vacuum(fence,
-            expected_generation_version=desired.projection_version,
-            worker_id="prepare-worker",lease_epoch=preparation.generation.lease_epoch)
         assert await uow.instrument_selection.release_generic_materialization_generation_lease(
             generation.materialization_generation_id,worker_id="prepare-worker",lease_epoch=preparation.generation.lease_epoch)
+    fenced = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=coordinator_request,clock_ms=lambda:generation.created_at_ms+3)
+    assert fenced.disposition == MaterializationDisposition.WAITING_VACUUM
     async with PostgresKernelUnitOfWork(database) as uow:
         assert await uow.instrument_selection.get_current_entry_vacuum(
             strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) == fence
@@ -717,10 +734,9 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
             await uow.instrument_selection.mark_entry_vacuum_drained(
                 fence.model_copy(update={"first_blocker":"forged"}),
                 target_state="RECONFIGURING",drained_at_ms=generation.created_at_ms+4)
-        drained = await drain_strategy_entry_vacuum_once(uow,
-            DrainStrategyEntryVacuumRequest(strategy_group_id=group,
-                selection_spec_id=source.spec.selection_spec_id,now_ms=generation.created_at_ms+4))
-        assert drained.status == VacuumDrainStatus.ENTRY_DRAINED
+    drained = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=coordinator_request,clock_ms=lambda:generation.created_at_ms+4)
+    assert drained.disposition == MaterializationDisposition.GENERATION_MATERIALIZING
     async with PostgresKernelUnitOfWork(database) as uow:
         target = await install_strategy_universe(uow, UniverseInstallRequest(
             event_spec_id=source.spec.event_spec_id,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
