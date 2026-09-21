@@ -371,6 +371,8 @@ Generic空ENTRY drain增量：共享`mark_entry_vacuum_drained`按真实Generati
 
 Generic Coordinator准备接线：同一`coordinate_selection_materialization_once`入口接受typed Generic Generation request（仅DB Generation ID及worker ID，不接收成员名单），读取Owner control、取得fenced lease、分步推进PENDING→DESIRED→Vacuum fence→空ENTRY drain。每步释放本次lease；Owner Pause返回无新增fence，已有lease返回GENERATION_LEASE_HELD等待状态。四策略集成改为调用该正式入口而非直接串联准备仓储；直接仓储负向测试仍保留。仅已提交Generation的准备阶段已接线：Snapshot→Generation发现/创建、MATERIALIZING目标安装/预热自动分支、STAGED atomic activation/fallback及Worker hosting仍未完成；后续状态显式BLOCKED，不产生正向Authority。Unit/Architecture1191 passed，全源码Mypy通过。
 
+Generic Coordinator目标接线增量：MATERIALIZING先验证同Generation的RECONFIGURING Vacuum，再由DB Spec/Snapshot及正式安装上下文确定target，通过现有install/stage入口推进。全局warming槽被占时返回TARGET_WARMING/GLOBAL_WARMING_SLOT_BUSY，不另建队列；就绪后返回GENERATION_STAGED，保留当前Universe及负向fence。临时认证/比较缺源与非transient失败分别等待/阻塞，未实现fallback的失败不伪造成功。四策略测试经Coordinator安装和stage，保留底层负向lease/Control测试；相关PG135 passed、Unit/Architecture1191 passed、全源码Mypy通过。Snapshot→Generation发现创建、deadline失败回收、atomic activation/fallback及hosting仍待完成，GS-07/08不标Done。
+
 有单drain审计补充：现有`support/selection_vacuum.py`的Spec来源固定SOR，不能只换StrategyGroup就当作Generic验收。共享Vacuum模型现明确拒绝SOR Spec与非SOR group混用，SOR有单drain与Vacuum单测合计21 passed。Generic有单测试必须安装对应真实Spec、使用合法Ticket身份，仍待补齐，不计为已验收。
 
 Generic prepared-ENTRY验收增量：CPM/MPG/MI/BRF2使用对应注册Event、ExitProfile Binding、方向（含BRF2 SHORT）与正式安装的Generic Spec，先经issue_ticket签发，再设置明确的负向Vacuum前置并调用正式drain。prepared ENTRY变为SUPERSEDED，Ticket进入entry_rejected，Reservation/lane/Netting Domain释放，冻结Ticket字段（除状态）保持不变。保留原SOR分支，五分支专项通过。测试从已签发Ticket开始，未证明Selection/Coordinator自然产出该Ticket；未覆盖Generic已发送未成交、部分成交及unknown cancel，不能升级为GS-08/09 full-chain完成。

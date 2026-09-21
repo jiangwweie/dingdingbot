@@ -9,6 +9,10 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from src.trading_kernel.application.abandon_strategy_universe import (
+    AbandonStrategyUniverseRequest,
+    abandon_strategy_universe,
+)
 from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationOperation,
     UniverseActivationRequest,
@@ -737,6 +741,23 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
     drained = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
         request=coordinator_request,clock_ms=lambda:generation.created_at_ms+4)
     assert drained.disposition == MaterializationDisposition.GENERATION_MATERIALIZING
+    other_spec = inputs("MI-001" if group == "CPM-RO-001" else "CPM-RO-001").spec
+    async with PostgresKernelUnitOfWork(database) as uow:
+        occupying = await install_strategy_universe(uow,UniverseInstallRequest(
+            event_spec_id=other_spec.event_spec_id,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
+            exchange_instrument_ids=other_spec.candidate_ids[:1],installed_at_ms=generation.created_at_ms+4))
+    assert occupying.universe is not None
+    busy = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=coordinator_request,clock_ms=lambda:generation.created_at_ms+5)
+    assert busy.disposition == MaterializationDisposition.TARGET_WARMING
+    assert busy.reason_code == "GLOBAL_WARMING_SLOT_BUSY"
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await abandon_strategy_universe(uow,AbandonStrategyUniverseRequest(
+            universe_version_id=occupying.universe.universe_version_id,reason_code="test_release_warming_slot",
+            attempted_at_ms=generation.created_at_ms+5))
+    warming = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=coordinator_request,clock_ms=lambda:generation.created_at_ms+5)
+    assert warming.disposition.value == "TARGET_WARMING"
     async with PostgresKernelUnitOfWork(database) as uow:
         target = await install_strategy_universe(uow, UniverseInstallRequest(
             event_spec_id=source.spec.event_spec_id,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
@@ -921,6 +942,19 @@ async def _assert_generic_target_stages(database, source, generation, uid):
         assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=:gid"), {"gid":generation.materialization_generation_id}) == "MATERIALIZING"
     async with database.begin() as conn:
         await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='eligible',blocker_code=NULL WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"), {"uid":uid})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.release_generic_materialization_generation_lease(
+            generation.materialization_generation_id,worker_id="stage-worker",lease_epoch=lease.generation.lease_epoch)
+    coordinated = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+        request=CoordinateGenericGenerationRequest(materialization_generation_id=generation.materialization_generation_id,
+            worker_id="stage-coordinator"),clock_ms=lambda:close+30_004)
+    assert coordinated.disposition == MaterializationDisposition.GENERATION_STAGED
+    async with PostgresKernelUnitOfWork(database) as uow:
+        lease = await uow.instrument_selection.claim_generic_materialization_generation(
+            generation.materialization_generation_id,worker_id="stage-worker",now_ms=close+30_004,
+            lease_duration_ms=HOUR//2-29_994)
+    assert lease.generation is not None
+    request = request.model_copy(update={"materialization_lease_epoch":lease.generation.lease_epoch})
     async with PostgresKernelUnitOfWork(database) as uow:
         staged = await advance_strategy_universe(uow, request)
     assert staged.status == UniverseActivationStatus.STAGED

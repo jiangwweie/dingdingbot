@@ -88,6 +88,8 @@ class MaterializationDisposition(StrEnum):
     GENERATION_DESIRED = "GENERATION_DESIRED"
     GENERATION_MATERIALIZING = "GENERATION_MATERIALIZING"
     GENERATION_LEASE_HELD = "GENERATION_LEASE_HELD"
+    TARGET_WARMING = "TARGET_WARMING"
+    GENERATION_STAGED = "GENERATION_STAGED"
     LONG_WARMING = "LONG_WARMING"
     SHORT_WARMING = "SHORT_WARMING"
     PAIR_STAGED = "PAIR_STAGED"
@@ -1132,7 +1134,40 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 return CoordinateSelectionMaterializationResult(disposition=(MaterializationDisposition.GENERATION_MATERIALIZING
                     if result.status is VacuumDrainStatus.ENTRY_DRAINED else MaterializationDisposition.WAITING_VACUUM),
                     entry_vacuum_id=result.entry_vacuum_id,reason_code=result.reason_code or result.status.value,**identity)
-            return _blocked("GENERIC_TARGET_MATERIALIZATION_REQUIRED")
+            if generation.lifecycle_state is MaterializationGenerationState.MATERIALIZING:
+                vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                    strategy_group_id=generation.strategy_group_id,selection_spec_id=generation.selection_spec_id,for_update=True)
+                if vacuum is None or vacuum.source_generation_id != generation.materialization_generation_id or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING:
+                    return _blocked("GENERIC_DRAINED_VACUUM_REQUIRED")
+                spec = await uow.instrument_selection.get_generic_spec(generation.selection_spec_id)
+                snapshot = await uow.instrument_selection.get_generic_snapshot(generation.selection_snapshot_id)
+                contract = strategy_contract_for(spec.event_spec_id)
+                context = await uow.strategy_universes.resolve_install_context(runtime_profile_id="tiny-live-v1",event_id=contract.event_id)
+                if context.event_spec_id != spec.event_spec_id:
+                    return _blocked("GENERIC_EVENT_AUTHORITY_CHANGED")
+                installed = await install_strategy_universe(uow,UniverseInstallRequest(
+                    event_spec_id=spec.event_spec_id,runtime_profile_id="tiny-live-v1",owner_policy_id=context.owner_policy_id,
+                    exchange_instrument_ids=snapshot.selected_members,source_kind="dynamic_selection",
+                    materialization_generation_id=generation.materialization_generation_id,
+                    expected_member_set_digest=snapshot.member_set_digest,installed_at_ms=now_ms))
+                if installed.status is UniverseInstallStatus.WARMING_UNIVERSE_ALREADY_EXISTS:
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.TARGET_WARMING,
+                        reason_code="GLOBAL_WARMING_SLOT_BUSY",entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
+                if installed.universe is None:
+                    return _blocked("GENERIC_TARGET_INSTALLATION_FAILED")
+                staged = await advance_strategy_universe(uow,UniverseActivationRequest(
+                    universe_version_id=installed.universe.universe_version_id,attempted_at_ms=now_ms,
+                    operation=UniverseActivationOperation.STAGE_DYNAMIC,materialization_generation_id=generation.materialization_generation_id,
+                    materialization_lease_owner=request.worker_id,materialization_lease_epoch=generation.lease_epoch))
+                if staged.status is UniverseActivationStatus.STAGED:
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_STAGED,
+                        entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
+                if staged.reason_code not in _TRANSIENT_WARMING_BLOCKERS and staged.reason_code != "COMPARATIVE_PROJECTION_INCOMPLETE":
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
+                        reason_code=staged.reason_code,entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.TARGET_WARMING,
+                    reason_code=staged.reason_code,entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
+            return _blocked("GENERIC_ACTIVATION_REQUIRED")
         finally:
             await uow.instrument_selection.release_generic_materialization_generation_lease(
                 generation.materialization_generation_id,worker_id=request.worker_id,lease_epoch=generation.lease_epoch)
