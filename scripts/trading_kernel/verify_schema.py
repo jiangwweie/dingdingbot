@@ -542,7 +542,7 @@ async def _verify_preservation(
             }
         ),
         EXIT_PROFILE_SOURCE_REVISION: frozenset(
-            {EXPECTED_ALEMBIC_REVISION}
+            {"0007_exit_profile_authority_v1"}
         ),
     }
     allowed_target_revisions = allowed_targets_by_source[source_revision]
@@ -1542,14 +1542,33 @@ def _source_0005_table_columns() -> dict[str, tuple[str, ...]]:
 
 
 def _source_0006_table_columns() -> dict[str, tuple[str, ...]]:
+    # Explicit inverse of the unreleased 0008 schema changes. These are source
+    # certification identities, not runtime fallback columns.
+    epoch_columns = ("selection_epoch_id", "selection_control_version", "predecessor_snapshot_id", "predecessor_member_digest")
+    added = {
+        **_GENERIC_PRE_DYNAMIC_ADDED_COLUMNS,
+        "brc_strategy_selection_control_current": ("selection_epoch_id",),
+        "brc_instrument_selection_jobs_current": epoch_columns,
+        "brc_instrument_selection_attempts": epoch_columns,
+        "brc_instrument_selection_snapshots": ("selection_family", "selection_epoch_id", "predecessor_snapshot_id", "predecessor_member_digest"),
+        "brc_instrument_selection_member_decisions": ("selection_family", "feature_value", "retained", "qualification_fact", "qualification_semantic_digest"),
+        "brc_strategy_universe_materialization_generations": ("selection_epoch_id", "selection_control_version", "lease_epoch"),
+    }
+    removed = {
+        "brc_strategy_universe_materialization_generations": ("previous_long_universe_version_id", "previous_short_universe_version_id"),
+        "brc_strategy_selection_rollback_baselines": ("source_long_universe_version_id", "source_short_universe_version_id"),
+        "brc_selection_session_authorities": ("authorized_long_universe_version_id", "authorized_short_universe_version_id"),
+    }
+    renamed = {"period_anchor_ms": "session_start_ms", "pending_effective_period_anchor_ms": "pending_effective_session_start_ms"}
     return {
-        table.name: tuple(
-            column.name
+        table.name: (*tuple(
+            renamed.get(column.name, column.name)
             for column in table.c
             if column.name not in _EXIT_PROFILE_ADDED_COLUMNS.get(table.name, ())
-        )
+            and column.name not in added.get(table.name, ())
+        ), *removed.get(table.name, ()))
         for table in sorted(metadata.tables.values(), key=lambda item: item.name)
-        if table.name not in _EXIT_PROFILE_TABLES
+        if table.name not in _EXIT_PROFILE_TABLES | _GENERIC_SELECTION_TABLES
     }
 
 

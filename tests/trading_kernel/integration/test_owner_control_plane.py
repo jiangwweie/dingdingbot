@@ -17,6 +17,7 @@ from scripts.trading_kernel.verify_schema import (
     _source_0003_table_columns,
     _source_0004_table_columns,
     _source_0005_table_columns,
+    _source_0006_table_columns,
     _verify_compatible_source,
     _verify_preservation,
 )
@@ -51,6 +52,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 @pytest.mark.parametrize("revision,source_columns", [
     ("0004_owner_control_plane", _source_0004_table_columns),
     ("0005_tradfi_instrument_center", _source_0005_table_columns),
+    ("0006_sor_dynamic_selection_v0", _source_0006_table_columns),
 ])
 async def test_preservation_inventory_matches_exact_source_schema(revision, source_columns) -> None:
     name, url = await create_empty_database()

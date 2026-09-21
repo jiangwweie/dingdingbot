@@ -298,6 +298,8 @@ candidate的installed Spec集合、Spec digests及证据绑定在release freeze�
 
 实施记录：离线`verify_schema.py`的0003/0004/0005 source inventory明确排除0008新增Generic表及comparison列，修复从current metadata错误查询旧schema新增列的问题。真实Docker PostgreSQL逐表逐列集合比对覆盖上述三版；0003→head的Owner-control preservation测试通过，所在模块4 passed。此为source认证工具，不增加production旧schema reader或fallback。0006 source清单还涉及period字段改名及pair字段归一化，未由此证明闭合；完整0007→0008 logical preservation和以下Static producer差分仍待完成。
 
+后续0006认证修复：source inventory显式还原0008改名前的period字段和被归一化的pair引用，并排除Generic新增表/列；真实0006数据库全表全列集合比对通过。0006→0007保全目标固定为`0007_exit_profile_authority_v1`，不随current head漂移；真实source verification→migration→preservation→identity rotation及篡改拒绝的专项测试通过。这不提供0008目标的保全授权，0007→0008完整logical preservation仍待实现和认证。
+
 在相同Static TradableUniverse、Static ComparisonUniverse、原Episode state且无Owner mode change条件下，对迁移前source和迁移后target重放**相同的第一根及后续合法Observation输入**，分别断言：
 
 ```text

@@ -414,7 +414,15 @@ async def test_real_0006_to_0007_source_verification_preservation_and_identity_p
             "--expected-preservation-digest",
             preservation_digest,
         )
-        assert preserved.returncode == 0, preserved.stderr[-4000:]
+        preserved_payload = json.loads(preserved.stdout)
+        assert preserved.returncode == 0, {
+            "status": preserved_payload.get("status"),
+            "revision": preserved_payload.get("alembic_revision"),
+            "targets": preserved_payload.get("allowed_target_revisions"),
+            "digest": preserved_payload.get("preservation_manifest", {}).get("digest"),
+            "expected": preservation_digest,
+            "stderr": preserved.stderr[-4000:],
+        }
         assert json.loads(preserved.stdout)["status"] == "pass"
 
         upgraded_0007 = _run_seed_runtime_authority(
