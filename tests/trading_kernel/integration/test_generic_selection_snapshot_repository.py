@@ -15,6 +15,11 @@ from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationStatus,
     advance_strategy_universe,
 )
+from src.trading_kernel.application.drain_strategy_entry_vacuum import (
+    DrainStrategyEntryVacuumRequest,
+    VacuumDrainStatus,
+    drain_strategy_entry_vacuum_once,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     install_strategy_universe,
@@ -706,16 +711,22 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
         draining = await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)
         assert draining is not None and draining.lifecycle_state.value == "DRAINING_ENTRY"
         assert draining.fenced_at_ms == fence.fenced_at_ms
-    # Remaining installation prerequisite only; Coordinator Vacuum/drain is not yet supplied here.
-    async with database.begin() as conn:
-        await conn.execute(sa.text("UPDATE brc_strategy_universe_materialization_generations SET lifecycle_state='MATERIALIZING' WHERE materialization_generation_id=:gid"),
-            {"gid":generation.materialization_generation_id})
+    # No ENTRY exists in this fixture; use the shared drain completion gate.
+    async with PostgresKernelUnitOfWork(database) as uow:
+        with pytest.raises(SelectionJobConflict, match="Vacuum.*changed"):
+            await uow.instrument_selection.mark_entry_vacuum_drained(
+                fence.model_copy(update={"first_blocker":"forged"}),
+                target_state="RECONFIGURING",drained_at_ms=generation.created_at_ms+4)
+        drained = await drain_strategy_entry_vacuum_once(uow,
+            DrainStrategyEntryVacuumRequest(strategy_group_id=group,
+                selection_spec_id=source.spec.selection_spec_id,now_ms=generation.created_at_ms+4))
+        assert drained.status == VacuumDrainStatus.ENTRY_DRAINED
     async with PostgresKernelUnitOfWork(database) as uow:
         target = await install_strategy_universe(uow, UniverseInstallRequest(
             event_spec_id=source.spec.event_spec_id,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
             exchange_instrument_ids=snapshot.selected_members,source_kind="dynamic_selection",
             materialization_generation_id=generation.materialization_generation_id,expected_member_set_digest=snapshot.member_set_digest,
-            installed_at_ms=generation.created_at_ms+4))
+            installed_at_ms=generation.created_at_ms+5))
         assert target.universe is not None and target.universe.exchange_instrument_ids==snapshot.selected_members
         assert target.lifecycle_state=="warming"
     if group in {"MPG-001","MI-001"}:
@@ -750,7 +761,7 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
         excluded = next(m for m in source.spec.candidate_ids if m not in snapshot.selected_members)
         request = ObservationRequest(runtime_scope_id=scope_id, runtime_commit="a"*40,
             schema_revision=CURRENT_SCHEMA_REVISION, trigger_candle_close_time_ms=close_at,
-            attempted_at_ms=generation.created_at_ms+5)
+            attempted_at_ms=generation.created_at_ms+6)
         missing = await observe_strategy_scope(
             lambda: PostgresKernelUnitOfWork(database), ComparisonMarket(excluded), request,
         )
@@ -762,14 +773,14 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
         market = ComparisonMarket()
         observed = await observe_strategy_scope(
             lambda: PostgresKernelUnitOfWork(database), market,
-            request.model_copy(update={"attempted_at_ms": generation.created_at_ms+30_006}),
+            request.model_copy(update={"attempted_at_ms": generation.created_at_ms+30_007}),
         )
         assert observed.status == ObservationStatus.WARMED, observed
         for other_scope_id in scope_ids[1:]:
             other = await observe_strategy_scope(
                 lambda: PostgresKernelUnitOfWork(database), market,
                 request.model_copy(update={"runtime_scope_id": other_scope_id,
-                    "attempted_at_ms": generation.created_at_ms+30_006}),
+                    "attempted_at_ms": generation.created_at_ms+30_007}),
             )
             assert other.status == ObservationStatus.WARMED, other
         # All tradable scopes share one complete comparison fetch per close.

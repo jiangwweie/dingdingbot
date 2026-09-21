@@ -3172,6 +3172,11 @@ class PostgresInstrumentSelectionRepository:
     ) -> StrategyEntryVacuum:
         if vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY:
             raise ValueError("Vacuum drain completion requires DRAINING_ENTRY")
+        current_row = (await self._connection.execute(sa.select(strategy_entry_vacuums_current).where(
+            strategy_entry_vacuums_current.c.entry_vacuum_id == vacuum.entry_vacuum_id,
+        ).with_for_update())).mappings().one_or_none()
+        if current_row is None or _entry_vacuum_from_row(current_row) != vacuum:
+            raise SelectionJobConflict("Vacuum authority changed before drain completion")
         if await self.entry_vacuum_has_drain_blockers(
             strategy_group_id=vacuum.strategy_group_id
         ):
@@ -3244,14 +3249,17 @@ class PostgresInstrumentSelectionRepository:
             )
             return drained
         assert vacuum.source_generation_id is not None
-        generation = await self.get_materialization_generation(
-            vacuum.source_generation_id,
-            for_update=True,
-        )
+        generation: MaterializationGeneration | GenericMaterializationGeneration | None
+        if vacuum.strategy_group_id == "SOR-001":
+            generation = await self.get_materialization_generation(vacuum.source_generation_id,for_update=True)
+        else:
+            generation = await self.get_generic_materialization_generation(vacuum.source_generation_id,for_update=True)
         if (
             generation is None
             or generation.lifecycle_state
             is not MaterializationGenerationState.DRAINING_ENTRY
+            or generation.strategy_group_id != vacuum.strategy_group_id
+            or generation.selection_spec_id != vacuum.selection_spec_id
         ):
             raise SelectionJobConflict("Generation is not waiting for ENTRY drain")
         generation_update = await self._connection.execute(
