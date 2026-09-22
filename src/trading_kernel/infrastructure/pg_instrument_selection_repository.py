@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from hashlib import sha256
 from typing import ClassVar, Literal
 
@@ -60,6 +61,7 @@ from src.trading_kernel.domain.instrument_selection import (
 )
 from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.domain.selection_authority import (
+    AuthorityEventBinding,
     AuthorityGapAudit,
     AuthorityGapAuditKind,
     AuthorityGapAuditState,
@@ -69,6 +71,7 @@ from src.trading_kernel.domain.selection_authority import (
     AuthorityOutcome,
     ContinuitySourceKind,
     CurrentSelectionAuthority,
+    GenericSelectionAuthority,
     MaterializationGeneration,
     MaterializationGenerationClaimStatus,
     MaterializationGenerationLeaseClaim,
@@ -3728,6 +3731,63 @@ class PostgresInstrumentSelectionRepository:
             authority=_authority_from_row(row),
             projection_version=int(row["current_projection_version"]),
         )
+
+
+def generic_authority_storage_values(authority: GenericSelectionAuthority) -> dict[str, object]:
+    """Encode the shared parent row, never grant or move a current pointer."""
+    authority = GenericSelectionAuthority.model_validate(authority.model_dump())
+    return {
+        "selection_authority_id":authority.selection_authority_id,
+        "selection_spec_id":authority.selection_spec_id,
+        "selection_epoch_id":authority.selection_epoch_id,
+        "selection_control_version":authority.selection_control_version,
+        "period_anchor_ms":authority.period.feature_cutoff_at_ms,
+        "decision_boundary_ms":authority.period.scheduled_effective_at_ms,
+        "authority_sequence":authority.authority_sequence,
+        "selection_mode":authority.selection_mode,
+        "selection_job_id":None,"selection_attempt_id":None,
+        "selection_snapshot_id":authority.selection_snapshot_id,
+        "continued_from_selection_authority_id":None,"continuity_source_kind":"NONE",
+        "authority_gap_audit_id":None,"materialization_generation_id":authority.materialization_generation_id,
+        "owner_control_version":authority.owner_control_version,"authority_outcome":authority.authority_outcome,
+        "grant_proof_kind":None if authority.blocks_new_entry else "PRECOMMITTED_SELECTION_CURRENT_CLOSE",
+        "grant_predecessor_authority_id":None,
+        "current_close_proof":None if authority.current_close_proof is None else authority.current_close_proof.model_dump(mode="json"),
+        "membership_freshness":None if authority.membership_freshness is None else authority.membership_freshness.model_dump(mode="json"),
+        "comparison_universe_id":authority.comparison_universe_id,
+        "comparison_transition_revision":authority.comparison_transition_revision,
+        "effective_from_ms":authority.effective_from_ms,
+        "first_eligible_close_time_ms":authority.first_eligible_close_time_ms,
+        "expires_at_ms":authority.expires_at_ms,"reason_code":authority.authority_outcome,
+        "semantic_digest":authority.semantic_digest,"created_at_ms":authority.created_at_ms,
+    }
+
+
+def generic_authority_from_storage(row: Mapping[str, object], *, spec: GenericSelectionSpecV1,
+    event_bindings: tuple[Mapping[str, object], ...]) -> GenericSelectionAuthority:
+    """Decode all authority fields and fail closed on contradictory provenance."""
+    if len(event_bindings) != 1:
+        raise ValueError("Generic Authority requires one exact Event binding")
+    binding = event_bindings[0]
+    if "selection_authority_id" in binding and binding["selection_authority_id"] != row["selection_authority_id"]:
+        raise ValueError("Generic Authority Event parent differs")
+    authority = GenericSelectionAuthority.model_validate({
+        **{name:row[name] for name in (
+            "selection_authority_id","selection_spec_id","selection_epoch_id","selection_snapshot_id",
+            "materialization_generation_id","authority_sequence","owner_control_version","selection_control_version",
+            "selection_mode","authority_outcome","current_close_proof","membership_freshness",
+            "comparison_universe_id","comparison_transition_revision","effective_from_ms","created_at_ms")},
+        "strategy_group_id":spec.strategy_group_id,
+        "period":{"feature_cutoff_at_ms":row["period_anchor_ms"],"cadence_hours":spec.cadence_hours,
+            "scheduled_effective_at_ms":row["decision_boundary_ms"],"period_expires_at_ms":row["expires_at_ms"]},
+        "event_binding":{name:binding[name] for name in AuthorityEventBinding.model_fields},
+    })
+    if authority.selection_spec_id != spec.selection_spec_id:
+        raise ValueError("Generic Authority installed Spec differs")
+    canonical = generic_authority_storage_values(authority)
+    if any(row.get(name) != value for name,value in canonical.items()):
+        raise ValueError("Generic Authority storage identity or semantic digest differs")
+    return authority
 
 
 def _authority_values(authority: SelectionSessionAuthority) -> dict[str, object]:

@@ -62,6 +62,13 @@ TARGET_REVISION = "0008_generic_dynamic_selection_v1"
 
 @pytest.mark.asyncio
 async def test_authority_schema_binds_snapshot_epoch(head_template_engine) -> None:
+    from src.trading_kernel.infrastructure.pg_models import (
+        selection_session_authorities,
+    )
+    async with head_template_engine.begin() as conn:
+        for column in ("current_close_proof", "membership_freshness"):
+            nullable_type = selection_session_authorities.c[column].type
+            assert await conn.scalar(sa.select(sa.bindparam("proof", None, type_=nullable_type).is_(None))) is True
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:
         await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id="authority-epoch",runtime_commit="a"*40,
             schema_revision=TARGET_REVISION,seeded_at_ms=NOW_MS))
