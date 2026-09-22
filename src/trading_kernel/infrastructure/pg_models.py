@@ -1065,6 +1065,19 @@ selection_session_authorities = sa.Table(
     _id("selection_spec_id"),
     sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"),
     sa.Column("selection_control_version", sa.BigInteger, nullable=True),
+    _json("current_close_proof", nullable=True),
+    _json("membership_freshness", nullable=True),
+    _id("comparison_universe_id", nullable=True),
+    sa.Column("comparison_transition_revision", sa.BigInteger, nullable=True),
+    sa.ForeignKeyConstraint(["comparison_universe_id"], ["brc_comparison_universe_definitions.comparison_universe_id"],
+        name="fk_brc_authority_comparison"),
+    sa.CheckConstraint(
+        "(current_close_proof IS NULL OR jsonb_typeof(current_close_proof)='object') AND "
+        "(membership_freshness IS NULL OR jsonb_typeof(membership_freshness)='object') AND "
+        "((comparison_universe_id IS NULL AND comparison_transition_revision IS NULL) OR "
+        "(comparison_universe_id IS NOT NULL AND comparison_transition_revision IS NOT NULL AND comparison_transition_revision>=0))",
+        name="generic_proof_shape",
+    ),
     _time("period_anchor_ms"),
     _time("decision_boundary_ms"),
     sa.Column("authority_sequence", sa.BigInteger, nullable=False),

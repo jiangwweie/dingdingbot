@@ -68,6 +68,7 @@ async def test_authority_schema_binds_snapshot_epoch(head_template_engine) -> No
     async with head_template_engine.connect() as conn:
         columns = await conn.run_sync(lambda c: {x["name"] for x in sa.inspect(c).get_columns("brc_selection_session_authorities")})
         assert {"selection_epoch_id", "selection_control_version"} <= columns
+        assert {"current_close_proof", "membership_freshness", "comparison_universe_id", "comparison_transition_revision"} <= columns
         foreign_keys = await conn.run_sync(lambda c: sa.inspect(c).get_foreign_keys("brc_selection_session_authorities"))
         assert any(fk["constrained_columns"] == ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id"]
             and fk["referred_table"] == "brc_instrument_selection_snapshots" for fk in foreign_keys)
@@ -83,6 +84,11 @@ async def test_authority_schema_binds_snapshot_epoch(head_template_engine) -> No
                 "VALUES('authority:wrong-epoch','sor-dynamic-selection-v0','generic:1',1)"))
     async with head_template_engine.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 0
+    with pytest.raises(sa.exc.DBAPIError, match="SOR Authority forbids Generic proof"):
+        async with head_template_engine.begin() as conn:
+            await conn.execute(sa.text("INSERT INTO brc_selection_session_authorities "
+                "(selection_authority_id,selection_spec_id,current_close_proof) "
+                "VALUES('authority:wrong-proof','sor-dynamic-selection-v0','{}'::jsonb)"))
 
 
 async def _insert_0007_comparison_source(

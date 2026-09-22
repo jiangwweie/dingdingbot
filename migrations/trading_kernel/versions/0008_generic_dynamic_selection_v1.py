@@ -56,6 +56,17 @@ def _authority_snapshot_epoch() -> None:
     table = "brc_selection_session_authorities"
     op.add_column(table, sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"))
     op.add_column(table, sa.Column("selection_control_version", sa.BigInteger(), nullable=True))
+    op.add_column(table, sa.Column("current_close_proof", sa.dialects.postgresql.JSONB(), nullable=True))
+    op.add_column(table, sa.Column("membership_freshness", sa.dialects.postgresql.JSONB(), nullable=True))
+    op.add_column(table, sa.Column("comparison_universe_id", ID, nullable=True))
+    op.add_column(table, sa.Column("comparison_transition_revision", sa.BigInteger(), nullable=True))
+    op.create_foreign_key("fk_brc_authority_comparison", table, "brc_comparison_universe_definitions",
+        ["comparison_universe_id"], ["comparison_universe_id"])
+    op.create_check_constraint("ck_brc_authority_generic_proof_shape", table,
+        "(current_close_proof IS NULL OR jsonb_typeof(current_close_proof)='object') AND "
+        "(membership_freshness IS NULL OR jsonb_typeof(membership_freshness)='object') AND "
+        "((comparison_universe_id IS NULL AND comparison_transition_revision IS NULL) OR "
+        "(comparison_universe_id IS NOT NULL AND comparison_transition_revision IS NOT NULL AND comparison_transition_revision>=0))")
     op.create_unique_constraint("uq_brc_snapshot_spec_epoch", "brc_instrument_selection_snapshots",
         ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id"])
     op.create_foreign_key("fk_brc_authority_snapshot_epoch", table, "brc_instrument_selection_snapshots",
@@ -70,6 +81,10 @@ def _authority_snapshot_epoch() -> None:
         DECLARE kind text;
         BEGIN
           SELECT selection_kind INTO kind FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
+          IF kind='sor_dynamic_v0' AND (NEW.current_close_proof IS NOT NULL OR NEW.membership_freshness IS NOT NULL
+              OR NEW.comparison_universe_id IS NOT NULL OR NEW.comparison_transition_revision IS NOT NULL) THEN
+            RAISE EXCEPTION 'SOR Authority forbids Generic proof';
+          END IF;
           IF kind='sor_dynamic_v0' AND NEW.selection_epoch_id<>'sor-v0' THEN
             RAISE EXCEPTION 'SOR Authority cannot carry Generic epoch';
           ELSIF kind='generic_dynamic_v1' AND NEW.selection_epoch_id='sor-v0' THEN
