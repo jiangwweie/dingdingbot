@@ -76,9 +76,17 @@ def _authority_snapshot_epoch() -> None:
         "(selection_epoch_id='sor-v0' AND selection_control_version IS NULL) OR "
         "(selection_epoch_id<>'sor-v0' AND length(trim(selection_epoch_id))>0 "
         "AND selection_control_version IS NOT NULL AND selection_control_version>0)")
+    old_time = next(c["sqltext"] for c in sa.inspect(op.get_bind()).get_check_constraints(table)
+        if c["name"] == "ck_brc_selection_session_authorities_time_valid")
+    op.drop_constraint("ck_brc_selection_session_authorities_time_valid",table,type_="check")
+    op.create_check_constraint("ck_brc_selection_session_authorities_time_valid",table,
+        f"(selection_epoch_id='sor-v0' AND ({old_time})) OR "
+        "(selection_epoch_id<>'sor-v0' AND authority_sequence>0 AND owner_control_version>0 "
+        "AND period_anchor_ms>0 AND decision_boundary_ms=period_anchor_ms+3600000 "
+        "AND effective_from_ms>=decision_boundary_ms AND created_at_ms=effective_from_ms AND created_at_ms<expires_at_ms)")
     op.execute(sa.text("""
         CREATE FUNCTION brc_validate_authority_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
-        DECLARE kind text;
+        DECLARE kind text; cadence integer; snapshot brc_instrument_selection_snapshots%ROWTYPE;
         BEGIN
           SELECT selection_kind INTO kind FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
           IF kind='sor_dynamic_v0' AND (NEW.current_close_proof IS NOT NULL OR NEW.membership_freshness IS NOT NULL
@@ -89,6 +97,24 @@ def _authority_snapshot_epoch() -> None:
             RAISE EXCEPTION 'SOR Authority cannot carry Generic epoch';
           ELSIF kind='generic_dynamic_v1' AND NEW.selection_epoch_id='sor-v0' THEN
             RAISE EXCEPTION 'Generic Authority requires explicit epoch';
+          END IF;
+          IF kind='generic_dynamic_v1' THEN
+            IF NEW.authority_outcome<>'VALID_EMPTY' THEN
+              RAISE EXCEPTION 'Generic trading Authority proof contract is not installed';
+            END IF;
+            SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=NEW.selection_spec_id;
+            IF cadence IS NULL OR NEW.period_anchor_ms % (cadence*3600000::bigint)<>0
+                OR NEW.expires_at_ms<>NEW.decision_boundary_ms+cadence*3600000::bigint THEN
+              RAISE EXCEPTION 'Generic Authority period differs from Spec';
+            END IF;
+            IF NEW.authority_outcome='VALID_EMPTY' THEN
+              SELECT * INTO snapshot FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=NEW.selection_snapshot_id;
+              IF NOT FOUND OR snapshot.selection_spec_id<>NEW.selection_spec_id OR snapshot.selection_epoch_id<>NEW.selection_epoch_id
+                  OR snapshot.selected_count<>0 OR snapshot.period_anchor_ms<>NEW.period_anchor_ms OR snapshot.created_at_ms>NEW.created_at_ms
+                  OR NEW.current_close_proof IS NOT NULL OR NEW.membership_freshness IS NOT NULL THEN
+                RAISE EXCEPTION 'Generic VALID_EMPTY requires exact zero-member Snapshot and no trading proof';
+              END IF;
+            END IF;
           END IF;
           RETURN NEW;
         END; $$
@@ -751,7 +777,7 @@ def _comparison_tables() -> None:
 
 
 def _episode_provenance() -> None:
-    for column in (
+    columns: Sequence[sa.Column] = (
         sa.Column("comparison_binding_digest", DIGEST, nullable=True),
         sa.Column("comparison_transition_revision", sa.BigInteger(), nullable=True),
         sa.Column("comparison_source_evidence_digest", DIGEST, nullable=True),
@@ -759,7 +785,8 @@ def _episode_provenance() -> None:
         sa.Column("comparison_last_observed_at_ms", sa.BigInteger(), nullable=True),
         sa.Column("comparison_last_detector_status", sa.String(32), nullable=True),
         sa.Column("comparison_checkpoint_version", sa.BigInteger(), nullable=True),
-    ):
+    )
+    for column in columns:
         op.add_column("brc_exposure_episode_current", column)
     op.drop_constraint("ck_brc_episode_state", "brc_exposure_episode_current", type_="check")
     op.drop_constraint("ck_brc_episode_state_shape", "brc_exposure_episode_current", type_="check")

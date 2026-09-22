@@ -45,6 +45,9 @@ from src.trading_kernel.application.run_instrument_selection import (
     run_instrument_selection_once,
 )
 from src.trading_kernel.domain.detector import DetectorStatus
+from src.trading_kernel.domain.dynamic_selection_timing import (
+    build_generic_selection_period,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.exposure_episode import (
     advance_comparison_bound_exposure_episode,
@@ -67,17 +70,25 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionAttemptOutcome,
     SelectionJobFailure,
 )
-from src.trading_kernel.domain.selection_authority import selected_member_set_digest
+from src.trading_kernel.domain.selection_authority import (
+    AuthorityEventBinding,
+    GenericSelectionAuthority,
+    selected_member_set_digest,
+)
 from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
     SelectionJobConflict,
+    generic_authority_from_storage,
+    generic_authority_storage_values,
 )
 from src.trading_kernel.infrastructure.pg_models import (
     instrument_selection_attempts,
     instrument_selection_jobs_current,
     instrument_selection_member_decisions,
     instrument_selection_snapshots,
+    selection_authority_event_bindings,
+    selection_session_authorities,
     strategy_selection_control_current,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
@@ -117,6 +128,51 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
                 reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb", common_numeric_authority="PASS", sor_golden="PASS", spec_cert="PASS",
             ))
     yield head_template_engine
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_generic_empty_authority_persists_without_positive_grant(database: AsyncEngine, group: str) -> None:
+    source = inputs(group)
+    source = source.model_copy(update={"member_windows":tuple(qualify_window(w,False) for w in source.member_windows)})
+    snapshot = compute_generic_selection(source)
+    assert not snapshot.selected_members
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,source_observed_at_ms=source.source_observed_at_ms)
+    authority = GenericSelectionAuthority(selection_authority_id="authority:empty:"+group,
+        selection_spec_id=source.spec.selection_spec_id,strategy_group_id=group,selection_epoch_id=snapshot.selection_epoch_id,
+        selection_snapshot_id=snapshot.selection_snapshot_id,authority_sequence=1,owner_control_version=1,selection_control_version=1,
+        period=build_generic_selection_period(feature_cutoff_at_ms=CUTOFF,cadence_hours=source.spec.cadence_hours),
+        authority_outcome="VALID_EMPTY",event_binding=AuthorityEventBinding.empty(event_spec_id=source.spec.event_spec_id,position_side=source.spec.position_side),
+        current_close_proof=None,membership_freshness=None,effective_from_ms=snapshot.effective_from_ms+1,created_at_ms=snapshot.effective_from_ms+1)
+    for changes, reason in (({"current_close_proof":{}},"Generic VALID_EMPTY"),
+                            ({"expires_at_ms":authority.expires_at_ms+HOUR},"Generic Authority period"),
+                            ({"authority_outcome":"NO_CHANGE"},"Generic trading Authority proof contract"),
+                            ({"selection_epoch_id":"wrong-epoch"},"Generic VALID_EMPTY")):
+        with pytest.raises(sa.exc.DBAPIError,match=reason):
+            async with database.begin() as conn:
+                await conn.execute(sa.insert(selection_session_authorities).values(**{**generic_authority_storage_values(authority),**changes}))
+    nonempty_source = next_input(inputs(group)).model_copy(update={"predecessor_snapshot":snapshot})
+    nonempty = compute_generic_selection(nonempty_source)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(nonempty,decision_at_ms=nonempty_source.decision_at_ms,source_observed_at_ms=nonempty_source.source_observed_at_ms)
+    with pytest.raises(sa.exc.DBAPIError,match="Generic VALID_EMPTY"):
+        async with database.begin() as conn:
+            await conn.execute(sa.insert(selection_session_authorities).values(**{
+                **generic_authority_storage_values(authority),"selection_snapshot_id":nonempty.selection_snapshot_id,
+                "period_anchor_ms":nonempty.feature_cutoff_at_ms,"decision_boundary_ms":nonempty.effective_from_ms,
+                "expires_at_ms":nonempty.expires_at_ms,"effective_from_ms":nonempty.effective_from_ms+1,
+                "created_at_ms":nonempty.effective_from_ms+1}))
+    async with database.begin() as conn:
+        await conn.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
+        await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
+            **authority.event_binding.model_dump(mode="json")))
+    async with database.connect() as conn:
+        row = (await conn.execute(sa.select(selection_session_authorities))).mappings().one()
+        bindings = tuple((await conn.execute(sa.select(selection_authority_event_bindings))).mappings())
+        assert generic_authority_from_storage(row,spec=source.spec,event_bindings=bindings) == authority
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_authority_current")) == 0
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
 
 
 @pytest.mark.asyncio

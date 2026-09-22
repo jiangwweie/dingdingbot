@@ -373,6 +373,8 @@ Authority proof storage准备：原Authority表增加current_close_proof、membe
 
 Authority codec增量：现有PG Selection repository增加Generic parent row编码/解码，父表全部字段映射与唯一Event binding、installed Spec、typed proof/freshness及semantic digest交叉核验；拒绝错误epoch/period/first-close/proof-kind、错属或重复binding、额外历史引用及digest篡改。四策略正常/VALID_EMPTY roundtrip通过。两个JSON proof列显式none_as_null，真实Docker PG绑定测试证明None为SQL NULL而非JSON null，避免VALID_EMPTY插入形状冲突。Unit/Architecture1203 passed，全源码Mypy通过。此处尚无Generic INSERT/current CAS接口，原子activation和数据库Generic time/proof/grant语义约束继续未完成；不得使用codec单测替代PG写入/完整交易链认证。
 
+Generic VALID_EMPTY存储验收：0008保留SOR原time表达式，仅Generic分支按已安装Spec校验1h/4h period及实际commit边界。VALID_EMPTY触发器要求同Spec/epoch/period的zero-member Snapshot、已提交来源以及无positive proof。四策略真实PG写入parent+EMPTY binding并经codec还原通过，错误epoch/expiry、非零Snapshot伪造empty及夹带proof均拒绝；current pointer/Command保持零。Generic正向proof合同未落库期间显式拒绝非VALID_EMPTY行，防止借用SOR旧proof；此为未完成实现阶段的fail-closed边界，不是最终功能。Generic repository62 passed，Unit/Architecture1203 passed；正式empty commit/current CAS/Vacuum resolution及正常activation仍待完成。
+
 Generic准备事务增量：现有Selection repository新增typed `PENDING→DESIRED` 写边界，锁定Control/Generation并校验epoch、Control version、source period、lease owner/epoch/expiry，CAS更新并追加唯一DESIRED event。四策略集成用例开始通过正式claim→desired，不再跳过该步骤；错误lease拒绝、重复调用保持首次desired时间。后续MATERIALIZING仍是明确标注的测试前置，不能据此宣称fence/drain或Coordinator已完成。
 
 Generic fence事务增量：复用`open_generation_entry_vacuum`及原Vacuum/event表，Generic分支要求DESIRED、exact Control/epoch/period与worker lease，原子保存OPEN/DRAINING_ENTRY事件和Generation DRAINING_ENTRY/fenced_at。四策略用例开始走真实claim→desired→fence；错误epoch在写Vacuum前拒绝，跨事务读回负向fence及Generation状态通过。SOR调用签名保留默认无Generic token路径，不增加第二drain链。当前仍未把Generic drain completion与Coordinator完整接通，测试中的MATERIALIZING转换仍明确标为前置，不能宣称GS-08完成或授权生产。
