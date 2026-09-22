@@ -141,7 +141,7 @@ async def test_generic_empty_authority_persists_without_positive_grant(database:
         await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,source_observed_at_ms=source.source_observed_at_ms)
     authority = GenericSelectionAuthority(selection_authority_id="authority:empty:"+group,
         selection_spec_id=source.spec.selection_spec_id,strategy_group_id=group,selection_epoch_id=snapshot.selection_epoch_id,
-        selection_snapshot_id=snapshot.selection_snapshot_id,authority_sequence=1,owner_control_version=1,selection_control_version=1,
+        selection_snapshot_id=snapshot.selection_snapshot_id,authority_sequence=1,owner_control_version=1,selection_control_version=2,
         period=build_generic_selection_period(feature_cutoff_at_ms=CUTOFF,cadence_hours=source.spec.cadence_hours),
         authority_outcome="VALID_EMPTY",event_binding=AuthorityEventBinding.empty(event_spec_id=source.spec.event_spec_id,position_side=source.spec.position_side),
         current_close_proof=None,membership_freshness=None,effective_from_ms=snapshot.effective_from_ms+1,created_at_ms=snapshot.effective_from_ms+1)
@@ -163,15 +163,49 @@ async def test_generic_empty_authority_persists_without_positive_grant(database:
                 "period_anchor_ms":nonempty.feature_cutoff_at_ms,"decision_boundary_ms":nonempty.effective_from_ms,
                 "expires_at_ms":nonempty.expires_at_ms,"effective_from_ms":nonempty.effective_from_ms+1,
                 "created_at_ms":nonempty.effective_from_ms+1}))
+    await enable_epoch(database,group)
+    vacuum = StrategyEntryVacuum(entry_vacuum_id="vacuum:empty:"+group,strategy_group_id=group,
+        selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=CUTOFF,source_generation_id=None,
+        state="OPEN",fenced_at_ms=snapshot.effective_from_ms,drained_at_ms=None,resolved_at_ms=None,
+        first_blocker="NO_SELECTION_READY_MEMBERS",projection_version=1)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.open_valid_empty_intent_vacuum(vacuum,selection_snapshot_id=snapshot.selection_snapshot_id)
+        vacuum = await uow.instrument_selection.mark_entry_vacuum_draining(vacuum,started_at_ms=snapshot.effective_from_ms)
+    with pytest.raises(SelectionJobConflict,match="current version"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.commit_generic_valid_empty(authority,entry_vacuum_id=vacuum.entry_vacuum_id,
+                expected_vacuum_version=vacuum.projection_version,expected_current_version=99)
     async with database.begin() as conn:
-        await conn.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
-        await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
-            **authority.event_binding.model_dump(mode="json")))
+        await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' WHERE strategy_group_id=:group"),{"group":group})
+    with pytest.raises(SelectionJobConflict,match="Owner control"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.commit_generic_valid_empty(authority,entry_vacuum_id=vacuum.entry_vacuum_id,
+                expected_vacuum_version=vacuum.projection_version,expected_current_version=None)
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='enabled' WHERE strategy_group_id=:group"),{"group":group})
+        await conn.execute(sa.text("CREATE FUNCTION reject_empty_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected empty current failure'; END; $$"))
+        await conn.execute(sa.text("CREATE TRIGGER reject_empty_test BEFORE INSERT ON brc_selection_authority_current FOR EACH ROW EXECUTE FUNCTION reject_empty_test()"))
+    with pytest.raises(sa.exc.DBAPIError,match="injected empty current failure"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.commit_generic_valid_empty(authority,entry_vacuum_id=vacuum.entry_vacuum_id,
+                expected_vacuum_version=vacuum.projection_version,expected_current_version=None)
+    async with database.begin() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 0
+        assert await conn.scalar(sa.text("SELECT state FROM brc_strategy_entry_vacuums_current")) == "DRAINING_ENTRY"
+        await conn.execute(sa.text("DROP TRIGGER reject_empty_test ON brc_selection_authority_current"))
+        await conn.execute(sa.text("DROP FUNCTION reject_empty_test()"))
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.commit_generic_valid_empty(authority,entry_vacuum_id=vacuum.entry_vacuum_id,
+            expected_vacuum_version=vacuum.projection_version,expected_current_version=None)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.commit_generic_valid_empty(authority,entry_vacuum_id=vacuum.entry_vacuum_id,
+            expected_vacuum_version=vacuum.projection_version,expected_current_version=None)
     async with database.connect() as conn:
         row = (await conn.execute(sa.select(selection_session_authorities))).mappings().one()
         bindings = tuple((await conn.execute(sa.select(selection_authority_event_bindings))).mappings())
         assert generic_authority_from_storage(row,spec=source.spec,event_bindings=bindings) == authority
-        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_authority_current")) == 0
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_authority_current")) == 1
+        assert await conn.scalar(sa.text("SELECT state FROM brc_strategy_entry_vacuums_current")) == "VALID_EMPTY"
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
 
 

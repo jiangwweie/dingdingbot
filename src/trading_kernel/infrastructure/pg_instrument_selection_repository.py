@@ -2834,6 +2834,74 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Entry Vacuum period exceeds readonly bound")
         return tuple(_entry_vacuum_from_row(row) for row in rows)
 
+    async def commit_generic_valid_empty(self, authority: GenericSelectionAuthority, *,
+        entry_vacuum_id: str, expected_vacuum_version: int, expected_current_version: int | None) -> None:
+        authority = GenericSelectionAuthority.model_validate(authority.model_dump())
+        if not authority.blocks_new_entry:
+            raise ValueError("empty commit forbids a trading Authority")
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id == authority.strategy_group_id).with_for_update())).mappings().one_or_none()
+        control = await self.get_selection_control(authority.strategy_group_id,for_update=True)
+        if owner is None or owner["entry_state"] != "enabled" or owner["control_version"] != authority.owner_control_version:
+            raise SelectionJobConflict("Generic empty Owner control changed")
+        if control is None or control.control_version != authority.selection_control_version or not self._generic_control_allows(
+            control,authority.selection_spec_id,authority.selection_epoch_id,authority.period.feature_cutoff_at_ms):
+            raise SelectionJobConflict("Generic empty Selection control changed")
+        snapshot = await self.get_generic_snapshot(authority.selection_snapshot_id)
+        if snapshot.selected_members or snapshot.selection_epoch_id != authority.selection_epoch_id or (
+            snapshot.feature_cutoff_at_ms != authority.period.feature_cutoff_at_ms
+            or snapshot.committed_at_ms > authority.created_at_ms):
+            raise SelectionJobConflict("Generic empty Snapshot differs")
+        vacuum_row = (await self._connection.execute(sa.select(strategy_entry_vacuums_current).where(
+            strategy_entry_vacuums_current.c.entry_vacuum_id == entry_vacuum_id).with_for_update())).mappings().one_or_none()
+        vacuum = None if vacuum_row is None else _entry_vacuum_from_row(vacuum_row)
+        if vacuum is None or vacuum.strategy_group_id != authority.strategy_group_id or vacuum.selection_spec_id != authority.selection_spec_id or vacuum.source_generation_id is not None or (
+            vacuum.first_blocker != "NO_SELECTION_READY_MEMBERS" or vacuum.period_anchor_ms != authority.period.feature_cutoff_at_ms):
+            raise SelectionJobConflict("Generic empty Vacuum differs")
+        intent = (await self._connection.execute(sa.select(strategy_entry_vacuum_events.c.payload).where(
+            strategy_entry_vacuum_events.c.entry_vacuum_id == entry_vacuum_id,
+            strategy_entry_vacuum_events.c.event_sequence == 1))).scalar_one_or_none()
+        if intent is None or intent.get("selection_snapshot_id") != authority.selection_snapshot_id or intent.get("intended_authority_outcome") != "VALID_EMPTY":
+            raise SelectionJobConflict("Generic empty Vacuum Snapshot intent differs")
+        current = (await self._connection.execute(sa.select(selection_authority_current).where(
+            selection_authority_current.c.selection_spec_id == authority.selection_spec_id).with_for_update())).mappings().one_or_none()
+        existing = (await self._connection.execute(sa.select(selection_session_authorities).where(
+            selection_session_authorities.c.selection_authority_id == authority.selection_authority_id))).mappings().one_or_none()
+        if existing is not None:
+            if existing["semantic_digest"] == authority.semantic_digest and current is not None and current["selection_authority_id"] == authority.selection_authority_id and vacuum.state is StrategyEntryVacuumState.VALID_EMPTY:
+                return
+            raise SelectionJobConflict("Generic empty Authority identity conflict")
+        if (None if current is None else current["projection_version"]) != expected_current_version:
+            raise SelectionJobConflict("Generic empty current version changed")
+        if vacuum.projection_version != expected_vacuum_version or vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY:
+            raise SelectionJobConflict("Generic empty Vacuum version changed")
+        sequence = 1
+        if current is not None:
+            prior = (await self._connection.execute(sa.select(selection_session_authorities).where(
+                selection_session_authorities.c.selection_authority_id == current["selection_authority_id"]))).mappings().one()
+            if prior["period_anchor_ms"] == authority.period.feature_cutoff_at_ms:
+                sequence = prior["authority_sequence"]+1
+            elif prior["period_anchor_ms"] > authority.period.feature_cutoff_at_ms:
+                raise SelectionJobConflict("Generic empty period is stale")
+        if authority.authority_sequence != sequence:
+            raise SelectionJobConflict("Generic empty sequence changed")
+        await self.mark_entry_vacuum_drained(vacuum,target_state="VALID_EMPTY",drained_at_ms=authority.created_at_ms)
+        await self._connection.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
+        await self._connection.execute(sa.insert(selection_authority_event_bindings).values(
+            selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
+        if current is None:
+            result = await self._connection.execute(pg_insert(selection_authority_current).values(
+                selection_spec_id=authority.selection_spec_id,selection_authority_id=authority.selection_authority_id,
+                projection_version=1,updated_at_ms=authority.created_at_ms).on_conflict_do_nothing())
+        else:
+            result = await self._connection.execute(sa.update(selection_authority_current).where(
+                selection_authority_current.c.selection_spec_id == authority.selection_spec_id,
+                selection_authority_current.c.projection_version == expected_current_version).values(
+                    selection_authority_id=authority.selection_authority_id,projection_version=current["projection_version"]+1,
+                    updated_at_ms=authority.created_at_ms))
+        if result.rowcount != 1:
+            raise SelectionJobConflict("Generic empty current CAS failed")
+
     async def open_generation_entry_vacuum(
         self,
         vacuum: StrategyEntryVacuum,
