@@ -1547,6 +1547,7 @@ def _source_0006_table_columns() -> dict[str, tuple[str, ...]]:
     epoch_columns = ("selection_epoch_id", "selection_control_version", "predecessor_snapshot_id", "predecessor_member_digest")
     added = {
         **_GENERIC_PRE_DYNAMIC_ADDED_COLUMNS,
+        "brc_selection_session_authorities": ("selection_epoch_id", "selection_control_version"),
         "brc_strategy_selection_control_current": ("selection_epoch_id",),
         "brc_instrument_selection_jobs_current": epoch_columns,
         "brc_instrument_selection_attempts": epoch_columns,

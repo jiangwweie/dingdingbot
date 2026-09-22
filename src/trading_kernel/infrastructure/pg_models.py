@@ -769,6 +769,7 @@ instrument_selection_snapshots = sa.Table(
     ),
     sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "period_anchor_ms"),
     sa.UniqueConstraint("selection_snapshot_id", "selection_semantic_digest"),
+    sa.UniqueConstraint("selection_snapshot_id", "selection_spec_id", "selection_epoch_id", name="uq_brc_snapshot_spec_epoch"),
 )
 
 instrument_selection_member_decisions = sa.Table(
@@ -1062,6 +1063,8 @@ selection_session_authorities = sa.Table(
     metadata,
     _id("selection_authority_id", primary_key=True),
     _id("selection_spec_id"),
+    sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"),
+    sa.Column("selection_control_version", sa.BigInteger, nullable=True),
     _time("period_anchor_ms"),
     _time("decision_boundary_ms"),
     sa.Column("authority_sequence", sa.BigInteger, nullable=False),
@@ -1109,6 +1112,10 @@ selection_session_authorities = sa.Table(
         ["brc_strategy_universe_materialization_generations.materialization_generation_id"],
     ),
     sa.UniqueConstraint("selection_spec_id", "period_anchor_ms", "authority_sequence"),
+    sa.ForeignKeyConstraint(["selection_snapshot_id", "selection_spec_id", "selection_epoch_id"],
+        ["brc_instrument_selection_snapshots.selection_snapshot_id", "brc_instrument_selection_snapshots.selection_spec_id",
+         "brc_instrument_selection_snapshots.selection_epoch_id"],
+        name="fk_brc_authority_snapshot_epoch"),
 )
 sa.Index(
     "ix_brc_selection_session_authorities_period",

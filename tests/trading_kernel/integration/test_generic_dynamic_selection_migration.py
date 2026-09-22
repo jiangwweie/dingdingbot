@@ -60,6 +60,31 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 TARGET_REVISION = "0008_generic_dynamic_selection_v1"
 
 
+@pytest.mark.asyncio
+async def test_authority_schema_binds_snapshot_epoch(head_template_engine) -> None:
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id="authority-epoch",runtime_commit="a"*40,
+            schema_revision=TARGET_REVISION,seeded_at_ms=NOW_MS))
+    async with head_template_engine.connect() as conn:
+        columns = await conn.run_sync(lambda c: {x["name"] for x in sa.inspect(c).get_columns("brc_selection_session_authorities")})
+        assert {"selection_epoch_id", "selection_control_version"} <= columns
+        foreign_keys = await conn.run_sync(lambda c: sa.inspect(c).get_foreign_keys("brc_selection_session_authorities"))
+        assert any(fk["constrained_columns"] == ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id"]
+            and fk["referred_table"] == "brc_instrument_selection_snapshots" for fk in foreign_keys)
+    async with head_template_engine.begin() as conn:
+        await conn.execute(sa.text("INSERT INTO brc_instrument_selection_specs "
+            "(selection_spec_id,strategy_group_id,strategy_version_id,selection_version,selection_kind,algorithm_semantic_digest,status,installed_at_ms) "
+            "VALUES('sor-dynamic-selection-v0','SOR-001','sgv:SOR-001:v4',1,'sor_dynamic_v0',:digest,'active',:now) ON CONFLICT DO NOTHING"),
+            {"digest":"sha256:"+"a"*64,"now":NOW_MS})
+    with pytest.raises(sa.exc.DBAPIError, match="SOR Authority cannot carry Generic epoch"):
+        async with head_template_engine.begin() as conn:
+            await conn.execute(sa.text("INSERT INTO brc_selection_session_authorities "
+                "(selection_authority_id,selection_spec_id,selection_epoch_id,selection_control_version) "
+                "VALUES('authority:wrong-epoch','sor-dynamic-selection-v0','generic:1',1)"))
+    async with head_template_engine.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 0
+
+
 async def _insert_0007_comparison_source(
     engine: AsyncEngine, projection: ComparativeUniverseProjection
 ) -> None:

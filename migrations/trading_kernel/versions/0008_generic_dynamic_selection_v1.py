@@ -49,6 +49,37 @@ def upgrade() -> None:
     _selection_job_epochs()
     _materialization_event_baselines(bind)
     _trusted_universe_member_limit()
+    _authority_snapshot_epoch()
+
+
+def _authority_snapshot_epoch() -> None:
+    table = "brc_selection_session_authorities"
+    op.add_column(table, sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"))
+    op.add_column(table, sa.Column("selection_control_version", sa.BigInteger(), nullable=True))
+    op.create_unique_constraint("uq_brc_snapshot_spec_epoch", "brc_instrument_selection_snapshots",
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id"])
+    op.create_foreign_key("fk_brc_authority_snapshot_epoch", table, "brc_instrument_selection_snapshots",
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id"],
+        ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id"])
+    op.create_check_constraint("ck_brc_authority_epoch_shape", table,
+        "(selection_epoch_id='sor-v0' AND selection_control_version IS NULL) OR "
+        "(selection_epoch_id<>'sor-v0' AND length(trim(selection_epoch_id))>0 "
+        "AND selection_control_version IS NOT NULL AND selection_control_version>0)")
+    op.execute(sa.text("""
+        CREATE FUNCTION brc_validate_authority_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE kind text;
+        BEGIN
+          SELECT selection_kind INTO kind FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
+          IF kind='sor_dynamic_v0' AND NEW.selection_epoch_id<>'sor-v0' THEN
+            RAISE EXCEPTION 'SOR Authority cannot carry Generic epoch';
+          ELSIF kind='generic_dynamic_v1' AND NEW.selection_epoch_id='sor-v0' THEN
+            RAISE EXCEPTION 'Generic Authority requires explicit epoch';
+          END IF;
+          RETURN NEW;
+        END; $$
+    """))
+    op.execute(sa.text("CREATE TRIGGER trg_authority_epoch_v1 BEFORE INSERT ON brc_selection_session_authorities "
+        "FOR EACH ROW EXECUTE FUNCTION brc_validate_authority_epoch_v1()"))
 
 
 def downgrade() -> None:
