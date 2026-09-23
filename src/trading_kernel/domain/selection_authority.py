@@ -899,6 +899,37 @@ class GenericSelectionAuthority(BaseModel):
         return self
 
 
+def generic_authority_entry_rejection(*, authority: GenericSelectionAuthority,
+    selection_spec_id: str, selection_epoch_id: str | None, selection_control_version: int,
+    owner_control_version: int, event_spec_id: str, position_side: str, universe_version_id: str,
+    birth_selection_authority_id: str | None, allow_current_as_birth: bool,
+    observed_close_time_ms: int, now_ms: int) -> str | None:
+    """Pure exact-birth normal grant check; callers also prove current DB facts."""
+    authority = GenericSelectionAuthority.model_validate(authority.model_dump())
+    if (authority.selection_spec_id != selection_spec_id or authority.selection_epoch_id != selection_epoch_id
+        or authority.selection_control_version != selection_control_version or authority.owner_control_version != owner_control_version):
+        return "selection_authority_control_changed"
+    if not authority.effective_from_ms <= now_ms < authority.expires_at_ms:
+        return "selection_authority_missing_or_expired"
+    if authority.blocks_new_entry:
+        return "selection_valid_empty"
+    binding = authority.event_binding
+    if (binding.event_spec_id,binding.position_side,binding.universe_version_id) != (event_spec_id,position_side,universe_version_id):
+        return "selection_authority_universe_changed"
+    if birth_selection_authority_id != authority.selection_authority_id and not (
+        birth_selection_authority_id is None and allow_current_as_birth):
+        return "selection_birth_authority_changed"
+    if (authority.first_eligible_close_time_ms is None
+        or observed_close_time_ms % HOUR_MS != 0
+        or observed_close_time_ms < authority.first_eligible_close_time_ms
+        or observed_close_time_ms != now_ms//HOUR_MS*HOUR_MS
+        or observed_close_time_ms >= authority.expires_at_ms):
+        return "selection_authority_close_ineligible"
+    if authority.membership_freshness is None or not authority.membership_freshness.allows_new_entry_at(now_ms):
+        return "selection_membership_stale"
+    return None
+
+
 class CurrentGenericSelectionAuthority(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     authority: GenericSelectionAuthority

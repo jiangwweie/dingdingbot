@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from src.trading_kernel.domain.dynamic_selection_timing import (
@@ -10,6 +13,7 @@ from src.trading_kernel.domain.generic_selection_spec import generic_selection_s
 from src.trading_kernel.domain.selection_authority import (
     AuthorityEventBinding,
     GenericSelectionAuthority,
+    generic_authority_entry_rejection,
     selected_member_set_digest,
 )
 
@@ -98,3 +102,87 @@ def test_generic_authority_storage_roundtrip_rejects_tampering(group, empty):
         selection_session_authorities,
     )
     assert set(row) == set(selection_session_authorities.c.keys())
+
+
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+def test_generic_positive_grant_requires_exact_birth_event_and_close(group):
+    authority = _authority(group)
+    args = {"authority": authority, "selection_spec_id": authority.selection_spec_id,
+        "selection_epoch_id": authority.selection_epoch_id,"selection_control_version": 1,"owner_control_version": 1,
+        "event_spec_id": authority.event_binding.event_spec_id,"position_side": authority.event_binding.position_side,
+        "universe_version_id": authority.event_binding.universe_version_id,
+        "birth_selection_authority_id": None,"allow_current_as_birth": True,
+        "observed_close_time_ms": authority.first_eligible_close_time_ms,"now_ms": authority.created_at_ms}
+    assert generic_authority_entry_rejection(**args) is None
+    assert generic_authority_entry_rejection(**{**args,"allow_current_as_birth":False}) is not None
+    assert generic_authority_entry_rejection(**{**args,"allow_current_as_birth":False,
+        "birth_selection_authority_id":authority.selection_authority_id}) is None
+    for changes in ({"universe_version_id":"wrong"},{"selection_epoch_id":"wrong"},
+                    {"selection_control_version":2},{"owner_control_version":2},
+                    {"observed_close_time_ms":authority.first_eligible_close_time_ms-3_600_000},
+                    {"observed_close_time_ms":authority.first_eligible_close_time_ms+1},
+                    {"now_ms":authority.expires_at_ms},
+                    {"birth_selection_authority_id":"authority:stale"}):
+        assert generic_authority_entry_rejection(**{**args,**changes}) is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_generic_resolver_checks_current_targets_before_allowing(group):
+    from src.trading_kernel.application.ingest_signal import (
+        resolve_selection_entry_authority,
+    )
+    from src.trading_kernel.domain.selection_authority import SelectionMode
+    authority = _authority(group)
+    spec = generic_selection_spec(group)
+    member = spec.candidate_ids[0]
+    control = SimpleNamespace(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,
+        selection_mode=SelectionMode.DYNAMIC_SELECTION,selection_epoch_id=authority.selection_epoch_id,control_version=1)
+    scope = SimpleNamespace(strategy_group_id=group,event_spec_id=spec.event_spec_id,position_side=spec.position_side,
+        runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",universe_version_id="universe:target",
+        universe_semantic_digest="digest:current",exchange_instrument_id=member)
+    target = SimpleNamespace(event_spec_id=spec.event_spec_id,universe_version_id="universe:target",
+        lifecycle_state=SimpleNamespace(value="active"))
+    # Port stubs isolate the shared resolver; not evidence of atomic activation.
+    uow = SimpleNamespace(
+        instrument_selection=SimpleNamespace(
+            get_selection_control=AsyncMock(return_value=control),
+            get_current_generic_authority=AsyncMock(return_value=SimpleNamespace(authority=authority)),
+            get_current_entry_vacuum=AsyncMock(return_value=None),
+            get_generic_snapshot=AsyncMock(return_value=SimpleNamespace(selection_spec_id=spec.selection_spec_id,
+                selection_epoch_id=authority.selection_epoch_id,selected_members=(member,),selection_snapshot_id=authority.selection_snapshot_id,
+                feature_cutoff_at_ms=authority.period.feature_cutoff_at_ms,committed_at_ms=authority.current_close_proof.selection_committed_at_ms)),
+            get_generic_materialization_generation=AsyncMock(return_value=SimpleNamespace(lifecycle_state=SimpleNamespace(value="ACTIVE"),
+                selection_snapshot_id=authority.selection_snapshot_id,selection_epoch_id=authority.selection_epoch_id,
+                selection_control_version=1,desired_member_count=1,activated_at_ms=authority.effective_from_ms)),
+            get_comparison_universe_binding=AsyncMock(return_value=SimpleNamespace(comparison_universe_id=authority.comparison_universe_id,
+                comparison_transition_revision=authority.comparison_transition_revision))),
+        owner_controls=SimpleNamespace(get_strategy_control=AsyncMock(return_value=SimpleNamespace(entry_state=SimpleNamespace(value="enabled"),control_version=1))),
+        entry_admission=SimpleNamespace(get_owner_policy=AsyncMock(return_value=SimpleNamespace(enabled=True,new_entry_submit_enabled=True,
+            scope=SimpleNamespace(authorizes=lambda **_:True)))),
+        strategy_universes=SimpleNamespace(get_current=AsyncMock(return_value=SimpleNamespace(universe_version_id="universe:target",semantic_digest="digest:current")),
+            get_generation_universe_targets=AsyncMock(return_value=(target,))),
+        signals=SimpleNamespace(get_observation_universe_members=AsyncMock(return_value=SimpleNamespace(lifecycle_state="active",
+            semantic_digest="digest:current",exchange_instrument_ids=(member,))),selection_authority_was_interrupted=AsyncMock(return_value=False)))
+    args = {"runtime_scope": scope,"birth_selection_authority_id": None,"observed_close_time_ms": authority.first_eligible_close_time_ms,
+        "now_ms": authority.created_at_ms,"allow_current_as_birth": True}
+    assert (await resolve_selection_entry_authority(uow,**args)).allowed
+    uow.strategy_universes.get_generation_universe_targets.return_value = ()
+    result = await resolve_selection_entry_authority(uow,**args)
+    assert not result.allowed and result.reason_code == "selection_generation_target_changed"
+    uow.strategy_universes.get_generation_universe_targets.return_value = (target,)
+    generation = uow.instrument_selection.get_generic_materialization_generation.return_value
+    generation.lifecycle_state.value = "STAGED"
+    assert not (await resolve_selection_entry_authority(uow,**args)).allowed
+    generation.lifecycle_state.value = "ACTIVE"
+    snapshot = uow.instrument_selection.get_generic_snapshot.return_value
+    snapshot.selected_members = ()
+    assert not (await resolve_selection_entry_authority(uow,**args)).allowed
+    snapshot.selected_members = (member,)
+    if authority.comparison_universe_id is not None:
+        comparison = uow.instrument_selection.get_comparison_universe_binding.return_value
+        comparison.comparison_transition_revision += 1
+        assert not (await resolve_selection_entry_authority(uow,**args)).allowed
+        comparison.comparison_transition_revision -= 1
+    uow.signals.selection_authority_was_interrupted.return_value = True
+    assert not (await resolve_selection_entry_authority(uow,**args)).allowed

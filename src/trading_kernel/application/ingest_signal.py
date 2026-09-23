@@ -19,6 +19,8 @@ from src.trading_kernel.domain.selection_authority import (
     SelectionSessionAuthority,
     UniverseAuthorityPair,
     authority_successor_is_compatible,
+    generic_authority_entry_rejection,
+    selected_member_set_digest,
     selection_authority_allows_new_entry,
 )
 from src.trading_kernel.domain.signal import StrategySignal, build_signal_fact_digest
@@ -342,7 +344,8 @@ async def resolve_selection_entry_authority(
 
     if control.strategy_group_id != "SOR-001":
         return await _resolve_generic_selection_authority(uow,control=control,runtime_scope=runtime_scope,
-            birth_selection_authority_id=birth_selection_authority_id,now_ms=now_ms,lock_current=lock_current)
+            birth_selection_authority_id=birth_selection_authority_id,now_ms=now_ms,lock_current=lock_current,
+            observed_close_time_ms=observed_close_time_ms,allow_current_as_birth=allow_current_as_birth)
 
     current = await uow.instrument_selection.get_current_authority(
         control.selection_spec_id,
@@ -473,8 +476,9 @@ class IngestSignalResult(BaseModel):
 async def _resolve_generic_selection_authority(
     uow: KernelUnitOfWork, *, control: SelectionControl, runtime_scope: RuntimeScopeSnapshot,
     birth_selection_authority_id: str | None, now_ms: int, lock_current: bool,
+    observed_close_time_ms: int, allow_current_as_birth: bool,
 ) -> SelectionEntryAuthorityDecision:
-    """Generic negative gates; positive grants require the full Event-set verifier."""
+    """Exact Generic birth grant plus bounded current Event-set authority facts."""
     current_id: str | None = None
 
     def decision(status: SelectionEntryAuthorityStatus, reason: str) -> SelectionEntryAuthorityDecision:
@@ -502,9 +506,57 @@ async def _resolve_generic_selection_authority(
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_control_changed")
         if authority.blocks_new_entry:
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_valid_empty")
-        # Normal trading proof verification is not installed yet. Never let an
-        # unverified Generic positive row fall through the Static or SOR path.
-        return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"generic_positive_authority_verification_required")
+        if control.selection_mode is not SelectionMode.DYNAMIC_SELECTION:
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"generic_dynamic_mode_not_active")
+        reason = generic_authority_entry_rejection(authority=authority,selection_spec_id=control.selection_spec_id,
+            selection_epoch_id=control.selection_epoch_id,selection_control_version=control.control_version,
+            owner_control_version=owner.control_version,event_spec_id=runtime_scope.event_spec_id,
+            position_side=runtime_scope.position_side,universe_version_id=runtime_scope.universe_version_id,
+            birth_selection_authority_id=birth_selection_authority_id,allow_current_as_birth=allow_current_as_birth,
+            observed_close_time_ms=observed_close_time_ms,now_ms=now_ms)
+        if reason is not None:
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,reason)
+        universe = await uow.strategy_universes.get_current(runtime_scope.event_spec_id)
+        members = await uow.signals.get_observation_universe_members(event_spec_id=runtime_scope.event_spec_id,
+            universe_version_id=runtime_scope.universe_version_id)
+        if universe is None or members is None or members.lifecycle_state != "active" or (
+            universe.universe_version_id != runtime_scope.universe_version_id
+            or universe.semantic_digest != runtime_scope.universe_semantic_digest
+            or members.semantic_digest != runtime_scope.universe_semantic_digest
+            or runtime_scope.exchange_instrument_id not in members.exchange_instrument_ids
+            or selected_member_set_digest(members.exchange_instrument_ids) != authority.event_binding.member_set_digest):
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_universe_changed")
+        snapshot = await uow.instrument_selection.get_generic_snapshot(authority.selection_snapshot_id)
+        proof = authority.current_close_proof
+        if proof is None or snapshot.selection_spec_id != authority.selection_spec_id or snapshot.selection_epoch_id != authority.selection_epoch_id or (
+            snapshot.selected_members != members.exchange_instrument_ids
+            or snapshot.feature_cutoff_at_ms != authority.period.feature_cutoff_at_ms
+            or snapshot.committed_at_ms != proof.selection_committed_at_ms):
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_snapshot_changed")
+        if authority.materialization_generation_id is not None:
+            generation = await uow.instrument_selection.get_generic_materialization_generation(authority.materialization_generation_id)
+            if generation is None or generation.lifecycle_state.value != "ACTIVE" or (
+                generation.selection_snapshot_id != snapshot.selection_snapshot_id
+                or generation.selection_epoch_id != authority.selection_epoch_id
+                or generation.selection_control_version != authority.selection_control_version
+                or generation.desired_member_count != len(snapshot.selected_members)
+                or generation.activated_at_ms != authority.effective_from_ms):
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_generation_not_active")
+            targets = await uow.strategy_universes.get_generation_universe_targets(authority.materialization_generation_id,for_update=lock_current)
+            if len(targets) != 1 or targets[0].event_spec_id != runtime_scope.event_spec_id or (
+                targets[0].universe_version_id != runtime_scope.universe_version_id or targets[0].lifecycle_state.value != "active"):
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_generation_target_changed")
+        if authority.comparison_universe_id is not None:
+            comparison = await uow.instrument_selection.get_comparison_universe_binding(runtime_scope.event_spec_id,for_update=lock_current)
+            if comparison is None or comparison.comparison_universe_id != authority.comparison_universe_id or comparison.comparison_transition_revision != authority.comparison_transition_revision:
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_comparison_changed")
+        if await uow.signals.selection_authority_was_interrupted(strategy_group_id=control.strategy_group_id,
+            selection_spec_id=control.selection_spec_id,owner_policy_id=runtime_scope.owner_policy_id,
+            after_ms=authority.created_at_ms,through_ms=now_ms):
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_interrupted")
+        return SelectionEntryAuthorityDecision(status=SelectionEntryAuthorityStatus.VALID,
+            selection_authority_id=authority.selection_authority_id,current_selection_authority_id=current_id,
+            reason_code="generic_exact_authority")
     if control.selection_mode is SelectionMode.STATIC_BASELINE and birth_selection_authority_id is None:
         return decision(SelectionEntryAuthorityStatus.VALID,"static_baseline")
     return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_missing_or_expired")
