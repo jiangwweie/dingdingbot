@@ -4,6 +4,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     build_current_final_close_grant_proof,
     build_generic_selection_period,
     plan_hourly_recovery_close,
+    require_current_close_commit,
     require_hourly_recovery_commit,
 )
 from src.trading_kernel.domain.exposure_episode import LockedObservationCursor
@@ -20,6 +21,11 @@ def test_slow_normal_transition_is_not_reclassified_as_recovery(delay_ms: int) -
         observation_cursors=(LockedObservationCursor(episode_domain_key="episode:test",exchange_instrument_id="instrument:test",
             episode_version=0,comparison_checkpoint_version=0,last_observed_at_ms=None),))
     assert proof.current_final_close_time_ms == 5*HOUR
+    require_current_close_commit(proof,committed_at_ms=5*HOUR+delay_ms+1)
+    with pytest.raises(ValueError,match="boundary"):
+        require_current_close_commit(proof,committed_at_ms=6*HOUR)
+    with pytest.raises(ValueError,match="backwards"):
+        require_current_close_commit(proof,committed_at_ms=5*HOUR+delay_ms-1)
     recovery = plan_hourly_recovery_close(recovery_id="recovery:gap", recovery_revision=1,
         reason="AUTHORITY_GAP", period=period, evaluated_at_ms=5*HOUR+delay_ms)
     assert recovery.status == "NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY"

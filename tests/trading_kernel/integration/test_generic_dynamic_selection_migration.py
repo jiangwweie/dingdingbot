@@ -61,6 +61,22 @@ TARGET_REVISION = "0008_generic_dynamic_selection_v1"
 
 
 @pytest.mark.asyncio
+async def test_authority_clock_advances_inside_one_readonly_transaction(head_template_engine) -> None:
+    from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+        PostgresInstrumentSelectionRepository,
+    )
+    async with head_template_engine.connect() as conn:
+        await conn.execute(sa.text("SET TRANSACTION READ ONLY"))
+        repository = PostgresInstrumentSelectionRepository(conn)
+        frozen = await conn.scalar(sa.text("SELECT transaction_timestamp()"))
+        first = await repository.read_authority_clock_ms()
+        await conn.execute(sa.text("SELECT pg_sleep(0.02)"))
+        second = await repository.read_authority_clock_ms()
+        assert second > first
+        assert await conn.scalar(sa.text("SELECT transaction_timestamp()")) == frozen
+
+
+@pytest.mark.asyncio
 async def test_authority_schema_binds_snapshot_epoch(head_template_engine) -> None:
     from src.trading_kernel.infrastructure.pg_models import (
         selection_session_authorities,

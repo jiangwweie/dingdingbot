@@ -32,6 +32,8 @@ from src.trading_kernel.application.install_strategy_universe import (
 )
 from src.trading_kernel.application.ports import KernelUnitOfWork, UnitOfWorkFactory
 from src.trading_kernel.domain.dynamic_selection_timing import (
+    CurrentFinalCloseGrantProof,
+    build_current_final_close_grant_proof,
     build_generic_selection_period,
 )
 from src.trading_kernel.domain.generic_materialization import (
@@ -1176,6 +1178,31 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation_id)
     return await _coordinate_generic_generation(uow_factory=uow_factory,
         request=CoordinateGenericGenerationRequest(materialization_generation_id=generation_id,worker_id=request.worker_id),now_ms=now_ms)
+
+
+async def prepare_generic_current_close_proof(uow: KernelUnitOfWork, *, selection_snapshot_id: str) -> CurrentFinalCloseGrantProof:
+    """Prepare locked NORMAL coverage, not continuity proof or a trading grant.
+
+    Caller must hold the same transaction through activation and recheck the
+    wall clock immediately before commit. Recovery must not call this route.
+    """
+    snapshot = await uow.instrument_selection.get_generic_snapshot(selection_snapshot_id)
+    spec = await uow.instrument_selection.get_generic_spec(snapshot.selection_spec_id)
+    period = build_generic_selection_period(feature_cutoff_at_ms=snapshot.feature_cutoff_at_ms,cadence_hours=spec.cadence_hours)
+    started = await uow.instrument_selection.read_authority_clock_ms()
+    close = started//3_600_000*3_600_000
+    if not period.scheduled_effective_at_ms <= close < period.period_expires_at_ms:
+        raise ValueError("Generic current-close proof period is not eligible")
+    if snapshot.committed_at_ms >= close:
+        raise ValueError("Generic current-close proof Snapshot was not precommitted")
+    cursors = await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,
+        exchange_instrument_ids=snapshot.selected_members,closed_at_ms=close)
+    granted = await uow.instrument_selection.read_authority_clock_ms()
+    if granted < started:
+        raise ValueError("Generic current-close proof clock moved backwards")
+    return build_current_final_close_grant_proof(selection_snapshot_id=snapshot.selection_snapshot_id,
+        selection_committed_at_ms=snapshot.committed_at_ms,source_snapshot_cutoff_at_ms=snapshot.feature_cutoff_at_ms,
+        period=period,current_final_close_time_ms=close,authority_granted_at_ms=granted,observation_cursors=cursors)
 
 
 async def _coordinate_generic_empty(*, uow: KernelUnitOfWork, snapshot: GenericSelectionSnapshotV1,

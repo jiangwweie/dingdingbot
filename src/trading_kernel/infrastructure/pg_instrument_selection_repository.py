@@ -3755,6 +3755,14 @@ class PostgresInstrumentSelectionRepository:
                 "Selection Authority current pointer version changed"
             )
 
+    async def read_authority_clock_ms(self) -> int:
+        # transaction_timestamp()/now() freeze at BEGIN and cannot catch an
+        # activation transaction crossing the next hourly close while blocked.
+        value = await self._connection.scalar(sa.text("SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint"))
+        if value is None or int(value) <= 0:
+            raise SelectionJobConflict("Authority database clock is unavailable")
+        return int(value)
+
     async def get_current_generic_authority(self, selection_spec_id: str, *,
         for_update: bool = False) -> CurrentGenericSelectionAuthority | None:
         spec = await self.get_generic_spec(selection_spec_id)

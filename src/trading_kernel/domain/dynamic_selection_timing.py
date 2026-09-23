@@ -237,6 +237,15 @@ class CurrentFinalCloseGrantProof(BaseModel):
         return self
 
 
+def require_current_close_commit(proof: CurrentFinalCloseGrantProof, *, committed_at_ms: int) -> None:
+    """Recheck NORMAL close at the final transaction boundary; never reclassify a gap."""
+    proof = CurrentFinalCloseGrantProof.model_validate(proof.model_dump())
+    if committed_at_ms < proof.authority_granted_at_ms:
+        raise ValueError("current-close commit clock moved backwards")
+    if committed_at_ms >= proof.period.period_expires_at_ms or committed_at_ms//_HOUR_MS*_HOUR_MS != proof.current_final_close_time_ms:
+        raise ValueError("current-close commit crossed its proof boundary")
+
+
 def build_generic_selection_period(
     *,
     feature_cutoff_at_ms: int,

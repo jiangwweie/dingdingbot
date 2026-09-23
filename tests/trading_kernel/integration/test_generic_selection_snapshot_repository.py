@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -24,6 +25,7 @@ from src.trading_kernel.application.coordinate_selection_materialization import 
     CoordinateGenericSnapshotRequest,
     MaterializationDisposition,
     coordinate_selection_materialization_once,
+    prepare_generic_current_close_proof,
 )
 from src.trading_kernel.application.ingest_signal import (
     resolve_selection_entry_authority,
@@ -132,6 +134,40 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
                 reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb", common_numeric_authority="PASS", sor_golden="PASS", spec_cert="PASS",
             ))
     yield head_template_engine
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_coverage(database: AsyncEngine, group: str) -> None:
+    source = inputs(group)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        now = await uow.instrument_selection.read_authority_clock_ms()
+    cadence = source.spec.cadence_hours*HOUR
+    cutoff = (now-HOUR)//cadence*cadence
+    delta = cutoff-source.feature_cutoff_at_ms
+    source = source.model_copy(update={"feature_cutoff_at_ms":cutoff,"decision_at_ms":source.decision_at_ms+delta,
+        "source_observed_at_ms":source.source_observed_at_ms+delta,"committed_at_ms":source.committed_at_ms+delta,
+        "member_windows":tuple(shift_window(w,delta) for w in source.member_windows)})
+    snapshot = compute_generic_selection(source)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,source_observed_at_ms=source.source_observed_at_ms)
+    with pytest.raises(ValueError,match="latest-close"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            start = now//HOUR*HOUR+8_000
+            with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(side_effect=[start,start//HOUR*HOUR+HOUR+1])):
+                await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        proof = await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)
+        assert proof.authority_granted_at_ms >= now
+        assert proof.current_final_close_time_ms == proof.authority_granted_at_ms//HOUR*HOUR
+        assert tuple(c.exchange_instrument_id for c in proof.observation_cursors) == snapshot.selected_members
+        state = advance_exposure_episode(contract=strategy_contract_for(source.spec.event_spec_id),current=None,
+            detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,observed_at_ms=proof.current_final_close_time_ms,
+            exchange_instrument_id=snapshot.selected_members[0]).current
+        await uow.signals.save_exposure_episode(state,expected_version=0)
+    with pytest.raises(RuntimeError,match="already consumed"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)
 
 
 @pytest.mark.asyncio
