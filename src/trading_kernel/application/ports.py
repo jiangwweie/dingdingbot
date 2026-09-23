@@ -80,6 +80,7 @@ from src.trading_kernel.domain.exposure_episode import (
     ComparisonBindingEpisodeCheckpoint,
     ComparisonBoundExposureEpisodeTransition,
     ExposureEpisodeState,
+    LockedObservationCursor,
 )
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
@@ -1070,6 +1071,9 @@ class SignalRepository(Protocol):
         self,
         episode_domain_key: str,
     ) -> ExposureEpisodeState | None: ...
+
+    async def lock_generic_close_coverage(self, *, event_spec_id: str,
+        exchange_instrument_ids: tuple[str, ...], closed_at_ms: int) -> tuple[LockedObservationCursor, ...]: ...
 
     async def save_exposure_episode(
         self,

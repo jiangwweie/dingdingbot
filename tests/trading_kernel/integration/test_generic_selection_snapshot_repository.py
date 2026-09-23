@@ -136,6 +136,40 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_generic_grant_coverage_rejects_consumed_episode_close(database: AsyncEngine, group: str) -> None:
+    spec = inputs(group).spec
+    contract = strategy_contract_for(spec.event_spec_id)
+    members = spec.candidate_ids[:2]
+    close = CUTOFF+HOUR
+    async with PostgresKernelUnitOfWork(database) as uow:
+        coverage = await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,
+            exchange_instrument_ids=members,closed_at_ms=close)
+        assert len(coverage) == 2 and all(c.episode_version == 0 and c.last_observed_at_ms is None for c in coverage)
+        if group == "CPM-RO-001":
+            with pytest.raises(sa.exc.DBAPIError,match="lock timeout"):
+                async with database.connect() as conn:
+                    await conn.execute(sa.text("SET LOCAL lock_timeout='100ms'"))
+                    from src.trading_kernel.infrastructure.pg_signal_repository import (
+                        PostgresSignalRepository,
+                    )
+                    await PostgresSignalRepository(conn).lock_exposure_episode(coverage[0].episode_domain_key)
+        state = advance_exposure_episode(contract=contract,current=None,detector_status=DetectorStatus.NOT_TRIGGERED,
+            occurred_at_ms=None,observed_at_ms=close,exchange_instrument_id=members[1]).current
+        await uow.signals.save_exposure_episode(state,expected_version=0)
+    with pytest.raises(RuntimeError,match="already consumed"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,
+                exchange_instrument_ids=members,closed_at_ms=close)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        later = await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,
+            exchange_instrument_ids=members,closed_at_ms=close+HOUR)
+        assert later[1].episode_version == 1 and later[1].last_observed_at_ms == close
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current")) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
 async def test_generic_empty_snapshot_coordinator_commits_negative_authority(database: AsyncEngine, group: str) -> None:
     source = inputs(group)
     source = source.model_copy(update={"member_windows":tuple(qualify_window(w,False) for w in source.member_windows)})
@@ -333,7 +367,7 @@ async def test_comparison_checkpoint_persists_without_fabricating_episode(
             async with database.begin() as conn:
                 await conn.execute(sa.text("UPDATE brc_comparison_binding_current SET comparison_transition_revision=2 WHERE event_spec_id=:event"), {"event":spec.event_spec_id})
         for step, status in enumerate((DetectorStatus.TRIGGERED, DetectorStatus.NOT_TRIGGERED, DetectorStatus.TRIGGERED)):
-            close = ((revision-1)*3 + step+1)*1000
+            close = ((revision-1)*3 + step+1)*HOUR
             async with PostgresKernelUnitOfWork(database) as uow:
                 current = await uow.signals.lock_exposure_episode(key)
                 checkpoint = await uow.signals.get_comparison_episode_checkpoint(key)
@@ -359,6 +393,10 @@ async def test_comparison_checkpoint_persists_without_fabricating_episode(
             assert persisted is not None
             if step == 0:
                 assert not transition.signal_eligible
+                with pytest.raises(RuntimeError,match="already consumed"):
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,
+                            exchange_instrument_ids=(member,),closed_at_ms=close)
                 assert persisted.exposure_episode_id == (None if current is None else current.exposure_episode_id)
                 if current is None:
                     assert persisted.state == "comparison_rebase_required"

@@ -7,12 +7,22 @@ from enum import StrEnum
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.strategy_registry import RegisteredStrategyContract
 
 EpisodeState = Literal["armed", "triggered", "comparison_rebase_required"]
+
+
+class LockedObservationCursor(BaseModel):
+    """Read evidence only; does not arm an Episode or grant Entry authority."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    episode_domain_key: str
+    exchange_instrument_id: str
+    episode_version: int = Field(ge=0)
+    comparison_checkpoint_version: int = Field(ge=0)
+    last_observed_at_ms: int | None = Field(default=None, gt=0)
 
 
 class ExposureEpisodeState(BaseModel):

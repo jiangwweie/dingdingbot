@@ -34,8 +34,10 @@ from src.trading_kernel.domain.exposure_episode import (
     ComparisonBindingEpisodeState,
     ComparisonBoundExposureEpisodeTransition,
     ExposureEpisodeState,
+    LockedObservationCursor,
     build_episode_domain_key,
 )
+from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
     ProductSessionSnapshot,
@@ -52,6 +54,7 @@ from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     StrategySignal,
 )
+from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.domain.strategy_universe import (
     MAX_MANUAL_UNIVERSE_MEMBERS,
     MAX_UNIVERSE_MEMBERS,
@@ -231,6 +234,35 @@ class PostgresSignalRepository:
             if row is None
             else ExposureEpisodeState.model_validate(row, extra="ignore")
         )
+
+    async def lock_generic_close_coverage(self, *, event_spec_id: str,
+        exchange_instrument_ids: tuple[str, ...], closed_at_ms: int) -> tuple[LockedObservationCursor, ...]:
+        contract = strategy_contract_for(event_spec_id)
+        spec = generic_selection_spec(contract.strategy_group_id)
+        if closed_at_ms <= 0 or closed_at_ms % 3_600_000 != 0:
+            raise ValueError("Generic grant coverage requires an hourly close")
+        if not 1 <= len(exchange_instrument_ids) <= spec.retain_rank or (
+            tuple(sorted(set(exchange_instrument_ids))) != exchange_instrument_ids
+            or not set(exchange_instrument_ids).issubset(spec.candidate_ids)):
+            raise ValueError("Generic grant coverage members differ from Spec")
+        evidence = []
+        # Same stable per-Episode advisory lock used by formal Observation,
+        # including absent rows. Canonical instrument order avoids deadlocks.
+        for member in exchange_instrument_ids:
+            key = build_episode_domain_key(event_spec_id=event_spec_id,
+                exchange_instrument_id=member,position_side=contract.position_side)
+            episode = await self.lock_exposure_episode(key)
+            checkpoint = await self.get_comparison_episode_checkpoint(key)
+            times = [x for x in (None if episode is None else episode.last_observed_at_ms,
+                None if checkpoint is None else checkpoint.last_observed_at_ms) if x is not None]
+            last = max(times) if times else None
+            if last is not None and last >= closed_at_ms:
+                raise RuntimeError("Generic grant close was already consumed")
+            evidence.append(LockedObservationCursor(episode_domain_key=key,exchange_instrument_id=member,
+                episode_version=0 if episode is None else episode.projection_version,
+                comparison_checkpoint_version=0 if checkpoint is None else checkpoint.projection_version,
+                last_observed_at_ms=last))
+        return tuple(evidence)
 
     async def save_exposure_episode(
         self,
