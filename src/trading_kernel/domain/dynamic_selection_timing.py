@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.exposure_episode import LockedObservationCursor
+
 _HOUR_MS = 60 * 60 * 1000
 
 
@@ -181,7 +183,7 @@ class CurrentFinalCloseGrantProof(BaseModel):
     period: GenericSelectionPeriod
     current_final_close_time_ms: int
     authority_granted_at_ms: int
-    observation_cursor_version: int
+    observation_cursors: tuple[LockedObservationCursor, ...]
 
     @field_validator("selection_snapshot_id", mode="before")
     @classmethod
@@ -203,8 +205,14 @@ class CurrentFinalCloseGrantProof(BaseModel):
             raise ValueError(
                 "current-close proof source or latest-close identity differs"
             )
-        if self.observation_cursor_version <= 0:
-            raise ValueError("current-close proof requires locked Observation cursor")
+        members = tuple(c.exchange_instrument_id for c in self.observation_cursors)
+        if not 1 <= len(members) <= 16 or tuple(sorted(set(members))) != members:
+            raise ValueError("current-close proof requires complete canonical Observation cursors")
+        if len({c.episode_domain_key for c in self.observation_cursors}) != len(members):
+            raise ValueError("current-close proof requires unique Episode keys")
+        if any(c.last_observed_at_ms is not None and c.last_observed_at_ms >= self.current_final_close_time_ms
+               for c in self.observation_cursors):
+            raise ValueError("current-close proof cannot reuse a consumed close")
         if not (
             self.period.scheduled_effective_at_ms
             <= self.current_final_close_time_ms
@@ -336,7 +344,7 @@ def build_current_final_close_grant_proof(
     period: GenericSelectionPeriod,
     current_final_close_time_ms: int,
     authority_granted_at_ms: int,
-    observation_cursor_version: int,
+    observation_cursors: tuple[LockedObservationCursor, ...],
 ) -> CurrentFinalCloseGrantProof:
     return CurrentFinalCloseGrantProof(
         selection_snapshot_id=selection_snapshot_id,
@@ -345,7 +353,7 @@ def build_current_final_close_grant_proof(
         period=period,
         current_final_close_time_ms=current_final_close_time_ms,
         authority_granted_at_ms=authority_granted_at_ms,
-        observation_cursor_version=observation_cursor_version,
+        observation_cursors=observation_cursors,
     )
 
 

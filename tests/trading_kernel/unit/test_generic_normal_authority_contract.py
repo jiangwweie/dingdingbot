@@ -9,6 +9,10 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     build_generic_selection_period,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.exposure_episode import (
+    LockedObservationCursor,
+    build_episode_domain_key,
+)
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.selection_authority import (
     AuthorityEventBinding,
@@ -26,7 +30,10 @@ def _authority(group):
         grant_state="ACTIVE",universe_version_id="universe:target",member_set_digest=selected_member_set_digest(spec.candidate_ids[:1]))
     proof = CurrentFinalCloseGrantProof(selection_snapshot_id="snapshot:test",selection_committed_at_ms=period.feature_cutoff_at_ms+1,
         source_snapshot_cutoff_at_ms=period.feature_cutoff_at_ms,period=period,
-        current_final_close_time_ms=period.scheduled_effective_at_ms,authority_granted_at_ms=grant,observation_cursor_version=1)
+        current_final_close_time_ms=period.scheduled_effective_at_ms,authority_granted_at_ms=grant,
+        observation_cursors=(LockedObservationCursor(episode_domain_key=build_episode_domain_key(event_spec_id=spec.event_spec_id,
+            exchange_instrument_id=spec.candidate_ids[0],position_side=spec.position_side),exchange_instrument_id=spec.candidate_ids[0],
+            episode_version=0,comparison_checkpoint_version=0,last_observed_at_ms=None),))
     authority = GenericSelectionAuthority(selection_authority_id="authority:test",selection_spec_id=spec.selection_spec_id,
         strategy_group_id=group,selection_epoch_id="epoch:1",selection_snapshot_id="snapshot:test",
         materialization_generation_id="generation:test",
@@ -47,6 +54,17 @@ def test_generic_authority_binds_exact_event_period_and_precommitted_close(group
     binding = authority.event_binding
     grant = authority.created_at_ms
     assert authority.first_eligible_close_time_ms == authority.period.scheduled_effective_at_ms
+    proof = authority.current_close_proof
+    assert proof is not None
+    with pytest.raises(ValueError, match="coverage"):
+        GenericSelectionAuthority.model_validate({**authority.model_dump(),
+            "event_binding":{**binding.model_dump(),"member_set_digest":selected_member_set_digest(spec.candidate_ids[:2])}})
+    for cursors in ((), proof.observation_cursors*2,
+                    (proof.observation_cursors[0].model_copy(update={"last_observed_at_ms":authority.first_eligible_close_time_ms}),),
+                    (proof.observation_cursors[0].model_copy(update={"episode_domain_key":"episode:wrong"}),)):
+        with pytest.raises(ValueError):
+            GenericSelectionAuthority.model_validate({**authority.model_dump(),
+                "current_close_proof":{**proof.model_dump(),"observation_cursors":cursors}})
     for changes in ({"selection_snapshot_id":"snapshot:other"}, {"effective_from_ms":grant+1},
                     {"current_close_proof":None}, {"materialization_generation_id":None},
                     {"authority_outcome":"FALLBACK_PREVIOUS"},

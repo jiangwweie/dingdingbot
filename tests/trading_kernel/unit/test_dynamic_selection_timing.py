@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import pytest
 
+from src.trading_kernel.domain.exposure_episode import LockedObservationCursor
+
+CURSORS = (LockedObservationCursor(episode_domain_key="episode:test",exchange_instrument_id="instrument:test",
+    episode_version=7,comparison_checkpoint_version=0,last_observed_at_ms=4*3600000),)
+
 from src.trading_kernel.application.run_instrument_selection import (
     RunInstrumentSelectionRequest,
 )
@@ -129,7 +134,7 @@ def test_current_final_close_requires_precommitted_snapshot_and_unexpired_period
         period=period,
         current_final_close_time_ms=5 * 60 * 60 * 1000,
         authority_granted_at_ms=5 * 60 * 60 * 1000 + 8_000,
-        observation_cursor_version=7,
+        observation_cursors=CURSORS,
     )
 
     assert proof.current_final_close_time_ms == 5 * 60 * 60 * 1000
@@ -141,7 +146,7 @@ def test_current_final_close_requires_precommitted_snapshot_and_unexpired_period
             period=period,
             current_final_close_time_ms=5 * 60 * 60 * 1000,
             authority_granted_at_ms=5 * 60 * 60 * 1000 + 8_000,
-            observation_cursor_version=7,
+            observation_cursors=CURSORS,
         )
 
 
@@ -202,7 +207,7 @@ def test_current_close_rejects_misbound_or_stale_source(
         ),
         "current_final_close_time_ms": 5 * 3600000,
         "authority_granted_at_ms": 5 * 3600000 + 8000,
-        "observation_cursor_version": 1,
+        "observation_cursors": CURSORS,
     }
     params.update(overrides)
     with pytest.raises(ValueError):

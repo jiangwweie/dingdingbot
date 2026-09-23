@@ -24,6 +24,17 @@ class LockedObservationCursor(BaseModel):
     comparison_checkpoint_version: int = Field(ge=0)
     last_observed_at_ms: int | None = Field(default=None, gt=0)
 
+    @model_validator(mode="after")
+    def _cursor_shape(self) -> LockedObservationCursor:
+        if not self.episode_domain_key.strip() or not self.exchange_instrument_id.strip():
+            raise ValueError("Observation cursor identities must be non-blank")
+        if self.episode_version == 0:
+            if self.comparison_checkpoint_version != 0 or self.last_observed_at_ms is not None:
+                raise ValueError("absent Episode cannot carry a consumed cursor")
+        elif self.last_observed_at_ms is None:
+            raise ValueError("persisted Episode requires its observed close")
+        return self
+
 
 class ExposureEpisodeState(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")

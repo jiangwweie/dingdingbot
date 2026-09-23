@@ -6,6 +6,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     plan_hourly_recovery_close,
     require_hourly_recovery_commit,
 )
+from src.trading_kernel.domain.exposure_episode import LockedObservationCursor
 
 HOUR = 3600000
 
@@ -15,7 +16,9 @@ def test_slow_normal_transition_is_not_reclassified_as_recovery(delay_ms: int) -
     period = build_generic_selection_period(feature_cutoff_at_ms=4*HOUR, cadence_hours=1)
     proof = build_current_final_close_grant_proof(selection_snapshot_id="snapshot:precommitted",
         selection_committed_at_ms=4*HOUR+1000, source_snapshot_cutoff_at_ms=4*HOUR, period=period,
-        current_final_close_time_ms=5*HOUR, authority_granted_at_ms=5*HOUR+delay_ms, observation_cursor_version=1)
+        current_final_close_time_ms=5*HOUR, authority_granted_at_ms=5*HOUR+delay_ms,
+        observation_cursors=(LockedObservationCursor(episode_domain_key="episode:test",exchange_instrument_id="instrument:test",
+            episode_version=0,comparison_checkpoint_version=0,last_observed_at_ms=None),))
     assert proof.current_final_close_time_ms == 5*HOUR
     recovery = plan_hourly_recovery_close(recovery_id="recovery:gap", recovery_revision=1,
         reason="AUTHORITY_GAP", period=period, evaluated_at_ms=5*HOUR+delay_ms)

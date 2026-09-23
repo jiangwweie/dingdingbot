@@ -21,6 +21,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     DynamicMembershipState,
     GenericSelectionPeriod,
 )
+from src.trading_kernel.domain.exposure_episode import build_episode_domain_key
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import (
     DAY_MS,
@@ -888,6 +889,13 @@ class GenericSelectionAuthority(BaseModel):
         fresh = self.membership_freshness
         if proof is None or proof.period != self.period or proof.selection_snapshot_id != self.selection_snapshot_id or proof.authority_granted_at_ms != self.effective_from_ms:
             raise ValueError("Generic Authority current-close proof differs")
+        covered_members = tuple(cursor.exchange_instrument_id for cursor in proof.observation_cursors)
+        if selected_member_set_digest(covered_members) != self.event_binding.member_set_digest or (
+            not set(covered_members).issubset(spec.candidate_ids) or len(covered_members)>spec.retain_rank):
+            raise ValueError("Generic Authority cursor coverage differs from selected members")
+        if any(cursor.episode_domain_key != build_episode_domain_key(event_spec_id=spec.event_spec_id,
+            exchange_instrument_id=cursor.exchange_instrument_id,position_side=spec.position_side) for cursor in proof.observation_cursors):
+            raise ValueError("Generic Authority cursor Event identity differs")
         if fresh is None or fresh.state is not DynamicMembershipState.ACTIVE or fresh.consecutive_missed_periods != 0 or (
             fresh.source_snapshot_id != self.selection_snapshot_id
             or fresh.source_member_set_digest != self.event_binding.member_set_digest
